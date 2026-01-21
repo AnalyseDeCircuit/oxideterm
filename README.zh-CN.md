@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 核心进化
 
-OxideTerm v1.1.0 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有近 **50,000 行** 精心设计的 Rust + TypeScript 代码。
+OxideTerm v1.3.0 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有近 **50,000 行** 精心设计的 Rust + TypeScript 代码。
 
 ### ⚙️ 后端突破：本地终端与并发模型
 我们引入了基于 `portable-pty` 的本地终端支持，彻底解决了 Rust 异步运行时中的并发难题：
@@ -145,15 +145,17 @@ OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使�
 - **动态代理 (-D)**：完整实现 SOCKS5 协议，支持 IPv4/IPv6/域名解析，配合 `direct-tcpip` 通道实现透明代理。
 - **健康监控**：实时统计连接数、吞吐量、活跃会话数。
 
-### 🤖 AI 内联终端助手
+### 🤖 AI 终端助手
+- **双模式交互**：内联快捷面板 (`⌘I`) + 侧边栏持久化聊天（支持对话历史）。
 - **OpenAI 兼容 API**：支持 OpenAI、Ollama、DeepSeek、OneAPI 等任意兼容端点。
-- **上下文捕获**：自动将可见缓冲区或选中文本作为 AI 上下文。
+- **智能上下文捕获**：通过 Terminal Registry 模式自动获取终端缓冲区内容。
+- **命令一键插入**：点击即可将 AI 生成的命令插入活动终端（多行命令通过 Bracketed Paste 模式支持）。
 - **流式响应**：通过 Server-Sent Events (SSE) 实时显示生成内容。
 - **隐私优先**：API Key 存储于系统钥匙串（macOS Keychain / Windows Credential Manager），绝不经过第三方中转。
 
 ---
 
-## 🛠️ 技术栈 (v1.1.0)
+## 🛠️ 技术栈 (v1.3.0)
 
 | 层级 | 关键技术 | 说明 |
 |------|----------|------|
@@ -294,7 +296,7 @@ OxideTerm/
 
 ## 🗺️ 路线图
 
-### ✅ 已完成（v1.1.0）
+### ✅ 已完成（v1.3.0）
 - [x] 本地终端支持（PTY）
 - [x] SSH 连接池与多路复用
 - [x] 自动重连机制
@@ -303,8 +305,10 @@ OxideTerm/
 - [x] SFTP 文件管理与预览
 - [x] .oxide 加密导出
 - [x] 后端滚动缓冲区
-- [x] AI 终端助手
+- [x] AI 终端助手（内联 + 侧边栏聊天）
 - [x] Keyboard-Interactive 认证（实验性）
+- [x] 终端上下文捕获（AI 集成）
+- [x] 国际化支持（9 种语言）
 
 ### 🚧 进行中
 - [ ] 命令面板 (`⌘K`)

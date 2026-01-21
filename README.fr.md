@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 Évolution Fondamentale
 
-OxideTerm v1.1.0 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec près de **50 000 lignes** de code Rust + TypeScript méticuleusement conçu.
+OxideTerm v1.3.0 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec près de **50 000 lignes** de code Rust + TypeScript méticuleusement conçu.
 
 ### ⚙️ Percée Backend : Terminal Local & Modèle de Concurrence
 Nous avons introduit un support de terminal local basé sur `portable-pty`, résolvant complètement les défis de concurrence dans le runtime async de Rust :
@@ -145,15 +145,17 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 - **Proxy Dynamique (-D)** : Implémentation complète du protocole SOCKS5 supportant IPv4/IPv6/résolution de domaine, associée aux canaux `direct-tcpip` pour un proxy transparent.
 - **Surveillance de Santé** : Stats en temps réel sur les connexions, le débit et les sessions actives.
 
-### 🤖 Assistant Terminal AI Inline
+### 🤖 Assistant Terminal AI
+- **Double Mode** : Panneau rapide inline (`⌘I`) + Chat persistant dans la barre latérale avec historique des conversations.
 - **API Compatible OpenAI** : Supporte OpenAI, Ollama, DeepSeek, OneAPI et tous les endpoints compatibles.
-- **Capture de Contexte** : Capture automatiquement le tampon visible ou le texte sélectionné comme contexte AI.
+- **Capture de Contexte Intelligente** : Capture automatiquement le contenu du tampon terminal via le pattern Terminal Registry.
+- **Insertion de Code** : Insertion en un clic des commandes générées par l'AI dans le terminal actif (multiligne supporté via bracketed paste).
 - **Réponse en Streaming** : Affichage en temps réel du contenu généré via Server-Sent Events (SSE).
 - **Priorité à la Vie Privée** : Clés API stockées dans le trousseau système (macOS Keychain / Windows Credential Manager), jamais routées via des tiers.
 
 ---
 
-## 🛠️ Stack Technique (v1.1.0)
+## 🛠️ Stack Technique (v1.3.0)
 
 | Couche | Technologie Clé | Description |
 |--------|----------------|-------------|
@@ -248,7 +250,7 @@ cargo build --no-default-features --release
 
 ## 🗺️ Feuille de Route
 
-### ✅ Complété (v1.1.0)
+### ✅ Complété (v1.3.0)
 - [x] Support de terminal local (PTY)
 - [x] Pool de connexions SSH & multiplexage
 - [x] Mécanisme de reconnexion auto
@@ -257,8 +259,10 @@ cargo build --no-default-features --release
 - [x] Gestion de fichiers SFTP & aperçu
 - [x] Export chiffré .oxide
 - [x] Tampon de défilement backend
-- [x] Assistant terminal AI
+- [x] Assistant terminal AI (inline + chat latéral)
 - [x] Auth Keyboard-Interactive (expérimental)
+- [x] Capture de contexte terminal pour AI
+- [x] Support i18n (9 langues)
 
 ### 🚧 En Cours
 - [ ] Palette de commandes (`⌘K`)

@@ -119,6 +119,23 @@ Full i18n support is available in:
 
 ## Technical Notes
 
+### Terminal Registry
+
+The `terminalRegistry.ts` module provides a robust mechanism for AI context capture:
+
+```typescript
+interface TerminalEntry {
+  getter: BufferGetter;
+  registeredAt: number;
+  tabId: string;
+}
+```
+
+**Safety Features:**
+- **Tab ID Validation**: Each registry entry is bound to a specific tab ID, preventing cross-tab context leakage
+- **Expiration Check**: Entries older than 5 minutes are automatically invalidated
+- **Error Isolation**: Failed getter calls are caught and return null gracefully
+
 ### Bracketed Paste Mode
 
 When inserting multi-line commands, the system uses bracketed paste mode escape sequences (`\x1b[200~...\x1b[201~`) to ensure the entire command block is treated as a single paste operation by the shell.
@@ -129,7 +146,10 @@ The system automatically filters out empty assistant messages when building API 
 
 ### Scroll Buffer API
 
-Terminal context capture uses the `getScrollBuffer` API to retrieve the last N lines from the SSH terminal's scroll buffer. Local terminals currently do not support context capture.
+Terminal context capture uses different methods depending on terminal type:
+
+- **SSH terminals**: Uses the `getScrollBuffer` Tauri command to retrieve scroll buffer from the Rust backend
+- **Local terminals**: Uses the Terminal Registry pattern with xterm.js buffer API for synchronous access
 
 ## Troubleshooting
 
@@ -137,5 +157,5 @@ Terminal context capture uses the `getScrollBuffer` API to retrieve the last N l
 |-------|----------|
 | "Enable AI in Settings first" | Go to Settings > AI and enable AI features |
 | No response from AI | Check API endpoint and key configuration |
-| Context not captured | Ensure you have an active SSH terminal tab |
+| Context not captured | Ensure you have an active terminal tab (SSH or local) |
 | Insert button not showing | Only shell/bash/zsh/powershell code blocks show insert button |

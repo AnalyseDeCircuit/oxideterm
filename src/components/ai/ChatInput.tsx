@@ -3,6 +3,7 @@ import { Send, StopCircle, Terminal } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
+import { getTerminalBuffer } from '../../lib/terminalRegistry';
 
 interface ChatInputProps {
   onSend: (content: string, context?: string) => void;
@@ -42,19 +43,24 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
 
     // Get terminal context if requested
     let context: string | undefined;
-    if (includeContext && terminalSessionId) {
+    if (includeContext && terminalSessionId && activeTab) {
       setFetchingContext(true);
       try {
-        // For SSH terminals, use scroll buffer API
-        if (activeTab?.type === 'terminal') {
+        if (activeTab.type === 'terminal') {
+          // For SSH terminals, use scroll buffer API
           const lines = await api.getScrollBuffer(terminalSessionId, 0, contextMaxChars || 50);
           if (lines.length > 0) {
             context = lines.map((l) => l.text).join('\n');
           }
+        } else if (activeTab.type === 'local_terminal') {
+          // For local terminals, use the terminal registry with tab ID validation
+          const buffer = getTerminalBuffer(terminalSessionId, activeTab.id);
+          if (buffer) {
+            context = buffer;
+          }
         }
-        // For local terminals, we'd need a similar API (not implemented yet)
       } catch (e) {
-        console.error('Failed to get terminal context:', e);
+        console.error('[AI] Failed to get terminal context:', e);
       } finally {
         setFetchingContext(false);
       }
@@ -63,10 +69,13 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     onSend(trimmed, context);
     setInput('');
     setIncludeContext(false);
-  }, [input, isLoading, disabled, includeContext, terminalSessionId, activeTab?.type, contextMaxChars, onSend]);
+  }, [input, isLoading, disabled, includeContext, terminalSessionId, activeTab, contextMaxChars, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Ignore Enter during IME composition (e.g., Chinese input)
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+      
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();

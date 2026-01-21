@@ -8,6 +8,7 @@ import { ImageAddon } from '@xterm/addon-image';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useAppStore } from '../../store/appStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { themes } from '../../lib/themes';
 import { useTerminalViewShortcuts } from '../../hooks/useTerminalKeyboard';
@@ -17,6 +18,7 @@ import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
+import { registerTerminalBuffer, unregisterTerminalBuffer } from '../../lib/terminalRegistry';
 
 interface LocalTerminalViewProps {
   sessionId: string;
@@ -31,6 +33,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
+  
+  // Get tab ID for this terminal (used for registry validation)
+  const tabId = useAppStore((state) => 
+    state.tabs.find(t => t.type === 'local_terminal' && t.sessionId === sessionId)?.id
+  );
   const isMountedRef = useRef(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
@@ -216,6 +223,22 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // Register buffer getter for AI context capture
+    registerTerminalBuffer(sessionId, tabId || sessionId, () => {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      // Get visible lines plus some scrollback
+      const startRow = Math.max(0, buffer.baseY);
+      const endRow = buffer.baseY + term.rows;
+      for (let i = startRow; i < endRow; i++) {
+        const line = buffer.getLine(i);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
+      }
+      return lines.join('\n');
+    });
+
     // Initial fit
     setTimeout(() => {
       fitAddon.fit();
@@ -253,6 +276,9 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
 
     return () => {
       isMountedRef.current = false;
+      
+      // Unregister buffer getter
+      unregisterTerminalBuffer(sessionId);
       
       // Dispose renderer addon first to avoid "onShowLinkUnderline" error
       // This is a known xterm.js canvas addon bug where dispose order matters

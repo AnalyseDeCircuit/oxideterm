@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 Core Evolution
 
-OxideTerm v1.1.0 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with nearly **50,000 lines** of meticulously crafted Rust + TypeScript code.
+OxideTerm v1.3.0 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with nearly **50,000 lines** of meticulously crafted Rust + TypeScript code.
 
 ### ⚙️ Backend Breakthrough: Local Terminal & Concurrency Model
 We've introduced local terminal support based on `portable-pty`, completely solving concurrency challenges in Rust's async runtime:
@@ -145,15 +145,17 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 - **Dynamic Proxy (-D)**: Complete SOCKS5 protocol implementation supporting IPv4/IPv6/domain resolution, paired with `direct-tcpip` channels for transparent proxying.
 - **Health Monitoring**: Real-time stats on connections, throughput, and active sessions.
 
-### 🤖 AI Inline Terminal Assistant
+### 🤖 AI Terminal Assistant
+- **Dual Mode**: Inline quick panel (`⌘I`) + Sidebar persistent chat with conversation history.
 - **OpenAI-Compatible API**: Supports OpenAI, Ollama, DeepSeek, OneAPI, and any compatible endpoints.
-- **Context Capture**: Auto-captures visible buffer or selected text as AI context.
+- **Smart Context Capture**: Auto-captures terminal buffer content via Terminal Registry pattern.
+- **Code Insertion**: One-click insert AI-generated commands into active terminal (multiline supported via bracketed paste).
 - **Streaming Response**: Real-time display of generated content via Server-Sent Events (SSE).
 - **Privacy First**: API Keys stored in system keychain (macOS Keychain / Windows Credential Manager), never routed through third parties.
 
 ---
 
-## 🛠️ Tech Stack (v1.1.0)
+## 🛠️ Tech Stack (v1.3.0)
 
 | Layer | Key Technology | Description |
 |-------|---------------|-------------|
@@ -294,7 +296,7 @@ OxideTerm/
 
 ## 🗺️ Roadmap
 
-### ✅ Completed (v1.1.0)
+### ✅ Completed (v1.3.0)
 - [x] Local terminal support (PTY)
 - [x] SSH connection pool & multiplexing
 - [x] Auto-reconnect mechanism
@@ -303,8 +305,10 @@ OxideTerm/
 - [x] SFTP file management & preview
 - [x] .oxide encrypted export
 - [x] Backend scroll buffer
-- [x] AI terminal assistant
+- [x] AI terminal assistant (inline + sidebar chat)
 - [x] Keyboard-Interactive auth (experimental)
+- [x] Terminal context capture for AI
+- [x] i18n support (9 languages)
 
 ### 🚧 In Progress
 - [ ] Command palette (`⌘K`)

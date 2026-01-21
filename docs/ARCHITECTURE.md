@@ -1,4 +1,4 @@
-# OxideTerm 架构设计 (v1.1.0)
+# OxideTerm 架构设计 (v1.3.0)
 
 > **版本**: v1.1.0 (2026-01-19)
 > **上次更新**: 2026-01-19
@@ -547,6 +547,7 @@ graph TD
         LocalStore["localTerminalStore<br/>- Local PTYs<br/>- Shells"]
         TransferStore["transferStore<br/>- SFTP Transfers"]
         SettingsStore["settingsStore<br/>- Config & Theme"]
+        AiStore["aiChatStore<br/>- AI Conversations"]
     end
     
     subgraph Hooks["自定义 Hooks"]
@@ -662,6 +663,11 @@ src/
 │   ├── forwards/           # 端口转发组件
 │   │   └── ForwardsView.tsx
 │   │
+│   ├── ai/                 # AI 聊天组件 (v1.3.0)
+│   │   ├── AiChatPanel.tsx      # 侧边栏聊天面板
+│   │   ├── ChatMessage.tsx      # 消息气泡（支持代码块）
+│   │   └── ChatInput.tsx        # 输入区域（支持上下文捕获）
+│   │
 │   └── modals/             # 弹窗组件
 │       ├── NewConnectionModal.tsx
 │       └── SettingsModal.tsx
@@ -671,10 +677,12 @@ src/
 │   ├── localTerminalStore.ts  # 本地PTY状态
 │   ├── sessionTreeStore.ts    # 会话树状态
 │   ├── settingsStore.ts       # 统一设置存储
-│   └── transferStore.ts       # SFTP传输队列状态
+│   ├── transferStore.ts       # SFTP传输队列状态
+│   └── aiChatStore.ts         # AI聊天状态 (v1.3.0)
 │
 ├── lib/                    # 工具库
 │   ├── api.ts              # Tauri API 封装
+│   ├── terminalRegistry.ts # 终端缓冲区注册表 (v1.3.0)
 │   └── utils.ts            # 通用工具函数
 │
 ├── hooks/                  # 自定义 Hooks
@@ -754,7 +762,7 @@ const TerminalView = ({ sessionId, wsUrl }: Props) => {
 
 ---
 
-## 双 Store 架构 (v1.1.0)
+## 双 Store 架构 (v1.3.0)
 
 ### 架构概览
 
@@ -863,6 +871,87 @@ interface PersistedSettingsV2 {
 - 检测 `SETTINGS_VERSION = 2`
 - 自动清理遗留 localStorage 键值
 - 无需数据库迁移，直接重置为默认值
+
+---
+
+## AI 侧边栏聊天 (v1.3.0)
+
+### 架构概览
+
+```mermaid
+flowchart TB
+    subgraph Frontend ["AI Chat Frontend"]
+        AiPanel["AiChatPanel.tsx<br/>主面板"]
+        ChatMsg["ChatMessage.tsx<br/>消息渲染"]
+        ChatInput["ChatInput.tsx<br/>输入+上下文"]
+        AiStore["aiChatStore.ts<br/>Zustand Store"]
+    end
+    
+    subgraph Registry ["Terminal Registry"]
+        TermReg["terminalRegistry.ts<br/>缓冲区注册表"]
+        LocalTerm["LocalTerminalView<br/>注册 getter"]
+    end
+    
+    subgraph External ["External API"]
+        OpenAI["OpenAI-Compatible<br/>Streaming API"]
+    end
+    
+    ChatInput --> AiStore
+    AiStore --> OpenAI
+    ChatInput --> TermReg
+    LocalTerm --> TermReg
+    AiStore --> ChatMsg
+    ChatMsg --> AiPanel
+    
+    style Frontend fill:#e8f5e9
+    style Registry fill:#fff3e0
+    style External fill:#fce4ec
+```
+
+### Terminal Registry 模式
+
+为了让 AI 聊天能够安全地获取终端上下文，我们实现了 Terminal Registry 模式：
+
+```typescript
+// src/lib/terminalRegistry.ts
+interface TerminalEntry {
+  getter: () => string;      // 缓冲区获取函数
+  registeredAt: number;      // 注册时间戳
+  tabId: string;             // 关联的 Tab ID
+}
+
+// 安全特性：
+// 1. Tab ID 验证：防止跨 Tab 上下文泄漏
+// 2. 过期检查：5 分钟未刷新自动失效
+// 3. 错误隔离：getter 失败返回 null
+```
+
+### 数据流
+
+```
+用户输入
+    ↓
+ChatInput (可选：捕获终端上下文)
+    ↓
+aiChatStore.sendMessage()
+    ↓
+streamChatCompletion() (OpenAI API)
+    ↓
+流式响应 → ChatMessage 渲染
+    ↓
+命令插入 (可选) → 活动终端
+```
+
+### 多行命令插入
+
+使用 Bracketed Paste Mode 确保多行命令作为整体粘贴：
+
+```typescript
+// 多行命令包装
+const bracketedPaste = `\x1b[200~${command}\x1b[201~`;
+```
+
+---
 
 ## 会话生命周期
 
@@ -974,7 +1063,7 @@ Tauri 2.0 提供细粒度的权限控制：
 
 ---
 
-## 后端滚动缓冲区 (v1.1.0)
+## 后端滚动缓冲区 (v1.3.0)
 
 ### 后端实现
 
