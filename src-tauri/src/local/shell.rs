@@ -216,6 +216,7 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                 .with_args(vec![
                     "-NoLogo".to_string(),
                     "-NoExit".to_string(),
+                    "-NoProfile".to_string(),  // Skip profile for faster startup
                     "-ExecutionPolicy".to_string(),
                     "Bypass".to_string(),
                 ]),
@@ -236,6 +237,7 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                     .with_args(vec![
                         "-NoLogo".to_string(),
                         "-NoExit".to_string(),
+                        "-NoProfile".to_string(),  // Skip profile for faster startup
                         "-ExecutionPolicy".to_string(),
                         "Bypass".to_string(),
                     ]),
@@ -260,6 +262,7 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                         .with_args(vec![
                             "-NoLogo".to_string(),
                             "-NoExit".to_string(),
+                            "-NoProfile".to_string(),
                             "-ExecutionPolicy".to_string(),
                             "Bypass".to_string(),
                         ]),
@@ -284,13 +287,85 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
         }
     }
 
-    // 5. WSL Bash (if WSL is installed)
-    let wsl_path = PathBuf::from(r"C:\Windows\System32\wsl.exe");
-    if wsl_path.exists() {
-        shells.push(ShellInfo::new("wsl", "WSL (Windows Subsystem for Linux)", wsl_path));
-    }
+    // 5. WSL2 - Scan for installed distributions
+    scan_wsl_distributions(&mut shells);
 
     shells
+}
+
+/// Scan for installed WSL distributions and add them as shell options
+#[cfg(target_os = "windows")]
+fn scan_wsl_distributions(shells: &mut Vec<ShellInfo>) {
+    let wsl_path = PathBuf::from(r"C:\Windows\System32\wsl.exe");
+    if !wsl_path.exists() {
+        return;
+    }
+
+    // Try to get list of installed distributions
+    let output = match std::process::Command::new(&wsl_path)
+        .args(["--list", "--quiet"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => {
+            // Fallback: add generic WSL entry if we can't enumerate
+            shells.push(
+                ShellInfo::new("wsl", "WSL (Default)", wsl_path.clone())
+                    .with_args(vec!["--cd".to_string(), "~".to_string()]),
+            );
+            return;
+        }
+    };
+
+    // Parse distribution list (UTF-16 LE output on Windows)
+    let stdout = String::from_utf16_lossy(
+        &output
+            .stdout
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>(),
+    );
+
+    let distros: Vec<&str> = stdout
+        .lines()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if distros.is_empty() {
+        // No distributions installed, add generic WSL entry
+        shells.push(
+            ShellInfo::new("wsl", "WSL (Default)", wsl_path)
+                .with_args(vec!["--cd".to_string(), "~".to_string()]),
+        );
+        return;
+    }
+
+    // Add each distribution as a separate shell option
+    for (i, distro) in distros.iter().enumerate() {
+        // Clean up distro name (remove any null bytes or special chars)
+        let distro_clean = distro.replace('\0', "").trim().to_string();
+        if distro_clean.is_empty() {
+            continue;
+        }
+
+        let id = format!("wsl-{}", distro_clean.to_lowercase().replace(' ', "-"));
+        let label = if i == 0 {
+            format!("WSL: {} (Default)", distro_clean)
+        } else {
+            format!("WSL: {}", distro_clean)
+        };
+
+        shells.push(
+            ShellInfo::new(id, label, wsl_path.clone())
+                .with_args(vec![
+                    "-d".to_string(),
+                    distro_clean,
+                    "--cd".to_string(),
+                    "~".to_string(),
+                ]),
+        );
+    }
 }
 
 #[cfg(test)]
