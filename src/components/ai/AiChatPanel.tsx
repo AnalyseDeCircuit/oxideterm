@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Plus, Trash2, MessageSquare, MoreVertical, Settings, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, MessageSquare, MoreVertical, Settings, ChevronDown, Terminal, HelpCircle, FileCode, Zap } from 'lucide-react';
 import { useAiChatStore } from '../../store/aiChatStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAppStore } from '../../store/appStore';
@@ -183,9 +183,37 @@ export function AiChatPanel() {
           <div className="h-full flex flex-col items-center justify-center p-6 text-center">
             <MessageSquare className="w-10 h-10 text-zinc-600 mb-3" />
             <h3 className="text-sm font-medium text-zinc-300 mb-1">Start a conversation</h3>
-            <p className="text-xs text-zinc-500 max-w-[200px]">
+            <p className="text-xs text-zinc-500 max-w-[200px] mb-4">
               Ask questions about shell commands, scripts, or get help with terminal operations.
             </p>
+            
+            {/* Quick prompt buttons */}
+            <div className="w-full max-w-[280px] space-y-2">
+              <QuickPromptButton
+                icon={<HelpCircle className="w-4 h-4" />}
+                label="Explain a command"
+                prompt="Explain what this command does: "
+                onSend={handleSend}
+              />
+              <QuickPromptButton
+                icon={<Terminal className="w-4 h-4" />}
+                label="Find files matching..."
+                prompt="How do I find files matching a pattern in the terminal?"
+                onSend={handleSend}
+              />
+              <QuickPromptButton
+                icon={<FileCode className="w-4 h-4" />}
+                label="Write a shell script"
+                prompt="Write a shell script that "
+                onSend={handleSend}
+              />
+              <QuickPromptButton
+                icon={<Zap className="w-4 h-4" />}
+                label="Optimize this command"
+                prompt="How can I optimize this command: "
+                onSend={handleSend}
+              />
+            </div>
           </div>
         ) : (
           <>
@@ -249,6 +277,45 @@ function ConversationItem({
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
+    </button>
+  );
+}
+
+// Quick prompt button for empty state
+function QuickPromptButton({
+  icon,
+  label,
+  prompt,
+  onSend,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  prompt: string;
+  onSend: (content: string, context?: string) => void;
+}) {
+  const handleClick = () => {
+    // If prompt ends with space or colon, it's a partial prompt - just send it to start the conversation
+    // If it's a complete question, send it directly
+    if (prompt.endsWith(' ') || prompt.endsWith(': ')) {
+      // For partial prompts, we'd ideally focus the input and fill it
+      // But for simplicity, we'll send it as is and let user continue in the chat
+      onSend(prompt.trim());
+    } else {
+      onSend(prompt);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50 hover:border-orange-600/30 hover:bg-zinc-800 text-left transition-colors group"
+    >
+      <div className="flex-shrink-0 text-zinc-500 group-hover:text-orange-500 transition-colors">
+        {icon}
+      </div>
+      <span className="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">
+        {label}
+      </span>
     </button>
   );
 }

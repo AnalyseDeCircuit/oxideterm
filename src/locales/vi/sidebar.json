@@ -17,6 +17,7 @@
       "connection_pool": "Nhóm kết nối",
       "connection_monitor": "Giám sát kết nối",
       "connection_matrix": "Ma trận kết nối",
+      "ai": "Trợ lý AI",
       "ai_assistant": "Trợ lý AI (Sắp ra mắt)",
       "settings": "Cài đặt",
       "no_saved_connections": "Không có kết nối đã lưu",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "Cài đặt",
-      "ai_hint": "Trợ lý AI (Sắp ra mắt) - Sử dụng Ctrl/Cmd+I trong terminal"
+      "ai_hint": "Trợ lý AI"
     }
   }
 }

@@ -17,6 +17,7 @@
       "connection_pool": "接続プール",
       "connection_monitor": "接続モニター",
       "connection_matrix": "接続マトリックス",
+      "ai": "AIアシスタント",
       "ai_assistant": "AIアシスタント（近日公開）",
       "settings": "設定",
       "no_saved_connections": "保存済み接続がありません",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "設定",
-      "ai_hint": "AIアシスタント（近日公開）- ターミナルでCtrl/Cmd+Iを使用"
+      "ai_hint": "AIアシスタント"
     }
   }
 }

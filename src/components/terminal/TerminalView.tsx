@@ -848,10 +848,22 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
       
       const { command } = event.payload;
       // Encode and send command to SSH terminal (without executing - user can review and press Enter)
+      // For multiline commands, use bracketed paste mode to insert as one unit
       const encoder = new TextEncoder();
-      const payload = encoder.encode(command);
-      const frame = encodeDataFrame(payload);
-      ws.send(frame);
+      
+      // Check if command is multiline
+      if (command.includes('\n')) {
+        // Use bracketed paste mode: \x1b[200~ ... \x1b[201~
+        // This tells the shell to treat the entire block as pasted text
+        const bracketedPaste = `\x1b[200~${command}\x1b[201~`;
+        const payload = encoder.encode(bracketedPaste);
+        const frame = encodeDataFrame(payload);
+        ws.send(frame);
+      } else {
+        const payload = encoder.encode(command);
+        const frame = encodeDataFrame(payload);
+        ws.send(frame);
+      }
     });
 
     return () => {
