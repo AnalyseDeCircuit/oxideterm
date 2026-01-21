@@ -17,6 +17,7 @@
       "connection_pool": "连接池",
       "connection_monitor": "连接监控",
       "connection_matrix": "连接矩阵",
+      "ai": "AI 助手",
       "ai_assistant": "AI 助手 (敬请期待)",
       "settings": "设置",
       "no_saved_connections": "无保存的连接",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "设置",
-      "ai_hint": "AI 助手 (即将推出) - 在终端使用 Ctrl/Cmd+I"
+      "ai_hint": "AI 助手"
     }
   }
 }

@@ -908,3 +908,43 @@ export interface CreateLocalTerminalResponse {
   /** Session info */
   info: LocalTerminalInfo;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Chat Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * A single message in an AI conversation
+ */
+export interface AiChatMessage {
+  /** Unique message ID */
+  id: string;
+  /** Message role */
+  role: 'user' | 'assistant' | 'system';
+  /** Message content */
+  content: string;
+  /** Unix timestamp (ms) */
+  timestamp: number;
+  /** Terminal context attached to this message */
+  context?: string;
+  /** Whether the message is being streamed */
+  isStreaming?: boolean;
+}
+
+/**
+ * A conversation containing multiple messages
+ */
+export interface AiConversation {
+  /** Unique conversation ID */
+  id: string;
+  /** Conversation title (auto-generated or user-defined) */
+  title: string;
+  /** Messages in the conversation */
+  messages: AiChatMessage[];
+  /** Creation timestamp */
+  createdAt: number;
+  /** Last update timestamp */
+  updatedAt: number;
+  /** Associated terminal session ID (optional) */
+  sessionId?: string;
+}

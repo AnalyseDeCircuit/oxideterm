@@ -48,7 +48,7 @@ export type FontFamily = 'jetbrains' | 'meslo' | 'tinos' | 'menlo' | 'courier' |
 export type CursorStyle = 'block' | 'underline' | 'bar';
 
 /** Sidebar section options */
-export type SidebarSection = 'sessions' | 'saved' | 'sftp' | 'forwards' | 'connections';
+export type SidebarSection = 'sessions' | 'saved' | 'sftp' | 'forwards' | 'connections' | 'ai';
 
 /** Language options */
 export type Language = 'zh-CN' | 'en' | 'fr-FR' | 'ja' | 'es-ES' | 'pt-BR' | 'vi' | 'ko';

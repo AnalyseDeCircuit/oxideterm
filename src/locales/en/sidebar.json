@@ -17,6 +17,7 @@
       "connection_pool": "Connection Pool",
       "connection_monitor": "Connection Monitor",
       "connection_matrix": "Connection Matrix",
+      "ai": "AI Assistant",
       "ai_assistant": "AI Assistant (Coming Soon)",
       "settings": "Settings",
       "no_saved_connections": "No saved connections",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "Settings",
-      "ai_hint": "AI Assistant (Coming Soon) - Use Ctrl/Cmd+I in terminal"
+      "ai_hint": "AI Assistant"
     }
   }
 }

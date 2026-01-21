@@ -27,6 +27,7 @@ import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
+import { AiChatPanel } from '../ai/AiChatPanel';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -590,11 +591,11 @@ export const Sidebar = () => {
 
           {/* AI Assistant (placeholder for future sidebar panel) */}
           <Button
-            variant="ghost"
+            variant={sidebarActiveSection === 'ai' ? 'secondary' : 'ghost'}
             size="icon"
-            className="rounded-md h-9 w-9 text-zinc-500 cursor-not-allowed opacity-50"
-            title={t('sidebar.tooltips.ai_hint')}
-            disabled
+            onClick={() => { setSidebarSection('ai'); toggleSidebar(); }}
+            title={t('sidebar.panels.ai')}
+            className="rounded-md h-9 w-9"
           >
             <Sparkles className="h-5 w-5" />
           </Button>
@@ -737,11 +738,11 @@ export const Sidebar = () => {
 
         {/* AI Assistant (placeholder for future sidebar panel) */}
         <Button
-          variant="ghost"
+          variant={sidebarActiveSection === 'ai' ? 'secondary' : 'ghost'}
           size="icon"
-          className="rounded-md h-9 w-9 text-zinc-500 cursor-not-allowed opacity-50"
-          title={t('sidebar.tooltips.ai_hint')}
-          disabled
+          onClick={() => setSidebarSection('ai')}
+          title={t('sidebar.panels.ai')}
+          className="rounded-md h-9 w-9"
         >
           <Sparkles className="h-5 w-5" />
         </Button>
@@ -1084,6 +1085,12 @@ export const Sidebar = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {sidebarActiveSection === 'ai' && (
+          <div className="h-full -m-2">
+            <AiChatPanel />
           </div>
         )}
       </div>
