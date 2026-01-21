@@ -58,6 +58,11 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const resultsListRef = useRef<HTMLDivElement>(null);
+  // Track IME composition state (for CJK input methods)
+  const isComposingRef = useRef(false);
+  // Timestamp when composition ended - used to detect if Enter is for IME confirmation
+  // More reliable than boolean flag with timeout (no race condition)
+  const compositionEndTimeRef = useRef(0);
 
   // Focus input when opened
   useEffect(() => {
@@ -79,6 +84,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     if (searchMode !== 'active') return;
 
     searchTimeoutRef.current = setTimeout(() => {
+      // Skip search if IME is composing (prevents jumping during CJK input)
+      if (isComposingRef.current) return;
       onSearch(query, { caseSensitive, regex: useRegex, wholeWord });
     }, 150); // Faster debounce for better responsiveness
 
@@ -102,7 +109,15 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       }
 
       // Enter to go to next match, Shift+Enter for previous (active mode only)
+      // BUT skip if composition just ended (the Enter was to confirm IME, not to find next)
       if (e.key === 'Enter' && searchMode === 'active' && resultCount > 0) {
+        // Check if this Enter is within 100ms of compositionEnd - if so, it's for IME confirmation
+        const timeSinceCompositionEnd = Date.now() - compositionEndTimeRef.current;
+        if (timeSinceCompositionEnd < 100) {
+          // This Enter was to confirm IME input, not to navigate
+          e.preventDefault();
+          return;
+        }
         if (e.shiftKey) {
           onFindPrevious();
         } else {
@@ -228,6 +243,16 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onCompositionStart={() => { isComposingRef.current = true; }}
+          onCompositionEnd={(e) => {
+            isComposingRef.current = false;
+            // Record timestamp - Enter within 100ms of this is for IME confirmation, not findNext
+            compositionEndTimeRef.current = Date.now();
+            // Trigger search after IME composition ends
+            if (searchMode === 'active') {
+              onSearch(e.currentTarget.value, { caseSensitive, regex: useRegex, wholeWord });
+            }
+          }}
           placeholder={searchMode === 'active' ? t('terminal.search.placeholder_active') : t('terminal.search.placeholder_deep')}
           className="flex-1 h-8 text-sm border-0 focus-visible:ring-0 bg-transparent"
         />

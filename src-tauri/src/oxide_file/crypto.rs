@@ -161,7 +161,6 @@ mod tests {
             tags: vec![],
             options: ConnectionOptions::default(),
             proxy_chain: vec![],
-            session_buffer: None,
         }
     }
 
