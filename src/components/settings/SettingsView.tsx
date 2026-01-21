@@ -424,11 +424,13 @@ export const SettingsView = () => {
                                             <SelectItem value="en">English</SelectItem>
                                             <SelectItem value="es-ES">Español (España)</SelectItem>
                                             <SelectItem value="fr-FR">Français (France)</SelectItem>
+                                            <SelectItem value="it">Italiano</SelectItem>
                                             <SelectItem value="ko">한국어</SelectItem>
                                             <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
                                             <SelectItem value="vi">Tiếng Việt</SelectItem>
                                             <SelectItem value="ja">日本語</SelectItem>
                                             <SelectItem value="zh-CN">简体中文</SelectItem>
+                                            <SelectItem value="zh-TW">繁體中文</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>

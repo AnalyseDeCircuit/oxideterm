@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI 채팅",
+      "disabled_message": "설정에서 AI를 활성화하여 터미널 어시스턴트와 대화를 시작하세요.",
+      "open_settings": "설정 열기",
+      "new_chat": "새 채팅",
+      "new_chat_tooltip": "새 채팅",
+      "more_options": "더 많은 옵션",
+      "settings": "설정",
+      "clear_all": "모두 지우기",
+      "clear_all_confirm": "모든 대화를 삭제하시겠습니까?",
+      "no_conversations": "대화가 없습니다",
+      "start_conversation": "대화 시작하기",
+      "start_conversation_hint": "셸 명령, 스크립트 또는 터미널 작업에 대해 질문하세요.",
+      "delete_conversation": "대화 삭제",
+      "messages_count": "메시지 {{count}}개"
+    },
+    "quick_prompts": {
+      "explain_command": "명령어 설명",
+      "explain_command_prompt": "이 명령어가 무엇을 하는지 설명해 주세요: ",
+      "find_files": "파일 찾기...",
+      "find_files_prompt": "터미널에서 패턴과 일치하는 파일을 어떻게 찾나요?",
+      "write_script": "스크립트 작성",
+      "write_script_prompt": "다음을 수행하는 셸 스크립트를 작성해 주세요: ",
+      "optimize_command": "명령어 최적화",
+      "optimize_command_prompt": "이 명령어를 어떻게 최적화할 수 있나요: "
+    },
+    "input": {
+      "placeholder": "터미널에 대해 무엇이든 물어보세요...",
+      "placeholder_disabled": "설정에서 AI를 활성화하세요...",
+      "include_context": "컨텍스트 포함",
+      "fetching_context": "가져오는 중...",
+      "stop_generation": "생성 중지",
+      "send": "메시지 보내기"
+    },
+    "message": {
+      "you": "나",
+      "assistant": "어시스턴트",
+      "context_attached": "터미널 컨텍스트가 첨부되었습니다",
+      "copy_code": "코드 복사",
+      "insert_to_terminal": "터미널에 삽입"
+    }
+  }
+}

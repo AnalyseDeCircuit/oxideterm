@@ -1,0 +1,71 @@
+{
+  "forwards": {
+    "quick": {
+      "title": "快速轉發",
+      "jupyter": "Jupyter (8888)",
+      "tensorboard": "TensorBoard (6006)",
+      "vscode": "VS Code (8080)"
+    },
+    "table": {
+      "title": "使用中的轉發",
+      "type": "類型",
+      "local_address": "本機位址",
+      "remote_address": "遠端位址",
+      "status": "狀態",
+      "actions": "操作",
+      "no_forwards": "沒有使用中的連接埠轉發"
+    },
+    "type": {
+      "local": "本機",
+      "remote": "遠端",
+      "dynamic": "動態"
+    },
+    "status": {
+      "active": "使用中",
+      "stopped": "已停止",
+      "failed": "失敗"
+    },
+    "actions": {
+      "new_forward": "新增轉發",
+      "stop": "停止轉發",
+      "restart": "重新啟動轉發",
+      "edit": "編輯轉發",
+      "delete": "刪除轉發"
+    },
+    "form": {
+      "new_title": "新增轉發規則",
+      "edit_title": "編輯轉發規則",
+      "cancel": "取消",
+      "type": "類型",
+      "create_forward": "建立轉發",
+      "creating": "建立中...",
+      "save_changes": "儲存變更",
+      "saving": "儲存中...",
+      "type_local": "本機 (L)",
+      "type_remote": "遠端 (R)",
+      "type_dynamic": "動態 (SOCKS5)",
+      "local_client": "本機（用戶端）",
+      "remote_server": "遠端（伺服器）",
+      "bind_address": "綁定位址",
+      "target_address": "目標位址",
+      "socks5_mode": "SOCKS5 代理模式",
+      "host_placeholder": "主機",
+      "port_placeholder": "連接埠",
+      "skip_check": "略過連接埠可用性檢查（進階）",
+      "checking_port": "檢查連接埠可用性...",
+      "port_required": "必須指定連接埠",
+      "desc": "範例：本機=127.0.0.1:8080、遠端=localhost:3000 → 透過 localhost:8080 存取 remote:3000"
+    },
+    "toast": {
+      "jupyter_created": "已建立 Jupyter 轉發",
+      "jupyter_desc": "localhost:8888 → remote:8888",
+      "tensorboard_created": "已建立 TensorBoard 轉發",
+      "tensorboard_desc": "localhost:6006 → remote:6006",
+      "vscode_created": "已建立 VS Code Server 轉發",
+      "vscode_desc": "localhost:8080 → remote:8080",
+      "create_failed": "無法建立轉發",
+      "forward_updated": "轉發更新成功",
+      "update_failed": "無法更新轉發"
+    }
+  }
+}

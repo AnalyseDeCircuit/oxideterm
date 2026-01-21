@@ -1,0 +1,76 @@
+{
+  "topology": {
+    "title": "Topologia Connessioni",
+    "matrix": "Matrice Connessioni",
+    "view_matrix": "Visualizza Matrice",
+    "view_list": "Visualizza Lista",
+    "view_tree": "Visualizza Albero",
+    "connections": "Connessioni",
+    "sessions": "Sessioni",
+    "jump_servers": "Server di salto",
+    "direct": "Diretta",
+    "via_jump": "via {{name}}",
+    "status": {
+      "connected": "Connesso",
+      "disconnected": "Disconnesso",
+      "connecting": "Connessione...",
+      "error": "Errore"
+    },
+    "no_connections": "Nessuna connessione configurata",
+    "no_sessions": "Nessuna sessione attiva",
+    "add_connection": "Aggiungi Connessione",
+    "connection_info": "Info Connessione",
+    "session_info": "Info Sessione",
+    "latency": "Latenza",
+    "uptime": "Tempo attivo",
+    "bytes_sent": "Byte inviati",
+    "bytes_received": "Byte ricevuti",
+    "last_activity": "Ultima attività",
+    "group": "Gruppo",
+    "groups": "Gruppi",
+    "all_groups": "Tutti i gruppi",
+    "ungrouped": "Senza gruppo",
+    "filter": {
+      "all": "Tutte le connessioni",
+      "connected": "Solo connesse",
+      "disconnected": "Solo disconnesse",
+      "favorites": "Preferiti"
+    },
+    "sort": {
+      "name": "Ordina per nome",
+      "status": "Ordina per stato",
+      "last_used": "Ordina per ultimo utilizzo",
+      "group": "Ordina per gruppo"
+    },
+    "actions": {
+      "connect": "Connetti",
+      "disconnect": "Disconnetti",
+      "reconnect": "Riconnetti",
+      "edit": "Modifica",
+      "duplicate": "Duplica",
+      "delete": "Elimina",
+      "add_to_favorites": "Aggiungi ai preferiti",
+      "remove_from_favorites": "Rimuovi dai preferiti",
+      "open_sftp": "Apri SFTP",
+      "open_terminal": "Apri Terminale"
+    },
+    "stats": {
+      "total": "Totale connessioni",
+      "active": "Sessioni attive",
+      "failed": "Connessioni fallite"
+    },
+    "health": {
+      "title": "Salute Connessione",
+      "good": "Buona",
+      "degraded": "Degradata",
+      "poor": "Scarsa",
+      "unknown": "Sconosciuta"
+    },
+    "legend": {
+      "title": "Legenda",
+      "active": "Attiva",
+      "inactive": "Inattiva",
+      "jump": "Server di salto"
+    }
+  }
+}

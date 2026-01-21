@@ -51,7 +51,7 @@ export type CursorStyle = 'block' | 'underline' | 'bar';
 export type SidebarSection = 'sessions' | 'saved' | 'sftp' | 'forwards' | 'connections' | 'ai';
 
 /** Language options */
-export type Language = 'zh-CN' | 'en' | 'fr-FR' | 'ja' | 'es-ES' | 'pt-BR' | 'vi' | 'ko';
+export type Language = 'zh-CN' | 'en' | 'fr-FR' | 'ja' | 'es-ES' | 'pt-BR' | 'vi' | 'ko' | 'de' | 'it' | 'zh-TW';
 
 /** General settings */
 export interface GeneralSettings {

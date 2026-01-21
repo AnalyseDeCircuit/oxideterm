@@ -1,0 +1,61 @@
+{
+  "connections": {
+    "state": {
+      "connecting": "Connessione in corso...",
+      "active": "Attiva",
+      "idle": "Inattiva",
+      "disconnecting": "Disconnessione...",
+      "disconnected": "Disconnessa",
+      "error": "Errore: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Connessione persa - riconnessione...",
+      "connection_closed": "Connessione chiusa"
+    },
+    "toast": {
+      "close_terminal_failed": "Impossibile chiudere il vecchio terminale",
+      "proxy_chain_established": "Connessione catena proxy stabilita",
+      "proxy_chain_desc": "Profondità catena {{depth}}. Topologia sincronizzata."
+    },
+    "time": {
+      "just_now": "Adesso",
+      "mins_ago": "{{count}} min fa",
+      "hrs_ago": "{{count}} ore fa"
+    },
+    "panel": {
+      "title": "Pool Connessioni",
+      "description": "Gestisci le connessioni SSH attive e le impostazioni keep-alive",
+      "refresh": "Aggiorna",
+      "no_connections": "Nessuna connessione SSH attiva",
+      "no_connections_hint": "Le nuove connessioni appariranno qui",
+      "terminals": "{{count}} Terminali",
+      "sftp": "{{count}} SFTP",
+      "forwards": "{{count}} Inoltri",
+      "created": "Creata: {{time}}",
+      "idle_hint": "Inattiva - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "Disconnessione in 30m"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Abilita Keep Alive (Mai disconnettere)",
+      "disable_tooltip": "Disabilita Keep Alive (Disconnetti dopo 30m inattività)",
+      "legend_enabled": "Keep Alive: Mai disconnettere automaticamente",
+      "legend_disabled": "Standard: Disconnetti automaticamente dopo 30 min inattività"
+    },
+    "monitor": {
+      "title": "Pool Connessioni",
+      "loading": "Caricamento statistiche...",
+      "idle_timeout": "Inattiva: {{min}}min",
+      "capacity": "Capacità: {{capacity}}",
+      "active": "Attive",
+      "idle": "Inattive",
+      "reconnecting": "Riconnessione",
+      "link_down": "Link Giù",
+      "terminals": "Terminali",
+      "sftp": "SFTP",
+      "forwards": "Inoltri",
+      "summary": "Totale: {{total}} connessioni • Ref: {{refs}}",
+      "live": "Live"
+    }
+  }
+}

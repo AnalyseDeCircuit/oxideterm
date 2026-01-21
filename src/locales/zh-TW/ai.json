@@ -1,0 +1,91 @@
+{
+  "ai": {
+    "panel": {
+      "title": "AI 聊天",
+      "placeholder": "詢問 AI...",
+      "send": "傳送",
+      "stop": "停止",
+      "clear": "清除聊天",
+      "clear_confirm": "要清除聊天記錄嗎？",
+      "close": "關閉面板",
+      "minimize": "最小化",
+      "maximize": "最大化",
+      "new_chat": "新聊天",
+      "history": "歷史記錄",
+      "settings": "AI 設定"
+    },
+    "context": {
+      "label": "終端機內容",
+      "lines": "{{count}} 行",
+      "chars": "{{count}} 字元",
+      "no_context": "沒有終端機內容",
+      "include": "包含終端機內容",
+      "exclude": "排除終端機內容",
+      "truncated": "內容已截斷至 {{max}} 字元",
+      "select_terminal": "選擇終端機以取得內容"
+    },
+    "message": {
+      "thinking": "思考中...",
+      "error": "發生錯誤",
+      "retry": "重試",
+      "copy": "複製訊息",
+      "copied": "已複製！",
+      "insert": "插入終端機",
+      "inserted": "已插入！",
+      "regenerate": "重新產生回應",
+      "user": "您",
+      "assistant": "AI 助手",
+      "system": "系統"
+    },
+    "suggestions": {
+      "title": "建議",
+      "explain": "解釋這個錯誤",
+      "fix": "如何修復這個？",
+      "command": "建議一個命令",
+      "optimize": "最佳化這個命令"
+    },
+    "errors": {
+      "api_error": "API 錯誤：{{message}}",
+      "network_error": "網路錯誤。請檢查您的連線。",
+      "rate_limit": "已達請求限制。請稍後再試。",
+      "invalid_key": "API 金鑰無效。請檢查設定。",
+      "no_api_key": "尚未設定 API 金鑰。請前往設定。",
+      "timeout": "請求逾時。請重試。",
+      "context_too_long": "內容超過最大長度限制。",
+      "model_not_found": "找不到模型。請檢查設定。",
+      "server_error": "伺服器錯誤。請稍後再試。"
+    },
+    "welcome": {
+      "title": "歡迎使用 AI 聊天",
+      "description": "我在這裡協助您處理終端機任務。您可以詢問我：",
+      "item_explain": "解釋錯誤和輸出",
+      "item_commands": "建議命令",
+      "item_debug": "協助除錯",
+      "item_learn": "學習 CLI 工具",
+      "start_hint": "輸入訊息以開始..."
+    },
+    "status": {
+      "connected": "AI 已連線",
+      "disconnected": "AI 已中斷連線",
+      "connecting": "連線中...",
+      "ready": "就緒"
+    },
+    "actions": {
+      "expand": "展開",
+      "collapse": "收合",
+      "select_all": "全選",
+      "scroll_to_bottom": "捲動至底部",
+      "export": "匯出聊天",
+      "import": "匯入聊天"
+    },
+    "shortcuts": {
+      "title": "鍵盤快速鍵",
+      "send": "傳送訊息",
+      "newline": "換行",
+      "clear": "清除輸入",
+      "history_prev": "上一則訊息",
+      "history_next": "下一則訊息",
+      "toggle_context": "切換內容"
+    }
+  }
+}

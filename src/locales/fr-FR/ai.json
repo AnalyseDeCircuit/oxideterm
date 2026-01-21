@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "Chat IA",
+      "disabled_message": "Activez l'IA dans les paramètres pour commencer à discuter avec votre assistant terminal.",
+      "open_settings": "Ouvrir les paramètres",
+      "new_chat": "Nouvelle discussion",
+      "new_chat_tooltip": "Nouvelle discussion",
+      "more_options": "Plus d'options",
+      "settings": "Paramètres",
+      "clear_all": "Tout effacer",
+      "clear_all_confirm": "Êtes-vous sûr de vouloir supprimer toutes les conversations ?",
+      "no_conversations": "Pas encore de conversations",
+      "start_conversation": "Démarrer une conversation",
+      "start_conversation_hint": "Posez des questions sur les commandes shell, les scripts ou les opérations du terminal.",
+      "delete_conversation": "Supprimer la conversation",
+      "messages_count": "{{count}} messages"
+    },
+    "quick_prompts": {
+      "explain_command": "Expliquer une commande",
+      "explain_command_prompt": "Explique ce que fait cette commande : ",
+      "find_files": "Rechercher des fichiers...",
+      "find_files_prompt": "Comment trouver des fichiers correspondant à un motif dans le terminal ?",
+      "write_script": "Écrire un script",
+      "write_script_prompt": "Écris un script shell qui ",
+      "optimize_command": "Optimiser une commande",
+      "optimize_command_prompt": "Comment puis-je optimiser cette commande : "
+    },
+    "input": {
+      "placeholder": "Posez n'importe quelle question sur le terminal...",
+      "placeholder_disabled": "Activez l'IA dans les paramètres...",
+      "include_context": "Inclure le contexte",
+      "fetching_context": "Récupération...",
+      "stop_generation": "Arrêter la génération",
+      "send": "Envoyer le message"
+    },
+    "message": {
+      "you": "Vous",
+      "assistant": "Assistant",
+      "context_attached": "Contexte du terminal joint",
+      "copy_code": "Copier le code",
+      "insert_to_terminal": "Insérer dans le terminal"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { User, Bot, Copy, Check, Play } from 'lucide-react';
 import { useState } from 'react';
 import { emit } from '@tauri-apps/api/event';
@@ -101,6 +102,7 @@ function TextContent({ text }: { text: string }) {
 
 // Code block component
 function CodeBlock({ language, code }: { language: string; code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [inserted, setInserted] = useState(false);
 
@@ -130,7 +132,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
             <button
               onClick={handleInsert}
               className="p-1 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-green-400 transition-colors"
-              title="Insert to terminal"
+              title={t('ai.message.insert_to_terminal')}
             >
               {inserted ? (
                 <Check className="w-3.5 h-3.5 text-green-400" />
@@ -142,7 +144,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           <button
             onClick={handleCopy}
             className="p-1 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-colors"
-            title="Copy code"
+            title={t('ai.message.copy_code')}
           >
             {copied ? (
               <Check className="w-3.5 h-3.5 text-green-400" />
@@ -160,6 +162,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
 }
 
 export const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
+  const { t } = useTranslation();
   const isUser = message.role === 'user';
 
   const renderedContent = useMemo(
@@ -189,7 +192,7 @@ export const ChatMessage = memo(function ChatMessage({ message }: ChatMessagePro
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="text-xs text-zinc-500 mb-1">
-          {isUser ? 'You' : 'Assistant'}
+          {isUser ? t('ai.message.you') : t('ai.message.assistant')}
         </div>
         <div className="text-sm text-zinc-200 leading-relaxed">
           {renderedContent}
@@ -199,7 +202,7 @@ export const ChatMessage = memo(function ChatMessage({ message }: ChatMessagePro
         </div>
         {message.context && (
           <div className="mt-2 text-xs text-zinc-500 italic">
-            Context from terminal attached
+            {t('ai.message.context_attached')}
           </div>
         )}
       </div>

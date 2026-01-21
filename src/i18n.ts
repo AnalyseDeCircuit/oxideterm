@@ -13,6 +13,7 @@ import zhCNSettingsView from './locales/zh-CN/settings_view.json';
 import zhCNSftp from './locales/zh-CN/sftp.json';
 import zhCNTerminal from './locales/zh-CN/terminal.json';
 import zhCNTopology from './locales/zh-CN/topology.json';
+import zhCNAi from './locales/zh-CN/ai.json';
 
 // en 翻译文件
 import enCommon from './locales/en/common.json';
@@ -26,6 +27,7 @@ import enSettingsView from './locales/en/settings_view.json';
 import enSftp from './locales/en/sftp.json';
 import enTerminal from './locales/en/terminal.json';
 import enTopology from './locales/en/topology.json';
+import enAi from './locales/en/ai.json';
 
 // fr-FR 翻译文件
 import frFRCommon from './locales/fr-FR/common.json';
@@ -39,6 +41,7 @@ import frFRSettingsView from './locales/fr-FR/settings_view.json';
 import frFRSftp from './locales/fr-FR/sftp.json';
 import frFRTerminal from './locales/fr-FR/terminal.json';
 import frFRTopology from './locales/fr-FR/topology.json';
+import frFRAi from './locales/fr-FR/ai.json';
 
 // ja 翻译文件
 import jaCommon from './locales/ja/common.json';
@@ -52,6 +55,7 @@ import jaSettingsView from './locales/ja/settings_view.json';
 import jaSftp from './locales/ja/sftp.json';
 import jaTerminal from './locales/ja/terminal.json';
 import jaTopology from './locales/ja/topology.json';
+import jaAi from './locales/ja/ai.json';
 
 // es-ES 翻译文件
 import esESCommon from './locales/es-ES/common.json';
@@ -65,6 +69,7 @@ import esESSettingsView from './locales/es-ES/settings_view.json';
 import esESSftp from './locales/es-ES/sftp.json';
 import esESTerminal from './locales/es-ES/terminal.json';
 import esESTopology from './locales/es-ES/topology.json';
+import esESAi from './locales/es-ES/ai.json';
 
 // pt-BR 翻译文件
 import ptBRCommon from './locales/pt-BR/common.json';
@@ -78,6 +83,7 @@ import ptBRSettingsView from './locales/pt-BR/settings_view.json';
 import ptBRSftp from './locales/pt-BR/sftp.json';
 import ptBRTerminal from './locales/pt-BR/terminal.json';
 import ptBRTopology from './locales/pt-BR/topology.json';
+import ptBRAi from './locales/pt-BR/ai.json';
 
 // vi 翻译文件
 import viCommon from './locales/vi/common.json';
@@ -91,6 +97,7 @@ import viSettingsView from './locales/vi/settings_view.json';
 import viSftp from './locales/vi/sftp.json';
 import viTerminal from './locales/vi/terminal.json';
 import viTopology from './locales/vi/topology.json';
+import viAi from './locales/vi/ai.json';
 
 // ko 翻译文件
 import koCommon from './locales/ko/common.json';
@@ -104,6 +111,7 @@ import koSettingsView from './locales/ko/settings_view.json';
 import koSftp from './locales/ko/sftp.json';
 import koTerminal from './locales/ko/terminal.json';
 import koTopology from './locales/ko/topology.json';
+import koAi from './locales/ko/ai.json';
 
 // de 翻译文件
 import deCommon from './locales/de/common.json';
@@ -117,6 +125,35 @@ import deSettingsView from './locales/de/settings_view.json';
 import deSftp from './locales/de/sftp.json';
 import deTerminal from './locales/de/terminal.json';
 import deTopology from './locales/de/topology.json';
+import deAi from './locales/de/ai.json';
+
+// it 翻译文件 (意大利语)
+import itCommon from './locales/it/common.json';
+import itSidebar from './locales/it/sidebar.json';
+import itSettings from './locales/it/settings.json';
+import itConnections from './locales/it/connections.json';
+import itForwards from './locales/it/forwards.json';
+import itModals from './locales/it/modals.json';
+import itSessions from './locales/it/sessions.json';
+import itSettingsView from './locales/it/settings_view.json';
+import itSftp from './locales/it/sftp.json';
+import itTerminal from './locales/it/terminal.json';
+import itTopology from './locales/it/topology.json';
+import itAi from './locales/it/ai.json';
+
+// zh-TW 翻译文件 (繁体中文)
+import zhTWCommon from './locales/zh-TW/common.json';
+import zhTWSidebar from './locales/zh-TW/sidebar.json';
+import zhTWSettings from './locales/zh-TW/settings.json';
+import zhTWConnections from './locales/zh-TW/connections.json';
+import zhTWForwards from './locales/zh-TW/forwards.json';
+import zhTWModals from './locales/zh-TW/modals.json';
+import zhTWSessions from './locales/zh-TW/sessions.json';
+import zhTWSettingsView from './locales/zh-TW/settings_view.json';
+import zhTWSftp from './locales/zh-TW/sftp.json';
+import zhTWTerminal from './locales/zh-TW/terminal.json';
+import zhTWTopology from './locales/zh-TW/topology.json';
+import zhTWAi from './locales/zh-TW/ai.json';
 
 // 合并翻译资源
 const zhCN = {
@@ -131,6 +168,7 @@ const zhCN = {
   ...zhCNSftp,
   ...zhCNTerminal,
   ...zhCNTopology,
+  ...zhCNAi,
 };
 
 const enUS = {
@@ -145,6 +183,7 @@ const enUS = {
   ...enSftp,
   ...enTerminal,
   ...enTopology,
+  ...enAi,
 };
 
 const frFR = {
@@ -159,6 +198,7 @@ const frFR = {
   ...frFRSftp,
   ...frFRTerminal,
   ...frFRTopology,
+  ...frFRAi,
 };
 
 const ja = {
@@ -173,6 +213,7 @@ const ja = {
   ...jaSftp,
   ...jaTerminal,
   ...jaTopology,
+  ...jaAi,
 };
 
 const esES = {
@@ -187,6 +228,7 @@ const esES = {
   ...esESSftp,
   ...esESTerminal,
   ...esESTopology,
+  ...esESAi,
 };
 
 const ptBR = {
@@ -201,6 +243,7 @@ const ptBR = {
   ...ptBRSftp,
   ...ptBRTerminal,
   ...ptBRTopology,
+  ...ptBRAi,
 };
 
 const vi = {
@@ -215,6 +258,7 @@ const vi = {
   ...viSftp,
   ...viTerminal,
   ...viTopology,
+  ...viAi,
 };
 
 const ko = {
@@ -229,6 +273,7 @@ const ko = {
   ...koSftp,
   ...koTerminal,
   ...koTopology,
+  ...koAi,
 };
 
 const de = {
@@ -243,6 +288,37 @@ const de = {
   ...deSftp,
   ...deTerminal,
   ...deTopology,
+  ...deAi,
+};
+
+const it = {
+  ...itCommon,
+  ...itSidebar,
+  ...itSettings,
+  ...itConnections,
+  ...itForwards,
+  ...itModals,
+  ...itSessions,
+  ...itSettingsView,
+  ...itSftp,
+  ...itTerminal,
+  ...itTopology,
+  ...itAi,
+};
+
+const zhTW = {
+  ...zhTWCommon,
+  ...zhTWSidebar,
+  ...zhTWSettings,
+  ...zhTWConnections,
+  ...zhTWForwards,
+  ...zhTWModals,
+  ...zhTWSessions,
+  ...zhTWSettingsView,
+  ...zhTWSftp,
+  ...zhTWTerminal,
+  ...zhTWTopology,
+  ...zhTWAi,
 };
 
 // 获取初始语言：优先本地存储 -> 浏览器语言 -> 默认中文
@@ -259,6 +335,8 @@ const getInitialLanguage = () => {
   if (browser.startsWith('vi')) return 'vi';
   if (browser.startsWith('ko')) return 'ko';
   if (browser.startsWith('de')) return 'de';
+  if (browser.startsWith('it')) return 'it';
+  if (browser === 'zh-TW' || browser === 'zh-Hant') return 'zh-TW';
   
   return 'zh-CN';
 };
@@ -275,7 +353,9 @@ i18n
       'pt-BR': { translation: ptBR },
       'vi': { translation: vi },
       'ko': { translation: ko },
-      'de': { translation: de }
+      'de': { translation: de },
+      'it': { translation: it },
+      'zh-TW': { translation: zhTW }
     },
     lng: getInitialLanguage(),
     fallbackLng: 'en',

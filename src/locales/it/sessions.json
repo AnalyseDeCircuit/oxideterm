@@ -1,0 +1,48 @@
+{
+  "sessions": {
+    "breadcrumb": {
+      "back_to_root": "Torna alla vista radice",
+      "all_servers": "Tutti i Server"
+    },
+    "focused_list": {
+      "all_servers": "Tutti i Server",
+      "child": "figlio",
+      "children": "figli",
+      "no_child_nodes": "Questo nodo non ha nodi figli",
+      "no_servers": "Nessun server ancora",
+      "add_by_drilling": "Puoi aggiungere nodi figli tramite drill down",
+      "click_to_add": "Clicca + per aggiungere una nuova connessione",
+      "terminal": "Terminale",
+      "close_terminal": "Chiudi terminale"
+    },
+    "status": {
+      "idle": "Disconnesso",
+      "connecting": "Connessione...",
+      "connected": "Connesso",
+      "active": "Attivo",
+      "link_down": "Link Giù",
+      "error": "Errore"
+    },
+    "actions": {
+      "connect": "Connetti",
+      "disconnect": "Disconnetti",
+      "reconnect": "Riconnetti",
+      "new_terminal": "Nuovo Terminale",
+      "sftp_explorer": "Esplora SFTP",
+      "open_sftp": "Apri SFTP",
+      "port_forwards": "Inoltri Porta",
+      "port_forwarding": "Port Forwarding",
+      "drill_down": "Drill Down",
+      "drill_in": "Drill In (Prossimo Hop)",
+      "remove": "Rimuovi",
+      "remove_node": "Rimuovi Nodo",
+      "save_as_preset": "Salva come Preset...",
+      "parent_disconnected": "Genitore Disconnesso"
+    },
+    "tree": {
+      "no_sessions": "Nessuna sessione",
+      "click_to_add": "Clicca + per aggiungere una nuova connessione",
+      "close_terminal": "Chiudi terminale"
+    }
+  }
+}

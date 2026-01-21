@@ -1,0 +1,34 @@
+{
+  "sidebar": {
+    "actions": {
+      "expand": "展開側邊欄",
+      "collapse": "收合側邊欄",
+      "new_local_terminal": "新增本機終端機",
+      "open_pylance_guide": "開啟 Pylance 指南"
+    },
+    "panels": {
+      "sessions": "使用中的工作階段",
+      "saved": "已儲存的連線",
+      "saved_title": "已儲存的連線",
+      "sftp": "SFTP",
+      "sftp_sessions": "SFTP 工作階段",
+      "forwards": "連接埠轉發",
+      "forwards_title": "連接埠轉發",
+      "connection_pool": "連線池",
+      "connection_monitor": "連線監控",
+      "connection_matrix": "連線矩陣",
+      "ai": "AI 助手",
+      "ai_assistant": "AI 助手（即將推出）",
+      "settings": "設定",
+      "no_saved_connections": "沒有已儲存的連線",
+      "no_active_sessions": "沒有使用中的工作階段",
+      "no_connected_sessions": "沒有已連線的工作階段",
+      "import_tooltip": "從 .oxide 檔案匯入",
+      "export_tooltip": "匯出為 .oxide 檔案"
+    },
+    "tooltips": {
+      "settings": "設定",
+      "ai_hint": "AI 助手"
+    }
+  }
+}

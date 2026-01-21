@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI Chat",
+      "disabled_message": "Enable AI in Settings to start chatting with your terminal assistant.",
+      "open_settings": "Open Settings",
+      "new_chat": "New Chat",
+      "new_chat_tooltip": "New chat",
+      "more_options": "More options",
+      "settings": "Settings",
+      "clear_all": "Clear all",
+      "clear_all_confirm": "Are you sure you want to delete all conversations?",
+      "no_conversations": "No conversations yet",
+      "start_conversation": "Start a conversation",
+      "start_conversation_hint": "Ask questions about shell commands, scripts, or get help with terminal operations.",
+      "delete_conversation": "Delete conversation",
+      "messages_count": "{{count}} messages"
+    },
+    "quick_prompts": {
+      "explain_command": "Explain a command",
+      "explain_command_prompt": "Explain what this command does:",
+      "find_files": "Find files matching...",
+      "find_files_prompt": "How do I find files matching a pattern in the terminal?",
+      "write_script": "Write a shell script",
+      "write_script_prompt": "Write a shell script that",
+      "optimize_command": "Optimize this command",
+      "optimize_command_prompt": "How can I optimize this command:"
+    },
+    "input": {
+      "placeholder": "Ask anything about terminal...",
+      "placeholder_disabled": "Enable AI in Settings first...",
+      "include_context": "Include context",
+      "fetching_context": "Fetching...",
+      "stop_generation": "Stop generation",
+      "send": "Send message"
+    },
+    "message": {
+      "you": "You",
+      "assistant": "Assistant",
+      "context_attached": "Context from terminal attached",
+      "copy_code": "Copy code",
+      "insert_to_terminal": "Insert to terminal"
+    }
+  }
+}
