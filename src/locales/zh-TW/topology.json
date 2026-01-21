@@ -1,0 +1,76 @@
+{
+  "topology": {
+    "title": "連線拓撲",
+    "matrix": "連線矩陣",
+    "view_matrix": "矩陣檢視",
+    "view_list": "清單檢視",
+    "view_tree": "樹狀檢視",
+    "connections": "連線",
+    "sessions": "工作階段",
+    "jump_servers": "跳板伺服器",
+    "direct": "直接",
+    "via_jump": "透過 {{name}}",
+    "status": {
+      "connected": "已連線",
+      "disconnected": "已中斷連線",
+      "connecting": "連線中...",
+      "error": "錯誤"
+    },
+    "no_connections": "未設定連線",
+    "no_sessions": "沒有作用中的工作階段",
+    "add_connection": "新增連線",
+    "connection_info": "連線資訊",
+    "session_info": "工作階段資訊",
+    "latency": "延遲",
+    "uptime": "運作時間",
+    "bytes_sent": "已傳送位元組",
+    "bytes_received": "已接收位元組",
+    "last_activity": "最後活動",
+    "group": "群組",
+    "groups": "群組",
+    "all_groups": "所有群組",
+    "ungrouped": "未分組",
+    "filter": {
+      "all": "所有連線",
+      "connected": "僅已連線",
+      "disconnected": "僅已中斷連線",
+      "favorites": "我的最愛"
+    },
+    "sort": {
+      "name": "依名稱排序",
+      "status": "依狀態排序",
+      "last_used": "依最近使用排序",
+      "group": "依群組排序"
+    },
+    "actions": {
+      "connect": "連線",
+      "disconnect": "中斷連線",
+      "reconnect": "重新連線",
+      "edit": "編輯",
+      "duplicate": "複製",
+      "delete": "刪除",
+      "add_to_favorites": "新增至我的最愛",
+      "remove_from_favorites": "從我的最愛移除",
+      "open_sftp": "開啟 SFTP",
+      "open_terminal": "開啟終端機"
+    },
+    "stats": {
+      "total": "連線總數",
+      "active": "作用中的工作階段",
+      "failed": "失敗的連線"
+    },
+    "health": {
+      "title": "連線健康狀態",
+      "good": "良好",
+      "degraded": "降級",
+      "poor": "不佳",
+      "unknown": "未知"
+    },
+    "legend": {
+      "title": "圖例",
+      "active": "作用中",
+      "inactive": "非作用中",
+      "jump": "跳板伺服器"
+    }
+  }
+}

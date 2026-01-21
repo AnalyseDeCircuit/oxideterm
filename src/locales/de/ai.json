@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI Chat",
+      "disabled_message": "Aktivieren Sie AI in den Einstellungen, um mit Ihrem Terminal-Assistenten zu chatten.",
+      "open_settings": "Einstellungen öffnen",
+      "new_chat": "Neuer Chat",
+      "new_chat_tooltip": "Neuer Chat",
+      "more_options": "Weitere Optionen",
+      "settings": "Einstellungen",
+      "clear_all": "Alle löschen",
+      "clear_all_confirm": "Möchten Sie wirklich alle Unterhaltungen löschen?",
+      "no_conversations": "Noch keine Unterhaltungen",
+      "start_conversation": "Unterhaltung starten",
+      "start_conversation_hint": "Stellen Sie Fragen zu Shell-Befehlen, Skripten oder Terminal-Operationen.",
+      "delete_conversation": "Unterhaltung löschen",
+      "messages_count": "{{count}} Nachrichten"
+    },
+    "quick_prompts": {
+      "explain_command": "Befehl erklären",
+      "explain_command_prompt": "Erkläre, was dieser Befehl macht: ",
+      "find_files": "Dateien finden...",
+      "find_files_prompt": "Wie finde ich Dateien, die einem Muster im Terminal entsprechen?",
+      "write_script": "Skript schreiben",
+      "write_script_prompt": "Schreibe ein Shell-Skript, das ",
+      "optimize_command": "Befehl optimieren",
+      "optimize_command_prompt": "Wie kann ich diesen Befehl optimieren: "
+    },
+    "input": {
+      "placeholder": "Fragen Sie alles zum Terminal...",
+      "placeholder_disabled": "AI in den Einstellungen aktivieren...",
+      "include_context": "Kontext einbeziehen",
+      "fetching_context": "Wird abgerufen...",
+      "stop_generation": "Generierung stoppen",
+      "send": "Nachricht senden"
+    },
+    "message": {
+      "you": "Sie",
+      "assistant": "Assistent",
+      "context_attached": "Terminal-Kontext angehängt",
+      "copy_code": "Code kopieren",
+      "insert_to_terminal": "Ins Terminal einfügen"
+    }
+  }
+}

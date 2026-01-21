@@ -1,0 +1,42 @@
+{
+  "common": {
+    "confirm": {
+      "disconnect_node": "確定要中斷連線「{{name}}」及其所有子節點嗎？",
+      "remove_node": "確定要移除節點「{{name}}」及其所有子節點嗎？",
+      "delete_batch": "確定要刪除 {{count}} 個連線嗎？"
+    },
+    "actions": {
+      "cancel": "取消",
+      "confirm": "確認",
+      "delete": "刪除"
+    },
+    "errors": {
+      "delete_failed": "無法刪除部分連線：{{message}}"
+    }
+  },
+  "layout": {
+    "empty": {
+      "title": "OxideTerm",
+      "no_sessions": "沒有使用中的工作階段",
+      "new_connection": "新增連線"
+    },
+    "connection_monitor": {
+      "title": "連線監控"
+    },
+    "loading": "載入中..."
+  },
+  "tabbar": {
+    "offline": "離線",
+    "cancel_reconnect": "取消重新連線",
+    "reconnect": "重新連線",
+    "close_tab": "關閉分頁"
+  },
+  "tabs": {
+    "settings": "設定",
+    "connection_monitor": "連線監控",
+    "connection_pool": "連線池",
+    "connection_matrix": "連線矩陣",
+    "sftp_prefix": "SFTP",
+    "forwards_prefix": "轉發"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI Chat",
+      "disabled_message": "Bật AI trong Cài đặt để bắt đầu trò chuyện với trợ lý terminal của bạn.",
+      "open_settings": "Mở cài đặt",
+      "new_chat": "Cuộc trò chuyện mới",
+      "new_chat_tooltip": "Cuộc trò chuyện mới",
+      "more_options": "Tùy chọn khác",
+      "settings": "Cài đặt",
+      "clear_all": "Xóa tất cả",
+      "clear_all_confirm": "Bạn có chắc chắn muốn xóa tất cả các cuộc trò chuyện không?",
+      "no_conversations": "Chưa có cuộc trò chuyện nào",
+      "start_conversation": "Bắt đầu cuộc trò chuyện",
+      "start_conversation_hint": "Đặt câu hỏi về lệnh shell, script hoặc các thao tác terminal.",
+      "delete_conversation": "Xóa cuộc trò chuyện",
+      "messages_count": "{{count}} tin nhắn"
+    },
+    "quick_prompts": {
+      "explain_command": "Giải thích lệnh",
+      "explain_command_prompt": "Giải thích lệnh này làm gì: ",
+      "find_files": "Tìm tệp...",
+      "find_files_prompt": "Làm thế nào để tìm các tệp khớp với mẫu trong terminal?",
+      "write_script": "Viết script",
+      "write_script_prompt": "Viết một shell script để ",
+      "optimize_command": "Tối ưu lệnh",
+      "optimize_command_prompt": "Làm thế nào để tối ưu lệnh này: "
+    },
+    "input": {
+      "placeholder": "Hỏi bất cứ điều gì về terminal...",
+      "placeholder_disabled": "Bật AI trong cài đặt...",
+      "include_context": "Bao gồm ngữ cảnh",
+      "fetching_context": "Đang tải...",
+      "stop_generation": "Dừng tạo",
+      "send": "Gửi tin nhắn"
+    },
+    "message": {
+      "you": "Bạn",
+      "assistant": "Trợ lý",
+      "context_attached": "Đã đính kèm ngữ cảnh terminal",
+      "copy_code": "Sao chép mã",
+      "insert_to_terminal": "Chèn vào terminal"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "forwards": {
+    "quick": {
+      "title": "Inoltri Rapidi",
+      "jupyter": "Jupyter (8888)",
+      "tensorboard": "TensorBoard (6006)",
+      "vscode": "VS Code (8080)"
+    },
+    "table": {
+      "title": "Inoltri Attivi",
+      "type": "Tipo",
+      "local_address": "Indirizzo Locale",
+      "remote_address": "Indirizzo Remoto",
+      "status": "Stato",
+      "actions": "Azioni",
+      "no_forwards": "Nessun inoltro porta attivo"
+    },
+    "type": {
+      "local": "locale",
+      "remote": "remoto",
+      "dynamic": "dinamico"
+    },
+    "status": {
+      "active": "attivo",
+      "stopped": "fermato",
+      "failed": "fallito"
+    },
+    "actions": {
+      "new_forward": "Nuovo Inoltro",
+      "stop": "Ferma inoltro",
+      "restart": "Riavvia inoltro",
+      "edit": "Modifica inoltro",
+      "delete": "Elimina inoltro"
+    },
+    "form": {
+      "new_title": "Nuova Regola Inoltro",
+      "edit_title": "Modifica Regola Inoltro",
+      "cancel": "Annulla",
+      "type": "Tipo",
+      "create_forward": "Crea Inoltro",
+      "creating": "Creazione...",
+      "save_changes": "Salva Modifiche",
+      "saving": "Salvataggio...",
+      "type_local": "Locale (L)",
+      "type_remote": "Remoto (R)",
+      "type_dynamic": "Dinamico (SOCKS5)",
+      "local_client": "Locale (Client)",
+      "remote_server": "Remoto (Server)",
+      "bind_address": "Indirizzo Binding",
+      "target_address": "Indirizzo Destinazione",
+      "socks5_mode": "Modalità Proxy SOCKS5",
+      "host_placeholder": "Host",
+      "port_placeholder": "Porta",
+      "skip_check": "Salta controllo disponibilità porta (avanzato)",
+      "checking_port": "Controllo disponibilità porta...",
+      "port_required": "La porta è obbligatoria",
+      "desc": "Esempio: Locale=127.0.0.1:8080, Remoto=localhost:3000 → accedi a remoto:3000 via localhost:8080"
+    },
+    "toast": {
+      "jupyter_created": "Inoltro Jupyter creato",
+      "jupyter_desc": "localhost:8888 → remoto:8888",
+      "tensorboard_created": "Inoltro TensorBoard creato",
+      "tensorboard_desc": "localhost:6006 → remoto:6006",
+      "vscode_created": "Inoltro VS Code Server creato",
+      "vscode_desc": "localhost:8080 → remoto:8080",
+      "create_failed": "Impossibile creare inoltro",
+      "forward_updated": "Inoltro aggiornato con successo",
+      "update_failed": "Impossibile aggiornare inoltro"
+    }
+  }
+}

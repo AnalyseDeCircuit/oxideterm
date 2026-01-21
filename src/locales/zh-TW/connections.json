@@ -1,0 +1,61 @@
+{
+  "connections": {
+    "state": {
+      "connecting": "連線中...",
+      "active": "使用中",
+      "idle": "閒置",
+      "disconnecting": "中斷連線中...",
+      "disconnected": "已中斷連線",
+      "error": "錯誤：{{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "連線中斷 - 重新連線中...",
+      "connection_closed": "連線已關閉"
+    },
+    "toast": {
+      "close_terminal_failed": "無法關閉舊終端機",
+      "proxy_chain_established": "代理鏈連線已建立",
+      "proxy_chain_desc": "鏈深度 {{depth}}。拓撲已同步。"
+    },
+    "time": {
+      "just_now": "剛才",
+      "mins_ago": "{{count}} 分鐘前",
+      "hrs_ago": "{{count}} 小時前"
+    },
+    "panel": {
+      "title": "連線池",
+      "description": "管理使用中的 SSH 連線和 Keep-alive 設定",
+      "refresh": "重新整理",
+      "no_connections": "沒有使用中的 SSH 連線",
+      "no_connections_hint": "新的連線將顯示在此處",
+      "terminals": "{{count}} 個終端機",
+      "sftp": "{{count}} 個 SFTP",
+      "forwards": "{{count}} 個轉發",
+      "created": "建立時間：{{time}}",
+      "idle_hint": "閒置 - {{keepAlive}}",
+      "keep_alive_enabled": "Keep Alive",
+      "disconnect_in": "30 分鐘後中斷連線"
+    },
+    "keep_alive": {
+      "enable_tooltip": "啟用 Keep Alive（永不中斷連線）",
+      "disable_tooltip": "停用 Keep Alive（閒置 30 分鐘後中斷連線）",
+      "legend_enabled": "Keep Alive：永不自動中斷連線",
+      "legend_disabled": "標準：閒置 30 分鐘後自動中斷連線"
+    },
+    "monitor": {
+      "title": "連線池",
+      "loading": "載入統計資料...",
+      "idle_timeout": "閒置：{{min}} 分鐘",
+      "capacity": "容量：{{capacity}}",
+      "active": "使用中",
+      "idle": "閒置",
+      "reconnecting": "重新連線中",
+      "link_down": "連線中斷",
+      "terminals": "終端機",
+      "sftp": "SFTP",
+      "forwards": "轉發",
+      "summary": "總計：{{total}} 個連線 • 參照：{{refs}}",
+      "live": "即時"
+    }
+  }
+}

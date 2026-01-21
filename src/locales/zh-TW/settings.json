@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "設定",
+    "general": {
+      "title": "一般",
+      "language": "語言",
+      "theme": "主題"
+    },
+    "terminal": {
+      "title": "終端機",
+      "font_size": "字型大小",
+      "font_family": "字型家族",
+      "selection_copy": "選取時複製",
+      "paste_protection": "貼上保護"
+    },
+    "sidebar_ui": {
+      "title": "側邊欄介面",
+      "width": "寬度"
+    },
+    "toast": {
+      "renderer_changed": "渲染器已變更",
+      "renderer_changed_desc": "終端機渲染器已切換為 {{renderer}}。新終端機將使用此渲染器，現有終端機不受影響。"
+    }
+  }
+}

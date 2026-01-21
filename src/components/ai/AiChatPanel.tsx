@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, MessageSquare, MoreVertical, Settings, ChevronDown, Terminal, HelpCircle, FileCode, Zap } from 'lucide-react';
 import { useAiChatStore } from '../../store/aiChatStore';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -8,6 +9,7 @@ import { ChatInput } from './ChatInput';
 import type { AiConversation } from '../../types';
 
 export function AiChatPanel() {
+  const { t } = useTranslation();
   const {
     conversations,
     activeConversationId,
@@ -65,11 +67,11 @@ export function AiChatPanel() {
   );
 
   const handleClearAll = useCallback(() => {
-    if (window.confirm('Are you sure you want to delete all conversations?')) {
+    if (window.confirm(t('ai.chat.clear_all_confirm'))) {
       clearAllConversations();
     }
     setShowMenu(false);
-  }, [clearAllConversations]);
+  }, [clearAllConversations, t]);
 
   const handleOpenSettings = useCallback(() => {
     createTab('settings');
@@ -81,16 +83,16 @@ export function AiChatPanel() {
     return (
       <div className="h-full flex flex-col items-center justify-center p-6 text-center">
         <MessageSquare className="w-12 h-12 text-zinc-600 mb-4" />
-        <h3 className="text-lg font-medium text-zinc-300 mb-2">AI Chat</h3>
+        <h3 className="text-lg font-medium text-zinc-300 mb-2">{t('ai.chat.title')}</h3>
         <p className="text-sm text-zinc-500 mb-4">
-          Enable AI in Settings to start chatting with your terminal assistant.
+          {t('ai.chat.disabled_message')}
         </p>
         <button
           onClick={() => createTab('settings')}
           className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 rounded-lg text-white text-sm transition-colors"
         >
           <Settings className="w-4 h-4" />
-          Open Settings
+          {t('ai.chat.open_settings')}
         </button>
       </div>
     );
@@ -107,7 +109,7 @@ export function AiChatPanel() {
         >
           <MessageSquare className="w-4 h-4 text-orange-500" />
           <span className="max-w-[150px] truncate">
-            {activeConversation?.title || 'New Chat'}
+            {activeConversation?.title || t('ai.chat.new_chat')}
           </span>
           <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${showConversations ? 'rotate-180' : ''}`} />
         </button>
@@ -116,7 +118,7 @@ export function AiChatPanel() {
           <button
             onClick={handleNewChat}
             className="p-1.5 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-colors"
-            title="New chat"
+            title={t('ai.chat.new_chat_tooltip')}
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -124,7 +126,7 @@ export function AiChatPanel() {
             <button
               onClick={() => setShowMenu(!showMenu)}
               className="p-1.5 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-colors"
-              title="More options"
+              title={t('ai.chat.more_options')}
             >
               <MoreVertical className="w-4 h-4" />
             </button>
@@ -137,14 +139,14 @@ export function AiChatPanel() {
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50 transition-colors"
                   >
                     <Settings className="w-4 h-4" />
-                    Settings
+                    {t('ai.chat.settings')}
                   </button>
                   <button
                     onClick={handleClearAll}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-zinc-700/50 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Clear all
+                    {t('ai.chat.clear_all')}
                   </button>
                 </div>
               </>
@@ -160,7 +162,7 @@ export function AiChatPanel() {
           <div className="absolute left-2 right-2 top-12 max-h-64 overflow-y-auto bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-20">
             {conversations.length === 0 ? (
               <div className="p-4 text-center text-sm text-zinc-500">
-                No conversations yet
+                {t('ai.chat.no_conversations')}
               </div>
             ) : (
               conversations.map((conv) => (
@@ -182,35 +184,35 @@ export function AiChatPanel() {
         {!activeConversation || activeConversation.messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center p-6 text-center">
             <MessageSquare className="w-10 h-10 text-zinc-600 mb-3" />
-            <h3 className="text-sm font-medium text-zinc-300 mb-1">Start a conversation</h3>
+            <h3 className="text-sm font-medium text-zinc-300 mb-1">{t('ai.chat.start_conversation')}</h3>
             <p className="text-xs text-zinc-500 max-w-[200px] mb-4">
-              Ask questions about shell commands, scripts, or get help with terminal operations.
+              {t('ai.chat.start_conversation_hint')}
             </p>
             
             {/* Quick prompt buttons */}
             <div className="w-full max-w-[280px] space-y-2">
               <QuickPromptButton
                 icon={<HelpCircle className="w-4 h-4" />}
-                label="Explain a command"
-                prompt="Explain what this command does: "
+                label={t('ai.quick_prompts.explain_command')}
+                prompt={t('ai.quick_prompts.explain_command_prompt')}
                 onSend={handleSend}
               />
               <QuickPromptButton
                 icon={<Terminal className="w-4 h-4" />}
-                label="Find files matching..."
-                prompt="How do I find files matching a pattern in the terminal?"
+                label={t('ai.quick_prompts.find_files')}
+                prompt={t('ai.quick_prompts.find_files_prompt')}
                 onSend={handleSend}
               />
               <QuickPromptButton
                 icon={<FileCode className="w-4 h-4" />}
-                label="Write a shell script"
-                prompt="Write a shell script that "
+                label={t('ai.quick_prompts.write_script')}
+                prompt={t('ai.quick_prompts.write_script_prompt')}
                 onSend={handleSend}
               />
               <QuickPromptButton
                 icon={<Zap className="w-4 h-4" />}
-                label="Optimize this command"
-                prompt="How can I optimize this command: "
+                label={t('ai.quick_prompts.optimize_command')}
+                prompt={t('ai.quick_prompts.optimize_command_prompt')}
                 onSend={handleSend}
               />
             </div>
@@ -255,6 +257,7 @@ function ConversationItem({
   onSelect: () => void;
   onDelete: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const timeStr = new Date(conversation.updatedAt).toLocaleDateString();
 
   return (
@@ -267,13 +270,13 @@ function ConversationItem({
       <div className="flex-1 min-w-0">
         <div className="text-sm text-zinc-200 truncate">{conversation.title}</div>
         <div className="text-xs text-zinc-500">
-          {conversation.messages.length} messages · {timeStr}
+          {t('ai.chat.messages_count', { count: conversation.messages.length })} · {timeStr}
         </div>
       </div>
       <button
         onClick={onDelete}
         className="flex-shrink-0 p-1 rounded hover:bg-red-600/20 text-zinc-500 hover:text-red-400 transition-colors"
-        title="Delete conversation"
+        title={t('ai.chat.delete_conversation')}
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>

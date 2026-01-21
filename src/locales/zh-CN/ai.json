@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI 聊天",
+      "disabled_message": "在设置中启用 AI 功能，开始与终端助手对话。",
+      "open_settings": "打开设置",
+      "new_chat": "新对话",
+      "new_chat_tooltip": "新建对话",
+      "more_options": "更多选项",
+      "settings": "设置",
+      "clear_all": "清空全部",
+      "clear_all_confirm": "确定要删除所有对话吗？",
+      "no_conversations": "暂无对话",
+      "start_conversation": "开始对话",
+      "start_conversation_hint": "询问关于 Shell 命令、脚本或终端操作的问题。",
+      "delete_conversation": "删除对话",
+      "messages_count": "{{count}} 条消息"
+    },
+    "quick_prompts": {
+      "explain_command": "解释命令",
+      "explain_command_prompt": "解释这个命令的作用：",
+      "find_files": "查找文件...",
+      "find_files_prompt": "如何在终端中查找匹配特定模式的文件？",
+      "write_script": "编写脚本",
+      "write_script_prompt": "编写一个 Shell 脚本，实现",
+      "optimize_command": "优化命令",
+      "optimize_command_prompt": "如何优化这个命令："
+    },
+    "input": {
+      "placeholder": "询问任何终端相关问题...",
+      "placeholder_disabled": "请先在设置中启用 AI...",
+      "include_context": "包含上下文",
+      "fetching_context": "获取中...",
+      "stop_generation": "停止生成",
+      "send": "发送消息"
+    },
+    "message": {
+      "you": "你",
+      "assistant": "助手",
+      "context_attached": "已附加终端上下文",
+      "copy_code": "复制代码",
+      "insert_to_terminal": "插入到终端"
+    }
+  }
+}

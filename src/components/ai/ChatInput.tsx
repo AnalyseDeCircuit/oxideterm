@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, StopCircle, Terminal } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
@@ -13,6 +14,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProps) {
+  const { t } = useTranslation();
   const [input, setInput] = useState('');
   const [includeContext, setIncludeContext] = useState(false);
   const [fetchingContext, setFetchingContext] = useState(false);
@@ -98,10 +100,10 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
                 ? 'bg-orange-600/20 text-orange-400 border border-orange-600/30'
                 : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
             } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
-            title="Include terminal context"
+            title={t('ai.input.include_context')}
           >
             <Terminal className="w-3 h-3" />
-            <span>{fetchingContext ? 'Fetching...' : 'Include context'}</span>
+            <span>{fetchingContext ? t('ai.input.fetching_context') : t('ai.input.include_context')}</span>
           </button>
         </div>
       )}
@@ -114,7 +116,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? 'Enable AI in Settings first...' : 'Ask anything about terminal...'}
+            placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
             disabled={disabled || isLoading}
             rows={1}
             className="w-full resize-none bg-zinc-900/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-orange-600/50 focus:ring-1 focus:ring-orange-600/25 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -126,7 +128,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             type="button"
             onClick={onStop}
             className="flex-shrink-0 p-2 rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors"
-            title="Stop generation"
+            title={t('ai.input.stop_generation')}
           >
             <StopCircle className="w-5 h-5" />
           </button>
@@ -136,7 +138,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             onClick={handleSubmit}
             disabled={!input.trim() || disabled}
             className="flex-shrink-0 p-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-600"
-            title="Send message"
+            title={t('ai.input.send')}
           >
             <Send className="w-5 h-5" />
           </button>

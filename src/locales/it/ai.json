@@ -1,0 +1,91 @@
+{
+  "ai": {
+    "panel": {
+      "title": "Chat AI",
+      "placeholder": "Chiedi all'AI...",
+      "send": "Invia",
+      "stop": "Interrompi",
+      "clear": "Pulisci chat",
+      "clear_confirm": "Pulire la cronologia della chat?",
+      "close": "Chiudi pannello",
+      "minimize": "Minimizza",
+      "maximize": "Massimizza",
+      "new_chat": "Nuova chat",
+      "history": "Cronologia",
+      "settings": "Impostazioni AI"
+    },
+    "context": {
+      "label": "Contesto Terminale",
+      "lines": "{{count}} linee",
+      "chars": "{{count}} caratteri",
+      "no_context": "Nessun contesto terminale",
+      "include": "Includi contesto terminale",
+      "exclude": "Escludi contesto terminale",
+      "truncated": "Contesto troncato a {{max}} caratteri",
+      "select_terminal": "Seleziona un terminale per il contesto"
+    },
+    "message": {
+      "thinking": "Pensando...",
+      "error": "Si è verificato un errore",
+      "retry": "Riprova",
+      "copy": "Copia messaggio",
+      "copied": "Copiato!",
+      "insert": "Inserisci nel terminale",
+      "inserted": "Inserito!",
+      "regenerate": "Rigenera risposta",
+      "user": "Tu",
+      "assistant": "Assistente AI",
+      "system": "Sistema"
+    },
+    "suggestions": {
+      "title": "Suggerimenti",
+      "explain": "Spiega questo errore",
+      "fix": "Come posso correggere questo?",
+      "command": "Suggerisci un comando",
+      "optimize": "Ottimizza questo comando"
+    },
+    "errors": {
+      "api_error": "Errore API: {{message}}",
+      "network_error": "Errore di rete. Controlla la connessione.",
+      "rate_limit": "Limite di richieste raggiunto. Riprova più tardi.",
+      "invalid_key": "Chiave API non valida. Controlla le impostazioni.",
+      "no_api_key": "Nessuna chiave API configurata. Vai alle impostazioni.",
+      "timeout": "Richiesta scaduta. Riprova.",
+      "context_too_long": "Il contesto supera la lunghezza massima.",
+      "model_not_found": "Modello non trovato. Controlla le impostazioni.",
+      "server_error": "Errore del server. Riprova più tardi."
+    },
+    "welcome": {
+      "title": "Benvenuto nel Chat AI",
+      "description": "Sono qui per aiutarti con i tuoi compiti nel terminale. Puoi chiedermi di:",
+      "item_explain": "Spiegare errori e output",
+      "item_commands": "Suggerire comandi",
+      "item_debug": "Aiutare con il debug",
+      "item_learn": "Imparare su strumenti CLI",
+      "start_hint": "Digita un messaggio per iniziare..."
+    },
+    "status": {
+      "connected": "AI connessa",
+      "disconnected": "AI disconnessa",
+      "connecting": "Connessione...",
+      "ready": "Pronta"
+    },
+    "actions": {
+      "expand": "Espandi",
+      "collapse": "Comprimi",
+      "select_all": "Seleziona tutto",
+      "scroll_to_bottom": "Scorri in fondo",
+      "export": "Esporta chat",
+      "import": "Importa chat"
+    },
+    "shortcuts": {
+      "title": "Scorciatoie da Tastiera",
+      "send": "Invia messaggio",
+      "newline": "Nuova linea",
+      "clear": "Pulisci input",
+      "history_prev": "Messaggio precedente",
+      "history_next": "Messaggio successivo",
+      "toggle_context": "Attiva/disattiva contesto"
+    }
+  }
+}

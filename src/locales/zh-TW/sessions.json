@@ -1,0 +1,48 @@
+{
+  "sessions": {
+    "breadcrumb": {
+      "back_to_root": "返回根檢視",
+      "all_servers": "所有伺服器"
+    },
+    "focused_list": {
+      "all_servers": "所有伺服器",
+      "child": "子節點",
+      "children": "子節點",
+      "no_child_nodes": "此節點沒有子節點",
+      "no_servers": "尚無伺服器",
+      "add_by_drilling": "您可以透過深入連線來新增子節點",
+      "click_to_add": "點擊 + 新增連線",
+      "terminal": "終端機",
+      "close_terminal": "關閉終端機"
+    },
+    "status": {
+      "idle": "已中斷連線",
+      "connecting": "連線中...",
+      "connected": "已連線",
+      "active": "使用中",
+      "link_down": "連線中斷",
+      "error": "錯誤"
+    },
+    "actions": {
+      "connect": "連線",
+      "disconnect": "中斷連線",
+      "reconnect": "重新連線",
+      "new_terminal": "新增終端機",
+      "sftp_explorer": "SFTP 檔案總管",
+      "open_sftp": "開啟 SFTP",
+      "port_forwards": "連接埠轉發",
+      "port_forwarding": "連接埠轉發",
+      "drill_down": "深入連線",
+      "drill_in": "深入連線（下一跳）",
+      "remove": "移除",
+      "remove_node": "移除節點",
+      "save_as_preset": "儲存為預設...",
+      "parent_disconnected": "父節點已中斷連線"
+    },
+    "tree": {
+      "no_sessions": "沒有工作階段",
+      "click_to_add": "點擊 + 新增連線",
+      "close_terminal": "關閉終端機"
+    }
+  }
+}

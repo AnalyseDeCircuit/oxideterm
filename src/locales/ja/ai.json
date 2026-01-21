@@ -1,0 +1,45 @@
+{
+  "ai": {
+    "chat": {
+      "title": "AI チャット",
+      "disabled_message": "設定で AI を有効にして、ターミナルアシスタントとの会話を始めましょう。",
+      "open_settings": "設定を開く",
+      "new_chat": "新規チャット",
+      "new_chat_tooltip": "新しいチャット",
+      "more_options": "その他のオプション",
+      "settings": "設定",
+      "clear_all": "すべてクリア",
+      "clear_all_confirm": "すべての会話を削除してもよろしいですか？",
+      "no_conversations": "会話がありません",
+      "start_conversation": "会話を始める",
+      "start_conversation_hint": "シェルコマンド、スクリプト、ターミナル操作についてご質問ください。",
+      "delete_conversation": "会話を削除",
+      "messages_count": "{{count}} 件のメッセージ"
+    },
+    "quick_prompts": {
+      "explain_command": "コマンドを説明",
+      "explain_command_prompt": "このコマンドの動作を説明してください：",
+      "find_files": "ファイルを検索...",
+      "find_files_prompt": "ターミナルでパターンに一致するファイルを見つけるにはどうすればいいですか？",
+      "write_script": "スクリプトを作成",
+      "write_script_prompt": "次のことを行うシェルスクリプトを作成してください：",
+      "optimize_command": "コマンドを最適化",
+      "optimize_command_prompt": "このコマンドを最適化するにはどうすればいいですか："
+    },
+    "input": {
+      "placeholder": "ターミナルについて何でも聞いてください...",
+      "placeholder_disabled": "設定で AI を有効にしてください...",
+      "include_context": "コンテキストを含める",
+      "fetching_context": "取得中...",
+      "stop_generation": "生成を停止",
+      "send": "メッセージを送信"
+    },
+    "message": {
+      "you": "あなた",
+      "assistant": "アシスタント",
+      "context_attached": "ターミナルのコンテキストが添付されました",
+      "copy_code": "コードをコピー",
+      "insert_to_terminal": "ターミナルに挿入"
+    }
+  }
+}
