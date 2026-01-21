@@ -833,6 +833,32 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
     };
   }, [sessionId]); // Only re-mount if sessionId changes absolutely
 
+  // Listen for AI insert command events (only when this terminal is active and connected)
+  useEffect(() => {
+    if (!isActive) return;
+    const currentSession = sessionRef.current;
+    if (!currentSession || currentSession.state !== 'connected') return;
+
+    const unlisten = listen<{ command: string }>('ai-insert-command', (event) => {
+      if (!isMountedRef.current) return;
+      if (inputLockedRef.current) return; // Don't insert during standby mode
+      
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      const { command } = event.payload;
+      // Encode and send command to SSH terminal (without executing - user can review and press Enter)
+      const encoder = new TextEncoder();
+      const payload = encoder.encode(command);
+      const frame = encodeDataFrame(payload);
+      ws.send(frame);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [isActive, session?.state]);
+
   const handleContainerClick = () => {
     if (!searchOpen && !aiPanelOpen) {
       terminalRef.current?.focus();

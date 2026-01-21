@@ -1,10 +1,17 @@
 import { memo, useMemo } from 'react';
-import { User, Bot, Copy, Check } from 'lucide-react';
+import { User, Bot, Copy, Check, Play } from 'lucide-react';
 import { useState } from 'react';
+import { emit } from '@tauri-apps/api/event';
 import type { AiChatMessage } from '../../types';
 
 interface ChatMessageProps {
   message: AiChatMessage;
+}
+
+// Check if language looks like a shell command
+function isShellLanguage(language: string): boolean {
+  const shellLangs = ['bash', 'sh', 'zsh', 'shell', 'powershell', 'ps1', 'cmd', 'terminal', 'console', ''];
+  return shellLangs.includes(language.toLowerCase());
 }
 
 // Simple markdown-like rendering for code blocks
@@ -95,6 +102,9 @@ function TextContent({ text }: { text: string }) {
 // Code block component
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  const [inserted, setInserted] = useState(false);
+
+  const canInsert = isShellLanguage(language);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code);
@@ -102,23 +112,45 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleInsert = async () => {
+    // Emit event to insert command into active terminal
+    await emit('ai-insert-command', { command: code });
+    setInserted(true);
+    setTimeout(() => setInserted(false), 2000);
+  };
+
   return (
     <div className="my-2 rounded-lg overflow-hidden bg-zinc-900/80 border border-zinc-700/50">
       <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/50 border-b border-zinc-700/50">
         <span className="text-xs text-zinc-400 font-mono">
-          {language || 'code'}
+          {language || 'shell'}
         </span>
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-colors"
-          title="Copy code"
-        >
-          {copied ? (
-            <Check className="w-3.5 h-3.5 text-green-400" />
-          ) : (
-            <Copy className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1">
+          {canInsert && (
+            <button
+              onClick={handleInsert}
+              className="p-1 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-green-400 transition-colors"
+              title="Insert to terminal"
+            >
+              {inserted ? (
+                <Check className="w-3.5 h-3.5 text-green-400" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+            </button>
           )}
-        </button>
+          <button
+            onClick={handleCopy}
+            className="p-1 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Copy code"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-green-400" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
       </div>
       <pre className="p-3 overflow-x-auto text-sm">
         <code className="text-zinc-200 font-mono">{code}</code>
