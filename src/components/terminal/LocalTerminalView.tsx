@@ -384,9 +384,21 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
       
       const { command } = event.payload;
       // Write command to terminal (without executing - user can review and press Enter)
+      // For multiline commands, we use bracketed paste mode markers if terminal supports it
+      // This ensures the entire command is pasted as one unit
       const encoder = new TextEncoder();
-      const bytes = encoder.encode(command);
-      writeTerminal(sessionId, bytes);
+      
+      // Check if command is multiline
+      if (command.includes('\n')) {
+        // Use bracketed paste mode: \x1b[200~ ... \x1b[201~
+        // This tells the shell to treat the entire block as pasted text
+        const bracketedPaste = `\x1b[200~${command}\x1b[201~`;
+        const bytes = encoder.encode(bracketedPaste);
+        writeTerminal(sessionId, bytes);
+      } else {
+        const bytes = encoder.encode(command);
+        writeTerminal(sessionId, bytes);
+      }
     });
 
     return () => {

@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, StopCircle, Terminal } from 'lucide-react';
+import { useAppStore } from '../../store/appStore';
+import { api } from '../../lib/api';
+import { useSettingsStore } from '../../store/settingsStore';
 
 interface ChatInputProps {
   onSend: (content: string, context?: string) => void;
@@ -11,10 +14,18 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [includeContext, setIncludeContext] = useState(false);
+  const [fetchingContext, setFetchingContext] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // TODO: Get active session for context capture
-  const hasActiveSession = false;
+  // Get active terminal session
+  const tabs = useAppStore((state) => state.tabs);
+  const activeTabId = useAppStore((state) => state.activeTabId);
+  const contextMaxChars = useSettingsStore((state) => state.settings.ai.contextVisibleLines);
+  
+  // Find active terminal tab
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const hasActiveTerminal = activeTab?.type === 'terminal' || activeTab?.type === 'local_terminal';
+  const terminalSessionId = hasActiveTerminal ? activeTab?.sessionId : null;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -31,16 +42,28 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
 
     // Get terminal context if requested
     let context: string | undefined;
-    if (includeContext && hasActiveSession) {
-      // TODO: Get last N lines from terminal buffer
-      // For now, just indicate context is requested
-      context = '(Terminal context requested but not yet implemented)';
+    if (includeContext && terminalSessionId) {
+      setFetchingContext(true);
+      try {
+        // For SSH terminals, use scroll buffer API
+        if (activeTab?.type === 'terminal') {
+          const lines = await api.getScrollBuffer(terminalSessionId, 0, contextMaxChars || 50);
+          if (lines.length > 0) {
+            context = lines.map((l) => l.text).join('\n');
+          }
+        }
+        // For local terminals, we'd need a similar API (not implemented yet)
+      } catch (e) {
+        console.error('Failed to get terminal context:', e);
+      } finally {
+        setFetchingContext(false);
+      }
     }
 
     onSend(trimmed, context);
     setInput('');
     setIncludeContext(false);
-  }, [input, isLoading, disabled, includeContext, hasActiveSession, onSend]);
+  }, [input, isLoading, disabled, includeContext, terminalSessionId, activeTab?.type, contextMaxChars, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -55,20 +78,21 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   return (
     <div className="border-t border-zinc-700/50 bg-zinc-800/50 p-3">
       {/* Context toggle */}
-      {hasActiveSession && (
+      {hasActiveTerminal && (
         <div className="flex items-center gap-2 mb-2">
           <button
             type="button"
             onClick={() => setIncludeContext(!includeContext)}
+            disabled={fetchingContext}
             className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
               includeContext
                 ? 'bg-orange-600/20 text-orange-400 border border-orange-600/30'
                 : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-            }`}
+            } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             title="Include terminal context"
           >
             <Terminal className="w-3 h-3" />
-            <span>Include context</span>
+            <span>{fetchingContext ? 'Fetching...' : 'Include context'}</span>
           </button>
         </div>
       )}

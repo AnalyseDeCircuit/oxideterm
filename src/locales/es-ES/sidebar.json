@@ -17,6 +17,7 @@
       "connection_pool": "Pool de conexiones",
       "connection_monitor": "Monitor de conexión",
       "connection_matrix": "Matriz de conexiones",
+      "ai": "Asistente IA",
       "ai_assistant": "Asistente IA (próximamente)",
       "settings": "Configuración",
       "no_saved_connections": "No hay conexiones guardadas",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "Configuración",
-      "ai_hint": "Asistente IA (próximamente) - Usa Ctrl/Cmd+I en el terminal"
+      "ai_hint": "Asistente IA"
     }
   }
 }

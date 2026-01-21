@@ -17,6 +17,7 @@
       "connection_pool": "Verbindungspool",
       "connection_monitor": "Verbindungsmonitor",
       "connection_matrix": "Verbindungsmatrix",
+      "ai": "KI-Assistent",
       "ai_assistant": "KI-Assistent (Demnächst verfügbar)",
       "settings": "Einstellungen",
       "no_saved_connections": "Keine gespeicherten Verbindungen",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "Einstellungen",
-      "ai_hint": "KI-Assistent (Demnächst verfügbar) - Verwenden Sie Strg/Cmd+I im Terminal"
+      "ai_hint": "KI-Assistent"
     }
   }
 }

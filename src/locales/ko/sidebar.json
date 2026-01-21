@@ -17,6 +17,7 @@
       "connection_pool": "연결 풀",
       "connection_monitor": "연결 모니터",
       "connection_matrix": "연결 매트릭스",
+      "ai": "AI 어시스턴트",
       "ai_assistant": "AI 어시스턴트 (출시 예정)",
       "settings": "설정",
       "no_saved_connections": "저장된 연결 없음",
@@ -27,7 +28,7 @@
     },
     "tooltips": {
       "settings": "설정",
-      "ai_hint": "AI 어시스턴트 (출시 예정) - 터미널에서 Ctrl/Cmd+I 사용"
+      "ai_hint": "AI 어시스턴트"
     }
   }
 }
