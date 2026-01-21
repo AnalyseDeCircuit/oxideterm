@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
-use crate::local::shell::ShellInfo;
+use crate::local::shell::{get_shell_args, ShellInfo};
 
 #[cfg(unix)]
 use nix::sys::signal::{killpg, Signal};
@@ -43,6 +43,12 @@ pub struct PtyConfig {
     pub shell: ShellInfo,
     pub cwd: Option<std::path::PathBuf>,
     pub env: Vec<(String, String)>,
+    /// Whether to load shell profile/startup files
+    pub load_profile: bool,
+    /// Enable Oh My Posh prompt theme engine (Windows)
+    pub oh_my_posh_enabled: bool,
+    /// Path to Oh My Posh theme file (.omp.json)
+    pub oh_my_posh_theme: Option<String>,
 }
 
 impl Default for PtyConfig {
@@ -53,6 +59,9 @@ impl Default for PtyConfig {
             shell: crate::local::shell::default_shell(),
             cwd: None,
             env: vec![],
+            load_profile: true,
+            oh_my_posh_enabled: false,
+            oh_my_posh_theme: None,
         }
     }
 }
@@ -90,8 +99,17 @@ impl PtyHandle {
         // Build command
         let mut cmd = CommandBuilder::new(&config.shell.path);
 
-        // Add shell arguments
-        for arg in &config.shell.args {
+        // Add shell arguments - use dynamic args based on profile setting
+        // WSL shells have their own args that shouldn't be overridden
+        let shell_args = if config.shell.id.starts_with("wsl") {
+            // WSL uses wsl.exe args, not the shell args
+            config.shell.args.clone()
+        } else {
+            // Use the dynamic args function for profile control
+            get_shell_args(&config.shell.id, config.load_profile)
+        };
+        
+        for arg in &shell_args {
             cmd.arg(arg);
         }
 
@@ -130,6 +148,23 @@ impl PtyHandle {
                 cmd.env("WSL_UTF8", "1");
                 // Pass these env vars to WSL
                 cmd.env("WSLENV", "TERM:COLORTERM");
+            }
+            
+            // Oh My Posh environment variables for PowerShell prompt rendering
+            if config.oh_my_posh_enabled {
+                // Identify the terminal program to Oh My Posh
+                cmd.env("TERM_PROGRAM", "OxideTerm");
+                cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+                
+                // If a theme is specified, set POSH_THEME
+                if let Some(theme_path) = &config.oh_my_posh_theme {
+                    if !theme_path.is_empty() {
+                        cmd.env("POSH_THEME", theme_path);
+                    }
+                }
+                
+                // Enable shell integration features
+                cmd.env("POSH_SHELL_VERSION", "");  // Let Oh My Posh detect shell version
             }
         }
 

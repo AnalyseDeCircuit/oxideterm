@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon, ISearchOptions } from '@xterm/addon-search';
 import { ImageAddon } from '@xterm/addon-image';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore } from '../../store/appStore';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -432,6 +433,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
     term.loadAddon(webLinksAddon);
     term.loadAddon(searchAddon);
     term.loadAddon(imageAddon);   // Load before term.open()
+    
+    // Unicode11Addon for proper Nerd Font icons and CJK wide character rendering
+    // Required for Oh My Posh, Starship, and other modern prompts
+    const unicode11Addon = new Unicode11Addon();
+    term.loadAddon(unicode11Addon);
+    term.unicode.activeVersion = '11';
     
     // Listen for search result changes
     searchAddon.onDidChangeResults((e) => {

@@ -16,7 +16,18 @@
       "new_shell_launcher": "Nueva terminal local (selector de shell)",
       "available_shells": "Shells disponibles",
       "loading_shells": "Cargando shells disponibles...",
-      "default": "Predeterminado"
+      "default": "Predeterminado",
+      "shell_profile": "Perfil de shell",
+      "load_shell_profile": "Cargar perfil de shell",
+      "load_shell_profile_hint": "Ejecutar archivos de inicio del shell (.bashrc, .zshrc, Profile.ps1, etc.)",
+      "oh_my_posh": "Oh My Posh",
+      "oh_my_posh_enable": "Activar Oh My Posh",
+      "oh_my_posh_enable_hint": "Inyectar variables de entorno para renderizar el prompt de Oh My Posh (Windows)",
+      "oh_my_posh_theme": "Ruta del tema",
+      "oh_my_posh_theme_hint": "Ruta al archivo de tema Oh My Posh (.omp.json), vacío = tema predeterminado",
+      "oh_my_posh_theme_placeholder": "ej: ~/.config/oh-my-posh/themes/agnoster.omp.json",
+      "custom_env": "Variables de entorno personalizadas",
+      "custom_env_hint": "Variables de entorno adicionales (formato: KEY=VALUE, una por línea)"
     },
     "tabs": {
       "general": "General",

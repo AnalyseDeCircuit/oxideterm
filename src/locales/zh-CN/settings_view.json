@@ -16,7 +16,18 @@
       "new_shell_launcher": "新建本地终端（Shell 选择器）",
       "available_shells": "可用 Shell",
       "loading_shells": "正在加载可用 Shell...",
-      "default": "默认"
+      "default": "默认",
+      "shell_profile": "Shell 配置文件",
+      "load_shell_profile": "加载 Shell 配置文件",
+      "load_shell_profile_hint": "执行 Shell 启动文件 (.bashrc, .zshrc, Profile.ps1 等)",
+      "oh_my_posh": "Oh My Posh",
+      "oh_my_posh_enable": "启用 Oh My Posh",
+      "oh_my_posh_enable_hint": "注入 Oh My Posh 提示符渲染所需的环境变量 (Windows)",
+      "oh_my_posh_theme": "主题路径",
+      "oh_my_posh_theme_hint": "Oh My Posh 主题文件路径 (.omp.json)，留空使用默认主题",
+      "oh_my_posh_theme_placeholder": "例如 ~/.config/oh-my-posh/themes/agnoster.omp.json",
+      "custom_env": "自定义环境变量",
+      "custom_env_hint": "附加的环境变量 (格式: KEY=VALUE，每行一个)"
     },
     "tabs": {
       "general": "常规",

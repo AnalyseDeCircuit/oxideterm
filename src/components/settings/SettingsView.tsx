@@ -132,6 +132,58 @@ const LocalTerminalSettings = () => {
                 </div>
             </div>
 
+            {/* Shell Profile Section */}
+            <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
+                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shell_profile')}</h4>
+                <div className="space-y-5">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-zinc-200">{t('settings_view.local_terminal.load_shell_profile')}</Label>
+                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.load_shell_profile_hint')}</p>
+                        </div>
+                        <Checkbox
+                            checked={localSettings?.loadShellProfile ?? true}
+                            onCheckedChange={(checked) => updateLocalTerminal('loadShellProfile', checked === true)}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            {/* Oh My Posh Section (Windows-specific hint) */}
+            <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
+                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.oh_my_posh')}</h4>
+                <div className="space-y-5">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-zinc-200">{t('settings_view.local_terminal.oh_my_posh_enable')}</Label>
+                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.oh_my_posh_enable_hint')}</p>
+                        </div>
+                        <Checkbox
+                            checked={localSettings?.ohMyPoshEnabled ?? false}
+                            onCheckedChange={(checked) => updateLocalTerminal('ohMyPoshEnabled', checked === true)}
+                        />
+                    </div>
+
+                    {localSettings?.ohMyPoshEnabled && (
+                        <>
+                            <Separator className="opacity-50" />
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <Label className="text-zinc-200">{t('settings_view.local_terminal.oh_my_posh_theme')}</Label>
+                                    <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.oh_my_posh_theme_hint')}</p>
+                                </div>
+                                <Input
+                                    value={localSettings?.ohMyPoshTheme || ''}
+                                    onChange={(e) => updateLocalTerminal('ohMyPoshTheme', e.target.value)}
+                                    placeholder={t('settings_view.local_terminal.oh_my_posh_theme_placeholder')}
+                                    className="w-[300px]"
+                                />
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
             {/* Keyboard Shortcuts Section */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
                 <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shortcuts')}</h4>

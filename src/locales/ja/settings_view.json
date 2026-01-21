@@ -16,7 +16,18 @@
       "new_shell_launcher": "新規ローカルターミナル（シェルランチャー）",
       "available_shells": "利用可能なシェル",
       "loading_shells": "利用可能なシェルを読み込み中...",
-      "default": "デフォルト"
+      "default": "デフォルト",
+      "shell_profile": "シェルプロファイル",
+      "load_shell_profile": "シェルプロファイルを読み込む",
+      "load_shell_profile_hint": "シェル起動ファイルを実行（.bashrc、.zshrc、Profile.ps1など）",
+      "oh_my_posh": "Oh My Posh",
+      "oh_my_posh_enable": "Oh My Poshを有効化",
+      "oh_my_posh_enable_hint": "Oh My Poshプロンプト表示用の環境変数を注入（Windows）",
+      "oh_my_posh_theme": "テーマパス",
+      "oh_my_posh_theme_hint": "Oh My Poshテーマファイルのパス（.omp.json）、空白 = デフォルトテーマ",
+      "oh_my_posh_theme_placeholder": "例: ~/.config/oh-my-posh/themes/agnoster.omp.json",
+      "custom_env": "カスタム環境変数",
+      "custom_env_hint": "追加の環境変数（形式: KEY=VALUE、1行に1つ）"
     },
     "tabs": {
       "general": "一般",

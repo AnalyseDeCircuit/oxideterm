@@ -891,6 +891,12 @@ export interface CreateLocalTerminalRequest {
   rows?: number;
   /** Working directory (optional) */
   cwd?: string;
+  /** Whether to load shell profile (default: true) */
+  loadProfile?: boolean;
+  /** Enable Oh My Posh prompt theme (Windows) */
+  ohMyPoshEnabled?: boolean;
+  /** Path to Oh My Posh theme file */
+  ohMyPoshTheme?: string;
 }
 
 /**

@@ -81,12 +81,27 @@ impl LocalTerminalSession {
         cwd: Option<std::path::PathBuf>,
         event_tx: mpsc::Sender<SessionEvent>,
     ) -> Result<(), SessionError> {
+        self.start_with_options(cwd, event_tx, true, false, None).await
+    }
+    
+    /// Start the session with extended options for profile and Oh My Posh
+    pub async fn start_with_options(
+        &mut self,
+        cwd: Option<std::path::PathBuf>,
+        event_tx: mpsc::Sender<SessionEvent>,
+        load_profile: bool,
+        oh_my_posh_enabled: bool,
+        oh_my_posh_theme: Option<String>,
+    ) -> Result<(), SessionError> {
         let config = PtyConfig {
             cols: self.cols,
             rows: self.rows,
             shell: self.shell.clone(),
             cwd,
             env: vec![],
+            load_profile,
+            oh_my_posh_enabled,
+            oh_my_posh_theme,
         };
 
         let pty = Arc::new(PtyHandle::new(config)?);

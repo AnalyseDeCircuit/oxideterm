@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon, ISearchOptions } from '@xterm/addon-search';
 import { ImageAddon } from '@xterm/addon-image';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
@@ -142,6 +143,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     term.loadAddon(webLinksAddon);
     term.loadAddon(searchAddon);
     term.loadAddon(imageAddon);
+    
+    // Unicode11Addon for proper Nerd Font icons and CJK wide character rendering
+    // Required for Oh My Posh, Starship, and other modern prompts
+    const unicode11Addon = new Unicode11Addon();
+    term.loadAddon(unicode11Addon);
+    term.unicode.activeVersion = '11';
     
     searchAddon.onDidChangeResults((e) => {
       // Only update if there's an active search query AND not paused due to high output

@@ -34,6 +34,21 @@ impl LocalTerminalRegistry {
         rows: u16,
         cwd: Option<std::path::PathBuf>,
     ) -> Result<(String, mpsc::Receiver<SessionEvent>), SessionError> {
+        // Use defaults: load profile, no OMP
+        self.create_session_with_options(shell, cols, rows, cwd, true, false, None).await
+    }
+    
+    /// Create a new local terminal session with extended options
+    pub async fn create_session_with_options(
+        &self,
+        shell: ShellInfo,
+        cols: u16,
+        rows: u16,
+        cwd: Option<std::path::PathBuf>,
+        load_profile: bool,
+        oh_my_posh_enabled: bool,
+        oh_my_posh_theme: Option<String>,
+    ) -> Result<(String, mpsc::Receiver<SessionEvent>), SessionError> {
         let mut session = LocalTerminalSession::new(shell, cols, rows);
         let session_id = session.id.clone();
 
@@ -46,8 +61,8 @@ impl LocalTerminalRegistry {
             channels.insert(session_id.clone(), event_tx.clone());
         }
 
-        // Start the session
-        session.start(cwd, event_tx).await?;
+        // Start the session with options
+        session.start_with_options(cwd, event_tx, load_profile, oh_my_posh_enabled, oh_my_posh_theme).await?;
 
         // Store session
         {

@@ -119,6 +119,13 @@ export interface LocalTerminalSettings {
   defaultShellId: string | null;  // User's preferred default shell ID
   recentShellIds: string[];       // Recently used shell IDs (max 5)
   defaultCwd: string | null;      // Default working directory
+  // Shell profile loading
+  loadShellProfile: boolean;      // Whether to load shell profile ($PROFILE for PowerShell, ~/.bashrc etc.)
+  // Oh My Posh support (Windows)
+  ohMyPoshEnabled: boolean;       // Enable Oh My Posh integration
+  ohMyPoshTheme: string | null;   // Path to OMP theme file (.omp.json)
+  // Custom environment variables for shell
+  customEnvVars: Record<string, string>;
 }
 
 /** SFTP transfer settings */
@@ -209,6 +216,10 @@ const defaultLocalTerminalSettings: LocalTerminalSettings = {
   defaultShellId: null,
   recentShellIds: [],
   defaultCwd: null,
+  loadShellProfile: false,      // Default: fast startup without profile
+  ohMyPoshEnabled: false,       // Default: disabled
+  ohMyPoshTheme: null,          // No theme selected
+  customEnvVars: {},            // No custom env vars
 };
 
 const defaultSftpSettings: SftpSettings = {

@@ -121,6 +121,82 @@ fn default_args_for_shell(shell_id: &str) -> Vec<String> {
     }
 }
 
+/// Get shell arguments with optional profile loading control
+/// 
+/// This function generates appropriate shell arguments based on:
+/// - The shell type (bash, zsh, powershell, etc.)
+/// - Whether to load the user's profile/startup files
+/// 
+/// # Arguments
+/// * `shell_id` - The shell identifier (e.g., "zsh", "pwsh", "git-bash")
+/// * `load_profile` - Whether to load shell startup files (.bashrc, .zshrc, Profile.ps1)
+/// 
+/// # Returns
+/// A vector of command-line arguments for the shell
+pub fn get_shell_args(shell_id: &str, load_profile: bool) -> Vec<String> {
+    match shell_id {
+        // Unix shells: --login loads profile, --norc/--noprofile skips
+        "zsh" => {
+            if load_profile {
+                vec!["--login".to_string()]
+            } else {
+                vec!["--no-rcs".to_string()]
+            }
+        }
+        "bash" => {
+            if load_profile {
+                vec!["--login".to_string()]
+            } else {
+                vec!["--noprofile".to_string(), "--norc".to_string()]
+            }
+        }
+        "fish" => {
+            if load_profile {
+                vec!["--login".to_string()]
+            } else {
+                vec!["--no-config".to_string()]
+            }
+        }
+        "sh" | "dash" => {
+            if load_profile {
+                vec!["--login".to_string()]
+            } else {
+                vec![]
+            }
+        }
+        // PowerShell: -NoProfile skips profile scripts
+        "pwsh" | "powershell" => {
+            let mut args = vec![
+                "-NoLogo".to_string(),
+                "-NoExit".to_string(),
+                "-ExecutionPolicy".to_string(),
+                "Bypass".to_string(),
+            ];
+            if !load_profile {
+                args.push("-NoProfile".to_string());
+            }
+            args
+        }
+        // Git Bash (MSYS2 bash)
+        "git-bash" => {
+            if load_profile {
+                vec!["--login".to_string()]
+            } else {
+                vec!["--noprofile".to_string(), "--norc".to_string()]
+            }
+        }
+        // WSL: profile handling is done inside the distribution
+        id if id.starts_with("wsl") => {
+            // WSL passes args to wsl.exe, not to the shell inside
+            // Profile loading is controlled by the shell config in WSL
+            vec![]
+        }
+        // cmd.exe: no profile concept
+        "cmd" => vec![],
+        _ => vec![],
+    }
+}
+
 /// Capitalize the first letter of a string
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
@@ -216,7 +292,6 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                 .with_args(vec![
                     "-NoLogo".to_string(),
                     "-NoExit".to_string(),
-                    "-NoProfile".to_string(),  // Skip profile for faster startup
                     "-ExecutionPolicy".to_string(),
                     "Bypass".to_string(),
                 ]),
@@ -237,7 +312,6 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                     .with_args(vec![
                         "-NoLogo".to_string(),
                         "-NoExit".to_string(),
-                        "-NoProfile".to_string(),  // Skip profile for faster startup
                         "-ExecutionPolicy".to_string(),
                         "Bypass".to_string(),
                     ]),
@@ -262,7 +336,6 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
                         .with_args(vec![
                             "-NoLogo".to_string(),
                             "-NoExit".to_string(),
-                            "-NoProfile".to_string(),
                             "-ExecutionPolicy".to_string(),
                             "Bypass".to_string(),
                         ]),
@@ -392,5 +465,45 @@ mod tests {
         assert_eq!(capitalize_first("zsh"), "Zsh");
         assert_eq!(capitalize_first("bash"), "Bash");
         assert_eq!(capitalize_first(""), "");
+    }
+
+    #[test]
+    fn test_get_shell_args_zsh() {
+        let args_with_profile = get_shell_args("zsh", true);
+        assert!(args_with_profile.contains(&"--login".to_string()));
+
+        let args_without_profile = get_shell_args("zsh", false);
+        assert!(args_without_profile.contains(&"--no-rcs".to_string()));
+        assert!(!args_without_profile.contains(&"--login".to_string()));
+    }
+
+    #[test]
+    fn test_get_shell_args_bash() {
+        let args_with_profile = get_shell_args("bash", true);
+        assert!(args_with_profile.contains(&"--login".to_string()));
+
+        let args_without_profile = get_shell_args("bash", false);
+        assert!(args_without_profile.contains(&"--noprofile".to_string()));
+        assert!(args_without_profile.contains(&"--norc".to_string()));
+    }
+
+    #[test]
+    fn test_get_shell_args_powershell() {
+        let args_with_profile = get_shell_args("pwsh", true);
+        assert!(args_with_profile.contains(&"-NoLogo".to_string()));
+        assert!(args_with_profile.contains(&"-NoExit".to_string()));
+        assert!(!args_with_profile.contains(&"-NoProfile".to_string()));
+
+        let args_without_profile = get_shell_args("pwsh", false);
+        assert!(args_without_profile.contains(&"-NoProfile".to_string()));
+    }
+
+    #[test]
+    fn test_get_shell_args_fish() {
+        let args_with_profile = get_shell_args("fish", true);
+        assert!(args_with_profile.contains(&"--login".to_string()));
+
+        let args_without_profile = get_shell_args("fish", false);
+        assert!(args_without_profile.contains(&"--no-config".to_string()));
     }
 }

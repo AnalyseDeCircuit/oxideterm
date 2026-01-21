@@ -16,7 +16,18 @@
       "new_shell_launcher": "새 로컬 터미널 (쉘 런처)",
       "available_shells": "사용 가능한 쉘",
       "loading_shells": "사용 가능한 쉘 로딩 중...",
-      "default": "기본값"
+      "default": "기본값",
+      "shell_profile": "쉘 프로필",
+      "load_shell_profile": "쉘 프로필 불러오기",
+      "load_shell_profile_hint": "쉘 시작 파일 실행 (.bashrc, .zshrc, Profile.ps1 등)",
+      "oh_my_posh": "Oh My Posh",
+      "oh_my_posh_enable": "Oh My Posh 활성화",
+      "oh_my_posh_enable_hint": "Oh My Posh 프롬프트 렌더링용 환경 변수 주입 (Windows)",
+      "oh_my_posh_theme": "테마 경로",
+      "oh_my_posh_theme_hint": "Oh My Posh 테마 파일 경로 (.omp.json), 비워두면 = 기본 테마",
+      "oh_my_posh_theme_placeholder": "예: ~/.config/oh-my-posh/themes/agnoster.omp.json",
+      "custom_env": "사용자 정의 환경 변수",
+      "custom_env_hint": "추가 환경 변수 (형식: KEY=VALUE, 한 줄에 하나씩)"
     },
     "tabs": {
       "general": "일반",

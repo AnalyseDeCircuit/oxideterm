@@ -53,6 +53,14 @@ pub struct CreateLocalTerminalRequest {
     pub rows: u16,
     /// Working directory (optional)
     pub cwd: Option<String>,
+    /// Whether to load shell profile (default: true)
+    #[serde(default = "default_load_profile")]
+    pub load_profile: bool,
+    /// Enable Oh My Posh prompt theme (Windows)
+    #[serde(default)]
+    pub oh_my_posh_enabled: bool,
+    /// Path to Oh My Posh theme file
+    pub oh_my_posh_theme: Option<String>,
 }
 
 fn default_cols() -> u16 {
@@ -61,6 +69,10 @@ fn default_cols() -> u16 {
 
 fn default_rows() -> u16 {
     24
+}
+
+fn default_load_profile() -> bool {
+    true
 }
 
 /// Response from creating a local terminal
@@ -131,10 +143,18 @@ pub async fn local_create_terminal(
 
     let cwd = request.cwd.map(std::path::PathBuf::from);
 
-    // Create session through registry
+    // Create session through registry with options
     let (session_id, mut event_rx) = state
         .registry
-        .create_session(shell, request.cols, request.rows, cwd)
+        .create_session_with_options(
+            shell, 
+            request.cols, 
+            request.rows, 
+            cwd,
+            request.load_profile,
+            request.oh_my_posh_enabled,
+            request.oh_my_posh_theme,
+        )
         .await
         .map_err(|e| format!("Failed to create local terminal: {}", e))?;
 

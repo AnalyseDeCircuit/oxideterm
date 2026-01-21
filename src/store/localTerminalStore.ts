@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useToastStore } from '../hooks/useToast';
+import { useSettingsStore } from './settingsStore';
 import i18n from '../i18n';
 import {
   ShellInfo,
@@ -57,7 +58,21 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
 
   createTerminal: async (request?: CreateLocalTerminalRequest) => {
     try {
-      const response = await api.localCreateTerminal(request || {});
+      // Get local terminal settings
+      const localSettings = useSettingsStore.getState().settings.localTerminal;
+      
+      // Merge settings into request (request overrides settings)
+      const mergedRequest: CreateLocalTerminalRequest = {
+        // Profile loading - default true, but can be overridden by settings
+        loadProfile: localSettings?.loadShellProfile ?? true,
+        // Oh My Posh settings
+        ohMyPoshEnabled: localSettings?.ohMyPoshEnabled ?? false,
+        ohMyPoshTheme: localSettings?.ohMyPoshTheme || undefined,
+        // Apply any explicit request params (they take precedence)
+        ...request,
+      };
+      
+      const response = await api.localCreateTerminal(mergedRequest);
       
       set((state) => {
         const newTerminals = new Map(state.terminals);
