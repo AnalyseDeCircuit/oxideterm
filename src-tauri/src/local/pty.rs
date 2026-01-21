@@ -114,6 +114,25 @@ impl PtyHandle {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
+        // Windows-specific environment variables
+        #[cfg(target_os = "windows")]
+        {
+            // Enable UTF-8 output for PowerShell and other Windows tools
+            // This helps with CJK characters and emoji display
+            cmd.env("PYTHONIOENCODING", "utf-8");
+            
+            // Set console code page to UTF-8 for child processes
+            // 65001 is the code page for UTF-8
+            cmd.env("CHCP", "65001");
+            
+            // WSL-specific: enable UTF-8 mode
+            if config.shell.id.starts_with("wsl") {
+                cmd.env("WSL_UTF8", "1");
+                // Pass these env vars to WSL
+                cmd.env("WSLENV", "TERM:COLORTERM");
+            }
+        }
+
         // Add custom environment variables
         for (key, value) in &config.env {
             cmd.env(key, value);
