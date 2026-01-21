@@ -375,6 +375,25 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     };
   }, [sessionId, updateTerminalState]);
 
+  // Listen for AI insert command events (only when this terminal is active)
+  useEffect(() => {
+    if (!isActive || !isRunning) return;
+
+    const unlisten = listen<{ command: string }>('ai-insert-command', (event) => {
+      if (!isMountedRef.current || !isRunning) return;
+      
+      const { command } = event.payload;
+      // Write command to terminal (without executing - user can review and press Enter)
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(command);
+      writeTerminal(sessionId, bytes);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [sessionId, isActive, isRunning, writeTerminal]);
+
   // Resize handling with 50ms debounce to reduce PTY backend pressure
   useEffect(() => {
     if (!containerRef.current || !fitAddonRef.current) return;

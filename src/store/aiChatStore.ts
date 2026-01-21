@@ -296,7 +296,8 @@ export const useAiChatStore = create<AiChatStore>()(
         const historyMessages = get().conversations.find((c) => c.id === convId)?.messages || [];
         const recentHistory = historyMessages.slice(-10); // Last 10 messages
         for (const msg of recentHistory) {
-          if (msg.role === 'user' || msg.role === 'assistant') {
+          // Skip empty messages and the current streaming placeholder
+          if ((msg.role === 'user' || msg.role === 'assistant') && msg.content.trim() !== '') {
             apiMessages.push({ role: msg.role, content: msg.content });
           }
         }
@@ -322,12 +323,33 @@ export const useAiChatStore = create<AiChatStore>()(
           _setStreaming(convId, assistantMessage.id, false);
         } catch (e) {
           if (e instanceof Error && e.name === 'AbortError') {
-            // User cancelled
-            _setStreaming(convId, assistantMessage.id, false);
+            // User cancelled - keep the partial message if any content
+            const currentMsg = get().conversations
+              .find((c) => c.id === convId)
+              ?.messages.find((m) => m.id === assistantMessage.id);
+            if (!currentMsg?.content) {
+              // Remove empty message
+              set((state) => ({
+                conversations: state.conversations.map((c) =>
+                  c.id === convId
+                    ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+                    : c
+                ),
+              }));
+            } else {
+              _setStreaming(convId, assistantMessage.id, false);
+            }
           } else {
             const errorMessage = e instanceof Error ? e.message : String(e);
             set({ error: errorMessage });
-            _setStreaming(convId, assistantMessage.id, false);
+            // Remove the empty assistant message on error
+            set((state) => ({
+              conversations: state.conversations.map((c) =>
+                c.id === convId
+                  ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+                  : c
+              ),
+            }));
           }
         } finally {
           set({ isLoading: false, abortController: null });
