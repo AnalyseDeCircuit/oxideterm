@@ -46,6 +46,16 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
   const currentSearchQueryRef = useRef<string>('');
   const currentSearchOptionsRef = useRef<ISearchOptions | undefined>(undefined);
 
+  // RAF buffering for high-frequency PTY data (prevents search index jumping)
+  // This batches rapid data events into single writes, reducing buffer churn
+  const pendingDataRef = useRef<Uint8Array[]>([]);
+  const rafIdRef = useRef<number | null>(null);
+  
+  // Search pause mechanism: pause search updates during heavy output bursts
+  // This prevents the "1->2->3->1" cycling when buffer changes rapidly
+  const searchPausedRef = useRef(false);
+  const outputThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { writeTerminal, resizeTerminal, getTerminal, updateTerminalState } = useLocalTerminalStore();
   const terminalInfo = getTerminal(sessionId);
 
@@ -134,8 +144,9 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     term.loadAddon(imageAddon);
     
     searchAddon.onDidChangeResults((e) => {
-      // Only update if there's an active search query to prevent spurious index updates
-      if (currentSearchQueryRef.current) {
+      // Only update if there's an active search query AND not paused due to high output
+      // searchPausedRef prevents the "1->2->3->1" cycling during rapid buffer changes
+      if (currentSearchQueryRef.current && !searchPausedRef.current) {
         setSearchResults({ resultIndex: e.resultIndex, resultCount: e.resultCount });
       }
     });
@@ -272,11 +283,56 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     const dataEventName = `local-terminal-data:${sessionId}`;
     const closedEventName = `local-terminal-closed:${sessionId}`;
 
-    // Listen for data
+    // Listen for data - use RAF batching to reduce search index jumping
+    // Rust PTY sends high-frequency small packets; batching reduces buffer churn
     const unlistenData = listen<{ sessionId: string; data: number[] }>(dataEventName, (event) => {
       if (!isMountedRef.current || !terminalRef.current) return;
       const data = new Uint8Array(event.payload.data);
-      terminalRef.current.write(data);
+      
+      // Queue data for RAF batch write
+      pendingDataRef.current.push(data);
+      
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = null;
+          if (!isMountedRef.current || !terminalRef.current) return;
+          
+          const pending = pendingDataRef.current;
+          if (pending.length === 0) return;
+          
+          // Concatenate all chunks for single write (reduces xterm buffer mutations)
+          const totalLength = pending.reduce((sum, chunk) => sum + chunk.length, 0);
+          const combined = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of pending) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+          }
+          
+          pendingDataRef.current = [];
+          terminalRef.current.write(combined);
+          
+          // Pause search updates during high-frequency output
+          // Resume after 150ms of quiet, then re-run search to get accurate results
+          if (currentSearchQueryRef.current) {
+            searchPausedRef.current = true;
+            if (outputThrottleRef.current) {
+              clearTimeout(outputThrottleRef.current);
+            }
+            outputThrottleRef.current = setTimeout(() => {
+              searchPausedRef.current = false;
+              outputThrottleRef.current = null;
+              // Re-trigger search to get accurate results after output settles
+              if (currentSearchQueryRef.current && searchAddonRef.current) {
+                searchAddonRef.current.findNext(
+                  currentSearchQueryRef.current,
+                  currentSearchOptionsRef.current
+                );
+              }
+            }, 150);
+          }
+        });
+      }
     });
 
     // Listen for close
@@ -295,6 +351,18 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     });
 
     return () => {
+      // Clean up RAF and throttle timers
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (outputThrottleRef.current) {
+        clearTimeout(outputThrottleRef.current);
+        outputThrottleRef.current = null;
+      }
+      pendingDataRef.current = [];
+      searchPausedRef.current = false;
+      
       unlistenData.then((fn) => fn());
       unlistenClosed.then((fn) => fn());
     };
@@ -341,6 +409,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     setSearchOpen(false);
     if (searchAddonRef.current) {
       searchAddonRef.current.clearDecorations();
+    }
+    // Clear search state and pause mechanism
+    currentSearchQueryRef.current = '';
+    searchPausedRef.current = false;
+    if (outputThrottleRef.current) {
+      clearTimeout(outputThrottleRef.current);
+      outputThrottleRef.current = null;
     }
     setSearchResults({ resultIndex: -1, resultCount: 0 });
     terminalRef.current?.focus();
@@ -494,7 +569,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
       {searchOpen && (
         <SearchBar
           isOpen={searchOpen}
-          onSearch={(query, options) => handleSearch(query, options)}
+          onSearch={handleSearch}
           onFindNext={handleSearchNext}
           onFindPrevious={handleSearchPrevious}
           onClose={handleSearchClose}
