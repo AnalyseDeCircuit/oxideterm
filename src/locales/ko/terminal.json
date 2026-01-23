@@ -85,6 +85,15 @@
       "connection_lost": "연결 끊김",
       "reconnecting": "재연결 중...",
       "input_locked": "재연결 중 입력이 잠김"
+    },
+    "pane": {
+      "split_horizontal": "가로 분할",
+      "split_vertical": "세로 분할",
+      "close_pane": "창 닫기",
+      "max_panes_reached": "최대 창 수에 도달 ({{max}})",
+      "focus_next": "다음 창으로 포커스",
+      "focus_previous": "이전 창으로 포커스",
+      "cannot_close_last": "마지막 창은 닫을 수 없음"
     }
   }
 }

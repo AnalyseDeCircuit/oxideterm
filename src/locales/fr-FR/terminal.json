@@ -85,6 +85,15 @@
       "connection_lost": "Connexion perdue",
       "reconnecting": "Reconnexion en cours...",
       "input_locked": "L'entrée est verrouillée pendant la reconnexion"
+    },
+    "pane": {
+      "split_horizontal": "Diviser horizontalement",
+      "split_vertical": "Diviser verticalement",
+      "close_pane": "Fermer le volet",
+      "max_panes_reached": "Nombre maximum de volets atteint ({{max}})",
+      "focus_next": "Volet suivant",
+      "focus_previous": "Volet précédent",
+      "cannot_close_last": "Impossible de fermer le dernier volet"
     }
   }
 }

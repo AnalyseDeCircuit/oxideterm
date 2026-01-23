@@ -1,10 +1,12 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 import { useAppStore } from '../../store/appStore';
 import { TerminalView } from '../terminal/TerminalView';
 import { LocalTerminalView } from '../terminal/LocalTerminalView';
+import { SplitTerminalContainer } from '../terminal/SplitTerminalContainer';
+import { SplitPaneToolbar } from '../terminal/SplitPaneToolbar';
 import { Button } from '../ui/button';
 import { NewConnectionModal } from '../modals/NewConnectionModal';
 import { SettingsView } from '../settings/SettingsView';
@@ -29,7 +31,16 @@ const ViewLoader = () => {
 
 export const AppLayout = () => {
   const { t } = useTranslation();
-  const { tabs, activeTabId, toggleModal } = useAppStore();
+  const { tabs, activeTabId, toggleModal, setActivePaneId, closePane } = useAppStore();
+
+  // Handlers for split pane interactions
+  const handlePaneFocus = useCallback((tabId: string, paneId: string) => {
+    setActivePaneId(tabId, paneId);
+  }, [setActivePaneId]);
+
+  const handlePaneClose = useCallback((tabId: string, paneId: string) => {
+    closePane(tabId, paneId);
+  }, [closePane]);
 
   return (
     <div className="flex h-screen w-screen bg-theme-bg text-oxide-text overflow-hidden">
@@ -60,9 +71,32 @@ export const AppLayout = () => {
                    key={tab.id} 
                    className={`absolute inset-0 ${tab.id === activeTabId ? 'z-10 block' : 'z-0 hidden'}`}
                  >
-                   {/* key={sessionId} forces remount when session changes (e.g., after reconnect) */}
-                   {tab.type === 'terminal' && tab.sessionId && <TerminalView key={tab.sessionId} sessionId={tab.sessionId} isActive={tab.id === activeTabId} />}
-                   {tab.type === 'local_terminal' && tab.sessionId && <LocalTerminalView key={tab.sessionId} sessionId={tab.sessionId} isActive={tab.id === activeTabId} />}
+                   {/* Terminal tabs: Support split panes via rootPane, fallback to single terminal */}
+                   {(tab.type === 'terminal' || tab.type === 'local_terminal') && (
+                     <div className="relative h-full w-full group/terminal">
+                       {/* Split pane toolbar - floating in top-right */}
+                       <SplitPaneToolbar tabId={tab.id} />
+                       
+                       {tab.rootPane ? (
+                         // Split pane mode - use recursive container
+                         <SplitTerminalContainer
+                           key={`split-${tab.id}`}
+                           tabId={tab.id}
+                           rootPane={tab.rootPane}
+                           activePaneId={tab.activePaneId}
+                           onPaneFocus={(paneId) => handlePaneFocus(tab.id, paneId)}
+                           onPaneClose={(paneId) => handlePaneClose(tab.id, paneId)}
+                         />
+                       ) : (
+                         // Legacy single pane mode (backward compatible)
+                         tab.sessionId && (
+                           tab.type === 'terminal' 
+                             ? <TerminalView key={tab.sessionId} sessionId={tab.sessionId} tabId={tab.id} isActive={tab.id === activeTabId} />
+                             : <LocalTerminalView key={tab.sessionId} sessionId={tab.sessionId} tabId={tab.id} isActive={tab.id === activeTabId} />
+                         )
+                       )}
+                     </div>
+                   )}
                    {tab.type === 'sftp' && tab.sessionId && (
                      <Suspense fallback={<ViewLoader />}>
                        <SFTPView sessionId={tab.sessionId} />

@@ -85,6 +85,15 @@
       "connection_lost": "Mất kết nối",
       "reconnecting": "Đang kết nối lại...",
       "input_locked": "Đầu vào bị khóa trong quá trình kết nối lại"
+    },
+    "pane": {
+      "split_horizontal": "Chia theo chiều ngang",
+      "split_vertical": "Chia theo chiều dọc",
+      "close_pane": "Đóng khung",
+      "max_panes_reached": "Đã đạt số khung tối đa ({{max}})",
+      "focus_next": "Khung tiếp theo",
+      "focus_previous": "Khung trước",
+      "cannot_close_last": "Không thể đóng khung cuối cùng"
     }
   }
 }

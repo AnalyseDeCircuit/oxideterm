@@ -22,10 +22,22 @@ import { listen } from '@tauri-apps/api/event';
 import { Lock, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
+import { 
+  registerTerminalBuffer, 
+  unregisterTerminalBuffer, 
+  setActivePaneId as setRegistryActivePaneId,
+  touchTerminalEntry 
+} from '../../lib/terminalRegistry';
 
 interface TerminalViewProps {
   sessionId: string;
   isActive?: boolean;
+  /** Unique pane ID for split pane support. If not provided, sessionId is used. */
+  paneId?: string;
+  /** Tab ID for registry security (prevents cross-tab context leakage) */
+  tabId?: string;
+  /** Callback when this pane receives focus */
+  onFocus?: (paneId: string) => void;
 }
 
 // Protocol Constants - Wire Protocol v1
@@ -67,7 +79,13 @@ const encodeResizeFrame = (cols: number, rows: number): Uint8Array => {
   return frame;
 };
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive = true }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ 
+  sessionId, 
+  isActive = true,
+  paneId,
+  tabId,
+  onFocus,
+}) => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -80,6 +98,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
   const reconnectingRef = useRef(false); // Suppress close/error during intentional reconnect
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  
+  // Effective pane ID: use provided paneId or fall back to sessionId
+  const effectivePaneId = paneId || sessionId;
+  const effectiveTabId = tabId || '';
   
   // Paste protection state
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
@@ -538,6 +560,38 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
 
     term.writeln(`\x1b[38;2;234;88;12m${i18n.t('terminal.ssh.initialized')}\x1b[0m`);
     
+    // ══════════════════════════════════════════════════════════════════════════
+    // Register terminal buffer to unified Terminal Registry
+    // This enables AI context retrieval for both SSH and Local terminals
+    // ══════════════════════════════════════════════════════════════════════════
+    const getBufferContent = (): string => {
+      const t = terminalRef.current;
+      if (!t) return '';
+      
+      const buffer = t.buffer.active;
+      const lines: string[] = [];
+      const lineCount = buffer.length;
+      
+      // Read all lines from the buffer
+      for (let i = 0; i < lineCount; i++) {
+        const line = buffer.getLine(i);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
+      }
+      
+      return lines.join('\n');
+    };
+    
+    // Register with paneId as key, not sessionId
+    registerTerminalBuffer(
+      effectivePaneId,
+      effectiveTabId,
+      sessionId,
+      'terminal', // SSH terminal type
+      getBufferContent
+    );
+    
     // Font loading detection - ensure fonts are loaded before connecting
     const ensureFontsLoaded = async () => {
         try {
@@ -740,6 +794,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
         }
     });
 
+    // Track focus for split pane support
+    // Update active pane in Registry when terminal receives focus
+    // Note: xterm.js doesn't have onFocus, use DOM event on container
+    const handleTerminalFocusIn = () => {
+      setRegistryActivePaneId(effectivePaneId);
+      touchTerminalEntry(effectivePaneId);
+      onFocus?.(effectivePaneId);
+    };
+    
+    // Add focus listener to terminal's element
+    const termElement = term.element;
+    if (termElement) {
+      termElement.addEventListener('focusin', handleTerminalFocusIn);
+    }
+
     // Handle Window Resize - use ResizeObserver for reliable detection
     // especially on Windows fullscreen transitions
     let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -778,6 +847,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
     return () => {
       isMountedRef.current = false;
       
+      // Unregister from Terminal Registry
+      unregisterTerminalBuffer(effectivePaneId);
+      
       // Cleanup resize handling
       if (resizeDebounceTimer) {
         clearTimeout(resizeDebounceTimer);
@@ -790,6 +862,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
       // Cleanup composition event listeners
       terminalElement?.removeEventListener('compositionstart', handleCompositionStart);
       terminalElement?.removeEventListener('compositionend', handleCompositionEnd);
+
+      // Remove focus listener
+      if (termElement) {
+        termElement.removeEventListener('focusin', handleTerminalFocusIn);
+      }
 
       if (wsConnectTimeout) {
           clearTimeout(wsConnectTimeout);
@@ -871,9 +948,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ sessionId, isActive 
     };
   }, [isActive, session?.state]);
 
+  /**
+   * Handle container click - focus terminal and update active pane
+   */
   const handleContainerClick = () => {
     if (!searchOpen && !aiPanelOpen) {
       terminalRef.current?.focus();
+      
+      // Update active pane in Registry and notify parent
+      setRegistryActivePaneId(effectivePaneId);
+      touchTerminalEntry(effectivePaneId);
+      onFocus?.(effectivePaneId);
     }
   };
 

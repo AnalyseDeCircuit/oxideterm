@@ -85,6 +85,15 @@
       "connection_lost": "Verbindung verloren",
       "reconnecting": "Wiederverbindung läuft...",
       "input_locked": "Eingabe ist während der Wiederverbindung gesperrt"
+    },
+    "pane": {
+      "split_horizontal": "Horizontal teilen",
+      "split_vertical": "Vertikal teilen",
+      "close_pane": "Bereich schließen",
+      "max_panes_reached": "Maximale Anzahl Bereiche erreicht ({{max}})",
+      "focus_next": "Nächster Bereich",
+      "focus_previous": "Vorheriger Bereich",
+      "cannot_close_last": "Letzter Bereich kann nicht geschlossen werden"
     }
   }
 }
