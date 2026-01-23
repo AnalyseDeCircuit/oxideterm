@@ -15,6 +15,11 @@ import {
   SshConnectionState,
   SshConnectRequest,
   ConnectPresetChainRequest,
+  PaneNode,
+  PaneLeaf,
+  SplitDirection,
+  PaneTerminalType,
+  MAX_PANES_PER_TAB,
 } from '../types';
 
 interface ModalsState {
@@ -70,6 +75,12 @@ interface AppStore {
   createTab: (type: TabType, sessionId?: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
+  
+  // Actions - Split Panes
+  splitPane: (tabId: string, direction: SplitDirection, newSessionId: string, newTerminalType: PaneTerminalType) => void;
+  closePane: (tabId: string, paneId: string) => void;
+  setActivePaneId: (tabId: string, paneId: string) => void;
+  getPaneCount: (tabId: string) => number;
   
   // Actions - UI
   toggleSidebar: () => void;
@@ -724,6 +735,182 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ activeTabId: tabId });
   },
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Split Pane Actions
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Count total panes in a layout tree
+   */
+  getPaneCount: (tabId) => {
+    const tab = get().tabs.find(t => t.id === tabId);
+    if (!tab) return 0;
+    
+    // Single pane mode (no rootPane)
+    if (!tab.rootPane) return tab.sessionId ? 1 : 0;
+    
+    // Count recursively
+    const countPanes = (node: PaneNode): number => {
+      if (node.type === 'leaf') return 1;
+      return node.children.reduce((sum, child) => sum + countPanes(child), 0);
+    };
+    
+    return countPanes(tab.rootPane);
+  },
+
+  /**
+   * Split the current active pane in the specified direction
+   */
+  splitPane: (tabId, direction, newSessionId, newTerminalType) => {
+    set((state) => {
+      const tabIndex = state.tabs.findIndex(t => t.id === tabId);
+      if (tabIndex === -1) return state;
+      
+      const tab = state.tabs[tabIndex];
+      
+      // Only terminal tabs can be split
+      if (tab.type !== 'terminal' && tab.type !== 'local_terminal') {
+        console.warn('[AppStore] Cannot split non-terminal tab');
+        return state;
+      }
+      
+      // Check pane limit
+      const currentCount = get().getPaneCount(tabId);
+      if (currentCount >= MAX_PANES_PER_TAB) {
+        console.warn(`[AppStore] Maximum panes (${MAX_PANES_PER_TAB}) reached`);
+        return state;
+      }
+      
+      const newPaneId = crypto.randomUUID();
+      const newPane: PaneLeaf = {
+        type: 'leaf',
+        id: newPaneId,
+        sessionId: newSessionId,
+        terminalType: newTerminalType,
+      };
+      
+      let newRootPane: PaneNode;
+      
+      // Case 1: No rootPane yet (single pane mode)
+      if (!tab.rootPane) {
+        // Convert existing session to leaf, then wrap in group
+        const existingPane: PaneLeaf = {
+          type: 'leaf',
+          id: tab.activePaneId || crypto.randomUUID(),
+          sessionId: tab.sessionId!,
+          terminalType: tab.type as PaneTerminalType,
+        };
+        
+        newRootPane = {
+          type: 'group',
+          id: crypto.randomUUID(),
+          direction,
+          children: [existingPane, newPane],
+          sizes: [50, 50],
+        };
+      }
+      // Case 2: Has rootPane - need to split the active pane
+      else {
+        const activePaneId = tab.activePaneId;
+        if (!activePaneId) {
+          console.warn('[AppStore] No active pane to split');
+          return state;
+        }
+        
+        // Deep clone and modify the tree
+        newRootPane = splitPaneInTree(tab.rootPane, activePaneId, direction, newPane);
+      }
+      
+      // Update tab
+      const newTabs = [...state.tabs];
+      newTabs[tabIndex] = {
+        ...tab,
+        rootPane: newRootPane,
+        activePaneId: newPaneId, // Focus the new pane
+        // Clear legacy sessionId since we now use rootPane
+        sessionId: undefined,
+      };
+      
+      return { tabs: newTabs };
+    });
+  },
+
+  /**
+   * Close a specific pane within a tab
+   */
+  closePane: (tabId, paneId) => {
+    set((state) => {
+      const tabIndex = state.tabs.findIndex(t => t.id === tabId);
+      if (tabIndex === -1) return state;
+      
+      const tab = state.tabs[tabIndex];
+      
+      // Single pane mode - close the entire tab
+      if (!tab.rootPane) {
+        const newTabs = state.tabs.filter(t => t.id !== tabId);
+        let newActiveId = state.activeTabId;
+        if (state.activeTabId === tabId) {
+          newActiveId = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+        }
+        return { tabs: newTabs, activeTabId: newActiveId };
+      }
+      
+      // Remove pane from tree
+      const result = removePaneFromTree(tab.rootPane, paneId);
+      
+      // If no panes left, close the tab
+      if (!result.node) {
+        const newTabs = state.tabs.filter(t => t.id !== tabId);
+        let newActiveId = state.activeTabId;
+        if (state.activeTabId === tabId) {
+          newActiveId = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+        }
+        return { tabs: newTabs, activeTabId: newActiveId };
+      }
+      
+      // If only one pane left, simplify to single pane mode
+      if (result.node.type === 'leaf') {
+        const newTabs = [...state.tabs];
+        newTabs[tabIndex] = {
+          ...tab,
+          rootPane: undefined,
+          activePaneId: result.node.id,
+          sessionId: result.node.sessionId,
+          type: result.node.terminalType,
+        };
+        return { tabs: newTabs };
+      }
+      
+      // Update with new tree
+      const newTabs = [...state.tabs];
+      newTabs[tabIndex] = {
+        ...tab,
+        rootPane: result.node,
+        activePaneId: result.newActivePaneId || tab.activePaneId,
+      };
+      
+      return { tabs: newTabs };
+    });
+  },
+
+  /**
+   * Set the active pane within a tab
+   */
+  setActivePaneId: (tabId, paneId) => {
+    set((state) => {
+      const tabIndex = state.tabs.findIndex(t => t.id === tabId);
+      if (tabIndex === -1) return state;
+      
+      const newTabs = [...state.tabs];
+      newTabs[tabIndex] = {
+        ...newTabs[tabIndex],
+        activePaneId: paneId,
+      };
+      
+      return { tabs: newTabs };
+    });
+  },
+
   // Sidebar actions delegated to settingsStore
   toggleSidebar: () => {
     useSettingsStore.getState().toggleSidebar();
@@ -905,3 +1092,172 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   }
 }));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Split Pane Tree Helper Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Find a pane in the tree and split it
+ * Returns a new tree with the split applied
+ */
+function splitPaneInTree(
+  node: PaneNode,
+  targetPaneId: string,
+  direction: SplitDirection,
+  newPane: PaneLeaf
+): PaneNode {
+  // Leaf node: check if this is the target
+  if (node.type === 'leaf') {
+    if (node.id === targetPaneId) {
+      // Create a new group containing both the original and new pane
+      return {
+        type: 'group',
+        id: crypto.randomUUID(),
+        direction,
+        children: [node, newPane],
+        sizes: [50, 50],
+      };
+    }
+    return node;
+  }
+  
+  // Group node: recurse into children
+  const newChildren = node.children.map(child => 
+    splitPaneInTree(child, targetPaneId, direction, newPane)
+  );
+  
+  // Check if any child was split (by comparing references)
+  const wasModified = newChildren.some((child, i) => child !== node.children[i]);
+  
+  if (wasModified) {
+    // A child was split - need to update sizes
+    const newSizes = node.sizes ? [...node.sizes] : node.children.map(() => 100 / node.children.length);
+    
+    // Find which child was split and adjust
+    for (let i = 0; i < newChildren.length; i++) {
+      if (newChildren[i] !== node.children[i] && newChildren[i].type === 'group') {
+        // This child was converted to a group - keep its size the same
+        // The new group's internal sizes handle the 50/50 split
+      }
+    }
+    
+    return {
+      ...node,
+      children: newChildren,
+      sizes: newSizes,
+    };
+  }
+  
+  return node;
+}
+
+/**
+ * Remove a pane from the tree
+ * Returns the modified tree and a suggested new active pane ID
+ */
+function removePaneFromTree(
+  node: PaneNode,
+  paneId: string
+): { node: PaneNode | null; newActivePaneId?: string } {
+  // Leaf node: check if this is the target
+  if (node.type === 'leaf') {
+    if (node.id === paneId) {
+      return { node: null };
+    }
+    return { node };
+  }
+  
+  // Group node: recurse into children
+  const newChildren: PaneNode[] = [];
+  let removedIndex = -1;
+  let newActivePaneId: string | undefined;
+  
+  for (let i = 0; i < node.children.length; i++) {
+    const result = removePaneFromTree(node.children[i], paneId);
+    if (result.node === null) {
+      removedIndex = i;
+      newActivePaneId = result.newActivePaneId;
+    } else {
+      newChildren.push(result.node);
+      if (result.newActivePaneId) {
+        newActivePaneId = result.newActivePaneId;
+      }
+    }
+  }
+  
+  // If nothing was removed, return unchanged
+  if (removedIndex === -1) {
+    return { node };
+  }
+  
+  // If no children left, return null
+  if (newChildren.length === 0) {
+    return { node: null };
+  }
+  
+  // If only one child left, unwrap it (remove the group)
+  if (newChildren.length === 1) {
+    const remaining = newChildren[0];
+    // Suggest the first leaf as new active
+    if (!newActivePaneId) {
+      newActivePaneId = findFirstLeaf(remaining)?.id;
+    }
+    return { node: remaining, newActivePaneId };
+  }
+  
+  // Multiple children remain - update sizes proportionally
+  const oldSizes = node.sizes || node.children.map(() => 100 / node.children.length);
+  const removedSize = oldSizes[removedIndex] || 0;
+  const remainingTotal = 100 - removedSize;
+  
+  const newSizes = oldSizes
+    .filter((_, i) => i !== removedIndex)
+    .map(size => (size / remainingTotal) * 100);
+  
+  // Suggest the next sibling as new active
+  if (!newActivePaneId) {
+    const nextIndex = Math.min(removedIndex, newChildren.length - 1);
+    newActivePaneId = findFirstLeaf(newChildren[nextIndex])?.id;
+  }
+  
+  return {
+    node: {
+      ...node,
+      children: newChildren,
+      sizes: newSizes,
+    },
+    newActivePaneId,
+  };
+}
+
+/**
+ * Find the first leaf node in a tree (for focus fallback)
+ */
+function findFirstLeaf(node: PaneNode): PaneLeaf | null {
+  if (node.type === 'leaf') return node;
+  if (node.children.length === 0) return null;
+  return findFirstLeaf(node.children[0]);
+}
+
+/**
+ * Find all leaf pane IDs in a tree
+ */
+export function getAllPaneIds(node: PaneNode): string[] {
+  if (node.type === 'leaf') return [node.id];
+  return node.children.flatMap(child => getAllPaneIds(child));
+}
+
+/**
+ * Find a specific pane by ID in the tree
+ */
+export function findPaneById(node: PaneNode, paneId: string): PaneLeaf | null {
+  if (node.type === 'leaf') {
+    return node.id === paneId ? node : null;
+  }
+  for (const child of node.children) {
+    const found = findPaneById(child, paneId);
+    if (found) return found;
+  }
+  return null;
+}

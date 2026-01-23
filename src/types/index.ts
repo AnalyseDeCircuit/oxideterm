@@ -279,12 +279,63 @@ export interface PersistedSessionInfo {
 // Tab Types
 export type TabType = 'terminal' | 'sftp' | 'forwards' | 'settings' | 'connection_monitor' | 'connection_pool' | 'topology' | 'local_terminal';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Split Pane Types (Layout Tree)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Terminal type for panes
+ */
+export type PaneTerminalType = 'terminal' | 'local_terminal';
+
+/**
+ * Leaf node: An actual terminal pane
+ */
+export interface PaneLeaf {
+  type: 'leaf';
+  id: string;                       // Unique pane ID (UUID)
+  sessionId: string;                // Associated terminal session
+  terminalType: PaneTerminalType;   // SSH or Local terminal
+}
+
+/**
+ * Split direction for pane groups
+ */
+export type SplitDirection = 'horizontal' | 'vertical';
+
+/**
+ * Group node: A container for multiple panes
+ */
+export interface PaneGroup {
+  type: 'group';
+  id: string;                       // Unique group ID (UUID)
+  direction: SplitDirection;        // Split direction
+  children: PaneNode[];             // Child panes or groups
+  sizes?: number[];                 // Percentage sizes for each child (0-100)
+}
+
+/**
+ * A node in the pane layout tree
+ */
+export type PaneNode = PaneLeaf | PaneGroup;
+
+/**
+ * Maximum number of panes allowed per tab
+ */
+export const MAX_PANES_PER_TAB = 4;
+
 export interface Tab {
   id: string;
   type: TabType;
-  sessionId?: string;
   title: string;
   icon?: string;
+  
+  // Split Pane Support (for terminal/local_terminal tabs)
+  rootPane?: PaneNode;              // Layout tree root (null = single pane mode)
+  activePaneId?: string;            // Currently focused pane within this tab
+  
+  // Legacy: Direct session binding (backward compatible, used when rootPane is undefined)
+  sessionId?: string;
 }
 
 // Connection Config Types

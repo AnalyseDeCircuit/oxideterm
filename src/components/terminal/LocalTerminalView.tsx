@@ -18,14 +18,31 @@ import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
-import { registerTerminalBuffer, unregisterTerminalBuffer } from '../../lib/terminalRegistry';
+import { 
+  registerTerminalBuffer, 
+  unregisterTerminalBuffer,
+  setActivePaneId as setRegistryActivePaneId,
+  touchTerminalEntry 
+} from '../../lib/terminalRegistry';
 
 interface LocalTerminalViewProps {
   sessionId: string;
   isActive?: boolean;
+  /** Unique pane ID for split pane support. If not provided, sessionId is used. */
+  paneId?: string;
+  /** Tab ID for registry security (prevents cross-tab context leakage) */
+  tabId?: string;
+  /** Callback when this pane receives focus */
+  onFocus?: (paneId: string) => void;
 }
 
-export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId, isActive = true }) => {
+export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ 
+  sessionId, 
+  isActive = true,
+  paneId,
+  tabId: propTabId,
+  onFocus,
+}) => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -35,9 +52,15 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
   
   // Get tab ID for this terminal (used for registry validation)
-  const tabId = useAppStore((state) => 
+  // Use prop if provided, otherwise look up from store
+  const storeTabId = useAppStore((state) => 
     state.tabs.find(t => t.type === 'local_terminal' && t.sessionId === sessionId)?.id
   );
+  const effectiveTabId = propTabId || storeTabId || '';
+  
+  // Effective pane ID: use provided paneId or fall back to sessionId
+  const effectivePaneId = paneId || sessionId;
+  
   const isMountedRef = useRef(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
@@ -224,20 +247,27 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     fitAddonRef.current = fitAddon;
 
     // Register buffer getter for AI context capture
-    registerTerminalBuffer(sessionId, tabId || sessionId, () => {
-      const buffer = term.buffer.active;
-      const lines: string[] = [];
-      // Get visible lines plus some scrollback
-      const startRow = Math.max(0, buffer.baseY);
-      const endRow = buffer.baseY + term.rows;
-      for (let i = startRow; i < endRow; i++) {
-        const line = buffer.getLine(i);
-        if (line) {
-          lines.push(line.translateToString(true));
+    // Now uses paneId as key (for split pane support)
+    registerTerminalBuffer(
+      effectivePaneId,
+      effectiveTabId,
+      sessionId,
+      'local_terminal',
+      () => {
+        const buffer = term.buffer.active;
+        const lines: string[] = [];
+        // Get visible lines plus some scrollback
+        const startRow = Math.max(0, buffer.baseY);
+        const endRow = buffer.baseY + term.rows;
+        for (let i = startRow; i < endRow; i++) {
+          const line = buffer.getLine(i);
+          if (line) {
+            lines.push(line.translateToString(true));
+          }
         }
+        return lines.join('\n');
       }
-      return lines.join('\n');
-    });
+    );
 
     // Initial fit
     setTimeout(() => {
@@ -269,6 +299,21 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
       writeTerminal(sessionId, bytes);
     });
 
+    // Track focus for split pane support
+    // Update active pane in Registry when terminal receives focus
+    // Note: xterm.js doesn't have onFocus, use DOM event on container
+    const handleTerminalFocus = () => {
+      setRegistryActivePaneId(effectivePaneId);
+      touchTerminalEntry(effectivePaneId);
+      onFocus?.(effectivePaneId);
+    };
+    
+    // Add focus listener to terminal's element
+    const termElement = term.element;
+    if (termElement) {
+      termElement.addEventListener('focusin', handleTerminalFocus);
+    }
+
     // Welcome message
     term.writeln(`\x1b[32m${t('terminal.local.title')}\x1b[0m`);
     term.writeln(t('terminal.local.shell', { shell: terminalInfo?.shell.label || t('terminal.local.shell_unknown') }));
@@ -277,8 +322,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     return () => {
       isMountedRef.current = false;
       
-      // Unregister buffer getter
-      unregisterTerminalBuffer(sessionId);
+      // Unregister buffer getter (using paneId, not sessionId)
+      unregisterTerminalBuffer(effectivePaneId);
+      
+      // Remove focus listener
+      if (termElement) {
+        termElement.removeEventListener('focusin', handleTerminalFocus);
+      }
       
       // Dispose renderer addon first to avoid "onShowLinkUnderline" error
       // This is a known xterm.js canvas addon bug where dispose order matters
@@ -627,8 +677,25 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ sessionId,
     return () => container.removeEventListener('paste', handlePaste, { capture: true });
   }, [terminalSettings.pasteProtection, isRunning]);
 
+  /**
+   * Handle container click - focus terminal and update active pane
+   */
+  const handleContainerClick = useCallback(() => {
+    if (!searchOpen && !aiPanelOpen) {
+      terminalRef.current?.focus();
+      
+      // Update active pane in Registry and notify parent
+      setRegistryActivePaneId(effectivePaneId);
+      touchTerminalEntry(effectivePaneId);
+      onFocus?.(effectivePaneId);
+    }
+  }, [searchOpen, aiPanelOpen, effectivePaneId, onFocus]);
+
   return (
-    <div className="relative flex-1 w-full h-full flex flex-col">
+    <div 
+      className="relative flex-1 w-full h-full flex flex-col"
+      onClick={handleContainerClick}
+    >
       {/* Search Bar - no deep search for local terminal */}
       {searchOpen && (
         <SearchBar

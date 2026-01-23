@@ -85,6 +85,15 @@
       "connection_lost": "Conexão perdida",
       "reconnecting": "Reconectando...",
       "input_locked": "Entrada bloqueada durante reconexão"
+    },
+    "pane": {
+      "split_horizontal": "Dividir horizontal",
+      "split_vertical": "Dividir vertical",
+      "close_pane": "Fechar painel",
+      "max_panes_reached": "Máximo de painéis atingido ({{max}})",
+      "focus_next": "Próximo painel",
+      "focus_previous": "Painel anterior",
+      "cannot_close_last": "Não é possível fechar o último painel"
     }
   }
 }

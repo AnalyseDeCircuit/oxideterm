@@ -4,7 +4,11 @@ import { Send, StopCircle, Terminal } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
-import { getTerminalBuffer } from '../../lib/terminalRegistry';
+import { 
+  getActiveTerminalBuffer, 
+  getActivePaneId,
+  getActivePaneMetadata 
+} from '../../lib/terminalRegistry';
 
 interface ChatInputProps {
   onSend: (content: string, context?: string) => void;
@@ -28,7 +32,6 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   // Find active terminal tab
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const hasActiveTerminal = activeTab?.type === 'terminal' || activeTab?.type === 'local_terminal';
-  const terminalSessionId = hasActiveTerminal ? activeTab?.sessionId : null;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -44,21 +47,31 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     if (!trimmed || isLoading || disabled) return;
 
     // Get terminal context if requested
+    // Now uses unified Registry for both SSH and Local terminals
     let context: string | undefined;
-    if (includeContext && terminalSessionId && activeTab) {
+    if (includeContext && hasActiveTerminal && activeTab) {
       setFetchingContext(true);
       try {
-        if (activeTab.type === 'terminal') {
-          // For SSH terminals, use scroll buffer API
-          const lines = await api.getScrollBuffer(terminalSessionId, 0, contextMaxChars || 50);
-          if (lines.length > 0) {
-            context = lines.map((l) => l.text).join('\n');
-          }
-        } else if (activeTab.type === 'local_terminal') {
-          // For local terminals, use the terminal registry with tab ID validation
-          const buffer = getTerminalBuffer(terminalSessionId, activeTab.id);
+        // Use the unified Terminal Registry
+        // This works for both SSH and Local terminals now
+        const activePaneId = getActivePaneId();
+        if (activePaneId) {
+          // Get buffer from registry (validates tab ID for security)
+          const buffer = getActiveTerminalBuffer(activeTab.id);
           if (buffer) {
-            context = buffer;
+            // Trim to contextMaxChars if needed
+            context = contextMaxChars && buffer.length > contextMaxChars 
+              ? buffer.slice(-contextMaxChars) 
+              : buffer;
+          } else {
+            // Fallback: For SSH terminals, try backend API if Registry returns null
+            const metadata = getActivePaneMetadata();
+            if (metadata?.terminalType === 'terminal' && metadata.sessionId) {
+              const lines = await api.getScrollBuffer(metadata.sessionId, 0, contextMaxChars || 50);
+              if (lines.length > 0) {
+                context = lines.map((l) => l.text).join('\n');
+              }
+            }
           }
         }
       } catch (e) {
@@ -71,7 +84,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     onSend(trimmed, context);
     setInput('');
     setIncludeContext(false);
-  }, [input, isLoading, disabled, includeContext, terminalSessionId, activeTab, contextMaxChars, onSend]);
+  }, [input, isLoading, disabled, includeContext, hasActiveTerminal, activeTab, contextMaxChars, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

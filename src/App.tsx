@@ -12,6 +12,7 @@ import { useLocalTerminalStore } from './store/localTerminalStore';
 import { useAppStore } from './store/appStore';
 import { useSettingsStore } from './store/settingsStore';
 import { useAppShortcuts, ShortcutDefinition, isTerminalReservedKey } from './hooks/useTerminalKeyboard';
+import { useSplitPaneShortcuts } from './hooks/useSplitPaneShortcuts';
 
 function App() {
   // Initialize global event listeners
@@ -96,6 +97,9 @@ function App() {
     isTerminalActive,
     isPanelOpen: shellLauncherOpen,
   });
+
+  // Split pane shortcuts (Cmd+Shift+E/D, Cmd+Option+Arrow)
+  useSplitPaneShortcuts({ enabled: isTerminalActive });
 
   // Additional keyboard handling for terminal-reserved keys
   useEffect(() => {

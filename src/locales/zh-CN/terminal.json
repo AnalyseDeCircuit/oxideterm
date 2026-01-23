@@ -85,6 +85,15 @@
       "connection_lost": "连接丢失",
       "reconnecting": "重连中...",
       "input_locked": "重连期间输入已锁定"
+    },
+    "pane": {
+      "split_horizontal": "水平分屏",
+      "split_vertical": "垂直分屏",
+      "close_pane": "关闭面板",
+      "max_panes_reached": "已达最大面板数 ({{max}})",
+      "focus_next": "聚焦下一面板",
+      "focus_previous": "聚焦上一面板",
+      "cannot_close_last": "无法关闭最后一个面板"
     }
   }
 }
