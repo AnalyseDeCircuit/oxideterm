@@ -24,6 +24,14 @@
       ]
     },
     {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "**" },
+        { "path": "$HOME/**" },
+        { "path": "?:/**" }
+      ]
+    },
+    {
       "identifier": "fs:allow-stat",
       "allow": [
         { "path": "**" },
