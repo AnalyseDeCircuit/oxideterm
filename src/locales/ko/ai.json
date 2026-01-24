@@ -30,6 +30,7 @@
       "placeholder": "터미널에 대해 무엇이든 물어보세요...",
       "placeholder_disabled": "설정에서 AI를 활성화하세요...",
       "include_context": "컨텍스트 포함",
+      "include_all_panes": "모든 창",
       "fetching_context": "가져오는 중...",
       "stop_generation": "생성 중지",
       "send": "메시지 보내기"
@@ -38,6 +39,7 @@
       "you": "나",
       "assistant": "어시스턴트",
       "context_attached": "터미널 컨텍스트가 첨부되었습니다",
+      "all_panes_context_attached": "모든 {{count}}개 창의 컨텍스트가 첨부되었습니다",
       "copy_code": "코드 복사",
       "insert_to_terminal": "터미널에 삽입"
     }

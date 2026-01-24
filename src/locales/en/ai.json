@@ -30,6 +30,7 @@
       "placeholder": "Ask anything about terminal...",
       "placeholder_disabled": "Enable AI in Settings first...",
       "include_context": "Include context",
+      "include_all_panes": "All panes",
       "fetching_context": "Fetching...",
       "stop_generation": "Stop generation",
       "send": "Send message"
@@ -38,6 +39,7 @@
       "you": "You",
       "assistant": "Assistant",
       "context_attached": "Context from terminal attached",
+      "all_panes_context_attached": "Context from all {{count}} panes attached",
       "copy_code": "Copy code",
       "insert_to_terminal": "Insert to terminal"
     }

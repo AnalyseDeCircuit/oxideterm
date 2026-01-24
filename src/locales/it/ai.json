@@ -20,6 +20,7 @@
       "chars": "{{count}} caratteri",
       "no_context": "Nessun contesto terminale",
       "include": "Includi contesto terminale",
+      "include_all_panes": "Tutti i riquadri",
       "exclude": "Escludi contesto terminale",
       "truncated": "Contesto troncato a {{max}} caratteri",
       "select_terminal": "Seleziona un terminale per il contesto"
@@ -35,7 +36,8 @@
       "regenerate": "Rigenera risposta",
       "user": "Tu",
       "assistant": "Assistente AI",
-      "system": "Sistema"
+      "system": "Sistema",
+      "all_panes_context_attached": "Contesto da tutti i {{count}} riquadri allegato"
     },
     "suggestions": {
       "title": "Suggerimenti",

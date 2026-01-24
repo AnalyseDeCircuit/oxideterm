@@ -195,6 +195,95 @@ export function touchTerminalEntry(paneId: string): void {
 }
 
 /**
+ * Result of gathering all pane buffers
+ */
+export interface GatheredPaneContext {
+  paneId: string;
+  sessionId: string;
+  terminalType: 'terminal' | 'local_terminal';
+  buffer: string;
+  isActive: boolean;
+}
+
+/**
+ * Gather buffers from ALL panes in a tab (for AI "cross-pane vision")
+ * This allows AI to analyze content across multiple split panes simultaneously.
+ * 
+ * @param tabId - The tab ID to gather context from
+ * @param maxCharsPerPane - Optional: limit characters per pane
+ * @returns Array of pane contexts with their buffers
+ */
+export function gatherAllPaneContexts(tabId: string, maxCharsPerPane?: number): GatheredPaneContext[] {
+  const results: GatheredPaneContext[] = [];
+  
+  for (const [paneId, entry] of registry) {
+    if (entry.tabId !== tabId) continue;
+    
+    try {
+      let buffer = entry.getBuffer();
+      if (buffer && maxCharsPerPane && buffer.length > maxCharsPerPane) {
+        // Keep the most recent content (tail)
+        buffer = buffer.slice(-maxCharsPerPane);
+      }
+      
+      if (buffer) {
+        results.push({
+          paneId,
+          sessionId: entry.sessionId,
+          terminalType: entry.terminalType,
+          buffer,
+          isActive: paneId === activePaneId,
+        });
+      }
+    } catch (e) {
+      console.error(`[TerminalRegistry] Failed to get buffer for pane ${paneId}:`, e);
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * Get combined context from all panes as a formatted string
+ * Useful for directly passing to AI prompt
+ * 
+ * @param tabId - The tab ID
+ * @param maxCharsPerPane - Optional: limit per pane
+ * @param separator - Separator between panes (default: visual divider)
+ * @returns Formatted string with all pane contents
+ */
+export function getCombinedPaneContext(
+  tabId: string, 
+  maxCharsPerPane?: number,
+  separator: string = '\n\n--- Pane {index} ({type}) ---\n\n'
+): string {
+  const contexts = gatherAllPaneContexts(tabId, maxCharsPerPane);
+  
+  if (contexts.length === 0) {
+    return '';
+  }
+  
+  if (contexts.length === 1) {
+    return contexts[0].buffer;
+  }
+  
+  // Sort: active pane first, then by paneId for consistency
+  contexts.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return a.paneId.localeCompare(b.paneId);
+  });
+  
+  return contexts.map((ctx, index) => {
+    const label = ctx.isActive ? 'active' : `pane ${index + 1}`;
+    const typeName = ctx.terminalType === 'terminal' ? 'SSH' : 'Local';
+    const header = separator
+      .replace('{index}', String(index + 1))
+      .replace('{type}', `${typeName}, ${label}`);
+    return header + ctx.buffer;
+  }).join('');
+}
+
+/**
  * Clear all entries (useful for testing or app reset)
  */
 export function clearRegistry(): void {

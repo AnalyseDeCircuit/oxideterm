@@ -1,13 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, StopCircle, Terminal } from 'lucide-react';
+import { Send, StopCircle, Terminal, Layers } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
 import { 
   getActiveTerminalBuffer, 
   getActivePaneId,
-  getActivePaneMetadata 
+  getActivePaneMetadata,
+  getCombinedPaneContext
 } from '../../lib/terminalRegistry';
 
 interface ChatInputProps {
@@ -21,6 +22,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   const { t } = useTranslation();
   const [input, setInput] = useState('');
   const [includeContext, setIncludeContext] = useState(false);
+  const [includeAllPanes, setIncludeAllPanes] = useState(false);
   const [fetchingContext, setFetchingContext] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -32,6 +34,9 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   // Find active terminal tab
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const hasActiveTerminal = activeTab?.type === 'terminal' || activeTab?.type === 'local_terminal';
+  
+  // Check if tab has multiple panes (split panes)
+  const hasSplitPanes = hasActiveTerminal && activeTab?.rootPane?.type === 'group';
 
   // Auto-resize textarea
   useEffect(() => {
@@ -52,24 +57,34 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     if (includeContext && hasActiveTerminal && activeTab) {
       setFetchingContext(true);
       try {
-        // Use the unified Terminal Registry
-        // This works for both SSH and Local terminals now
-        const activePaneId = getActivePaneId();
-        if (activePaneId) {
-          // Get buffer from registry (validates tab ID for security)
-          const buffer = getActiveTerminalBuffer(activeTab.id);
-          if (buffer) {
-            // Trim to contextMaxChars if needed
-            context = contextMaxChars && buffer.length > contextMaxChars 
-              ? buffer.slice(-contextMaxChars) 
-              : buffer;
-          } else {
-            // Fallback: For SSH terminals, try backend API if Registry returns null
-            const metadata = getActivePaneMetadata();
-            if (metadata?.terminalType === 'terminal' && metadata.sessionId) {
-              const lines = await api.getScrollBuffer(metadata.sessionId, 0, contextMaxChars || 50);
-              if (lines.length > 0) {
-                context = lines.map((l) => l.text).join('\n');
+        // Cross-Pane Vision: Gather context from ALL panes if enabled
+        if (includeAllPanes && hasSplitPanes) {
+          const maxCharsPerPane = contextMaxChars ? Math.floor(contextMaxChars / 4) : 2000;
+          context = getCombinedPaneContext(activeTab.id, maxCharsPerPane);
+          if (!context) {
+            console.warn('[AI] getCombinedPaneContext returned empty, falling back to active pane');
+          }
+        }
+        
+        // Fallback to active pane only
+        if (!context) {
+          const activePaneId = getActivePaneId();
+          if (activePaneId) {
+            // Get buffer from registry (validates tab ID for security)
+            const buffer = getActiveTerminalBuffer(activeTab.id);
+            if (buffer) {
+              // Trim to contextMaxChars if needed
+              context = contextMaxChars && buffer.length > contextMaxChars 
+                ? buffer.slice(-contextMaxChars) 
+                : buffer;
+            } else {
+              // Fallback: For SSH terminals, try backend API if Registry returns null
+              const metadata = getActivePaneMetadata();
+              if (metadata?.terminalType === 'terminal' && metadata.sessionId) {
+                const lines = await api.getScrollBuffer(metadata.sessionId, 0, contextMaxChars || 50);
+                if (lines.length > 0) {
+                  context = lines.map((l) => l.text).join('\n');
+                }
               }
             }
           }
@@ -84,7 +99,8 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     onSend(trimmed, context);
     setInput('');
     setIncludeContext(false);
-  }, [input, isLoading, disabled, includeContext, hasActiveTerminal, activeTab, contextMaxChars, onSend]);
+    setIncludeAllPanes(false);
+  }, [input, isLoading, disabled, includeContext, includeAllPanes, hasSplitPanes, hasActiveTerminal, activeTab, contextMaxChars, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -103,7 +119,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     <div className="border-t border-zinc-700/50 bg-zinc-800/50 p-3">
       {/* Context toggle */}
       {hasActiveTerminal && (
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <button
             type="button"
             onClick={() => setIncludeContext(!includeContext)}
@@ -118,6 +134,24 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             <Terminal className="w-3 h-3" />
             <span>{fetchingContext ? t('ai.input.fetching_context') : t('ai.input.include_context')}</span>
           </button>
+          
+          {/* Cross-Pane Vision: Include all split panes */}
+          {hasSplitPanes && includeContext && (
+            <button
+              type="button"
+              onClick={() => setIncludeAllPanes(!includeAllPanes)}
+              disabled={fetchingContext}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                includeAllPanes
+                  ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30'
+                  : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+              } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
+              title={t('ai.input.include_all_panes')}
+            >
+              <Layers className="w-3 h-3" />
+              <span>{t('ai.input.include_all_panes')}</span>
+            </button>
+          )}
         </div>
       )}
 

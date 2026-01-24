@@ -30,6 +30,7 @@
       "placeholder": "Pregunte cualquier cosa sobre el terminal...",
       "placeholder_disabled": "Habilite la IA en la configuración...",
       "include_context": "Incluir contexto",
+      "include_all_panes": "Todos los paneles",
       "fetching_context": "Obteniendo...",
       "stop_generation": "Detener generación",
       "send": "Enviar mensaje"
@@ -38,6 +39,7 @@
       "you": "Usted",
       "assistant": "Asistente",
       "context_attached": "Contexto del terminal adjunto",
+      "all_panes_context_attached": "Contexto de los {{count}} paneles adjunto",
       "copy_code": "Copiar código",
       "insert_to_terminal": "Insertar en terminal"
     }
