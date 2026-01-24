@@ -30,6 +30,7 @@
       "placeholder": "ターミナルについて何でも聞いてください...",
       "placeholder_disabled": "設定で AI を有効にしてください...",
       "include_context": "コンテキストを含める",
+      "include_all_panes": "全ペイン",
       "fetching_context": "取得中...",
       "stop_generation": "生成を停止",
       "send": "メッセージを送信"
@@ -38,6 +39,7 @@
       "you": "あなた",
       "assistant": "アシスタント",
       "context_attached": "ターミナルのコンテキストが添付されました",
+      "all_panes_context_attached": "全 {{count}} ペインのコンテキストが添付されました",
       "copy_code": "コードをコピー",
       "insert_to_terminal": "ターミナルに挿入"
     }

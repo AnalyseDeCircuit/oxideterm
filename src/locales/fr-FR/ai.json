@@ -30,6 +30,7 @@
       "placeholder": "Posez n'importe quelle question sur le terminal...",
       "placeholder_disabled": "Activez l'IA dans les paramètres...",
       "include_context": "Inclure le contexte",
+      "include_all_panes": "Tous les volets",
       "fetching_context": "Récupération...",
       "stop_generation": "Arrêter la génération",
       "send": "Envoyer le message"
@@ -38,6 +39,7 @@
       "you": "Vous",
       "assistant": "Assistant",
       "context_attached": "Contexte du terminal joint",
+      "all_panes_context_attached": "Contexte des {{count}} volets joint",
       "copy_code": "Copier le code",
       "insert_to_terminal": "Insérer dans le terminal"
     }

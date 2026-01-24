@@ -30,6 +30,7 @@
       "placeholder": "Hỏi bất cứ điều gì về terminal...",
       "placeholder_disabled": "Bật AI trong cài đặt...",
       "include_context": "Bao gồm ngữ cảnh",
+      "include_all_panes": "Tất cả khung",
       "fetching_context": "Đang tải...",
       "stop_generation": "Dừng tạo",
       "send": "Gửi tin nhắn"
@@ -38,6 +39,7 @@
       "you": "Bạn",
       "assistant": "Trợ lý",
       "context_attached": "Đã đính kèm ngữ cảnh terminal",
+      "all_panes_context_attached": "Đã đính kèm ngữ cảnh từ {{count}} khung",
       "copy_code": "Sao chép mã",
       "insert_to_terminal": "Chèn vào terminal"
     }

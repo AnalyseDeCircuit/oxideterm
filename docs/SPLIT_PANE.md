@@ -196,7 +196,51 @@ SplitTerminalContainer.tsx        // 递归渲染布局树
 - [ ] 关闭最后 Pane 关闭整个 Tab
 - [ ] SSH 和 Local 终端均可分屏
 
-## 7. 参考资源
+## 7. 跨分屏视野 (Cross-Pane Vision)
+
+> 新增于 v1.1
+
+### 7.1 功能概述
+
+AI 聊天支持同时获取所有分屏的终端内容，而非仅获取当前活动 Pane。这对于调试场景非常有用：
+
+- 左屏显示错误日志，右屏显示代码
+- 上屏运行服务器，下屏执行 curl 测试
+- AI 可以综合分析所有屏幕内容
+
+### 7.2 使用方式
+
+1. 在 AI 聊天输入框启用 "包含上下文"
+2. 当 Tab 有多个分屏时，会出现 "所有分屏" 按钮
+3. 点击启用后，AI 将获取所有 Pane 的缓冲区
+
+### 7.3 技术实现
+
+**Registry 新增 API:**
+```typescript
+// 获取所有 Pane 的上下文（数组形式）
+gatherAllPaneContexts(tabId: string, maxCharsPerPane?: number): GatheredPaneContext[]
+
+// 获取合并后的上下文字符串（带分隔标记）
+getCombinedPaneContext(tabId: string, maxCharsPerPane?: number, separator?: string): string
+```
+
+**输出格式:**
+```
+=== PANE 1 (terminal) [ACTIVE] ===
+... terminal buffer ...
+
+=== PANE 2 (local_terminal) ===
+... terminal buffer ...
+```
+
+### 7.4 性能考虑
+
+- 每个 Pane 的缓冲区默认截取 `contextMaxChars / 4` 字符
+- 最多支持 4 个分屏，总上下文不会超过设置限制
+- 只在用户明确启用时才获取全部上下文
+
+## 8. 参考资源
 
 - [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels)
 - [VS Code workbench layout](https://github.com/microsoft/vscode/tree/main/src/vs/workbench/browser/layout)

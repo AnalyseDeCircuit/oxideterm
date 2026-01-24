@@ -20,6 +20,7 @@
       "chars": "{{count}} 字元",
       "no_context": "沒有終端機內容",
       "include": "包含終端機內容",
+      "include_all_panes": "所有分屏",
       "exclude": "排除終端機內容",
       "truncated": "內容已截斷至 {{max}} 字元",
       "select_terminal": "選擇終端機以取得內容"
@@ -35,7 +36,8 @@
       "regenerate": "重新產生回應",
       "user": "您",
       "assistant": "AI 助手",
-      "system": "系統"
+      "system": "系統",
+      "all_panes_context_attached": "已附加全部 {{count}} 個分屏的內容"
     },
     "suggestions": {
       "title": "建議",

@@ -30,6 +30,7 @@
       "placeholder": "Fragen Sie alles zum Terminal...",
       "placeholder_disabled": "AI in den Einstellungen aktivieren...",
       "include_context": "Kontext einbeziehen",
+      "include_all_panes": "Alle Fenster",
       "fetching_context": "Wird abgerufen...",
       "stop_generation": "Generierung stoppen",
       "send": "Nachricht senden"
@@ -38,6 +39,7 @@
       "you": "Sie",
       "assistant": "Assistent",
       "context_attached": "Terminal-Kontext angehängt",
+      "all_panes_context_attached": "Kontext aus allen {{count}} Fenstern angehängt",
       "copy_code": "Code kopieren",
       "insert_to_terminal": "Ins Terminal einfügen"
     }
