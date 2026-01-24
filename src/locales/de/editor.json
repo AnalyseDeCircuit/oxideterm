@@ -18,6 +18,7 @@
     "retry": "Wiederholen",
     "reconnecting": "Verbindung wird wiederhergestellt...",
     "connection_lost": "Verbindung verloren",
-    "save_offline_warning": "Offline-Speichern nicht möglich"
+    "save_offline_warning": "Offline-Speichern nicht möglich",
+    "encoding_detected": "Erkannte Kodierung: {{encoding}}"
   }
 }

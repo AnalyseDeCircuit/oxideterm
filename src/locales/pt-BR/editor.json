@@ -18,6 +18,7 @@
     "retry": "Tentar novamente",
     "reconnecting": "Reconectando...",
     "connection_lost": "Conexão perdida",
-    "save_offline_warning": "Não é possível salvar offline"
+    "save_offline_warning": "Não é possível salvar offline",
+    "encoding_detected": "Codificação detectada: {{encoding}}"
   }
 }

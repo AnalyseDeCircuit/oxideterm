@@ -18,6 +18,7 @@
     "retry": "재시도",
     "reconnecting": "재연결 중...",
     "connection_lost": "연결이 끊어졌습니다",
-    "save_offline_warning": "오프라인 상태에서는 저장할 수 없습니다"
+    "save_offline_warning": "오프라인 상태에서는 저장할 수 없습니다",
+    "encoding_detected": "감지된 인코딩: {{encoding}}"
   }
 }

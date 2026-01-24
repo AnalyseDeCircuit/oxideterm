@@ -57,6 +57,14 @@ pub enum PreviewContent {
         mime_type: Option<String>,
         /// Language hint for syntax highlighting (e.g., "rust", "python", "bash")
         language: Option<String>,
+        /// Detected encoding (e.g., "UTF-8", "GBK", "Shift_JIS")
+        encoding: String,
+        /// Detection confidence (0.0 - 1.0)
+        #[serde(default)]
+        confidence: f32,
+        /// Whether file has BOM (Byte Order Mark)
+        #[serde(default)]
+        has_bom: bool,
     },
     /// Base64-encoded image content
     Image { data: String, mime_type: String },
@@ -385,4 +393,92 @@ pub fn generate_hex_dump(data: &[u8], offset: u64) -> String {
     }
 
     result
+}
+
+/// Detect encoding and decode bytes to UTF-8 string
+/// 
+/// Uses chardetng for encoding detection and encoding_rs for conversion.
+/// Returns: (decoded_text, encoding_name, confidence, has_bom)
+pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
+    use chardetng::EncodingDetector;
+
+    // Check for BOM first
+    let (has_bom, bom_encoding) = check_bom(bytes);
+    
+    if let Some(encoding) = bom_encoding {
+        // If BOM detected, use that encoding directly
+        let (cow, _, _) = encoding.decode(bytes);
+        return (cow.into_owned(), encoding.name().to_string(), 1.0, true);
+    }
+
+    // Use chardetng for detection
+    let mut detector = EncodingDetector::new();
+    detector.feed(bytes, true);
+    
+    // Guess with allow_utf8 = true to prefer UTF-8 when valid
+    let encoding = detector.guess(None, true);
+    
+    // Calculate rough confidence based on encoding detection
+    // chardetng doesn't expose confidence directly, so we estimate:
+    // - UTF-8 that validates perfectly = high confidence
+    // - Other encodings = medium confidence
+    let confidence = if encoding == encoding_rs::UTF_8 {
+        // Check if it's actually valid UTF-8
+        if std::str::from_utf8(bytes).is_ok() {
+            1.0
+        } else {
+            0.8 // Probably UTF-8 with some invalid sequences
+        }
+    } else {
+        0.7 // Other encoding detected
+    };
+
+    // Decode using the detected encoding
+    let (cow, _, had_errors) = encoding.decode(bytes);
+    
+    // Adjust confidence if there were decoding errors
+    let final_confidence = if had_errors {
+        confidence * 0.8
+    } else {
+        confidence
+    };
+
+    (cow.into_owned(), encoding.name().to_string(), final_confidence, has_bom)
+}
+
+/// Check for Byte Order Mark (BOM) at the start of bytes
+/// Returns (has_bom, Option<encoding>)
+fn check_bom(bytes: &[u8]) -> (bool, Option<&'static encoding_rs::Encoding>) {
+    use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
+    
+    if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+        return (true, Some(UTF_8));
+    }
+    if bytes.len() >= 2 {
+        if bytes[0] == 0xFE && bytes[1] == 0xFF {
+            return (true, Some(UTF_16BE));
+        }
+        if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            return (true, Some(UTF_16LE));
+        }
+    }
+    (false, None)
+}
+
+/// Encode UTF-8 string to target encoding
+/// 
+/// Returns the encoded bytes. If encoding fails, returns UTF-8 bytes as fallback.
+pub fn encode_to_encoding(text: &str, encoding_name: &str) -> Vec<u8> {
+    // Find the encoding by name
+    let encoding = encoding_rs::Encoding::for_label(encoding_name.as_bytes())
+        .unwrap_or(encoding_rs::UTF_8);
+    
+    // If target is UTF-8, just return the bytes directly
+    if encoding == encoding_rs::UTF_8 {
+        return text.as_bytes().to_vec();
+    }
+    
+    // Encode to target encoding
+    let (cow, _, _) = encoding.encode(text);
+    cow.into_owned()
 }

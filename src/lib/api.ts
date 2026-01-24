@@ -425,15 +425,17 @@ export const api = {
 
   /**
    * Write content to a remote file (IDE Mode)
+   * @param encoding Optional target encoding (defaults to "UTF-8")
    * @returns WriteResult containing the new mtime for sync confirmation and file size
    */
   sftpWriteContent: async (
     sessionId: string,
     path: string,
-    content: string
-  ): Promise<{ mtime: number | null; size: number | null }> => {
-    if (USE_MOCK) return { mtime: Date.now() / 1000, size: content.length };
-    return invoke('sftp_write_content', { sessionId, path, content });
+    content: string,
+    encoding?: string
+  ): Promise<{ mtime: number | null; size: number | null; encoding_used: string }> => {
+    if (USE_MOCK) return { mtime: Date.now() / 1000, size: content.length, encoding_used: encoding || 'UTF-8' };
+    return invoke('sftp_write_content', { sessionId, path, content, encoding });
   },
 
   sftpDownload: async (sessionId: string, remotePath: string, localPath: string, transferId?: string): Promise<void> => {

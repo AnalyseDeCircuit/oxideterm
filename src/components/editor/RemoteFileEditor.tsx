@@ -55,6 +55,8 @@ interface RemoteFileEditorProps {
   initialContent: string;
   /** 后端检测的语言 */
   language: string | null;
+  /** 检测到的文件编码 */
+  encoding?: string;
   /** 文件的 mtime（可选，用于冲突检测） */
   serverMtime?: number | null;
   /** 保存成功回调 */
@@ -68,6 +70,7 @@ export function RemoteFileEditor({
   filePath,
   initialContent,
   language,
+  encoding = 'UTF-8',
   serverMtime,
   onSaved,
 }: RemoteFileEditorProps) {
@@ -77,6 +80,9 @@ export function RemoteFileEditor({
   const [editorContainer, setEditorContainer] = useState<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const initialContentRef = useRef(initialContent);
+  
+  // 文件编码状态
+  const [currentEncoding, setCurrentEncoding] = useState(encoding);
 
   // 编辑器状态
   const [content, setContent] = useState(initialContent);
@@ -117,7 +123,8 @@ export function RemoteFileEditor({
 
     try {
       const currentContent = viewRef.current?.state.doc.toString() || content;
-      const result = await api.sftpWriteContent(sessionId, filePath, currentContent);
+      // 传递当前编码，保存时转回原编码
+      const result = await api.sftpWriteContent(sessionId, filePath, currentContent, currentEncoding);
       setLastSavedMtime(result.mtime);
       setIsDirty(false);
       initialContentRef.current = currentContent;
@@ -404,7 +411,12 @@ export function RemoteFileEditor({
             <span className="px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-300">
               {getLanguageDisplayName(normalizedLang)}
             </span>
-            <span>{t('editor.encoding')}</span>
+            <span 
+              className="px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-300 cursor-default"
+              title={t('editor.encoding_detected', { encoding: currentEncoding })}
+            >
+              {currentEncoding}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             {/* 网络错误显示 + 重试按钮 */}

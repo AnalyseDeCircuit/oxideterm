@@ -18,6 +18,7 @@
     "retry": "Retry",
     "reconnecting": "Reconnecting...",
     "connection_lost": "Connection lost",
-    "save_offline_warning": "Cannot save while offline"
+    "save_offline_warning": "Cannot save while offline",
+    "encoding_detected": "Detected encoding: {{encoding}}"
   }
 }

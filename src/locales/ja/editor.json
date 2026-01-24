@@ -18,6 +18,7 @@
     "retry": "再試行",
     "reconnecting": "再接続中...",
     "connection_lost": "接続が切れました",
-    "save_offline_warning": "オフライン中は保存できません"
+    "save_offline_warning": "オフライン中は保存できません",
+    "encoding_detected": "検出されたエンコーディング: {{encoding}}"
   }
 }

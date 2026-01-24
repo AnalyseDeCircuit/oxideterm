@@ -18,6 +18,7 @@
     "retry": "重試",
     "reconnecting": "重新連線中...",
     "connection_lost": "連線已斷開",
-    "save_offline_warning": "離線狀態無法儲存"
+    "save_offline_warning": "離線狀態無法儲存",
+    "encoding_detected": "偵測到的編碼：{{encoding}}"
   }
 }
