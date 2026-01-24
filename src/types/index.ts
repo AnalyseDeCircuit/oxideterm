@@ -445,7 +445,17 @@ export interface ListFilter {
 }
 
 export type PreviewContent =
-  | { Text: { data: string; mime_type: string | null; language: string | null } }
+  | { Text: { 
+      data: string; 
+      mime_type: string | null; 
+      language: string | null;
+      /** Detected encoding (e.g., "UTF-8", "GBK", "Shift_JIS") */
+      encoding: string;
+      /** Detection confidence (0.0 - 1.0) */
+      confidence?: number;
+      /** Whether file has BOM (Byte Order Mark) */
+      has_bom?: boolean;
+    } }
   | { Image: { data: string; mime_type: string } }
   | { Video: { data: string; mime_type: string } }
   | { Audio: { data: string; mime_type: string } }

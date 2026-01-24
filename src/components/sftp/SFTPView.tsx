@@ -593,6 +593,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     data: string;
     mimeType?: string;
     language?: string | null;
+    encoding?: string; // Detected file encoding
     // Hex specific
     hexOffset?: number;
     hexTotalSize?: number;
@@ -637,6 +638,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     path: string;
     content: string;
     language: string | null;
+    encoding: string;
   } | null>(null);
 
   // Drag and Drop state
@@ -1406,6 +1408,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
                   data: content.Text.data,
                   mimeType: content.Text.mime_type || undefined,
                   language: content.Text.language,
+                  encoding: content.Text.encoding,
               });
               return;
           }
@@ -1804,6 +1807,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
                               path: previewFile.path,
                               content: previewFile.data,
                               language: previewFile.language || null,
+                              encoding: previewFile.encoding || 'UTF-8',
                             });
                             setPreviewFile(null);
                           }
@@ -1929,6 +1933,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
           filePath={editorFile.path}
           initialContent={editorFile.content}
           language={editorFile.language}
+          encoding={editorFile.encoding}
           onSaved={() => {
             // Refresh remote file list to update mtime
             api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);

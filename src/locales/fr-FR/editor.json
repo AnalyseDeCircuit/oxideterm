@@ -18,6 +18,7 @@
     "retry": "Réessayer",
     "reconnecting": "Reconnexion...",
     "connection_lost": "Connexion perdue",
-    "save_offline_warning": "Impossible d'enregistrer hors ligne"
+    "save_offline_warning": "Impossible d'enregistrer hors ligne",
+    "encoding_detected": "Encodage détecté : {{encoding}}"
   }
 }

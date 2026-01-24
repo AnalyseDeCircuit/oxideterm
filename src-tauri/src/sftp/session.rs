@@ -426,13 +426,17 @@ impl SftpSession {
             .await
             .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
 
-        let text = String::from_utf8_lossy(&content).to_string();
+        // Detect encoding using chardetng
+        let (text, encoding_name, confidence, has_bom) = detect_and_decode(&content);
         let language = extension_to_language(extension);
 
         Ok(PreviewContent::Text {
             data: text,
             mime_type: Some(mime_type.to_string()),
             language,
+            encoding: encoding_name,
+            confidence,
+            has_bom,
         })
     }
 

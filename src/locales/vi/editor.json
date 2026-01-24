@@ -18,6 +18,7 @@
     "retry": "Thử lại",
     "reconnecting": "Đang kết nối lại...",
     "connection_lost": "Mất kết nối",
-    "save_offline_warning": "Không thể lưu khi ngoại tuyến"
+    "save_offline_warning": "Không thể lưu khi ngoại tuyến",
+    "encoding_detected": "Mã hóa phát hiện: {{encoding}}"
   }
 }

@@ -18,6 +18,7 @@
     "retry": "Reintentar",
     "reconnecting": "Reconectando...",
     "connection_lost": "Conexión perdida",
-    "save_offline_warning": "No se puede guardar sin conexión"
+    "save_offline_warning": "No se puede guardar sin conexión",
+    "encoding_detected": "Codificación detectada: {{encoding}}"
   }
 }
