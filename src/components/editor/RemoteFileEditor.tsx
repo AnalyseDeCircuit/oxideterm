@@ -82,7 +82,7 @@ export function RemoteFileEditor({
   const initialContentRef = useRef(initialContent);
   
   // 文件编码状态
-  const [currentEncoding, setCurrentEncoding] = useState(encoding);
+  const [currentEncoding] = useState(encoding);
 
   // 编辑器状态
   const [content, setContent] = useState(initialContent);
