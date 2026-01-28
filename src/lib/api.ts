@@ -414,7 +414,7 @@ export const api = {
   },
 
   sftpPreview: async (sessionId: string, path: string): Promise<PreviewContent> => {
-    if (USE_MOCK) return { Text: { data: 'Mock preview', mime_type: 'text/plain', language: null } };
+    if (USE_MOCK) return { Text: { data: 'Mock preview', mime_type: 'text/plain', language: null, encoding: 'UTF-8' } };
     return invoke('sftp_preview', { sessionId, path });
   },
 
