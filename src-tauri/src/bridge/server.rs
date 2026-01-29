@@ -1,11 +1,14 @@
 //! WebSocket Server for SSH bridge with Wire Protocol support
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -41,55 +44,85 @@ fn unix_timestamp_secs() -> u64 {
         .as_secs()
 }
 
-/// Generate a time-bound authentication token
-/// Format: uuid:timestamp (e.g., "550e8400-e29b-41d4-a716-446655440000:1705000000")
+/// Token structure: 32 bytes random + 8 bytes timestamp
+const TOKEN_RANDOM_LEN: usize = 32;
+const TOKEN_TIMESTAMP_LEN: usize = 8;
+const TOKEN_TOTAL_LEN: usize = TOKEN_RANDOM_LEN + TOKEN_TIMESTAMP_LEN; // 40 bytes
+
+/// Generate a cryptographically secure authentication token
+/// 
+/// Format: Base64(random[32] || timestamp[8])
+/// - 32 bytes of OS-level randomness (256 bits entropy)
+/// - 8 bytes big-endian timestamp (hidden in encoding)
+/// - Output: 54 character URL-safe Base64 string
+/// 
+/// The token appears opaque to external observers - no visible structure.
 fn generate_token() -> String {
-    let uuid = uuid::Uuid::new_v4();
-    let timestamp = unix_timestamp_secs();
-    format!("{}:{}", uuid, timestamp)
+    let mut data = [0u8; TOKEN_TOTAL_LEN];
+    // Fill first 32 bytes with cryptographically secure random data
+    rand::rngs::OsRng.fill_bytes(&mut data[..TOKEN_RANDOM_LEN]);
+    // Append timestamp as big-endian bytes
+    data[TOKEN_RANDOM_LEN..].copy_from_slice(&unix_timestamp_secs().to_be_bytes());
+    URL_SAFE_NO_PAD.encode(data)
 }
 
 /// Validate token with expiration check
-/// Returns true if token matches and has not expired
-/// Uses constant-time comparison to prevent timing attacks
+/// 
+/// Decodes both tokens, performs constant-time comparison on the random
+/// portion, then checks timestamp expiration from the expected token.
+/// 
+/// Returns true if token matches and has not expired.
 fn validate_token(received: &str, expected: &str) -> bool {
-    use subtle::ConstantTimeEq;
-    
     let received_trimmed = received.trim();
-    
-    // Constant-time comparison to prevent timing attacks
-    // Note: We still need to check length first, but this doesn't leak token content
+
+    // Quick length check (doesn't leak token content)
     if received_trimmed.len() != expected.len() {
         return false;
     }
-    
-    let token_matches = bool::from(
-        received_trimmed.as_bytes().ct_eq(expected.as_bytes())
+
+    // Decode both tokens
+    let received_bytes = match URL_SAFE_NO_PAD.decode(received_trimmed) {
+        Ok(bytes) if bytes.len() == TOKEN_TOTAL_LEN => bytes,
+        _ => {
+            warn!("Token validation failed: invalid Base64 or wrong length");
+            return false;
+        }
+    };
+
+    let expected_bytes = match URL_SAFE_NO_PAD.decode(expected) {
+        Ok(bytes) if bytes.len() == TOKEN_TOTAL_LEN => bytes,
+        _ => {
+            warn!("Token validation failed: expected token malformed");
+            return false;
+        }
+    };
+
+    // Constant-time comparison of random portion (first 32 bytes)
+    let random_matches = bool::from(
+        received_bytes[..TOKEN_RANDOM_LEN].ct_eq(&expected_bytes[..TOKEN_RANDOM_LEN])
     );
-    
-    if !token_matches {
+
+    if !random_matches {
         return false;
     }
 
-    // Parse timestamp from expected token (format: uuid:timestamp)
-    if let Some(timestamp_str) = expected.rsplit(':').next() {
-        if let Ok(created_at) = timestamp_str.parse::<u64>() {
-            let now = unix_timestamp_secs();
-            let age = now.saturating_sub(created_at);
-            if age > TOKEN_VALIDITY_SECS {
-                warn!(
-                    "Token expired: age {} seconds exceeds limit {} seconds",
-                    age, TOKEN_VALIDITY_SECS
-                );
-                return false;
-            }
-            return true;
-        }
+    // Extract timestamp from expected token and check expiration
+    let timestamp_bytes: [u8; 8] = expected_bytes[TOKEN_RANDOM_LEN..]
+        .try_into()
+        .expect("timestamp slice length verified above");
+    let created_at = u64::from_be_bytes(timestamp_bytes);
+
+    let now = unix_timestamp_secs();
+    let age = now.saturating_sub(created_at);
+    if age > TOKEN_VALIDITY_SECS {
+        warn!(
+            "Token expired: age {} seconds exceeds limit {} seconds",
+            age, TOKEN_VALIDITY_SECS
+        );
+        return false;
     }
 
-    // If we can't parse timestamp, reject (malformed token)
-    warn!("Malformed token: could not parse timestamp");
-    false
+    true
 }
 
 /// Reason for WebSocket disconnection
