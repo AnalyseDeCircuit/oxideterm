@@ -18,6 +18,7 @@ import { Plus } from 'lucide-react';
 // Lazy load non-critical views (only loaded when user opens SFTP/Forwards tab)
 const SFTPView = lazy(() => import('../sftp/SFTPView').then(m => ({ default: m.SFTPView })));
 const ForwardsView = lazy(() => import('../forwards/ForwardsView').then(m => ({ default: m.ForwardsView })));
+const IdeWorkspace = lazy(() => import('../ide').then(m => ({ default: m.IdeWorkspace })));
 
 // Loading fallback for lazy components
 const ViewLoader = () => {
@@ -118,6 +119,15 @@ export const AppLayout = () => {
                    )}
                    {tab.type === 'connection_pool' && <ConnectionsPanel />}
                    {tab.type === 'topology' && <TopologyPage />}
+                   {tab.type === 'ide' && tab.sessionId && (
+                     <Suspense fallback={<ViewLoader />}>
+                       <IdeWorkspace 
+                         connectionId={tab.sessionId} 
+                         sftpSessionId={tab.sessionId}
+                         rootPath="~"
+                       />
+                     </Suspense>
+                   )}
                  </div>
               ))}
             </>

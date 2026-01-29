@@ -29,6 +29,7 @@
       "reconnect": "Kết nối lại",
       "new_terminal": "Terminal mới",
       "sftp_explorer": "Trình duyệt SFTP",
+      "ide_mode": "Chế độ IDE",
       "open_sftp": "Mở SFTP",
       "port_forwards": "Chuyển tiếp cổng",
       "port_forwarding": "Chuyển tiếp cổng",

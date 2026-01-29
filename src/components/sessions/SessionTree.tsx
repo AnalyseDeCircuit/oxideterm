@@ -24,6 +24,7 @@ import {
   Settings2,
   Terminal,
   FolderOpen,
+  Code,
   Unplug,
   Trash2,
   Plug,
@@ -70,6 +71,7 @@ export interface SessionTreeProps {
   onSelectTerminal: (terminalId: string) => void;
   // 其他操作
   onOpenSftp: (nodeId: string) => void;
+  onOpenIde?: (nodeId: string) => void;
   onOpenForwards?: (nodeId: string) => void;
   onDrillDown: (parentNodeId: string) => void;
   onRemove: (nodeId: string) => void;
@@ -326,6 +328,7 @@ interface SessionNodeProps {
   onCloseTerminal: (terminalId: string) => void;
   onSelectTerminal: (terminalId: string) => void;
   onOpenSftp: () => void;
+  onOpenIde?: () => void;
   onOpenForwards?: () => void;
   onDrillDown: () => void;
   onRemove: () => void;
@@ -348,6 +351,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
   onCloseTerminal,
   onSelectTerminal,
   onOpenSftp,
+  onOpenIde,
   onOpenForwards,
   onDrillDown,
   onRemove,
@@ -479,6 +483,21 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           isLast={++itemIndex === totalItems}
         />
       );
+      
+      // 2.5. IDE Mode
+      if (onOpenIde) {
+        items.push(
+          <ActionItem
+            key="ide"
+            depth={subDepth}
+            icon={<Code className="w-3.5 h-3.5" />}
+            label={t('sessions.actions.ide_mode')}
+            onClick={onOpenIde}
+            lineColor={styles.line}
+            isLast={++itemIndex === totalItems}
+          />
+        );
+      }
       
       // 3. Port Forwarding
       if (onOpenForwards) {
@@ -734,6 +753,7 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
   onCloseTerminal,
   onSelectTerminal,
   onOpenSftp,
+  onOpenIde,
   onOpenForwards,
   onDrillDown,
   onRemove,
@@ -778,6 +798,7 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
         onCloseTerminal={(terminalId) => onCloseTerminal(node.id, terminalId)}
         onSelectTerminal={onSelectTerminal}
         onOpenSftp={() => onOpenSftp(node.id)}
+        onOpenIde={onOpenIde ? () => onOpenIde(node.id) : undefined}
         onOpenForwards={onOpenForwards ? () => onOpenForwards(node.id) : undefined}
         onDrillDown={() => onDrillDown(node.id)}
         onRemove={() => onRemove(node.id)}
@@ -798,6 +819,7 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
     onCloseTerminal,
     onSelectTerminal,
     onOpenSftp,
+    onOpenIde,
     onOpenForwards,
     onDrillDown,
     onRemove,

@@ -122,6 +122,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
 
         // ─── Project Actions ───
         openProject: async (connectionId, sftpSessionId, rootPath) => {
+          // 先初始化 SFTP 会话（如果尚未初始化）
+          // sftpInit 会在 SFTP 已初始化时返回当前工作目录，不会重复初始化
+          const isInitialized = await api.sftpIsInitialized(sftpSessionId);
+          if (!isInitialized) {
+            await api.sftpInit(sftpSessionId);
+          }
+          
           // 调用后端获取项目信息
           const projectInfo = await api.ideOpenProject(sftpSessionId, rootPath);
           

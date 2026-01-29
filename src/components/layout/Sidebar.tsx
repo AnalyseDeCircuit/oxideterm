@@ -271,6 +271,32 @@ export const Sidebar = () => {
     }
   }, [getNode, createTab, createTerminalForNode]);
 
+  // 打开 IDE 模式标签页
+  const handleTreeOpenIde = useCallback(async (nodeId: string) => {
+    const node = getNode(nodeId);
+    if (!node) return;
+    
+    const terminalIds = node.runtime?.terminalIds || [];
+    const connectionId = node.runtime?.connectionId || node.sshConnectionId;
+    
+    // 如果已有终端会话，用第一个打开 IDE 标签页
+    if (terminalIds.length > 0) {
+      const sessionId = terminalIds[0];
+      createTab('ide', sessionId);
+      return;
+    }
+    
+    // 如果节点已连接但没有终端会话，先创建终端会话再打开 IDE 标签页
+    if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
+      try {
+        const terminalId = await createTerminalForNode(nodeId, 80, 24);
+        createTab('ide', terminalId);
+      } catch (err) {
+        console.error('Failed to create session for IDE:', err);
+      }
+    }
+  }, [getNode, createTab, createTerminalForNode]);
+
   // 打开端口转发标签页
   const handleTreeOpenForwards = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
@@ -864,6 +890,7 @@ export const Sidebar = () => {
                 onCloseTerminal={handleTreeCloseTerminal}
                 onSelectTerminal={handleTreeSelectTerminal}
                 onOpenSftp={handleTreeOpenSftp}
+                onOpenIde={handleTreeOpenIde}
                 onOpenForwards={handleTreeOpenForwards}
                 onDrillDown={handleTreeDrillDown}
                 onRemove={handleTreeRemove}

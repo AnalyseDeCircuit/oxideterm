@@ -29,6 +29,7 @@
       "reconnect": "Riconnetti",
       "new_terminal": "Nuovo Terminale",
       "sftp_explorer": "Esplora SFTP",
+      "ide_mode": "Modalità IDE",
       "open_sftp": "Apri SFTP",
       "port_forwards": "Inoltri Porta",
       "port_forwarding": "Port Forwarding",

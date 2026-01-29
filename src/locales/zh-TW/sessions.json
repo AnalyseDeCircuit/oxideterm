@@ -29,6 +29,7 @@
       "reconnect": "重新連線",
       "new_terminal": "新增終端機",
       "sftp_explorer": "SFTP 檔案總管",
+      "ide_mode": "IDE 模式",
       "open_sftp": "開啟 SFTP",
       "port_forwards": "連接埠轉發",
       "port_forwarding": "連接埠轉發",

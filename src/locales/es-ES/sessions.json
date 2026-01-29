@@ -29,6 +29,7 @@
       "reconnect": "Reconectar",
       "new_terminal": "Nueva terminal",
       "sftp_explorer": "Explorador SFTP",
+      "ide_mode": "Modo IDE",
       "open_sftp": "Abrir SFTP",
       "port_forwards": "Reenvío de puertos",
       "port_forwarding": "Reenvío de puertos",

@@ -29,6 +29,7 @@
       "reconnect": "重新连接",
       "new_terminal": "新建终端",
       "sftp_explorer": "SFTP 文件管理器",
+      "ide_mode": "IDE 模式",
       "open_sftp": "打开 SFTP",
       "port_forwards": "端口转发",
       "port_forwarding": "端口转发",

@@ -29,6 +29,7 @@
       "reconnect": "재연결",
       "new_terminal": "새 터미널",
       "sftp_explorer": "SFTP 탐색기",
+      "ide_mode": "IDE 모드",
       "open_sftp": "SFTP 열기",
       "port_forwards": "포트 포워딩",
       "port_forwarding": "포트 포워딩",
