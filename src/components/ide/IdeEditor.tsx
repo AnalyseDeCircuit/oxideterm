@@ -14,8 +14,9 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   const { t } = useTranslation();
   const { updateTabContent, updateTabCursor, saveFile } = useIdeStore();
   
-  // 跟踪上一次的 tab.id，用于检测是否切换了文件
+  // 跟踪上一次的 tab.id / language，用于检测是否切换了文件或语言
   const prevTabIdRef = useRef<string>(tab.id);
+  const prevLanguageRef = useRef<string>(tab.language);
   const contentInitializedRef = useRef<boolean>(false);
   
   // 内容变化回调
@@ -55,17 +56,19 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   // 当文件内容加载完成或切换文件时，更新编辑器内容
   useEffect(() => {
     if (!isReady) return;
-    
+
     const isNewTab = prevTabIdRef.current !== tab.id;
+    const languageChanged = prevLanguageRef.current !== tab.language;
     const hasContent = tab.content !== null;
-    const needsInit = !contentInitializedRef.current || isNewTab;
-    
+    const needsInit = !contentInitializedRef.current || isNewTab || languageChanged;
+
     if (hasContent && needsInit) {
       setContent(tab.content!);
       contentInitializedRef.current = true;
       prevTabIdRef.current = tab.id;
+      prevLanguageRef.current = tab.language;
     }
-  }, [isReady, tab.id, tab.content, setContent]);
+  }, [isReady, tab.id, tab.content, tab.language, setContent]);
   
   // 标签激活时聚焦编辑器
   useEffect(() => {
@@ -79,21 +82,21 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   // 加载中状态
   if (tab.isLoading || tab.content === null) {
     return (
-      <div className="h-full flex items-center justify-center bg-zinc-900">
+      <div className="h-full flex items-center justify-center bg-theme-bg">
         <div className="flex flex-col items-center gap-2">
-          <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
-          <span className="text-xs text-zinc-500">{t('ide.loading_file')}</span>
+          <Loader2 className="w-6 h-6 animate-spin text-theme-text-muted" />
+          <span className="text-xs text-theme-text-muted">{t('ide.loading_file')}</span>
         </div>
       </div>
     );
   }
   
   return (
-    <div className="h-full w-full relative bg-zinc-900">
+    <div className="h-full w-full relative bg-theme-bg">
       {/* 编辑器加载中遮罩 */}
       {!isReady && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-10">
-          <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+        <div className="absolute inset-0 flex items-center justify-center bg-theme-bg z-10">
+          <Loader2 className="w-5 h-5 animate-spin text-theme-text-muted" />
         </div>
       )}
       

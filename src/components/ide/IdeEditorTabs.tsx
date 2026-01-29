@@ -3,19 +3,8 @@ import { useCallback, useState, useRef } from 'react';
 import { X, Circle, Loader2 } from 'lucide-react';
 import { useIdeTabs, useIdeStore, IdeTab } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
+import { FileIcon } from '../../lib/fileIcons';
 import { IdeSaveConfirmDialog } from './dialogs/IdeSaveConfirmDialog';
-
-// 文件图标（基于语言）
-const LANG_ICONS: Record<string, string> = {
-  typescript: '📘', javascript: '📙', rust: '🦀', python: '🐍',
-  go: '🐹', ruby: '💎', json: '📋', yaml: '📋',
-  markdown: '📝', html: '🌐', css: '🎨', shell: '📜',
-  plaintext: '📄',
-};
-
-function getLanguageIcon(language: string): string {
-  return LANG_ICONS[language.toLowerCase()] || '📄';
-}
 
 interface TabItemProps {
   tab: IdeTab;
@@ -42,24 +31,24 @@ function TabItem({ tab, isActive, onActivate, onClose }: TabItemProps) {
     <div
       className={cn(
         'group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer',
-        'border-r border-zinc-700/50 transition-colors',
-        'hover:bg-zinc-700/30',
+        'border-r border-theme-border/50 transition-colors',
+        'hover:bg-theme-bg-hover/30',
         isActive 
-          ? 'bg-zinc-800 border-b-2 border-b-orange-500' 
-          : 'bg-zinc-900/50'
+          ? 'bg-theme-bg-hover border-b-2 border-b-theme-accent' 
+          : 'bg-theme-bg/50'
       )}
       onClick={onActivate}
       onMouseDown={handleMouseDown}
     >
       {/* 文件图标 */}
-      <span className="text-sm flex-shrink-0">
-        {getLanguageIcon(tab.language)}
+      <span className="flex-shrink-0">
+        <FileIcon filename={tab.name} size={14} />
       </span>
       
       {/* 文件名 */}
       <span className={cn(
         'text-xs truncate max-w-[120px]',
-        isActive ? 'text-zinc-200' : 'text-zinc-400',
+        isActive ? 'text-theme-text' : 'text-theme-text-muted',
         tab.isDirty && 'italic'
       )}>
         {tab.name}
@@ -68,21 +57,21 @@ function TabItem({ tab, isActive, onActivate, onClose }: TabItemProps) {
       {/* 状态指示器 / 关闭按钮 */}
       <div className="w-4 h-4 flex items-center justify-center flex-shrink-0 ml-1">
         {tab.isLoading ? (
-          <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />
+          <Loader2 className="w-3 h-3 animate-spin text-theme-text-muted" />
         ) : tab.isDirty ? (
           // 未保存指示器（hover 时显示关闭按钮）
           <>
             <Circle 
               className={cn(
-                'w-2 h-2 fill-orange-500 text-orange-500',
+                'w-2 h-2 fill-theme-accent text-theme-accent',
                 'group-hover:hidden'
               )} 
             />
             <button
-              className="hidden group-hover:flex items-center justify-center w-4 h-4 rounded hover:bg-zinc-600/50"
+              className="hidden group-hover:flex items-center justify-center w-4 h-4 rounded hover:bg-theme-bg-hover/50"
               onClick={handleClose}
             >
-              <X className="w-3 h-3 text-zinc-400" />
+              <X className="w-3 h-3 text-theme-text-muted" />
             </button>
           </>
         ) : (
@@ -91,11 +80,11 @@ function TabItem({ tab, isActive, onActivate, onClose }: TabItemProps) {
             className={cn(
               'flex items-center justify-center w-4 h-4 rounded',
               'opacity-0 group-hover:opacity-100 transition-opacity',
-              'hover:bg-zinc-600/50'
+              'hover:bg-theme-bg-hover/50'
             )}
             onClick={handleClose}
           >
-            <X className="w-3 h-3 text-zinc-400" />
+            <X className="w-3 h-3 text-theme-text-muted" />
           </button>
         )}
       </div>
@@ -177,7 +166,7 @@ export function IdeEditorTabs() {
     <>
       <div
         ref={scrollRef}
-        className="flex items-stretch border-b border-zinc-700/50 bg-zinc-900/80 overflow-x-auto scrollbar-none"
+        className="flex items-stretch border-b border-theme-border/50 bg-theme-bg/80 overflow-x-auto scrollbar-none"
         onWheel={handleWheel}
       >
         {tabs.map(tab => (

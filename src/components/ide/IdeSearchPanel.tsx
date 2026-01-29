@@ -235,44 +235,44 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
   if (!open) return null;
   
   return (
-    <div className="w-80 h-full flex flex-col bg-zinc-900 border-r border-zinc-800">
+    <div className="w-80 h-full flex flex-col bg-theme-bg border-r border-theme-border">
       {/* 标题栏 */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border">
         <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-orange-500" />
+          <Search className="w-4 h-4 text-theme-accent" />
           <span className="text-sm font-medium">{t('ide.search')}</span>
         </div>
         <button
           onClick={onClose}
-          className="p-1 hover:bg-zinc-800 rounded transition-colors"
+          className="p-1 hover:bg-theme-bg-hover rounded transition-colors"
           title={t('ide.cancel')}
         >
-          <X className="w-4 h-4 text-zinc-500" />
+          <X className="w-4 h-4 text-theme-text-muted" />
         </button>
       </div>
       
       {/* 搜索输入 */}
-      <div className="p-2 border-b border-zinc-800">
+      <div className="p-2 border-b border-theme-border">
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-text-muted" />
           <Input
             ref={inputRef}
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t('ide.search_placeholder')}
-            className="pl-8 pr-8 bg-zinc-800 border-zinc-700 text-sm"
+            className="pl-8 pr-8 bg-theme-bg-panel border-theme-border text-sm"
           />
           {/* 加载/清除按钮 */}
           <div className="absolute right-2 top-1/2 -translate-y-1/2">
             {isSearching ? (
-              <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+              <Loader2 className="w-4 h-4 animate-spin text-theme-text-muted" />
             ) : query && (
               <button
                 onClick={handleClear}
-                className="p-0.5 hover:bg-zinc-700 rounded transition-colors"
+                className="p-0.5 hover:bg-theme-bg-hover rounded transition-colors"
               >
-                <X className="w-3 h-3 text-zinc-500" />
+                <X className="w-3 h-3 text-theme-text-muted" />
               </button>
             )}
           </div>
@@ -280,7 +280,7 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
         
         {/* 结果统计 */}
         {query && !isSearching && results.length > 0 && (
-          <div className="mt-2 text-xs text-zinc-500">
+          <div className="mt-2 text-xs text-theme-text-muted">
             {t('ide.search_results_count', { 
               count: totalMatches, 
               files: results.length 
@@ -301,62 +301,62 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
         
         {/* 空状态：未输入 */}
         {!query && !error && (
-          <div className="p-4 text-zinc-500 text-sm text-center">
+          <div className="p-4 text-theme-text-muted text-sm text-center">
             {t('ide.search_hint')}
           </div>
         )}
         
         {/* 空状态：无结果 */}
         {query && results.length === 0 && !isSearching && !error && (
-          <div className="p-4 text-zinc-500 text-sm text-center">
+          <div className="p-4 text-theme-text-muted text-sm text-center">
             {t('ide.no_results')}
           </div>
         )}
         
         {/* 搜索结果列表 */}
         {results.map(group => (
-          <div key={group.path} className="border-b border-zinc-800/50">
+          <div key={group.path} className="border-b border-theme-border/50">
             {/* 文件标题 */}
             <div
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 cursor-pointer",
-                "hover:bg-zinc-800/50 transition-colors"
+                "hover:bg-theme-bg-hover/50 transition-colors"
               )}
               onClick={() => togglePath(group.path)}
             >
               <ChevronRight 
                 className={cn(
-                  'w-3 h-3 text-zinc-500 transition-transform flex-shrink-0',
+                  'w-3 h-3 text-theme-text-muted transition-transform flex-shrink-0',
                   expandedPaths.has(group.path) && 'rotate-90'
                 )}
               />
-              <File className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-              <span className="text-sm truncate flex-1 text-zinc-300">
+              <File className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
+              <span className="text-sm truncate flex-1 text-theme-text">
                 {group.path.split('/').pop()}
               </span>
-              <span className="text-xs text-zinc-600">
+              <span className="text-xs text-theme-text-muted opacity-60">
                 {group.matches.length}
               </span>
             </div>
             
             {/* 文件中的匹配项 */}
             {expandedPaths.has(group.path) && (
-              <div className="bg-zinc-900/50">
+              <div className="bg-theme-bg/50">
                 {group.matches.map((match, idx) => (
                   <div
                     key={`${match.line}-${idx}`}
                     className={cn(
                       "flex items-start gap-2 px-3 py-1 cursor-pointer",
-                      "hover:bg-zinc-800/30 transition-colors text-sm"
+                      "hover:bg-theme-bg-hover/30 transition-colors text-sm"
                     )}
                     onClick={() => handleMatchClick(match)}
                   >
                     {/* 行号 */}
-                    <span className="text-zinc-600 w-8 text-right flex-shrink-0 font-mono text-xs pt-0.5">
+                    <span className="text-theme-text-muted opacity-60 w-8 text-right flex-shrink-0 font-mono text-xs pt-0.5">
                       {match.line}
                     </span>
                     {/* 预览内容（高亮匹配部分） */}
-                    <span className="truncate text-zinc-400 text-xs">
+                    <span className="truncate text-theme-text-muted text-xs">
                       {match.preview.substring(0, match.matchStart)}
                       <span className="text-yellow-500 font-medium bg-yellow-500/10">
                         {match.preview.substring(match.matchStart, match.matchEnd)}
@@ -372,7 +372,7 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
       </div>
       
       {/* 底部提示 */}
-      <div className="px-3 py-2 border-t border-zinc-800 text-[10px] text-zinc-600">
+      <div className="px-3 py-2 border-t border-theme-border text-[10px] text-theme-text-muted opacity-60">
         {t('ide.search_shortcut_hint')}
       </div>
     </div>

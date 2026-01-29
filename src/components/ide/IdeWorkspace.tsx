@@ -70,15 +70,15 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
   // 加载中状态
   if (!project) {
     return (
-      <div className="flex items-center justify-center h-full bg-zinc-900">
-        <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
-        <span className="ml-3 text-zinc-400">{t('ide.loading_project')}</span>
+      <div className="flex items-center justify-center h-full bg-theme-bg">
+        <Loader2 className="w-8 h-8 animate-spin text-theme-accent" />
+        <span className="ml-3 text-theme-text-muted">{t('ide.loading_project')}</span>
       </div>
     );
   }
   
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-theme-bg">
       {/* 主工作区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 搜索面板（最左侧，可选） */}
@@ -86,7 +86,7 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
         
         {/* 文件树（左侧） */}
         <div 
-          className="flex-shrink-0 border-r border-zinc-800 overflow-hidden"
+          className="flex-shrink-0 border-r border-theme-border overflow-hidden"
           style={{ width: treeWidth }}
         >
           <IdeTree />
@@ -94,7 +94,7 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
         
         {/* 可拖拽分隔线 */}
         <div
-          className="w-1 bg-zinc-800 hover:bg-orange-500/50 cursor-col-resize transition-colors"
+          className="w-1 bg-theme-border hover:bg-theme-accent/50 cursor-col-resize transition-colors"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -125,7 +125,7 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
             <>
               {/* 可拖拽分隔线 */}
               <div
-                className="h-1 bg-zinc-800 hover:bg-orange-500/50 cursor-row-resize transition-colors"
+                className="h-1 bg-theme-border hover:bg-theme-accent/50 cursor-row-resize transition-colors"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   const startY = e.clientY;

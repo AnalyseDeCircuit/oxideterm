@@ -8,7 +8,7 @@ export function IdeStatusBar() {
   const dirtyCount = useIdeDirtyCount();
   
   return (
-    <div className="h-6 bg-zinc-800 border-t border-zinc-700 flex items-center px-3 text-xs text-zinc-400">
+    <div className="h-6 bg-theme-bg-panel border-t border-theme-border flex items-center px-3 text-xs text-theme-text-muted">
       {/* Git 分支 */}
       {project?.isGitRepo && project.gitBranch && (
         <div className="flex items-center gap-1 mr-4">
@@ -31,7 +31,7 @@ export function IdeStatusBar() {
       
       {/* 未保存文件数 */}
       {dirtyCount > 0 && (
-        <span className="ml-auto text-orange-500">
+        <span className="ml-auto text-theme-accent">
           {dirtyCount} unsaved
         </span>
       )}

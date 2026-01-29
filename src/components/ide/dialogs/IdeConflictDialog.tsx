@@ -45,15 +45,15 @@ export function IdeConflictDialog({
         
         {/* 时间对比 */}
         <div className="space-y-2 text-sm">
-          <div className="flex justify-between items-center px-3 py-2 bg-zinc-800/50 rounded">
-            <span className="text-zinc-400">{t('ide.your_version')}</span>
-            <span className="text-zinc-300 font-mono text-xs">
+          <div className="flex justify-between items-center px-3 py-2 bg-theme-bg-hover/50 rounded">
+            <span className="text-theme-text-muted">{t('ide.your_version')}</span>
+            <span className="text-theme-text font-mono text-xs">
               {localTime.toLocaleString()}
             </span>
           </div>
-          <div className="flex justify-between items-center px-3 py-2 bg-zinc-800/50 rounded">
-            <span className="text-zinc-400">{t('ide.remote_version')}</span>
-            <span className="text-orange-400 font-mono text-xs">
+          <div className="flex justify-between items-center px-3 py-2 bg-theme-bg-hover/50 rounded">
+            <span className="text-theme-text-muted">{t('ide.remote_version')}</span>
+            <span className="text-theme-accent font-mono text-xs">
               {remoteTime.toLocaleString()}
             </span>
           </div>

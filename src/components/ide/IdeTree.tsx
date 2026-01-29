@@ -2,18 +2,18 @@
 import { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
-  Folder, 
-  FolderOpen,
   ChevronRight,
   ChevronDown,
   RefreshCw,
   AlertCircle,
   Loader2,
   GitBranch,
+  Folder,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
+import { FileIcon, FolderIcon } from '../../lib/fileIcons';
 import { FileInfo } from '../../types';
 import { Button } from '../ui/button';
 import { 
@@ -40,34 +40,6 @@ function useGitStatusContext() {
 // 判断文件是否为目录
 function isDirectory(file: FileInfo): boolean {
   return file.file_type === 'Directory';
-}
-
-// 文件图标映射（基于扩展名）
-const FILE_ICONS: Record<string, string> = {
-  ts: '📘', tsx: '📘', js: '📙', jsx: '📙',
-  rs: '🦀', py: '🐍', go: '🐹', rb: '💎',
-  json: '📋', yaml: '📋', yml: '📋', toml: '📋',
-  md: '📝', txt: '📄', html: '🌐', css: '🎨',
-  scss: '🎨', less: '🎨', svg: '🖼️', png: '🖼️',
-  jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️',
-  sh: '📜', bash: '📜', zsh: '📜', fish: '📜',
-  dockerfile: '🐳', gitignore: '🙈', lock: '🔒',
-  vue: '💚', svelte: '🧡', astro: '🚀',
-};
-
-function getFileIcon(name: string): string {
-  const lowerName = name.toLowerCase();
-  
-  // 特殊文件名匹配
-  if (lowerName === 'dockerfile') return '🐳';
-  if (lowerName === '.gitignore') return '🙈';
-  if (lowerName === 'cargo.toml') return '📦';
-  if (lowerName === 'package.json') return '📦';
-  if (lowerName.endsWith('.lock')) return '🔒';
-  
-  // 扩展名匹配
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  return FILE_ICONS[ext] || '📄';
 }
 
 // 排序：目录优先，然后按名称字母顺序
@@ -158,8 +130,8 @@ function TreeNode({ file, depth, sftpSessionId, parentPath }: TreeNodeProps) {
       <div
         className={cn(
           'flex items-center gap-1 py-0.5 px-1 cursor-pointer rounded-sm',
-          'hover:bg-zinc-700/50 transition-colors',
-          isOpen && 'bg-orange-500/10 text-orange-400'
+          'hover:bg-theme-bg-hover/50 transition-colors',
+          isOpen && 'bg-theme-accent/10 text-theme-accent'
         )}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
         onClick={handleClick}
@@ -169,34 +141,35 @@ function TreeNode({ file, depth, sftpSessionId, parentPath }: TreeNodeProps) {
         <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
           {isDir ? (
             isLoading ? (
-              <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />
+              <Loader2 className="w-3 h-3 animate-spin text-theme-text-muted" />
             ) : isExpanded ? (
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+              <ChevronDown className="w-3.5 h-3.5 text-theme-text-muted" />
             ) : (
-              <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+              <ChevronRight className="w-3.5 h-3.5 text-theme-text-muted" />
             )
           ) : null}
         </span>
         
         {/* 图标 */}
-        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 text-sm">
+        <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
           {isDir ? (
-            isExpanded ? (
-              <FolderOpen className="w-4 h-4 text-orange-400" />
-            ) : (
-              <Folder className="w-4 h-4 text-zinc-400" />
-            )
+            <FolderIcon isOpen={isExpanded} size={16} />
           ) : (
-            <span>{getFileIcon(file.name)}</span>
+            <FileIcon 
+              filename={file.name} 
+              size={14}
+              // Git 状态颜色覆盖默认颜色
+              overrideColor={gitStatus ? GIT_STATUS_COLORS[gitStatus] : undefined}
+            />
           )}
         </span>
         
         {/* 文件名 */}
         <span className={cn(
           'truncate text-xs flex-1',
-          isDir ? 'text-zinc-300' : 'text-zinc-400',
-          isOpen && 'text-orange-400 font-medium',
-          // Git 状态颜色（仅对未打开的文件生效）
+          isDir ? 'text-theme-text' : 'text-theme-text-muted',
+          isOpen && 'text-theme-accent font-medium',
+          // Git 状态颜色（仅对未打开的文件名生效）
           !isOpen && gitStatus && GIT_STATUS_COLORS[gitStatus]
         )}>
           {file.name}
@@ -288,28 +261,28 @@ export function IdeTree() {
   if (!project) {
     return (
       <div className="h-full flex items-center justify-center p-4">
-        <p className="text-xs text-zinc-500">{t('ide.no_project')}</p>
+        <p className="text-xs text-theme-text-muted">{t('ide.no_project')}</p>
       </div>
     );
   }
   
   return (
     <GitStatusContext.Provider value={gitStatusContextValue}>
-      <div className="h-full flex flex-col bg-zinc-900/50">
+      <div className="h-full flex flex-col bg-theme-bg/50">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700/50">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border/50">
           <div className="flex items-center gap-2 min-w-0">
-            <Folder className="w-4 h-4 text-orange-400 flex-shrink-0" />
-            <span className="text-xs font-medium text-zinc-300 truncate">
+            <Folder className="w-4 h-4 text-theme-accent flex-shrink-0" />
+            <span className="text-xs font-medium text-theme-text truncate">
               {project.name}
             </span>
             {/* Git 分支信息 */}
             {project.isGitRepo && gitStatus && (
-              <span className="flex items-center gap-1 text-[10px] text-zinc-500 truncate ml-1">
+              <span className="flex items-center gap-1 text-[10px] text-theme-text-muted truncate ml-1">
                 <GitBranch className="w-3 h-3" />
                 {gitStatus.branch}
                 {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
-                  <span className="text-zinc-600">
+                  <span className="opacity-60">
                     {gitStatus.ahead > 0 && `↑${gitStatus.ahead}`}
                     {gitStatus.behind > 0 && `↓${gitStatus.behind}`}
                   </span>
@@ -322,9 +295,9 @@ export function IdeTree() {
             size="sm"
             onClick={handleRefresh}
             disabled={isLoading || gitLoading}
-            className="h-6 w-6 p-0 hover:bg-zinc-700/50"
+            className="h-6 w-6 p-0 hover:bg-theme-bg-hover/50"
           >
-            <RefreshCw className={cn('w-3.5 h-3.5 text-zinc-400', (isLoading || gitLoading) && 'animate-spin')} />
+            <RefreshCw className={cn('w-3.5 h-3.5 text-theme-text-muted', (isLoading || gitLoading) && 'animate-spin')} />
           </Button>
         </div>
         
@@ -332,7 +305,7 @@ export function IdeTree() {
         <div className="flex-1 overflow-auto py-1">
           {isLoading && rootFiles === null ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+              <Loader2 className="w-5 h-5 animate-spin text-theme-text-muted" />
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center gap-2 py-8 px-4">

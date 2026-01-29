@@ -62,14 +62,14 @@ export function IdeTerminal({ isActive = true }: IdeTerminalProps) {
   }
   
   return (
-    <div className="h-full flex flex-col bg-zinc-950 border-t border-zinc-700/50">
+    <div className="h-full flex flex-col bg-theme-bg border-t border-theme-border/50">
       {/* 标题栏 */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-700/50">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg-panel/80 border-b border-theme-border/50">
         <div className="flex items-center gap-2">
-          <Terminal className="w-3.5 h-3.5 text-orange-400" />
-          <span className="text-xs font-medium text-zinc-300">{t('ide.terminal')}</span>
+          <Terminal className="w-3.5 h-3.5 text-theme-accent" />
+          <span className="text-xs font-medium text-theme-text">{t('ide.terminal')}</span>
           {status === 'creating' && (
-            <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />
+            <Loader2 className="w-3 h-3 animate-spin text-theme-text-muted" />
           )}
           {status === 'connected' && (
             <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -86,10 +86,10 @@ export function IdeTerminal({ isActive = true }: IdeTerminalProps) {
               variant="ghost"
               size="sm"
               onClick={handleReconnect}
-              className="h-5 w-5 p-0 hover:bg-zinc-700/50"
+              className="h-5 w-5 p-0 hover:bg-theme-bg-hover/50"
               title={t('ide.terminal_reconnect')}
             >
-              <RefreshCw className="w-3 h-3 text-zinc-400" />
+              <RefreshCw className="w-3 h-3 text-theme-text-muted" />
             </Button>
           )}
           
@@ -98,9 +98,9 @@ export function IdeTerminal({ isActive = true }: IdeTerminalProps) {
             variant="ghost"
             size="sm"
             onClick={handleClose}
-            className="h-5 w-5 p-0 hover:bg-zinc-700/50"
+            className="h-5 w-5 p-0 hover:bg-theme-bg-hover/50"
           >
-            <X className="w-3.5 h-3.5 text-zinc-400" />
+            <X className="w-3.5 h-3.5 text-theme-text-muted" />
           </Button>
         </div>
       </div>
@@ -109,19 +109,19 @@ export function IdeTerminal({ isActive = true }: IdeTerminalProps) {
       <div className="flex-1 min-h-0 relative">
         {/* 创建中 */}
         {status === 'creating' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-500 mb-2" />
-            <span className="text-xs text-zinc-500">{t('ide.creating_terminal')}</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-theme-bg">
+            <Loader2 className="w-6 h-6 animate-spin text-theme-text-muted mb-2" />
+            <span className="text-xs text-theme-text-muted">{t('ide.creating_terminal')}</span>
           </div>
         )}
         
         {/* 错误状态 */}
         {status === 'error' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-theme-bg">
             <AlertCircle className="w-6 h-6 text-red-400 mb-2" />
             <span className="text-xs text-red-400 mb-2">{t('ide.terminal_error')}</span>
             {error && (
-              <span className="text-xs text-zinc-500 max-w-xs text-center truncate mb-3">
+              <span className="text-xs text-theme-text-muted max-w-xs text-center truncate mb-3">
                 {error}
               </span>
             )}
@@ -138,8 +138,8 @@ export function IdeTerminal({ isActive = true }: IdeTerminalProps) {
         
         {/* 空闲状态（等待创建） */}
         {status === 'idle' && !terminalSessionId && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950">
-            <Terminal className="w-8 h-8 text-zinc-600 mb-2" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-theme-bg">
+            <Terminal className="w-8 h-8 text-theme-text-muted mb-2" />
             <Button
               variant="outline"
               size="sm"

@@ -34,16 +34,16 @@ export function IdeEditorArea() {
   
   if (tabs.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-zinc-500 bg-zinc-900/50">
+      <div className="h-full flex flex-col items-center justify-center text-theme-text-muted bg-theme-bg/50">
         <Code2 className="w-16 h-16 mb-4 opacity-20" />
         <p className="text-sm">{t('ide.no_open_files')}</p>
-        <p className="text-xs mt-1 text-zinc-600">{t('ide.click_to_open')}</p>
+        <p className="text-xs mt-1 opacity-60">{t('ide.click_to_open')}</p>
       </div>
     );
   }
   
   return (
-    <div className="h-full flex flex-col bg-zinc-900">
+    <div className="h-full flex flex-col bg-theme-bg">
       {/* 标签栏 */}
       <IdeEditorTabs />
       
