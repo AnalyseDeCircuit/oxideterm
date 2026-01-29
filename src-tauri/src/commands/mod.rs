@@ -6,6 +6,7 @@ pub mod config;
 mod connect_v2;
 pub mod forwarding;
 pub mod health;
+pub mod ide;
 pub mod kbi;
 #[cfg(feature = "local-terminal")]
 pub mod local;
@@ -20,6 +21,7 @@ pub mod ssh;
 pub use connect_v2::*;
 pub use forwarding::*;
 pub use health::*;
+pub use ide::*;
 pub use kbi::*;
 #[cfg(feature = "local-terminal")]
 pub use local::*;

@@ -687,6 +687,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
+    // Handle IDE tabs (require a connected SFTP session)
+    if (type === 'ide') {
+      if (!sessionId) return;
+
+      // Check if an IDE tab with the same sessionId already exists
+      const existingTab = get().tabs.find(t => t.type === 'ide' && t.sessionId === sessionId);
+      if (existingTab) {
+        set({ activeTabId: existingTab.id });
+        return;
+      }
+
+      // Get session name for tab title
+      const session = get().sessions.get(sessionId);
+      const sessionName = session?.name || 'Remote';
+
+      const newTab: Tab = {
+        id: crypto.randomUUID(),
+        type: 'ide',
+        sessionId,
+        title: `${i18n.t('tabs.ide')}: ${sessionName}`,
+        icon: '💻'
+      };
+
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id
+      }));
+      return;
+    }
+
     // Require sessionId for session-based tabs
     if (!sessionId) return;
 

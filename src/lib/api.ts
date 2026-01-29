@@ -1073,6 +1073,49 @@ export const api = {
     if (USE_MOCK) return ['/'];
     return invoke('local_get_drives');
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // IDE Mode Commands
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Open a project directory and get basic info
+   */
+  ideOpenProject: async (sessionId: string, path: string): Promise<{
+    rootPath: string;
+    name: string;
+    isGitRepo: boolean;
+    gitBranch: string | null;
+    fileCount: number;
+  }> => {
+    if (USE_MOCK) return { rootPath: path, name: 'mock', isGitRepo: false, gitBranch: null, fileCount: 0 };
+    return invoke('ide_open_project', { sessionId, path });
+  },
+
+  /**
+   * Check if a file is editable
+   */
+  ideCheckFile: async (sessionId: string, path: string): Promise<
+    | { type: 'editable'; size: number; mtime: number }
+    | { type: 'too_large'; size: number; limit: number }
+    | { type: 'binary' }
+    | { type: 'not_editable'; reason: string }
+  > => {
+    if (USE_MOCK) return { type: 'editable', size: 100, mtime: Date.now() / 1000 };
+    return invoke('ide_check_file', { sessionId, path });
+  },
+
+  /**
+   * Batch stat multiple paths
+   */
+  ideBatchStat: async (sessionId: string, paths: string[]): Promise<Array<{
+    size: number;
+    mtime: number;
+    isDir: boolean;
+  } | null>> => {
+    if (USE_MOCK) return paths.map(() => null);
+    return invoke('ide_batch_stat', { sessionId, paths });
+  },
 };
 
 

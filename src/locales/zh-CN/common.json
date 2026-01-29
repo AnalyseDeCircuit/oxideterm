@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "部分连接删除失败: {{message}}"
-    }
+    },
+    "retry": "重试"
   },
   "layout": {
     "empty": {
@@ -37,6 +38,50 @@
     "connection_pool": "连接池",
     "connection_matrix": "连接矩阵",
     "sftp_prefix": "SFTP",
-    "forwards_prefix": "转发"
+    "forwards_prefix": "转发",
+    "ide": "IDE"
+  },
+  "ide": {
+    "loading_project": "正在加载项目...",
+    "no_project": "未打开项目",
+    "file_tree_placeholder": "文件树将显示在这里",
+    "no_open_files": "没有打开的文件",
+    "click_to_open": "双击文件树中的文件以打开",
+    "terminal_placeholder": "终端（第三阶段）",
+    "open_project": "打开项目",
+    "close_project": "关闭项目",
+    "select_folder": "选择文件夹作为项目根目录",
+    "unsaved_changes": "以下文件有未保存的更改：",
+    "unsaved_changes_title": "未保存的更改",
+    "unsaved_changes_desc": "\"{{fileName}}\" 有未保存的更改。您想要怎么做？",
+    "save_all": "全部保存",
+    "discard_all": "全部放弃",
+    "discard": "不保存",
+    "save": "保存",
+    "file_conflict": "文件冲突",
+    "file_conflict_desc": "远程文件已被修改，请选择处理方式：",
+    "conflict_overwrite": "覆盖远程",
+    "conflict_reload": "重新加载",
+    "conflict_save_as": "另存为",
+    "file_too_large": "文件过大",
+    "file_too_large_desc": "文件大小 {{size}} 超过限制 {{limit}}",
+    "file_binary": "无法编辑二进制文件",
+    "terminal_toggle": "切换终端",
+    "terminal": "终端",
+    "creating_terminal": "正在创建终端...",
+    "terminal_error": "创建终端失败",
+    "git_branch": "分支：{{branch}}",
+    "search_placeholder": "搜索文件...",
+    "loading_file": "正在加载文件...",
+    "file_not_loaded": "文件内容未加载",
+    "tip_double_click": "双击文件以打开",
+    "tip_save_shortcut": "按 Cmd/Ctrl+S 保存",
+    "file_name": "文件",
+    "your_version": "您的版本",
+    "remote_version": "远程版本",
+    "refresh": "刷新",
+    "search": "搜索",
+    "search_hint": "输入以在项目文件中搜索",
+    "no_results": "未找到结果"
   }
 }
