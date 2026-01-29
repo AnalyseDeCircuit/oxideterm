@@ -156,12 +156,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   // === Listen for connection status changes (Standby mode trigger) ===
   useEffect(() => {
+    let mounted = true;
+    let unlistenFn: (() => void) | null = null;
+    
     interface ConnectionStatusEvent {
       connection_id: string;
       status: 'connected' | 'link_down' | 'reconnecting' | 'disconnected';
     }
 
-    const unlisten = listen<ConnectionStatusEvent>('connection_status_changed', (event) => {
+    listen<ConnectionStatusEvent>('connection_status_changed', (event) => {
+      if (!mounted) return;
+      
       const { connection_id, status } = event.payload;
       
       const currentConnectionId = connectionIdRef.current;
@@ -199,10 +204,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           term.write(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_failed')}\x1b[0m\r\n`);
         }
       }
+    }).then((fn) => {
+      if (mounted) {
+        unlistenFn = fn;
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      mounted = false;
+      unlistenFn?.();
     };
   }, [sessionId]);
 

@@ -57,123 +57,163 @@ export function useConnectionEvents(): void {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const unlisteners: Array<() => void> = [];
+    
     // 获取 sessionTreeStore 方法（避免闭包问题）
     const getTreeStore = () => useSessionTreeStore.getState();
 
-    // Listen for connection status changes from backend
-    const unlistenStatus = listen<ConnectionStatusEvent>('connection_status_changed', (event) => {
-      const { connection_id, status, affected_children } = event.payload;
-      console.log(`[ConnectionEvents] ${connection_id} -> ${status}`, { affected_children });
+    // Setup all listeners asynchronously
+    const setupListeners = async () => {
+      // Listen for connection status changes from backend
+      try {
+        const unlistenStatus = await listen<ConnectionStatusEvent>('connection_status_changed', (event) => {
+          if (!mounted) return;
+          const { connection_id, status, affected_children } = event.payload;
+          console.log(`[ConnectionEvents] ${connection_id} -> ${status}`, { affected_children });
 
-      // Map backend status to frontend state
-      let state: SshConnectionState;
-      switch (status) {
-        case 'connected':
-          state = 'active';
-          break;
-        case 'link_down':
-          state = 'link_down';
-          break;
-        case 'reconnecting':
-          state = 'reconnecting';
-          break;
-        case 'disconnected':
-          state = 'disconnected';
-          break;
-        default:
-          console.warn(`[ConnectionEvents] Unknown status: ${status}`);
-          return;
-      }
+          // Map backend status to frontend state
+          let state: SshConnectionState;
+          switch (status) {
+            case 'connected':
+              state = 'active';
+              break;
+            case 'link_down':
+              state = 'link_down';
+              break;
+            case 'reconnecting':
+              state = 'reconnecting';
+              break;
+            case 'disconnected':
+              state = 'disconnected';
+              break;
+            default:
+              console.warn(`[ConnectionEvents] Unknown status: ${status}`);
+              return;
+          }
 
-      updateConnectionState(connection_id, state);
+          updateConnectionState(connection_id, state);
 
-      // 使用拓扑解析器处理 link-down 级联
-      if (status === 'link_down') {
-        const affectedNodeIds = topologyResolver.handleLinkDown(connection_id, affected_children);
-        if (affectedNodeIds.length > 0) {
-          console.log(`[ConnectionEvents] Marking nodes as link-down:`, affectedNodeIds);
-          getTreeStore().markLinkDownBatch(affectedNodeIds);
-        }
-      }
+          // 使用拓扑解析器处理 link-down 级联
+          if (status === 'link_down') {
+            const affectedNodeIds = topologyResolver.handleLinkDown(connection_id, affected_children);
+            if (affectedNodeIds.length > 0) {
+              console.log(`[ConnectionEvents] Marking nodes as link-down:`, affectedNodeIds);
+              getTreeStore().markLinkDownBatch(affectedNodeIds);
+            }
+          }
 
-      // 重连成功时清除 link-down 标记
-      if (status === 'connected') {
-        const nodeId = topologyResolver.getNodeId(connection_id);
-        if (nodeId) {
-          console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
-          getTreeStore().clearLinkDown(nodeId);
-          // 清除重连进度
-          getTreeStore().setReconnectProgress(nodeId, null);
-        }
-      }
+          // 重连成功时清除 link-down 标记
+          if (status === 'connected') {
+            const nodeId = topologyResolver.getNodeId(connection_id);
+            if (nodeId) {
+              console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
+              getTreeStore().clearLinkDown(nodeId);
+              // 清除重连进度
+              getTreeStore().setReconnectProgress(nodeId, null);
+            }
+          }
 
-      // When connection goes down, interrupt all SFTP transfers for related sessions
-      // Use sessionsRef.current to avoid dependency on sessions
-      if (status === 'link_down' || status === 'disconnected') {
-        const sessions = sessionsRef.current;
-        sessions.forEach((session, sessionId) => {
-          if (session.connectionId === connection_id) {
-            interruptTransfersBySession(sessionId, 
-              status === 'link_down' ? i18n.t('connections.events.connection_lost_reconnecting') : i18n.t('connections.events.connection_closed')
-            );
+          // When connection goes down, interrupt all SFTP transfers for related sessions
+          if (status === 'link_down' || status === 'disconnected') {
+            const sessions = sessionsRef.current;
+            sessions.forEach((session, sessionId) => {
+              if (session.connectionId === connection_id) {
+                interruptTransfersBySession(sessionId, 
+                  status === 'link_down' ? i18n.t('connections.events.connection_lost_reconnecting') : i18n.t('connections.events.connection_closed')
+                );
+              }
+            });
           }
         });
-      }
-    });
-
-    // Listen for reconnect progress events
-    const unlistenProgress = listen<ConnectionReconnectProgressEvent>('connection_reconnect_progress', (event) => {
-      const { connection_id, attempt, max_attempts, next_retry_ms } = event.payload;
-      console.log(`[ConnectionEvents] Reconnect progress: ${connection_id} attempt ${attempt}/${max_attempts ?? '∞'}`);
-
-      // 通过拓扑解析器找到对应节点
-      const nodeId = topologyResolver.getNodeId(connection_id);
-      if (nodeId) {
-        const progress: ReconnectProgress = {
-          attempt,
-          maxAttempts: max_attempts,
-          nextRetryMs: next_retry_ms,
-        };
-        getTreeStore().setReconnectProgress(nodeId, progress);
-      }
-    });
-
-    // Listen for connection reconnected events from backend
-    const unlistenReconnected = listen<ConnectionReconnectedEvent>('connection_reconnected', (event) => {
-      const { connection_id, terminal_ids, forward_ids } = event.payload;
-      console.log(`[ConnectionEvents] Connection ${connection_id} reconnected`, {
-        terminal_ids,
-        forward_ids,
-      });
-
-      // Update connection state to active
-      updateConnectionState(connection_id, 'active');
-
-      // 通过拓扑解析器找到对应节点并清除 link-down
-      const nodeId = topologyResolver.getNodeId(connection_id);
-      if (nodeId) {
-        console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
-        getTreeStore().clearLinkDown(nodeId);
-        getTreeStore().setReconnectProgress(nodeId, null);
+        
+        if (mounted) {
+          unlisteners.push(unlistenStatus);
+        } else {
+          unlistenStatus();
+        }
+      } catch (error) {
+        console.error('[ConnectionEvents] Failed to listen to connection_status_changed:', error);
       }
 
-      // 恢复终端 WebSocket 连接
-      if (terminal_ids.length > 0) {
-        console.log(`[ConnectionEvents] Restoring terminals:`, terminal_ids);
-        restoreTerminalConnections(terminal_ids);
+      // Listen for reconnect progress events
+      try {
+        const unlistenProgress = await listen<ConnectionReconnectProgressEvent>('connection_reconnect_progress', (event) => {
+          if (!mounted) return;
+          const { connection_id, attempt, max_attempts, next_retry_ms } = event.payload;
+          console.log(`[ConnectionEvents] Reconnect progress: ${connection_id} attempt ${attempt}/${max_attempts ?? '∞'}`);
+
+          // 通过拓扑解析器找到对应节点
+          const nodeId = topologyResolver.getNodeId(connection_id);
+          if (nodeId) {
+            const progress: ReconnectProgress = {
+              attempt,
+              maxAttempts: max_attempts,
+              nextRetryMs: next_retry_ms,
+            };
+            getTreeStore().setReconnectProgress(nodeId, progress);
+          }
+        });
+
+        if (mounted) {
+          unlisteners.push(unlistenProgress);
+        } else {
+          unlistenProgress();
+        }
+      } catch (error) {
+        console.error('[ConnectionEvents] Failed to listen to connection_reconnect_progress:', error);
       }
 
-      // 恢复端口转发
-      if (forward_ids.length > 0) {
-        console.log(`[ConnectionEvents] Restoring port forwards:`, forward_ids);
-        restorePortForwards(connection_id, forward_ids);
-      }
-    });
+      // Listen for connection reconnected events from backend
+      try {
+        const unlistenReconnected = await listen<ConnectionReconnectedEvent>('connection_reconnected', (event) => {
+          if (!mounted) return;
+          const { connection_id, terminal_ids, forward_ids } = event.payload;
+          console.log(`[ConnectionEvents] Connection ${connection_id} reconnected`, {
+            terminal_ids,
+            forward_ids,
+          });
 
+          // Update connection state to active
+          updateConnectionState(connection_id, 'active');
+
+          // 通过拓扑解析器找到对应节点并清除 link-down
+          const nodeId = topologyResolver.getNodeId(connection_id);
+          if (nodeId) {
+            console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
+            getTreeStore().clearLinkDown(nodeId);
+            getTreeStore().setReconnectProgress(nodeId, null);
+          }
+
+          // 恢复终端 WebSocket 连接
+          if (terminal_ids.length > 0) {
+            console.log(`[ConnectionEvents] Restoring terminals:`, terminal_ids);
+            restoreTerminalConnections(terminal_ids);
+          }
+
+          // 恢复端口转发
+          if (forward_ids.length > 0) {
+            console.log(`[ConnectionEvents] Restoring port forwards:`, forward_ids);
+            restorePortForwards(connection_id, forward_ids);
+          }
+        });
+
+        if (mounted) {
+          unlisteners.push(unlistenReconnected);
+        } else {
+          unlistenReconnected();
+        }
+      } catch (error) {
+        console.error('[ConnectionEvents] Failed to listen to connection_reconnected:', error);
+      }
+    };
+
+    setupListeners();
+
+    // Cleanup function with proper async handling
     return () => {
-      unlistenStatus.then((fn) => fn());
-      unlistenProgress.then((fn) => fn());
-      unlistenReconnected.then((fn) => fn());
+      mounted = false;
+      unlisteners.forEach((unlisten) => unlisten());
     };
   // Dependencies are stable: updateConnectionState and interruptTransfersBySession are selectors
   // sessionsRef is updated via subscription, not as a dependency

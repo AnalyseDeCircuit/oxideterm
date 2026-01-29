@@ -367,9 +367,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const closedEventName = `local-terminal-closed:${sessionId}`;
 
     // Listen for data - use RAF batching to reduce search index jumping
+    // Track mounted state and listener cleanup functions
+    let mounted = true;
+    let unlistenDataFn: (() => void) | null = null;
+    let unlistenClosedFn: (() => void) | null = null;
+
     // Rust PTY sends high-frequency small packets; batching reduces buffer churn
-    const unlistenData = listen<{ sessionId: string; data: number[] }>(dataEventName, (event) => {
-      if (!isMountedRef.current || !terminalRef.current) return;
+    listen<{ sessionId: string; data: number[] }>(dataEventName, (event) => {
+      if (!mounted || !isMountedRef.current || !terminalRef.current) return;
       const data = new Uint8Array(event.payload.data);
       
       // Queue data for RAF batch write
@@ -378,7 +383,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (rafIdRef.current === null) {
         rafIdRef.current = requestAnimationFrame(() => {
           rafIdRef.current = null;
-          if (!isMountedRef.current || !terminalRef.current) return;
+          if (!mounted || !isMountedRef.current || !terminalRef.current) return;
           
           const pending = pendingDataRef.current;
           if (pending.length === 0) return;
@@ -416,11 +421,17 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           }
         });
       }
+    }).then((fn) => {
+      if (mounted) {
+        unlistenDataFn = fn;
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
     });
 
     // Listen for close
-    const unlistenClosed = listen<{ sessionId: string; exitCode: number | null }>(closedEventName, (event) => {
-      if (!isMountedRef.current || !terminalRef.current) return;
+    listen<{ sessionId: string; exitCode: number | null }>(closedEventName, (event) => {
+      if (!mounted || !isMountedRef.current || !terminalRef.current) return;
       const { exitCode } = event.payload;
       setIsRunning(false);
       updateTerminalState(sessionId, false);
@@ -431,9 +442,16 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       } else {
         terminalRef.current.writeln(`\x1b[33m${t('terminal.local.process_terminated')}\x1b[0m`);
       }
+    }).then((fn) => {
+      if (mounted) {
+        unlistenClosedFn = fn;
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
     });
 
     return () => {
+      mounted = false;
       // Clean up RAF and throttle timers
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
@@ -446,8 +464,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       pendingDataRef.current = [];
       searchPausedRef.current = false;
       
-      unlistenData.then((fn) => fn());
-      unlistenClosed.then((fn) => fn());
+      unlistenDataFn?.();
+      unlistenClosedFn?.();
     };
   }, [sessionId, updateTerminalState]);
 
@@ -455,8 +473,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   useEffect(() => {
     if (!isActive || !isRunning) return;
 
-    const unlisten = listen<{ command: string }>('ai-insert-command', (event) => {
-      if (!isMountedRef.current || !isRunning) return;
+    let mounted = true;
+    let unlistenFn: (() => void) | null = null;
+
+    listen<{ command: string }>('ai-insert-command', (event) => {
+      if (!mounted || !isMountedRef.current || !isRunning) return;
       
       const { command } = event.payload;
       // Write command to terminal (without executing - user can review and press Enter)
@@ -475,10 +496,17 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         const bytes = encoder.encode(command);
         writeTerminal(sessionId, bytes);
       }
+    }).then((fn) => {
+      if (mounted) {
+        unlistenFn = fn;
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      mounted = false;
+      unlistenFn?.();
     };
   }, [sessionId, isActive, isRunning, writeTerminal]);
 

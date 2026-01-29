@@ -43,6 +43,8 @@ OxideTerm 是一个使用 Tauri + React + Rust 构建的 SSH 终端客户端。�
 | C-3 | 🔴 | WebSocket Token 有效期过短 | `bridge/server.rs` | [x] ✅ 2026-01-29 |
 | H-1 | 🟠 | SFTPView 组件过度复杂 | `SFTPView.tsx` (1946行) | [ ] |
 | H-2 | 🟠 | TerminalView 状态管理复杂 | `TerminalView.tsx` (1345行) | [ ] |
+| H-3 | 🟠 | appStore 过于集中 | `appStore.ts` (780行) | [ ] |
+| H-4 | 🟠 | 事件监听器内存泄漏风险 | 多个组件 | [x] ✅ 2026-01-29 |
 | H-3 | 🟠 | appStore 状态过度集中 | `appStore.ts` (1264行) | [ ] |
 | H-4 | 🟠 | 事件监听器内存泄漏风险 | `useNetworkStatus.ts` | [ ] |
 | H-5 | 🟠 | Rust 连接池死锁风险 | `pool.rs` | [ ] |
@@ -750,7 +752,18 @@ export const useAppStore = () => {
 
 ---
 
-### H-4: 事件监听器内存泄漏风险
+### H-4: 事件监听器内存泄漏风险 ✅ 已修复
+
+> **修复日期**: 2026-01-29  
+> **修复内容**: 
+> - 创建 `src/hooks/useTauriListener.ts` 通用安全监听器 hook
+> - 重构 `useConnectionEvents.ts` 使用 `mounted` 标志和 `unlisteners` 数组模式
+> - 修复 `TerminalView.tsx` 中 `connection_status_changed` 监听器
+> - 修复 `LocalTerminalView.tsx` 中 `data`、`closed`、`ai-insert-command` 监听器
+> - 修复 `SFTPView.tsx` 中 `sftp:progress` 和 `sftp:complete` 监听器
+> - 修复 `KbiDialog.tsx` 中 `ssh_kbi_prompt` 和 `ssh_kbi_result` 监听器
+>
+> **关键修复模式**：避免使用 `async/await` 在 useEffect 中设置监听器，改用 `.then()` 回调，并在回调中检查 `mounted` 标志
 
 **问题描述**
 

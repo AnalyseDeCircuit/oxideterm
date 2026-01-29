@@ -963,53 +963,63 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       let unlistenProgressFn: (() => void) | null = null;
       let unlistenCompleteFn: (() => void) | null = null;
       
-      const setupListeners = async () => {
-        unlistenProgressFn = await listen<TransferProgressEvent>(`sftp:progress:${sessionId}`, (event) => {
-          if (!mounted) return; // 组件已卸载，忽略事件
-          
-          const { remote_path, local_path, transferred_bytes, total_bytes } = event.payload;
-          // Find matching transfer by path (normalize paths for comparison)
-          const transfers = getAllTransfers();
-          const normalizePath = (p: string) => p.replace(/\/+/g, '/').replace(/\/$/, '');
-          const normalizedRemote = normalizePath(remote_path);
-          const normalizedLocal = normalizePath(local_path);
-          
-          const match = transfers.find(t => {
-            const tRemote = normalizePath(t.remotePath);
-            const tLocal = normalizePath(t.localPath);
-            return tRemote === normalizedRemote || tLocal === normalizedLocal ||
-                   normalizedRemote.endsWith(tRemote) || tRemote.endsWith(normalizedRemote) ||
-                   normalizedLocal.endsWith(tLocal) || tLocal.endsWith(normalizedLocal);
-          });
-          
-          if (match) {
-            updateProgress(match.id, transferred_bytes, total_bytes);
-          } else {
-            console.log('[SFTP Progress] No match found for:', { remote_path, local_path, transfers: transfers.map(t => ({ remotePath: t.remotePath, localPath: t.localPath })) });
-          }
+      // Setup progress listener
+      listen<TransferProgressEvent>(`sftp:progress:${sessionId}`, (event) => {
+        if (!mounted) return; // 组件已卸载，忽略事件
+        
+        const { remote_path, local_path, transferred_bytes, total_bytes } = event.payload;
+        // Find matching transfer by path (normalize paths for comparison)
+        const transfers = getAllTransfers();
+        const normalizePath = (p: string) => p.replace(/\/+/g, '/').replace(/\/$/, '');
+        const normalizedRemote = normalizePath(remote_path);
+        const normalizedLocal = normalizePath(local_path);
+        
+        const match = transfers.find(t => {
+          const tRemote = normalizePath(t.remotePath);
+          const tLocal = normalizePath(t.localPath);
+          return tRemote === normalizedRemote || tLocal === normalizedLocal ||
+                 normalizedRemote.endsWith(tRemote) || tRemote.endsWith(normalizedRemote) ||
+                 normalizedLocal.endsWith(tLocal) || tLocal.endsWith(normalizedLocal);
         });
         
-        unlistenCompleteFn = await listen<TransferCompleteEvent>(`sftp:complete:${sessionId}`, (event) => {
-          if (!mounted) return; // 组件已卸载，忽略事件
-          
-          const { transfer_id, success, error } = event.payload;
-          if (success) {
-              setTransferState(transfer_id, 'completed');
-              // Refresh file lists
-              refreshLocalFiles();
-              api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
-          } else {
-              setTransferState(transfer_id, 'error', error || 'Transfer failed');
-          }
-        });
-      };
+        if (match) {
+          updateProgress(match.id, transferred_bytes, total_bytes);
+        } else {
+          console.log('[SFTP Progress] No match found for:', { remote_path, local_path, transfers: transfers.map(t => ({ remotePath: t.remotePath, localPath: t.localPath })) });
+        }
+      }).then((fn) => {
+        if (mounted) {
+          unlistenProgressFn = fn;
+        } else {
+          fn(); // Component unmounted, clean up immediately
+        }
+      });
       
-      setupListeners();
+      // Setup complete listener
+      listen<TransferCompleteEvent>(`sftp:complete:${sessionId}`, (event) => {
+        if (!mounted) return; // 组件已卸载，忽略事件
+        
+        const { transfer_id, success, error } = event.payload;
+        if (success) {
+            setTransferState(transfer_id, 'completed');
+            // Refresh file lists
+            refreshLocalFiles();
+            api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+        } else {
+            setTransferState(transfer_id, 'error', error || 'Transfer failed');
+        }
+      }).then((fn) => {
+        if (mounted) {
+          unlistenCompleteFn = fn;
+        } else {
+          fn(); // Component unmounted, clean up immediately
+        }
+      });
       
       return () => { 
           mounted = false;
-          if (unlistenProgressFn) unlistenProgressFn();
-          if (unlistenCompleteFn) unlistenCompleteFn();
+          unlistenProgressFn?.();
+          unlistenCompleteFn?.();
       };
   }, [sessionId, updateProgress, setTransferState, refreshLocalFiles, remotePath, getAllTransfers]);
 

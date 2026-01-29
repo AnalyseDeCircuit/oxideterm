@@ -51,55 +51,66 @@ export const KbiDialog = ({ onSuccess, onFailure }: KbiDialogProps) => {
 
   // Set up event listeners
   useEffect(() => {
-    const setupListeners = async () => {
-      // Listen for prompt events from backend
-      const unlistenPrompt = await listen<KbiPromptEvent>('ssh_kbi_prompt', (event) => {
-        setCurrentPrompt(event.payload);
-        setResponses(new Array(event.payload.prompts.length).fill(''));
+    let mounted = true;
+
+    // Listen for prompt events from backend
+    listen<KbiPromptEvent>('ssh_kbi_prompt', (event) => {
+      if (!mounted) return;
+      setCurrentPrompt(event.payload);
+      setResponses(new Array(event.payload.prompts.length).fill(''));
+      setLoading(false);
+      setError(null);
+      setTimeLeft(60);
+
+      // Start countdown timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            if (timerRef.current) clearInterval(timerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }).then((fn) => {
+      if (mounted) {
+        listenersRef.current.push(fn);
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
+    });
+
+    // Listen for result events from backend
+    listen<KbiResultEvent>('ssh_kbi_result', (event) => {
+      if (!mounted) return;
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      const result = event.payload;
+      if (result.success && result.sessionId && result.wsPort && result.wsToken) {
+        setCurrentPrompt(null);
+        onSuccess(result.sessionId, result.wsPort, result.wsToken);
+      } else {
+        setError(result.error || 'Authentication failed');
         setLoading(false);
-        setError(null);
-        setTimeLeft(60);
-
-        // Start countdown timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-        }
-        timerRef.current = setInterval(() => {
-          setTimeLeft((prev) => {
-            if (prev <= 1) {
-              if (timerRef.current) clearInterval(timerRef.current);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-      });
-
-      // Listen for result events from backend
-      const unlistenResult = await listen<KbiResultEvent>('ssh_kbi_result', (event) => {
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-
-        const result = event.payload;
-        if (result.success && result.sessionId && result.wsPort && result.wsToken) {
-          setCurrentPrompt(null);
-          onSuccess(result.sessionId, result.wsPort, result.wsToken);
-        } else {
-          setError(result.error || 'Authentication failed');
-          setLoading(false);
-          // Don't close dialog - let user see the error
-          // They can click Cancel to dismiss
-        }
-      });
-
-      listenersRef.current = [unlistenPrompt, unlistenResult];
-    };
-
-    setupListeners();
+        // Don't close dialog - let user see the error
+        // They can click Cancel to dismiss
+      }
+    }).then((fn) => {
+      if (mounted) {
+        listenersRef.current.push(fn);
+      } else {
+        fn(); // Component unmounted, clean up immediately
+      }
+    });
 
     return () => {
+      mounted = false;
       // Cleanup listeners
       listenersRef.current.forEach((unlisten) => unlisten());
       listenersRef.current = [];
