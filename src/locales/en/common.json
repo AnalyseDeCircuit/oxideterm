@@ -82,6 +82,12 @@
     "refresh": "Refresh",
     "search": "Search",
     "search_hint": "Type to search in project files",
-    "no_results": "No results found"
+    "no_results": "No results found",
+    "cancel": "Cancel",
+    "conflict_title": "File Modified on Server",
+    "conflict_desc": "\"{{fileName}}\" has been modified on the remote server since you opened it.",
+    "reload_remote": "Load Remote",
+    "overwrite": "Overwrite",
+    "retry": "Retry"
   }
 }

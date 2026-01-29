@@ -1,36 +1,65 @@
 // src/components/ide/IdeEditorArea.tsx
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Code2 } from 'lucide-react';
-import { useIdeTabs, useIdeActiveTab } from '../../store/ideStore';
+import { useIdeTabs, useIdeActiveTab, useIdeStore } from '../../store/ideStore';
+import { IdeEditorTabs } from './IdeEditorTabs';
+import { IdeEditor } from './IdeEditor';
+import { IdeConflictDialog, ConflictResolution } from './dialogs/IdeConflictDialog';
 
 export function IdeEditorArea() {
   const { t } = useTranslation();
   const tabs = useIdeTabs();
   const activeTab = useIdeActiveTab();
+  const { conflictState, resolveConflict, clearConflict } = useIdeStore();
+  
+  // 获取冲突文件信息
+  const conflictTab = conflictState 
+    ? tabs.find(t => t.id === conflictState.tabId) 
+    : null;
+  
+  // 处理冲突解决
+  const handleConflictResolve = useCallback(async (resolution: ConflictResolution) => {
+    if (resolution === 'cancel') {
+      clearConflict();
+      return;
+    }
+    
+    try {
+      await resolveConflict(resolution === 'overwrite' ? 'overwrite' : 'reload');
+    } catch (e) {
+      console.error('[IdeEditorArea] Conflict resolution failed:', e);
+    }
+  }, [resolveConflict, clearConflict]);
   
   if (tabs.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-zinc-500">
+      <div className="h-full flex flex-col items-center justify-center text-zinc-500 bg-zinc-900/50">
         <Code2 className="w-16 h-16 mb-4 opacity-20" />
-        <p>{t('ide.no_open_files')}</p>
-        <p className="text-sm mt-1">{t('ide.click_to_open')}</p>
+        <p className="text-sm">{t('ide.no_open_files')}</p>
+        <p className="text-xs mt-1 text-zinc-600">{t('ide.click_to_open')}</p>
       </div>
     );
   }
   
   return (
-    <div className="flex-1 flex flex-col">
-      {/* 标签栏（Phase 2 实现） */}
-      <div className="h-9 bg-zinc-900 border-b border-zinc-800 flex items-center px-2 text-sm text-zinc-400">
-        {tabs.map(tab => (
-          <span key={tab.id} className="px-2">{tab.name}</span>
-        ))}
+    <div className="h-full flex flex-col bg-zinc-900">
+      {/* 标签栏 */}
+      <IdeEditorTabs />
+      
+      {/* 编辑器区域 */}
+      <div className="flex-1 min-h-0 relative">
+        {activeTab && <IdeEditor tab={activeTab} />}
       </div>
       
-      {/* 编辑器（Phase 2 实现） */}
-      <div className="flex-1 bg-zinc-950 p-4 text-zinc-500">
-        {activeTab ? `Editing: ${activeTab.path}` : 'No file selected'}
-      </div>
+      {/* 冲突对话框 */}
+      <IdeConflictDialog
+        open={!!conflictState && !!conflictTab}
+        fileName={conflictTab?.name || ''}
+        localTime={new Date((conflictState?.localMtime || 0) * 1000)}
+        remoteTime={new Date((conflictState?.remoteMtime || 0) * 1000)}
+        onResolve={handleConflictResolve}
+      />
     </div>
   );
 }
