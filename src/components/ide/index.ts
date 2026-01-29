@@ -9,3 +9,4 @@ export { IdeStatusBar } from './IdeStatusBar';
 export { IdeSaveConfirmDialog } from './dialogs/IdeSaveConfirmDialog';
 export { IdeConflictDialog } from './dialogs/IdeConflictDialog';
 export { useCodeMirrorEditor } from './hooks/useCodeMirrorEditor';
+export { useIdeTerminal } from './hooks/useIdeTerminal';

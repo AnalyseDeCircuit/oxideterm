@@ -88,6 +88,9 @@
     "conflict_desc": "\"{{fileName}}\" 自您打开以来已在远程服务器上被修改。",
     "reload_remote": "加载远程版本",
     "overwrite": "覆盖",
-    "retry": "重试"
+    "retry": "重试",
+    "open_terminal": "打开终端",
+    "terminal_reconnect": "重新连接终端",
+    "terminal_shortcut": "切换终端 (Ctrl+`)"
   }
 }

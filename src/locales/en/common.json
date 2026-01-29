@@ -88,6 +88,9 @@
     "conflict_desc": "\"{{fileName}}\" has been modified on the remote server since you opened it.",
     "reload_remote": "Load Remote",
     "overwrite": "Overwrite",
-    "retry": "Retry"
+    "retry": "Retry",
+    "open_terminal": "Open Terminal",
+    "terminal_reconnect": "Reconnect terminal",
+    "terminal_shortcut": "Toggle terminal (Ctrl+`)"
   }
 }
