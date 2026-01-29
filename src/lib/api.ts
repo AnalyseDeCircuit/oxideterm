@@ -1116,6 +1116,23 @@ export const api = {
     if (USE_MOCK) return paths.map(() => null);
     return invoke('ide_batch_stat', { sessionId, paths });
   },
+
+  /**
+   * Execute a command on the remote server via SSH exec channel
+   */
+  ideExecCommand: async (
+    connectionId: string,
+    command: string,
+    cwd?: string,
+    timeoutSecs?: number
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+  }> => {
+    if (USE_MOCK) return { stdout: '', stderr: '', exitCode: 0 };
+    return invoke('ide_exec_command', { connectionId, command, cwd, timeoutSecs });
+  },
 };
 
 

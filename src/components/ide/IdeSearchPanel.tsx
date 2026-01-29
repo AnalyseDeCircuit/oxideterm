@@ -12,6 +12,7 @@ import {
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
+import { api } from '../../lib/api';
 
 /**
  * 单个匹配结果
@@ -64,7 +65,7 @@ interface IdeSearchPanelProps {
 export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
   const { t } = useTranslation();
   const project = useIdeProject();
-  const { sftpSessionId, openFile } = useIdeStore();
+  const { connectionId, openFile } = useIdeStore();
   
   // 搜索状态
   const [query, setQuery] = useState('');
@@ -100,12 +101,10 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
   
   /**
    * 执行搜索
-   * 
-   * TODO: 实际实现需要后端支持
-   * 应该调用类似 api.ideSearchInProject() 的 API
+   * 使用 grep 命令搜索文件内容
    */
   const doSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim() || !sftpSessionId || !project) {
+    if (!searchQuery.trim() || !connectionId || !project) {
       setResults([]);
       return;
     }
@@ -114,35 +113,89 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
     setError(null);
     
     try {
-      // ═══════════════════════════════════════════════════════════════════
-      // TODO: 实际实现 - 需要后端支持
-      // ═══════════════════════════════════════════════════════════════════
-      // 
-      // 完整实现需要：
-      // 1. 后端添加 ide_search_in_project API
-      // 2. 执行: grep -rn -I --include='*.{rs,ts,...}' 'query' 'project_path'
-      // 3. 解析输出并返回结果
-      //
-      // 示例代码（需要后端支持）:
-      // const response = await api.ideSearchInProject(
-      //   sftpSessionId,
-      //   project.rootPath,
-      //   searchQuery,
-      //   100 // 最大结果数
-      // );
-      // 
-      // // 将结果按文件分组
-      // const grouped = groupByPath(response.matches);
-      // setResults(grouped);
-      // setExpandedPaths(new Set(grouped.map(g => g.path)));
-      // ═══════════════════════════════════════════════════════════════════
+      // 转义搜索查询中的特殊字符用于 grep
+      const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       
-      // Mock 实现：模拟搜索延迟，返回空结果
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // 构建 grep 命令
+      // -r: 递归搜索
+      // -n: 显示行号
+      // -I: 忽略二进制文件
+      // --include: 只搜索特定类型文件
+      // 限制结果数量为 200 以避免过多输出
+      const includePatterns = [
+        '*.ts', '*.tsx', '*.js', '*.jsx', '*.json',
+        '*.rs', '*.toml', '*.md', '*.txt',
+        '*.py', '*.go', '*.java', '*.c', '*.cpp', '*.h',
+        '*.css', '*.scss', '*.html', '*.vue', '*.svelte',
+        '*.yaml', '*.yml', '*.sh', '*.bash',
+      ].map(p => `--include='${p}'`).join(' ');
       
-      // 暂时返回空结果
-      // 当后端支持后，这里会返回实际的搜索结果
-      setResults([]);
+      const command = `grep -rn -I ${includePatterns} '${escapedQuery}' . 2>/dev/null | head -200`;
+      
+      const result = await api.ideExecCommand(
+        connectionId,
+        command,
+        project.rootPath,
+        30 // 30秒超时
+      );
+      
+      // 解析 grep 输出
+      // 格式: ./path/to/file:line:content
+      const matches: SearchMatch[] = [];
+      const lines = result.stdout.split('\n');
+      
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        
+        // 解析格式: ./path:linenum:content
+        const firstColonIdx = line.indexOf(':');
+        if (firstColonIdx === -1) continue;
+        
+        const secondColonIdx = line.indexOf(':', firstColonIdx + 1);
+        if (secondColonIdx === -1) continue;
+        
+        let path = line.substring(0, firstColonIdx);
+        const lineNum = parseInt(line.substring(firstColonIdx + 1, secondColonIdx), 10);
+        const content = line.substring(secondColonIdx + 1);
+        
+        if (isNaN(lineNum)) continue;
+        
+        // 移除前导 ./
+        if (path.startsWith('./')) {
+          path = path.substring(2);
+        }
+        
+        // 查找匹配位置（不区分大小写）
+        const lowerContent = content.toLowerCase();
+        const lowerQuery = searchQuery.toLowerCase();
+        const matchStart = lowerContent.indexOf(lowerQuery);
+        const matchEnd = matchStart >= 0 ? matchStart + searchQuery.length : 0;
+        
+        matches.push({
+          path,
+          line: lineNum,
+          column: matchStart >= 0 ? matchStart : 0,
+          preview: content.trim().substring(0, 200), // 限制预览长度
+          matchStart: Math.max(0, matchStart),
+          matchEnd: matchEnd,
+        });
+      }
+      
+      // 按文件分组
+      const grouped = new Map<string, SearchMatch[]>();
+      for (const match of matches) {
+        const existing = grouped.get(match.path) || [];
+        existing.push(match);
+        grouped.set(match.path, existing);
+      }
+      
+      const resultGroups: SearchResultGroup[] = Array.from(grouped.entries()).map(
+        ([path, fileMatches]) => ({ path, matches: fileMatches })
+      );
+      
+      setResults(resultGroups);
+      // 默认展开所有文件
+      setExpandedPaths(new Set(resultGroups.map(g => g.path)));
       
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
@@ -151,7 +204,7 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
     } finally {
       setIsSearching(false);
     }
-  }, [sftpSessionId, project]);
+  }, [connectionId, project]);
   
   /**
    * 处理输入变化（带防抖）

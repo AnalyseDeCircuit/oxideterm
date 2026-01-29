@@ -2,12 +2,14 @@
 //!
 //! Commands for the lightweight IDE mode feature.
 
+use russh::ChannelMsg;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::State;
 
 use crate::sftp::session::SftpRegistry;
 use crate::sftp::types::{FileType, PreviewContent};
+use crate::ssh::SshConnectionRegistry;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -38,6 +40,18 @@ pub enum FileCheckResult {
     TooLarge { size: u64, limit: u64 },
     Binary,
     NotEditable { reason: String },
+}
+
+/// Result of executing a remote command
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecResult {
+    /// Standard output
+    pub stdout: String,
+    /// Standard error
+    pub stderr: String,
+    /// Exit code (None if terminated by signal)
+    pub exit_code: Option<u32>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -202,4 +216,111 @@ async fn get_git_branch_inner(
         // Detached HEAD - return short hash
         Ok(content.chars().take(7).collect())
     }
+}
+
+/// Execute a command on the remote server via SSH exec channel
+///
+/// This is used for running commands like `grep` for search and `git status` for file status.
+#[tauri::command]
+pub async fn ide_exec_command(
+    connection_id: String,
+    command: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+) -> Result<ExecResult, String> {
+    use tokio::time::{timeout, Duration};
+    use tracing::{debug, warn};
+
+    // Get the HandleController for this connection
+    let controller = connection_registry
+        .get_handle_controller(&connection_id)
+        .ok_or_else(|| format!("Connection not found: {}", connection_id))?;
+
+    // Open a new session channel
+    let mut channel = controller
+        .open_session_channel()
+        .await
+        .map_err(|e| format!("Failed to open exec channel: {}", e))?;
+
+    // Build command with optional cwd
+    let full_command = match cwd {
+        Some(dir) => format!("cd {} && {}", shell_escape(&dir), command),
+        None => command.clone(),
+    };
+
+    debug!("IDE exec: {}", full_command);
+
+    // Execute the command
+    channel
+        .exec(true, full_command.clone())
+        .await
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
+
+    // Collect output
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_code: Option<u32> = None;
+
+    // Use timeout to prevent hanging
+    let timeout_duration = Duration::from_secs(timeout_secs.unwrap_or(30));
+
+    let result = timeout(timeout_duration, async {
+        loop {
+            match channel.wait().await {
+                Some(ChannelMsg::Data { data }) => {
+                    stdout.extend_from_slice(&data);
+                }
+                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
+                    // ext=1 is stderr
+                    stderr.extend_from_slice(&data);
+                }
+                Some(ChannelMsg::ExitStatus { exit_status }) => {
+                    exit_code = Some(exit_status);
+                }
+                Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => {
+                    break;
+                }
+                Some(_other) => {
+                    // Ignore other messages (WindowAdjusted, Success, etc.)
+                }
+                None => {
+                    // Channel closed
+                    break;
+                }
+            }
+        }
+    })
+    .await;
+
+    // Handle timeout
+    if result.is_err() {
+        warn!("IDE exec timed out after {:?}: {}", timeout_duration, command);
+        // Close the channel to clean up
+        let _ = channel.close().await;
+        return Err(format!("Command timed out after {} seconds", timeout_duration.as_secs()));
+    }
+
+    // Convert output to strings
+    let stdout_str = String::from_utf8_lossy(&stdout).to_string();
+    let stderr_str = String::from_utf8_lossy(&stderr).to_string();
+
+    debug!(
+        "IDE exec completed: exit={:?} stdout_len={} stderr_len={}",
+        exit_code,
+        stdout_str.len(),
+        stderr_str.len()
+    );
+
+    Ok(ExecResult {
+        stdout: stdout_str,
+        stderr: stderr_str,
+        exit_code,
+    })
+}
+
+/// Escape a string for use in shell command
+fn shell_escape(s: &str) -> String {
+    // Simple escaping - wrap in single quotes and escape single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
 }

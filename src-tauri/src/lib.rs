@@ -416,6 +416,7 @@ pub fn run() {
             commands::ide_open_project,
             commands::ide_check_file,
             commands::ide_batch_stat,
+            commands::ide_exec_command,
             // SFTP commands
             commands::sftp_init,
             commands::sftp_list_dir,

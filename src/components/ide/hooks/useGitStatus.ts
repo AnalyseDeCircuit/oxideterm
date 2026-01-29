@@ -1,6 +1,7 @@
 // src/components/ide/hooks/useGitStatus.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIdeStore } from '../../../store/ideStore';
+import { api } from '../../../lib/api';
 
 /**
  * Git 文件状态类型
@@ -46,11 +47,7 @@ interface UseGitStatusResult {
  * 解析 git status --porcelain=v1 输出
  * 格式: XY filename
  * X = staged 状态, Y = unstaged 状态
- * 
- * 注意：此函数在后端支持 SSH exec 后将被使用
  */
-// @ts-ignore - 预留函数，将在后端支持 SSH exec 后使用
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function parseGitStatusOutput(output: string): Map<string, GitFileStatus> {
   const files = new Map<string, GitFileStatus>();
   
@@ -105,11 +102,7 @@ function parseGitStatusOutput(output: string): Map<string, GitFileStatus> {
 /**
  * 解析 git branch 信息
  * 格式: ## branch...origin/branch [ahead N, behind M]
- * 
- * 注意：此函数在后端支持 SSH exec 后将被使用
  */
-// @ts-ignore - 预留函数，将在后端支持 SSH exec 后使用
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function parseBranchInfo(firstLine: string): { branch: string; ahead: number; behind: number } {
   let branch = 'main';
   let ahead = 0;
@@ -168,7 +161,7 @@ const REFRESH_INTERVAL_MS = 30000;
  * ```
  */
 export function useGitStatus(): UseGitStatusResult {
-  const { project, terminalSessionId } = useIdeStore();
+  const { project, connectionId } = useIdeStore();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,12 +169,10 @@ export function useGitStatus(): UseGitStatusResult {
   
   /**
    * 刷新 Git 状态
-   * 
-   * TODO: 实际实现需要后端支持
-   * 现阶段使用从 project.gitBranch 获取的信息作为 mock
+   * 执行 git status --porcelain=v1 --branch 并解析输出
    */
   const refresh = useCallback(async () => {
-    if (!project?.isGitRepo) {
+    if (!project?.isGitRepo || !connectionId) {
       setStatus(null);
       return;
     }
@@ -190,49 +181,49 @@ export function useGitStatus(): UseGitStatusResult {
     setError(null);
     
     try {
-      // ═══════════════════════════════════════════════════════════════════
-      // TODO: 实际实现 - 需要后端支持 SSH exec 功能
-      // ═══════════════════════════════════════════════════════════════════
-      // 
-      // 完整实现需要：
-      // 1. 后端添加 ide_exec_command API
-      // 2. 执行: cd '${project.rootPath}' && git status --porcelain=v1 --branch
-      // 3. 解析输出
-      //
-      // 示例代码（需要后端支持）:
-      // if (terminalSessionId) {
-      //   const output = await api.ideExecCommand(
-      //     terminalSessionId,
-      //     `cd '${project.rootPath}' && git status --porcelain=v1 --branch`
-      //   );
-      //   
-      //   const lines = output.split('\n');
-      //   const { branch, ahead, behind } = parseBranchInfo(lines[0] || '');
-      //   const files = parseGitStatusOutput(lines.slice(1).join('\n'));
-      //   
-      //   setStatus({ branch, ahead, behind, files });
-      // }
-      // ═══════════════════════════════════════════════════════════════════
+      // 执行 git status 命令
+      const result = await api.ideExecCommand(
+        connectionId,
+        'git status --porcelain=v1 --branch 2>/dev/null',
+        project.rootPath,
+        10 // 10秒超时
+      );
       
-      // Mock 实现：使用项目中已有的 gitBranch 信息
+      // 检查命令是否成功
+      if (result.exitCode !== 0) {
+        // git 命令失败，可能不是 git 仓库或其他错误
+        console.warn('[useGitStatus] git status failed:', result.stderr);
+        setStatus({
+          branch: project.gitBranch || 'main',
+          ahead: 0,
+          behind: 0,
+          files: new Map(),
+        });
+        return;
+      }
+      
+      const lines = result.stdout.split('\n');
+      const { branch, ahead, behind } = parseBranchInfo(lines[0] || '');
+      const files = parseGitStatusOutput(lines.slice(1).join('\n'));
+      
+      setStatus({ branch, ahead, behind, files });
+      
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      setError(errorMessage);
+      console.error('[useGitStatus] Failed to refresh git status:', e);
+      
+      // 出错时仍然设置一个基本状态
       setStatus({
         branch: project.gitBranch || 'main',
         ahead: 0,
         behind: 0,
         files: new Map(),
       });
-      
-      // 模拟网络延迟
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      setError(errorMessage);
-      console.error('[useGitStatus] Failed to refresh git status:', e);
     } finally {
       setIsLoading(false);
     }
-  }, [project, terminalSessionId]);
+  }, [project, connectionId]);
   
   /**
    * 获取特定文件的 Git 状态
