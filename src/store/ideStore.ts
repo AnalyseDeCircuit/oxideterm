@@ -122,6 +122,14 @@ export const useIdeStore = create<IdeState & IdeActions>()(
 
         // ─── Project Actions ───
         openProject: async (connectionId, sftpSessionId, rootPath) => {
+          const currentState = get();
+          
+          // 如果已经打开了相同的项目，不要重置状态
+          if (currentState.project?.rootPath === rootPath && 
+              currentState.sftpSessionId === sftpSessionId) {
+            return;
+          }
+          
           // 先初始化 SFTP 会话（如果尚未初始化）
           // sftpInit 会在 SFTP 已初始化时返回当前工作目录，不会重复初始化
           const isInitialized = await api.sftpIsInitialized(sftpSessionId);
@@ -143,7 +151,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             },
             tabs: [],
             activeTabId: null,
-            expandedPaths: new Set([rootPath]), // 默认展开根目录
+            expandedPaths: new Set([projectInfo.rootPath]), // 默认展开根目录
           });
         },
 
@@ -211,12 +219,41 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }));
           
           try {
-            // 使用 preview API 加载文件内容
+            // 先检查文件是否可编辑
+            const checkResult = await api.ideCheckFile(sftpSessionId, path);
+            
+            if (checkResult.type === 'too_large') {
+              // 文件太大
+              set(state => ({
+                tabs: state.tabs.filter(t => t.id !== tabId),
+                activeTabId: state.tabs.length > 1 ? state.tabs[0].id : null,
+              }));
+              throw new Error(`File too large: ${checkResult.size} bytes (limit: ${checkResult.limit})`);
+            }
+            
+            if (checkResult.type === 'binary') {
+              // 二进制文件，静默关闭标签
+              set(state => ({
+                tabs: state.tabs.filter(t => t.id !== tabId),
+                activeTabId: state.tabs.length > 1 ? state.tabs[0].id : null,
+              }));
+              // 不抛出错误，静默处理
+              console.info(`[IDE] Skipping binary file: ${path}`);
+              return;
+            }
+            
+            if (checkResult.type === 'not_editable') {
+              set(state => ({
+                tabs: state.tabs.filter(t => t.id !== tabId),
+                activeTabId: state.tabs.length > 1 ? state.tabs[0].id : null,
+              }));
+              throw new Error(`Cannot edit file: ${checkResult.reason}`);
+            }
+            
+            // 文件可编辑，使用 preview API 加载内容
             const preview = await api.sftpPreview(sftpSessionId, path);
             
             if ('Text' in preview) {
-              const stat = await api.sftpStat(sftpSessionId, path);
-              
               set(state => ({
                 tabs: state.tabs.map(t => 
                   t.id === tabId 
@@ -226,18 +263,19 @@ export const useIdeStore = create<IdeState & IdeActions>()(
                         originalContent: preview.Text.data,
                         language: preview.Text.language || extensionToLanguage(extension),
                         isLoading: false,
-                        serverMtime: stat.modified ?? undefined,
+                        serverMtime: checkResult.mtime,
                       }
                     : t
                 ),
               }));
             } else {
-              // 非文本文件，关闭标签并报错
+              // 不应该发生，但以防万一
               set(state => ({
                 tabs: state.tabs.filter(t => t.id !== tabId),
                 activeTabId: state.tabs.length > 1 ? state.tabs[0].id : null,
               }));
-              throw new Error('Cannot edit non-text file');
+              console.warn(`[IDE] Unexpected preview result for: ${path}`);
+              return;
             }
           } catch (error) {
             // 加载失败，移除标签

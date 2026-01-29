@@ -304,6 +304,14 @@ pub fn is_text_extension(ext: &str) -> bool {
         ext.to_lowercase().as_str(),
         // Scripts & configs
         "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" |
+        // Dotfiles (e.g., .bashrc -> ext="bashrc", .zshrc -> ext="zshrc")
+        "bashrc" | "zshrc" | "profile" | "bash_profile" | "zprofile" |
+        "bash_login" | "bash_logout" | "zlogin" | "zlogout" |
+        "inputrc" | "vimrc" | "gvimrc" | "exrc" | "nanorc" |
+        "tmux" | "screenrc" | "gitconfig" | "gitattributes" |
+        "npmrc" | "yarnrc" | "gemrc" | "irbrc" | "pryrc" |
+        "curlrc" | "wgetrc" | "netrc" | "mailrc" |
+        // Config extensions
         "conf" | "cfg" | "ini" | "properties" | "env" | "envrc" |
         "yaml" | "yml" | "toml" | "json" | "jsonc" | "json5" |
         "xml" | "svg" | "xsd" | "xsl" | "html" | "htm" | "xhtml" |

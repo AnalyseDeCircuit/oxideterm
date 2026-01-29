@@ -1,5 +1,5 @@
 // src/components/ide/IdeEditor.tsx
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { useIdeStore, IdeTab } from '../../store/ideStore';
@@ -13,6 +13,10 @@ interface IdeEditorProps {
 export function IdeEditor({ tab }: IdeEditorProps) {
   const { t } = useTranslation();
   const { updateTabContent, updateTabCursor, saveFile } = useIdeStore();
+  
+  // 跟踪上一次的 tab.id，用于检测是否切换了文件
+  const prevTabIdRef = useRef<string>(tab.id);
+  const contentInitializedRef = useRef<boolean>(false);
   
   // 内容变化回调
   const handleChange = useCallback((content: string) => {
@@ -34,30 +38,43 @@ export function IdeEditor({ tab }: IdeEditorProps) {
     updateTabCursor(tab.id, line, col);
   }, [tab.id, updateTabCursor]);
   
-  // 初始内容（使用 useMemo 避免不必要的重新初始化）
-  const initialContent = useMemo(() => tab.content || '', [tab.id]);
-  
-  // CodeMirror hook
+  // CodeMirror hook - 使用空字符串初始化，内容加载后通过 setContent 设置
   const {
     containerRef,
     isReady,
+    setContent,
     focus,
   } = useCodeMirrorEditor({
-    initialContent,
+    initialContent: '',
     language: tab.language,
     onChange: handleChange,
     onSave: handleSave,
     onCursorChange: handleCursorChange,
   });
   
+  // 当文件内容加载完成或切换文件时，更新编辑器内容
+  useEffect(() => {
+    if (!isReady) return;
+    
+    const isNewTab = prevTabIdRef.current !== tab.id;
+    const hasContent = tab.content !== null;
+    const needsInit = !contentInitializedRef.current || isNewTab;
+    
+    if (hasContent && needsInit) {
+      setContent(tab.content!);
+      contentInitializedRef.current = true;
+      prevTabIdRef.current = tab.id;
+    }
+  }, [isReady, tab.id, tab.content, setContent]);
+  
   // 标签激活时聚焦编辑器
   useEffect(() => {
-    if (isReady) {
+    if (isReady && tab.content !== null) {
       // 短暂延迟确保 DOM 已更新
       const timer = setTimeout(() => focus(), 50);
       return () => clearTimeout(timer);
     }
-  }, [isReady, focus]);
+  }, [isReady, tab.content, focus]);
   
   // 加载中状态
   if (tab.isLoading || tab.content === null) {

@@ -36,12 +36,16 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
     setSearchOpen(prev => !prev);
   }, []);
   
-  // 初始化项目
+  // 初始化项目 - 只在首次加载或会话变更时执行
   useEffect(() => {
-    if (!project || project.rootPath !== rootPath) {
+    // 只有当没有项目或 session ID 变更时才重新打开
+    const needsOpen = !project || 
+      (useIdeStore.getState().sftpSessionId !== sftpSessionId);
+    
+    if (needsOpen) {
       openProject(connectionId, sftpSessionId, rootPath).catch(console.error);
     }
-  }, [connectionId, sftpSessionId, rootPath, project, openProject]);
+  }, [connectionId, sftpSessionId, rootPath]); // 移除 project 和 openProject 依赖
   
   // 全局快捷键
   useEffect(() => {

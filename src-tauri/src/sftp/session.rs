@@ -324,6 +324,12 @@ impl SftpSession {
         let info = self.stat(&canonical_path).await?;
         let file_size = info.size;
 
+        // Get file name for special handling
+        let file_name = Path::new(&canonical_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
         // Get file extension
         let extension = Path::new(&canonical_path)
             .extension()
@@ -342,7 +348,14 @@ impl SftpSession {
                 .preview_text(&canonical_path, &extension, &mime_type)
                 .await;
         }
-
+        
+        // Priority 1.5: Dotfiles without extension are usually text configs
+        // e.g., .gitignore, .env, .htaccess (these have no extension when parsed)
+        if file_name.starts_with('.') && extension.is_empty() {
+            return self
+                .preview_text(&canonical_path, "conf", &mime_type)
+                .await;
+        }
         // Priority 2: PDF files
         if is_pdf_extension(&extension) || mime_type == "application/pdf" {
             return self.preview_pdf(&canonical_path, file_size).await;
