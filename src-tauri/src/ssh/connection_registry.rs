@@ -181,6 +181,23 @@ pub struct ConnectionPoolStats {
 }
 
 /// 单个 SSH 连接条目
+///
+/// # 锁获取顺序约定
+///
+/// 为避免死锁，当需要同时获取多个锁时，必须按以下顺序获取：
+///
+/// 1. `state` (RwLock)
+/// 2. `keep_alive` (RwLock)
+/// 3. `terminal_ids` (RwLock)
+/// 4. `sftp_session_id` (RwLock)
+/// 5. `forward_ids` (RwLock)
+/// 6. `last_emitted_status` (RwLock)
+/// 7. `idle_timer` (Mutex)
+/// 8. `heartbeat_task` (Mutex)
+/// 9. `reconnect_task` (Mutex)
+///
+/// 注意：大多数方法只获取单个锁，无需担心顺序。此约定仅在需要
+/// 同时持有多个锁时适用（目前代码中几乎不存在这种情况）。
 pub struct ConnectionEntry {
     /// 连接唯一 ID
     pub id: String,
@@ -2226,35 +2243,61 @@ impl SshConnectionRegistry {
     }
 
     /// 替换连接的 HandleController（用于重连后更新）
+    ///
+    /// # 锁安全
+    /// 此方法先收集所有需要的数据到局部变量，然后再释放 DashMap 引用，
+    /// 避免在持有 DashMap 引用时获取多个 RwLock。
     async fn replace_handle_controller(&self, connection_id: &str, new_controller: HandleController) {
-        if let Some(entry) = self.connections.get(connection_id) {
+        // 先收集所有需要的数据到局部变量
+        let old_data = if let Some(entry) = self.connections.get(connection_id) {
             let old_entry = entry.value();
             
-            // 创建新的连接条目，复用旧条目的元数据
+            // 按锁顺序依次读取，每个 await 后锁自动释放
+            let keep_alive = *old_entry.keep_alive.read().await;
+            let terminal_ids = old_entry.terminal_ids.read().await.clone();
+            let sftp_session_id = old_entry.sftp_session_id.read().await.clone();
+            let forward_ids = old_entry.forward_ids.read().await.clone();
+            
+            Some((
+                old_entry.id.clone(),
+                old_entry.config.clone(),
+                old_entry.ref_count.load(Ordering::SeqCst),
+                old_entry.created_at,
+                old_entry.current_attempt_id.load(Ordering::SeqCst),
+                old_entry.parent_connection_id.clone(),
+                keep_alive,
+                terminal_ids,
+                sftp_session_id,
+                forward_ids,
+            ))
+        } else {
+            None
+        };
+        
+        // 在 DashMap 引用释放后，使用收集的数据创建新条目
+        if let Some((id, config, ref_count, created_at, attempt_id, parent_id, keep_alive, terminal_ids, sftp_session_id, forward_ids)) = old_data {
             let new_entry = Arc::new(ConnectionEntry {
-                id: old_entry.id.clone(),
-                config: old_entry.config.clone(),
+                id,
+                config,
                 handle_controller: new_controller,
                 state: RwLock::new(ConnectionState::Active),
-                ref_count: AtomicU32::new(old_entry.ref_count.load(Ordering::SeqCst)),
+                ref_count: AtomicU32::new(ref_count),
                 last_active: AtomicU64::new(Utc::now().timestamp() as u64),
-                keep_alive: RwLock::new(*old_entry.keep_alive.read().await),
-                created_at: old_entry.created_at,
+                keep_alive: RwLock::new(keep_alive),
+                created_at,
                 idle_timer: Mutex::new(None),
-                terminal_ids: RwLock::new(old_entry.terminal_ids.read().await.clone()),
-                sftp_session_id: RwLock::new(old_entry.sftp_session_id.read().await.clone()),
-                forward_ids: RwLock::new(old_entry.forward_ids.read().await.clone()),
+                terminal_ids: RwLock::new(terminal_ids),
+                sftp_session_id: RwLock::new(sftp_session_id),
+                forward_ids: RwLock::new(forward_ids),
                 heartbeat_task: Mutex::new(None),
                 heartbeat_failures: AtomicU32::new(0),
                 reconnect_task: Mutex::new(None),
                 is_reconnecting: AtomicBool::new(false),
                 reconnect_attempts: AtomicU32::new(0),
-                current_attempt_id: AtomicU64::new(old_entry.current_attempt_id.load(Ordering::SeqCst)),
+                current_attempt_id: AtomicU64::new(attempt_id),
                 last_emitted_status: RwLock::new(None),
-                parent_connection_id: old_entry.parent_connection_id.clone(), // 保持父连接关系
+                parent_connection_id: parent_id,
             });
-            
-            drop(entry); // 释放引用
             
             // 替换条目
             self.connections.insert(connection_id.to_string(), new_entry);
