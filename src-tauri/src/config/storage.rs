@@ -176,7 +176,13 @@ impl ConfigStorage {
 
 impl Default for ConfigStorage {
     fn default() -> Self {
-        Self::new().expect("Failed to create config storage")
+        Self::new().unwrap_or_else(|e| {
+            panic!(
+                "Failed to create ConfigStorage with default path: {}. \
+                This is likely a system configuration issue.",
+                e
+            )
+        })
     }
 }
 

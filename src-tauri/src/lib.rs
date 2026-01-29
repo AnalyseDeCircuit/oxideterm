@@ -596,8 +596,16 @@ pub fn run() {
 
     builder
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .map_err(|e| {
+            let msg = format!("Failed to build Tauri application: {}", e);
+            tracing::error!("{}", msg);
+            write_startup_log(&msg);
+            show_startup_error("OxideTerm Startup Error", &msg);
+            e
+        })
+        .ok()
+        .map(|app| {
+            app.run(|app_handle, event| {
             // Handle app lifecycle events
             if let tauri::RunEvent::Exit = event {
                 tracing::info!("App exit requested, cleaning up resources...");
@@ -656,5 +664,6 @@ pub fn run() {
                 
                 tracing::info!("All resources cleaned up, exiting...");
             }
-        });
+        })
+    });
 }

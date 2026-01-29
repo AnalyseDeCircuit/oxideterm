@@ -39,8 +39,8 @@ OxideTerm 是一个使用 Tauri + React + Rust 构建的 SSH 终端客户端。�
 | ID | 严重性 | 问题 | 文件 | 状态 |
 |----|--------|------|------|------|
 | C-1 | 🔴 | Rust `unwrap()` 滥用 | `kbi.rs`, `registry.rs`, `parser.rs` | [x] ✅ 2026-01-29 |
-| C-2 | 🔴 | `expect()` 在关键路径 | `main.rs`, `transfer.rs` | [ ] |
-| C-3 | 🔴 | WebSocket Token 有效期过短 | `bridge/server.rs` | [ ] |
+| C-2 | 🔴 | `expect()` 在关键路径 | `main.rs`, `transfer.rs` | [x] ✅ 2026-01-29 |
+| C-3 | 🔴 | WebSocket Token 有效期过短 | `bridge/server.rs` | [x] ✅ 2026-01-29 |
 | H-1 | 🟠 | SFTPView 组件过度复杂 | `SFTPView.tsx` (1946行) | [ ] |
 | H-2 | 🟠 | TerminalView 状态管理复杂 | `TerminalView.tsx` (1345行) | [ ] |
 | H-3 | 🟠 | appStore 状态过度集中 | `appStore.ts` (1264行) | [ ] |
@@ -145,7 +145,13 @@ let mut pending = PENDING_REQUESTS.lock();
 
 ---
 
-### C-2: `expect()` 在关键路径可能导致 Panic
+### C-2: `expect()` 在关键路径可能导致 Panic ✅ 已修复
+
+> **修复日期**: 2026-01-29  
+> **修复内容**: 
+> - `lib.rs`: 使用 `map_err()` + `ok()` + `map()` 处理构建错误，显示友好对话框
+> - `transfer.rs`: 使用 `unwrap_or_else()` 并添加详细 panic 信息
+> - `storage.rs`: 使用 `unwrap_or_else()` 并改进错误信息
 
 **问题描述**
 
@@ -233,7 +239,10 @@ let listener = TcpListener::bind(addr).await
 
 ---
 
-### C-3: WebSocket Token 有效期过短
+### C-3: WebSocket Token 有效期过短 ✅ 已修复
+
+> **修复日期**: 2026-01-29  
+> **修复内容**: 将 `TOKEN_VALIDITY_SECS` 从 60 秒延长到 300 秒（5 分钟）
 
 **问题描述**
 

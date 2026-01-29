@@ -22,7 +22,8 @@ const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 /// Heartbeat timeout - consider connection dead if no response (seconds)
 const HEARTBEAT_TIMEOUT_SECS: u64 = 90;
 /// Token validity window (seconds) - tokens older than this are rejected
-const TOKEN_VALIDITY_SECS: u64 = 60;
+/// Extended to 300s (5 min) to handle high-latency networks and system load
+const TOKEN_VALIDITY_SECS: u64 = 300;
 
 /// Frame channel capacity - larger on Windows due to slower I/O throughput
 /// Windows: 16384 to compensate for higher syscall overhead

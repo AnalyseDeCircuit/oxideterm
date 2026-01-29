@@ -149,6 +149,10 @@ impl TransferManager {
     /// 
     /// Uses a soft limit approach: the semaphore has MAX_POSSIBLE_CONCURRENT permits,
     /// but we wait until active_count < max_concurrent before acquiring.
+    /// 
+    /// # Panics
+    /// This function will panic if the semaphore is closed, which should never happen
+    /// in normal operation as the semaphore lives for the lifetime of the TransferManager.
     pub async fn acquire_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
         // Wait until we're below the configured limit
         loop {
@@ -166,7 +170,10 @@ impl TransferManager {
             .clone()
             .acquire_owned()
             .await
-            .expect("Semaphore closed unexpectedly");
+            .unwrap_or_else(|_| {
+                // This should never happen as we own the semaphore and never close it
+                panic!("TransferManager semaphore was unexpectedly closed - this is a bug")
+            });
         *self.active_count.write() += 1;
         debug!(
             "Acquired transfer permit, active count: {}/{}",
