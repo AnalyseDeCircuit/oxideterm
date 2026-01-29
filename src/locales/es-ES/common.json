@@ -92,6 +92,14 @@
     "terminal_reconnect": "Reconectar terminal",
     "terminal_shortcut": "Alternar terminal (Ctrl+`)",
     "search_results_count": "{{count}} resultados en {{files}} archivos",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F para buscar"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F para buscar",
+    "go_to_parent": "Ir a carpeta superior",
+    "open_subfolder": "Abrir como raíz",
+    "unsaved": "sin guardar",
+    "select_folder_desc": "Navegar y seleccionar una carpeta como raíz del proyecto",
+    "go": "Ir",
+    "no_subfolders": "No hay subcarpetas en este directorio",
+    "selected_path": "Seleccionado",
+    "open_folder": "Abrir carpeta"
   }
 }

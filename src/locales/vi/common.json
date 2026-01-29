@@ -92,6 +92,14 @@
     "terminal_reconnect": "Kết nối lại terminal",
     "terminal_shortcut": "Bật/Tắt terminal (Ctrl+`)",
     "search_results_count": "{{count}} kết quả trong {{files}} tập tin",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F để tìm kiếm"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F để tìm kiếm",
+    "go_to_parent": "Đi đến thư mục cha",
+    "open_subfolder": "Mở làm thư mục gốc",
+    "unsaved": "chưa lưu",
+    "select_folder_desc": "Duyệt và chọn thư mục làm thư mục gốc dự án",
+    "go": "Đi",
+    "no_subfolders": "Không có thư mục con trong thư mục này",
+    "selected_path": "Đã chọn",
+    "open_folder": "Mở thư mục"
   }
 }

@@ -92,6 +92,14 @@
     "terminal_reconnect": "터미널 재연결",
     "terminal_shortcut": "터미널 토글 (Ctrl+`)",
     "search_results_count": "{{files}}개 파일에서 {{count}}개 결과",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F로 검색"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F로 검색",
+    "go_to_parent": "상위 폴더로 이동",
+    "open_subfolder": "루트로 열기",
+    "unsaved": "저장되지 않음",
+    "select_folder_desc": "프로젝트 루트로 열 폴더를 찾아 선택하세요",
+    "go": "이동",
+    "no_subfolders": "이 디렉토리에 하위 폴더가 없습니다",
+    "selected_path": "선택됨",
+    "open_folder": "폴더 열기"
   }
 }

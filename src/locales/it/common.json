@@ -92,6 +92,14 @@
     "terminal_reconnect": "Riconnetti terminale",
     "terminal_shortcut": "Attiva/disattiva terminale (Ctrl+`)",
     "search_results_count": "{{count}} risultati in {{files}} file",
-    "search_shortcut_hint": "Cmd/Ctrl+Maiusc+F per cercare"
+    "search_shortcut_hint": "Cmd/Ctrl+Maiusc+F per cercare",
+    "go_to_parent": "Vai alla cartella superiore",
+    "open_subfolder": "Apri come radice",
+    "unsaved": "non salvato",
+    "select_folder_desc": "Sfoglia e seleziona una cartella come radice del progetto",
+    "go": "Vai",
+    "no_subfolders": "Nessuna sottocartella in questa directory",
+    "selected_path": "Selezionato",
+    "open_folder": "Apri cartella"
   }
 }

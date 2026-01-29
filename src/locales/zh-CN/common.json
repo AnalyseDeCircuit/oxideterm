@@ -96,6 +96,11 @@
     "search_shortcut_hint": "Cmd/Ctrl+Shift+F 切换搜索",
     "go_to_parent": "返回上级目录",
     "open_subfolder": "打开为根目录",
-    "unsaved": "未保存"
+    "unsaved": "未保存",
+    "select_folder_desc": "浏览并选择一个文件夹作为项目根目录",
+    "go": "前往",
+    "no_subfolders": "此目录下没有子文件夹",
+    "selected_path": "已选择",
+    "open_folder": "打开文件夹"
   }
 }

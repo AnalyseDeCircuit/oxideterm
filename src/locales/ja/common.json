@@ -92,6 +92,14 @@
     "terminal_reconnect": "ターミナルを再接続",
     "terminal_shortcut": "ターミナルの切り替え (Ctrl+`)",
     "search_results_count": "{{files}} ファイルで {{count}} 件の結果",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F で検索"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F で検索",
+    "go_to_parent": "親フォルダーに移動",
+    "open_subfolder": "ルートとして開く",
+    "unsaved": "未保存",
+    "select_folder_desc": "プロジェクトルートとして開くフォルダーを参照して選択",
+    "go": "移動",
+    "no_subfolders": "このディレクトリにサブフォルダーはありません",
+    "selected_path": "選択済み",
+    "open_folder": "フォルダーを開く"
   }
 }

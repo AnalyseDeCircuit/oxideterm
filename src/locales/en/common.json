@@ -96,6 +96,11 @@
     "search_shortcut_hint": "Cmd/Ctrl+Shift+F to toggle search",
     "go_to_parent": "Go to Parent Folder",
     "open_subfolder": "Open as Root",
-    "unsaved": "unsaved"
+    "unsaved": "unsaved",
+    "select_folder_desc": "Browse and select a folder to open as project root",
+    "go": "Go",
+    "no_subfolders": "No subfolders in this directory",
+    "selected_path": "Selected",
+    "open_folder": "Open Folder"
   }
 }

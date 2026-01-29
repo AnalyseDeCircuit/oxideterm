@@ -92,6 +92,14 @@
     "terminal_reconnect": "Reconectar terminal",
     "terminal_shortcut": "Alternar terminal (Ctrl+`)",
     "search_results_count": "{{count}} resultados em {{files}} arquivos",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F para buscar"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F para buscar",
+    "go_to_parent": "Ir para pasta pai",
+    "open_subfolder": "Abrir como raiz",
+    "unsaved": "não salvo",
+    "select_folder_desc": "Navegar e selecionar uma pasta como raiz do projeto",
+    "go": "Ir",
+    "no_subfolders": "Nenhuma subpasta neste diretório",
+    "selected_path": "Selecionado",
+    "open_folder": "Abrir pasta"
   }
 }

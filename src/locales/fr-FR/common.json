@@ -92,6 +92,14 @@
     "terminal_reconnect": "Reconnecter le terminal",
     "terminal_shortcut": "Basculer le terminal (Ctrl+`)",
     "search_results_count": "{{count}} résultats dans {{files}} fichiers",
-    "search_shortcut_hint": "Cmd/Ctrl+Maj+F pour rechercher"
+    "search_shortcut_hint": "Cmd/Ctrl+Maj+F pour rechercher",
+    "go_to_parent": "Aller au dossier parent",
+    "open_subfolder": "Ouvrir comme racine",
+    "unsaved": "non enregistré",
+    "select_folder_desc": "Parcourir et sélectionner un dossier comme racine du projet",
+    "go": "Aller",
+    "no_subfolders": "Aucun sous-dossier dans ce répertoire",
+    "selected_path": "Sélectionné",
+    "open_folder": "Ouvrir le dossier"
   }
 }

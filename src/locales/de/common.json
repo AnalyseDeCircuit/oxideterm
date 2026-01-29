@@ -92,6 +92,14 @@
     "terminal_reconnect": "Terminal neu verbinden",
     "terminal_shortcut": "Terminal umschalten (Strg+`)",
     "search_results_count": "{{count}} Ergebnisse in {{files}} Dateien",
-    "search_shortcut_hint": "Cmd/Strg+Umschalt+F zum Suchen"
+    "search_shortcut_hint": "Cmd/Strg+Umschalt+F zum Suchen",
+    "go_to_parent": "Zum übergeordneten Ordner",
+    "open_subfolder": "Als Stammordner öffnen",
+    "unsaved": "ungespeichert",
+    "select_folder_desc": "Ordner als Projektstamm durchsuchen und auswählen",
+    "go": "Los",
+    "no_subfolders": "Keine Unterordner in diesem Verzeichnis",
+    "selected_path": "Ausgewählt",
+    "open_folder": "Ordner öffnen"
   }
 }

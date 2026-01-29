@@ -92,6 +92,14 @@
     "terminal_reconnect": "重新連接終端機",
     "terminal_shortcut": "切換終端機 (Ctrl+`)",
     "search_results_count": "在 {{files}} 個檔案中找到 {{count}} 個結果",
-    "search_shortcut_hint": "Cmd/Ctrl+Shift+F 切換搜尋"
+    "search_shortcut_hint": "Cmd/Ctrl+Shift+F 切換搜尋",
+    "go_to_parent": "返回上層目錄",
+    "open_subfolder": "開啟為根目錄",
+    "unsaved": "未儲存",
+    "select_folder_desc": "瀏覽並選擇一個資料夾作為專案根目錄",
+    "go": "前往",
+    "no_subfolders": "此目錄下沒有子資料夾",
+    "selected_path": "已選擇",
+    "open_folder": "開啟資料夾"
   }
 }
