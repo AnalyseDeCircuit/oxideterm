@@ -412,6 +412,10 @@ pub fn run() {
             commands::get_all_health_status,
             commands::get_health_for_display,
             commands::simulate_health_response,
+            // IDE mode commands
+            commands::ide_open_project,
+            commands::ide_check_file,
+            commands::ide_batch_stat,
             // SFTP commands
             commands::sftp_init,
             commands::sftp_list_dir,
@@ -564,6 +568,10 @@ pub fn run() {
             commands::get_all_health_status,
             commands::get_health_for_display,
             commands::simulate_health_response,
+            // IDE mode commands
+            commands::ide_open_project,
+            commands::ide_check_file,
+            commands::ide_batch_stat,
             // SFTP commands
             commands::sftp_init,
             commands::sftp_list_dir,

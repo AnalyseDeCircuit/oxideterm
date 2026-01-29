@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Failed to delete some connections: {{message}}"
-    }
+    },
+    "retry": "Retry"
   },
   "layout": {
     "empty": {
@@ -37,6 +38,50 @@
     "connection_pool": "Connection Pool",
     "connection_matrix": "Connection Matrix",
     "sftp_prefix": "SFTP",
-    "forwards_prefix": "Forwards"
+    "forwards_prefix": "Forwards",
+    "ide": "IDE"
+  },
+  "ide": {
+    "loading_project": "Loading project...",
+    "no_project": "No project opened",
+    "file_tree_placeholder": "File tree will appear here",
+    "no_open_files": "No open files",
+    "click_to_open": "Double-click a file in the tree to open",
+    "terminal_placeholder": "Terminal (Phase 3)",
+    "open_project": "Open Project",
+    "close_project": "Close Project",
+    "select_folder": "Select a folder as project root",
+    "unsaved_changes": "The following files have unsaved changes:",
+    "unsaved_changes_title": "Unsaved Changes",
+    "unsaved_changes_desc": "\"{{fileName}}\" has unsaved changes. What would you like to do?",
+    "save_all": "Save All",
+    "discard_all": "Discard All",
+    "discard": "Don't Save",
+    "save": "Save",
+    "file_conflict": "File Conflict",
+    "file_conflict_desc": "The remote file has been modified. Choose how to proceed:",
+    "conflict_overwrite": "Overwrite Remote",
+    "conflict_reload": "Reload File",
+    "conflict_save_as": "Save As",
+    "file_too_large": "File Too Large",
+    "file_too_large_desc": "File size {{size}} exceeds limit {{limit}}",
+    "file_binary": "Cannot edit binary file",
+    "terminal_toggle": "Toggle Terminal",
+    "terminal": "Terminal",
+    "creating_terminal": "Creating terminal...",
+    "terminal_error": "Failed to create terminal",
+    "git_branch": "Branch: {{branch}}",
+    "search_placeholder": "Search files...",
+    "loading_file": "Loading file...",
+    "file_not_loaded": "File content not loaded",
+    "tip_double_click": "Double-click a file to open it",
+    "tip_save_shortcut": "Press Cmd/Ctrl+S to save",
+    "file_name": "File",
+    "your_version": "Your version",
+    "remote_version": "Remote version",
+    "refresh": "Refresh",
+    "search": "Search",
+    "search_hint": "Type to search in project files",
+    "no_results": "No results found"
   }
 }
