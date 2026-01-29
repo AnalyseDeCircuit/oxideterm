@@ -30,7 +30,7 @@ pub struct SessionRegistry {
     /// State persistence
     persistence: Option<SessionPersistence>,
     /// Lock for create_session to prevent TOCTOU race
-    create_lock: std::sync::Mutex<()>,
+    create_lock: parking_lot::Mutex<()>,
 }
 
 impl Default for SessionRegistry {
@@ -49,7 +49,7 @@ impl SessionRegistry {
             max_sessions: AtomicUsize::new(DEFAULT_MAX_SESSIONS),
             active_count: AtomicUsize::new(0),
             persistence: Some(persistence),
-            create_lock: std::sync::Mutex::new(()),
+            create_lock: parking_lot::Mutex::new(()),
         }
     }
 
@@ -61,7 +61,7 @@ impl SessionRegistry {
             max_sessions: AtomicUsize::new(DEFAULT_MAX_SESSIONS),
             active_count: AtomicUsize::new(0),
             persistence: None,
-            create_lock: std::sync::Mutex::new(()),
+            create_lock: parking_lot::Mutex::new(()),
         }
     }
 
@@ -73,7 +73,7 @@ impl SessionRegistry {
             max_sessions: AtomicUsize::new(max),
             active_count: AtomicUsize::new(0),
             persistence: None,
-            create_lock: std::sync::Mutex::new(()),
+            create_lock: parking_lot::Mutex::new(()),
         }
     }
 
@@ -91,7 +91,7 @@ impl SessionRegistry {
     /// Returns session ID or error if limit reached
     pub fn create_session(&self, config: SessionConfig) -> Result<String, RegistryError> {
         // Hold lock to prevent TOCTOU race between count check and insert
-        let _guard = self.create_lock.lock().unwrap();
+        let _guard = self.create_lock.lock();
 
         // Check connection limit (now atomic with insert)
         let active_count = self.active_count();
@@ -126,7 +126,7 @@ impl SessionRegistry {
         max_lines: usize,
     ) -> Result<String, RegistryError> {
         // Hold lock to prevent TOCTOU race between count check and insert
-        let _guard = self.create_lock.lock().unwrap();
+        let _guard = self.create_lock.lock();
 
         // Check connection limit (now atomic with insert)
         let active_count = self.active_count();

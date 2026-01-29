@@ -3,7 +3,7 @@
 //! Parses raw terminal output, strips ANSI codes, and splits into lines.
 
 use super::scroll_buffer::TerminalLine;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use vte::{Params, Parser, Perform};
 
 /// Parser state for terminal output
@@ -139,7 +139,7 @@ impl BatchParser {
 
     /// Feed data to the parser
     pub fn feed(&mut self, data: &[u8]) {
-        let mut performer = self.performer.lock().unwrap();
+        let mut performer = self.performer.lock();
         for &byte in data {
             self.parser.advance(&mut *performer, byte);
         }
@@ -147,7 +147,7 @@ impl BatchParser {
 
     /// Get all completed lines and reset
     pub fn flush(&self) -> Vec<TerminalLine> {
-        let mut performer = self.performer.lock().unwrap();
+        let mut performer = self.performer.lock();
         let lines = performer.finish();
 
         lines

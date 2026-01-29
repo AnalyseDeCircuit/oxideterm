@@ -21,7 +21,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use once_cell::sync::Lazy;
 
@@ -133,7 +133,7 @@ static PENDING_REQUESTS: Lazy<Mutex<std::collections::HashMap<String, PendingReq
 /// Called by backend when it needs to wait for frontend input
 pub fn register_pending(auth_flow_id: String) -> oneshot::Receiver<Result<Vec<String>, KbiError>> {
     let (tx, rx) = oneshot::channel();
-    let mut pending = PENDING_REQUESTS.lock().unwrap();
+    let mut pending = PENDING_REQUESTS.lock();
     pending.insert(auth_flow_id, PendingRequest { sender: tx });
     rx
 }
@@ -142,7 +142,7 @@ pub fn register_pending(auth_flow_id: String) -> oneshot::Receiver<Result<Vec<St
 ///
 /// Called by Tauri command when frontend submits responses
 pub fn complete_pending(auth_flow_id: &str, responses: Vec<String>) -> Result<(), KbiError> {
-    let mut pending = PENDING_REQUESTS.lock().unwrap();
+    let mut pending = PENDING_REQUESTS.lock();
     let request = pending.remove(auth_flow_id).ok_or(KbiError::FlowNotFound)?;
     
     // Send responses (ignore error if receiver dropped - means flow was cancelled/timed out)
@@ -154,7 +154,7 @@ pub fn complete_pending(auth_flow_id: &str, responses: Vec<String>) -> Result<()
 ///
 /// Called by Tauri command when user closes the dialog
 pub fn cancel_pending(auth_flow_id: &str) -> Result<(), KbiError> {
-    let mut pending = PENDING_REQUESTS.lock().unwrap();
+    let mut pending = PENDING_REQUESTS.lock();
     let request = pending.remove(auth_flow_id).ok_or(KbiError::FlowNotFound)?;
     
     // Send cancellation
@@ -164,13 +164,13 @@ pub fn cancel_pending(auth_flow_id: &str) -> Result<(), KbiError> {
 
 /// Cleanup a pending request (called on timeout or error)
 pub fn cleanup_pending(auth_flow_id: &str) {
-    let mut pending = PENDING_REQUESTS.lock().unwrap();
+    let mut pending = PENDING_REQUESTS.lock();
     pending.remove(auth_flow_id);
 }
 
 /// Get count of pending requests (for debugging/monitoring)
 pub fn pending_count() -> usize {
-    PENDING_REQUESTS.lock().unwrap().len()
+    PENDING_REQUESTS.lock().len()
 }
 
 // ============================================================================
