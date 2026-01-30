@@ -19,6 +19,7 @@ export interface IdeTab {
   cursor?: { line: number; col: number };
   serverMtime?: number;   // 服务器端文件修改时间（Unix timestamp 秒）
   lastAccessTime: number; // 最后访问时间（用于 LRU 驱逐）
+  contentVersion: number; // 内容版本号，用于强制编辑器刷新（冲突 reload 等场景）
 }
 
 export interface IdeProject {
@@ -242,6 +243,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             isDirty: false,
             isLoading: true,
             lastAccessTime: Date.now(),
+            contentVersion: 0,
           };
           
           set(state => ({
@@ -501,6 +503,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
                         originalContent: preview.Text.data,
                         isDirty: false,
                         serverMtime: stat.modified ?? undefined,
+                        contentVersion: t.contentVersion + 1, // 强制编辑器刷新
                       }
                     : t
                 ),

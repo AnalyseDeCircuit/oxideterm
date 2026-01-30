@@ -14,9 +14,10 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   const { t } = useTranslation();
   const { updateTabContent, updateTabCursor, saveFile } = useIdeStore();
   
-  // 跟踪上一次的 tab.id / language，用于检测是否切换了文件或语言
+  // 跟踪上一次的 tab.id / language / contentVersion，用于检测变化
   const prevTabIdRef = useRef<string>(tab.id);
   const prevLanguageRef = useRef<string>(tab.language);
+  const prevContentVersionRef = useRef<number>(tab.contentVersion); // 跟踪内容版本号
   const contentInitializedRef = useRef<boolean>(false);
   
   // 内容变化回调
@@ -55,20 +56,30 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   
   // 当文件内容加载完成或切换文件时，更新编辑器内容
   useEffect(() => {
-    if (!isReady) return;
+    // 编辑器未就绪时，重置初始化标志以便后续重新设置
+    if (!isReady) {
+      contentInitializedRef.current = false;
+      return;
+    }
 
     const isNewTab = prevTabIdRef.current !== tab.id;
     const languageChanged = prevLanguageRef.current !== tab.language;
     const hasContent = tab.content !== null;
+    
+    // 检测内容版本号变化（冲突 reload 等场景会增加版本号）
+    const contentVersionChanged = prevContentVersionRef.current !== tab.contentVersion;
+    
     const needsInit = !contentInitializedRef.current || isNewTab || languageChanged;
+    const needsUpdate = needsInit || contentVersionChanged;
 
-    if (hasContent && needsInit) {
+    if (hasContent && needsUpdate) {
       setContent(tab.content!);
       contentInitializedRef.current = true;
       prevTabIdRef.current = tab.id;
       prevLanguageRef.current = tab.language;
+      prevContentVersionRef.current = tab.contentVersion;
     }
-  }, [isReady, tab.id, tab.content, tab.language, setContent]);
+  }, [isReady, tab.id, tab.content, tab.language, tab.contentVersion, setContent]);
   
   // 标签激活时聚焦编辑器
   useEffect(() => {
