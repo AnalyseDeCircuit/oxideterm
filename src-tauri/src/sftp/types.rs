@@ -358,6 +358,77 @@ pub fn is_pdf_extension(ext: &str) -> bool {
     ext.eq_ignore_ascii_case("pdf")
 }
 
+/// Check if bytes are likely text content (not binary)
+/// Uses heuristics similar to how Git detects binary files:
+/// - Check for NUL bytes (binary indicator)
+/// - Check ratio of printable vs non-printable characters
+pub fn is_likely_text_content(bytes: &[u8]) -> bool {
+    // Empty files are considered text
+    if bytes.is_empty() {
+        return true;
+    }
+    
+    // Sample size: check first 8KB or entire file if smaller
+    let sample_size = bytes.len().min(8192);
+    let sample = &bytes[..sample_size];
+    
+    // Count different character types
+    let mut nul_count = 0;
+    let mut control_count = 0;
+    let mut high_byte_count = 0;
+    
+    for &byte in sample {
+        match byte {
+            // NUL byte - strong binary indicator
+            0x00 => nul_count += 1,
+            // Common text control characters (tab, newline, carriage return)
+            0x09 | 0x0A | 0x0D => {},
+            // Other control characters (0x01-0x08, 0x0B-0x0C, 0x0E-0x1F)
+            0x01..=0x08 | 0x0B..=0x0C | 0x0E..=0x1F => control_count += 1,
+            // DEL character
+            0x7F => control_count += 1,
+            // High bytes (could be UTF-8 continuation or binary)
+            0x80..=0xFF => high_byte_count += 1,
+            // Printable ASCII (0x20-0x7E)
+            _ => {},
+        }
+    }
+    
+    // If there are any NUL bytes, it's likely binary
+    // (text files almost never contain NUL)
+    if nul_count > 0 {
+        return false;
+    }
+    
+    // If more than 10% are control characters, it's likely binary
+    let control_ratio = control_count as f64 / sample_size as f64;
+    if control_ratio > 0.10 {
+        return false;
+    }
+    
+    // Try to validate as UTF-8 - if it's valid UTF-8, treat as text
+    if std::str::from_utf8(bytes).is_ok() {
+        return true;
+    }
+    
+    // If high bytes exist but not valid UTF-8, could still be text in other encoding
+    // (e.g., Latin-1, GB2312, Shift-JIS)
+    // Use chardetng to detect - if it finds a reasonable encoding, treat as text
+    if high_byte_count > 0 {
+        use chardetng::EncodingDetector;
+        let mut detector = EncodingDetector::new();
+        detector.feed(sample, true);
+        let _encoding = detector.guess(None, true);
+        // chardetng always returns an encoding, so we accept it if:
+        // - No NUL bytes
+        // - Reasonable control character ratio
+        return true;
+    }
+    
+    // Pure ASCII with minimal control characters - definitely text
+    true
+}
+
 /// Generate hex dump from bytes
 pub fn generate_hex_dump(data: &[u8], offset: u64) -> String {
     use std::fmt::Write;

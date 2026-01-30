@@ -12,6 +12,14 @@ interface IdeInlineInputProps {
   selectBaseName?: boolean; // 重命名时只选中不含扩展名的部分
 }
 
+/**
+ * 内联输入组件，用于重命名或新建文件/文件夹
+ * 
+ * 行为模仿 VSCode：
+ * - Enter: 确认（如果值有效）
+ * - Escape: 取消
+ * - Blur: 如果值有效且有修改则确认，否则取消
+ */
 export function IdeInlineInput({
   defaultValue = '',
   placeholder,
@@ -25,6 +33,7 @@ export function IdeInlineInput({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmingRef = useRef(false);
+  const cancellingRef = useRef(false);
 
   // 自动聚焦
   useEffect(() => {
@@ -67,12 +76,20 @@ export function IdeInlineInput({
 
   // 确认
   const handleConfirm = useCallback(() => {
-    if (confirmingRef.current) return;
+    if (confirmingRef.current || cancellingRef.current) return;
     if (error || !value.trim()) return;
 
     confirmingRef.current = true;
     onConfirm(value.trim());
   }, [value, error, onConfirm]);
+
+  // 取消
+  const handleCancel = useCallback(() => {
+    if (confirmingRef.current || cancellingRef.current) return;
+    
+    cancellingRef.current = true;
+    onCancel();
+  }, [onCancel]);
 
   // 键盘事件
   const handleKeyDown = useCallback(
@@ -84,21 +101,37 @@ export function IdeInlineInput({
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onCancel();
+        handleCancel();
       }
     },
-    [handleConfirm, onCancel]
+    [handleConfirm, handleCancel]
   );
 
-  // 失焦时取消
+  // 失焦时处理 - 模仿 VSCode 行为
+  // VSCode: blur 时如果值有效就确认，无效就取消
   const handleBlur = useCallback(() => {
     // 短暂延迟，允许 Enter 键或按钮点击先处理
     setTimeout(() => {
-      if (!confirmingRef.current) {
-        onCancel();
+      if (confirmingRef.current || cancellingRef.current) return;
+
+      const trimmedValue = value.trim();
+      
+      // 如果值为空或有错误，取消操作
+      if (!trimmedValue || error) {
+        handleCancel();
+        return;
       }
-    }, 150);
-  }, [onCancel]);
+      
+      // 如果值没有变化（对于重命名来说），取消操作
+      if (trimmedValue === defaultValue) {
+        handleCancel();
+        return;
+      }
+      
+      // 值有效且有修改，确认操作
+      handleConfirm();
+    }, 100);
+  }, [value, error, defaultValue, handleConfirm, handleCancel]);
 
   const displayError = getErrorMessage(error);
 

@@ -411,8 +411,42 @@ impl SftpSession {
                 .await;
         }
 
-        // Fallback: Hex preview for unknown binary files
+        // Priority 8: For files without extension or unknown MIME, detect by content
+        // This handles Linux extensionless text files like "fichier", "README", etc.
+        if extension.is_empty() || mime_type == "application/octet-stream" {
+            // Only attempt content detection for reasonably sized files
+            if file_size <= constants::MAX_TEXT_PREVIEW_SIZE {
+                // Read a small sample to check if it's text
+                let sample_size = file_size.min(8192) as usize;
+                if let Ok(sample) = self.read_sample(&canonical_path, sample_size).await {
+                    if is_likely_text_content(&sample) {
+                        return self
+                            .preview_text(&canonical_path, "txt", "text/plain")
+                            .await;
+                    }
+                }
+            }
+        }
+
+        // Fallback: Hex preview for binary files
         self.preview_hex(&canonical_path, file_size, offset).await
+    }
+
+    /// Read a small sample from the beginning of a file for content detection
+    async fn read_sample(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, SftpError> {
+        use tokio::io::AsyncReadExt;
+        
+        let mut file = self
+            .sftp
+            .open(path)
+            .await
+            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+        
+        let mut buffer = vec![0u8; max_bytes];
+        let bytes_read = file.read(&mut buffer).await.map_err(SftpError::IoError)?;
+        buffer.truncate(bytes_read);
+        
+        Ok(buffer)
     }
 
     /// Preview text/code files with syntax highlighting hint
