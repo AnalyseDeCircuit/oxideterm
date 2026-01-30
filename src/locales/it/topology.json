@@ -1,76 +1,45 @@
 {
   "topology": {
-    "title": "Topologia Connessioni",
-    "matrix": "Matrice Connessioni",
-    "view_matrix": "Visualizza Matrice",
-    "view_list": "Visualizza Lista",
-    "view_tree": "Visualizza Albero",
-    "connections": "Connessioni",
-    "sessions": "Sessioni",
-    "jump_servers": "Server di salto",
-    "direct": "Diretta",
-    "via_jump": "via {{name}}",
-    "status": {
-      "connected": "Connesso",
-      "disconnected": "Disconnesso",
-      "connecting": "Connessione...",
-      "error": "Errore"
+    "button_title": "Vista Topologia",
+    "title": "Matrice Connessioni",
+    "system_status": "STATO_SISTEMA: ONLINE",
+    "legend_title": "Stato Segnale",
+    "status_active": "Attiva",
+    "status_connecting": "Connessione",
+    "status_idle": "Inattiva",
+    "stats_single": "1 connessione attiva",
+    "stats_multiple": "{{count}} connessioni attive, profondità max: {{depth}}",
+    "page": {
+      "title": "Matrice Connessioni",
+      "description": "Topologia visuale dei tunnel SSH attivi e server di salto.",
+      "no_connections": "Nessuna connessione attiva",
+      "connect_hint": "Connettiti ai server per popolare la matrice."
     },
-    "no_connections": "Nessuna connessione configurata",
-    "no_sessions": "Nessuna sessione attiva",
-    "add_connection": "Aggiungi Connessione",
-    "connection_info": "Info Connessione",
-    "session_info": "Info Sessione",
-    "latency": "Latenza",
-    "uptime": "Tempo attivo",
-    "bytes_sent": "Byte inviati",
-    "bytes_received": "Byte ricevuti",
-    "last_activity": "Ultima attività",
-    "group": "Gruppo",
-    "groups": "Gruppi",
-    "all_groups": "Tutti i gruppi",
-    "ungrouped": "Senza gruppo",
-    "filter": {
-      "all": "Tutte le connessioni",
-      "connected": "Solo connesse",
-      "disconnected": "Solo disconnesse",
-      "favorites": "Preferiti"
+    "view": {
+      "no_matrix": "Nessuna Matrice Attiva",
+      "connect_to_populate": "Connettiti ai server per popolare"
     },
-    "sort": {
-      "name": "Ordina per nome",
-      "status": "Ordina per stato",
-      "last_used": "Ordina per ultimo utilizzo",
-      "group": "Ordina per gruppo"
-    },
-    "actions": {
-      "connect": "Connetti",
-      "disconnect": "Disconnetti",
-      "reconnect": "Riconnetti",
-      "edit": "Modifica",
-      "duplicate": "Duplica",
-      "delete": "Elimina",
-      "add_to_favorites": "Aggiungi ai preferiti",
-      "remove_from_favorites": "Rimuovi dai preferiti",
+    "menu": {
+      "navigate_session": "Vai alla Sessione Attiva",
+      "new_terminal": "Nuovo Terminale",
       "open_sftp": "Apri SFTP",
-      "open_terminal": "Apri Terminale"
+      "close_hint": "Clicca fuori per chiudere"
     },
-    "stats": {
-      "total": "Totale connessioni",
-      "active": "Sessioni attive",
-      "failed": "Connessioni fallite"
-    },
-    "health": {
-      "title": "Salute Connessione",
-      "good": "Buona",
-      "degraded": "Degradata",
-      "poor": "Scarsa",
-      "unknown": "Sconosciuta"
-    },
-    "legend": {
-      "title": "Legenda",
-      "active": "Attiva",
-      "inactive": "Inattiva",
-      "jump": "Server di salto"
+    "controls": {
+      "instructions": "Scorri per zoomare · Trascina per spostare · Doppio clic sul nodo per menu"
     }
+  },
+  "error_boundary": {
+    "title": "Errore Applicazione",
+    "description": "Si è verificato un errore imprevisto, ma i tuoi dati dovrebbero essere al sicuro.",
+    "unknown_error": "Errore sconosciuto",
+    "component_stack": "Stack Componenti",
+    "attempt_recovery": "Tenta Recupero",
+    "reload_page": "Ricarica Pagina",
+    "copied": "Copiato",
+    "copy_error": "Copia Dettagli Errore",
+    "help_text": "Se il problema persiste, copia i dettagli dell'errore e invia una segnalazione su",
+    "github_issues": "GitHub Issues",
+    "help_text_suffix": ""
   }
 }

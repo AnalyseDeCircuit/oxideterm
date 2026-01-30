@@ -56,6 +56,10 @@
       "forwards": "Transferts",
       "summary": "Total : {{total}} connexions • Réf : {{refs}}",
       "live": "En direct"
+    },
+    "status": {
+      "reconnecting_title": "Reconnexion en cours",
+      "reconnecting_wait": "La connexion est en cours de restauration. Veuillez patienter et réessayer."
     }
   }
 }

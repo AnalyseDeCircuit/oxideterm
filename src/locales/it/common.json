@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Impossibile eliminare alcune connessioni: {{message}}"
-    }
+    },
+    "retry": "Riprova"
   },
   "layout": {
     "empty": {

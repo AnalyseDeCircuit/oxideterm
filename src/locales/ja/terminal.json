@@ -71,6 +71,7 @@
       "server_error": "サーバーエラー: {{error}}",
       "no_ws_url": "セッションで利用可能なWebSocket URLがありません。",
       "connection_lost": "[OxideTerm] 接続が切断されました。再接続中...",
+      "connection_lost_reconnect": "[OxideTerm] SSH接続が切断されました。再接続してください。",
       "attempting_reconnect": "[OxideTerm] 再接続を試みています...",
       "link_restored": "[OxideTerm] リンクが復元されました。シェルセッションがリセットされました。",
       "connection_failed": "[OxideTerm] 接続が永続的に失敗しました。",

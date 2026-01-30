@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Échec de la suppression de certaines connexions : {{message}}"
-    }
+    },
+    "retry": "Réessayer"
   },
   "layout": {
     "empty": {

@@ -56,6 +56,10 @@
       "forwards": "포워딩",
       "summary": "총: {{total}} 연결 • 참조: {{refs}}",
       "live": "실시간"
+    },
+    "status": {
+      "reconnecting_title": "연결 재설정 중",
+      "reconnecting_wait": "연결을 복원하고 있습니다. 잠시 후 다시 시도해 주세요."
     }
   }
 }

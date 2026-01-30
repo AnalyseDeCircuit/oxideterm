@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "일부 연결 삭제 실패: {{message}}"
-    }
+    },
+    "retry": "재시도"
   },
   "layout": {
     "empty": {

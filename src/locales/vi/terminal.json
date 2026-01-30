@@ -71,6 +71,7 @@
       "server_error": "Lỗi máy chủ: {{error}}",
       "no_ws_url": "Không có URL WebSocket khả dụng cho phiên.",
       "connection_lost": "[OxideTerm] Mất kết nối. Đang kết nối lại...",
+      "connection_lost_reconnect": "[OxideTerm] Mất kết nối SSH. Vui lòng kết nối lại.",
       "attempting_reconnect": "[OxideTerm] Đang cố gắng kết nối lại...",
       "link_restored": "[OxideTerm] Đã khôi phục kết nối. Phiên shell đã reset.",
       "connection_failed": "[OxideTerm] Kết nối thất bại vĩnh viễn.",

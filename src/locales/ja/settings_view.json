@@ -156,6 +156,7 @@
       "conflict_overwrite": "常に上書き",
       "conflict_skip": "常にスキップ",
       "conflict_rename": "両方を保持（名前変更）",
+      "transfer_count_one": "{{count}} 転送",
       "transfer_count_other": "{{count}} 転送"
     },
     "ai_confirm": {

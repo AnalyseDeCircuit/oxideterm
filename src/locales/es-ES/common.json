@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Error al eliminar algunas conexiones: {{message}}"
-    }
+    },
+    "retry": "Reintentar"
   },
   "layout": {
     "empty": {

@@ -56,6 +56,10 @@
       "forwards": "Inoltri",
       "summary": "Totale: {{total}} connessioni • Ref: {{refs}}",
       "live": "Live"
+    },
+    "status": {
+      "reconnecting_title": "Riconnessione in corso",
+      "reconnecting_wait": "La connessione è in fase di ripristino. Attendi e riprova."
     }
   }
 }

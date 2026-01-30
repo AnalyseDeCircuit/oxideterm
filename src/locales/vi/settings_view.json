@@ -156,6 +156,7 @@
       "conflict_overwrite": "Luôn ghi đè",
       "conflict_skip": "Luôn bỏ qua",
       "conflict_rename": "Giữ cả hai (đổi tên)",
+      "transfer_count_one": "{{count}} truyền tải",
       "transfer_count_other": "{{count}} truyền tải"
     },
     "ai_confirm": {
