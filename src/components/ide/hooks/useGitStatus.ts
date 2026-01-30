@@ -1,7 +1,19 @@
 // src/components/ide/hooks/useGitStatus.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useIdeStore } from '../../../store/ideStore';
+import { useIdeStore, registerGitRefreshCallback } from '../../../store/ideStore';
 import { api } from '../../../lib/api';
+
+// 防抖函数
+function debounce<T extends (...args: unknown[]) => unknown>(
+  fn: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+}
 
 /**
  * Git 文件状态类型
@@ -138,8 +150,11 @@ function parseBranchInfo(firstLine: string): { branch: string; ahead: number; be
   return { branch, ahead, behind };
 }
 
-// 刷新间隔（毫秒）
-const REFRESH_INTERVAL_MS = 30000;
+// 刷新间隔（毫秒）- 从 30s 改为 60s 作为保底轮询
+const REFRESH_INTERVAL_MS = 60000;
+
+// 防抖延迟（毫秒）- 避免短时间内多次刷新
+const DEBOUNCE_DELAY_MS = 1000;
 
 /**
  * Git 状态管理 Hook
@@ -252,6 +267,36 @@ export function useGitStatus(): UseGitStatusResult {
     return undefined;
   }, [status]);
   
+  // 防抖刷新函数（供外部事件调用）
+  const debouncedRefresh = useCallback(
+    debounce(() => {
+      refresh();
+    }, DEBOUNCE_DELAY_MS),
+    [refresh]
+  );
+  
+  // 注册 Git 刷新回调（saveFile、终端回车等行为触发）
+  useEffect(() => {
+    registerGitRefreshCallback(debouncedRefresh);
+    return () => {
+      registerGitRefreshCallback(() => {}); // 清理时注册空函数
+    };
+  }, [debouncedRefresh]);
+  
+  // 监听窗口聚焦事件（用户切回时可能有外部变更）
+  useEffect(() => {
+    if (!project?.isGitRepo) return;
+    
+    const handleFocus = () => {
+      debouncedRefresh();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [project?.isGitRepo, debouncedRefresh]);
+  
   // 项目变化或成为 Git 仓库时加载状态
   useEffect(() => {
     if (project?.isGitRepo) {
@@ -261,7 +306,7 @@ export function useGitStatus(): UseGitStatusResult {
     }
   }, [project?.isGitRepo, project?.rootPath, refresh]);
   
-  // 定期刷新
+  // 定期刷新（保底轮询，60s）
   useEffect(() => {
     if (project?.isGitRepo) {
       refreshIntervalRef.current = setInterval(refresh, REFRESH_INTERVAL_MS);
