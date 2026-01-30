@@ -4,6 +4,21 @@ import { subscribeWithSelector, persist } from 'zustand/middleware';
 import { api } from '../lib/api';
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 搜索缓存清除回调（由 IdeSearchPanel 注册）
+// ═══════════════════════════════════════════════════════════════════════════
+let onSearchCacheClear: (() => void) | null = null;
+
+/** 注册搜索缓存清除回调 */
+export function registerSearchCacheClearCallback(callback: () => void) {
+  onSearchCacheClear = callback;
+}
+
+/** 触发搜索缓存清除 */
+function triggerSearchCacheClear() {
+  onSearchCacheClear?.();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -380,6 +395,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 保存文件
           const result = await api.sftpWriteContent(sftpSessionId, tab.path, tab.content);
+          
+          // 清除搜索缓存（文件内容已变化）
+          triggerSearchCacheClear();
           
           set(state => ({
             tabs: state.tabs.map(t =>
