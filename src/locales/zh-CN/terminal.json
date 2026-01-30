@@ -71,6 +71,7 @@
       "server_error": "服务器错误: {{error}}",
       "no_ws_url": "此会话无可用的 WebSocket URL。",
       "connection_lost": "[OxideTerm] 连接丢失。正在重连...",
+      "connection_lost_reconnect": "[OxideTerm] SSH 连接已断开，请重新连接。",
       "attempting_reconnect": "[OxideTerm] 尝试重新连接...",
       "link_restored": "[OxideTerm] 链路已恢复。Shell 会话已重置。",
       "connection_failed": "[OxideTerm] 连接永久失败。",

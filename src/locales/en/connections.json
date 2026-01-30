@@ -56,6 +56,10 @@
       "forwards": "Forwards",
       "summary": "Total: {{total}} connections • Refs: {{refs}}",
       "live": "Live"
+    },
+    "status": {
+      "reconnecting_title": "Connection Reconnecting",
+      "reconnecting_wait": "The connection is being restored. Please wait and try again."
     }
   }
 }

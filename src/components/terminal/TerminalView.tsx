@@ -97,6 +97,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const isMountedRef = useRef(true); // Track mount state for StrictMode
   const reconnectingRef = useRef(false); // Suppress close/error during intentional reconnect
+  const wsRecoveryInFlightRef = useRef(false);
+  const wsRecoveryAttemptsRef = useRef(0);
+  const wsRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   
@@ -151,6 +154,67 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   useEffect(() => {
     connectionIdRef.current = session?.connectionId ?? null;
   }, [session?.connectionId]);
+
+  const recoverWebSocket = useCallback((reason: string) => {
+    if (wsRecoveryInFlightRef.current) return;
+    if (wsRecoveryAttemptsRef.current >= 3) return;
+
+    wsRecoveryInFlightRef.current = true;
+    wsRecoveryAttemptsRef.current += 1;
+    const attempt = wsRecoveryAttemptsRef.current;
+    const delayMs = Math.min(1000 * attempt, 3000);
+
+    if (import.meta.env.DEV) {
+      console.warn(`[TerminalView ${sessionId}] WS recover attempt #${attempt} (${reason}) in ${delayMs}ms`);
+    }
+
+    if (wsRecoveryTimeoutRef.current) {
+      clearTimeout(wsRecoveryTimeoutRef.current);
+    }
+
+    wsRecoveryTimeoutRef.current = setTimeout(async () => {
+      try {
+        const result = await api.recreateTerminalPty(sessionId);
+        useAppStore.setState((state) => {
+          const newSessions = new Map(state.sessions);
+          const existingSession = newSessions.get(sessionId);
+          if (existingSession) {
+            newSessions.set(sessionId, {
+              ...existingSession,
+              ws_url: result.wsUrl,
+              ws_token: result.wsToken,
+            });
+          }
+          return { sessions: newSessions };
+        });
+        lastWsUrlRef.current = null; // Allow reconnect even if URL repeats
+        wsRecoveryAttemptsRef.current = 0; // Reset on success
+      } catch (error) {
+        const errorMsg = String(error);
+        console.error(`[TerminalView ${sessionId}] WS recover failed:`, error);
+        
+        // Check if this is a connection-level failure (SSH connection lost)
+        if (errorMsg.includes('Connection not found') || errorMsg.includes('Session') && errorMsg.includes('not found')) {
+          // SSH connection is gone - stop retrying and notify user
+          wsRecoveryAttemptsRef.current = 3; // Prevent further retries
+          const term = terminalRef.current;
+          if (term) {
+            term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_lost_reconnect')}\x1b[0m`);
+          }
+        }
+      } finally {
+        wsRecoveryInFlightRef.current = false;
+      }
+    }, delayMs);
+  }, [sessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (wsRecoveryTimeoutRef.current) {
+        clearTimeout(wsRecoveryTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Get terminal settings from unified store
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
@@ -297,6 +361,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     
     try {
       const ws = new WebSocket(wsUrl);
+      let opened = false;
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
       lastWsUrlRef.current = wsUrl;
@@ -307,6 +372,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           return;
         }
         reconnectingRef.current = false;
+        opened = true;
+        wsRecoveryAttemptsRef.current = 0;
+        wsRecoveryInFlightRef.current = false;
         
         // Send authentication token
         if (wsToken) {
@@ -408,6 +476,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         if (!isMountedRef.current || wsRef.current !== ws) return;
         console.error('WebSocket reconnection error:', error);
         term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_reconnect_error')}\x1b[0m`);
+        if (!opened) {
+          recoverWebSocket('reconnect-error');
+        }
       };
 
       ws.onclose = (event) => {
@@ -416,12 +487,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         if (event.code !== 1000) {
           term.writeln(`\r\n\x1b[33m${i18n.t('terminal.ssh.connection_closed_code', { code: event.code })}\x1b[0m`);
         }
+        if (!opened) {
+          recoverWebSocket('reconnect-close');
+        }
       };
     } catch (e) {
       console.error('Failed to reconnect WebSocket:', e);
       term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_establish_failed', { error: e })}\x1b[0m`);
     }
-  }, [session?.ws_url]);
+  }, [session?.ws_url, recoverWebSocket]);
 
   const getFontFamily = (val: string) => {
       switch(val) {
@@ -647,7 +721,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             await ensureFontsLoaded();
 
             try {
-                const ws = new WebSocket(wsUrl);
+              const ws = new WebSocket(wsUrl);
+              let opened = false;
                 ws.binaryType = 'arraybuffer';
                 wsRef.current = ws;
                 lastWsUrlRef.current = wsUrl; // Track initial ws_url
@@ -658,6 +733,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                         return;
                     }
                   reconnectingRef.current = false;
+                  opened = true;
+                  wsRecoveryAttemptsRef.current = 0;
+                  wsRecoveryInFlightRef.current = false;
 
                     // SECURITY: Send authentication token as first message
                     const latestToken = latestSession.ws_token;
@@ -738,11 +816,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                   if (!reconnectingRef.current) {
                     term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_closed')}\x1b[0m`);
                   }
+                  if (!opened) {
+                    recoverWebSocket('initial-close');
+                  }
                 };
 
                 ws.onerror = (e) => {
                   if (!isMountedRef.current || wsRef.current !== ws) return;
                   term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_error', { error: e })}\x1b[0m`);
+                  if (!opened) {
+                    recoverWebSocket('initial-error');
+                  }
                 };
 
 

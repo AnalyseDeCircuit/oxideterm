@@ -1777,7 +1777,7 @@ impl SshConnectionRegistry {
     }
 
     /// 启动连接重连任务
-    async fn start_reconnect(self: &Arc<Self>, connection_id: &str) {
+    pub async fn start_reconnect(self: &Arc<Self>, connection_id: &str) {
         let Some(entry) = self.connections.get(connection_id) else {
             return;
         };
@@ -2168,7 +2168,7 @@ impl SshConnectionRegistry {
     /// 
     /// # AppHandle 生命周期
     /// 如果 AppHandle 未就绪，事件会被缓存，待 AppHandle 设置后立即发送
-    async fn emit_connection_status_changed(&self, connection_id: &str, status: &str) {
+    pub async fn emit_connection_status_changed(&self, connection_id: &str, status: &str) {
         // 对于 link_down 状态，使用带子连接的版本
         if status == "link_down" {
             let affected_children = self.collect_all_children(connection_id);

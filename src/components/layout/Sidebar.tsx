@@ -27,6 +27,7 @@ import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
+import { useToast } from '../../hooks/useToast';
 import { AiChatPanel } from '../ai/AiChatPanel';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -339,6 +340,8 @@ export const Sidebar = () => {
     setSavePresetDialog({ open: true, nodeId });
   }, []);
 
+  const { toast } = useToast();
+
   // 新建终端 (使用统一 store)
   const handleTreeNewTerminal = useCallback(async (nodeId: string) => {
     try {
@@ -346,8 +349,16 @@ export const Sidebar = () => {
       createTab('terminal', terminalId);
     } catch (err) {
       console.error('Failed to create terminal:', err);
+      const errMsg = String(err);
+      if (errMsg.includes('CONNECTION_RECONNECTING')) {
+        toast({
+          title: t('connections.status.reconnecting_title'),
+          description: t('connections.status.reconnecting_wait'),
+          variant: 'warning',
+        });
+      }
     }
-  }, [createTerminalForNode, createTab]);
+  }, [createTerminalForNode, createTab, toast, t]);
 
   // 关闭终端
   const handleTreeCloseTerminal = useCallback(async (nodeId: string, terminalId: string) => {

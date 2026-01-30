@@ -343,17 +343,34 @@ pub async fn create_terminal(
         request.connection_id
     );
 
+    // 检查连接状态 - 如果正在重连则拒绝创建
+    let connection_info = connection_registry
+        .get_info(&request.connection_id)
+        .await
+        .ok_or_else(|| "Connection not found".to_string())?;
+    
+    use crate::ssh::ConnectionState;
+    match &connection_info.state {
+        ConnectionState::LinkDown => {
+            return Err("CONNECTION_RECONNECTING: Connection is down, waiting for reconnect".to_string());
+        }
+        ConnectionState::Reconnecting => {
+            return Err("CONNECTION_RECONNECTING: Connection is reconnecting, please wait".to_string());
+        }
+        ConnectionState::Disconnected => {
+            return Err("Connection is disconnected".to_string());
+        }
+        ConnectionState::Error(e) => {
+            return Err(format!("Connection error: {}", e));
+        }
+        _ => {} // Active, Idle, Connecting are OK
+    }
+
     // 获取 HandleController（增加引用计数）
     let handle_controller = connection_registry
         .acquire(&request.connection_id)
         .await
         .map_err(|e| format!("Failed to acquire connection: {}", e))?;
-
-    // 获取连接配置
-    let connection_info = connection_registry
-        .get_info(&request.connection_id)
-        .await
-        .ok_or_else(|| "Connection not found".to_string())?;
 
     // 创建 session 配置
     let config = SessionConfig {
@@ -387,18 +404,47 @@ pub async fn create_terminal(
     }
 
     // 通过已有的 HandleController 打开新的 shell channel
-    let mut channel = handle_controller
-        .open_session_channel()
-        .await
-        .map_err(|e| {
+    let mut channel = match handle_controller.open_session_channel().await {
+        Ok(ch) => ch,
+        Err(e) => {
             session_registry.remove(&session_id);
             let conn_reg = connection_registry.inner().clone();
             let conn_id = request.connection_id.clone();
-            tokio::spawn(async move {
-                let _ = conn_reg.release(&conn_id).await;
-            });
-            format!("Failed to open channel: {}", e)
-        })?;
+            
+            // 检查是否是连接断开错误
+            let err_str = e.to_string().to_lowercase();
+            let is_connection_error = err_str.contains("disconnected")
+                || err_str.contains("connectfailed")
+                || err_str.contains("channel error");
+            
+            if is_connection_error {
+                // 连接已断开，标记为 LinkDown 并触发重连
+                warn!("Channel open failed, connection {} may be dead: {}", conn_id, e);
+                tokio::spawn(async move {
+                    // 先释放引用
+                    let _ = conn_reg.release(&conn_id).await;
+                    // 标记连接为 LinkDown 并触发重连
+                    if let Some(entry) = conn_reg.get_connection(&conn_id) {
+                        let current_state = entry.state().await;
+                        // 只有当连接还不是 LinkDown/Reconnecting 时才触发
+                        if !matches!(current_state, ConnectionState::LinkDown | ConnectionState::Reconnecting) {
+                            entry.set_state(ConnectionState::LinkDown).await;
+                            // 发送状态变更事件
+                            conn_reg.emit_connection_status_changed(&conn_id, "link_down").await;
+                            // 触发重连
+                            conn_reg.start_reconnect(&conn_id).await;
+                        }
+                    }
+                });
+                return Err("CONNECTION_RECONNECTING: Connection lost, please wait for reconnect".to_string());
+            } else {
+                tokio::spawn(async move {
+                    let _ = conn_reg.release(&conn_id).await;
+                });
+                return Err(format!("Failed to open channel: {}", e));
+            }
+        }
+    };
 
     // 请求 PTY
     channel

@@ -110,6 +110,9 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
 
   resizeTerminal: async (sessionId: string, cols: number, rows: number) => {
     try {
+      if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols <= 0 || rows <= 0) {
+        return;
+      }
       await api.localResizeTerminal(sessionId, cols, rows);
       
       set((state) => {

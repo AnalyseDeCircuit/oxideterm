@@ -56,6 +56,10 @@
       "forwards": "转发",
       "summary": "总计: {{total}} 个连接 • 引用: {{refs}}",
       "live": "实时"
+    },
+    "status": {
+      "reconnecting_title": "连接重连中",
+      "reconnecting_wait": "连接正在恢复中，请稍后重试。"
     }
   }
 }

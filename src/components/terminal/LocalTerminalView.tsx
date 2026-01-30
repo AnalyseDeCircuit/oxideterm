@@ -274,7 +274,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       fitAddon.fit();
       
       const dims = fitAddon.proposeDimensions();
-      if (dims) {
+      if (dims && Number.isFinite(dims.cols) && Number.isFinite(dims.rows) && dims.cols > 0 && dims.rows > 0) {
         resizeTerminal(sessionId, dims.cols, dims.rows);
       }
     }, 0);
@@ -528,7 +528,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         fitAddon.fit();
         
         const dims = fitAddon.proposeDimensions();
-        if (dims) {
+        if (dims && Number.isFinite(dims.cols) && Number.isFinite(dims.rows) && dims.cols > 0 && dims.rows > 0) {
           resizeTerminal(sessionId, dims.cols, dims.rows);
         }
         resizeDebounceTimer = null;

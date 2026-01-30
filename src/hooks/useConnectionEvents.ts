@@ -230,6 +230,8 @@ export function useConnectionEvents(): void {
  */
 async function restoreTerminalConnections(terminalIds: string[]): Promise<void> {
   const appStore = useAppStore.getState();
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 500;
 
   for (const terminalId of terminalIds) {
     const session = appStore.sessions.get(terminalId);
@@ -238,30 +240,45 @@ async function restoreTerminalConnections(terminalIds: string[]): Promise<void> 
       continue;
     }
 
-    try {
-      console.log(`[ConnectionEvents] Recreating PTY for terminal ${terminalId}`);
-      
-      // 调用后端重建 PTY 并获取新的 WebSocket 信息
-      const result = await api.recreateTerminalPty(terminalId);
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[ConnectionEvents] Recreating PTY for terminal ${terminalId} (attempt ${attempt}/${MAX_RETRIES})`);
+        
+        // 调用后端重建 PTY 并获取新的 WebSocket 信息
+        const result = await api.recreateTerminalPty(terminalId);
 
-      // 直接更新 sessions Map 中的 ws_url 和 ws_token
-      // 这会触发 TerminalView 的 useEffect 重连
-      useAppStore.setState((state) => {
-        const newSessions = new Map(state.sessions);
-        const existingSession = newSessions.get(terminalId);
-        if (existingSession) {
-          newSessions.set(terminalId, {
-            ...existingSession,
-            ws_url: result.wsUrl,
-            ws_token: result.wsToken,
-          });
+        // 直接更新 sessions Map 中的 ws_url 和 ws_token
+        // 这会触发 TerminalView 的 useEffect 重连
+        useAppStore.setState((state) => {
+          const newSessions = new Map(state.sessions);
+          const existingSession = newSessions.get(terminalId);
+          if (existingSession) {
+            newSessions.set(terminalId, {
+              ...existingSession,
+              ws_url: result.wsUrl,
+              ws_token: result.wsToken,
+            });
+          }
+          return { sessions: newSessions };
+        });
+
+        console.log(`[ConnectionEvents] Terminal ${terminalId} PTY recreated, new ws_url: ${result.wsUrl}`);
+        lastError = null;
+        break; // Success, exit retry loop
+      } catch (e) {
+        lastError = e;
+        console.warn(`[ConnectionEvents] Failed to restore terminal ${terminalId} (attempt ${attempt}/${MAX_RETRIES}):`, e);
+        
+        if (attempt < MAX_RETRIES) {
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
         }
-        return { sessions: newSessions };
-      });
-
-      console.log(`[ConnectionEvents] Terminal ${terminalId} PTY recreated, new ws_url: ${result.wsUrl}`);
-    } catch (e) {
-      console.error(`[ConnectionEvents] Failed to restore terminal ${terminalId}:`, e);
+      }
+    }
+    
+    if (lastError) {
+      console.error(`[ConnectionEvents] Failed to restore terminal ${terminalId} after ${MAX_RETRIES} attempts:`, lastError);
     }
   }
 }
