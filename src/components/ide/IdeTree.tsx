@@ -65,7 +65,6 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ file, depth, sftpSessionId, parentPath }: TreeNodeProps) {
-  const { expandedPaths, togglePath, openFile, tabs } = useIdeStore();
   const gitStatusCtx = useGitStatusContext();
   const [children, setChildren] = useState<FileInfo[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,8 +74,13 @@ function TreeNode({ file, depth, sftpSessionId, parentPath }: TreeNodeProps) {
   const fullPath = parentPath === '/' 
     ? `/${file.name}` 
     : `${parentPath}/${file.name}`;
-  const isExpanded = expandedPaths.has(fullPath);
-  const isOpen = tabs.some(t => t.path === fullPath);
+  
+  // 精细化 selector：只订阅需要的状态，减少不必要的重渲染
+  // 当用户打字时，tabs 数组引用会变，但 isOpen 布尔值不变，组件不会重绘
+  const isExpanded = useIdeStore(state => state.expandedPaths.has(fullPath));
+  const isOpen = useIdeStore(state => state.tabs.some(t => t.path === fullPath));
+  const togglePath = useIdeStore(state => state.togglePath);
+  const openFile = useIdeStore(state => state.openFile);
   
   // 计算相对于项目根目录的路径（用于 Git 状态查询）
   const relativePath = gitStatusCtx 
@@ -217,16 +221,19 @@ function TreeNode({ file, depth, sftpSessionId, parentPath }: TreeNodeProps) {
 export function IdeTree() {
   const { t } = useTranslation();
   const project = useIdeProject();
-  const { sftpSessionId, expandedPaths, changeRootPath, tabs } = useIdeStore();
+  
+  // 精细化 selector：只订阅需要的状态
+  const sftpSessionId = useIdeStore(state => state.sftpSessionId);
+  const expandedPaths = useIdeStore(state => state.expandedPaths);
+  const changeRootPath = useIdeStore(state => state.changeRootPath);
+  const hasDirtyFiles = useIdeStore(state => state.tabs.some(t => t.isDirty));
+  
   const { status: gitStatus, getFileStatus, refresh: refreshGit, isLoading: gitLoading } = useGitStatus();
   const [rootFiles, setRootFiles] = useState<FileInfo[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isChangingRoot, setIsChangingRoot] = useState(false);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
-  
-  // 检查是否有未保存的文件
-  const hasDirtyFiles = tabs.some(t => t.isDirty);
   
   // 加载根目录
   const loadRoot = useCallback(async () => {

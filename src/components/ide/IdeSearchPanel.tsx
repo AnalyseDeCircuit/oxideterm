@@ -9,10 +9,40 @@ import {
   ChevronRight,
   AlertCircle,
 } from 'lucide-react';
-import { useIdeStore, useIdeProject } from '../../store/ideStore';
+import { useIdeStore, useIdeProject, registerSearchCacheClearCallback } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
 import { api } from '../../lib/api';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 搜索缓存（模块级别，组件卸载不会丢失）
+// ═══════════════════════════════════════════════════════════════════════════
+interface SearchCacheEntry {
+  results: SearchResultGroup[];
+  timestamp: number;
+}
+
+const searchCache = new Map<string, SearchCacheEntry>();
+const SEARCH_CACHE_TTL = 60 * 1000; // 60秒缓存
+
+// 注册缓存清除回调（保存文件时触发）
+registerSearchCacheClearCallback(() => {
+  searchCache.clear();
+});
+
+/** 清除所有搜索缓存（保存文件后调用） */
+export function clearSearchCache() {
+  searchCache.clear();
+}
+
+/** 清除指定项目的搜索缓存 */
+export function clearSearchCacheForProject(rootPath: string) {
+  for (const key of searchCache.keys()) {
+    if (key.startsWith(`${rootPath}:`)) {
+      searchCache.delete(key);
+    }
+  }
+}
 
 /**
  * 单个匹配结果
@@ -101,11 +131,20 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
   
   /**
    * 执行搜索
-   * 使用 grep 命令搜索文件内容
+   * 使用 grep 命令搜索文件内容（带缓存）
    */
   const doSearch = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim() || !connectionId || !project) {
       setResults([]);
+      return;
+    }
+    
+    // 检查缓存
+    const cacheKey = `${project.rootPath}:${searchQuery}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < SEARCH_CACHE_TTL) {
+      setResults(cached.results);
+      setExpandedPaths(new Set(cached.results.map(g => g.path)));
       return;
     }
     
@@ -192,6 +231,12 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
       const resultGroups: SearchResultGroup[] = Array.from(grouped.entries()).map(
         ([path, fileMatches]) => ({ path, matches: fileMatches })
       );
+      
+      // 写入缓存
+      searchCache.set(cacheKey, {
+        results: resultGroups,
+        timestamp: Date.now(),
+      });
       
       setResults(resultGroups);
       // 默认展开所有文件
