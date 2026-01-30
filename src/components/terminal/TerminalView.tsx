@@ -9,6 +9,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore } from '../../store/appStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { triggerGitRefresh } from '../../store/ideStore';
 import { api } from '../../lib/api';
 import { themes } from '../../lib/themes';
 import { platform } from '../../lib/platform';
@@ -790,6 +791,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             const payload = encoder.encode(data);
             const frame = encodeDataFrame(payload);
             ws.send(frame);
+            
+            // IDE Terminal: 检测回车键触发 Git 刷新
+            // 仅当 sessionId 以 'ide-terminal-' 开头时触发（区分普通终端和 IDE 终端）
+            if (sessionId.startsWith('ide-terminal-') && (data === '\r' || data === '\n')) {
+              // 延迟 500ms 触发，给 git 命令执行时间
+              setTimeout(() => {
+                triggerGitRefresh();
+              }, 500);
+            }
         }
     });
 

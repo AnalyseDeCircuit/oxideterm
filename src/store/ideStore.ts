@@ -19,6 +19,21 @@ function triggerSearchCacheClear() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Git 状态刷新回调（由 useGitStatus 注册）
+// ═══════════════════════════════════════════════════════════════════════════
+let onGitRefresh: (() => void) | null = null;
+
+/** 注册 Git 刷新回调 */
+export function registerGitRefreshCallback(callback: () => void) {
+  onGitRefresh = callback;
+}
+
+/** 触发 Git 状态刷新（保存文件、终端回车等行为后调用） */
+export function triggerGitRefresh() {
+  onGitRefresh?.();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -398,6 +413,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 清除搜索缓存（文件内容已变化）
           triggerSearchCacheClear();
+          
+          // 触发 Git 状态刷新
+          triggerGitRefresh();
           
           set(state => ({
             tabs: state.tabs.map(t =>
