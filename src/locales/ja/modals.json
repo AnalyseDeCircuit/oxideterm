@@ -428,6 +428,7 @@
         "concurrent": {
           "title": "最大同時転送数",
           "hint": "同時に転送されるファイルの最大数。値を大きくするとスループットが向上する可能性がありますが、メモリ使用量が増加します。",
+          "transfer_count_one": "{{count}} 転送",
           "transfer_count_other": "{{count}} 転送"
         },
         "bandwidth": {

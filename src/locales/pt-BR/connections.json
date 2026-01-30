@@ -56,6 +56,10 @@
       "forwards": "Encaminhamentos",
       "summary": "Total: {{total}} conexões • Referências: {{refs}}",
       "live": "AO VIVO"
+    },
+    "status": {
+      "reconnecting_title": "Reconectando",
+      "reconnecting_wait": "A conexão está sendo restaurada. Por favor aguarde e tente novamente."
     }
   }
 }

@@ -156,6 +156,7 @@
       "conflict_overwrite": "항상 덮어쓰기",
       "conflict_skip": "항상 건너뛰기",
       "conflict_rename": "둘 다 유지 (이름 변경)",
+      "transfer_count_one": "{{count}}개 전송",
       "transfer_count_other": "{{count}}개 전송"
     },
     "ai_confirm": {

@@ -71,6 +71,7 @@
       "server_error": "Serverfehler: {{error}}",
       "no_ws_url": "Keine WebSocket-URL für Sitzung verfügbar.",
       "connection_lost": "[OxideTerm] Verbindung verloren. Wiederverbindung läuft...",
+      "connection_lost_reconnect": "[OxideTerm] SSH-Verbindung verloren. Bitte erneut verbinden.",
       "attempting_reconnect": "[OxideTerm] Wiederverbindungsversuch...",
       "link_restored": "[OxideTerm] Verbindung wiederhergestellt. Shell-Sitzung zurückgesetzt.",
       "connection_failed": "[OxideTerm] Verbindung endgültig fehlgeschlagen.",

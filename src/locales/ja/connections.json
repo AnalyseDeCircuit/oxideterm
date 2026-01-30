@@ -56,6 +56,10 @@
       "forwards": "転送",
       "summary": "合計: {{total}}接続 • 参照: {{refs}}",
       "live": "ライブ"
+    },
+    "status": {
+      "reconnecting_title": "接続を再確立中",
+      "reconnecting_wait": "接続を復元しています。しばらくお待ちいただいてから再試行してください。"
     }
   }
 }

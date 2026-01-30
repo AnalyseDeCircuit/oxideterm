@@ -156,6 +156,7 @@
       "conflict_overwrite": "始终覆盖",
       "conflict_skip": "始终跳过",
       "conflict_rename": "保留两者（重命名）",
+      "transfer_count_one": "{{count}} 个传输",
       "transfer_count_other": "{{count}} 个传输"
     },
     "ai_confirm": {

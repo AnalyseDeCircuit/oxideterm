@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Falha ao excluir algumas conexões: {{message}}"
-    }
+    },
+    "retry": "Tentar novamente"
   },
   "layout": {
     "empty": {

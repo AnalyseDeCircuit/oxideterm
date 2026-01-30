@@ -9,7 +9,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "license:check:backend": "cd src-tauri && node scripts/check-license-policy.cjs"
+    "license:check:backend": "cd src-tauri && node scripts/check-license-policy.cjs",
+    "i18n:check": "node scripts/check-i18n.cjs",
+    "i18n:check:all": "node scripts/check-i18n.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",

@@ -56,6 +56,10 @@
       "forwards": "Reenvíos",
       "summary": "Total: {{total}} conexiones • Referencias: {{refs}}",
       "live": "EN VIVO"
+    },
+    "status": {
+      "reconnecting_title": "Reconectando conexión",
+      "reconnecting_wait": "La conexión se está restaurando. Por favor espere e intente de nuevo."
     }
   }
 }

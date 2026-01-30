@@ -56,6 +56,10 @@
       "forwards": "轉發",
       "summary": "總計：{{total}} 個連線 • 參照：{{refs}}",
       "live": "即時"
+    },
+    "status": {
+      "reconnecting_title": "連線重新連接中",
+      "reconnecting_wait": "連線正在恢復中，請稍候再試。"
     }
   }
 }

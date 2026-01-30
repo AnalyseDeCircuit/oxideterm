@@ -428,6 +428,7 @@
         "concurrent": {
           "title": "Số lượng truyền đồng thời tối đa",
           "hint": "Số lượng file được truyền đồng thời tối đa. Giá trị cao hơn có thể cải thiện thông lượng nhưng tăng sử dụng bộ nhớ.",
+          "transfer_count_one": "{{count}} truyền tải",
           "transfer_count_other": "{{count}} truyền tải"
         },
         "bandwidth": {

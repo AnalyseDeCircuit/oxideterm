@@ -428,6 +428,7 @@
         "concurrent": {
           "title": "最大并发传输数",
           "hint": "同时传输的最大文件数。较高的值可能提高吞吐量，但会增加内存使用。",
+          "transfer_count_one": "{{count}} 个传输",
           "transfer_count_other": "{{count}} 个传输"
         },
         "bandwidth": {

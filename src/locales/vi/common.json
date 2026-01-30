@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Không thể xóa một số kết nối: {{message}}"
-    }
+    },
+    "retry": "Thử lại"
   },
   "layout": {
     "empty": {

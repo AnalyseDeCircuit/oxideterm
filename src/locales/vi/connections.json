@@ -56,6 +56,10 @@
       "forwards": "Chuyển tiếp",
       "summary": "Tổng: {{total}} kết nối • Tham chiếu: {{refs}}",
       "live": "Trực tiếp"
+    },
+    "status": {
+      "reconnecting_title": "Đang kết nối lại",
+      "reconnecting_wait": "Kết nối đang được khôi phục. Vui lòng đợi và thử lại."
     }
   }
 }

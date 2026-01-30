@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "無法刪除部分連線：{{message}}"
-    }
+    },
+    "retry": "重試"
   },
   "layout": {
     "empty": {

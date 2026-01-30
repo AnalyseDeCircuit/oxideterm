@@ -1,76 +1,45 @@
 {
   "topology": {
-    "title": "連線拓撲",
-    "matrix": "連線矩陣",
-    "view_matrix": "矩陣檢視",
-    "view_list": "清單檢視",
-    "view_tree": "樹狀檢視",
-    "connections": "連線",
-    "sessions": "工作階段",
-    "jump_servers": "跳板伺服器",
-    "direct": "直接",
-    "via_jump": "透過 {{name}}",
-    "status": {
-      "connected": "已連線",
-      "disconnected": "已中斷連線",
-      "connecting": "連線中...",
-      "error": "錯誤"
+    "button_title": "拓撲檢視",
+    "title": "連線矩陣",
+    "system_status": "系統狀態：線上",
+    "legend_title": "訊號狀態",
+    "status_active": "使用中",
+    "status_connecting": "連線中",
+    "status_idle": "閒置",
+    "stats_single": "1 個使用中的連線",
+    "stats_multiple": "{{count}} 個使用中的連線，最大深度：{{depth}}",
+    "page": {
+      "title": "連線矩陣",
+      "description": "使用中的 SSH 通道和跳板伺服器的視覺化拓撲。",
+      "no_connections": "沒有使用中的連線",
+      "connect_hint": "連線至伺服器以填充矩陣。"
     },
-    "no_connections": "未設定連線",
-    "no_sessions": "沒有作用中的工作階段",
-    "add_connection": "新增連線",
-    "connection_info": "連線資訊",
-    "session_info": "工作階段資訊",
-    "latency": "延遲",
-    "uptime": "運作時間",
-    "bytes_sent": "已傳送位元組",
-    "bytes_received": "已接收位元組",
-    "last_activity": "最後活動",
-    "group": "群組",
-    "groups": "群組",
-    "all_groups": "所有群組",
-    "ungrouped": "未分組",
-    "filter": {
-      "all": "所有連線",
-      "connected": "僅已連線",
-      "disconnected": "僅已中斷連線",
-      "favorites": "我的最愛"
+    "view": {
+      "no_matrix": "沒有使用中的矩陣",
+      "connect_to_populate": "連線至伺服器以填充"
     },
-    "sort": {
-      "name": "依名稱排序",
-      "status": "依狀態排序",
-      "last_used": "依最近使用排序",
-      "group": "依群組排序"
-    },
-    "actions": {
-      "connect": "連線",
-      "disconnect": "中斷連線",
-      "reconnect": "重新連線",
-      "edit": "編輯",
-      "duplicate": "複製",
-      "delete": "刪除",
-      "add_to_favorites": "新增至我的最愛",
-      "remove_from_favorites": "從我的最愛移除",
+    "menu": {
+      "navigate_session": "導覽至使用中的工作階段",
+      "new_terminal": "新增終端機",
       "open_sftp": "開啟 SFTP",
-      "open_terminal": "開啟終端機"
+      "close_hint": "點擊外部以關閉"
     },
-    "stats": {
-      "total": "連線總數",
-      "active": "作用中的工作階段",
-      "failed": "失敗的連線"
-    },
-    "health": {
-      "title": "連線健康狀態",
-      "good": "良好",
-      "degraded": "降級",
-      "poor": "不佳",
-      "unknown": "未知"
-    },
-    "legend": {
-      "title": "圖例",
-      "active": "作用中",
-      "inactive": "非作用中",
-      "jump": "跳板伺服器"
+    "controls": {
+      "instructions": "捲動縮放 · 拖曳平移 · 雙擊節點開啟選單"
     }
+  },
+  "error_boundary": {
+    "title": "應用程式錯誤",
+    "description": "發生了意外錯誤，但您的資料應該是安全的。",
+    "unknown_error": "未知錯誤",
+    "component_stack": "元件堆疊追蹤",
+    "attempt_recovery": "嘗試恢復",
+    "reload_page": "重新載入頁面",
+    "copied": "已複製",
+    "copy_error": "複製錯誤詳情",
+    "help_text": "如果問題持續發生，請複製錯誤詳情並在以下位置提交問題",
+    "github_issues": "GitHub Issues",
+    "help_text_suffix": ""
   }
 }

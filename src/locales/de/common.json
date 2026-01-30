@@ -12,7 +12,8 @@
     },
     "errors": {
       "delete_failed": "Einige Verbindungen konnten nicht gelöscht werden: {{message}}"
-    }
+    },
+    "retry": "Erneut versuchen"
   },
   "layout": {
     "empty": {

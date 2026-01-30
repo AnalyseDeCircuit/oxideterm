@@ -428,6 +428,7 @@
         "concurrent": {
           "title": "최대 동시 전송 수",
           "hint": "동시에 전송되는 최대 파일 수. 높은 값은 처리량을 향상시킬 수 있지만 메모리 사용량이 증가합니다.",
+          "transfer_count_one": "{{count}}개 전송",
           "transfer_count_other": "{{count}}개 전송"
         },
         "bandwidth": {
