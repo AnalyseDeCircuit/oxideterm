@@ -282,10 +282,15 @@ OxideTerm/
 │   │   ├── ui/                 # Atomic components (Radix UI)
 │   │   ├── terminal/           # Terminal views
 │   │   ├── sftp/               # SFTP file browser
+│   │   ├── ide/                # IDE mode components
+│   │   ├── ai/                 # AI chat components
 │   │   └── modals/             # Modal dialogs
 │   ├── store/                  # Zustand state management
 │   │   ├── appStore.ts         # Remote session state
-│   │   └── localTerminalStore.ts  # Local PTY state
+│   │   ├── ideStore.ts         # IDE mode state
+│   │   ├── localTerminalStore.ts  # Local PTY state
+│   │   ├── settingsStore.ts    # Unified settings
+│   │   └── aiChatStore.ts      # AI chat state
 │   └── lib/                    # API wrappers & utilities
 │
 ├── src-tauri/                  # Backend (Rust)

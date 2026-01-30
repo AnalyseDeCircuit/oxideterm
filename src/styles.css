@@ -10,6 +10,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Bold.ttf') format('truetype');
@@ -17,6 +18,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Italic.ttf') format('truetype');
@@ -24,6 +26,7 @@
   font-style: italic;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-BoldItalic.ttf') format('truetype');
@@ -40,6 +43,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'MesloLGM Nerd Font';
   src: url('/fonts/Meslo/MesloLGMNerdFontMono-Bold.ttf') format('truetype');
@@ -47,6 +51,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'MesloLGM Nerd Font';
   src: url('/fonts/Meslo/MesloLGMNerdFontMono-Italic.ttf') format('truetype');
@@ -54,6 +59,7 @@
   font-style: italic;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'MesloLGM Nerd Font';
   src: url('/fonts/Meslo/MesloLGMNerdFontMono-BoldItalic.ttf') format('truetype');
@@ -70,6 +76,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'Tinos Nerd Font';
   src: url('/fonts/Tinos/TinosNerdFont-Bold.ttf') format('truetype');
@@ -77,6 +84,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'Tinos Nerd Font';
   src: url('/fonts/Tinos/TinosNerdFont-Italic.ttf') format('truetype');
@@ -84,6 +92,7 @@
   font-style: italic;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'Tinos Nerd Font';
   src: url('/fonts/Tinos/TinosNerdFont-BoldItalic.ttf') format('truetype');
@@ -94,14 +103,20 @@
 
 @theme {
   /* Oxide-Industrial Palette (Legacy - kept for backward compatibility) */
-  --color-oxide-bg: #09090b;       /* Deep Void */
-  --color-oxide-panel: #18181b;    /* Machine Grey */
-  --color-oxide-border: #27272a;   /* Structural Steel */
-  --color-oxide-accent: #ea580c;   /* Rust/Oxide Orange */
+  --color-oxide-bg: #09090b;
+  /* Deep Void */
+  --color-oxide-panel: #18181b;
+  /* Machine Grey */
+  --color-oxide-border: #27272a;
+  /* Structural Steel */
+  --color-oxide-accent: #ea580c;
+  /* Rust/Oxide Orange */
   --color-oxide-accent-hover: #c2410c;
-  --color-oxide-text: #f4f4f5;     /* Zinc 100 */
-  --color-oxide-text-muted: #a1a1aa; /* Zinc 400 */
-  
+  --color-oxide-text: #f4f4f5;
+  /* Zinc 100 */
+  --color-oxide-text-muted: #a1a1aa;
+  /* Zinc 400 */
+
   /* Theme System Colors - Dynamically updated via CSS variables */
   --color-theme-bg: var(--theme-bg);
   --color-theme-bg-panel: var(--theme-bg-panel);
@@ -111,16 +126,17 @@
   --color-theme-text-muted: var(--theme-text-muted);
   --color-theme-accent: var(--theme-accent);
   --color-theme-accent-hover: var(--theme-accent-hover);
-  
+
   /* Typography */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
 
   /* Spacing - High Density overrides if needed, or just use standard tight scales */
-  
+
   /* Borders */
   --radius-sm: 2px;
-  --radius-md: 0px; /* Force sharp corners generally */
+  --radius-md: 0px;
+  /* Force sharp corners generally */
   --radius-lg: 0px;
 }
 
@@ -129,7 +145,7 @@
   color-scheme: dark;
   --background: var(--color-oxide-bg);
   --foreground: var(--color-oxide-text);
-  
+
   /* Theme Variables - Default Theme (Neutral) */
   --theme-bg: #09090b;
   --theme-bg-panel: #18181b;
@@ -225,13 +241,62 @@
   --theme-accent-hover: #1f6feb;
 }
 
+/* Verdigris Theme */
+[data-theme="verdigris"] {
+  --theme-bg: #1C312C;
+  --theme-bg-panel: #223D37;
+  --theme-bg-hover: #2C4A42;
+  --theme-border: #2C4A42;
+  --theme-text: #2DD4BF;
+  --theme-text-muted: #5FA69B;
+  --theme-accent: #00FFFF;
+  --theme-accent-hover: #66FFFF;
+}
+
+/* Magnetite Theme */
+[data-theme="magnetite"] {
+  --theme-bg: #1A1A1A;
+  --theme-bg-panel: #262626;
+  --theme-bg-hover: #333333;
+  --theme-border: #333333;
+  --theme-text: #E5E7EB;
+  --theme-text-muted: #9CA3AF;
+  --theme-accent: #4682B4;
+  --theme-accent-hover: #5A9BD6;
+}
+
+/* Cobalt Theme */
+[data-theme="cobalt"] {
+  --theme-bg: #0F172A;
+  --theme-bg-panel: #1E293B;
+  --theme-bg-hover: #334155;
+  --theme-border: #334155;
+  --theme-text: #CBD5E1;
+  --theme-text-muted: #64748B;
+  --theme-accent: #3B82F6;
+  --theme-accent-hover: #60A5FA;
+}
+
+/* Ochre Theme */
+[data-theme="ochre"] {
+  --theme-bg: #1C1917;
+  --theme-bg-panel: #292524;
+  --theme-bg-hover: #44403C;
+  --theme-border: #44403C;
+  --theme-text: #FDE047;
+  --theme-text-muted: #A8A29E;
+  --theme-accent: #EA580C;
+  --theme-accent-hover: #F97316;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow: hidden; /* App-like feel */
+  overflow: hidden;
+  /* App-like feel */
 }
 
 /* Scrollbar styling for WebKit */
@@ -246,7 +311,8 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-oxide-border);
-  border: 2px solid var(--color-oxide-bg); /* Padding effect */
+  border: 2px solid var(--color-oxide-bg);
+  /* Padding effect */
   border-radius: 0px;
 }
 
@@ -292,10 +358,10 @@ body {
   /* GPU acceleration for smooth rendering */
   transform: translateZ(0);
   backface-visibility: hidden;
-  
+
   /* Contain layout recalculations */
   contain: layout style;
-  
+
   /* Prevent text selection issues */
   user-select: none;
 }
@@ -305,7 +371,7 @@ body {
   /* Use antialiased rendering for clear text */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  
+
   /* Ensure monospace grid integrity - CRITICAL */
   letter-spacing: 0 !important;
   word-spacing: 0 !important;
@@ -326,9 +392,17 @@ body {
 
 /* Data Visualization Animations */
 @keyframes pulse-subtle {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
 }
+
 .animate-pulse-subtle {
   animation: pulse-subtle 3s ease-in-out infinite;
 }

@@ -282,10 +282,15 @@ OxideTerm/
 │   │   ├── ui/                 # 原子组件 (Radix UI)
 │   │   ├── terminal/           # 终端视图
 │   │   ├── sftp/               # SFTP 文件浏览器
+│   │   ├── ide/                # IDE 模式组件
+│   │   ├── ai/                 # AI 聊天组件
 │   │   └── modals/             # 弹窗组件
 │   ├── store/                  # Zustand 状态管理
 │   │   ├── appStore.ts         # 远程会话状态
-│   │   └── localTerminalStore.ts  # 本地 PTY 状态
+│   │   ├── ideStore.ts         # IDE 模式状态
+│   │   ├── localTerminalStore.ts  # 本地 PTY 状态
+│   │   ├── settingsStore.ts    # 统一设置存储
+│   │   └── aiChatStore.ts      # AI 聊天状态
 │   └── lib/                    # API 封装与工具
 │
 ├── src-tauri/                  # 后端 (Rust)

@@ -220,7 +220,11 @@ src-tauri/src/
 │   ├── mod.rs
 │   ├── session.rs          # SFTP 会话
 │   ├── types.rs            # 文件类型定义
-│   └── error.rs            # SFTP 错误
+│   ├── error.rs            # SFTP 错误
+│   ├── path_utils.rs       # 路径处理工具
+│   ├── progress.rs         # 传输进度跟踪
+│   ├── retry.rs            # 断点续传支持
+│   └── transfer.rs         # 传输任务管理
 │
 ├── forwarding/             # 端口转发
 │   ├── mod.rs
@@ -257,6 +261,7 @@ src-tauri/src/
     ├── sftp.rs             # SFTP 命令
     ├── forwarding.rs       # 转发命令
     ├── health.rs           # 健康检查命令
+    ├── ide.rs              # IDE 模式命令
     ├── kbi.rs              # KBI/2FA 命令
     ├── network.rs          # 网络状态命令
     ├── oxide_export.rs     # .oxide 导出
@@ -508,18 +513,26 @@ graph TB
 
 ```
 src/components/ide/
-├── IdeTree.tsx              # 文件树组件（SFTP 驱动）
-├── IdeTreeNode.tsx          # 树节点渲染（Git 状态图标）
+├── IdeTree.tsx              # 文件树组件（SFTP 驱动，含节点渲染）
+├── IdeTreeContextMenu.tsx   # 文件树右键菜单
+├── IdeEditor.tsx            # 远程文件编辑器
+├── IdeEditorArea.tsx        # 编辑器区域容器
+├── IdeEditorTabs.tsx        # 编辑器标签栏
 ├── IdeStatusBar.tsx         # 底部状态栏（分支、文件统计）
 ├── IdeSearchPanel.tsx       # 全文搜索面板
 ├── IdeInlineInput.tsx       # 内联重命名/新建输入
-├── RemoteFileEditor.tsx     # 远程文件编辑器包装
+├── IdeTerminal.tsx          # 集成终端组件
+├── IdeWorkspace.tsx         # IDE 工作区布局
+├── dialogs/                 # 对话框组件
+│   └── ...                  # 冲突解决、确认对话框等
 ├── hooks/
 │   ├── useGitStatus.ts      # Git 状态检测与刷新
-│   ├── useFileIcon.ts       # 文件图标映射
-│   └── useCodeMirrorEditor.ts  # CodeMirror 封装
+│   ├── useCodeMirrorEditor.ts  # CodeMirror 封装
+│   └── useIdeTerminal.ts    # IDE 终端 Hook
 └── index.ts
 ```
+
+> **注意**: 文件图标映射逻辑位于 `src/lib/fileIcons.tsx`
 
 ### SFTP 驱动文件树
 
@@ -802,9 +815,10 @@ graph TD
     end
     
     subgraph Hooks["自定义 Hooks"]
-        UseReconnect["useReconnectEvents<br/>重连事件"]
+        UseConnEvents["useConnectionEvents<br/>连接事件"]
         UseNetwork["useNetworkStatus<br/>网络状态"]
         UseToast["useToast<br/>提示消息"]
+        UseTermKb["useTerminalKeyboard<br/>终端快捷键"]
     end
     
     App --> AppLayout
@@ -825,7 +839,7 @@ graph TD
     Forwards --> AppStore
     Settings --> SettingsStore
     
-    Terminal --> UseReconnect
+    Terminal --> UseConnEvents
     App --> UseNetwork
     Terminal --> UseToast
     
@@ -1041,17 +1055,7 @@ flowchart TB
     LocalView --> LocalStore
     IdeView --> IdeStore
     TreeUI --> SessionTree
-    
-    subgraph Components ["Component Layer"]
-        TermView["TerminalView.tsx"]
-        LocalView["LocalTerminalView.tsx"]
-        TreeUI["SessionTreeView.tsx"]
-    end
-    
-    TermView --> AppStore
-    LocalView --> LocalStore
-    TreeUI --> SessionTree
-    
+
     AppStore -.-> Backend1["Tauri IPC: SSH Commands"]
     LocalStore -.-> Backend2["Tauri IPC: Local Commands"]
     
@@ -1591,26 +1595,26 @@ sequenceDiagram
     
     Note over XTerm,Server: 用户输入流程
     XTerm->>WS: onData("ls\n")
-    WS->>Bridge: Binary Frame<br/>[Type=0x01][Len=3]["ls\n"]
+    WS->>Bridge: Binary Frame<br/>[Type=0x00][Len=3]["ls\n"]
     Bridge->>Channel: write("ls\n")
     Channel->>Server: SSH Protocol
     
     Note over XTerm,Server: 服务器输出流程
     Server->>Channel: SSH Protocol (stdout)
     Channel->>Bridge: read()
-    Bridge->>WS: Binary Frame<br/>[Type=0x01][Len=N][output]
+    Bridge->>WS: Binary Frame<br/>[Type=0x00][Len=N][output]
     WS->>XTerm: ArrayBuffer
     XTerm->>XTerm: write(output)
     
     Note over XTerm,Server: 心跳保活
     loop Every 30s
-        WS->>Bridge: Heartbeat Frame [Type=0x03]
-        Bridge->>WS: Heartbeat Response [Type=0x03]
+        WS->>Bridge: Heartbeat Frame [Type=0x02]
+        Bridge->>WS: Heartbeat Response [Type=0x02]
     end
     
     Note over XTerm,Server: 窗口大小调整
     XTerm->>WS: onResize(cols, rows)
-    WS->>Bridge: Resize Frame<br/>[Type=0x02][cols][rows]
+    WS->>Bridge: Resize Frame<br/>[Type=0x01][cols][rows]
     Bridge->>Channel: request_pty_req(cols, rows)
 ```
 
@@ -1619,7 +1623,7 @@ sequenceDiagram
 ```mermaid
 graph LR
     subgraph Frame["WebSocket 帧结构"]
-        Type["Type (1 byte)<br/>0x01=Data<br/>0x02=Resize<br/>0x03=Heartbeat<br/>0x04=Error"]
+        Type["Type (1 byte)<br/>0x00=Data<br/>0x01=Resize<br/>0x02=Heartbeat<br/>0x03=Error"]
         Length["Length (4 bytes)<br/>Big Endian"]
         Payload["Payload (N bytes)<br/>根据 Type 解析"]
     end
