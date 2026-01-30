@@ -85,7 +85,7 @@ function TreeNode({
   file, 
   depth, 
   sftpSessionId, 
-  parentPath,
+  parentPath: _parentPath,
   onContextMenu,
   inlineInput,
   onInlineInputConfirm,

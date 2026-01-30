@@ -232,6 +232,190 @@ export function RemoteFileEditor({
           '&.cm-focused .cm-selectionBackground, ::selection': {
             backgroundColor: 'rgb(234 88 12 / 0.2)',
           },
+          
+          // ═══════════════════════════════════════════════════════════════════════════
+          // 搜索面板主题 - 深度统一 Shadcn UI 风格
+          // ═══════════════════════════════════════════════════════════════════════════
+          
+          // 面板容器 - 使用 Flex Flow 布局
+          '.cm-search.cm-panel': {
+            backgroundColor: 'var(--theme-bg-panel)',
+            color: 'var(--theme-text)',
+            padding: '12px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--theme-border)',
+            minWidth: '350px',
+          },
+          
+          // 隐藏默认的换行
+          '.cm-search.cm-panel > br': {
+            display: 'none',
+          },
+          
+          // 1. 搜索框 - 占据主导位置
+          '.cm-panel input[name="search"]': {
+            flex: '1 1 200px', // 自适应宽度，最小200px
+            height: '32px',
+            backgroundColor: 'var(--theme-bg)',
+            border: '1px solid var(--theme-border)',
+            borderRadius: '4px', // Shadcn radius-sm
+            color: 'var(--theme-text)',
+            padding: '0 10px',
+            fontSize: '13px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            order: '1',
+          },
+          '.cm-panel input[name="search"]:focus': {
+            borderColor: 'var(--theme-accent)',
+            boxShadow: '0 0 0 1px var(--theme-accent)',
+          },
+          
+          // 2. 导航按钮组 (Prev/Next/Select)
+          '.cm-panel button[name="next"], .cm-panel button[name="prev"], .cm-panel button[name="select"]': {
+            flex: '0 0 auto',
+            order: '2',
+            height: '32px',
+            padding: '0 12px',
+            background: 'transparent', // Reset background (image & color)
+            backgroundImage: 'none',   // Explicitly remove default gradient
+            border: '1px solid var(--theme-border)',
+            borderRadius: '4px',
+            color: 'var(--theme-text)',
+            fontSize: '12px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textTransform: 'capitalize',
+            boxShadow: 'none',
+          },
+          '.cm-panel button:hover': {
+            background: 'var(--theme-bg-hover)',
+          },
+          
+          // 3. 选项 Checkboxes - 放在搜索框和导航按钮之后
+          '.cm-search.cm-panel label': {
+            order: '3',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '12px',
+            color: 'var(--theme-text-muted)',
+            cursor: 'pointer',
+            height: '24px',
+            marginRight: '8px',
+            marginTop: '4px',
+            userSelect: 'none',
+          },
+          
+          // Checkbox 本身样式
+          '.cm-search.cm-panel input[type="checkbox"]': {
+            appearance: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '14px',
+            height: '14px',
+            border: '1px solid var(--theme-border)',
+            borderRadius: '3px',
+            backgroundColor: 'var(--theme-bg)',
+            position: 'relative',
+            cursor: 'pointer',
+            margin: '0',
+          },
+          '.cm-search.cm-panel input[type="checkbox"]:checked': {
+            backgroundColor: 'var(--theme-accent)',
+            borderColor: 'var(--theme-accent)',
+          },
+          '.cm-search.cm-panel input[type="checkbox"]:checked::after': {
+            content: '""',
+            width: '4px',
+            height: '8px',
+            border: 'solid white',
+            borderWidth: '0 2px 2px 0',
+            transform: 'rotate(45deg) translate(0px, -1px)',
+          },
+          
+          // 4. 替换输入框 - 强制新行
+          '.cm-panel input[name="replace"]': {
+            flex: '1 1 100%', 
+            order: '4',
+            marginTop: '8px',
+            height: '32px',
+            backgroundColor: 'var(--theme-bg)',
+            border: '1px solid var(--theme-border)',
+            borderRadius: '4px',
+            color: 'var(--theme-text)',
+            padding: '0 10px',
+            fontSize: '13px',
+            outline: 'none',
+          },
+          
+          // 5. 替换按钮
+          '.cm-panel button[name="replace"], .cm-panel button[name="replaceAll"]': {
+            flex: '0 0 auto', // 不再自动拉伸
+            order: '5',
+            marginTop: '8px',
+            height: '32px',
+            padding: '0 16px',
+            background: 'var(--theme-bg-panel)', 
+            backgroundImage: 'none',
+            border: '1px solid var(--theme-border)',
+            borderRadius: '4px',
+            color: 'var(--theme-text)',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '500',
+            boxShadow: 'none',
+          },
+
+          // 6. 关闭按钮 - 移除伪元素，使用默认的 x 但调整样式
+          '.cm-panel button[name="close"]': {
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            padding: '4px',
+            background: 'transparent',
+            backgroundImage: 'none',
+            border: 'none',
+            boxShadow: 'none',
+            color: 'var(--theme-text-muted)',
+            cursor: 'pointer',
+            borderRadius: '4px',
+            fontSize: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '24px',
+            height: '24px',
+            opacity: '0.7',
+          },
+          '.cm-panel button[name="close"]:hover': {
+            backgroundColor: 'var(--theme-bg-hover)',
+            color: 'var(--theme-text)',
+            opacity: '1',
+          },
+          // 移除之前的伪元素定义，避免双重 X
+
+          
+          // 聚焦状态统一
+          '.cm-panel *:focus-visible': {
+             outline: 'none',
+             boxShadow: '0 0 0 1px var(--theme-accent)',
+             borderColor: 'var(--theme-accent)',
+          },
+
+          
+          // 搜索高亮
+          '.cm-searchMatch': {
+            backgroundColor: 'rgba(234, 88, 12, 0.3)',
+            borderRadius: '2px',
+          },
+          '.cm-searchMatch-selected': {
+            backgroundColor: 'rgba(234, 88, 12, 0.6)',
+          },
         }),
         keymap.of([
           ...defaultKeymap,

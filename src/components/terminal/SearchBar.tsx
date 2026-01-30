@@ -202,7 +202,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
 
   return (
     <div 
-      className="absolute top-4 right-4 z-50 w-96 bg-zinc-900 border border-theme-border rounded-md shadow-2xl"
+      className="absolute top-4 right-4 z-50 w-96 bg-theme-bg-panel border border-theme-border rounded-sm shadow-2xl"
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
     >
@@ -212,8 +212,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           <button
             className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
               searchMode === 'active' 
-                ? 'bg-zinc-800 text-white border-b-2 border-orange-500' 
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-theme-bg-hover text-theme-text border-b-2 border-theme-accent' 
+                : 'text-theme-text-muted hover:text-theme-text'
             }`}
             onClick={() => handleModeChange('active')}
           >
@@ -223,8 +223,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           <button
             className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
               searchMode === 'deep' 
-                ? 'bg-zinc-800 text-white border-b-2 border-orange-500' 
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-theme-bg-hover text-theme-text border-b-2 border-theme-accent' 
+                : 'text-theme-text-muted hover:text-theme-text'
             }`}
             onClick={() => handleModeChange('deep')}
             title={t('terminal.search.deep_history_tooltip')}
@@ -237,7 +237,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       
       {/* Main Search Row */}
       <div className="flex items-center gap-2 p-3 border-b border-theme-border">
-        <Search className="w-4 h-4 text-zinc-400" />
+        <Search className="w-4 h-4 text-theme-text-muted" />
         <Input
           ref={inputRef}
           type="text"
@@ -259,7 +259,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
         
         {/* Match Counter */}
         {query.trim() && (
-          <div className="text-xs text-zinc-400 whitespace-nowrap">
+          <div className="text-xs text-theme-text-muted whitespace-nowrap">
             {getResultDisplay()}
           </div>
         )}
@@ -321,7 +321,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       </div>
 
       {/* Options Row */}
-      <div className="flex items-center gap-4 px-3 py-2 bg-zinc-950">
+      <div className="flex items-center gap-4 px-3 py-2 bg-theme-bg">
         {/* Case Sensitive */}
         <div className="flex items-center gap-1.5">
           <Checkbox
@@ -331,7 +331,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           />
           <Label 
             htmlFor="case-sensitive" 
-            className="text-xs cursor-pointer flex items-center gap-1"
+            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
             title={t('terminal.search.case_sensitive')}
           >
             <CaseSensitive className="w-3.5 h-3.5" />
@@ -348,7 +348,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           />
           <Label 
             htmlFor="regex" 
-            className="text-xs cursor-pointer flex items-center gap-1"
+            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
             title={t('terminal.search.regex')}
           >
             <Regex className="w-3.5 h-3.5" />
@@ -365,7 +365,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           />
           <Label 
             htmlFor="whole-word" 
-            className="text-xs cursor-pointer flex items-center gap-1"
+            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
             title={t('terminal.search.whole_word')}
           >
             <WholeWord className="w-3.5 h-3.5" />
@@ -380,25 +380,25 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           ref={resultsListRef}
           className="max-h-64 overflow-y-auto border-t border-theme-border"
         >
-          <div className="text-xs text-zinc-500 px-3 py-1 bg-zinc-950 sticky top-0">
+          <div className="text-xs text-theme-text-muted px-3 py-1 bg-theme-bg sticky top-0">
             {t('terminal.search.click_to_jump')}
           </div>
           {deepSearchState.matches.slice(0, 100).map((match, idx) => (
             <button
               key={`${match.line_number}-${match.column_start}-${idx}`}
-              className="w-full text-left px-3 py-2 hover:bg-zinc-800 border-b border-zinc-800 transition-colors"
+              className="w-full text-left px-3 py-2 hover:bg-theme-bg-hover border-b border-theme-border transition-colors"
               onClick={() => onJumpToMatch?.(match)}
             >
-              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+              <div className="flex items-center justify-between text-xs text-theme-text-muted mb-1">
                 <span className="font-mono">{t('terminal.search.line_number', { line: match.line_number + 1 })}</span>
               </div>
-              <div className="text-sm font-mono text-zinc-200 truncate">
+              <div className="text-sm font-mono text-theme-text truncate">
                 {truncateLine(match.line_content, match)}
               </div>
             </button>
           ))}
           {deepSearchState.matches.length > 100 && (
-            <div className="text-xs text-zinc-500 px-3 py-2 text-center">
+            <div className="text-xs text-theme-text-muted px-3 py-2 text-center">
               {t('terminal.search.showing_first', { total: deepSearchState.totalMatches })}
             </div>
           )}
@@ -414,7 +414,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       
       {/* Deep Search No Results */}
       {searchMode === 'deep' && deepSearchState && !deepSearchState.loading && deepSearchState.totalMatches === 0 && query.trim() && (
-        <div className="px-3 py-2 bg-zinc-950 border-t border-theme-border text-zinc-400 text-xs text-center">
+        <div className="px-3 py-2 bg-theme-bg border-t border-theme-border text-theme-text-muted text-xs text-center">
           {t('terminal.search.no_matches_in_history')}
         </div>
       )}
