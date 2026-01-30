@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "Nessun progetto aperto",
+    "open_folder": "Apri cartella",
+    "retry": "Riprova",
+    "unsaved_changes": "Modifiche non salvate",
+    "unsaved_changes_desc": "Vuoi salvare le modifiche a {{fileName}}?",
+    "cancel": "Annulla",
+    "discard": "Non salvare",
+    "save": "Salva",
+    "contextMenu": {
+      "newFile": "Nuovo file",
+      "newFolder": "Nuova cartella",
+      "rename": "Rinomina",
+      "delete": "Elimina",
+      "copyPath": "Copia percorso",
+      "openInTerminal": "Apri nel terminale"
+    },
+    "delete": {
+      "confirmTitle": "Conferma eliminazione",
+      "folderWarning": "Questo eliminerà permanentemente tutti i contenuti nella cartella.",
+      "willCloseTabs": "{{count}} scheda/e aperta/e verranno chiuse.",
+      "hasUnsaved": "Impossibile eliminare: {{count}} file hanno modifiche non salvate. Salva o annulla prima le modifiche.",
+      "confirm": "Elimina",
+      "deleting": "Eliminazione..."
+    },
+    "toast": {
+      "fileCreated": "File creato",
+      "folderCreated": "Cartella creata",
+      "createFailed": "Creazione fallita",
+      "renamed": "Rinominato",
+      "renameFailed": "Rinomina fallita",
+      "deleted": "Eliminato",
+      "deleteFailed": "Eliminazione fallita",
+      "pathCopied": "Percorso copiato",
+      "revealInTerminal": "Apri nel terminale",
+      "operationFailed": "Operazione fallita"
+    },
+    "inline": {
+      "newFilePlaceholder": "nome.ext",
+      "newFolderPlaceholder": "nome cartella"
+    },
+    "validation": {
+      "nameEmpty": "Il nome non può essere vuoto",
+      "nameContainsSlash": "Il nome non può contenere /",
+      "nameInvalid": "Nome non valido",
+      "nameInvalidChars": "Il nome contiene caratteri non validi",
+      "nameTooLong": "Il nome è troppo lungo"
+    },
+    "error": {
+      "alreadyExists": "Esiste già",
+      "fileAlreadyOpen": "Il file è già aperto",
+      "noSession": "Nessuna sessione SFTP",
+      "unsavedChanges": "Ha modifiche non salvate"
+    }
+  }
+}

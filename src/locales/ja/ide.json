@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "プロジェクトが開かれていません",
+    "open_folder": "フォルダを開く",
+    "retry": "再試行",
+    "unsaved_changes": "未保存の変更",
+    "unsaved_changes_desc": "{{fileName}} への変更を保存しますか？",
+    "cancel": "キャンセル",
+    "discard": "保存しない",
+    "save": "保存",
+    "contextMenu": {
+      "newFile": "新規ファイル",
+      "newFolder": "新規フォルダ",
+      "rename": "名前を変更",
+      "delete": "削除",
+      "copyPath": "パスをコピー",
+      "openInTerminal": "ターミナルで開く"
+    },
+    "delete": {
+      "confirmTitle": "削除の確認",
+      "folderWarning": "フォルダ内のすべての内容が完全に削除されます。",
+      "willCloseTabs": "{{count}} 個の開いているタブが閉じられます。",
+      "hasUnsaved": "削除できません：{{count}} 個のファイルに未保存の変更があります。先に保存または破棄してください。",
+      "confirm": "削除",
+      "deleting": "削除中..."
+    },
+    "toast": {
+      "fileCreated": "ファイルを作成しました",
+      "folderCreated": "フォルダを作成しました",
+      "createFailed": "作成に失敗しました",
+      "renamed": "名前を変更しました",
+      "renameFailed": "名前の変更に失敗しました",
+      "deleted": "削除しました",
+      "deleteFailed": "削除に失敗しました",
+      "pathCopied": "パスをコピーしました",
+      "revealInTerminal": "ターミナルで開く",
+      "operationFailed": "操作に失敗しました"
+    },
+    "inline": {
+      "newFilePlaceholder": "ファイル名.ext",
+      "newFolderPlaceholder": "フォルダ名"
+    },
+    "validation": {
+      "nameEmpty": "名前を入力してください",
+      "nameContainsSlash": "名前に / を含めることはできません",
+      "nameInvalid": "無効な名前",
+      "nameInvalidChars": "名前に無効な文字が含まれています",
+      "nameTooLong": "名前が長すぎます"
+    },
+    "error": {
+      "alreadyExists": "既に存在します",
+      "fileAlreadyOpen": "ファイルは既に開かれています",
+      "noSession": "SFTPセッションがありません",
+      "unsavedChanges": "未保存の変更があります"
+    }
+  }
+}

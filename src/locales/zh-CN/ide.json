@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "未打开项目",
+    "open_folder": "打开文件夹",
+    "retry": "重试",
+    "unsaved_changes": "未保存的更改",
+    "unsaved_changes_desc": "是否保存对 {{fileName}} 的更改？",
+    "cancel": "取消",
+    "discard": "不保存",
+    "save": "保存",
+    "contextMenu": {
+      "newFile": "新建文件",
+      "newFolder": "新建文件夹",
+      "rename": "重命名",
+      "delete": "删除",
+      "copyPath": "复制路径",
+      "openInTerminal": "在终端中打开"
+    },
+    "delete": {
+      "confirmTitle": "确认删除",
+      "folderWarning": "这将永久删除文件夹内的所有内容。",
+      "willCloseTabs": "{{count}} 个已打开的标签页将被关闭。",
+      "hasUnsaved": "无法删除：{{count}} 个文件有未保存的更改。请先保存或放弃更改。",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    },
+    "toast": {
+      "fileCreated": "文件已创建",
+      "folderCreated": "文件夹已创建",
+      "createFailed": "创建失败",
+      "renamed": "已重命名",
+      "renameFailed": "重命名失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败",
+      "pathCopied": "路径已复制",
+      "revealInTerminal": "在终端中打开",
+      "operationFailed": "操作失败"
+    },
+    "inline": {
+      "newFilePlaceholder": "文件名.扩展名",
+      "newFolderPlaceholder": "文件夹名"
+    },
+    "validation": {
+      "nameEmpty": "名称不能为空",
+      "nameContainsSlash": "名称不能包含 /",
+      "nameInvalid": "无效的名称",
+      "nameInvalidChars": "名称包含无效字符",
+      "nameTooLong": "名称过长"
+    },
+    "error": {
+      "alreadyExists": "已存在",
+      "fileAlreadyOpen": "文件已打开",
+      "noSession": "无 SFTP 会话",
+      "unsavedChanges": "有未保存的更改"
+    }
+  }
+}

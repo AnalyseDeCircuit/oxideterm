@@ -2,6 +2,13 @@
 import { create } from 'zustand';
 import { subscribeWithSelector, persist } from 'zustand/middleware';
 import { api } from '../lib/api';
+import {
+  normalizePath,
+  joinPath,
+  getParentPath,
+  getBaseName,
+  validateFileName,
+} from '../lib/pathUtils';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 搜索缓存清除回调（由 IdeSearchPanel 注册）
@@ -79,6 +86,7 @@ interface IdeState {
   
   // ─── 文件树状态 ───
   expandedPaths: Set<string>;  // 展开的目录路径
+  treeRefreshSignal: Record<string, number>; // 树刷新信号 { path: version }
   
   // ─── 冲突状态 ───
   conflictState: {
@@ -121,6 +129,14 @@ interface IdeActions {
   resolveConflict: (resolution: 'overwrite' | 'reload') => Promise<void>;
   clearConflict: () => void;
   
+  // 文件系统操作（CRUD）
+  createFile: (parentPath: string, name: string) => Promise<string>;
+  createFolder: (parentPath: string, name: string) => Promise<string>;
+  deleteItem: (path: string, isDirectory: boolean) => Promise<void>;
+  renameItem: (oldPath: string, newName: string) => Promise<string>;
+  refreshTreeNode: (parentPath: string) => void;
+  getAffectedTabs: (path: string) => { affected: IdeTab[]; unsaved: IdeTab[] };
+  
   // 内部方法
   _findTabByPath: (path: string) => IdeTab | undefined;
 }
@@ -150,6 +166,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         terminalHeight: 200,
         terminalVisible: false,
         expandedPaths: new Set<string>(),
+        treeRefreshSignal: {},
         conflictState: null,
 
         // ─── Project Actions ───
@@ -553,9 +570,245 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           set({ conflictState: null });
         },
 
+        // ─── File System Operations (CRUD) ───
+        
+        createFile: async (parentPath, name) => {
+          const { sftpSessionId, _findTabByPath, refreshTreeNode } = get();
+          
+          // 1. 基础验证
+          if (!sftpSessionId) {
+            throw new Error('No SFTP session');
+          }
+          const validationError = validateFileName(name);
+          if (validationError) {
+            throw new Error(validationError);
+          }
+          
+          // 2. 计算完整路径
+          const fullPath = joinPath(parentPath, name);
+          
+          // 3. 竞态检查：是否已有同名标签打开
+          const existingTab = _findTabByPath(fullPath);
+          if (existingTab) {
+            throw new Error('ide.error.fileAlreadyOpen');
+          }
+          
+          // 4. 竞态检查：远程是否已存在同名文件
+          try {
+            await api.sftpStat(sftpSessionId, fullPath);
+            // 如果能获取到 stat，说明文件已存在
+            throw new Error('ide.error.alreadyExists');
+          } catch (e) {
+            // 预期行为：文件不存在时 sftpStat 会抛出错误
+            if (e instanceof Error && e.message.includes('ide.error.')) {
+              throw e; // 重新抛出我们自己的错误
+            }
+            // 其他错误（如 "not found"）是正常的，继续执行
+          }
+          
+          // 5. 创建空文件（通过写入空内容）
+          await api.sftpWriteContent(sftpSessionId, fullPath, '');
+          
+          // 6. 触发树刷新
+          refreshTreeNode(parentPath);
+          
+          // 7. 触发 Git 刷新（新文件是 untracked）
+          triggerGitRefresh();
+          
+          return fullPath;
+        },
+
+        createFolder: async (parentPath, name) => {
+          const { sftpSessionId, refreshTreeNode } = get();
+          
+          if (!sftpSessionId) {
+            throw new Error('No SFTP session');
+          }
+          const validationError = validateFileName(name);
+          if (validationError) {
+            throw new Error(validationError);
+          }
+          
+          const fullPath = joinPath(parentPath, name);
+          
+          // 检查是否已存在
+          try {
+            await api.sftpStat(sftpSessionId, fullPath);
+            throw new Error('ide.error.alreadyExists');
+          } catch (e) {
+            if (e instanceof Error && e.message.includes('ide.error.')) {
+              throw e;
+            }
+          }
+          
+          // 创建目录
+          await api.sftpMkdir(sftpSessionId, fullPath);
+          
+          // 刷新
+          refreshTreeNode(parentPath);
+          triggerGitRefresh();
+          
+          return fullPath;
+        },
+
+        getAffectedTabs: (path) => {
+          const { tabs } = get();
+          const normalizedPath = normalizePath(path);
+          
+          // 找出所有路径匹配或以该路径为前缀的标签
+          const affected = tabs.filter(t => {
+            const tabPath = normalizePath(t.path);
+            return tabPath === normalizedPath || tabPath.startsWith(normalizedPath + '/');
+          });
+          
+          // 筛选出未保存的
+          const unsaved = affected.filter(t => t.isDirty);
+          
+          return { affected, unsaved };
+        },
+
+        deleteItem: async (path, isDirectory) => {
+          const { sftpSessionId, closeTab, getAffectedTabs, refreshTreeNode } = get();
+          
+          if (!sftpSessionId) {
+            throw new Error('No SFTP session');
+          }
+          
+          // 1. 检查受影响的标签
+          const { affected, unsaved } = getAffectedTabs(path);
+          
+          // 2. 如果有未保存的文件，拒绝删除
+          if (unsaved.length > 0) {
+            const names = unsaved.map(t => getBaseName(t.path)).join(', ');
+            throw new Error(`ide.error.unsavedChanges:${names}`);
+          }
+          
+          // 3. 关闭所有受影响的标签（已确认没有未保存）
+          for (const tab of [...affected].reverse()) {
+            await closeTab(tab.id);
+          }
+          
+          // 4. 执行删除操作
+          if (isDirectory) {
+            await api.sftpDeleteRecursive(sftpSessionId, path);
+          } else {
+            await api.sftpDelete(sftpSessionId, path);
+          }
+          
+          // 5. 刷新父目录
+          const parentPath = getParentPath(path);
+          refreshTreeNode(parentPath);
+          
+          // 6. 触发 Git 和搜索缓存刷新
+          triggerGitRefresh();
+          triggerSearchCacheClear();
+        },
+
+        renameItem: async (oldPath, newName) => {
+          const { sftpSessionId, refreshTreeNode } = get();
+          
+          if (!sftpSessionId) {
+            throw new Error('No SFTP session');
+          }
+          
+          // 1. 验证新名称
+          const validationError = validateFileName(newName);
+          if (validationError) {
+            throw new Error(validationError);
+          }
+          
+          // 2. 计算新路径
+          const parentPath = getParentPath(oldPath);
+          const newPath = joinPath(parentPath, newName);
+          const normalizedOld = normalizePath(oldPath);
+          const normalizedNew = normalizePath(newPath);
+          
+          // 3. 检查新路径是否与旧路径相同（无操作）
+          if (normalizedOld === normalizedNew) {
+            return newPath;
+          }
+          
+          // 4. 检查新路径是否已存在
+          try {
+            await api.sftpStat(sftpSessionId, newPath);
+            throw new Error('ide.error.alreadyExists');
+          } catch (e) {
+            if (e instanceof Error && e.message.includes('ide.error.')) {
+              throw e;
+            }
+          }
+          
+          // 5. 执行重命名
+          await api.sftpRename(sftpSessionId, oldPath, newPath);
+          
+          // 6. 更新所有受影响的标签路径
+          set(state => ({
+            tabs: state.tabs.map(tab => {
+              const tabPath = normalizePath(tab.path);
+              
+              // Case 1: 精确匹配 - 重命名的就是这个文件
+              if (tabPath === normalizedOld) {
+                return {
+                  ...tab,
+                  path: newPath,
+                  name: newName,
+                };
+              }
+              
+              // Case 2: 前缀匹配 - 重命名的是父目录
+              if (tabPath.startsWith(normalizedOld + '/')) {
+                const relativePart = tabPath.substring(normalizedOld.length);
+                return {
+                  ...tab,
+                  path: normalizedNew + relativePart,
+                };
+              }
+              
+              // Case 3: 不受影响
+              return tab;
+            }),
+          }));
+          
+          // 7. 更新 expandedPaths
+          set(state => {
+            const newExpandedPaths = new Set<string>();
+            for (const expandedPath of state.expandedPaths) {
+              const normalized = normalizePath(expandedPath);
+              if (normalized === normalizedOld) {
+                newExpandedPaths.add(normalizedNew);
+              } else if (normalized.startsWith(normalizedOld + '/')) {
+                newExpandedPaths.add(normalizedNew + normalized.substring(normalizedOld.length));
+              } else {
+                newExpandedPaths.add(expandedPath);
+              }
+            }
+            return { expandedPaths: newExpandedPaths };
+          });
+          
+          // 8. 刷新父目录
+          refreshTreeNode(parentPath);
+          
+          // 9. 触发 Git 和搜索缓存刷新
+          triggerGitRefresh();
+          triggerSearchCacheClear();
+          
+          return newPath;
+        },
+
+        refreshTreeNode: (parentPath) => {
+          const normalized = normalizePath(parentPath);
+          set(state => ({
+            treeRefreshSignal: {
+              ...state.treeRefreshSignal,
+              [normalized]: (state.treeRefreshSignal[normalized] || 0) + 1,
+            },
+          }));
+        },
+
         // ─── Internal ───
         _findTabByPath: (path) => {
-          return get().tabs.find(t => t.path === path);
+          const normalizedPath = normalizePath(path);
+          return get().tabs.find(t => normalizePath(t.path) === normalizedPath);
         },
       }),
       {

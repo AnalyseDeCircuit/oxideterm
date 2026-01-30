@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "Nenhum projeto aberto",
+    "open_folder": "Abrir pasta",
+    "retry": "Tentar novamente",
+    "unsaved_changes": "Alterações não salvas",
+    "unsaved_changes_desc": "Deseja salvar as alterações em {{fileName}}?",
+    "cancel": "Cancelar",
+    "discard": "Não salvar",
+    "save": "Salvar",
+    "contextMenu": {
+      "newFile": "Novo arquivo",
+      "newFolder": "Nova pasta",
+      "rename": "Renomear",
+      "delete": "Excluir",
+      "copyPath": "Copiar caminho",
+      "openInTerminal": "Abrir no terminal"
+    },
+    "delete": {
+      "confirmTitle": "Confirmar exclusão",
+      "folderWarning": "Isso excluirá permanentemente todo o conteúdo da pasta.",
+      "willCloseTabs": "{{count}} aba(s) aberta(s) serão fechadas.",
+      "hasUnsaved": "Não é possível excluir: {{count}} arquivo(s) têm alterações não salvas. Salve ou descarte as alterações primeiro.",
+      "confirm": "Excluir",
+      "deleting": "Excluindo..."
+    },
+    "toast": {
+      "fileCreated": "Arquivo criado",
+      "folderCreated": "Pasta criada",
+      "createFailed": "Falha ao criar",
+      "renamed": "Renomeado",
+      "renameFailed": "Falha ao renomear",
+      "deleted": "Excluído",
+      "deleteFailed": "Falha ao excluir",
+      "pathCopied": "Caminho copiado",
+      "revealInTerminal": "Abrir no terminal",
+      "operationFailed": "Operação falhou"
+    },
+    "inline": {
+      "newFilePlaceholder": "nome.ext",
+      "newFolderPlaceholder": "nome da pasta"
+    },
+    "validation": {
+      "nameEmpty": "O nome não pode estar vazio",
+      "nameContainsSlash": "O nome não pode conter /",
+      "nameInvalid": "Nome inválido",
+      "nameInvalidChars": "O nome contém caracteres inválidos",
+      "nameTooLong": "O nome é muito longo"
+    },
+    "error": {
+      "alreadyExists": "Já existe",
+      "fileAlreadyOpen": "O arquivo já está aberto",
+      "noSession": "Sem sessão SFTP",
+      "unsavedChanges": "Tem alterações não salvas"
+    }
+  }
+}

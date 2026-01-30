@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "열린 프로젝트 없음",
+    "open_folder": "폴더 열기",
+    "retry": "재시도",
+    "unsaved_changes": "저장되지 않은 변경사항",
+    "unsaved_changes_desc": "{{fileName}}의 변경사항을 저장하시겠습니까?",
+    "cancel": "취소",
+    "discard": "저장 안 함",
+    "save": "저장",
+    "contextMenu": {
+      "newFile": "새 파일",
+      "newFolder": "새 폴더",
+      "rename": "이름 바꾸기",
+      "delete": "삭제",
+      "copyPath": "경로 복사",
+      "openInTerminal": "터미널에서 열기"
+    },
+    "delete": {
+      "confirmTitle": "삭제 확인",
+      "folderWarning": "폴더 내의 모든 내용이 영구적으로 삭제됩니다.",
+      "willCloseTabs": "{{count}}개의 열린 탭이 닫힙니다.",
+      "hasUnsaved": "삭제할 수 없음: {{count}}개의 파일에 저장되지 않은 변경사항이 있습니다. 먼저 저장하거나 취소하세요.",
+      "confirm": "삭제",
+      "deleting": "삭제 중..."
+    },
+    "toast": {
+      "fileCreated": "파일 생성됨",
+      "folderCreated": "폴더 생성됨",
+      "createFailed": "생성 실패",
+      "renamed": "이름 변경됨",
+      "renameFailed": "이름 변경 실패",
+      "deleted": "삭제됨",
+      "deleteFailed": "삭제 실패",
+      "pathCopied": "경로 복사됨",
+      "revealInTerminal": "터미널에서 열기",
+      "operationFailed": "작업 실패"
+    },
+    "inline": {
+      "newFilePlaceholder": "파일명.ext",
+      "newFolderPlaceholder": "폴더 이름"
+    },
+    "validation": {
+      "nameEmpty": "이름은 비워둘 수 없습니다",
+      "nameContainsSlash": "이름에 /를 포함할 수 없습니다",
+      "nameInvalid": "잘못된 이름",
+      "nameInvalidChars": "이름에 잘못된 문자가 포함되어 있습니다",
+      "nameTooLong": "이름이 너무 깁니다"
+    },
+    "error": {
+      "alreadyExists": "이미 존재함",
+      "fileAlreadyOpen": "파일이 이미 열려 있습니다",
+      "noSession": "SFTP 세션 없음",
+      "unsavedChanges": "저장되지 않은 변경사항이 있습니다"
+    }
+  }
+}

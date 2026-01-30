@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "沒有開啟的專案",
+    "open_folder": "開啟資料夾",
+    "retry": "重試",
+    "unsaved_changes": "未儲存的變更",
+    "unsaved_changes_desc": "是否儲存 {{fileName}} 的變更？",
+    "cancel": "取消",
+    "discard": "不儲存",
+    "save": "儲存",
+    "contextMenu": {
+      "newFile": "新增檔案",
+      "newFolder": "新增資料夾",
+      "rename": "重新命名",
+      "delete": "刪除",
+      "copyPath": "複製路徑",
+      "openInTerminal": "在終端機開啟"
+    },
+    "delete": {
+      "confirmTitle": "確認刪除",
+      "folderWarning": "這將永久刪除資料夾內的所有內容。",
+      "willCloseTabs": "{{count}} 個開啟的分頁將被關閉。",
+      "hasUnsaved": "無法刪除：{{count}} 個檔案有未儲存的變更。請先儲存或捨棄變更。",
+      "confirm": "刪除",
+      "deleting": "刪除中..."
+    },
+    "toast": {
+      "fileCreated": "已建立檔案",
+      "folderCreated": "已建立資料夾",
+      "createFailed": "建立失敗",
+      "renamed": "已重新命名",
+      "renameFailed": "重新命名失敗",
+      "deleted": "已刪除",
+      "deleteFailed": "刪除失敗",
+      "pathCopied": "已複製路徑",
+      "revealInTerminal": "在終端機開啟",
+      "operationFailed": "操作失敗"
+    },
+    "inline": {
+      "newFilePlaceholder": "檔案名稱.ext",
+      "newFolderPlaceholder": "資料夾名稱"
+    },
+    "validation": {
+      "nameEmpty": "名稱不能為空",
+      "nameContainsSlash": "名稱不能包含 /",
+      "nameInvalid": "無效的名稱",
+      "nameInvalidChars": "名稱包含無效字元",
+      "nameTooLong": "名稱過長"
+    },
+    "error": {
+      "alreadyExists": "已存在",
+      "fileAlreadyOpen": "檔案已開啟",
+      "noSession": "沒有 SFTP 工作階段",
+      "unsavedChanges": "有未儲存的變更"
+    }
+  }
+}

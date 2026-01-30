@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "Kein Projekt geöffnet",
+    "open_folder": "Ordner öffnen",
+    "retry": "Wiederholen",
+    "unsaved_changes": "Nicht gespeicherte Änderungen",
+    "unsaved_changes_desc": "Möchten Sie die Änderungen an {{fileName}} speichern?",
+    "cancel": "Abbrechen",
+    "discard": "Nicht speichern",
+    "save": "Speichern",
+    "contextMenu": {
+      "newFile": "Neue Datei",
+      "newFolder": "Neuer Ordner",
+      "rename": "Umbenennen",
+      "delete": "Löschen",
+      "copyPath": "Pfad kopieren",
+      "openInTerminal": "Im Terminal öffnen"
+    },
+    "delete": {
+      "confirmTitle": "Löschen bestätigen",
+      "folderWarning": "Dies löscht dauerhaft alle Inhalte im Ordner.",
+      "willCloseTabs": "{{count}} geöffnete Tab(s) werden geschlossen.",
+      "hasUnsaved": "Löschen nicht möglich: {{count}} Datei(en) haben nicht gespeicherte Änderungen. Bitte zuerst speichern oder verwerfen.",
+      "confirm": "Löschen",
+      "deleting": "Wird gelöscht..."
+    },
+    "toast": {
+      "fileCreated": "Datei erstellt",
+      "folderCreated": "Ordner erstellt",
+      "createFailed": "Erstellung fehlgeschlagen",
+      "renamed": "Umbenannt",
+      "renameFailed": "Umbenennung fehlgeschlagen",
+      "deleted": "Gelöscht",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "pathCopied": "Pfad kopiert",
+      "revealInTerminal": "Im Terminal öffnen",
+      "operationFailed": "Operation fehlgeschlagen"
+    },
+    "inline": {
+      "newFilePlaceholder": "dateiname.ext",
+      "newFolderPlaceholder": "Ordnername"
+    },
+    "validation": {
+      "nameEmpty": "Name darf nicht leer sein",
+      "nameContainsSlash": "Name darf kein / enthalten",
+      "nameInvalid": "Ungültiger Name",
+      "nameInvalidChars": "Name enthält ungültige Zeichen",
+      "nameTooLong": "Name ist zu lang"
+    },
+    "error": {
+      "alreadyExists": "Existiert bereits",
+      "fileAlreadyOpen": "Datei ist bereits geöffnet",
+      "noSession": "Keine SFTP-Sitzung",
+      "unsavedChanges": "Hat nicht gespeicherte Änderungen"
+    }
+  }
+}

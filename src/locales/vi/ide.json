@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "Không có dự án nào được mở",
+    "open_folder": "Mở thư mục",
+    "retry": "Thử lại",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "unsaved_changes_desc": "Bạn có muốn lưu các thay đổi trong {{fileName}} không?",
+    "cancel": "Hủy",
+    "discard": "Không lưu",
+    "save": "Lưu",
+    "contextMenu": {
+      "newFile": "Tệp mới",
+      "newFolder": "Thư mục mới",
+      "rename": "Đổi tên",
+      "delete": "Xóa",
+      "copyPath": "Sao chép đường dẫn",
+      "openInTerminal": "Mở trong terminal"
+    },
+    "delete": {
+      "confirmTitle": "Xác nhận xóa",
+      "folderWarning": "Điều này sẽ xóa vĩnh viễn tất cả nội dung trong thư mục.",
+      "willCloseTabs": "{{count}} tab đang mở sẽ bị đóng.",
+      "hasUnsaved": "Không thể xóa: {{count}} tệp có thay đổi chưa lưu. Vui lòng lưu hoặc hủy thay đổi trước.",
+      "confirm": "Xóa",
+      "deleting": "Đang xóa..."
+    },
+    "toast": {
+      "fileCreated": "Đã tạo tệp",
+      "folderCreated": "Đã tạo thư mục",
+      "createFailed": "Tạo thất bại",
+      "renamed": "Đã đổi tên",
+      "renameFailed": "Đổi tên thất bại",
+      "deleted": "Đã xóa",
+      "deleteFailed": "Xóa thất bại",
+      "pathCopied": "Đã sao chép đường dẫn",
+      "revealInTerminal": "Mở trong terminal",
+      "operationFailed": "Thao tác thất bại"
+    },
+    "inline": {
+      "newFilePlaceholder": "tên.ext",
+      "newFolderPlaceholder": "tên thư mục"
+    },
+    "validation": {
+      "nameEmpty": "Tên không được để trống",
+      "nameContainsSlash": "Tên không được chứa /",
+      "nameInvalid": "Tên không hợp lệ",
+      "nameInvalidChars": "Tên chứa ký tự không hợp lệ",
+      "nameTooLong": "Tên quá dài"
+    },
+    "error": {
+      "alreadyExists": "Đã tồn tại",
+      "fileAlreadyOpen": "Tệp đã được mở",
+      "noSession": "Không có phiên SFTP",
+      "unsavedChanges": "Có thay đổi chưa lưu"
+    }
+  }
+}

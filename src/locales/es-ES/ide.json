@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "No hay proyecto abierto",
+    "open_folder": "Abrir carpeta",
+    "retry": "Reintentar",
+    "unsaved_changes": "Cambios sin guardar",
+    "unsaved_changes_desc": "¿Desea guardar los cambios en {{fileName}}?",
+    "cancel": "Cancelar",
+    "discard": "No guardar",
+    "save": "Guardar",
+    "contextMenu": {
+      "newFile": "Nuevo archivo",
+      "newFolder": "Nueva carpeta",
+      "rename": "Renombrar",
+      "delete": "Eliminar",
+      "copyPath": "Copiar ruta",
+      "openInTerminal": "Abrir en terminal"
+    },
+    "delete": {
+      "confirmTitle": "Confirmar eliminación",
+      "folderWarning": "Esto eliminará permanentemente todo el contenido de la carpeta.",
+      "willCloseTabs": "Se cerrarán {{count}} pestaña(s) abierta(s).",
+      "hasUnsaved": "No se puede eliminar: {{count}} archivo(s) tienen cambios sin guardar. Guarde o descarte los cambios primero.",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    },
+    "toast": {
+      "fileCreated": "Archivo creado",
+      "folderCreated": "Carpeta creada",
+      "createFailed": "Error al crear",
+      "renamed": "Renombrado",
+      "renameFailed": "Error al renombrar",
+      "deleted": "Eliminado",
+      "deleteFailed": "Error al eliminar",
+      "pathCopied": "Ruta copiada",
+      "revealInTerminal": "Abrir en terminal",
+      "operationFailed": "Operación fallida"
+    },
+    "inline": {
+      "newFilePlaceholder": "nombre.ext",
+      "newFolderPlaceholder": "nombre de carpeta"
+    },
+    "validation": {
+      "nameEmpty": "El nombre no puede estar vacío",
+      "nameContainsSlash": "El nombre no puede contener /",
+      "nameInvalid": "Nombre inválido",
+      "nameInvalidChars": "El nombre contiene caracteres inválidos",
+      "nameTooLong": "El nombre es demasiado largo"
+    },
+    "error": {
+      "alreadyExists": "Ya existe",
+      "fileAlreadyOpen": "El archivo ya está abierto",
+      "noSession": "Sin sesión SFTP",
+      "unsavedChanges": "Tiene cambios sin guardar"
+    }
+  }
+}

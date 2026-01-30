@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "Aucun projet ouvert",
+    "open_folder": "Ouvrir le dossier",
+    "retry": "Réessayer",
+    "unsaved_changes": "Modifications non enregistrées",
+    "unsaved_changes_desc": "Voulez-vous enregistrer les modifications de {{fileName}} ?",
+    "cancel": "Annuler",
+    "discard": "Ne pas enregistrer",
+    "save": "Enregistrer",
+    "contextMenu": {
+      "newFile": "Nouveau fichier",
+      "newFolder": "Nouveau dossier",
+      "rename": "Renommer",
+      "delete": "Supprimer",
+      "copyPath": "Copier le chemin",
+      "openInTerminal": "Ouvrir dans le terminal"
+    },
+    "delete": {
+      "confirmTitle": "Confirmer la suppression",
+      "folderWarning": "Cela supprimera définitivement tout le contenu du dossier.",
+      "willCloseTabs": "{{count}} onglet(s) ouvert(s) seront fermés.",
+      "hasUnsaved": "Impossible de supprimer : {{count}} fichier(s) ont des modifications non enregistrées. Enregistrez ou annulez d'abord les modifications.",
+      "confirm": "Supprimer",
+      "deleting": "Suppression..."
+    },
+    "toast": {
+      "fileCreated": "Fichier créé",
+      "folderCreated": "Dossier créé",
+      "createFailed": "Échec de la création",
+      "renamed": "Renommé",
+      "renameFailed": "Échec du renommage",
+      "deleted": "Supprimé",
+      "deleteFailed": "Échec de la suppression",
+      "pathCopied": "Chemin copié",
+      "revealInTerminal": "Ouvrir dans le terminal",
+      "operationFailed": "Opération échouée"
+    },
+    "inline": {
+      "newFilePlaceholder": "nom.ext",
+      "newFolderPlaceholder": "nom du dossier"
+    },
+    "validation": {
+      "nameEmpty": "Le nom ne peut pas être vide",
+      "nameContainsSlash": "Le nom ne peut pas contenir /",
+      "nameInvalid": "Nom invalide",
+      "nameInvalidChars": "Le nom contient des caractères invalides",
+      "nameTooLong": "Le nom est trop long"
+    },
+    "error": {
+      "alreadyExists": "Existe déjà",
+      "fileAlreadyOpen": "Le fichier est déjà ouvert",
+      "noSession": "Pas de session SFTP",
+      "unsavedChanges": "A des modifications non enregistrées"
+    }
+  }
+}

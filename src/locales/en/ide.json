@@ -1,0 +1,57 @@
+{
+  "ide": {
+    "no_project": "No project open",
+    "open_folder": "Open Folder",
+    "retry": "Retry",
+    "unsaved_changes": "Unsaved Changes",
+    "unsaved_changes_desc": "Do you want to save the changes to {{fileName}}?",
+    "cancel": "Cancel",
+    "discard": "Don't Save",
+    "save": "Save",
+    "contextMenu": {
+      "newFile": "New File",
+      "newFolder": "New Folder",
+      "rename": "Rename",
+      "delete": "Delete",
+      "copyPath": "Copy Path",
+      "openInTerminal": "Open in Terminal"
+    },
+    "delete": {
+      "confirmTitle": "Confirm Delete",
+      "folderWarning": "This will permanently delete all contents inside the folder.",
+      "willCloseTabs": "{{count}} open tab(s) will be closed.",
+      "hasUnsaved": "Cannot delete: {{count}} file(s) have unsaved changes. Save or discard changes first.",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    },
+    "toast": {
+      "fileCreated": "File created",
+      "folderCreated": "Folder created",
+      "createFailed": "Failed to create",
+      "renamed": "Renamed",
+      "renameFailed": "Failed to rename",
+      "deleted": "Deleted",
+      "deleteFailed": "Failed to delete",
+      "pathCopied": "Path copied",
+      "revealInTerminal": "Open in Terminal",
+      "operationFailed": "Operation failed"
+    },
+    "inline": {
+      "newFilePlaceholder": "filename.ext",
+      "newFolderPlaceholder": "folder name"
+    },
+    "validation": {
+      "nameEmpty": "Name cannot be empty",
+      "nameContainsSlash": "Name cannot contain /",
+      "nameInvalid": "Invalid name",
+      "nameInvalidChars": "Name contains invalid characters",
+      "nameTooLong": "Name is too long"
+    },
+    "error": {
+      "alreadyExists": "Already exists",
+      "fileAlreadyOpen": "File is already open",
+      "noSession": "No SFTP session",
+      "unsavedChanges": "Has unsaved changes"
+    }
+  }
+}
