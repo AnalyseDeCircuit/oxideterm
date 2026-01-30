@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 Évolution Fondamentale
 
-OxideTerm v1.3.0 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec près de **50 000 lignes** de code Rust + TypeScript méticuleusement conçu.
+OxideTerm v1.3.2 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec plus de **65 000 lignes** de code Rust + TypeScript méticuleusement conçu.
 
 ### ⚙️ Percée Backend : Terminal Local & Modèle de Concurrence
 Nous avons introduit un support de terminal local basé sur `portable-pty`, résolvant complètement les défis de concurrence dans le runtime async de Rust :
@@ -39,31 +39,34 @@ Pour supporter les futures constructions mobiles (iOS/Android ne supportent pas 
 - **Build Modulaire** : La fonctionnalité PTY est encapsulée dans la feature `local-terminal`.
 - **Compilation à la Demande** : Utilisez `cargo build --no-default-features` pour supprimer complètement les dépendances `portable-pty`, générant un noyau léger contenant seulement les fonctionnalités SSH/SFTP (ouvrant la voie au portage mobile).
 
-### ⚛️ Évolution Frontend : Architecture Dual Store
-Face aux besoins de gestion d'état drastiquement différents entre sessions locales et distantes, le frontend adopte un modèle **Dual Store** :
+### ⚛️ Évolution Frontend : Architecture Multi-Store
+Face aux besoins de gestion d'état drastiquement différents entre sessions locales, distantes et IDE, le frontend adopte un modèle **Multi-Store** :
 - **AppStore** : Se concentre sur les connexions SSH distantes, les arbres de sessions, les règles de redirection de ports et autres états réseau complexes.
+- **IdeStore** : Dédié à la gestion d'état du mode IDE, incluant l'édition de fichiers distants, le suivi de statut Git et l'éditeur multi-onglets.
 - **LocalTerminalStore** : Dédié à la gestion du cycle de vie des instances PTY locales, la surveillance des processus Shell et les pipelines I/O indépendants.
-- **Couche de Vue Unifiée** : Malgré différentes sources d'état, la logique de rendu est unifiée via le composant `TerminalView` au niveau UI.
+- **Couche de Vue Unifiée** : Malgré différentes sources d'état, la logique de rendu est unifiée via les composants `TerminalView` et `IdeView` au niveau UI.
 
 ---
 
 ## 🏗️ Architecture Système
 
-v1.1.0 emploie une architecture de flux de données hybride qui route intelligemment le trafic selon le type de session :
+v1.3.2 emploie une architecture de flux de données hybride qui route intelligemment le trafic selon le type de session :
 
 ```mermaid
 flowchart TB
     subgraph Frontend ["Couche Frontend (React 19)"]
         UI[Interface Utilisateur]
         
-        subgraph Stores ["Gestion d'État Dual Store"]
+        subgraph Stores ["Gestion d'État Multi-Store"]
             RemoteStore["AppStore (Zustand)<br/>Sessions Distantes"]
+            IdeStore["IdeStore (Zustand)<br/>Mode IDE"]
             LocalStore["LocalTerminalStore (Zustand)<br/>PTYs Locaux"]
         end
         
         Terminal["xterm.js + WebGL"]
         
         UI --> RemoteStore
+        UI --> IdeStore
         UI --> LocalStore
         RemoteStore --> Terminal
         LocalStore --> Terminal
@@ -155,7 +158,7 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 
 ---
 
-## 🛠️ Stack Technique (v1.3.0)
+## 🛠️ Stack Technique (v1.3.2)
 
 | Couche | Technologie Clé | Description |
 |--------|----------------|-------------|
@@ -166,7 +169,7 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 | **SFTP** | **russh-sftp 2.0** | Protocole de Transfert de Fichiers SSH |
 | **WebSocket** | **tokio-tungstenite 0.24** | Implémentation WebSocket async |
 | **Frontend** | **React 19** | Développement UI type-safe avec TypeScript 5.3 |
-| **État** | **Zustand** | Design d'architecture Dual Store, séparation des préoccupations |
+| **État** | **Zustand** | Architecture Multi-Store (AppStore/IdeStore/LocalTerminalStore), séparation des préoccupations |
 | **Rendu** | **xterm.js 5 + WebGL** | Rendu accéléré GPU, sortie haute fréquence 60fps+ |
 | **Protocole** | **WebSocket / IPC** | Distant via WS direct, local via canal IPC Tauri efficace |
 | **Chiffrement** | **ChaCha20-Poly1305 + Argon2** | Chiffrement authentifié AEAD + dérivation de clé à dureté mémoire |
@@ -191,16 +194,38 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 - **2FA/MFA** : Authentification interactive Keyboard-Interactive (expérimental).
 - **Known Hosts** : Vérification et gestion des clés d'hôte.
 
+### 💻 Mode IDE (v1.3.0)
+Édition de code distante sans dépendance serveur—aucune installation côté serveur requise :
+- **Navigateur d'Arborescence** : Chargement paresseux SFTP avec indicateurs de statut Git.
+- **Éditeur de Code** : Basé sur CodeMirror 6, supportant 30+ langages avec coloration syntaxique.
+- **Gestion Multi-Onglets** : Stratégie de cache LRU, détection d'état modifié, résolution de conflits.
+- **Terminal Intégré** : Terminal en panneau inférieur avec partage de session.
+- **Statut Git Piloté par Événements** : Rafraîchissement auto lors de sauvegarde/création/suppression/renommage/commande terminal.
+
+### 🔍 Recherche Plein-Texte
+Recherche de contenu de fichiers à l'échelle du projet avec mise en cache intelligente :
+- **Recherche en Temps Réel** : Entrée avec debounce 300ms et résultats instantanés.
+- **Mise en Cache des Résultats** : Cache TTL 60 secondes pour éviter les scans répétés.
+- **Regroupement des Résultats** : Groupés par fichier avec positionnement par numéro de ligne.
+- **Mise en Surbrillance** : Termes de recherche surlignés dans les aperçus.
+- **Effacement Auto** : Cache de recherche effacé automatiquement lors des changements de fichiers.
+
 ### 📦 Gestion de Fichiers Avancée
 - **Protocole SFTP v3** : Gestionnaire de fichiers double panneau complet.
 - **Transferts par Glisser-Déposer** : Supporte les opérations par lot multi-fichiers et dossiers.
 - **Aperçu Intelligent** :
   - 🎨 Images (JPEG/PNG/GIF/WebP)
   - 🎬 Vidéos (MP4/WebM)
-  - 💻 Coloration syntaxique de code (100+ langages)
+  - 💻 Coloration syntaxique (30+ langages)
   - 📄 Documents PDF
   - 🔍 Visualiseur Hex (fichiers binaires)
 - **Suivi de Progression** : Vitesse de transfert en temps réel, barres de progression, ETA.
+
+### 🌍 Internationalisation (i18n)
+Internationalisation complète de l'UI supportant 11 langues :
+- **Langues** : English, 简体中文, 繁體中文, 日本語, Français, Deutsch, Español, Italiano, 한국어, Português, Tiếng Việt.
+- **Chargement Dynamique** : Chargement à la demande des packs de langue via i18next.
+- **Type-Safe** : Définitions de types TypeScript pour toutes les clés de traduction.
 
 ### 🌐 Optimisation Réseau
 - **Architecture Dual-Plane** : Séparation du plan de données (direct WebSocket) et du plan de contrôle (IPC Tauri).

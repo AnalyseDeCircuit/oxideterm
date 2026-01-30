@@ -1,7 +1,7 @@
-# OxideTerm 架构设计 (v1.3.0)
+# OxideTerm 架构设计 (v1.3.2)
 
-> **版本**: v1.1.0 (2026-01-19)
-> **上次更新**: 2026-01-19
+> **版本**: v1.3.2 (2026-01-31)
+> **上次更新**: 2026-01-31
 > 本文档描述 OxideTerm 的系统架构、设计决策和核心组件。
 
 ## 目录
@@ -11,15 +11,19 @@
 3. [双平面架构](#双平面架构)
 4. [后端架构](#后端架构-rust)
 5. **[本地终端架构 (v1.1.0)](#本地终端架构)**
-6. **[Oxide 文件加密格式](#oxide-文件加密格式)**
-7. [前端架构](#前端架构-react)
-8. **[双 Store 架构 (v1.1.0)](#双-store-架构)**
-9. [SSH 连接池](#ssh-连接池)
-10. [数据流与协议](#数据流与协议)
-11. [会话生命周期](#会话生命周期)
-12. [重连机制](#重连机制)
-13. [安全设计](#安全设计)
-14. [性能优化](#性能优化)
+6. **[IDE 模式架构 (v1.3.0)](#ide-模式架构)**
+7. **[Git 集成设计](#git-集成设计)**
+8. **[搜索架构](#搜索架构)**
+9. **[Oxide 文件加密格式](#oxide-文件加密格式)**
+10. [前端架构](#前端架构-react)
+11. **[多 Store 架构 (v1.3.0)](#多-store-架构)**
+12. [AI 侧边栏聊天 (v1.3.0)](#ai-侧边栏聊天-v130)
+13. [SSH 连接池](#ssh-连接池)
+14. [数据流与协议](#数据流与协议)
+15. [会话生命周期](#会话生命周期)
+16. [重连机制](#重连机制)
+17. [安全设计](#安全设计)
+18. [性能优化](#性能优化)
 
 ---
 
@@ -50,14 +54,16 @@ flowchart TB
     subgraph Frontend ["Frontend Layer (React 19)"]
         UI[User Interface]
         
-        subgraph Stores ["Dual Store State Management"]
+        subgraph Stores ["Multi-Store State Management"]
             RemoteStore["AppStore (Zustand)<br/>Remote Sessions"]
+            IdeStore["IdeStore (Zustand)<br/>IDE Mode"]
             LocalStore["LocalTerminalStore (Zustand)<br/>Local PTYs"]
         end
-        
+
         Terminal["xterm.js + WebGL"]
-        
+
         UI --> RemoteStore
+        UI --> IdeStore
         UI --> LocalStore
         RemoteStore --> Terminal
         LocalStore --> Terminal
@@ -454,6 +460,251 @@ pub fn scan_shells() -> Vec<ShellInfo> {
 
 ---
 
+## IDE 模式架构 (v1.3.0)
+
+### 架构定位
+
+IDE 模式是 OxideTerm 的核心差异化功能，定位为 **"VS Code Remote 的轻量替代品"**，适用于：
+- 临时修改远程服务器配置
+- 轻量级脚本开发
+- 查看和分析日志文件
+- 零服务器端依赖的远程编辑
+
+### 双面板布局架构
+
+```mermaid
+graph TB
+    subgraph IDE["IDE Mode Layout"]
+        subgraph LeftPanel["左侧面板 - 文件树"]
+            FileTree["IdeTree.tsx<br/>SFTP 文件浏览器"]
+            GitStatus["Git 状态指示<br/>修改/新增/未跟踪"]
+            SearchPanel["IdeSearchPanel.tsx<br/>全文搜索面板"]
+        end
+
+        subgraph RightPanel["右侧面板 - 编辑器"]
+            EditorArea["编辑器区域"]
+            BottomPanel["底部面板 - 集成终端"]
+        end
+
+        subgraph State["状态管理"]
+            IdeStore["ideStore.ts<br/>IDE 核心状态"]
+            GitStore["useGitStatus.ts<br/>Git 状态管理"]
+            SearchCache["搜索缓存<br/>60秒 TTL"]
+        end
+    end
+
+    FileTree --> IdeStore
+    SearchPanel --> SearchCache
+    EditorArea --> IdeStore
+    BottomPanel --> IdeStore
+    GitStatus --> GitStore
+
+    style LeftPanel fill:#e3f2fd
+    style RightPanel fill:#f3e5f5
+    style State fill:#c8e6c9
+```
+
+### 核心组件关系
+
+```
+src/components/ide/
+├── IdeTree.tsx              # 文件树组件（SFTP 驱动）
+├── IdeTreeNode.tsx          # 树节点渲染（Git 状态图标）
+├── IdeStatusBar.tsx         # 底部状态栏（分支、文件统计）
+├── IdeSearchPanel.tsx       # 全文搜索面板
+├── IdeInlineInput.tsx       # 内联重命名/新建输入
+├── RemoteFileEditor.tsx     # 远程文件编辑器包装
+├── hooks/
+│   ├── useGitStatus.ts      # Git 状态检测与刷新
+│   ├── useFileIcon.ts       # 文件图标映射
+│   └── useCodeMirrorEditor.ts  # CodeMirror 封装
+└── index.ts
+```
+
+### SFTP 驱动文件树
+
+IDE 模式的文件树基于 SFTP 协议，而非本地文件系统：
+
+```mermaid
+sequenceDiagram
+    participant Tree as IdeTree
+    participant Store as ideStore
+    participant API as Tauri SFTP API
+    participant SSH as SSH Server
+
+    Tree->>Store: 请求目录内容(path)
+    Store->>API: sftpReadDir(sessionId, path)
+    API->>SSH: SFTP READDIR
+    SSH-->>API: 文件列表
+    API-->>Store: FileInfo[]
+    Store->>Store: 合并 Git 状态
+    Store-->>Tree: 渲染文件树
+```
+
+**懒加载策略**：
+- 目录首次展开时从服务器获取
+- 本地缓存已展开目录（5 秒 TTL）
+- 支持手动刷新（F5 或右键菜单）
+
+### 编辑器集成
+
+基于 CodeMirror 6 的远程文件编辑器：
+
+```typescript
+// RemoteFileEditor 核心逻辑
+interface IdeTab {
+  id: string;
+  path: string;                    // 远程文件完整路径
+  content: string | null;          // 当前内容
+  originalContent: string | null;  // 原始内容（用于 diff）
+  isDirty: boolean;                // 未保存标记
+  serverMtime?: number;            // 服务器修改时间（冲突检测）
+  contentVersion: number;          // 强制刷新版本号
+}
+```
+
+**冲突检测机制**：
+1. 保存前获取服务器文件最新 mtime
+2. 与打开时记录的 mtime 对比
+3. 不一致则提示用户选择（覆盖/放弃/对比）
+
+---
+
+## Git 集成设计
+
+### 事件驱动刷新机制
+
+区别于传统轮询，OxideTerm 采用**事件驱动 + 防抖**的 Git 状态刷新策略：
+
+```mermaid
+graph LR
+    subgraph Events["触发事件"]
+        Save["文件保存"]
+        Create["新建文件/目录"]
+        Delete["删除"]
+        Rename["重命名"]
+        Terminal["终端回车"]
+    end
+
+    subgraph Debounce["1秒防抖"]
+        Queue["事件队列"]
+        Timer["防抖定时器"]
+    end
+
+    subgraph Refresh["刷新执行"]
+        GitCmd["git status --porcelain"]
+        Parse["解析状态"]
+        Update["更新 UI"]
+    end
+
+    Events --> Queue
+    Queue --> Timer
+    Timer --> GitCmd
+    GitCmd --> Parse
+    Parse --> Update
+```
+
+**触发点**（6个场景）：
+| 场景 | 位置 | 说明 |
+|------|------|------|
+| 保存文件 | `ideStore.saveFile()` | 内容变更 |
+| 创建文件 | `ideStore.createFile()` | 新增 untracked |
+| 创建目录 | `ideStore.createFolder()` | 可能包含文件 |
+| 删除 | `ideStore.deleteItem()` | 文件移除 |
+| 重命名 | `ideStore.renameItem()` | 路径变更 |
+| 终端回车 | `TerminalView.tsx` | 检测 git 命令执行 |
+
+### 终端 Git 命令检测
+
+IDE 终端中检测回车键，智能触发 Git 刷新：
+
+```typescript
+// TerminalView.tsx
+if (sessionId.startsWith('ide-terminal-') && data === '\r') {
+  // 延迟 500ms 给 git 命令执行时间
+  setTimeout(() => triggerGitRefresh(), 500);
+}
+```
+
+### Git 状态表示
+
+文件树中通过颜色和图标表示 Git 状态：
+
+| 状态 | 颜色 | 图标 | 说明 |
+|------|------|------|------|
+| modified | 🟡 黄色 | M | 已修改 |
+| added | 🟢 绿色 | A | 已暂存 |
+| untracked | ⚪ 灰色 | ? | 未跟踪 |
+| deleted | 🔴 红色 | D | 已删除 |
+| renamed | 🔵 蓝色 | R | 重命名 |
+| conflict | 🟣 紫色 | C | 冲突 |
+
+---
+
+## 搜索架构
+
+### 全文搜索设计
+
+IDE 模式提供基于 SFTP 的全文搜索功能：
+
+```mermaid
+flowchart TB
+    subgraph Input["用户输入"]
+        Query["搜索关键词"]
+        Options["选项：大小写/正则/文件类型"]
+    end
+
+    subgraph Cache["缓存层"]
+        Key["缓存键: query+options+path"]
+        TTL["60秒 TTL"]
+        Store["搜索结果缓存"]
+    end
+
+    subgraph Execution["执行层"]
+        Find["find 命令获取文件列表"]
+        Grep["grep 内容匹配"]
+        Limit["限制：最多200结果"]
+    end
+
+    subgraph Result["结果处理"]
+        Group["按文件分组"]
+        Highlight["高亮匹配行"]
+        Render["渲染结果面板"]
+    end
+
+    Input --> Cache
+    Cache -->|缓存命中| Result
+    Cache -->|缓存未命中| Execution
+    Execution --> Result
+```
+
+### 搜索性能优化
+
+**缓存策略**：
+- 缓存键：`${query}:${caseSensitive}:${useRegex}:${filePattern}:${projectPath}`
+- TTL：60 秒
+- 缓存清除：文件变更时自动清除
+
+**限流保护**：
+- 最大结果数：200（防止大仓库卡死）
+- 文件类型过滤：排除 `node_modules`, `.git`, 二进制文件
+- 防抖：输入停止 300ms 后才执行搜索
+
+### 搜索结果缓存清除
+
+与 Git 刷新联动，文件变更时自动清除搜索缓存：
+
+```typescript
+// ideStore.ts
+deleteItem() {
+  // ... 删除逻辑
+  triggerGitRefresh();           // 触发 Git 刷新
+  triggerSearchCacheClear();     // 清除搜索缓存
+}
+```
+
+---
+
 ## Oxide 文件加密格式
 
 ### 加密体系
@@ -672,8 +923,9 @@ src/
 │       ├── NewConnectionModal.tsx
 │       └── SettingsModal.tsx
 │
-├── store/                  # Zustand 状态管理 (双Store架构)
-│   ├── appStore.ts         # 远程会话状态 (SSH连接)
+├── store/                  # Zustand 状态管理 (多Store架构)
+│   ├── appStore.ts            # 远程会话状态 (SSH连接)
+│   ├── ideStore.ts            # IDE模式状态 (v1.3.0)
 │   ├── localTerminalStore.ts  # 本地PTY状态
 │   ├── sessionTreeStore.ts    # 会话树状态
 │   ├── settingsStore.ts       # 统一设置存储
@@ -762,7 +1014,7 @@ const TerminalView = ({ sessionId, wsUrl }: Props) => {
 
 ---
 
-## 双 Store 架构 (v1.3.0)
+## 多 Store 架构 (v1.3.0)
 
 ### 架构概览
 
@@ -770,11 +1022,25 @@ const TerminalView = ({ sessionId, wsUrl }: Props) => {
 flowchart TB
     subgraph Frontend ["Frontend State Layer"]
         AppStore["appStore.ts<br/>(30KB)<br/>Remote SSH Sessions"]
+        IdeStore["ideStore.ts<br/>(35KB)<br/>IDE Mode State"]
         LocalStore["localTerminalStore.ts<br/>(5KB)<br/>Local PTY Instances"]
         SessionTree["sessionTreeStore.ts<br/>(48KB)<br/>Tree View State"]
         Settings["settingsStore.ts<br/>(18KB)<br/>Unified Settings"]
         Transfer["transferStore.ts<br/>(8KB)<br/>SFTP Transfers"]
+        AiChat["aiChatStore.ts<br/>(12KB)<br/>AI Chat"]
     end
+
+    subgraph Components ["Component Layer"]
+        TermView["TerminalView.tsx"]
+        LocalView["LocalTerminalView.tsx"]
+        IdeView["IdeView.tsx<br/>IDE Mode"]
+        TreeUI["SessionTreeView.tsx"]
+    end
+
+    TermView --> AppStore
+    LocalView --> LocalStore
+    IdeView --> IdeStore
+    TreeUI --> SessionTree
     
     subgraph Components ["Component Layer"]
         TermView["TerminalView.tsx"]
@@ -790,9 +1056,11 @@ flowchart TB
     LocalStore -.-> Backend2["Tauri IPC: Local Commands"]
     
     style AppStore fill:#fce4ec
+    style IdeStore fill:#f3e5f5
     style LocalStore fill:#e8f5e9
     style SessionTree fill:#fff3cd
     style Settings fill:#e1f5ff
+    style AiChat fill:#fff8e1
 ```
 
 ### AppStore (远程会话)
@@ -812,6 +1080,44 @@ interface AppState {
   // ...
 }
 ```
+
+### IdeStore (IDE模式核心)
+
+**职责**：
+- 远程项目文件管理
+- 多标签页编辑器状态
+- Git 状态刷新回调注册
+- 搜索缓存清除联动
+
+**关键状态**：
+```typescript
+interface IdeState {
+  // 会话关联
+  connectionId: string | null;
+  sftpSessionId: string | null;
+
+  // 项目状态
+  project: IdeProject | null;    // 项目路径、Git仓库状态
+
+  // 编辑器状态
+  tabs: IdeTab[];                // 打开的文件标签
+  activeTabId: string | null;
+
+  // 文件树状态
+  expandedPaths: Set<string>;    // 展开的目录
+
+  // 回调注册（用于跨组件通信）
+  refreshCallbacks: {
+    git: () => void;             // Git刷新
+    search: () => void;          // 搜索缓存清除
+  };
+}
+```
+
+**设计亮点**：
+- **注册模式**：通过 `registerGitRefreshCallback()` 实现组件间松耦合
+- **防抖集成**：文件操作自动触发 Git 刷新（1秒防抖）
+- **冲突检测**：保存前检查服务器 mtime，防止覆盖他人修改
 
 ### LocalTerminalStore (本地终端)
 

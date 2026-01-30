@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 Core Evolution
 
-OxideTerm v1.3.0 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with nearly **50,000 lines** of meticulously crafted Rust + TypeScript code.
+OxideTerm v1.3.2 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with over **65,000 lines** of meticulously crafted Rust + TypeScript code.
 
 ### ⚙️ Backend Breakthrough: Local Terminal & Concurrency Model
 We've introduced local terminal support based on `portable-pty`, completely solving concurrency challenges in Rust's async runtime:
@@ -39,31 +39,34 @@ To support future mobile builds (iOS/Android don't support native PTY), we've re
 - **Modular Build**: Core PTY functionality is encapsulated in the `local-terminal` feature.
 - **On-Demand Compilation**: Use `cargo build --no-default-features` to completely strip `portable-pty` dependencies, generating a lightweight kernel containing only SSH/SFTP functionality (clearing the path for mobile porting).
 
-### ⚛️ Frontend Evolution: Dual Store Architecture
-Facing drastically different state management needs for local vs remote sessions, the frontend adopts a **Dual Store** pattern:
+### ⚛️ Frontend Evolution: Multi-Store Architecture
+Facing drastically different state management needs for local, remote, and IDE sessions, the frontend adopts a **Multi-Store** pattern:
 - **AppStore**: Focuses on remote SSH connections, session trees, port forwarding rules, and other complex network states.
+- **IdeStore**: Dedicated to IDE mode state management, including remote file editing, Git status tracking, and multi-tab editor.
 - **LocalTerminalStore**: Dedicated to local PTY instance lifecycle management, Shell process monitoring, and independent I/O pipelines.
-- **Unified View Layer**: Despite different state sources, rendering logic is unified through the `TerminalView` component at the UI level.
+- **Unified View Layer**: Despite different state sources, rendering logic is unified through the `TerminalView` and `IdeView` components at the UI level.
 
 ---
 
 ## 🏗️ System Architecture
 
-v1.1.0 employs a hybrid dataflow architecture that intelligently routes traffic based on session type:
+v1.3.2 employs a hybrid dataflow architecture that intelligently routes traffic based on session type:
 
 ```mermaid
 flowchart TB
     subgraph Frontend ["Frontend Layer (React 19)"]
         UI[User Interface]
         
-        subgraph Stores ["Dual Store State Management"]
+        subgraph Stores ["Multi-Store State Management"]
             RemoteStore["AppStore (Zustand)<br/>Remote Sessions"]
+            IdeStore["IdeStore (Zustand)<br/>IDE Mode"]
             LocalStore["LocalTerminalStore (Zustand)<br/>Local PTYs"]
         end
         
         Terminal["xterm.js + WebGL"]
         
         UI --> RemoteStore
+        UI --> IdeStore
         UI --> LocalStore
         RemoteStore --> Terminal
         LocalStore --> Terminal
@@ -155,7 +158,7 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 
 ---
 
-## 🛠️ Tech Stack (v1.3.0)
+## 🛠️ Tech Stack (v1.3.2)
 
 | Layer | Key Technology | Description |
 |-------|---------------|-------------|
@@ -166,7 +169,7 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 | **SFTP** | **russh-sftp 2.0** | SSH File Transfer Protocol |
 | **WebSocket** | **tokio-tungstenite 0.24** | Async WebSocket implementation |
 | **Frontend** | **React 19** | Type-safe UI development with TypeScript 5.3 |
-| **State** | **Zustand** | Dual Store architecture design, separation of concerns |
+| **State** | **Zustand** | Multi-Store architecture (AppStore/IdeStore/LocalTerminalStore), separation of concerns |
 | **Rendering** | **xterm.js 5 + WebGL** | GPU-accelerated rendering, 60fps+ high framerate output |
 | **Protocol** | **WebSocket / IPC** | Remote via WS direct, local via Tauri IPC efficient channel |
 | **Encryption** | **ChaCha20-Poly1305 + Argon2** | AEAD authenticated encryption + memory-hard key derivation |
@@ -191,16 +194,38 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 - **2FA/MFA**: Keyboard-Interactive authentication (experimental).
 - **Known Hosts**: Host key verification and management.
 
+### 💻 IDE Mode (v1.3.0)
+Zero-dependency remote code editing—no server-side installation required:
+- **File Tree Browser**: SFTP-driven lazy loading with Git status indicators.
+- **Code Editor**: Based on CodeMirror 6, supporting 30+ languages with syntax highlighting.
+- **Multi-Tab Management**: LRU cache strategy, dirty state detection, conflict resolution.
+- **Integrated Terminal**: Bottom panel terminal with session sharing.
+- **Event-Driven Git Status**: Auto-refresh on file save/create/delete/rename/terminal command.
+
+### 🔍 Full-Text Search
+Project-wide file content search with intelligent caching:
+- **Real-Time Search**: 300ms debounced input with instant results.
+- **Result Caching**: 60-second TTL cache to avoid repeated scans.
+- **Result Grouping**: Grouped by file with line number positioning.
+- **Highlight Matching**: Search terms highlighted in preview snippets.
+- **Auto-Clear**: Search cache automatically cleared on file changes.
+
 ### 📦 Advanced File Management
 - **SFTP v3 Protocol**: Full dual-pane file manager.
 - **Drag-and-Drop Transfers**: Supports multi-file and folder batch operations.
 - **Intelligent Preview**:
   - 🎨 Images (JPEG/PNG/GIF/WebP)
   - 🎬 Videos (MP4/WebM)
-  - 💻 Code highlighting (100+ languages)
+- 💻 Code highlighting (30+ languages)
   - 📄 PDF documents
   - 🔍 Hex viewer (binary files)
 - **Progress Tracking**: Real-time transfer speed, progress bars, ETA.
+
+### 🌍 Internationalization (i18n)
+Full UI internationalization supporting 11 languages:
+- **Languages**: English, 简体中文, 繁體中文, 日本語, Français, Deutsch, Español, Italiano, 한국어, Português, Tiếng Việt.
+- **Dynamic Loading**: On-demand language pack loading via i18next.
+- **Type-Safe**: TypeScript type definitions for all translation keys.
 
 ### 🌐 Network Optimization
 - **Dual-Plane Architecture**: Separation of data plane (WebSocket direct) and control plane (Tauri IPC).

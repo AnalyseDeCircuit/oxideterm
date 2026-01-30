@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -26,7 +26,7 @@
 
 ## 📖 核心进化
 
-OxideTerm v1.3.0 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有近 **50,000 行** 精心设计的 Rust + TypeScript 代码。
+OxideTerm v1.3.2 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有超过 **65,000 行** 精心设计的 Rust + TypeScript 代码。
 
 ### ⚙️ 后端突破：本地终端与并发模型
 我们引入了基于 `portable-pty` 的本地终端支持，彻底解决了 Rust 异步运行时中的并发难题：
@@ -39,31 +39,34 @@ OxideTerm v1.3.0 是一次彻底的架构重构。我们不再只是一个 SSH �
 - **模块化构建**：核心 PTY 功能被封装在 `local-terminal` feature 中。
 - **按需编译**：通过 `cargo build --no-default-features` 即可完全剥离 `portable-pty` 依赖，生成仅包含 SSH/SFTP 功能的轻量级内核（为移动端移植扫清障碍）。
 
-### ⚛️ 前端进化：双 Store 架构
-面对本地与远程会话截然不同的状态管理需求，前端采用了 **Dual Store** 模式：
+### ⚛️ 前端进化：多 Store 架构
+面对本地、远程和 IDE 会话截然不同的状态管理需求，前端采用了 **多 Store** 模式：
 - **AppStore**：专注于远程 SSH 连接、会话树、端口转发规则等复杂网络状态。
+- **IdeStore**：专用于 IDE 模式状态管理，包括远程文件编辑、Git 状态跟踪和多标签编辑器。
 - **LocalTerminalStore**：专用于本地 PTY 实例的生命周期管理、Shell 进程监控和独立的 I/O 管道。
-- **统一视图层**：尽管状态源不同，但在 UI 层通过 `TerminalView` 组件实现了渲染逻辑的统一。
+- **统一视图层**：尽管状态源不同，但在 UI 层通过 `TerminalView` 和 `IdeView` 组件实现了渲染逻辑的统一。
 
 ---
 
 ## 🏗️ 系统架构
 
-v1.1.0 采用了混合数据流架构，根据会话类型智能路由流量：
+v1.3.2 采用了混合数据流架构，根据会话类型智能路由流量：
 
 ```mermaid
 flowchart TB
     subgraph Frontend ["Frontend Layer (React 19)"]
         UI[User Interface]
         
-        subgraph Stores ["Dual Store State Management"]
-            RemoteStore["AppStore (Zustand)<br/>Remote Sessions"]
-            LocalStore["LocalTerminalStore (Zustand)<br/>Local PTYs"]
+        subgraph Stores ["多 Store 状态管理"]
+            RemoteStore["AppStore (Zustand)<br/>远程会话"]
+            IdeStore["IdeStore (Zustand)<br/>IDE 模式"]
+            LocalStore["LocalTerminalStore (Zustand)<br/>本地 PTY"]
         end
         
         Terminal["xterm.js + WebGL"]
         
         UI --> RemoteStore
+        UI --> IdeStore
         UI --> LocalStore
         RemoteStore --> Terminal
         LocalStore --> Terminal
@@ -155,7 +158,7 @@ OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使�
 
 ---
 
-## 🛠️ 技术栈 (v1.3.0)
+## 🛠️ 技术栈 (v1.3.2)
 
 | 层级 | 关键技术 | 说明 |
 |------|----------|------|
@@ -166,7 +169,7 @@ OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使�
 | **SFTP** | **russh-sftp 2.0** | SSH 文件传输协议 |
 | **WebSocket** | **tokio-tungstenite 0.24** | 异步 WebSocket 实现 |
 | **Frontend** | **React 19** | 配合 TypeScript 5.3 实现类型安全的 UI 开发 |
-| **State** | **Zustand** | 双 Store 架构设计，分离关注点 |
+| **State** | **Zustand** | 多 Store 架构（AppStore/IdeStore/LocalTerminalStore），分离关注点 |
 | **Rendering** | **xterm.js 5 + WebGL** | GPU 加速渲染，支持 60fps+ 高帧率输出 |
 | **Protocol** | **WebSocket / IPC** | 远程走 WS 直连，本地走 Tauri IPC 高效通道 |
 | **Encryption** | **ChaCha20-Poly1305 + Argon2** | AEAD 认证加密 + 内存硬化密钥派生 |
@@ -191,16 +194,38 @@ OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使�
 - **2FA/MFA**：Keyboard-Interactive 交互式认证（实验性）。
 - **Known Hosts**：主机密钥验证与管理。
 
+### 💻 IDE 模式 (v1.3.0)
+零服务器端依赖的远程代码编辑：
+- **文件树浏览器**：基于 SFTP 的懒加载，带 Git 状态指示。
+- **代码编辑器**：基于 CodeMirror 6，支持 30+ 语言语法高亮。
+- **多标签管理**：LRU 缓存策略、脏状态检测、冲突解决。
+- **集成终端**：底部面板终端，与会话共享连接。
+- **事件驱动 Git 状态**：文件保存/创建/删除/重命名/终端命令后自动刷新。
+
+### 🔍 全文搜索
+项目级文件内容搜索，带智能缓存：
+- **实时搜索**：300ms 防抖输入，即时结果。
+- **结果缓存**：60 秒 TTL 缓存，避免重复扫描。
+- **结果分组**：按文件分组，带行号定位。
+- **高亮匹配**：预览片段中高亮搜索词。
+- **自动清除**：文件变更时自动清除搜索缓存。
+
 ### 📦 高级文件管理
 - **SFTP v3 协议**：完整的双面板文件管理器。
 - **拖拽上传下载**：支持多文件、文件夹批量操作。
 - **智能预览**：
   - 🎨 图片（JPEG/PNG/GIF/WebP）
   - 🎬 视频（MP4/WebM）
-  - 💻 代码高亮（100+ 语言）
+  - 💻 代码高亮（30+ 语言）
   - 📄 PDF 文档
   - 🔍 Hex 查看器（二进制文件）
 - **进度追踪**：实时传输速度、进度条、ETA。
+
+### 🌍 国际化 (i18n)
+完整的 UI 国际化支持，涵盖 11 种语言：
+- **语言**：English, 简体中文, 繁體中文, 日本語, Français, Deutsch, Español, Italiano, 한국어, Português, Tiếng Việt。
+- **动态加载**：通过 i18next 按需加载语言包。
+- **类型安全**：所有翻译键的 TypeScript 类型定义。
 
 ### 🌐 网络优化
 - **双平面架构**：数据平面（WebSocket 直连）与控制平面（Tauri IPC）分离。

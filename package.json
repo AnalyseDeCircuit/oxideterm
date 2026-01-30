@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "license:check:backend": "cd src-tauri && node scripts/check-license-policy.cjs",
+    "license:generate:backend": "cd src-tauri && node scripts/generate-third-party-notices.cjs",
     "i18n:check": "node scripts/check-i18n.cjs",
-    "i18n:check:all": "node scripts/check-i18n.cjs"
+    "i18n:check:all": "node scripts/check-i18n.cjs",
+    "project:stats": "node scripts/project-stats.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",
