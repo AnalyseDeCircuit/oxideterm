@@ -102,20 +102,14 @@
 }
 
 @theme {
-  /* Oxide-Industrial Palette (Legacy - kept for backward compatibility) */
-  --color-oxide-bg: #09090b;
-  /* Deep Void */
-  --color-oxide-panel: #18181b;
-  /* Machine Grey */
-  --color-oxide-border: #27272a;
-  /* Structural Steel */
-  --color-oxide-accent: #ea580c;
-  /* Rust/Oxide Orange */
-  --color-oxide-accent-hover: #c2410c;
-  --color-oxide-text: #f4f4f5;
-  /* Zinc 100 */
-  --color-oxide-text-muted: #a1a1aa;
-  /* Zinc 400 */
+  /* Oxide-Industrial Palette (Legacy - mapped to dynamic theme variables) */
+  --color-oxide-bg: var(--theme-bg);
+  --color-oxide-panel: var(--theme-bg-panel);
+  --color-oxide-border: var(--theme-border);
+  --color-oxide-accent: var(--theme-accent);
+  --color-oxide-accent-hover: var(--theme-accent-hover);
+  --color-oxide-text: var(--theme-text);
+  --color-oxide-text-muted: var(--theme-text-muted);
 
   /* Theme System Colors - Dynamically updated via CSS variables */
   --color-theme-bg: var(--theme-bg);
@@ -289,16 +283,16 @@
   --theme-accent-hover: #33ff66;
 }
 
-/* Titanium White Theme */
-[data-theme="titanium-white"] {
-  --theme-bg: #f2f4f7;
-  --theme-bg-panel: #ffffff;
-  --theme-bg-hover: #e0e4e8;
-  --theme-border: #dfe6e9;
-  --theme-text: #2d3436;
-  --theme-text-muted: #636e72;
-  --theme-accent: #0984e3;
-  --theme-accent-hover: #74b9ff;
+/* Paper Oxide Theme */
+[data-theme="paper-oxide"] {
+  --theme-bg: #f4f0e6;
+  --theme-bg-panel: #ece8dd;
+  --theme-bg-hover: #e4e0d5;
+  --theme-border: #dcd8cc;
+  --theme-text: #3c3c3c;
+  --theme-text-muted: #787878;
+  --theme-accent: #8d6e63;
+  --theme-accent-hover: #795548;
 }
 
 /* Oxide Theme (Base Rust) */

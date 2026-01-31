@@ -155,7 +155,7 @@ export interface PersistedSettingsV2 {
 // Platform Detection
 // ============================================================================
 
-const isWindows = typeof navigator !== 'undefined' 
+const isWindows = typeof navigator !== 'undefined'
   && navigator.platform.toLowerCase().includes('win');
 
 // ============================================================================
@@ -216,7 +216,7 @@ const defaultLocalTerminalSettings: LocalTerminalSettings = {
   defaultShellId: null,
   recentShellIds: [],
   defaultCwd: null,
-  loadShellProfile: false,      // Default: fast startup without profile
+  loadShellProfile: true,       // Default: load profile for complete shell environment
   ohMyPoshEnabled: false,       // Default: disabled
   ohMyPoshTheme: null,          // No theme selected
   customEnvVars: {},            // No custom env vars
@@ -262,8 +262,8 @@ function mergeWithDefaults(saved: Partial<PersistedSettingsV2>): PersistedSettin
     treeUI: { ...defaults.treeUI, ...saved.treeUI },
     sidebarUI: { ...defaults.sidebarUI, ...saved.sidebarUI },
     ai: { ...defaults.ai, ...saved.ai },
-    localTerminal: saved.localTerminal 
-      ? { ...defaults.localTerminal!, ...saved.localTerminal } 
+    localTerminal: saved.localTerminal
+      ? { ...defaults.localTerminal!, ...saved.localTerminal }
       : defaults.localTerminal,
     sftp: saved.sftp
       ? { ...defaults.sftp!, ...saved.sftp }
@@ -282,7 +282,7 @@ function loadSettings(): PersistedSettingsV2 {
         return mergeWithDefaults(parsed);
       }
     }
-    
+
     // Check for legacy formats and clean them up
     const hasLegacy = LEGACY_KEYS.some(key => localStorage.getItem(key) !== null);
     if (hasLegacy) {
@@ -292,7 +292,7 @@ function loadSettings(): PersistedSettingsV2 {
   } catch (e) {
     console.error('[SettingsStore] Failed to load settings:', e);
   }
-  
+
   return createDefaultSettings();
 }
 
@@ -312,7 +312,7 @@ function persistSettings(settings: PersistedSettingsV2): void {
 interface SettingsStore {
   // State
   settings: PersistedSettingsV2;
-  
+
   // Actions - Category updates
   updateGeneral: <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => void;
   updateTerminal: <K extends keyof TerminalSettings>(key: K, value: TerminalSettings[K]) => void;
@@ -322,24 +322,24 @@ interface SettingsStore {
   updateAi: <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => void;
   updateLocalTerminal: <K extends keyof LocalTerminalSettings>(key: K, value: LocalTerminalSettings[K]) => void;
   updateSftp: <K extends keyof SftpSettings>(key: K, value: SftpSettings[K]) => void;
-  
+
   // Actions - Dedicated language setter with i18n sync
   setLanguage: (language: Language) => void;
-  
+
   // Actions - Tree UI state
   setTreeExpanded: (ids: string[]) => void;
   toggleTreeNode: (nodeId: string) => void;
   setFocusedNode: (nodeId: string | null) => void;
-  
+
   // Actions - Sidebar UI state
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarSection: (section: SidebarSection) => void;
   setSidebarWidth: (width: number) => void;
   toggleSidebar: () => void;
-  
+
   // Actions - Bulk operations
   resetToDefaults: () => void;
-  
+
   // Selectors (convenience getters)
   getTerminal: () => TerminalSettings;
   getBuffer: () => BufferSettings;
@@ -356,7 +356,7 @@ interface SettingsStore {
 export const useSettingsStore = create<SettingsStore>()(
   subscribeWithSelector((set, get) => ({
     settings: loadSettings(),
-    
+
     // ========== General Settings ==========
     updateGeneral: (key, value) => {
       set((state) => {
@@ -368,7 +368,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // Language setter with i18n synchronization
     setLanguage: async (language) => {
       set((state) => {
@@ -377,18 +377,18 @@ export const useSettingsStore = create<SettingsStore>()(
           general: { ...state.settings.general, language },
         };
         persistSettings(newSettings);
-        
+
         // Sync with localStorage for i18n initialization
         localStorage.setItem('app_lang', language);
-        
+
         return { settings: newSettings };
       });
-      
+
       // Dynamically import i18n to avoid circular dependency
       const { default: i18n } = await import('../i18n');
       await i18n.changeLanguage(language);
     },
-    
+
     // ========== Terminal Settings ==========
     updateTerminal: (key, value) => {
       set((state) => {
@@ -400,7 +400,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Buffer Settings ==========
     updateBuffer: (key, value) => {
       set((state) => {
@@ -412,7 +412,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Appearance Settings ==========
     updateAppearance: (key, value) => {
       set((state) => {
@@ -424,7 +424,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Connection Defaults ==========
     updateConnectionDefaults: (key, value) => {
       set((state) => {
@@ -436,7 +436,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Local Terminal Settings ==========
     updateLocalTerminal: (key, value) => {
       set((state) => {
@@ -449,7 +449,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== SFTP Settings ==========
     updateSftp: (key, value) => {
       set((state) => {
@@ -459,7 +459,7 @@ export const useSettingsStore = create<SettingsStore>()(
           sftp: { ...currentSftp, [key]: value },
         };
         persistSettings(newSettings);
-        
+
         // Sync to backend for transfer manager settings
         if (key === 'maxConcurrentTransfers' || key === 'speedLimitEnabled' || key === 'speedLimitKBps') {
           const sftp = newSettings.sftp!;
@@ -471,11 +471,11 @@ export const useSettingsStore = create<SettingsStore>()(
             ).catch((err) => console.error('Failed to sync SFTP settings to backend:', err));
           });
         }
-        
+
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Tree UI State ==========
     setTreeExpanded: (ids) => {
       set((state) => {
@@ -487,7 +487,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     toggleTreeNode: (nodeId) => {
       set((state) => {
         const current = new Set(state.settings.treeUI.expandedIds);
@@ -504,7 +504,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     setFocusedNode: (nodeId) => {
       set((state) => {
         const newSettings: PersistedSettingsV2 = {
@@ -515,7 +515,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Sidebar UI State ==========
     setSidebarCollapsed: (collapsed) => {
       set((state) => {
@@ -527,7 +527,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     setSidebarSection: (section) => {
       set((state) => {
         const newSettings: PersistedSettingsV2 = {
@@ -538,14 +538,14 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     toggleSidebar: () => {
       set((state) => {
         const newSettings: PersistedSettingsV2 = {
           ...state.settings,
-          sidebarUI: { 
-            ...state.settings.sidebarUI, 
-            collapsed: !state.settings.sidebarUI.collapsed 
+          sidebarUI: {
+            ...state.settings.sidebarUI,
+            collapsed: !state.settings.sidebarUI.collapsed
           },
         };
         persistSettings(newSettings);
@@ -565,7 +565,7 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== AI Settings ==========
     updateAi: (key, value) => {
       set((state) => {
@@ -577,14 +577,14 @@ export const useSettingsStore = create<SettingsStore>()(
         return { settings: newSettings };
       });
     },
-    
+
     // ========== Bulk Operations ==========
     resetToDefaults: () => {
       const newSettings = createDefaultSettings();
       persistSettings(newSettings);
       set({ settings: newSettings });
     },
-    
+
     // ========== Selectors ==========
     getTerminal: () => get().settings.terminal,
     getBuffer: () => get().settings.buffer,
@@ -611,10 +611,10 @@ useSettingsStore.subscribe(
       console.warn(`[SettingsStore] Theme "${themeName}" not found, falling back to default`);
       themeName = 'default';
     }
-    
+
     // Set data-theme attribute for CSS variables
     document.documentElement.setAttribute('data-theme', themeName);
-    
+
     // Dispatch event for terminal components to update their xterm instances
     window.dispatchEvent(
       new CustomEvent('global-theme-changed', {
@@ -636,12 +636,12 @@ useSettingsStore.subscribe(
       useToastStore.getState().addToast({
         variant: 'default',
         title: i18n.t('settings.toast.renderer_changed'),
-        description: i18n.t('settings.toast.renderer_changed_desc', { 
-          renderer: i18n.t(`settings.sections.terminal.renderer_${renderer}`) 
+        description: i18n.t('settings.toast.renderer_changed_desc', {
+          renderer: i18n.t(`settings.sections.terminal.renderer_${renderer}`)
         }),
         duration: 5000,
       });
-      
+
       console.debug(`[SettingsStore] Renderer changed: ${previousRenderer} -> ${renderer}`);
     }
     previousRenderer = renderer;
@@ -658,14 +658,14 @@ useSettingsStore.subscribe(
  */
 export function initializeSettings(): void {
   const { settings } = useSettingsStore.getState();
-  
+
   // Apply theme immediately
   const themeName = themes[settings.terminal.theme] ? settings.terminal.theme : 'default';
   document.documentElement.setAttribute('data-theme', themeName);
-  
+
   // Initialize previousRenderer for Toast tracking
   previousRenderer = settings.terminal.renderer;
-  
+
   console.debug('[SettingsStore] Initialized with settings:', {
     theme: settings.terminal.theme,
     renderer: settings.terminal.renderer,

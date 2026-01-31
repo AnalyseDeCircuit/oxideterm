@@ -54,34 +54,34 @@ const getTabTitle = (
     case 'topology':
       return t('sidebar.panels.connection_matrix');
   }
-  
+
   // Calculate pane count for terminal tabs with split panes
   const paneCount = tab.rootPane ? countPanes(tab.rootPane) : 1;
   const paneCountSuffix = paneCount > 1 ? ` (${paneCount})` : '';
-  
+
   // For terminal tabs (may have rootPane instead of sessionId after split)
   if (tab.type === 'terminal' || tab.type === 'local_terminal') {
     // Get session name from sessionId if exists
     if (tab.sessionId) {
       const session = sessions.get(tab.sessionId);
       const sessionName = session?.name || tab.title;
-      
+
       if (tab.type === 'terminal') {
         return sessionName + paneCountSuffix;
       } else {
         return tab.title + paneCountSuffix;
       }
     }
-    
+
     // For split panes (sessionId cleared, use tab.title)
     return tab.title + paneCountSuffix;
   }
-  
+
   // For session-based tabs (SFTP, Forwards)
   if (tab.sessionId) {
     const session = sessions.get(tab.sessionId);
     const sessionName = session?.name || tab.title;
-    
+
     switch (tab.type) {
       case 'sftp':
         return `${t('sidebar.panels.sftp')}: ${sessionName}`;
@@ -89,7 +89,7 @@ const getTabTitle = (
         return `${t('sidebar.panels.forwards')}: ${sessionName}`;
     }
   }
-  
+
   // Fallback to stored title
   return tab.title;
 };
@@ -103,22 +103,22 @@ const formatTimeRemaining = (nextRetry: number): string => {
 
 export const TabBar = () => {
   const { t } = useTranslation();
-  const { 
-    tabs, 
-    activeTabId, 
-    setActiveTab, 
-    closeTab, 
+  const {
+    tabs,
+    activeTabId,
+    setActiveTab,
+    closeTab,
     closeTerminalSession,
-    reconnect, 
-    cancelReconnect, 
-    sessions, 
-    networkOnline 
+    reconnect,
+    cancelReconnect,
+    sessions,
+    networkOnline
   } = useAppStore();
   const [reconnecting, setReconnecting] = React.useState<string | null>(null);
   const [closing, setClosing] = React.useState<string | null>(null);
   // Force re-render for countdown
   const [, setTick] = React.useState(0);
-  
+
   // Scroll container ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -166,7 +166,7 @@ export const TabBar = () => {
   // 关闭 Tab 时释放后端资源
   const handleCloseTab = async (e: React.MouseEvent, tabId: string, sessionId: string | undefined, tabType: string) => {
     e.stopPropagation();
-    
+
     // Handle local terminal tabs
     if (tabType === 'local_terminal' && sessionId) {
       setClosing(sessionId);
@@ -181,7 +181,7 @@ export const TabBar = () => {
       closeTab(tabId);
       return;
     }
-    
+
     // 如果是终端 Tab，尝试调用新的 closeTerminalSession
     if (tabType === 'terminal' && sessionId) {
       setClosing(sessionId);
@@ -192,7 +192,7 @@ export const TabBar = () => {
           // 使用新 API 释放终端（会减少连接引用计数）
           await closeTerminalSession(sessionId);
         }
-        
+
         // 同步到 sessionTreeStore：清理终端映射
         const { terminalNodeMap, closeTerminalForNode } = useSessionTreeStore.getState();
         const nodeId = terminalNodeMap.get(sessionId);
@@ -205,7 +205,7 @@ export const TabBar = () => {
         setClosing(null);
       }
     }
-    
+
     // 总是移除 Tab（即使后端调用失败）
     closeTab(tabId);
   };
@@ -220,9 +220,9 @@ export const TabBar = () => {
           <span>{t('tabbar.offline')}</span>
         </div>
       )}
-      
+
       {/* 中间层（滚动层）：flex-1 + min-w-0 强制收缩 + overflow-x-auto 触发滚动 */}
-      <div 
+      <div
         ref={scrollContainerRef}
         onWheel={handleWheel}
         className="flex-1 min-w-0 h-full overflow-x-auto scrollbar-thin"
@@ -246,15 +246,15 @@ export const TabBar = () => {
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
                   "flex-shrink-0 group flex items-center gap-2 px-3 h-full min-w-[120px] max-w-[240px] border-r border-theme-border cursor-pointer select-none text-sm transition-colors",
-                  isActive 
-                    ? "bg-theme-bg-panel text-oxide-text border-t-2 border-t-oxide-accent" 
-                    : "bg-theme-bg text-zinc-500 hover:bg-zinc-900 border-t-2 border-t-transparent",
+                  isActive
+                    ? "bg-theme-bg-panel text-theme-text border-t-2 border-t-theme-accent"
+                    : "bg-theme-bg text-theme-text-muted hover:bg-theme-bg-hover border-t-2 border-t-transparent",
                   showReconnectProgress && "border-t-amber-500"
                 )}
               >
                 <TabIcon type={tab.type} />
                 <span className="truncate flex-1">{getTabTitle(tab, sessions, t)}</span>
-                
+
                 {/* Reconnect progress indicator */}
                 {showReconnectProgress && (
                   <div className="flex items-center gap-1 text-xs text-amber-400">
@@ -265,14 +265,14 @@ export const TabBar = () => {
                     </span>
                     <button
                       onClick={(e) => tab.sessionId && handleCancelReconnect(e, tab.sessionId)}
-                      className="hover:bg-zinc-700 rounded p-0.5"
+                      className="hover:bg-theme-bg-hover rounded p-0.5"
                       title={t('tabbar.cancel_reconnect')}
                     >
                       <XCircle className="h-3 w-3" />
                     </button>
                   </div>
                 )}
-                
+
                 {/* Normal tab controls */}
                 {!showReconnectProgress && (
                   <div className="flex items-center gap-0.5">
@@ -282,7 +282,7 @@ export const TabBar = () => {
                         onClick={(e) => tab.sessionId && handleReconnect(e, tab.sessionId)}
                         disabled={isManualReconnecting}
                         className={cn(
-                          "opacity-0 group-hover:opacity-100 hover:bg-zinc-700 rounded p-0.5 transition-opacity",
+                          "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
                           isActive && "opacity-100",
                           isManualReconnecting && "opacity-100"
                         )}
@@ -295,7 +295,7 @@ export const TabBar = () => {
                       onClick={(e) => handleCloseTab(e, tab.id, tab.sessionId, tab.type)}
                       disabled={tab.sessionId ? closing === tab.sessionId : false}
                       className={cn(
-                        "opacity-0 group-hover:opacity-100 hover:bg-zinc-700 rounded p-0.5 transition-opacity",
+                        "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
                         isActive && "opacity-100",
                         (tab.sessionId && closing === tab.sessionId) && "opacity-100"
                       )}

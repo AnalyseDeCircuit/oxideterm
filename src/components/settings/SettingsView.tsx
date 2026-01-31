@@ -651,7 +651,7 @@ export const SettingsView = () => {
                                             <SelectContent className="bg-theme-bg-panel border-theme-border max-h-[300px]">
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Oxide Series</SelectLabel>
-                                                    {['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'titanium-white'].map((key) => (
+                                                    {['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide'].map((key) => (
                                                         <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                             {formatThemeName(key)}
                                                         </SelectItem>
@@ -663,7 +663,7 @@ export const SettingsView = () => {
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Classic / Other</SelectLabel>
                                                     {Object.keys(themes)
-                                                        .filter(key => !['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'titanium-white'].includes(key))
+                                                        .filter(key => !['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide'].includes(key))
                                                         .map(key => (
                                                             <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                                 {formatThemeName(key)}

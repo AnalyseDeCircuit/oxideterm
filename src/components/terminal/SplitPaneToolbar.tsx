@@ -24,16 +24,16 @@ export const SplitPaneToolbar: React.FC<SplitPaneToolbarProps> = ({
   const { t } = useTranslation();
   const { splitPane, getPaneCount, tabs } = useAppStore();
   const { createTerminal } = useLocalTerminalStore();
-  
+
   const paneCount = getPaneCount(tabId);
   const canSplit = paneCount < MAX_PANES_PER_TAB;
-  
+
   // Find the current tab to determine its type
   const currentTab = tabs.find(tab => tab.id === tabId);
 
   const handleSplit = useCallback(async (direction: SplitDirection) => {
     if (!canSplit || !currentTab) return;
-    
+
     try {
       if (currentTab.type === 'local_terminal') {
         // For local terminals: Create a new local terminal session
@@ -63,8 +63,8 @@ export const SplitPaneToolbar: React.FC<SplitPaneToolbarProps> = ({
       className={cn(
         'absolute top-2 left-2 z-20',
         'flex items-center gap-1',
-        'bg-zinc-900/80 backdrop-blur-sm rounded-md',
-        'border border-zinc-700/50',
+        'bg-theme-bg-panel/80 backdrop-blur-sm rounded-md',
+        'border border-theme-border/50',
         'p-1',
         'opacity-0 hover:opacity-100 transition-opacity duration-200',
         // Show on hover of parent container
@@ -79,13 +79,13 @@ export const SplitPaneToolbar: React.FC<SplitPaneToolbarProps> = ({
         className={cn(
           'p-1.5 rounded-sm transition-colors',
           canSplit && !isSshTerminal
-            ? 'text-zinc-400 hover:text-[#FF6B35] hover:bg-zinc-800/50'
-            : 'text-zinc-600 cursor-not-allowed'
+            ? 'text-theme-text-muted hover:text-theme-accent hover:bg-theme-bg-hover/50'
+            : 'text-theme-text-muted/40 cursor-not-allowed'
         )}
         title={
-          isSshTerminal 
+          isSshTerminal
             ? 'SSH terminal split coming soon'
-            : canSplit 
+            : canSplit
               ? t('terminal.pane.split_horizontal')
               : t('terminal.pane.max_panes_reached', { max: MAX_PANES_PER_TAB })
         }
@@ -100,13 +100,13 @@ export const SplitPaneToolbar: React.FC<SplitPaneToolbarProps> = ({
         className={cn(
           'p-1.5 rounded-sm transition-colors',
           canSplit && !isSshTerminal
-            ? 'text-zinc-400 hover:text-[#FF6B35] hover:bg-zinc-800/50'
-            : 'text-zinc-600 cursor-not-allowed'
+            ? 'text-theme-text-muted hover:text-theme-accent hover:bg-theme-bg-hover/50'
+            : 'text-theme-text-muted/40 cursor-not-allowed'
         )}
         title={
-          isSshTerminal 
+          isSshTerminal
             ? 'SSH terminal split coming soon'
-            : canSplit 
+            : canSplit
               ? t('terminal.pane.split_vertical')
               : t('terminal.pane.max_panes_reached', { max: MAX_PANES_PER_TAB })
         }
@@ -116,7 +116,7 @@ export const SplitPaneToolbar: React.FC<SplitPaneToolbarProps> = ({
 
       {/* Pane count indicator */}
       {paneCount > 1 && (
-        <span className="text-xs text-zinc-500 px-1">
+        <span className="text-xs text-theme-text-muted px-1">
           {paneCount}/{MAX_PANES_PER_TAB}
         </span>
       )}
