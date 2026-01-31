@@ -253,6 +253,139 @@
   --theme-accent-hover: #66FFFF;
 }
 
+/* Silver Oxide Theme */
+[data-theme="silver-oxide"] {
+  --theme-bg: #1c1c1c;
+  --theme-bg-panel: #2a2a2a;
+  --theme-bg-hover: #3a3a3a;
+  --theme-border: #3a3a3a;
+  --theme-text: #dcdcdc;
+  --theme-text-muted: #888888;
+  --theme-accent: #9b88ff;
+  --theme-accent-hover: #b0a3ff;
+}
+
+/* Cuprite Theme */
+[data-theme="cuprite"] {
+  --theme-bg: #221212;
+  --theme-bg-panel: #331a1a;
+  --theme-bg-hover: #442222;
+  --theme-border: #442222;
+  --theme-text: #f5d0c5;
+  --theme-text-muted: #d4a0a0;
+  --theme-accent: #ff4d4d;
+  --theme-accent-hover: #ff6666;
+}
+
+/* Chromium Oxide Theme */
+[data-theme="chromium-oxide"] {
+  --theme-bg: #0e1a12;
+  --theme-bg-panel: #16261b;
+  --theme-bg-hover: #1e3626;
+  --theme-border: #1e3626;
+  --theme-text: #b8d8be;
+  --theme-text-muted: #7a9c82;
+  --theme-accent: #00ff41;
+  --theme-accent-hover: #33ff66;
+}
+
+/* Titanium White Theme */
+[data-theme="titanium-white"] {
+  --theme-bg: #f2f4f7;
+  --theme-bg-panel: #ffffff;
+  --theme-bg-hover: #e0e4e8;
+  --theme-border: #dfe6e9;
+  --theme-text: #2d3436;
+  --theme-text-muted: #636e72;
+  --theme-accent: #0984e3;
+  --theme-accent-hover: #74b9ff;
+}
+
+/* Oxide Theme (Base Rust) */
+[data-theme="oxide"] {
+  --theme-bg: #331a0d;
+  --theme-bg-panel: #4a2613;
+  --theme-bg-hover: #5e311a;
+  --theme-border: #63341b;
+  --theme-text: #fef3e2;
+  --theme-text-muted: #d4b49a;
+  --theme-accent: #FF6B00;
+  --theme-accent-hover: #ff8533;
+}
+
+/* Dracula Theme */
+[data-theme="dracula"] {
+  --theme-bg: #282a36;
+  --theme-bg-panel: #21222c;
+  /* Slightly darker than bg for contrast */
+  --theme-bg-hover: #44475a;
+  --theme-border: #44475a;
+  --theme-text: #f8f8f2;
+  --theme-text-muted: #6272a4;
+  --theme-accent: #bd93f9;
+  --theme-accent-hover: #ff79c6;
+}
+
+/* Nord Theme */
+[data-theme="nord"] {
+  --theme-bg: #2e3440;
+  --theme-bg-panel: #3b4252;
+  --theme-bg-hover: #434c5e;
+  --theme-border: #434c5e;
+  --theme-text: #d8dee9;
+  --theme-text-muted: #4c566a;
+  --theme-accent: #88c0d0;
+  --theme-accent-hover: #81a1c1;
+}
+
+/* Solarized Dark Theme */
+[data-theme="solarized-dark"] {
+  --theme-bg: #002b36;
+  --theme-bg-panel: #073642;
+  --theme-bg-hover: #586e75;
+  --theme-border: #073642;
+  --theme-text: #839496;
+  --theme-text-muted: #586e75;
+  --theme-accent: #2aa198;
+  --theme-accent-hover: #268bd2;
+}
+
+/* One Dark Theme */
+[data-theme="one-dark"] {
+  --theme-bg: #282c34;
+  --theme-bg-panel: #21252b;
+  --theme-bg-hover: #2c313a;
+  --theme-border: #3e4451;
+  --theme-text: #abb2bf;
+  --theme-text-muted: #5c6370;
+  --theme-accent: #61afef;
+  --theme-accent-hover: #528bff;
+}
+
+/* Monokai Theme */
+[data-theme="monokai"] {
+  --theme-bg: #272822;
+  --theme-bg-panel: #1e1f1c;
+  --theme-bg-hover: #3e3d32;
+  --theme-border: #3e3d32;
+  --theme-text: #f8f8f2;
+  --theme-text-muted: #75715e;
+  --theme-accent: #a6e22e;
+  --theme-accent-hover: #f92672;
+}
+
+/* Catppuccin Mocha Theme */
+[data-theme="catppuccin-mocha"] {
+  --theme-bg: #1e1e2e;
+  --theme-bg-panel: #181825;
+  --theme-bg-hover: #313244;
+  --theme-border: #313244;
+  --theme-text: #cdd6f4;
+  --theme-text-muted: #6c7086;
+  --theme-accent: #89b4fa;
+  --theme-accent-hover: #b4befe;
+}
+
 /* Magnetite Theme */
 [data-theme="magnetite"] {
   --theme-bg: #1A1A1A;
