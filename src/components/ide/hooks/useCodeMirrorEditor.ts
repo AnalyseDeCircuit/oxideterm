@@ -4,7 +4,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLineGutter } from '@cod
 import { EditorState, Extension } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
-import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { highlightSelectionMatches, search } from '@codemirror/search';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { loadLanguage } from '../../../lib/codemirror/languageLoader';
@@ -22,6 +22,8 @@ export interface UseCodeMirrorEditorOptions {
   onCursorChange?: (line: number, col: number) => void;
   /** 是否只读 */
   readOnly?: boolean;
+  /** 触发搜索 UI 的回调 */
+  onSearchOpen?: () => void;
 }
 
 export interface UseCodeMirrorEditorResult {
@@ -37,6 +39,8 @@ export interface UseCodeMirrorEditorResult {
   focus: () => void;
   /** 获取 EditorView 实例 */
   getView: () => EditorView | null;
+  /** 执行命令 (如 findNext) */
+  executeCommand: (command: (view: EditorView) => boolean) => boolean;
 }
 
 // Oxide 主题覆盖（与 RemoteFileEditor 保持一致）
@@ -74,156 +78,24 @@ const oxideTheme = EditorView.theme({
     backgroundColor: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)',
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 搜索面板 - 暴力美学重构
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // 1. 容器：强制贴边，强制行布局，消灭换行
-  '.cm-search.cm-panel': {
-    position: 'absolute !important',
-    top: '0 !important',
-    right: '0 !important',
-    zIndex: '999 !important',
-
-    // UI 风格
-    backgroundColor: 'var(--theme-bg-panel) !important',
-    border: 'none !important', // 不需要边框，因为它贴边了
-    borderLeft: '1px solid var(--theme-border) !important',
-    borderBottom: '1px solid var(--theme-border) !important',
-    borderBottomLeftRadius: '6px !important',
-    boxShadow: '-2px 2px 8px rgba(0,0,0,0.1) !important',
-
-    // 布局核心：拍扁它！
-    display: 'flex !important',
-    flexDirection: 'row !important',
-    flexWrap: 'nowrap !important',
-    alignItems: 'center !important',
-    padding: '6px 12px !important',
-    gap: '6px !important',
-
-    // 尺寸控制
-    width: 'auto !important',
-    maxWidth: 'calc(100% - 20px) !important',
-    minWidth: '400px !important',
-  },
-
-  // 2. 彻底消灭所有的换行符
-  '.cm-search.cm-panel br': {
-    display: 'none !important',
-  },
-
-  // 3. 通用控件重置：去掉所有默认样式的干扰
-  '.cm-search.cm-panel input, .cm-search.cm-panel button, .cm-search.cm-panel label': {
-    margin: '0 !important',
-    fontFamily: 'inherit !important',
-    fontSize: '12px !important',
-    verticalAlign: 'middle !important',
-  },
-
-  // 4. 输入框 (Find & Replace) - 紧凑风格
-  '.cm-search.cm-panel input[name="search"], .cm-search.cm-panel input[name="replace"]': {
-    height: '24px !important',
-    width: '120px !important',
-    flex: '1 !important', // 允许伸缩
-    backgroundColor: 'var(--theme-bg) !important',
-    border: '1px solid var(--theme-border) !important',
-    borderRadius: '4px !important',
-    color: 'var(--theme-text) !important',
-    padding: '0 6px !important',
-    outline: 'none !important',
-    transition: 'all 0.15s !important',
-  },
-  '.cm-search.cm-panel input:focus': {
-    borderColor: 'var(--theme-accent) !important',
-    boxShadow: '0 0 0 1px var(--theme-accent) !important',
-  },
-
-  // 5. 按钮 (Next, Prev, Replace...) - 图标化/极简风格
-  '.cm-search.cm-panel button': {
-    height: '24px !important',
-    padding: '0 8px !important',
-    background: 'transparent !important',
-    border: '1px solid transparent !important',
-    color: 'var(--theme-text-muted) !important',
-    borderRadius: '4px !important',
-    cursor: 'pointer !important',
-    fontWeight: '500 !important',
-    textTransform: 'capitalize !important',
-    display: 'flex !important',
-    alignItems: 'center !important',
-    justifyContent: 'center !important',
-  },
-  '.cm-search.cm-panel button:hover': {
-    color: 'var(--theme-text) !important',
-    backgroundColor: 'var(--theme-bg-hover) !important',
-  },
-
-  // 6. Checkbox 组 - 缩小并变成透明背景
-  '.cm-search.cm-panel label': {
-    display: 'flex !important',
-    alignItems: 'center !important',
-    gap: '4px !important',
-    color: 'var(--theme-text-muted) !important',
-    fontSize: '11px !important',
-    cursor: 'pointer !important',
-    padding: '0 4px !important',
-  },
-  '.cm-search.cm-panel input[type="checkbox"]': {
-    appearance: 'none !important',
-    width: '12px !important',
-    height: '12px !important',
-    border: '1px solid currentColor !important',
-    borderRadius: '2px !important',
-    background: 'transparent !important',
-    position: 'relative !important',
-  },
-  '.cm-search.cm-panel input[type="checkbox"]:checked': {
-    background: 'var(--theme-accent) !important',
-    borderColor: 'var(--theme-accent) !important',
-  },
-
-  // 7. 关闭按钮 - 独立定位到最右边
-  '.cm-search.cm-panel button[name="close"]': {
-    fontSize: '14px !important',
-    width: '20px !important',
-    padding: '0 !important',
-    marginLeft: '8px !important',
-    opacity: '0.6 !important',
-  },
-  '.cm-search.cm-panel button[name="close"]:hover': {
-    opacity: '1 !important',
-    backgroundColor: 'var(--theme-bg-hover) !important',
-  },
-
-  // 8. 布局调整：让 replace 框如果存在，也尽量挤在一行，或者优雅换行（如果实在太挤）
-  // 但为了彻底的单行感，我们尝试让它们 flex-wrap: wrap
-  // 并控制 input[name="replace"] 的上一级行为（虽然很难选中父级文本节点）
-  // CM6 的结构很扁平，都在一个 div 里。
-  // 我们利用 flex order 来重新排序：
-  // 顺序: SearchInput -> MatchCase -> Next/Prev -> ReplaceInput -> ReplaceBtns -> Close
-
-  '.cm-search.cm-panel input[name="search"]': { order: '1' },
-  '.cm-search.cm-panel label': { order: '2' },
-  '.cm-search.cm-panel button[name="next"]': { order: '3' },
-  '.cm-search.cm-panel button[name="prev"]': { order: '4' },
-  '.cm-search.cm-panel button[name="select"]': { order: '5', display: 'none !important' }, // 隐藏 Select All，一般用不到且占地
-
-  '.cm-search.cm-panel input[name="replace"]': {
-    order: '6',
-    marginLeft: '8px !important', // 与上一组隔开
-  },
-  '.cm-search.cm-panel button[name="replace"]': { order: '7' },
-  '.cm-search.cm-panel button[name="replaceAll"]': { order: '8' },
-  '.cm-search.cm-panel button[name="close"]': { order: '10' },
-
-  // 搜索高亮
+  // 搜索高亮 - 增加“线包边”视觉效果
   '.cm-searchMatch': {
-    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 25%, transparent)',
+    outline: '1px solid color-mix(in srgb, var(--theme-accent) 50%, transparent)',
+    outlineOffset: '-1px', // 向内缩进，实现完美的包边感而不影响行高
     borderRadius: '2px',
+    transition: 'all 0.1s',
   },
   '.cm-searchMatch-selected': {
-    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 60%, transparent)',
-    outline: '1px solid var(--theme-accent)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 60%, transparent) !important',
+    outline: '1px solid var(--theme-accent) !important',
+    boxShadow: '0 0 4px var(--theme-accent)', // 给选中的项增加一点呼吸感阴影
+    outlineOffset: '0px',
+    borderRadius: '2px',
+    zIndex: 2,
+  },
+  '.cm-panels': {
+    display: 'none !important',
   },
 });
 
@@ -285,13 +157,15 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
         bracketMatching(),
         autocompletion(),
         highlightSelectionMatches(),
+        // 保持搜索逻辑激活，但通过 CSS 隐藏原生面板
+        search(),
         oneDark,
         oxideTheme,
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
           ...foldKeymap,
-          ...searchKeymap,
+          // 移除默认 searchKeymap
           ...completionKeymap,
           indentWithTab,
           // Cmd/Ctrl+S 保存
@@ -303,6 +177,17 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
             },
           },
         ]),
+        // 拦截编辑器内部的 Cmd+F
+        EditorView.domEventHandlers({
+          keydown(event) {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
+              event.preventDefault();
+              options.onSearchOpen?.();
+              return true;
+            }
+            return false;
+          }
+        }),
         // 监听内容变化
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -382,6 +267,12 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
   // 获取视图
   const getView = useCallback(() => viewRef.current, []);
 
+  // 执行命令
+  const executeCommand = useCallback((command: (view: EditorView) => boolean) => {
+    if (!viewRef.current) return false;
+    return command(viewRef.current);
+  }, []);
+
   return {
     containerRef: setContainerRef,
     isReady,
@@ -389,5 +280,6 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
     setContent,
     focus,
     getView,
+    executeCommand,
   };
 }
