@@ -426,34 +426,38 @@ body {
   /* App-like feel */
 }
 
-/* Scrollbar styling for WebKit */
+/* Scrollbar styling for WebKit - Modern & Theme-aware */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-oxide-bg);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-oxide-border);
-  border: 2px solid var(--color-oxide-bg);
-  /* Padding effect */
-  border-radius: 0px;
+  background: transparent;
+  border-radius: 10px;
+}
+
+/* Only show scrollbar thumb when the container is hovered */
+*:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--theme-text-muted), transparent 85%);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: color-mix(in srgb, var(--theme-text-muted), transparent 60%) !important;
 }
 
 ::-webkit-scrollbar-corner {
-  background: var(--color-oxide-bg);
+  background: transparent;
 }
 
-/* Thin scrollbar for tab bar */
+/* Thin scrollbar for specialized components like TabBar */
 .scrollbar-thin::-webkit-scrollbar {
-  height: 4px;
+  height: 3px;
+  width: 3px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
@@ -461,13 +465,16 @@ body {
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: var(--color-oxide-border);
-  border-radius: 2px;
-  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--theme-text-muted), transparent 80%);
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--theme-accent) !important;
 }
 
 /* Utility classes for the Industrial look */

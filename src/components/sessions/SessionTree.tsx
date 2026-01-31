@@ -13,9 +13,9 @@
 import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { 
-  Server, 
-  ChevronRight, 
+import {
+  Server,
+  ChevronRight,
   ChevronDown,
   Loader2,
   AlertCircle,
@@ -89,46 +89,46 @@ function getStatusStyles(status: UnifiedNodeStatus): {
 } {
   switch (status) {
     case 'idle':
-      return { 
-        dot: 'bg-zinc-500', 
-        text: 'text-zinc-400',
-        line: 'border-zinc-700',
+      return {
+        dot: 'bg-theme-text-muted/50',
+        text: 'text-theme-text-muted',
+        line: 'border-theme-border',
       };
     case 'connecting':
-      return { 
-        dot: 'bg-blue-500 animate-pulse', 
-        text: 'text-blue-400',
-        line: 'border-blue-500/40',
+      return {
+        dot: 'bg-blue-500 animate-pulse',
+        text: 'text-blue-500',
+        line: 'border-blue-500/30',
       };
     case 'connected':
-      return { 
-        dot: 'bg-emerald-500 ring-2 ring-emerald-500/30', 
-        text: 'text-emerald-400',
-        line: 'border-emerald-500/40',
+      return {
+        dot: 'bg-emerald-500 ring-2 ring-emerald-500/20',
+        text: 'text-emerald-500',
+        line: 'border-emerald-500/30',
       };
     case 'active':
-      return { 
-        dot: 'bg-emerald-500', 
-        text: 'text-emerald-300',
-        line: 'border-emerald-500/40',
+      return {
+        dot: 'bg-emerald-500',
+        text: 'text-emerald-600',
+        line: 'border-emerald-500/30',
       };
     case 'link-down':
-      return { 
-        dot: 'bg-orange-500 animate-pulse', 
-        text: 'text-orange-400',
-        line: 'border-orange-500/40',
+      return {
+        dot: 'bg-orange-500 animate-pulse',
+        text: 'text-orange-500',
+        line: 'border-orange-500/30',
       };
     case 'error':
-      return { 
-        dot: 'bg-red-500', 
-        text: 'text-red-400',
-        line: 'border-red-500/40',
+      return {
+        dot: 'bg-red-500',
+        text: 'text-red-500',
+        line: 'border-red-500/30',
       };
     default:
-      return { 
-        dot: 'bg-zinc-500', 
-        text: 'text-zinc-400',
-        line: 'border-zinc-700',
+      return {
+        dot: 'bg-theme-text-muted/50',
+        text: 'text-theme-text-muted',
+        line: 'border-theme-border',
       };
   }
 }
@@ -182,27 +182,32 @@ const TreeItem: React.FC<TreeItemProps> = ({
   children,
 }) => {
   const paddingLeft = depth * INDENT_SIZE;
-  
+
+
+
   return (
     <div className="relative" style={{ paddingLeft }}>
-      {/* 垂直连接线 */}
+      {/* 垂直连接线 - 极简风格 */}
       {depth > 0 && showLine && (
-        <div 
+        <div
           className={cn(
-            "absolute left-0 top-0 w-px border-l",
-            lineColor,
-            isLast ? "h-1/2" : "h-full"
+            "absolute w-px bg-theme-text-muted/15", // 极度淡化的线条
+            isLast ? "h-3.5" : "h-full" // 3.5 = 14px (半高)
           )}
-          style={{ left: (depth - 1) * INDENT_SIZE + 6 }}
+          style={{
+            left: (depth - 1) * INDENT_SIZE + 10, // 调整位置以对齐图标中心
+            top: 0
+          }}
         />
       )}
-      {/* 水平连接线 */}
+      {/* 水平连接线 - 极简风格 */}
       {depth > 0 && showLine && (
-        <div 
-          className={cn("absolute top-1/2 -translate-y-1/2 h-px border-t", lineColor)}
-          style={{ 
-            left: (depth - 1) * INDENT_SIZE + 6, 
-            width: INDENT_SIZE - 4 
+        <div
+          className="absolute h-px bg-theme-text-muted/15"
+          style={{
+            left: (depth - 1) * INDENT_SIZE + 10, // 连接垂直线
+            width: 8, // 短横线
+            top: 14 // 垂直居中 (28px height / 2)
           }}
         />
       )}
@@ -235,11 +240,11 @@ const ActionItem: React.FC<ActionItemProps> = ({
   variant = 'default',
 }) => {
   const variantStyles = {
-    default: 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5',
-    primary: 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/10',
-    danger: 'text-red-400 hover:text-red-300 hover:bg-red-500/10',
+    default: 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover',
+    primary: 'text-blue-500 hover:text-blue-400 hover:bg-theme-bg-hover',
+    danger: 'text-red-500 hover:text-red-400 hover:bg-red-500/10',
   };
-  
+
   return (
     <TreeItem depth={depth} isLast={isLast} lineColor={lineColor}>
       <div
@@ -281,15 +286,15 @@ const TerminalItem: React.FC<TerminalItemProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  
+
   return (
     <TreeItem depth={depth} isLast={isLast} lineColor={lineColor}>
       <div
         className={cn(
-          "flex items-center gap-2 h-7 px-2 cursor-pointer group transition-colors rounded-sm",
-          isActive 
-            ? "bg-blue-500/20 text-blue-300" 
-            : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+          "flex items-center gap-2 h-7 px-2 cursor-pointer group transition-colors rounded-sm ml-1",
+          isActive
+            ? "bg-theme-accent/10 text-theme-accent font-medium border-l-2 border-theme-accent pl-1.5"
+            : "text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover"
         )}
         onClick={onSelect}
       >
@@ -362,14 +367,14 @@ const SessionNode: React.FC<SessionNodeProps> = ({
   const displayLabel = node.displayName || `${node.username}@${node.host}`;
   const { status, terminalIds } = node.runtime;
   const styles = getStatusStyles(status);
-  
+
   const isConnected = status === 'connected' || status === 'active';
   const isConnecting = status === 'connecting';
   const isError = status === 'error';
   const isLinkDown = status === 'link-down';
   const hasTerminals = terminalIds.length > 0;
   const hasChildren = childNodes.length > 0;
-  
+
   // 双击处理 - 仅在已连接状态下操作终端
   const handleDoubleClick = useCallback(() => {
     if (isConnected) {
@@ -410,23 +415,23 @@ const SessionNode: React.FC<SessionNodeProps> = ({
             <ChevronRight className="w-3 h-3" />
           )}
         </span>
-        
+
         {/* 服务器图标 */}
         <Server className={cn("w-4 h-4 mr-2", styles.text)} />
-        
+
         {/* 来源标记 */}
         {getOriginIcon(node.originType)}
-        
+
         {/* 名称 */}
         <span className={cn("truncate flex-1 text-sm", styles.text, node.originType && "ml-1")}>
           {displayLabel}
         </span>
-        
+
         {/* 端口 */}
         {node.port !== 22 && (
           <span className="text-xs text-zinc-500 mr-2">:{node.port}</span>
         )}
-        
+
         {/* 终端数量 */}
         {hasTerminals && (
           <span className="text-xs text-zinc-500 mr-2 flex items-center gap-0.5">
@@ -434,7 +439,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
             {terminalIds.length}
           </span>
         )}
-        
+
         {/* 状态指示器 */}
         <div className="flex items-center gap-1">
           {getStatusIcon(status)}
@@ -447,17 +452,17 @@ const SessionNode: React.FC<SessionNodeProps> = ({
   // 构建子项列表
   const renderSubItems = () => {
     if (!node.isExpanded) return null;
-    
+
     const items: React.ReactNode[] = [];
     const subDepth = node.depth + 1;
-    
+
     if (isConnected) {
       // 已连接状态：按"路径直觉"顺序
       // 1. 操作项 → 2. 已有终端 → 3. Drill In → 4. Disconnect → 5. 子节点
       const actionCount = onOpenForwards ? 4 : 3; // New Terminal, SFTP, (Forwards), Disconnect (after Drill In)
       const totalItems = actionCount + terminalIds.length + 1 + childNodes.length; // +1 for Drill In
       let itemIndex = 0;
-      
+
       // 1. New Terminal（最常用操作）
       items.push(
         <ActionItem
@@ -470,7 +475,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           isLast={++itemIndex === totalItems}
         />
       );
-      
+
       // 2. SFTP Explorer
       items.push(
         <ActionItem
@@ -483,7 +488,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           isLast={++itemIndex === totalItems}
         />
       );
-      
+
       // 2.5. IDE Mode
       if (onOpenIde) {
         items.push(
@@ -498,7 +503,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           />
         );
       }
-      
+
       // 3. Port Forwarding
       if (onOpenForwards) {
         items.push(
@@ -513,7 +518,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           />
         );
       }
-      
+
       // 4. 已有终端列表
       terminalIds.forEach((terminalId, index) => {
         items.push(
@@ -530,7 +535,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           />
         );
       });
-      
+
       // 5 Disconnect（断开连接）
       items.push(
         <ActionItem
@@ -544,7 +549,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           variant="danger"
         />
       );
-      
+
       // 6. Drill In（引导用户继续深入）
       items.push(
         <ActionItem
@@ -558,8 +563,8 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           variant="primary"
         />
       );
-      
-      
+
+
       // 7. 子节点（最终的延伸）
       childNodes.forEach((child) => {
         itemIndex++;
@@ -574,7 +579,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
       const errorActionCount = 2; // Reconnect + Remove
       const errorTotalItems = errorActionCount + childNodes.length;
       let errorItemIndex = 0;
-      
+
       items.push(
         <ActionItem
           key="reconnect"
@@ -586,7 +591,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           isLast={++errorItemIndex === errorTotalItems}
         />
       );
-      
+
       items.push(
         <ActionItem
           key="remove"
@@ -599,7 +604,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           variant="danger"
         />
       );
-      
+
       // 子节点（如果有）
       childNodes.forEach((child) => {
         errorItemIndex++;
@@ -622,7 +627,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           isLast={childNodes.length === 0}
         />
       );
-      
+
       // 子节点（如果有）
       childNodes.forEach((child) => {
         items.push(
@@ -641,7 +646,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
         );
       });
     }
-    
+
     return items;
   };
 
@@ -730,7 +735,7 @@ const SessionNode: React.FC<SessionNodeProps> = ({
           )}
         </ContextMenuContent>
       </ContextMenu>
-      
+
       {renderSubItems()}
     </div>
   );
@@ -772,16 +777,16 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
     }
     return map;
   }, [nodes]);
-  
+
   // 获取直接子节点
   const getChildNodes = useCallback((parentId: string): UnifiedFlatNode[] => {
     return nodesByParent.get(parentId) || [];
   }, [nodesByParent]);
-  
+
   // 递归渲染节点
   const renderNode = useCallback((node: UnifiedFlatNode): React.ReactNode => {
     const childNodes = getChildNodes(node.id);
-    
+
     return (
       <SessionNode
         key={node.id}
@@ -825,7 +830,7 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
     onRemove,
     onSaveAsPreset,
   ]);
-  
+
   // 获取根节点
   const rootNodes = nodesByParent.get(null) || [];
 

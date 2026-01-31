@@ -54,197 +54,176 @@ const oxideTheme = EditorView.theme({
     minHeight: '100%',
   },
   '.cm-gutters': {
-    backgroundColor: 'rgb(39 39 42 / 0.5)',
-    borderRight: '1px solid rgb(63 63 70 / 0.5)',
+    backgroundColor: 'var(--theme-bg-panel)',
+    borderRight: '1px solid var(--theme-border)',
+    color: 'var(--theme-text-muted)',
+    opacity: 0.7,
   },
   '.cm-activeLineGutter': {
-    backgroundColor: 'rgb(234 88 12 / 0.1)',
+    backgroundColor: 'var(--theme-accent)',
+    color: 'var(--theme-bg)',
+    opacity: 0.8,
   },
   '.cm-activeLine': {
-    backgroundColor: 'rgb(234 88 12 / 0.05)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)',
   },
   '&.cm-focused .cm-cursor': {
-    borderLeftColor: '#f97316',
+    borderLeftColor: 'var(--theme-accent)',
   },
   '&.cm-focused .cm-selectionBackground, ::selection': {
-    backgroundColor: 'rgb(234 88 12 / 0.2)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)',
   },
-  
+
   // ═══════════════════════════════════════════════════════════════════════════
-  // 搜索面板主题 - 深度统一 Shadcn UI 风格
+  // 搜索面板 - 暴力美学重构
   // ═══════════════════════════════════════════════════════════════════════════
-  
-  // 面板容器 - 使用 Flex Flow 布局
+
+  // 1. 容器：强制贴边，强制行布局，消灭换行
   '.cm-search.cm-panel': {
-    backgroundColor: 'var(--theme-bg-panel)',
-    color: 'var(--theme-text)',
-    padding: '12px',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '8px',
-    alignItems: 'center',
-    borderBottom: '1px solid var(--theme-border)',
-    minWidth: '350px',
-  },
-  
-  // 隐藏默认的换行
-  '.cm-search.cm-panel > br': {
-    display: 'none',
-  },
-  
-  // 1. 搜索框 - 占据主导位置
-  '.cm-panel input[name="search"]': {
-    flex: '1 1 200px', // 自适应宽度，最小200px
-    height: '32px',
-    backgroundColor: 'var(--theme-bg)',
-    border: '1px solid var(--theme-border)',
-    borderRadius: '4px', // Shadcn radius-sm
-    color: 'var(--theme-text)',
-    padding: '0 10px',
-    fontSize: '13px',
-    outline: 'none',
-    fontFamily: 'inherit',
-    order: '1',
-  },
-  '.cm-panel input[name="search"]:focus': {
-    borderColor: 'var(--theme-accent)',
-    boxShadow: '0 0 0 1px var(--theme-accent)',
-  },
-  
-  // 2. 导航按钮组 (Prev/Next/Select)
-  '.cm-panel button[name="next"], .cm-panel button[name="prev"], .cm-panel button[name="select"]': {
-    flex: '0 0 auto',
-    order: '2',
-    height: '32px',
-    padding: '0 12px',
-            background: 'transparent', // Reset background (image & color)
-            backgroundImage: 'none',   // Explicitly remove default gradient
-            border: '1px solid var(--theme-border)',
-            borderRadius: '4px',
-            color: 'var(--theme-text)',
-            fontSize: '12px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textTransform: 'capitalize',
-            boxShadow: 'none',
-          },
-          '.cm-panel button:hover': {
-            background: 'var(--theme-bg-hover)',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: '12px',
-    color: 'var(--theme-text-muted)',
-    cursor: 'pointer',
-    height: '24px',
-    marginRight: '8px',
-    marginTop: '4px', // 稍微与上方隔开
-    userSelect: 'none',
-  },
-  // Hack: 让第一个 Label 强制换行 (如果空间不足，Flex wrap 会自动处理，但我们可以强制)
-  // 由于无法精准选中"第一个label"，利用宽度填充机制
-  
-  // Checkbox 本身样式
-  '.cm-panel input[type="checkbox"]': {
-    appearance: 'none',
-    width: '14px',
-    height: '14px',
-    border: '1px solid var(--theme-border)',
-    borderRadius: '3px',
-    backgroundColor: 'var(--theme-bg)',
-    position: 'relative',
-    cursor: 'pointer',
-    margin: '0',
-  },
-  '.cm-panel input[type="checkbox"]:checked': {
-    backgroundColor: 'var(--theme-accent)',
-    borderColor: 'var(--theme-accent)',
-  },
-  '.cm-panel input[type="checkbox"]:checked::after': {
-    content: '""',
-    position: 'absolute',
-    left: '4px',
-    top: '1px',
-    width: '4px',
-    height: '8px',
-    border: 'solid white',
-    borderWidth: '0 2px 2px 0',
-    transform: 'rotate(45deg)',
-  },
-  
-  // 4. 替换输入框 - 强制新行
-  '.cm-panel input[name="replace"]': {
-    flex: '1 1 100%', // 强制占满整行
-    order: '4',
-    marginTop: '8px',
-    height: '32px',
-    backgroundColor: 'var(--theme-bg)',
-    border: '1px solid var(--theme-border)',
-    borderRadius: '4px',
-    color: 'var(--theme-text)',
-    padding: '0 10px',
-    fontSize: '13px',
-    outline: 'none',
-  },
-  
-  // 5. 替换按钮
-  '.cm-panel button[name="replace"], .cm-panel button[name="replaceAll"]': {
-            flex: '0 0 auto', // 均分宽度
-            order: '5',
-            marginTop: '8px',
-            height: '32px',
-            background: 'var(--theme-bg-panel)', // Reset all background props
-            backgroundImage: 'none',
-            border: '1px solid var(--theme-border)',
-            padding: '0 16px',
-            borderRadius: '4px',
-            color: 'var(--theme-text)',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: '500',
-            boxShadow: 'none',
-          },
+    position: 'absolute !important',
+    top: '0 !important',
+    right: '0 !important',
+    zIndex: '999 !important',
 
-          // 6. 关闭按钮 - 绝对定位
-          '.cm-panel button[name="close"]': {
-            position: 'absolute',
-            top: '8px',
-            right: '8px',
-            padding: '4px',
-            background: 'transparent',
-            backgroundImage: 'none',
-            border: 'none',
-            boxShadow: 'none',
-            color: 'var(--theme-text-muted)',
-            cursor: 'pointer',
-            borderRadius: '4px',
-            fontSize: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '24px',
-            height: '24px',
-            opacity: '0.7',
-          },
-          '.cm-panel button[name="close"]:hover': {
-            backgroundColor: 'var(--theme-bg-hover)',
-            color: 'var(--theme-text)',
-            opacity: '1',
-          },
-          // 移除之前的伪元素定义，避免双重 X
-  '.cm-panel *:focus-visible': {
-     outline: 'none',
-     boxShadow: '0 0 0 1px var(--theme-accent)',
-     borderColor: 'var(--theme-accent)',
+    // UI 风格
+    backgroundColor: 'var(--theme-bg-panel) !important',
+    border: 'none !important', // 不需要边框，因为它贴边了
+    borderLeft: '1px solid var(--theme-border) !important',
+    borderBottom: '1px solid var(--theme-border) !important',
+    borderBottomLeftRadius: '6px !important',
+    boxShadow: '-2px 2px 8px rgba(0,0,0,0.1) !important',
+
+    // 布局核心：拍扁它！
+    display: 'flex !important',
+    flexDirection: 'row !important',
+    flexWrap: 'nowrap !important',
+    alignItems: 'center !important',
+    padding: '6px 12px !important',
+    gap: '6px !important',
+
+    // 尺寸控制
+    width: 'auto !important',
+    maxWidth: 'calc(100% - 20px) !important',
+    minWidth: '400px !important',
   },
 
-  
+  // 2. 彻底消灭所有的换行符
+  '.cm-search.cm-panel br': {
+    display: 'none !important',
+  },
+
+  // 3. 通用控件重置：去掉所有默认样式的干扰
+  '.cm-search.cm-panel input, .cm-search.cm-panel button, .cm-search.cm-panel label': {
+    margin: '0 !important',
+    fontFamily: 'inherit !important',
+    fontSize: '12px !important',
+    verticalAlign: 'middle !important',
+  },
+
+  // 4. 输入框 (Find & Replace) - 紧凑风格
+  '.cm-search.cm-panel input[name="search"], .cm-search.cm-panel input[name="replace"]': {
+    height: '24px !important',
+    width: '120px !important',
+    flex: '1 !important', // 允许伸缩
+    backgroundColor: 'var(--theme-bg) !important',
+    border: '1px solid var(--theme-border) !important',
+    borderRadius: '4px !important',
+    color: 'var(--theme-text) !important',
+    padding: '0 6px !important',
+    outline: 'none !important',
+    transition: 'all 0.15s !important',
+  },
+  '.cm-search.cm-panel input:focus': {
+    borderColor: 'var(--theme-accent) !important',
+    boxShadow: '0 0 0 1px var(--theme-accent) !important',
+  },
+
+  // 5. 按钮 (Next, Prev, Replace...) - 图标化/极简风格
+  '.cm-search.cm-panel button': {
+    height: '24px !important',
+    padding: '0 8px !important',
+    background: 'transparent !important',
+    border: '1px solid transparent !important',
+    color: 'var(--theme-text-muted) !important',
+    borderRadius: '4px !important',
+    cursor: 'pointer !important',
+    fontWeight: '500 !important',
+    textTransform: 'capitalize !important',
+    display: 'flex !important',
+    alignItems: 'center !important',
+    justifyContent: 'center !important',
+  },
+  '.cm-search.cm-panel button:hover': {
+    color: 'var(--theme-text) !important',
+    backgroundColor: 'var(--theme-bg-hover) !important',
+  },
+
+  // 6. Checkbox 组 - 缩小并变成透明背景
+  '.cm-search.cm-panel label': {
+    display: 'flex !important',
+    alignItems: 'center !important',
+    gap: '4px !important',
+    color: 'var(--theme-text-muted) !important',
+    fontSize: '11px !important',
+    cursor: 'pointer !important',
+    padding: '0 4px !important',
+  },
+  '.cm-search.cm-panel input[type="checkbox"]': {
+    appearance: 'none !important',
+    width: '12px !important',
+    height: '12px !important',
+    border: '1px solid currentColor !important',
+    borderRadius: '2px !important',
+    background: 'transparent !important',
+    position: 'relative !important',
+  },
+  '.cm-search.cm-panel input[type="checkbox"]:checked': {
+    background: 'var(--theme-accent) !important',
+    borderColor: 'var(--theme-accent) !important',
+  },
+
+  // 7. 关闭按钮 - 独立定位到最右边
+  '.cm-search.cm-panel button[name="close"]': {
+    fontSize: '14px !important',
+    width: '20px !important',
+    padding: '0 !important',
+    marginLeft: '8px !important',
+    opacity: '0.6 !important',
+  },
+  '.cm-search.cm-panel button[name="close"]:hover': {
+    opacity: '1 !important',
+    backgroundColor: 'var(--theme-bg-hover) !important',
+  },
+
+  // 8. 布局调整：让 replace 框如果存在，也尽量挤在一行，或者优雅换行（如果实在太挤）
+  // 但为了彻底的单行感，我们尝试让它们 flex-wrap: wrap
+  // 并控制 input[name="replace"] 的上一级行为（虽然很难选中父级文本节点）
+  // CM6 的结构很扁平，都在一个 div 里。
+  // 我们利用 flex order 来重新排序：
+  // 顺序: SearchInput -> MatchCase -> Next/Prev -> ReplaceInput -> ReplaceBtns -> Close
+
+  '.cm-search.cm-panel input[name="search"]': { order: '1' },
+  '.cm-search.cm-panel label': { order: '2' },
+  '.cm-search.cm-panel button[name="next"]': { order: '3' },
+  '.cm-search.cm-panel button[name="prev"]': { order: '4' },
+  '.cm-search.cm-panel button[name="select"]': { order: '5', display: 'none !important' }, // 隐藏 Select All，一般用不到且占地
+
+  '.cm-search.cm-panel input[name="replace"]': {
+    order: '6',
+    marginLeft: '8px !important', // 与上一组隔开
+  },
+  '.cm-search.cm-panel button[name="replace"]': { order: '7' },
+  '.cm-search.cm-panel button[name="replaceAll"]': { order: '8' },
+  '.cm-search.cm-panel button[name="close"]': { order: '10' },
+
   // 搜索高亮
   '.cm-searchMatch': {
-    backgroundColor: 'rgba(234, 88, 12, 0.3)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)',
     borderRadius: '2px',
   },
   '.cm-searchMatch-selected': {
-    backgroundColor: 'rgba(234, 88, 12, 0.6)',
+    backgroundColor: 'color-mix(in srgb, var(--theme-accent) 60%, transparent)',
+    outline: '1px solid var(--theme-accent)',
   },
 });
 
@@ -261,12 +240,12 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
   const viewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isReady, setIsReady] = useState(false);
-  
+
   // 保存最新的回调引用，避免闭包问题
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const onCursorChangeRef = useRef(onCursorChange);
-  
+
   useEffect(() => {
     onChangeRef.current = onChange;
     onSaveRef.current = onSave;
@@ -276,7 +255,7 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
   // Callback ref for container
   const setContainerRef = useCallback((node: HTMLDivElement | null) => {
     containerRef.current = node;
-    
+
     if (!node) {
       // 清理
       if (viewRef.current) {
@@ -286,16 +265,16 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
       }
       return;
     }
-    
+
     // 初始化编辑器
     let mounted = true;
-    
+
     const initEditor = async () => {
       // 加载语言支持
       const langSupport = await loadLanguage(language);
-      
+
       if (!mounted || !node) return;
-      
+
       // 构建扩展
       const extensions: Extension[] = [
         lineNumbers(),
@@ -338,53 +317,53 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
           }
         }),
       ];
-      
+
       // 添加语言支持
       if (langSupport) {
         extensions.push(langSupport);
       }
-      
+
       // 只读模式
       if (readOnly) {
         extensions.push(EditorState.readOnly.of(true));
       }
-      
+
       // 创建状态
       const state = EditorState.create({
         doc: initialContent,
         extensions,
       });
-      
+
       // 清空容器
       node.innerHTML = '';
-      
+
       // 创建视图
       const view = new EditorView({
         state,
         parent: node,
       });
-      
+
       viewRef.current = view;
       setIsReady(true);
-      
+
       // 初始光标位置
       onCursorChangeRef.current?.(1, 1);
     };
-    
+
     initEditor();
-    
+
     // 返回清理函数不是必要的，因为 callback ref 会在 node 变为 null 时处理
   }, [language, initialContent, readOnly]);
-  
+
   // 获取内容
   const getContent = useCallback(() => {
     return viewRef.current?.state.doc.toString() || '';
   }, []);
-  
+
   // 设置内容
   const setContent = useCallback((content: string) => {
     if (!viewRef.current) return;
-    
+
     const view = viewRef.current;
     view.dispatch({
       changes: {
@@ -394,15 +373,15 @@ export function useCodeMirrorEditor(options: UseCodeMirrorEditorOptions): UseCod
       },
     });
   }, []);
-  
+
   // 聚焦
   const focus = useCallback(() => {
     viewRef.current?.focus();
   }, []);
-  
+
   // 获取视图
   const getView = useCallback(() => viewRef.current, []);
-  
+
   return {
     containerRef: setContainerRef,
     isReady,
