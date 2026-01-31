@@ -4,8 +4,8 @@ import { Send, StopCircle, Terminal, Layers } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
-import { 
-  getActiveTerminalBuffer, 
+import {
+  getActiveTerminalBuffer,
   getActivePaneId,
   getActivePaneMetadata,
   getCombinedPaneContext
@@ -30,11 +30,11 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   const tabs = useAppStore((state) => state.tabs);
   const activeTabId = useAppStore((state) => state.activeTabId);
   const contextMaxChars = useSettingsStore((state) => state.settings.ai.contextVisibleLines);
-  
+
   // Find active terminal tab
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const hasActiveTerminal = activeTab?.type === 'terminal' || activeTab?.type === 'local_terminal';
-  
+
   // Check if tab has multiple panes (split panes)
   const hasSplitPanes = hasActiveTerminal && activeTab?.rootPane?.type === 'group';
 
@@ -65,7 +65,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             console.warn('[AI] getCombinedPaneContext returned empty, falling back to active pane');
           }
         }
-        
+
         // Fallback to active pane only
         if (!context) {
           const activePaneId = getActivePaneId();
@@ -74,8 +74,8 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             const buffer = getActiveTerminalBuffer(activeTab.id);
             if (buffer) {
               // Trim to contextMaxChars if needed
-              context = contextMaxChars && buffer.length > contextMaxChars 
-                ? buffer.slice(-contextMaxChars) 
+              context = contextMaxChars && buffer.length > contextMaxChars
+                ? buffer.slice(-contextMaxChars)
                 : buffer;
             } else {
               // Fallback: For SSH terminals, try backend API if Registry returns null
@@ -106,7 +106,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // Ignore Enter during IME composition (e.g., Chinese input)
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-      
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();
@@ -116,36 +116,34 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
   );
 
   return (
-    <div className="border-t border-zinc-700/50 bg-zinc-800/50 p-3">
+    <div className="bg-theme-bg-panel/30 border-t border-theme-border p-4">
       {/* Context toggle */}
       {hasActiveTerminal && (
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <button
             type="button"
             onClick={() => setIncludeContext(!includeContext)}
             disabled={fetchingContext}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
-              includeContext
-                ? 'bg-orange-600/20 text-orange-400 border border-orange-600/30'
-                : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-            } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${includeContext
+              ? 'bg-theme-accent text-theme-bg shadow-sm'
+              : 'bg-theme-bg text-theme-text-muted hover:text-theme-text border border-theme-border/50'
+              } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             title={t('ai.input.include_context')}
           >
             <Terminal className="w-3 h-3" />
             <span>{fetchingContext ? t('ai.input.fetching_context') : t('ai.input.include_context')}</span>
           </button>
-          
+
           {/* Cross-Pane Vision: Include all split panes */}
           {hasSplitPanes && includeContext && (
             <button
               type="button"
               onClick={() => setIncludeAllPanes(!includeAllPanes)}
               disabled={fetchingContext}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
-                includeAllPanes
-                  ? 'bg-purple-600/20 text-purple-400 border border-purple-600/30'
-                  : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-              } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${includeAllPanes
+                ? 'bg-blue-500 text-white shadow-sm'
+                : 'bg-theme-bg text-theme-text-muted hover:text-theme-text border border-theme-border/50'
+                } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
               title={t('ai.input.include_all_panes')}
             >
               <Layers className="w-3 h-3" />
@@ -156,7 +154,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
       )}
 
       {/* Input area */}
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 bg-theme-bg border border-theme-border rounded-xl focus-within:border-theme-accent/50 focus-within:ring-2 focus-within:ring-theme-accent/10 transition-all p-2 pr-2">
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -166,7 +164,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
             disabled={disabled || isLoading}
             rows={1}
-            className="w-full resize-none bg-zinc-900/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-orange-600/50 focus:ring-1 focus:ring-orange-600/25 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full resize-none bg-transparent border-none rounded-none px-2 py-1.5 text-sm text-theme-text placeholder-theme-text-muted/40 focus:outline-none focus:ring-0 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
@@ -174,28 +172,36 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
           <button
             type="button"
             onClick={onStop}
-            className="flex-shrink-0 p-2 rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors"
+            className="flex-shrink-0 mb-0.5 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white shadow-sm transition-all active:scale-95"
             title={t('ai.input.stop_generation')}
           >
-            <StopCircle className="w-5 h-5" />
+            <StopCircle className="w-4 h-4" />
           </button>
         ) : (
           <button
             type="button"
             onClick={handleSubmit}
             disabled={!input.trim() || disabled}
-            className="flex-shrink-0 p-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-600"
+            className="flex-shrink-0 mb-0.5 p-2 rounded-lg bg-theme-accent hover:opacity-90 text-theme-bg shadow-sm transition-all disabled:opacity-30 disabled:grayscale disabled:scale-100 active:scale-95"
             title={t('ai.input.send')}
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4" />
           </button>
         )}
       </div>
 
       {/* Hint */}
-      <div className="mt-2 text-[10px] text-zinc-500">
-        Press <kbd className="px-1 py-0.5 bg-zinc-700/50 rounded text-zinc-400">Enter</kbd> to send,{' '}
-        <kbd className="px-1 py-0.5 bg-zinc-700/50 rounded text-zinc-400">Shift+Enter</kbd> for new line
+      <div className="mt-3 flex items-center justify-between text-[10px] text-theme-text-muted opacity-50 px-1">
+        <div className="flex items-center gap-3">
+          <span>
+            <kbd className="font-sans px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[9px]">Enter</kbd>
+            {' '}{t('ai.input.send_hint', 'to send')}
+          </span>
+          <span>
+            <kbd className="font-sans px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[9px]">Shift+Enter</kbd>
+            {' '}{t('ai.input.newline_hint', 'new line')}
+          </span>
+        </div>
       </div>
     </div>
   );
