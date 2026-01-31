@@ -35,7 +35,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   const { t } = useTranslation();
   const { settings } = useSettingsStore();
   const { ai: aiSettings } = settings;
-  
+
   // State
   const [prompt, setPrompt] = useState('');
   const [contextSource, setContextSource] = useState<ContextSource>('selection');
@@ -44,7 +44,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
-  
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -135,7 +135,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   // Get context based on source
   const getContext = useCallback((): string => {
     let context = '';
-    
+
     if (contextSource === 'selection') {
       context = getSelection();
       // Fall back to visible buffer if no selection
@@ -145,12 +145,12 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
     } else if (contextSource === 'visible') {
       context = getVisibleBuffer();
     }
-    
+
     // Truncate to max chars
     if (context.length > aiSettings.contextMaxChars) {
       context = context.slice(-aiSettings.contextMaxChars);
     }
-    
+
     return context;
   }, [contextSource, getSelection, getVisibleBuffer, aiSettings.contextMaxChars]);
 
@@ -176,7 +176,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
       // Build messages
       const context = getContext();
       const messages: Message[] = [];
-      
+
       // System prompt
       messages.push({
         role: 'system',
@@ -265,20 +265,20 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
 
   return (
     <div
-      className="absolute top-4 right-4 z-50 w-[420px] bg-zinc-900 border border-theme-border rounded-lg shadow-2xl"
+      className="absolute top-4 right-4 z-50 w-[420px] bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl"
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border bg-zinc-800/50 rounded-t-lg">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border bg-theme-bg/50 rounded-t-lg">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-orange-400" />
-          <span className="text-sm font-medium text-zinc-200">{t('terminal.ai.title')}</span>
+          <Sparkles className="h-4 w-4 text-theme-accent" />
+          <span className="text-sm font-medium text-theme-text">{t('terminal.ai.title')}</span>
         </div>
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 text-zinc-400 hover:text-zinc-200"
+          className="h-6 w-6 p-0 text-theme-text-muted hover:text-theme-text"
           onClick={handleClose}
         >
           <X className="h-4 w-4" />
@@ -288,7 +288,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
       {/* API Key Warning */}
       {!hasApiKey && (
         <div className="mx-3 mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
-          <div className="flex items-start gap-2 text-yellow-400">
+          <div className="flex items-start gap-2 text-yellow-500/80">
             <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <div className="text-sm">
               <p className="font-medium">{t('terminal.ai.api_key_required')}</p>
@@ -302,17 +302,16 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
 
       {/* Context Source Selector */}
       <div className="px-3 pt-3 pb-2">
-        <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <div className="flex items-center gap-2 text-xs text-theme-text-muted">
           <span>{t('terminal.ai.context')}</span>
           <div className="flex gap-1">
             {(['selection', 'visible', 'none'] as ContextSource[]).map((source) => (
               <button
                 key={source}
-                className={`px-2 py-1 rounded transition-colors ${
-                  contextSource === source
-                    ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
-                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-transparent'
-                }`}
+                className={`px-2 py-1 rounded transition-colors ${contextSource === source
+                    ? 'bg-theme-accent/10 text-theme-accent border border-theme-accent/30'
+                    : 'bg-theme-bg text-theme-text-muted hover:text-theme-text border border-theme-border/50'
+                  }`}
                 onClick={() => setContextSource(source)}
               >
                 {source === 'selection' ? t('terminal.ai.context_selection') : source === 'visible' ? t('terminal.ai.context_visible') : t('terminal.ai.context_none')}
@@ -320,18 +319,18 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
             ))}
           </div>
           {contextSource !== 'none' && contextPreview && (
-            <span className="ml-auto text-zinc-500">
+            <span className="ml-auto text-theme-text-muted opacity-50">
               {t('terminal.ai.tokens_estimate', { count: contextTokens })}
             </span>
           )}
         </div>
-        
+
         {/* Context Preview */}
         {contextSource !== 'none' && contextPreview && (
-          <div className="mt-2 p-2 bg-zinc-800/50 border border-zinc-700 rounded text-xs font-mono text-zinc-400 max-h-20 overflow-y-auto">
+          <div className="mt-2 p-2 bg-theme-bg/50 border border-theme-border rounded text-xs font-mono text-theme-text-muted max-h-20 overflow-y-auto">
             <pre className="whitespace-pre-wrap break-all">
-              {contextPreview.length > 200 
-                ? contextPreview.slice(0, 200) + '...' 
+              {contextPreview.length > 200
+                ? contextPreview.slice(0, 200) + '...'
                 : contextPreview}
             </pre>
           </div>
@@ -346,13 +345,13 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder={t('terminal.ai.prompt_placeholder')}
-            className="w-full h-20 px-3 py-2 pr-12 bg-zinc-800 border border-zinc-700 rounded-md text-sm text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-orange-500/50"
+            className="w-full h-20 px-3 py-2 pr-12 bg-theme-bg border border-theme-border rounded-md text-sm text-theme-text placeholder-theme-text-muted/50 resize-none focus:outline-none focus:border-theme-accent/50"
             disabled={isLoading}
           />
           <Button
             variant="ghost"
             size="sm"
-            className="absolute right-2 bottom-2 h-7 w-7 p-0 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+            className="absolute right-2 bottom-2 h-7 w-7 p-0 text-theme-accent hover:text-theme-accent hover:bg-theme-accent/10"
             onClick={handleSend}
             disabled={!prompt.trim() || isLoading}
           >
@@ -363,15 +362,15 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
             )}
           </Button>
         </div>
-        <div className="flex items-center justify-between mt-1 text-xs text-zinc-500">
+        <div className="flex items-center justify-between mt-1 text-xs text-theme-text-muted">
           <span>
-            <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-[10px]">⌘</kbd>
+            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">⌘</kbd>
             <span className="mx-0.5">+</span>
-            <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-[10px]">Enter</kbd>
+            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">Enter</kbd>
             {' '}{t('terminal.ai.send_shortcut')}
           </span>
           <span>
-            <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-[10px]">Esc</kbd>
+            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">Esc</kbd>
             {' '}{t('terminal.ai.close_shortcut')}
           </span>
         </div>
@@ -381,7 +380,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
       {(response || error) && (
         <div className="border-t border-theme-border">
           {error ? (
-            <div className="p-3 text-sm text-red-400 bg-red-500/10">
+            <div className="p-3 text-sm text-red-500 bg-red-500/10">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>{error}</span>
@@ -391,21 +390,21 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
             <>
               <div
                 ref={responseRef}
-                className="p-3 max-h-48 overflow-y-auto text-sm text-zinc-200 font-mono whitespace-pre-wrap"
+                className="p-3 max-h-48 overflow-y-auto text-sm text-theme-text font-mono whitespace-pre-wrap"
               >
                 {response}
                 {isLoading && (
-                  <span className="inline-block w-2 h-4 ml-1 bg-orange-400 animate-pulse" />
+                  <span className="inline-block w-2 h-4 ml-1 bg-theme-accent animate-pulse" />
                 )}
               </div>
 
               {/* Action Buttons */}
               {!isLoading && response && (
-                <div className="flex items-center gap-2 px-3 py-2 border-t border-zinc-800 bg-zinc-800/30">
+                <div className="flex items-center gap-2 px-3 py-2 border-t border-theme-border bg-theme-bg/50">
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 text-xs text-zinc-400 hover:text-zinc-200"
+                    className="h-7 text-xs text-theme-text-muted hover:text-theme-text"
                     onClick={handleCopy}
                   >
                     {copied ? (
@@ -418,7 +417,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 text-xs text-zinc-400 hover:text-zinc-200"
+                    className="h-7 text-xs text-theme-text-muted hover:text-theme-text"
                     onClick={handleInsert}
                   >
                     <CornerDownLeft className="h-3 w-3 mr-1" />
@@ -427,7 +426,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+                    className="h-7 text-xs text-theme-accent hover:text-theme-accent hover:bg-theme-accent/10"
                     onClick={handleExecute}
                   >
                     <Play className="h-3 w-3 mr-1" />
