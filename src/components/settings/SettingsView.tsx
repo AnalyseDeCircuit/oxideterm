@@ -78,19 +78,19 @@ const LocalTerminalSettings = () => {
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div>
-                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.local_terminal.title')}</h3>
-                <p className="text-zinc-500">{t('settings_view.local_terminal.description')}</p>
+                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.local_terminal.title')}</h3>
+                <p className="text-theme-text-muted">{t('settings_view.local_terminal.description')}</p>
             </div>
             <Separator />
 
             {/* Default Shell Section */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shell')}</h4>
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shell')}</h4>
                 <div className="space-y-5">
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label className="text-zinc-200">{t('settings_view.local_terminal.default_shell')}</Label>
-                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.default_shell_hint')}</p>
+                            <Label className="text-theme-text">{t('settings_view.local_terminal.default_shell')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.local_terminal.default_shell_hint')}</p>
                         </div>
                         <Select
                             value={defaultShellId || ''}
@@ -110,10 +110,10 @@ const LocalTerminalSettings = () => {
                     </div>
 
                     {defaultShell && (
-                        <div className="text-xs text-zinc-500 bg-zinc-900/30 p-3 rounded border border-theme-border/50">
+                        <div className="text-xs text-theme-text-muted bg-theme-bg-panel/30 p-3 rounded border border-theme-border/50">
                             <div className="flex items-center gap-2 mb-1">
-                                <span className="text-zinc-400">{t('settings_view.local_terminal.path')}:</span>
-                                <code className="text-zinc-300">{defaultShell.path}</code>
+                                <span className="text-theme-text-muted">{t('settings_view.local_terminal.path')}:</span>
+                                <code className="text-theme-text">{defaultShell.path}</code>
                             </div>
                         </div>
                     )}
@@ -122,8 +122,8 @@ const LocalTerminalSettings = () => {
 
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label className="text-zinc-200">{t('settings_view.local_terminal.default_cwd')}</Label>
-                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.default_cwd_hint')}</p>
+                            <Label className="text-theme-text">{t('settings_view.local_terminal.default_cwd')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.local_terminal.default_cwd_hint')}</p>
                         </div>
                         <Input
                             value={localSettings?.defaultCwd || ''}
@@ -137,12 +137,12 @@ const LocalTerminalSettings = () => {
 
             {/* Shell Profile Section */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shell_profile')}</h4>
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shell_profile')}</h4>
                 <div className="space-y-5">
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label className="text-zinc-200">{t('settings_view.local_terminal.load_shell_profile')}</Label>
-                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.load_shell_profile_hint')}</p>
+                            <Label className="text-theme-text">{t('settings_view.local_terminal.load_shell_profile')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.local_terminal.load_shell_profile_hint')}</p>
                         </div>
                         <Checkbox
                             checked={localSettings?.loadShellProfile ?? true}
@@ -154,12 +154,12 @@ const LocalTerminalSettings = () => {
 
             {/* Oh My Posh Section (Windows-specific hint) */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.oh_my_posh')}</h4>
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.oh_my_posh')}</h4>
                 <div className="space-y-5">
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label className="text-zinc-200">{t('settings_view.local_terminal.oh_my_posh_enable')}</Label>
-                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.oh_my_posh_enable_hint')}</p>
+                            <Label className="text-theme-text">{t('settings_view.local_terminal.oh_my_posh_enable')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.local_terminal.oh_my_posh_enable_hint')}</p>
                         </div>
                         <Checkbox
                             checked={localSettings?.ohMyPoshEnabled ?? false}
@@ -172,8 +172,8 @@ const LocalTerminalSettings = () => {
                             <Separator className="opacity-50" />
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <Label className="text-zinc-200">{t('settings_view.local_terminal.oh_my_posh_theme')}</Label>
-                                    <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.local_terminal.oh_my_posh_theme_hint')}</p>
+                                    <Label className="text-theme-text">{t('settings_view.local_terminal.oh_my_posh_theme')}</Label>
+                                    <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.local_terminal.oh_my_posh_theme_hint')}</p>
                                 </div>
                                 <Input
                                     value={localSettings?.ohMyPoshTheme || ''}
@@ -189,39 +189,39 @@ const LocalTerminalSettings = () => {
 
             {/* Keyboard Shortcuts Section */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shortcuts')}</h4>
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.shortcuts')}</h4>
                 <div className="space-y-3 text-sm">
                     <div className="flex items-center justify-between py-2">
-                        <span className="text-zinc-300">{t('settings_view.local_terminal.new_default_shell')}</span>
-                        <kbd className="px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400 border border-zinc-700">⌘T</kbd>
+                        <span className="text-theme-text">{t('settings_view.local_terminal.new_default_shell')}</span>
+                        <kbd className="px-2 py-1 bg-theme-bg-hover rounded text-xs text-theme-text-muted border border-theme-border">⌘T</kbd>
                     </div>
                     <Separator className="opacity-30" />
                     <div className="flex items-center justify-between py-2">
-                        <span className="text-zinc-300">{t('settings_view.local_terminal.new_shell_launcher')}</span>
-                        <kbd className="px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400 border border-zinc-700">⌘⇧T</kbd>
+                        <span className="text-theme-text">{t('settings_view.local_terminal.new_shell_launcher')}</span>
+                        <kbd className="px-2 py-1 bg-theme-bg-hover rounded text-xs text-theme-text-muted border border-theme-border">⌘⇧T</kbd>
                     </div>
                 </div>
             </div>
 
             {/* Available Shells Section */}
             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.available_shells')}</h4>
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.local_terminal.available_shells')}</h4>
                 <div className="space-y-2">
                     {shells.length === 0 ? (
-                        <div className="text-center py-8 text-zinc-500">
+                        <div className="text-center py-8 text-theme-text-muted">
                             {t('settings_view.local_terminal.loading_shells')}
                         </div>
                     ) : (
                         shells.map((shell) => (
                             <div
                                 key={shell.id}
-                                className="flex items-center justify-between p-3 rounded-md bg-zinc-900/30 border border-theme-border/50"
+                                className="flex items-center justify-between p-3 rounded-md bg-theme-bg-panel/30 border border-theme-border/50"
                             >
                                 <div className="flex items-center gap-3">
-                                    <Square className="h-4 w-4 text-zinc-500" />
+                                    <Square className="h-4 w-4 text-theme-text-muted" />
                                     <div>
-                                        <div className="text-sm text-zinc-200">{shell.label}</div>
-                                        <div className="text-xs text-zinc-500">{shell.path}</div>
+                                        <div className="text-sm text-theme-text">{shell.label}</div>
+                                        <div className="text-xs text-theme-text-muted">{shell.path}</div>
                                     </div>
                                 </div>
                                 {shell.id === defaultShellId && (
@@ -327,11 +327,11 @@ export const SettingsView = () => {
     };
 
     return (
-        <div className="flex h-full w-full bg-theme-bg text-zinc-300">
+        <div className="flex h-full w-full bg-theme-bg text-theme-text">
             {/* Sidebar */}
             <div className="w-56 bg-theme-bg-panel border-r border-theme-border flex flex-col pt-6 pb-4 min-h-0">
                 <div className="px-5 mb-6">
-                    <h2 className="text-xl font-semibold text-zinc-100">{t('settings_view.title')}</h2>
+                    <h2 className="text-xl font-semibold text-theme-text">{t('settings_view.title')}</h2>
                 </div>
                 <div className="space-y-1 px-3 flex-1 overflow-y-auto min-h-0">
                     <Button
@@ -399,21 +399,21 @@ export const SettingsView = () => {
                     {activeTab === 'general' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.general.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.general.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.general.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.general.description')}</p>
                             </div>
                             <Separator />
 
                             {/* Language Selection */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">
                                     {t('settings_view.general.language')}
                                 </h4>
                                 <div className="space-y-5">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.general.language')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.general.language_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.general.language')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.general.language_hint')}</p>
                                         </div>
                                         <Select
                                             value={general.language}
@@ -445,19 +445,19 @@ export const SettingsView = () => {
                     {activeTab === 'terminal' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.terminal.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.terminal.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.terminal.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.terminal.description')}</p>
                             </div>
                             <Separator />
 
                             {/* Font Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.terminal.font')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.terminal.font')}</h4>
                                 <div className="space-y-5">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.font_family')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.font_family_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.font_family')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.font_family_hint')}</p>
                                         </div>
                                         <Select
                                             value={terminal.fontFamily}
@@ -478,8 +478,8 @@ export const SettingsView = () => {
 
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.font_size')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.font_size_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.font_size')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.font_size_hint')}</p>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <Input
@@ -498,7 +498,7 @@ export const SettingsView = () => {
                                                     onChange={(e) => updateTerminal('fontSize', parseInt(e.target.value))}
                                                     className="w-16 text-center"
                                                 />
-                                                <span className="text-xs text-zinc-500">px</span>
+                                                <span className="text-xs text-theme-text-muted">px</span>
                                             </div>
                                         </div>
                                     </div>
@@ -507,8 +507,8 @@ export const SettingsView = () => {
 
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.line_height')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.line_height_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.line_height')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.line_height_hint')}</p>
                                         </div>
                                         <Input
                                             type="number"
@@ -525,8 +525,8 @@ export const SettingsView = () => {
 
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.renderer')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.renderer_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.renderer')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.renderer_hint')}</p>
                                         </div>
                                         <Select
                                             value={terminal.renderer}
@@ -547,12 +547,12 @@ export const SettingsView = () => {
 
                             {/* Cursor Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.terminal.cursor')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.terminal.cursor')}</h4>
                                 <div className="space-y-5">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.cursor_style')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.cursor_style_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.cursor_style')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.cursor_style_hint')}</p>
                                         </div>
                                         <Select
                                             value={terminal.cursorStyle}
@@ -573,8 +573,8 @@ export const SettingsView = () => {
 
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.terminal.cursor_blink')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.cursor_blink_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.terminal.cursor_blink')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.cursor_blink_hint')}</p>
                                         </div>
                                         <Checkbox
                                             id="blink"
@@ -587,11 +587,11 @@ export const SettingsView = () => {
 
                             {/* Input Safety Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.terminal.input_safety')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.terminal.input_safety')}</h4>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <Label className="text-zinc-200">{t('settings_view.terminal.paste_protection')}</Label>
-                                        <p className="text-xs text-zinc-500 mt-0.5">
+                                        <Label className="text-theme-text">{t('settings_view.terminal.paste_protection')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">
                                             {t('settings_view.terminal.paste_protection_hint')}
                                         </p>
                                     </div>
@@ -605,11 +605,11 @@ export const SettingsView = () => {
 
                             {/* Buffer Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.terminal.buffer')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.terminal.buffer')}</h4>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <Label className="text-zinc-200">{t('settings_view.terminal.scrollback')}</Label>
-                                        <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.terminal.scrollback_hint')}</p>
+                                        <Label className="text-theme-text">{t('settings_view.terminal.scrollback')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.scrollback_hint')}</p>
                                     </div>
                                     <Input
                                         type="number"
@@ -625,34 +625,34 @@ export const SettingsView = () => {
                     {activeTab === 'appearance' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.appearance.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.appearance.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.appearance.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.appearance.description')}</p>
                             </div>
                             <Separator />
 
                             {/* Theme Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.appearance.theme')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.appearance.theme')}</h4>
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label className="text-zinc-200">{t('settings_view.appearance.color_theme')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.appearance.color_theme_hint')}</p>
+                                            <Label className="text-theme-text">{t('settings_view.appearance.color_theme')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.appearance.color_theme_hint')}</p>
                                         </div>
                                         <Select
                                             value={terminal.theme}
                                             onValueChange={(val) => updateTerminal('theme', val)}
                                         >
-                                            <SelectTrigger className="w-[200px] text-zinc-100">
+                                            <SelectTrigger className="w-[200px] text-theme-text">
                                                 <SelectValue placeholder="Select theme">
                                                     {formatThemeName(terminal.theme)}
                                                 </SelectValue>
                                             </SelectTrigger>
-                                            <SelectContent className="bg-zinc-900 border-zinc-700 max-h-[300px]">
+                                            <SelectContent className="bg-theme-bg-panel border-theme-border max-h-[300px]">
                                                 <SelectGroup>
-                                                    <SelectLabel className="text-zinc-400 text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Oxide Series</SelectLabel>
+                                                    <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Oxide Series</SelectLabel>
                                                     {['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'titanium-white'].map((key) => (
-                                                        <SelectItem key={key} value={key} className="text-zinc-100 focus:bg-zinc-800 focus:text-zinc-100 pl-4">
+                                                        <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                             {formatThemeName(key)}
                                                         </SelectItem>
                                                     ))}
@@ -661,11 +661,11 @@ export const SettingsView = () => {
                                                 <SelectSeparator className="bg-zinc-700 my-1" />
 
                                                 <SelectGroup>
-                                                    <SelectLabel className="text-zinc-400 text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Classic / Other</SelectLabel>
+                                                    <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold">Classic / Other</SelectLabel>
                                                     {Object.keys(themes)
                                                         .filter(key => !['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'titanium-white'].includes(key))
                                                         .map(key => (
-                                                            <SelectItem key={key} value={key} className="text-zinc-100 focus:bg-zinc-800 focus:text-zinc-100 pl-4">
+                                                            <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                                 {formatThemeName(key)}
                                                             </SelectItem>
                                                         ))}
@@ -679,8 +679,8 @@ export const SettingsView = () => {
 
                             {/* Layout Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.appearance.layout')}</h4>
-                                <p className="text-xs text-zinc-500">
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.appearance.layout')}</h4>
+                                <p className="text-xs text-theme-text-muted">
                                     {t('settings_view.appearance.layout_hint')}
                                 </p>
                             </div>
@@ -690,8 +690,8 @@ export const SettingsView = () => {
                     {activeTab === 'connections' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.connections.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.connections.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.connections.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.connections.description')}</p>
                             </div>
                             <Separator />
                             <div className="grid grid-cols-2 gap-8 max-w-2xl">
@@ -712,8 +712,8 @@ export const SettingsView = () => {
                             </div>
 
                             <div className="pt-8">
-                                <h3 className="text-xl font-medium text-zinc-100 mb-2">{t('settings_view.connections.groups.title')}</h3>
-                                <p className="text-sm text-zinc-500 mb-4">{t('settings_view.connections.groups.description')}</p>
+                                <h3 className="text-xl font-medium text-theme-text mb-2">{t('settings_view.connections.groups.title')}</h3>
+                                <p className="text-sm text-theme-text-muted mb-4">{t('settings_view.connections.groups.description')}</p>
                                 <Separator className="mb-4" />
 
                                 <div className="flex gap-2 mb-4 max-w-md">
@@ -731,7 +731,7 @@ export const SettingsView = () => {
                                     {groups.map(group => (
                                         <div key={group} className="flex items-center justify-between p-3 bg-theme-bg-panel rounded-md border border-theme-border">
                                             <span className="text-sm">{group}</span>
-                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-500 hover:text-red-400" onClick={() => handleDeleteGroup(group)}>
+                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-theme-text-muted hover:text-red-400" onClick={() => handleDeleteGroup(group)}>
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </div>
@@ -740,16 +740,16 @@ export const SettingsView = () => {
                             </div>
 
                             <div className="pt-8">
-                                <h3 className="text-xl font-medium text-zinc-100 mb-2">{t('settings_view.connections.ssh_config.title')}</h3>
-                                <p className="text-sm text-zinc-500 mb-4">{t('settings_view.connections.ssh_config.description')}</p>
+                                <h3 className="text-xl font-medium text-theme-text mb-2">{t('settings_view.connections.ssh_config.title')}</h3>
+                                <p className="text-sm text-theme-text-muted mb-4">{t('settings_view.connections.ssh_config.description')}</p>
                                 <Separator className="mb-4" />
 
                                 <div className="h-64 overflow-y-auto border border-theme-border rounded-md bg-theme-bg-panel p-2 max-w-2xl">
                                     {sshHosts.map(host => (
-                                        <div key={host.alias} className="flex items-center justify-between p-3 hover:bg-zinc-800 rounded-md border border-transparent hover:border-theme-border mb-1">
+                                        <div key={host.alias} className="flex items-center justify-between p-3 hover:bg-theme-bg-hover rounded-md border border-transparent hover:border-theme-border mb-1">
                                             <div className="flex flex-col">
                                                 <span className="text-sm font-medium">{host.alias}</span>
-                                                <span className="text-xs text-zinc-500">{host.user}@{host.hostname}:{host.port}</span>
+                                                <span className="text-xs text-theme-text-muted">{host.user}@{host.hostname}:{host.port}</span>
                                             </div>
                                             <Button size="sm" variant="secondary" onClick={() => handleImportHost(host.alias)}>
                                                 <FolderInput className="h-4 w-4 mr-1" /> {t('settings_view.connections.ssh_config.import')}
@@ -757,7 +757,7 @@ export const SettingsView = () => {
                                         </div>
                                     ))}
                                     {sshHosts.length === 0 && (
-                                        <div className="text-center py-12 text-zinc-500 text-sm">
+                                        <div className="text-center py-12 text-theme-text-muted text-sm">
                                             {t('settings_view.connections.ssh_config.no_hosts')}
                                         </div>
                                     )}
@@ -769,8 +769,8 @@ export const SettingsView = () => {
                     {activeTab === 'ssh' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.ssh_keys.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.ssh_keys.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.ssh_keys.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.ssh_keys.description')}</p>
                             </div>
                             <Separator />
 
@@ -782,8 +782,8 @@ export const SettingsView = () => {
                                                 <Key className="h-5 w-5 text-theme-accent" />
                                             </div>
                                             <div className="flex flex-col">
-                                                <span className="text-sm font-medium text-zinc-200">{key.name}</span>
-                                                <span className="text-xs text-zinc-500">{key.key_type} · {key.path}</span>
+                                                <span className="text-sm font-medium text-theme-text">{key.name}</span>
+                                                <span className="text-xs text-theme-text-muted">{key.key_type} · {key.path}</span>
                                             </div>
                                         </div>
                                         {key.has_passphrase && (
@@ -792,7 +792,7 @@ export const SettingsView = () => {
                                     </div>
                                 ))}
                                 {keys.length === 0 && (
-                                    <div className="text-center py-12 text-zinc-500 border border-dashed border-theme-border rounded-md">
+                                    <div className="text-center py-12 text-theme-text-muted border border-dashed border-theme-border rounded-md">
                                         {t('settings_view.ssh_keys.no_keys')}
                                     </div>
                                 )}
@@ -803,20 +803,20 @@ export const SettingsView = () => {
                     {activeTab === 'ai' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.ai.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.ai.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.ai.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.ai.description')}</p>
                             </div>
                             <Separator />
 
                             {/* AI Settings Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.ai.general')}</h4>
+                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.general')}</h4>
 
                                 {/* Enable Toggle - Standard Layout */}
                                 <div className="flex items-center justify-between mb-6">
                                     <div>
-                                        <Label className="text-zinc-200">{t('settings_view.ai.enable')}</Label>
-                                        <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.ai.enable_hint')}</p>
+                                        <Label className="text-theme-text">{t('settings_view.ai.enable')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.ai.enable_hint')}</p>
                                     </div>
                                     <Checkbox
                                         id="ai-enabled"
@@ -832,9 +832,9 @@ export const SettingsView = () => {
                                 </div>
 
                                 {/* Privacy Note - Integrating subtly */}
-                                <div className="mb-6 p-3 rounded bg-zinc-900/50 border border-zinc-800">
-                                    <p className="text-xs text-zinc-500 leading-relaxed">
-                                        <span className="font-semibold text-zinc-400">{t('settings_view.ai.privacy_notice')}:</span> {t('settings_view.ai.privacy_text')}
+                                <div className="mb-6 p-3 rounded bg-theme-bg-panel/50 border border-zinc-800">
+                                    <p className="text-xs text-theme-text-muted leading-relaxed">
+                                        <span className="font-semibold text-theme-text-muted">{t('settings_view.ai.privacy_notice')}:</span> {t('settings_view.ai.privacy_text')}
                                     </p>
                                 </div>
 
@@ -842,7 +842,7 @@ export const SettingsView = () => {
 
                                 {/* API Configuration - Using Form/Grid Layout like Connections */}
                                 <div className={ai.enabled ? "" : "opacity-50 pointer-events-none"}>
-                                    <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
+                                    <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mb-6">
                                         <div className="grid gap-2">
@@ -872,7 +872,7 @@ export const SettingsView = () => {
                                             <div className="flex gap-2">
                                                 {hasApiKey ? (
                                                     <div className="flex-1 flex items-center gap-2">
-                                                        <div className="flex-1 h-10 px-3 flex items-center bg-zinc-900/50 border border-zinc-700/50 rounded-md text-zinc-400 text-sm italic">
+                                                        <div className="flex-1 h-10 px-3 flex items-center bg-theme-bg-panel/50 border border-theme-border/50 rounded-md text-theme-text-muted text-sm italic">
                                                             ••••••••••••••••••••••••
                                                         </div>
                                                         <Button
@@ -926,13 +926,13 @@ export const SettingsView = () => {
                                                     </>
                                                 )}
                                             </div>
-                                            <p className="text-xs text-zinc-500">{t('settings_view.ai.api_key_stored')}</p>
+                                            <p className="text-xs text-theme-text-muted">{t('settings_view.ai.api_key_stored')}</p>
                                         </div>
                                     </div>
 
                                     <Separator className="my-6 opacity-50" />
 
-                                    <h4 className="text-sm font-medium text-zinc-300 mb-4 uppercase tracking-wider">{t('settings_view.ai.context_controls')}</h4>
+                                    <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.context_controls')}</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
                                         <div className="grid gap-2">
                                             <Label>{t('settings_view.ai.max_context')}</Label>
@@ -951,7 +951,7 @@ export const SettingsView = () => {
                                                     <SelectItem value="32000">{t('settings_view.ai.chars_32000')}</SelectItem>
                                                 </SelectContent>
                                             </Select>
-                                            <p className="text-xs text-zinc-500">{t('settings_view.ai.max_context_hint')}</p>
+                                            <p className="text-xs text-theme-text-muted">{t('settings_view.ai.max_context_hint')}</p>
                                         </div>
                                         <div className="grid gap-2">
                                             <Label>{t('settings_view.ai.buffer_history')}</Label>
@@ -969,7 +969,7 @@ export const SettingsView = () => {
                                                     <SelectItem value="400">{t('settings_view.ai.lines_400')}</SelectItem>
                                                 </SelectContent>
                                             </Select>
-                                            <p className="text-xs text-zinc-500">{t('settings_view.ai.buffer_history_hint')}</p>
+                                            <p className="text-xs text-theme-text-muted">{t('settings_view.ai.buffer_history_hint')}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -984,8 +984,8 @@ export const SettingsView = () => {
                     {activeTab === 'sftp' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <div>
-                                <h3 className="text-2xl font-medium text-zinc-100 mb-2">{t('settings_view.sftp.title')}</h3>
-                                <p className="text-zinc-500">{t('settings_view.sftp.description')}</p>
+                                <h3 className="text-2xl font-medium text-theme-text mb-2">{t('settings_view.sftp.title')}</h3>
+                                <p className="text-theme-text-muted">{t('settings_view.sftp.description')}</p>
                             </div>
                             <Separator />
 
@@ -993,8 +993,8 @@ export const SettingsView = () => {
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
                                 <div className="flex items-center justify-between mb-2">
                                     <div>
-                                        <Label className="text-zinc-200">{t('settings_view.sftp.concurrent')}</Label>
-                                        <p className="text-xs text-zinc-500 mt-0.5">
+                                        <Label className="text-theme-text">{t('settings_view.sftp.concurrent')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">
                                             {t('settings_view.sftp.concurrent_hint')}
                                         </p>
                                     </div>
@@ -1021,8 +1021,8 @@ export const SettingsView = () => {
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <Label htmlFor="speed-limit-enabled" className="text-zinc-200">{t('settings_view.sftp.bandwidth')}</Label>
-                                            <p className="text-xs text-zinc-500 mt-0.5">{t('settings_view.sftp.bandwidth_hint')}</p>
+                                            <Label htmlFor="speed-limit-enabled" className="text-theme-text">{t('settings_view.sftp.bandwidth')}</Label>
+                                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.sftp.bandwidth_hint')}</p>
                                         </div>
                                         <Checkbox
                                             id="speed-limit-enabled"
@@ -1034,7 +1034,7 @@ export const SettingsView = () => {
                                     {sftp?.speedLimitEnabled && (
                                         <div className="pt-2 flex items-center justify-between animate-in fade-in slide-in-from-top-1 duration-200">
                                             <div>
-                                                <Label className="text-zinc-300 text-sm">{t('settings_view.sftp.speed_limit')}</Label>
+                                                <Label className="text-theme-text text-sm">{t('settings_view.sftp.speed_limit')}</Label>
                                             </div>
                                             <Input
                                                 type="number"
@@ -1057,8 +1057,8 @@ export const SettingsView = () => {
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
                                 <div className="flex items-center justify-between mb-2">
                                     <div>
-                                        <Label className="text-zinc-200">{t('settings_view.sftp.conflict')}</Label>
-                                        <p className="text-xs text-zinc-500 mt-0.5">
+                                        <Label className="text-theme-text">{t('settings_view.sftp.conflict')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">
                                             {t('settings_view.sftp.conflict_hint')}
                                         </p>
                                     </div>
@@ -1094,10 +1094,10 @@ export const SettingsView = () => {
                     </DialogHeader>
 
                     <div className="p-4 space-y-4">
-                        <p className="text-sm text-zinc-300">
+                        <p className="text-sm text-theme-text">
                             {t('settings_view.ai_confirm.intro')}
                         </p>
-                        <div className="space-y-2 text-xs text-zinc-500 bg-zinc-900/30 p-3 rounded border border-theme-border/50">
+                        <div className="space-y-2 text-xs text-theme-text-muted bg-theme-bg-panel/30 p-3 rounded border border-theme-border/50">
                             <div className="flex items-start gap-2">
                                 <div className="w-1 h-1 rounded-full bg-zinc-500 mt-1.5 shrink-0"></div>
                                 <p>{t('settings_view.ai_confirm.point_local')}</p>
