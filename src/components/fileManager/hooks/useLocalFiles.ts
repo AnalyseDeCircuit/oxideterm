@@ -104,7 +104,9 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
       const entries = await readDir(path);
       const fileList: FileInfo[] = await Promise.all(
         entries.map(async (entry) => {
-          const fullPath = `${path}/${entry.name}`;
+          // Normalize path to avoid double slashes
+          const basePath = path.endsWith('/') ? path.slice(0, -1) : path;
+          const fullPath = `${basePath}/${entry.name}`;
           const isDir = entry.isDirectory === true;
           try {
             const info = await stat(fullPath);

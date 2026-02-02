@@ -6,11 +6,14 @@
 // Components
 export { LocalFileManager } from './LocalFileManager';
 export { FileList, formatFileSize } from './FileList';
+export { QuickLook } from './QuickLook';
+export { BookmarksPanel } from './BookmarksPanel';
 
 // Hooks
-export { useLocalFiles, useFileSelection } from './hooks';
+export { useLocalFiles, useFileSelection, useBookmarks } from './hooks';
 export type { UseLocalFilesReturn, UseLocalFilesOptions } from './hooks';
 export type { UseFileSelectionReturn, UseFileSelectionOptions } from './hooks';
+export type { UseBookmarksReturn } from './hooks';
 
 // Types
 export type {
@@ -26,4 +29,5 @@ export type {
   ContextMenuState,
   PreviewType,
   FilePreview,
+  Bookmark,
 } from './types';

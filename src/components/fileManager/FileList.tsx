@@ -23,7 +23,12 @@ import {
   ArrowUpAZ,
   HardDrive,
   FolderOpen,
-  CornerDownLeft
+  CornerDownLeft,
+  Terminal,
+  Scissors,
+  ClipboardPaste,
+  Archive,
+  FolderArchive
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
@@ -81,6 +86,16 @@ export interface FileListProps {
   onNewFolder?: () => void;
   onBrowse?: () => void;
   onShowDrives?: () => void;
+  onOpenTerminal?: () => void;
+  
+  // Clipboard & Archive
+  onCopy?: () => void;
+  onCut?: () => void;
+  onPaste?: () => void;
+  onCompress?: () => void;
+  onExtract?: () => void;
+  hasClipboard?: boolean;
+  canExtract?: boolean;
   
   // Drag & Drop
   isDragOver?: boolean;
@@ -122,6 +137,14 @@ export const FileList: React.FC<FileListProps> = ({
   onNewFolder,
   onBrowse,
   onShowDrives,
+  onOpenTerminal,
+  onCopy,
+  onCut,
+  onPaste,
+  onCompress,
+  onExtract,
+  hasClipboard,
+  canExtract,
   isDragOver = false,
   onDragOver,
   onDragLeave,
@@ -504,7 +527,95 @@ export const FileList: React.FC<FileListProps> = ({
             </button>
           )}
           
+          {/* Clipboard operations separator */}
+          {(onCopy || onCut || onPaste) && (
+            <div className="border-t border-theme-border my-1" />
+          )}
+          
+          {/* Copy */}
+          {onCopy && selected.size > 0 && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onCopy();
+                setContextMenu(null);
+              }}
+            >
+              <Copy className="h-3 w-3" /> {t('fileManager.copy')}
+            </button>
+          )}
+          
+          {/* Cut */}
+          {onCut && selected.size > 0 && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onCut();
+                setContextMenu(null);
+              }}
+            >
+              <Scissors className="h-3 w-3" /> {t('fileManager.cut')}
+            </button>
+          )}
+          
+          {/* Paste */}
+          {onPaste && hasClipboard && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onPaste();
+                setContextMenu(null);
+              }}
+            >
+              <ClipboardPaste className="h-3 w-3" /> {t('fileManager.paste')}
+            </button>
+          )}
+          
+          {/* Archive operations separator */}
+          {(onCompress || onExtract) && (
+            <div className="border-t border-theme-border my-1" />
+          )}
+          
+          {/* Compress */}
+          {onCompress && selected.size > 0 && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onCompress();
+                setContextMenu(null);
+              }}
+            >
+              <Archive className="h-3 w-3" /> {t('fileManager.compress')}
+            </button>
+          )}
+          
+          {/* Extract */}
+          {onExtract && selected.size === 1 && canExtract && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onExtract();
+                setContextMenu(null);
+              }}
+            >
+              <FolderArchive className="h-3 w-3" /> {t('fileManager.extract')}
+            </button>
+          )}
+          
           <div className="border-t border-theme-border my-1" />
+          
+          {/* Open Terminal Here (local only) */}
+          {!isRemote && onOpenTerminal && (
+            <button 
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onOpenTerminal();
+                setContextMenu(null);
+              }}
+            >
+              <Terminal className="h-3 w-3" /> {t('fileManager.openTerminalHere')}
+            </button>
+          )}
           
           {/* New Folder */}
           {onNewFolder && (

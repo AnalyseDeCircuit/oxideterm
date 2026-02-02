@@ -453,6 +453,10 @@ pub fn run() {
             commands::ssh_connect_kbi,
             commands::ssh_kbi_respond,
             commands::ssh_kbi_cancel,
+            // Archive commands (compression/extraction)
+            commands::compress_files,
+            commands::extract_archive,
+            commands::list_archive_contents,
         ]);
 
     #[cfg(not(feature = "local-terminal"))]
@@ -609,6 +613,10 @@ pub fn run() {
             commands::ssh_connect_kbi,
             commands::ssh_kbi_respond,
             commands::ssh_kbi_cancel,
+            // Archive commands (compression/extraction)
+            commands::compress_files,
+            commands::extract_archive,
+            commands::list_archive_contents,
         ]);
 
     builder

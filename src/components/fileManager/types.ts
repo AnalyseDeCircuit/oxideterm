@@ -54,7 +54,12 @@ export type FileAction =
   | 'new-folder'
   | 'upload'
   | 'download'
-  | 'compare';
+  | 'compare'
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'compress'
+  | 'extract';
 
 export interface ContextMenuState {
   x: number;
@@ -65,13 +70,35 @@ export interface ContextMenuState {
 // File preview types
 export type PreviewType = 
   | 'text' 
+  | 'code'
+  | 'markdown'
   | 'image' 
   | 'video' 
   | 'audio' 
   | 'pdf' 
+  | 'archive'
   | 'hex' 
   | 'too-large' 
   | 'unsupported';
+
+// Archive entry info
+export interface ArchiveEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  compressedSize: number;
+  modified: string | null;
+}
+
+// Archive info for preview
+export interface ArchiveInfo {
+  entries: ArchiveEntry[];
+  totalFiles: number;
+  totalDirs: number;
+  totalSize: number;
+  compressedSize: number;
+}
 
 export interface FilePreview {
   name: string;
@@ -81,6 +108,7 @@ export interface FilePreview {
   mimeType?: string;
   language?: string | null;
   encoding?: string;
+  size?: number;
   // Hex specific
   hexOffset?: number;
   hexTotalSize?: number;
@@ -91,4 +119,24 @@ export interface FilePreview {
   fileSize?: number;
   // Unsupported specific
   reason?: string;
+  // Archive specific
+  archiveInfo?: ArchiveInfo;
+}
+
+// Bookmark/Favorite types
+export interface Bookmark {
+  id: string;
+  name: string;
+  path: string;
+  icon?: string;
+  createdAt: number;
+}
+
+// Clipboard types for copy/cut/paste operations
+export type ClipboardMode = 'copy' | 'cut';
+
+export interface ClipboardData {
+  files: FileInfo[];
+  mode: ClipboardMode;
+  sourcePath: string;
 }
