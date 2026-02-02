@@ -2,6 +2,7 @@
 //!
 //! This module contains all Tauri commands exposed to the frontend.
 
+pub mod archive;
 pub mod config;
 mod connect_v2;
 pub mod forwarding;
@@ -18,6 +19,7 @@ pub mod session_tree;
 pub mod sftp;
 pub mod ssh;
 
+pub use archive::*;
 pub use connect_v2::*;
 pub use forwarding::*;
 pub use health::*;

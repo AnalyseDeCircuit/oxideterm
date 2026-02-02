@@ -7,77 +7,125 @@
     "core:default",
     "dialog:default",
     "opener:default",
-    {
-      "identifier": "fs:allow-read-dir",
-      "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
-      ]
-    },
+    "fs:default",
     {
       "identifier": "fs:allow-read-file",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-stat",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
-    "fs:allow-exists",
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
+      ]
+    },
     {
       "identifier": "fs:allow-write-file",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-remove",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-rename",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     },
     {
       "identifier": "fs:allow-copy-file",
       "allow": [
-        { "path": "**" },
-        { "path": "$HOME/**" },
-        { "path": "?:/**" }
+        { "path": "$HOME" },
+        { "path": "$HOME/*" },
+        { "path": "$HOME/**/*" },
+        { "path": "/*" },
+        { "path": "/**/*" },
+        { "path": "[A-Z]:/*" },
+        { "path": "[A-Z]:/**/*" }
       ]
     }
   ],

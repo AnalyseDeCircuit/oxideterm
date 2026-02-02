@@ -48,5 +48,10 @@
     "macOS": {
       "minimumSystemVersion": "10.13"
     }
+  },
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    }
   }
 }

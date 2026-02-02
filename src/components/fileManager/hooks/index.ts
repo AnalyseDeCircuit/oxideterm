@@ -1,4 +1,10 @@
 export { useLocalFiles } from './useLocalFiles';
 export { useFileSelection } from './useFileSelection';
+export { useBookmarks } from './useBookmarks';
+export { useFileClipboard } from './useFileClipboard';
+export { useFileArchive } from './useFileArchive';
 export type { UseLocalFilesReturn, UseLocalFilesOptions } from './useLocalFiles';
 export type { UseFileSelectionReturn, UseFileSelectionOptions } from './useFileSelection';
+export type { UseBookmarksReturn } from './useBookmarks';
+export type { UseFileClipboardReturn, UseFileClipboardOptions } from './useFileClipboard';
+export type { UseFileArchiveReturn, UseFileArchiveOptions } from './useFileArchive';
