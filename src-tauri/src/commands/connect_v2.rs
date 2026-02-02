@@ -370,6 +370,7 @@ async fn register_session_services(
     // Spawn task to handle WebSocket bridge disconnect
     let sid_clone = sid.to_string();
     let registry_clone = registry.clone();
+    let conn_registry_clone = connection_registry.clone();
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!(
@@ -380,7 +381,15 @@ async fn register_session_services(
             if reason.is_recoverable() {
                 let _ = registry_clone.mark_ws_detached(&sid_clone, std::time::Duration::from_secs(300));
             } else {
-                let _ = registry_clone.disconnect_complete(&sid_clone, false);
+                // AcceptTimeout: 清理会话（在 connect_v2 中 session_id == connection_id）
+                if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
+                    warn!("Session {} WS accept timeout, removing from registries", sid_clone);
+                    // 在 connect_v2 模式中，connection_id == session_id
+                    let _ = conn_registry_clone.remove_terminal(&sid_clone, &sid_clone).await;
+                    let _ = registry_clone.disconnect_complete(&sid_clone, true);
+                } else {
+                    let _ = registry_clone.disconnect_complete(&sid_clone, false);
+                }
             }
         }
     });

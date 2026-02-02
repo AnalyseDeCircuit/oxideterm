@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "Connection Reconnecting",
-      "reconnecting_wait": "The connection is being restored. Please wait and try again."
+      "reconnecting_wait": "The connection is being restored. Please wait and try again.",
+      "reconnect_unstable": "Connection Unstable",
+      "try_again_later": "The connection has not stabilized. Please try again later."
     }
   }
 }

@@ -44,6 +44,7 @@ import { DrillDownDialog } from '../modals/DrillDownDialog';
 import { SavePathAsPresetDialog } from '../modals/SavePathAsPresetDialog';
 import { AddRootNodeDialog } from '../modals/AddRootNodeDialog';
 import { api } from '../../lib/api';
+import { waitForConnectionActive, isConnectionGuardError } from '../../lib/connectionGuard';
 import type { UnifiedFlatNode } from '../../types';
 
 export const Sidebar = () => {
@@ -200,11 +201,33 @@ export const Sidebar = () => {
       // 1. 建立 SSH 连接
       const result = await api.connectTreeNode({ nodeId, cols: 80, rows: 24 });
 
-      // 2. 创建终端会话
+      // 2. 创建终端会话并添加到 appStore.sessions
       const terminalResponse = await api.createTerminal({
         connectionId: result.sshConnectionId,
         cols: 80,
         rows: 24,
+      });
+
+      // 🔴 关键修复：把 session 添加到 appStore.sessions，否则 createTab 会失败
+      useAppStore.setState((state) => {
+        const newSessions = new Map(state.sessions);
+        newSessions.set(terminalResponse.sessionId, terminalResponse.session);
+
+        // 更新连接的 terminalIds 和 refCount
+        const newConnections = new Map(state.connections);
+        const connection = newConnections.get(result.sshConnectionId);
+        if (connection) {
+          newConnections.set(result.sshConnectionId, {
+            ...connection,
+            // ✅ 重连时替换而非追加：旧终端 ID 已失效，只保留新的
+            terminalIds: [terminalResponse.sessionId],
+            // ✅ 重连后引用计数重置为 1（当前只有一个活跃终端）
+            refCount: 1,
+            state: 'active',
+          });
+        }
+
+        return { sessions: newSessions, connections: newConnections };
       });
 
       // 3. 关联终端会话到节点
@@ -216,7 +239,7 @@ export const Sidebar = () => {
         refreshConnections(),
       ]);
 
-      // 5. 打开终端 tab
+      // 5. 打开终端 tab（现在 sessions 中有这个 sessionId 了）
       createTab('terminal', terminalResponse.sessionId);
     } catch (err) {
       console.error('Failed to connect tree node:', err);
@@ -388,11 +411,112 @@ export const Sidebar = () => {
   // 重连节点
   const handleTreeReconnect = useCallback(async (nodeId: string) => {
     try {
+      // 防御性清理：关闭该节点的所有残留 tabs（正常情况下 useConnectionEvents 已在 link_down 时关闭）
+      // 这里再检查一次以防万一有遗漏
+      const nodeBeforeReconnect = getNode(nodeId);
+      if (nodeBeforeReconnect?.runtime?.terminalIds) {
+        const oldTerminalIds = new Set(nodeBeforeReconnect.runtime.terminalIds);
+        const tabsToClose = tabs.filter(tab => tab.sessionId && oldTerminalIds.has(tab.sessionId));
+        if (tabsToClose.length > 0) {
+          console.log(`[Reconnect] Closing ${tabsToClose.length} stale tabs before reconnect`);
+          for (const tab of tabsToClose) {
+            closeTab(tab.id);
+          }
+          // 短暂延迟让 React 完成卸载
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+      
       await connectNode(nodeId);
+
+      // 等待一小段时间让后端完成异步初始化并发出 connection_status_changed 事件
+      // 这样新的 connectionId 会被添加到 appStore.connections 中
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 连接成功后，获取 connectionId 并等待连接真正稳定
+      // connectNode 返回后，后端可能还在做一些异步初始化
+      const node = getNode(nodeId);
+      const connectionId = node?.runtime?.connectionId || node?.sshConnectionId;
+
+      if (connectionId) {
+        try {
+          // 等待连接状态变为 active（最多 20 秒）
+          await waitForConnectionActive(connectionId, 20000);
+        } catch (waitErr) {
+          // 如果等待超时但节点状态显示已连接，仍然继续尝试创建终端
+          const freshNode = getNode(nodeId);
+          if (freshNode?.runtime?.status !== 'connected') {
+            console.error('Connection not stable after wait:', waitErr);
+            toast({
+              title: t('connections.status.reconnect_unstable'),
+              description: t('connections.status.try_again_later'),
+              variant: 'warning',
+            });
+            return;
+          }
+          console.warn('Connection wait failed but node shows connected, continuing:', waitErr);
+        }
+      } else {
+        console.error('[Reconnect] No connectionId found for node after connectNode');
+        toast({
+          title: t('connections.status.connection_failed'),
+          description: t('connections.status.no_connection_id'),
+          variant: 'error',
+        });
+        return;
+      }
+      
+      // 获取断开前保存的终端数量
+      const { disconnectedTerminalCounts } = useSessionTreeStore.getState();
+      const terminalCountToRestore = disconnectedTerminalCounts.get(nodeId) || 1;
+      
+      // 重连成功后，恢复之前数量的终端
+      // 如果之前没有记录，默认创建 1 个
+      for (let i = 0; i < terminalCountToRestore; i++) {
+        // 带重试的终端创建（处理 CONNECTION_RECONNECTING 错误）
+        let terminalId: string | null = null;
+        let lastErr: unknown = null;
+        
+        for (let attempt = 0; attempt < 3 && !terminalId; attempt++) {
+          try {
+            terminalId = await createTerminalForNode(nodeId, 80, 24);
+          } catch (termErr) {
+            lastErr = termErr;
+            if (isConnectionGuardError(termErr)) {
+              // 连接还在重连中，等待后重试
+              console.log(`Terminal ${i + 1} creation blocked by reconnecting, retry ${attempt + 1}/3`);
+              await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+            } else {
+              // 其他错误，不重试
+              break;
+            }
+          }
+        }
+        
+        if (terminalId) {
+          // 等待 backend WS bridge 完全就绪后再创建 Tab
+          // 增加到 500ms 确保 WS bridge 完全就绪
+          await new Promise(r => setTimeout(r, 500));
+          createTab('terminal', terminalId);
+          // 更长的延迟避免同时创建太多终端争用资源
+          if (i < terminalCountToRestore - 1) {
+            await new Promise(r => setTimeout(r, 500));
+          }
+        } else {
+          console.error(`Failed to create terminal ${i + 1}/${terminalCountToRestore}:`, lastErr);
+        }
+      }
+      
+      // 清除保存的终端数量
+      useSessionTreeStore.setState((state) => {
+        const newCounts = new Map(state.disconnectedTerminalCounts);
+        newCounts.delete(nodeId);
+        return { disconnectedTerminalCounts: newCounts };
+      });
     } catch (err) {
       console.error('Failed to reconnect:', err);
     }
-  }, [connectNode]);
+  }, [connectNode, createTerminalForNode, createTab, getNode, toast, t, tabs, closeTab]);
 
   // 从 Saved Connections 连接 - 在树中创建根节点
   const handleConnectSaved = useCallback(async (connectionId: string) => {

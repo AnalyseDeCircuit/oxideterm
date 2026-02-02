@@ -586,15 +586,27 @@ pub async fn create_terminal(
     // Important: 不要在这里移除 terminal_id 或释放连接，因为重连时需要这些信息
     let session_id_clone = session_id.clone();
     let registry_clone = session_registry.inner().clone();
+    let conn_registry_clone = connection_registry.inner().clone();
+    let conn_id_clone = request.connection_id.clone();
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
             if reason.is_recoverable() {
                 let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
             } else {
-                // 只更新 session registry 状态，不移除终端关联
-                // 终端关联由 close_terminal 命令显式移除
-                let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+                // AcceptTimeout 或其他不可恢复的断开：清理会话
+                // 这是因为如果前端从未连接，保留这个会话没有意义
+                if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
+                    warn!("Session {} WS accept timeout, removing from registries", session_id_clone);
+                    // 从连接的终端列表中移除
+                    let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    // 完全移除会话
+                    let _ = registry_clone.disconnect_complete(&session_id_clone, true);
+                } else {
+                    // 其他不可恢复的断开：只更新状态，不移除
+                    // 终端关联由 close_terminal 命令显式移除
+                    let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+                }
             }
         }
     });
@@ -895,14 +907,23 @@ pub async fn recreate_terminal_pty(
     // Important: 不要在这里移除 terminal_id 或释放连接，因为重连时需要这些信息
     let session_id_clone = session_id.clone();
     let registry_clone = session_registry.inner().clone();
+    let conn_registry_clone = connection_registry.inner().clone();
+    let conn_id_clone = connection_id.clone();
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Recreated session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
             if reason.is_recoverable() {
                 let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
             } else {
-                // 只更新 session registry 状态，不移除终端关联
-                let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+                // AcceptTimeout: 前端没有连接，清理会话
+                if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
+                    warn!("Recreated session {} WS accept timeout, removing from registries", session_id_clone);
+                    let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    let _ = registry_clone.disconnect_complete(&session_id_clone, true);
+                } else {
+                    // 其他不可恢复的断开：只更新状态
+                    let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+                }
             }
         }
     });

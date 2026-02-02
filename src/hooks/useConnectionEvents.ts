@@ -117,13 +117,38 @@ export function useConnectionEvents(): void {
           // When connection goes down, interrupt all SFTP transfers for related sessions
           if (status === 'link_down' || status === 'disconnected') {
             const sessions = sessionsRef.current;
+            
             sessions.forEach((session, sessionId) => {
               if (session.connectionId === connection_id) {
+                // Interrupt SFTP transfers
                 interruptTransfersBySession(sessionId, 
                   status === 'link_down' ? i18n.t('connections.events.connection_lost_reconnecting') : i18n.t('connections.events.connection_closed')
                 );
               }
             });
+          }
+          
+          // 只有在彻底断开时才关闭 tabs
+          // link_down 时保留 tabs，让终端进入待命模式等待自动重连
+          if (status === 'disconnected') {
+            const sessions = sessionsRef.current;
+            const appStore = useAppStore.getState();
+            const sessionIdsToClose: string[] = [];
+            
+            sessions.forEach((session, sessionId) => {
+              if (session.connectionId === connection_id) {
+                sessionIdsToClose.push(sessionId);
+              }
+            });
+            
+            if (sessionIdsToClose.length > 0) {
+              console.log(`[ConnectionEvents] Connection disconnected, closing tabs for sessions:`, sessionIdsToClose);
+              const sessionIdSet = new Set(sessionIdsToClose);
+              const tabsToClose = appStore.tabs.filter(tab => tab.sessionId && sessionIdSet.has(tab.sessionId));
+              for (const tab of tabsToClose) {
+                appStore.closeTab(tab.id);
+              }
+            }
           }
         });
         
@@ -185,11 +210,8 @@ export function useConnectionEvents(): void {
             getTreeStore().setReconnectProgress(nodeId, null);
           }
 
-          // 恢复终端 WebSocket 连接
-          if (terminal_ids.length > 0) {
-            console.log(`[ConnectionEvents] Restoring terminals:`, terminal_ids);
-            restoreTerminalConnections(terminal_ids);
-          }
+          // 同步前端终端与后端：清理已失效的、恢复有效的
+          syncTerminalsAfterReconnect(connection_id, terminal_ids);
 
           // 恢复端口转发
           if (forward_ids.length > 0) {
@@ -279,6 +301,12 @@ async function restoreTerminalConnections(terminalIds: string[]): Promise<void> 
     
     if (lastError) {
       console.error(`[ConnectionEvents] Failed to restore terminal ${terminalId} after ${MAX_RETRIES} attempts:`, lastError);
+
+      const msg = String(lastError);
+      if (msg.includes('Connection not found') || msg.includes('Session') && msg.includes('not found')) {
+        console.warn(`[ConnectionEvents] Purging orphaned terminal ${terminalId} after restore failure`);
+        useAppStore.getState().purgeTerminalSession(terminalId);
+      }
     }
   }
 }
@@ -325,5 +353,39 @@ async function restorePortForwards(connectionId: string, forwardIds: string[]): 
     } catch (e) {
       console.error(`[ConnectionEvents] Failed to refresh port forwards for session ${sessionId}:`, e);
     }
+  }
+}
+
+/**
+ * 同步前端终端与后端状态
+ * 
+ * 重连后，后端返回当前有效的 terminal_ids：
+ * 1. 如果前端有不在列表中的旧终端 → 静默清理
+ * 2. 如果列表中的终端前端没有 → 获取新 session info（创建 Tab）
+ * 3. 如果前端已有且在列表中 → 恢复 WS 连接
+ */
+async function syncTerminalsAfterReconnect(connectionId: string, backendTerminalIds: string[]): Promise<void> {
+  const appStore = useAppStore.getState();
+  const backendSet = new Set(backendTerminalIds);
+
+  // 收集前端属于此连接的所有终端
+  const frontendTerminalIds: string[] = [];
+  appStore.sessions.forEach((session, sessionId) => {
+    if (session.connectionId === connectionId) {
+      frontendTerminalIds.push(sessionId);
+    }
+  });
+
+  // 1. 清理前端有但后端没有的（孤儿）
+  for (const terminalId of frontendTerminalIds) {
+    if (!backendSet.has(terminalId)) {
+      console.log(`[ConnectionEvents] Purging orphaned terminal ${terminalId} (not in backend list)`);
+      appStore.purgeTerminalSession(terminalId);
+    }
+  }
+
+  // 2. 恢复后端有的终端
+  if (backendTerminalIds.length > 0) {
+    await restoreTerminalConnections(backendTerminalIds);
   }
 }

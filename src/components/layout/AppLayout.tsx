@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
-import { useAppStore } from '../../store/appStore';
+import { useAppStore, getSession } from '../../store/appStore';
 import { TerminalView } from '../terminal/TerminalView';
 import { LocalTerminalView } from '../terminal/LocalTerminalView';
 import { SplitTerminalContainer } from '../terminal/SplitTerminalContainer';
@@ -91,9 +91,10 @@ export const AppLayout = () => {
                         />
                       ) : (
                         // Legacy single pane mode (backward compatible)
+                        // Key includes ws_url to force remount when backend assigns new port
                         tab.sessionId && (
                           tab.type === 'terminal'
-                            ? <TerminalView key={tab.sessionId} sessionId={tab.sessionId} tabId={tab.id} isActive={tab.id === activeTabId} />
+                            ? <TerminalView key={`${tab.sessionId}-${getSession(tab.sessionId)?.ws_url ?? ''}`} sessionId={tab.sessionId} tabId={tab.id} isActive={tab.id === activeTabId} />
                             : <LocalTerminalView key={tab.sessionId} sessionId={tab.sessionId} tabId={tab.id} isActive={tab.id === activeTabId} />
                         )
                       )}

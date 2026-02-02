@@ -102,6 +102,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsRecoveryInFlightRef = useRef(false);
   const wsRecoveryAttemptsRef = useRef(0);
   const wsRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsConnectAbortRef = useRef<AbortController | null>(null); // Cancel WS connect retries on unmount
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   
@@ -143,9 +144,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const [inputLocked, setInputLocked] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'link_down' | 'reconnecting' | 'disconnected'>('connected');
   const inputLockedRef = useRef(false); // For synchronous check in onData callback
+  const connectionStatusRef = useRef<'connected' | 'link_down' | 'reconnecting' | 'disconnected'>('connected');
   
-  const { getSession } = useAppStore();
-  const session = getSession(sessionId);
+  // Subscribe to session changes (including ws_url updates after reconnect)
+  const session = useAppStore((state) => state.sessions.get(sessionId));
   const sessionRef = useRef<SessionInfo | undefined>(session);
   const connectionIdRef = useRef<string | null>(session?.connectionId ?? null);
 
@@ -170,14 +172,25 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     connectionIdRef.current = session?.connectionId ?? null;
   }, [session?.connectionId]);
 
+  useEffect(() => {
+    connectionStatusRef.current = connectionStatus;
+  }, [connectionStatus]);
+
   const recoverWebSocket = useCallback((reason: string) => {
     if (wsRecoveryInFlightRef.current) return;
-    if (wsRecoveryAttemptsRef.current >= 3) return;
+    if (wsRecoveryAttemptsRef.current >= 5) return; // Increased max attempts
+    if (connectionStatusRef.current !== 'connected') return;
 
     wsRecoveryInFlightRef.current = true;
     wsRecoveryAttemptsRef.current += 1;
     const attempt = wsRecoveryAttemptsRef.current;
-    const delayMs = Math.min(1000 * attempt, 3000);
+    
+    // Fast retry for initial connection failures (backend may not be ready yet)
+    // Slower retry for mid-session failures (need to recreate PTY)
+    const isInitialFailure = reason.startsWith('initial-') && !reason.includes('opened');
+    const delayMs = isInitialFailure 
+      ? Math.min(200 * attempt, 1000)  // 200ms, 400ms, 600ms, 800ms, 1000ms
+      : Math.min(1000 * attempt, 3000); // 1s, 2s, 3s
 
     if (import.meta.env.DEV) {
       console.warn(`[TerminalView ${sessionId}] WS recover attempt #${attempt} (${reason}) in ${delayMs}ms`);
@@ -188,8 +201,36 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     }
 
     wsRecoveryTimeoutRef.current = setTimeout(async () => {
+      // 🔴 Early exit if component unmounted
+      if (!isMountedRef.current) {
+        wsRecoveryInFlightRef.current = false;
+        return;
+      }
+      
       try {
+        // For initial failures, first 3 attempts just wait and let the reconnect effect retry
+        // (the backend WS bridge should still be accepting connections)
+        if (isInitialFailure && attempt <= 3) {
+          lastWsUrlRef.current = null; // Force reconnect effect to re-attempt
+          wsRecoveryInFlightRef.current = false;
+          return;
+        }
+        
+        // 🔴 Check again before making API call
+        if (!isMountedRef.current) {
+          wsRecoveryInFlightRef.current = false;
+          return;
+        }
+        
+        // Full recovery: recreate PTY and get new WS URL
         const result = await api.recreateTerminalPty(sessionId);
+        
+        // 🔴 Check after API call - component might have unmounted during the await
+        if (!isMountedRef.current) {
+          wsRecoveryInFlightRef.current = false;
+          return;
+        }
+        
         useAppStore.setState((state) => {
           const newSessions = new Map(state.sessions);
           const existingSession = newSessions.get(sessionId);
@@ -206,17 +247,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         wsRecoveryAttemptsRef.current = 0; // Reset on success
       } catch (error) {
         const errorMsg = String(error);
-        console.error(`[TerminalView ${sessionId}] WS recover failed:`, error);
-        
-        // Check if this is a connection-level failure (SSH connection lost)
+
+        // Connection-level failure: silently purge
         if (errorMsg.includes('Connection not found') || errorMsg.includes('Session') && errorMsg.includes('not found')) {
-          // SSH connection is gone - stop retrying and notify user
-          wsRecoveryAttemptsRef.current = 3; // Prevent further retries
-          const term = terminalRef.current;
-          if (term) {
-            term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_lost_reconnect')}\x1b[0m`);
-          }
+          wsRecoveryAttemptsRef.current = 5; // Prevent further retries
+          useAppStore.getState().purgeTerminalSession(sessionId);
+          return;
         }
+
+        console.error(`[TerminalView ${sessionId}] WS recover failed:`, error);
       } finally {
         wsRecoveryInFlightRef.current = false;
       }
@@ -280,9 +319,23 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         
         if (term && status === 'connected') {
           term.write(`\r\n\x1b[32m${i18n.t('terminal.ssh.link_restored')}\x1b[0m\r\n`);
+          // 🔴 关键修复：清除 lastWsUrlRef，让重连 effect 检查是否需要连接新的 ws_url
+          // 这解决了 connection_reconnected 和 connection_status_changed 事件顺序导致的竞态问题
+          lastWsUrlRef.current = null;
         } else if (term && status === 'disconnected') {
           term.write(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_failed')}\x1b[0m\r\n`);
         }
+      }
+
+      if (status === 'disconnected') {
+        // Stop any reconnection attempts and close websocket
+        wsRecoveryAttemptsRef.current = 3;
+        wsRecoveryInFlightRef.current = false;
+        const ws = wsRef.current;
+        wsRef.current = null;
+        manualCloseRef.current = true;
+        cleanupWebSocket(ws, 'Disconnected');
+        lastWsUrlRef.current = null;
       }
     }).then((fn) => {
       if (mounted) {
@@ -343,6 +396,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const wsUrl = currentSession?.ws_url;
     // Skip if terminal not initialized or no ws_url
     if (!terminalRef.current || !wsUrl) return;
+    if (connectionStatusRef.current !== 'connected') return;
     
     // Skip if this is the same URL we're already connected to
     if (wsUrl === lastWsUrlRef.current) {
@@ -492,8 +546,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         if (!isMountedRef.current || wsRef.current !== ws) return;
         console.error('WebSocket reconnection error:', error);
         term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_reconnect_error')}\x1b[0m`);
-        if (!opened) {
-          recoverWebSocket('reconnect-error');
+        if (!reconnectingRef.current) {
+          recoverWebSocket(opened ? 'reconnect-error-opened' : 'reconnect-error');
         }
       };
 
@@ -515,7 +569,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       console.error('Failed to reconnect WebSocket:', e);
       term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_establish_failed', { error: e })}\x1b[0m`);
     }
-  }, [session?.ws_url, recoverWebSocket, cleanupWebSocket]);
+  }, [session?.ws_url, recoverWebSocket, cleanupWebSocket, connectionStatus]);
 
   const getFontFamily = (val: string) => {
       switch(val) {
@@ -726,9 +780,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       const wsUrl = session.ws_url; // Capture to avoid undefined in closure
         term.writeln(i18n.t('terminal.ssh.connecting', { user: session.username, host: session.host }));
 
-        wsConnectTimeout = setTimeout(async () => {
-            if (!isMountedRef.current) return; // Check if still mounted after delay
+        // Create AbortController for cancelling WS connect retries
+        const abortController = new AbortController();
+        wsConnectAbortRef.current = abortController;
 
+        // Helper function to attempt WS connection with retries
+        const attemptWsConnect = async (attempt: number, maxAttempts: number): Promise<void> => {
+            // Check both mount state and abort signal
+            if (!isMountedRef.current || abortController.signal.aborted) return;
+            
             // Avoid stale ws_url from reconnect race
             const latestSession = useAppStore.getState().sessions.get(sessionId);
             if (!latestSession?.ws_url || latestSession.ws_url !== wsUrl) {
@@ -738,127 +798,203 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               return;
             }
 
-            // Wait for fonts to load before connecting
-            await ensureFontsLoaded();
+            return new Promise<void>((resolve) => {
+              // Check abort before creating WebSocket
+              if (abortController.signal.aborted) {
+                resolve();
+                return;
+              }
 
-            try {
               const ws = new WebSocket(wsUrl);
               let opened = false;
-                ws.binaryType = 'arraybuffer';
-                wsRef.current = ws;
-                lastWsUrlRef.current = wsUrl; // Track initial ws_url
+              ws.binaryType = 'arraybuffer';
+              wsRef.current = ws;
+              lastWsUrlRef.current = wsUrl;
 
-                ws.onopen = () => {
-                    if (!isMountedRef.current) {
-                        ws.close();
-                        return;
-                    }
+              ws.onopen = () => {
+                  if (!isMountedRef.current) {
+                      ws.close();
+                      resolve();
+                      return;
+                  }
                   reconnectingRef.current = false;
                   opened = true;
                   wsRecoveryAttemptsRef.current = 0;
                   wsRecoveryInFlightRef.current = false;
 
-                    // SECURITY: Send authentication token as first message
-                    const latestToken = latestSession.ws_token;
-                    if (latestToken) {
-                      ws.send(latestToken);
-                    } else {
-                        console.warn('No WebSocket token available - authentication may fail');
-                    }
+                  // SECURITY: Send authentication token as first message
+                  const latestToken = latestSession.ws_token;
+                  if (latestToken) {
+                    ws.send(latestToken);
+                  } else {
+                      console.warn('No WebSocket token available - authentication may fail');
+                  }
 
-                    term.writeln(i18n.t('terminal.ssh.connected') + "\r\n");
-                    // Initial resize using Wire Protocol v1
-                    const frame = encodeResizeFrame(term.cols, term.rows);
-                    ws.send(frame);
-                    // Focus terminal after connection
-                    term.focus();
-                };
+                  term.writeln(i18n.t('terminal.ssh.connected') + "\r\n");
+                  // Initial resize using Wire Protocol v1
+                  const frame = encodeResizeFrame(term.cols, term.rows);
+                  ws.send(frame);
+                  // Focus terminal after connection
+                  term.focus();
+                  resolve();
+              };
 
-                ws.onmessage = (event) => {
-                  if (!isMountedRef.current || wsRef.current !== ws) return;
-                    const data = event.data;
-                    if (data instanceof ArrayBuffer) {
-                        // Parse Wire Protocol v1 frame: [Type: 1][Length: 4][Payload: n]
-                        const view = new DataView(data);
-                        if (data.byteLength < HEADER_SIZE) return;
-
-                        const type = view.getUint8(0);
-                        const length = view.getUint32(1, false); // big-endian
-
-                        if (data.byteLength < HEADER_SIZE + length) return;
-
-                        if (type === MSG_TYPE_DATA) {
-                            const payload = new Uint8Array(data, HEADER_SIZE, length);
-                            // P3: Queue data and batch writes with RAF for backpressure handling
-                            pendingDataRef.current.push(payload);
-
-                            // Schedule RAF flush if not already scheduled
-                            if (rafIdRef.current === null) {
-                                rafIdRef.current = requestAnimationFrame(() => {
-                                    rafIdRef.current = null;
-                                    if (!isMountedRef.current || !terminalRef.current) return;
-
-                                    // Flush all pending data in one batch
-                                    const pending = pendingDataRef.current;
-                                    if (pending.length === 0) return;
-
-                                    // Concatenate all chunks for single write
-                                    const totalLength = pending.reduce((sum, chunk) => sum + chunk.length, 0);
-                                    const combined = new Uint8Array(totalLength);
-                                    let offset = 0;
-                                    for (const chunk of pending) {
-                                        combined.set(chunk, offset);
-                                        offset += chunk.length;
-                                    }
-
-                                    pendingDataRef.current = [];
-                                    terminalRef.current.write(combined);
-                                });
-                            }
-                        } else if (type === MSG_TYPE_HEARTBEAT) {
-                            // Heartbeat ping from server - respond with pong
-                            if (length === 4) {
-                                const seq = view.getUint32(HEADER_SIZE, false); // big-endian
-                                const response = encodeHeartbeatFrame(seq);
-                                ws.send(response);
-                            }
-                        } else if (type === MSG_TYPE_ERROR) {
-                            // Error message from backend - display in terminal
-                            const payload = new Uint8Array(data, HEADER_SIZE, length);
-                            const decoder = new TextDecoder('utf-8');
-                            const errorMsg = decoder.decode(payload);
-                            term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.server_error', { error: errorMsg })}\x1b[0m`);
-                        }
-                    }
-                };
-
-                ws.onclose = () => {
-                  if (!isMountedRef.current || wsRef.current !== ws) return;
-                  if (manualCloseRef.current) {
-                    manualCloseRef.current = false;
+              ws.onerror = async () => {
+                  // Check both mount state and abort signal
+                  if (!isMountedRef.current || abortController.signal.aborted) {
+                    resolve();
                     return;
                   }
-                  if (!reconnectingRef.current) {
-                    term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_closed')}\x1b[0m`);
+                  
+                  // Clear current WS ref since it failed
+                  if (wsRef.current === ws) {
+                    wsRef.current = null;
                   }
-                  if (!reconnectingRef.current) {
-                    recoverWebSocket(opened ? 'initial-close-opened' : 'initial-close');
-                  }
-                };
-
-                ws.onerror = (e) => {
-                  if (!isMountedRef.current || wsRef.current !== ws) return;
-                  term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_error', { error: e })}\x1b[0m`);
-                  if (!opened) {
+                  
+                  if (!opened && attempt < maxAttempts) {
+                    // Fast retry with exponential backoff: 250ms, 500ms, 750ms, 1000ms, 1250ms, 1500ms, 1750ms, 2000ms
+                    // Total window: ~9 seconds, giving backend plenty of time during SSH handshake contention
+                    const delay = Math.min(250 * attempt, 2000);
+                    if (import.meta.env.DEV) {
+                      console.warn(`[TerminalView ${sessionId}] Initial WS connect failed, retry #${attempt + 1} in ${delay}ms`);
+                    }
+                    // Abortable delay - check signal after timeout
+                    await new Promise<void>(r => {
+                      const timeoutId = setTimeout(() => r(), delay);
+                      abortController.signal.addEventListener('abort', () => {
+                        clearTimeout(timeoutId);
+                        r();
+                      }, { once: true });
+                    });
+                    // Don't continue if aborted
+                    if (abortController.signal.aborted) {
+                      resolve();
+                      return;
+                    }
+                    await attemptWsConnect(attempt + 1, maxAttempts);
+                    resolve();
+                  } else if (!opened) {
+                    // All fast retries failed, check if backend assigned a new port
+                    // 🔴 再次检查，避免在组件卸载后调用 recoverWebSocket
+                    if (!isMountedRef.current || abortController.signal.aborted) {
+                      resolve();
+                      return;
+                    }
+                    
+                    // Check if session has a new ws_url (backend may have recreated)
+                    const freshSession = useAppStore.getState().sessions.get(sessionId);
+                    if (freshSession?.ws_url && freshSession.ws_url !== wsUrl) {
+                      // New URL available, the force-remount via key prop will handle reconnection
+                      if (import.meta.env.DEV) {
+                        console.log(`[TerminalView ${sessionId}] Detected new ws_url, skipping recovery`);
+                      }
+                      resolve();
+                      return;
+                    }
+                    
+                    term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_error', { error: 'Connection failed' })}\x1b[0m`);
                     recoverWebSocket('initial-error');
+                    resolve();
                   }
-                };
+              };
 
+              ws.onclose = () => {
+                  if (!isMountedRef.current || wsRef.current !== ws || abortController.signal.aborted) {
+                    resolve();
+                    return;
+                  }
+                  if (manualCloseRef.current) {
+                    manualCloseRef.current = false;
+                    resolve();
+                    return;
+                  }
+                  if (!opened && attempt < maxAttempts) {
+                    // Connection closed before open - retry
+                    return; // Let onerror handle retry
+                  }
+                  if (!reconnectingRef.current && opened) {
+                    term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_closed')}\x1b[0m`);
+                    recoverWebSocket('initial-close-opened');
+                  }
+                  resolve();
+              };
 
+              ws.onmessage = (event) => {
+                if (!isMountedRef.current || wsRef.current !== ws) return;
+                const data = event.data;
+                if (data instanceof ArrayBuffer) {
+                    // Parse Wire Protocol v1 frame: [Type: 1][Length: 4][Payload: n]
+                    const view = new DataView(data);
+                    if (data.byteLength < HEADER_SIZE) return;
 
-            } catch (e) {
-                term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_establish_failed', { error: e })}\x1b[0m`);
-            }
+                    const type = view.getUint8(0);
+                    const length = view.getUint32(1, false); // big-endian
+
+                    if (data.byteLength < HEADER_SIZE + length) return;
+
+                    if (type === MSG_TYPE_DATA) {
+                        const payload = new Uint8Array(data, HEADER_SIZE, length);
+                        // P3: Queue data and batch writes with RAF for backpressure handling
+                        pendingDataRef.current.push(payload);
+
+                        // Schedule RAF flush if not already scheduled
+                        if (rafIdRef.current === null) {
+                            rafIdRef.current = requestAnimationFrame(() => {
+                                rafIdRef.current = null;
+                                if (!isMountedRef.current || !terminalRef.current) return;
+
+                                // Flush all pending data in one batch
+                                const pending = pendingDataRef.current;
+                                if (pending.length === 0) return;
+
+                                // Concatenate all chunks for single write
+                                const totalLength = pending.reduce((sum, chunk) => sum + chunk.length, 0);
+                                const combined = new Uint8Array(totalLength);
+                                let offset = 0;
+                                for (const chunk of pending) {
+                                    combined.set(chunk, offset);
+                                    offset += chunk.length;
+                                }
+
+                                pendingDataRef.current = [];
+                                terminalRef.current.write(combined);
+                            });
+                        }
+                    } else if (type === MSG_TYPE_HEARTBEAT) {
+                        // Heartbeat ping from server - respond with pong
+                        if (length === 4) {
+                            const seq = view.getUint32(HEADER_SIZE, false); // big-endian
+                            const response = encodeHeartbeatFrame(seq);
+                            ws.send(response);
+                        }
+                    } else if (type === MSG_TYPE_ERROR) {
+                        // Error message from backend - display in terminal
+                        const payload = new Uint8Array(data, HEADER_SIZE, length);
+                        const decoder = new TextDecoder('utf-8');
+                        const errorMsg = decoder.decode(payload);
+                        term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.server_error', { error: errorMsg })}\x1b[0m`);
+                    }
+                }
+              };
+            });
+        };
+
+        wsConnectTimeout = setTimeout(async () => {
+            if (!isMountedRef.current) return;
+
+            // Add random jitter (0-200ms) to prevent thundering herd when multiple terminals reconnect
+            const jitter = Math.random() * 200;
+            await new Promise(r => setTimeout(r, jitter));
+            
+            if (!isMountedRef.current || abortController.signal.aborted) return;
+
+            // Start connection immediately, fonts can load in parallel
+            // Font loading is non-blocking, xterm.js can re-render when fonts become available
+            const connectPromise = attemptWsConnect(1, 5);
+            const fontsPromise = ensureFontsLoaded();
+            
+            // Wait for connection, but don't block on fonts
+            await Promise.race([connectPromise, fontsPromise.then(() => connectPromise)]);
         }, 100); // 100ms delay to let StrictMode unmount/remount complete
     } else {
          term.writeln(`\x1b[33m${i18n.t('terminal.ssh.no_ws_url')}\x1b[0m`);
@@ -977,6 +1113,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
     return () => {
       isMountedRef.current = false;
+      
+      // Abort any pending WS connect retries immediately
+      if (wsConnectAbortRef.current) {
+        wsConnectAbortRef.current.abort();
+        wsConnectAbortRef.current = null;
+      }
       
       // Unregister from Terminal Registry
       unregisterTerminalBuffer(effectivePaneId);

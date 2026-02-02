@@ -120,6 +120,8 @@ interface SessionTreeStore {
   linkDownNodeIds: Set<string>;
   /** 重连进度 (nodeId -> ReconnectProgress) */
   reconnectProgress: Map<string, ReconnectProgress>;
+  /** 断开前的终端数量 (nodeId -> count) - 用于重连时恢复终端 */
+  disconnectedTerminalCounts: Map<string, number>;
   
   // ========== Data Actions ==========
   fetchTree: () => Promise<void>;
@@ -146,6 +148,8 @@ interface SessionTreeStore {
   createTerminalForNode: (nodeId: string, cols?: number, rows?: number) => Promise<string>;
   /** 关闭节点的指定终端 */
   closeTerminalForNode: (nodeId: string, terminalId: string) => Promise<void>;
+  /** 本地清理终端映射（不调用后端） */
+  purgeTerminalMapping: (terminalId: string) => void;
   /** 获取节点的所有终端 */
   getTerminalsForNode: (nodeId: string) => string[];
   /** 通过终端 ID 查找所属节点 */
@@ -294,6 +298,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     terminalNodeMap: new Map<string, string>(),
     linkDownNodeIds: new Set<string>(),
     reconnectProgress: new Map<string, ReconnectProgress>(),
+    disconnectedTerminalCounts: new Map<string, number>(),
     
     // ========== Data Actions ==========
     
@@ -548,7 +553,18 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       const descendants = get().getDescendants(nodeId);
       const allAffectedNodes = [node, ...descendants];
       
-      // 2. 收集所有需要关闭的 Tab sessionId
+      // 2. 保存断开前的终端数量（用于重连时恢复）
+      const { disconnectedTerminalCounts } = get();
+      const newDisconnectedCounts = new Map(disconnectedTerminalCounts);
+      for (const n of allAffectedNodes) {
+        const terminalCount = n.runtime.terminalIds?.length || 0;
+        if (terminalCount > 0) {
+          newDisconnectedCounts.set(n.id, terminalCount);
+        }
+      }
+      set({ disconnectedTerminalCounts: newDisconnectedCounts });
+      
+      // 3. 收集所有需要关闭的 Tab sessionId
       const sessionIdsToClose: string[] = [];
       for (const n of allAffectedNodes) {
         // 收集终端 ID
@@ -561,7 +577,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         }
       }
       
-      // 3. 关闭 appStore 中的相关 Tab
+      // 4. 关闭 appStore 中的相关 Tab
       if (sessionIdsToClose.length > 0) {
         const { useAppStore } = await import('./appStore');
         const appStore = useAppStore.getState();
@@ -573,7 +589,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         }
       }
       
-      // 4. 标记所有子节点为 link-down（表示链路断开，需要父节点先恢复才能连接）
+      // 5. 标记所有子节点为 link-down（表示链路断开，需要父节点先恢复才能连接）
       // 注意：不标记父节点本身，只标记子节点
       const { linkDownNodeIds } = get();
       const newLinkDownIds = new Set(linkDownNodeIds);
@@ -582,19 +598,19 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       }
       set({ linkDownNodeIds: newLinkDownIds });
       
-      // 5. 清理拓扑映射
+      // 6. 清理拓扑映射
       for (const n of allAffectedNodes) {
         topologyResolver.unregister(n.id);
       }
       
-      // 6. 调用后端断开节点（会递归断开子节点并更新状态）
+      // 7. 调用后端断开节点（会递归断开子节点并更新状态）
       try {
         await api.disconnectTreeNode(nodeId);
       } catch (e) {
         console.error('Failed to disconnect tree node:', e);
       }
       
-      // 7. 刷新树状态
+      // 8. 刷新树状态
       await get().fetchTree();
     },
     
@@ -750,6 +766,27 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       }
       
       // 重建统一节点
+      get().rebuildUnifiedNodes();
+    },
+
+    purgeTerminalMapping: (terminalId: string) => {
+      const { nodeTerminalMap, terminalNodeMap } = get();
+      const nodeId = terminalNodeMap.get(terminalId);
+      if (!nodeId) return;
+
+      const newTerminalMap = new Map(nodeTerminalMap);
+      const newNodeMap = new Map(terminalNodeMap);
+
+      const existing = newTerminalMap.get(nodeId) || [];
+      const filtered = existing.filter(id => id !== terminalId);
+      if (filtered.length > 0) {
+        newTerminalMap.set(nodeId, filtered);
+      } else {
+        newTerminalMap.delete(nodeId);
+      }
+      newNodeMap.delete(terminalId);
+
+      set({ nodeTerminalMap: newTerminalMap, terminalNodeMap: newNodeMap });
       get().rebuildUnifiedNodes();
     },
     

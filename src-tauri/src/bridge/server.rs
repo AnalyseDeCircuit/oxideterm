@@ -24,6 +24,9 @@ use crate::ssh::{
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 /// Heartbeat timeout - consider connection dead if no response (seconds)
 const HEARTBEAT_TIMEOUT_SECS: u64 = 90;
+/// WebSocket accept timeout (seconds)
+/// Extended to 60s to handle font loading and multiple concurrent terminals
+const WS_ACCEPT_TIMEOUT_SECS: u64 = 60;
 /// Number of lines to replay after reconnect
 const REPLAY_LINE_COUNT: usize = 50;
 /// Token validity window (seconds) - tokens older than this are rejected
@@ -438,7 +441,7 @@ impl WsBridge {
         let _ = ready_tx.send(());
 
         // Accept only one connection per session (with timeout)
-        let accept_result = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;
+        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -485,7 +488,7 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;
+        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -848,7 +851,7 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;
+        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -897,7 +900,7 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;
+        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
 
         let disconnect_reason = match accept_result {
             Ok(Ok((stream, addr))) => {

@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { PaneLeaf } from '../../types';
 import { TerminalView } from './TerminalView';
 import { LocalTerminalView } from './LocalTerminalView';
+import { getSession } from '../../store/appStore';
 import { cn } from '../../lib/utils';
 
 interface TerminalPaneProps {
@@ -48,9 +49,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       onClick={handleFocus}
     >
       {/* Terminal content */}
+      {/* Key includes ws_url to force remount when backend assigns new port */}
       <div className="h-full w-full">
         {pane.terminalType === 'terminal' ? (
           <TerminalView
+            key={`${pane.sessionId}-${getSession(pane.sessionId)?.ws_url ?? ''}`}
             sessionId={pane.sessionId}
             paneId={pane.id}
             tabId={tabId}

@@ -139,7 +139,7 @@ export const DrillDownDialog: React.FC<DrillDownDialogProps> = ({
           </DialogTitle>
           <p className="text-sm text-zinc-500 mt-1">
             {t('modals.drill_down.description', { host: parentHost }).split('<host>').map((part, i) => 
-              i === 0 ? part : <><span key={i} className="text-white font-mono">{part.split('</host>')[0]}</span>{part.split('</host>')[1]}</>
+              i === 0 ? <span key={i}>{part}</span> : <span key={i}><span className="text-white font-mono">{part.split('</host>')[0]}</span>{part.split('</host>')[1]}</span>
             )}
           </p>
         </DialogHeader>

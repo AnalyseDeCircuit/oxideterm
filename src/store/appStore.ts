@@ -65,6 +65,11 @@ interface AppStore {
   disconnectSsh: (connectionId: string) => Promise<void>;
   createTerminalSession: (connectionId: string, cols?: number, rows?: number) => Promise<SessionInfo>;
   closeTerminalSession: (sessionId: string) => Promise<void>;
+  /**
+   * Force-remove a terminal session locally (no backend call).
+   * Used when backend no longer recognizes the session.
+   */
+  purgeTerminalSession: (sessionId: string) => void;
   refreshConnections: () => Promise<void>;
   setConnectionKeepAlive: (connectionId: string, keepAlive: boolean) => Promise<void>;
   
@@ -347,6 +352,104 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.error('Close terminal failed:', error);
       throw error;
     }
+  },
+
+  purgeTerminalSession: (sessionId: string) => {
+    set((state) => {
+      const newSessions = new Map(state.sessions);
+      const session = newSessions.get(sessionId);
+      if (!session) return state;
+      newSessions.delete(sessionId);
+
+      // Update connections map
+      const newConnections = new Map(state.connections);
+      if (session.connectionId) {
+        const connection = newConnections.get(session.connectionId);
+        if (connection) {
+          const newTerminalIds = connection.terminalIds.filter(id => id !== sessionId);
+          newConnections.set(session.connectionId, {
+            ...connection,
+            terminalIds: newTerminalIds,
+            refCount: Math.max(0, connection.refCount - 1),
+            state: newTerminalIds.length === 0 ? 'idle' : connection.state,
+          });
+        }
+      }
+
+      // Update tabs (legacy + split panes)
+      const updatedTabs: Tab[] = [];
+      let newActiveId = state.activeTabId;
+
+      for (const tab of state.tabs) {
+        // Legacy single-pane tabs
+        if (!tab.rootPane) {
+          if (tab.sessionId === sessionId) {
+            if (newActiveId === tab.id) {
+              newActiveId = null;
+            }
+            continue; // Drop the tab
+          }
+          updatedTabs.push(tab);
+          continue;
+        }
+
+        // Split-pane tabs
+        const result = removePanesBySessionId(tab.rootPane, sessionId);
+        if (!result.removed) {
+          updatedTabs.push(tab);
+          continue;
+        }
+
+        // If no panes left, drop tab
+        if (!result.node) {
+          if (newActiveId === tab.id) {
+            newActiveId = null;
+          }
+          continue;
+        }
+
+        // If only one pane left, simplify to single pane mode
+        if (result.node.type === 'leaf') {
+          updatedTabs.push({
+            ...tab,
+            rootPane: undefined,
+            activePaneId: result.node.id,
+            sessionId: result.node.sessionId,
+            type: result.node.terminalType,
+          });
+          continue;
+        }
+
+        // Keep split pane mode
+        const activePaneId = result.newActivePaneId || tab.activePaneId;
+        updatedTabs.push({
+          ...tab,
+          rootPane: result.node,
+          activePaneId,
+        });
+      }
+
+      // Fix activeTabId if it was removed
+      if (newActiveId === null && updatedTabs.length > 0) {
+        newActiveId = updatedTabs[updatedTabs.length - 1].id;
+      }
+
+      return {
+        sessions: newSessions,
+        connections: newConnections,
+        tabs: updatedTabs,
+        activeTabId: newActiveId,
+      };
+    });
+
+    // Also purge terminal mapping in sessionTreeStore (local only)
+    void import('./sessionTreeStore')
+      .then(({ useSessionTreeStore }) => {
+        useSessionTreeStore.getState().purgeTerminalMapping(sessionId);
+      })
+      .catch(() => {
+        // ignore
+      });
   },
 
   refreshConnections: async () => {
@@ -1265,6 +1368,83 @@ function removePaneFromTree(
 }
 
 /**
+ * Remove all panes that match a sessionId
+ * Returns modified tree, removal flag, and suggested new active pane ID
+ */
+function removePanesBySessionId(
+  node: PaneNode,
+  sessionId: string
+): { node: PaneNode | null; removed: boolean; newActivePaneId?: string } {
+  if (node.type === 'leaf') {
+    if (node.sessionId === sessionId) {
+      return { node: null, removed: true };
+    }
+    return { node, removed: false };
+  }
+
+  const newChildren: PaneNode[] = [];
+  const removedIndices: number[] = [];
+  let newActivePaneId: string | undefined;
+  let removed = false;
+
+  for (let i = 0; i < node.children.length; i++) {
+    const result = removePanesBySessionId(node.children[i], sessionId);
+    if (result.node === null) {
+      removedIndices.push(i);
+      removed = true;
+      if (result.newActivePaneId) {
+        newActivePaneId = result.newActivePaneId;
+      }
+    } else {
+      newChildren.push(result.node);
+      if (result.newActivePaneId) {
+        newActivePaneId = result.newActivePaneId;
+      }
+      if (result.removed) {
+        removed = true;
+      }
+    }
+  }
+
+  if (!removed) {
+    return { node, removed: false };
+  }
+
+  if (newChildren.length === 0) {
+    return { node: null, removed: true };
+  }
+
+  if (newChildren.length === 1) {
+    const remaining = newChildren[0];
+    if (!newActivePaneId) {
+      newActivePaneId = findFirstLeaf(remaining)?.id;
+    }
+    return { node: remaining, removed: true, newActivePaneId };
+  }
+
+  const oldSizes = node.sizes || node.children.map(() => 100 / node.children.length);
+  const remainingSizes = oldSizes.filter((_, idx) => !removedIndices.includes(idx));
+  const remainingTotal = remainingSizes.reduce((sum, size) => sum + size, 0);
+  const newSizes = remainingTotal > 0
+    ? remainingSizes.map(size => (size / remainingTotal) * 100)
+    : remainingSizes.map(() => 100 / remainingSizes.length);
+
+  if (!newActivePaneId) {
+    newActivePaneId = findFirstLeaf(newChildren[0])?.id;
+  }
+
+  return {
+    node: {
+      ...node,
+      children: newChildren,
+      sizes: newSizes,
+    },
+    removed: true,
+    newActivePaneId,
+  };
+}
+
+/**
  * Find the first leaf node in a tree (for focus fallback)
  */
 function findFirstLeaf(node: PaneNode): PaneLeaf | null {
@@ -1293,4 +1473,12 @@ export function findPaneById(node: PaneNode, paneId: string): PaneLeaf | null {
     if (found) return found;
   }
   return null;
+}
+
+/**
+ * Get session info by ID (convenience function for use outside React components)
+ * Used for dynamic key generation when ws_url changes
+ */
+export function getSession(sessionId: string): SessionInfo | undefined {
+  return useAppStore.getState().sessions.get(sessionId);
 }
