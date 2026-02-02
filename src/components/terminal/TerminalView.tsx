@@ -94,6 +94,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
+  const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isMountedRef = useRef(true); // Track mount state for StrictMode
   const reconnectingRef = useRef(false); // Suppress close/error during intentional reconnect
@@ -147,6 +148,19 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const session = getSession(sessionId);
   const sessionRef = useRef<SessionInfo | undefined>(session);
   const connectionIdRef = useRef<string | null>(session?.connectionId ?? null);
+
+  const cleanupWebSocket = useCallback((ws: WebSocket | null, reason?: string) => {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    try {
+      ws.close(1000, reason);
+    } catch {
+      // Ignore close errors
+    }
+  }, []);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -348,7 +362,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         const oldWs = wsRef.current;
         wsRef.current = null;
         manualCloseRef.current = true;
-        oldWs.close(1000, 'Reconnect');
+        cleanupWebSocket(oldWs, 'Reconnect');
       } else {
         return; // Same URL, already connected
       }
@@ -501,7 +515,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       console.error('Failed to reconnect WebSocket:', e);
       term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_establish_failed', { error: e })}\x1b[0m`);
     }
-  }, [session?.ws_url, recoverWebSocket]);
+  }, [session?.ws_url, recoverWebSocket, cleanupWebSocket]);
 
   const getFontFamily = (val: string) => {
       switch(val) {
@@ -565,6 +579,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     
     searchAddonRef.current = searchAddon;
     imageAddonRef.current = imageAddon;
+    webLinksAddonRef.current = webLinksAddon;
 
     // Load renderer based on settings
     // renderer: 'auto' | 'webgl' | 'canvas'
@@ -817,7 +832,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                     }
                 };
 
-                ws.onclose = (event) => {
+                ws.onclose = () => {
                   if (!isMountedRef.current || wsRef.current !== ws) return;
                   if (manualCloseRef.current) {
                     manualCloseRef.current = false;
@@ -993,37 +1008,64 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           rafIdRef.current = null;
       }
       pendingDataRef.current = [];
-      if (wsRef.current) {
+        if (wsRef.current) {
           manualCloseRef.current = true;
-          wsRef.current.close();
+          cleanupWebSocket(wsRef.current, 'Unmount');
           wsRef.current = null;
-      }
+        }
         lastWsUrlRef.current = null;
       
-      // Dispose renderer addon first to avoid "onShowLinkUnderline" error
-      // This is a known xterm.js canvas addon bug where dispose order matters
-      if (rendererAddonRef.current) {
+        // Dispose renderer addon first to avoid "onShowLinkUnderline" error
+        // This is a known xterm.js canvas addon bug where dispose order matters
+        if (rendererAddonRef.current) {
           try {
-              rendererAddonRef.current.dispose();
+            rendererAddonRef.current.dispose();
           } catch (e) {
-              // Ignore errors during addon disposal
+            // Ignore errors during addon disposal
           }
           rendererAddonRef.current = null;
-      }
-      
-      // Dispose ImageAddon to free memory (canvas + image storage)
-      if (imageAddonRef.current) {
+        }
+
+        // Dispose plugins (image/search/weblinks/fit) before terminal
+        if (imageAddonRef.current) {
           try {
-              imageAddonRef.current.dispose();
+            imageAddonRef.current.dispose();
           } catch (e) {
-              // Ignore errors during addon disposal
+            // Ignore errors during addon disposal
           }
           imageAddonRef.current = null;
-      }
-      
-      // Finally dispose terminal
-      term.dispose();
-      terminalRef.current = null;
+        }
+
+        if (searchAddonRef.current) {
+          try {
+            searchAddonRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during addon disposal
+          }
+          searchAddonRef.current = null;
+        }
+
+        if (webLinksAddonRef.current) {
+          try {
+            webLinksAddonRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during addon disposal
+          }
+          webLinksAddonRef.current = null;
+        }
+
+        if (fitAddonRef.current) {
+          try {
+            fitAddonRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during addon disposal
+          }
+          fitAddonRef.current = null;
+        }
+
+        // Finally dispose terminal
+        term.dispose();
+        terminalRef.current = null;
     };
   }, [sessionId]); // Only re-mount if sessionId changes absolutely
 

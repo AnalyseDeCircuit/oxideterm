@@ -328,7 +328,7 @@ async fn start_session_and_bridge(
 
     // Start WebSocket bridge with disconnect tracking
     let (_, ws_port, ws_token, disconnect_rx) =
-        WsBridge::start_extended_with_disconnect(session_handle, scroll_buffer)
+        WsBridge::start_extended_with_disconnect(session_handle, scroll_buffer, false)
             .await
             .map_err(|e| {
                 registry.remove(sid);
@@ -376,7 +376,12 @@ async fn register_session_services(
                 "Session {} WebSocket bridge disconnected: {:?}",
                 sid_clone, reason
             );
-            let _ = registry_clone.disconnect_complete(&sid_clone, false);
+
+            if reason.is_recoverable() {
+                let _ = registry_clone.mark_ws_detached(&sid_clone, std::time::Duration::from_secs(300));
+            } else {
+                let _ = registry_clone.disconnect_complete(&sid_clone, false);
+            }
         }
     });
 

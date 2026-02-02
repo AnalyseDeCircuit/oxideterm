@@ -287,7 +287,7 @@ impl AutoReconnectService {
 
         // Start WebSocket bridge (consumes session_handle)
         let (_, ws_port, ws_token) =
-            crate::bridge::WsBridge::start_extended(session_handle, scroll_buffer)
+            crate::bridge::WsBridge::start_extended(session_handle, scroll_buffer, false)
                 .await
                 .map_err(|e| format!("WebSocket bridge failed: {}", e))?;
 

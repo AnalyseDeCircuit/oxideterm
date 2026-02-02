@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector, persist } from 'zustand/middleware';
 import { api } from '../lib/api';
+import { guardSessionConnection, isConnectionGuardError } from '../lib/connectionGuard';
 import {
   normalizePath,
   joinPath,
@@ -181,6 +182,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 先初始化 SFTP 会话（如果尚未初始化）
           // sftpInit 会在 SFTP 已初始化时返回当前工作目录，不会重复初始化
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
+          }
+
           const isInitialized = await api.sftpIsInitialized(sftpSessionId);
           if (!isInitialized) {
             await api.sftpInit(sftpSessionId);
@@ -239,6 +247,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 调用后端获取新项目信息
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
+          }
+
           const projectInfo = await api.ideOpenProject(sftpSessionId, newRootPath);
           
           // 更新状态，关闭所有标签
@@ -261,6 +276,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           if (!sftpSessionId) {
             throw new Error('No SFTP session');
+          }
+
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
           }
           
           // 检查是否已打开
@@ -411,6 +433,14 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             throw new Error('Cannot save: invalid state');
           }
           
+          // 连接状态守卫
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
+          }
+
           // 检查冲突
           const stat = await api.sftpStat(sftpSessionId, tab.path);
           if (tab.serverMtime && stat.modified && stat.modified !== tab.serverMtime) {
@@ -519,6 +549,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         resolveConflict: async (resolution) => {
           const { conflictState, tabs, sftpSessionId } = get();
           if (!conflictState || !sftpSessionId) return;
+
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
+          }
           
           const tab = tabs.find(t => t.id === conflictState.tabId);
           if (!tab || tab.content === null) return;
@@ -579,6 +616,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!sftpSessionId) {
             throw new Error('No SFTP session');
           }
+
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return '';
+          }
           const validationError = validateFileName(name);
           if (validationError) {
             throw new Error(validationError);
@@ -623,6 +667,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           if (!sftpSessionId) {
             throw new Error('No SFTP session');
+          }
+
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return '';
           }
           const validationError = validateFileName(name);
           if (validationError) {
@@ -672,6 +723,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           if (!sftpSessionId) {
             throw new Error('No SFTP session');
+          }
+
+          try {
+            await guardSessionConnection(sftpSessionId);
+          } catch (err) {
+            if (!isConnectionGuardError(err)) throw err;
+            return;
           }
           
           // 1. 检查受影响的标签

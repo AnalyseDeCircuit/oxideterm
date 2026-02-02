@@ -14,6 +14,7 @@ import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { Save, X, AlertCircle, Check, Loader2, WifiOff, RefreshCw } from 'lucide-react';
 import { api } from '../../lib/api';
+import { guardSessionConnection, isConnectionGuardError } from '../../lib/connectionGuard';
 import {
   loadLanguage,
   normalizeLanguage,
@@ -122,6 +123,14 @@ export function RemoteFileEditor({
     setIsNetworkErr(false);
 
     try {
+      try {
+        await guardSessionConnection(sessionId);
+      } catch (err) {
+        if (isConnectionGuardError(err)) {
+          return;
+        }
+        throw err;
+      }
       const currentContent = viewRef.current?.state.doc.toString() || content;
       // 传递当前编码，保存时转回原编码
       const result = await api.sftpWriteContent(sessionId, filePath, currentContent, currentEncoding);

@@ -37,6 +37,7 @@ import { RemoteFileEditor } from '../editor/RemoteFileEditor';
 import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
 import { api } from '../../lib/api';
+import { guardSessionConnection, isConnectionGuardError } from '../../lib/connectionGuard';
 import { FileInfo } from '../../types';
 import { listen } from '@tauri-apps/api/event';
 import { readDir, stat, remove, rename, mkdir } from '@tauri-apps/plugin-fs';
@@ -749,33 +750,62 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
   }, [remotePath, isRemotePathEditing]);
 
   // Initialize SFTP on mount
-  useEffect(() => {
+    useEffect(() => {
      if (!session) return;
+     let cancelled = false;
      
-     api.sftpIsInitialized(sessionId)
-        .then(initialized => {
-            if (initialized) {
-                setSftpInitialized(true);
-                return api.sftpPwd(sessionId);
-            } else {
-                return api.sftpInit(sessionId).then(cwd => {
-                    setSftpInitialized(true);
-                    return cwd;
-                });
-            }
-        })
-        .then(cwd => {
+     const init = async () => {
+      try {
+        await guardSessionConnection(sessionId);
+        if (cancelled) return;
+        const initialized = await api.sftpIsInitialized(sessionId);
+        if (cancelled) return;
+        if (initialized) {
+          setSftpInitialized(true);
+          const cwd = await api.sftpPwd(sessionId);
+          if (!cancelled && cwd) setRemotePath(cwd);
+        } else {
+          const cwd = await api.sftpInit(sessionId);
+          if (!cancelled) {
+            setSftpInitialized(true);
             if (cwd) setRemotePath(cwd);
-        })
-        .catch(err => console.error("SFTP Init Error:", err));
-  }, [sessionId, session]);
+          }
+        }
+      } catch (err) {
+        if (!cancelled && !isConnectionGuardError(err)) {
+          console.error("SFTP Init Error:", err);
+        }
+      }
+     };
+
+     init();
+     return () => {
+       cancelled = true;
+     };
+    }, [sessionId, session]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {
      if (!session || !sftpInitialized) return;
-     api.sftpListDir(sessionId, remotePath)
-        .then(setRemoteFiles)
-        .catch(err => console.error("SFTP List Error:", err));
+     let cancelled = false;
+
+     const refresh = async () => {
+        try {
+          await guardSessionConnection(sessionId);
+          if (cancelled) return;
+          const files = await api.sftpListDir(sessionId, remotePath);
+          if (!cancelled) setRemoteFiles(files);
+        } catch (err) {
+          if (!cancelled && !isConnectionGuardError(err)) {
+            console.error("SFTP List Error:", err);
+          }
+        }
+     };
+
+     refresh();
+     return () => {
+       cancelled = true;
+     };
   }, [sessionId, remotePath, session, sftpInitialized]);
 
   // Refresh local files using Tauri fs plugin

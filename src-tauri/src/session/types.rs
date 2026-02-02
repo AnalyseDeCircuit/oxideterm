@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::scroll_buffer::ScrollBuffer;
 use super::state::{SessionState, SessionStateMachine};
@@ -148,6 +148,12 @@ pub struct SessionEntry {
     pub handle_controller: Option<HandleController>,
     /// Terminal scroll buffer for backend storage and search
     pub scroll_buffer: Arc<ScrollBuffer>,
+    /// Output broadcast channel for terminal data (supports WS reattach)
+    pub output_tx: broadcast::Sender<Vec<u8>>,
+    /// WS detached flag (true while client disconnected)
+    pub ws_detached: bool,
+    /// Cancel handle for WS detach cleanup task
+    pub ws_detach_cancel: Option<oneshot::Sender<()>>,
     /// Creation timestamp
     pub created_at: Instant,
     /// Tab order (for UI sorting)
@@ -160,6 +166,7 @@ pub struct SessionEntry {
 impl SessionEntry {
     /// Create a new session entry
     pub fn new(id: String, config: SessionConfig, order: usize) -> Self {
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(1024);
         Self {
             id,
             config,
@@ -169,6 +176,9 @@ impl SessionEntry {
             cmd_tx: None,
             handle_controller: None,
             scroll_buffer: Arc::new(ScrollBuffer::new()), // Default 100k lines
+            output_tx,
+            ws_detached: false,
+            ws_detach_cancel: None,
             created_at: Instant::now(),
             order,
             connection_id: None,
@@ -182,6 +192,7 @@ impl SessionEntry {
         order: usize,
         max_lines: usize,
     ) -> Self {
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(1024);
         Self {
             id,
             config,
@@ -191,6 +202,9 @@ impl SessionEntry {
             cmd_tx: None,
             handle_controller: None,
             scroll_buffer: Arc::new(ScrollBuffer::with_capacity(max_lines)),
+            output_tx,
+            ws_detached: false,
+            ws_detach_cancel: None,
             created_at: Instant::now(),
             order,
             connection_id: None,

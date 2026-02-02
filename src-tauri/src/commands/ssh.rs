@@ -22,7 +22,7 @@ use super::ForwardingRegistry;
 use crate::bridge::{BridgeManager, WsBridge};
 use crate::forwarding::ForwardingManager;
 use crate::session::{
-    AuthMethod, KeyAuth, SessionConfig, SessionInfo, SessionRegistry,
+    parse_terminal_output, AuthMethod, KeyAuth, SessionConfig, SessionInfo, SessionRegistry,
 };
 use crate::sftp::session::SftpRegistry;
 use crate::ssh::{
@@ -485,7 +485,17 @@ pub async fn create_terminal(
     use tokio::sync::mpsc;
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<SessionCommand>(1024);
-    let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(1024);
+
+    let scroll_buffer = session_registry
+        .with_session(&session_id, |entry| entry.scroll_buffer.clone())
+        .ok_or_else(|| "Session not found in registry".to_string())?;
+
+    let output_tx = session_registry
+        .with_session(&session_id, |entry| entry.output_tx.clone())
+        .ok_or_else(|| "Session output channel not found".to_string())?;
+
+    let output_rx = output_tx.subscribe();
+    let scroll_buffer_clone = scroll_buffer.clone();
 
     // 启动 channel 处理任务
     let sid = session_id.clone();
@@ -519,13 +529,21 @@ pub async fn create_terminal(
                 Some(msg) = channel.wait() => {
                     match msg {
                         ChannelMsg::Data { data } => {
-                            if stdout_tx.send(data.to_vec()).await.is_err() {
-                                break;
+                            let bytes = data.to_vec();
+                            let lines = parse_terminal_output(&bytes);
+                            if !lines.is_empty() {
+                                scroll_buffer_clone.append_batch(lines).await;
                             }
+                            let _ = output_tx.send(bytes);
                         }
                         ChannelMsg::ExtendedData { data, ext } => {
-                            if ext == 1 && stdout_tx.send(data.to_vec()).await.is_err() {
-                                break;
+                            if ext == 1 {
+                                let bytes = data.to_vec();
+                                let lines = parse_terminal_output(&bytes);
+                                if !lines.is_empty() {
+                                    scroll_buffer_clone.append_batch(lines).await;
+                                }
+                                let _ = output_tx.send(bytes);
                             }
                         }
                         ChannelMsg::Eof | ChannelMsg::Close => {
@@ -546,17 +564,12 @@ pub async fn create_terminal(
     let extended_handle = ExtendedSessionHandle {
         id: session_id.clone(),
         cmd_tx: cmd_tx.clone(),
-        stdout_rx,
+        stdout_rx: output_rx,
     };
-
-    // 获取 scroll buffer
-    let scroll_buffer = session_registry
-        .with_session(&session_id, |entry| entry.scroll_buffer.clone())
-        .ok_or_else(|| "Session not found in registry".to_string())?;
 
     // 启动 WebSocket bridge
     let (_, port, token, disconnect_rx) =
-        WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer)
+        WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer.clone(), false)
             .await
             .map_err(|e| {
                 session_registry.remove(&session_id);
@@ -576,9 +589,13 @@ pub async fn create_terminal(
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
-            // 只更新 session registry 状态，不移除终端关联
-            // 终端关联由 close_terminal 命令显式移除
-            let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+            if reason.is_recoverable() {
+                let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
+            } else {
+                // 只更新 session registry 状态，不移除终端关联
+                // 终端关联由 close_terminal 命令显式移除
+                let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+            }
         }
     });
 
@@ -702,6 +719,51 @@ pub async fn recreate_terminal_pty(
 ) -> Result<RecreateTerminalResponse, String> {
     info!("Recreate terminal PTY request: {}", session_id);
 
+    // === Fast path: reuse existing PTY if WS was detached ===
+    if session_registry.is_ws_detached(&session_id) {
+        if let (Some(cmd_tx), Some(output_tx)) = (
+            session_registry.get_cmd_tx(&session_id),
+            session_registry.get_output_tx(&session_id),
+        ) {
+            let handle_controller = session_registry
+                .get_handle_controller(&session_id)
+                .ok_or_else(|| "Session handle controller not found".to_string())?;
+
+            let scroll_buffer = session_registry
+                .with_session(&session_id, |entry| entry.scroll_buffer.clone())
+                .ok_or_else(|| "Session not found in registry".to_string())?;
+
+            let extended_handle = ExtendedSessionHandle {
+                id: session_id.clone(),
+                cmd_tx: cmd_tx.clone(),
+                stdout_rx: output_tx.subscribe(),
+            };
+
+            let (_, port, token, _disconnect_rx) = WsBridge::start_extended_with_disconnect(
+                extended_handle,
+                scroll_buffer,
+                true,
+            )
+            .await
+            .map_err(|e| format!("Failed to start WebSocket bridge: {}", e))?;
+
+            session_registry
+                .update_ws_info(&session_id, port, token.clone(), cmd_tx, handle_controller)
+                .map_err(|e| format!("Failed to update session: {}", e))?;
+
+            let ws_url = format!("ws://localhost:{}", port);
+
+            info!("Terminal WS reattached: session={}, ws_port={}", session_id, port);
+
+            return Ok(RecreateTerminalResponse {
+                session_id,
+                ws_url,
+                port,
+                ws_token: token,
+            });
+        }
+    }
+
     // 获取 session 信息
     let session_info = session_registry
         .get(&session_id)
@@ -744,7 +806,17 @@ pub async fn recreate_terminal_pty(
     use tokio::sync::mpsc;
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<SessionCommand>(1024);
-    let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(1024);
+
+    let scroll_buffer = session_registry
+        .with_session(&session_id, |entry| entry.scroll_buffer.clone())
+        .ok_or_else(|| "Session not found in registry".to_string())?;
+
+    let output_tx = session_registry
+        .with_session(&session_id, |entry| entry.output_tx.clone())
+        .ok_or_else(|| "Session output channel not found".to_string())?;
+
+    let output_rx = output_tx.subscribe();
+    let scroll_buffer_clone = scroll_buffer.clone();
 
     let sid = session_id.clone();
     tokio::spawn(async move {
@@ -775,13 +847,21 @@ pub async fn recreate_terminal_pty(
                 Some(msg) = channel.wait() => {
                     match msg {
                         ChannelMsg::Data { data } => {
-                            if stdout_tx.send(data.to_vec()).await.is_err() {
-                                break;
+                            let bytes = data.to_vec();
+                            let lines = parse_terminal_output(&bytes);
+                            if !lines.is_empty() {
+                                scroll_buffer_clone.append_batch(lines).await;
                             }
+                            let _ = output_tx.send(bytes);
                         }
                         ChannelMsg::ExtendedData { data, ext } => {
-                            if ext == 1 && stdout_tx.send(data.to_vec()).await.is_err() {
-                                break;
+                            if ext == 1 {
+                                let bytes = data.to_vec();
+                                let lines = parse_terminal_output(&bytes);
+                                if !lines.is_empty() {
+                                    scroll_buffer_clone.append_batch(lines).await;
+                                }
+                                let _ = output_tx.send(bytes);
                             }
                         }
                         ChannelMsg::Eof | ChannelMsg::Close => {
@@ -801,17 +881,12 @@ pub async fn recreate_terminal_pty(
     let extended_handle = ExtendedSessionHandle {
         id: session_id.clone(),
         cmd_tx: cmd_tx.clone(),
-        stdout_rx,
+        stdout_rx: output_rx,
     };
-
-    // 获取 scroll buffer（保留历史）
-    let scroll_buffer = session_registry
-        .with_session(&session_id, |entry| entry.scroll_buffer.clone())
-        .ok_or_else(|| "Session not found in registry".to_string())?;
 
     // 启动新的 WebSocket bridge
     let (_, port, token, disconnect_rx) =
-        WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer)
+        WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer, false)
             .await
             .map_err(|e| format!("Failed to start WebSocket bridge: {}", e))?;
 
@@ -823,8 +898,12 @@ pub async fn recreate_terminal_pty(
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Recreated session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
-            // 只更新 session registry 状态，不移除终端关联
-            let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+            if reason.is_recoverable() {
+                let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
+            } else {
+                // 只更新 session registry 状态，不移除终端关联
+                let _ = registry_clone.disconnect_complete(&session_id_clone, false);
+            }
         }
     });
 

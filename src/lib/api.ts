@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { guardSessionConnection } from './connectionGuard';
 import {
   SessionInfo,
   ConnectRequest,
@@ -436,31 +437,37 @@ export const api = {
   // ============ SFTP ============
   sftpInit: async (sessionId: string): Promise<string> => {
     if (USE_MOCK) return '/home/mock';
+    await guardSessionConnection(sessionId);
     return invoke('sftp_init', { sessionId });
   },
 
   sftpIsInitialized: async (sessionId: string): Promise<boolean> => {
     if (USE_MOCK) return true;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_is_initialized', { sessionId });
   },
 
   sftpListDir: async (sessionId: string, path: string, filter?: ListFilter): Promise<FileInfo[]> => {
     if (USE_MOCK) return mockFiles;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_list_dir', { sessionId, path, filter: filter || null });
   },
 
   sftpStat: async (sessionId: string, path: string): Promise<FileInfo> => {
     if (USE_MOCK) return mockFiles[0];
+    await guardSessionConnection(sessionId);
     return invoke('sftp_stat', { sessionId, path });
   },
 
   sftpPreview: async (sessionId: string, path: string): Promise<PreviewContent> => {
     if (USE_MOCK) return { Text: { data: 'Mock preview', mime_type: 'text/plain', language: null, encoding: 'UTF-8' } };
+    await guardSessionConnection(sessionId);
     return invoke('sftp_preview', { sessionId, path });
   },
 
   sftpPreviewHex: async (sessionId: string, path: string, offset: number): Promise<PreviewContent> => {
     if (USE_MOCK) return { Hex: { data: '00000000  00 00 00 00 |....|', total_size: 16, offset: 0, chunk_size: 16, has_more: false } };
+    await guardSessionConnection(sessionId);
     return invoke('sftp_preview_hex', { sessionId, path, offset });
   },
 
@@ -476,61 +483,73 @@ export const api = {
     encoding?: string
   ): Promise<{ mtime: number | null; size: number | null; encoding_used: string }> => {
     if (USE_MOCK) return { mtime: Date.now() / 1000, size: content.length, encoding_used: encoding || 'UTF-8' };
+    await guardSessionConnection(sessionId);
     return invoke('sftp_write_content', { sessionId, path, content, encoding });
   },
 
   sftpDownload: async (sessionId: string, remotePath: string, localPath: string, transferId?: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_download', { sessionId, remotePath, localPath, transferId });
   },
 
   sftpUpload: async (sessionId: string, localPath: string, remotePath: string, transferId?: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_upload', { sessionId, localPath, remotePath, transferId });
   },
 
   sftpDelete: async (sessionId: string, path: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_delete', { sessionId, path });
   },
 
   sftpDeleteRecursive: async (sessionId: string, path: string): Promise<number> => {
     if (USE_MOCK) return 1;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_delete_recursive', { sessionId, path });
   },
 
   sftpDownloadDir: async (sessionId: string, remotePath: string, localPath: string): Promise<number> => {
     if (USE_MOCK) return 0;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_download_dir', { sessionId, remotePath, localPath });
   },
 
   sftpUploadDir: async (sessionId: string, localPath: string, remotePath: string): Promise<number> => {
     if (USE_MOCK) return 0;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_upload_dir', { sessionId, localPath, remotePath });
   },
 
   sftpMkdir: async (sessionId: string, path: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_mkdir', { sessionId, path });
   },
 
   sftpRename: async (sessionId: string, oldPath: string, newPath: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_rename', { sessionId, oldPath, newPath });
   },
 
   sftpPwd: async (sessionId: string): Promise<string> => {
     if (USE_MOCK) return '/home/mock';
+    await guardSessionConnection(sessionId);
     return invoke('sftp_pwd', { sessionId });
   },
 
   sftpCd: async (sessionId: string, path: string): Promise<string> => {
     if (USE_MOCK) return path;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_cd', { sessionId, path });
   },
 
   sftpClose: async (sessionId: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_close', { sessionId });
   },
 
@@ -564,12 +583,14 @@ export const api = {
   // SFTP Resume Transfer - List incomplete transfers
   sftpListIncompleteTransfers: async (sessionId: string): Promise<IncompleteTransferInfo[]> => {
     if (USE_MOCK) return [];
+    await guardSessionConnection(sessionId);
     return invoke('sftp_list_incomplete_transfers', { sessionId });
   },
 
   // SFTP Resume Transfer - Resume a specific transfer with retry support
   sftpResumeTransferWithRetry: async (sessionId: string, transferId: string): Promise<void> => {
     if (USE_MOCK) return;
+    await guardSessionConnection(sessionId);
     return invoke('sftp_resume_transfer_with_retry', { sessionId, transferId });
   },
 

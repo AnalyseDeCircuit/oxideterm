@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { api } from '../lib/api';
+import { guardSessionConnection, isConnectionGuardError } from '../lib/connectionGuard';
 import { topologyResolver } from '../lib/topologyResolver';
 import { useSettingsStore } from './settingsStore';
 import type { 
@@ -869,6 +870,15 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         throw new Error('No valid terminal session found. Please create a new terminal first.');
       }
       
+      try {
+        await guardSessionConnection(validTerminalId);
+      } catch (err) {
+        if (!isConnectionGuardError(err)) {
+          throw err;
+        }
+        return null;
+      }
+
       const sftpId = await api.sftpInit(validTerminalId);
       
       // 更新后端节点状态
