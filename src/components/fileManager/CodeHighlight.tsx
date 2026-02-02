@@ -5,69 +5,15 @@
 
 import React, { useMemo } from 'react';
 import Prism from 'prismjs';
+import { useSettingsStore } from '../../store/settingsStore';
+import { getFontFamilyCSS } from './fontUtils';
 import { getPrismLanguage } from './utils';
 
 // Import Prism core styles (we override most with Tailwind)
 import 'prismjs/themes/prism-tomorrow.css';
 
-// Import commonly used languages
-// NOTE: Order matters! Some languages have dependencies:
-// - markup must come before markup-templating
-// - markup-templating must come before PHP
-import 'prismjs/components/prism-markup'; // HTML/XML - base for many languages
-import 'prismjs/components/prism-css';
-import 'prismjs/components/prism-clike'; // Base for C-like languages
-import 'prismjs/components/prism-javascript';
-import 'prismjs/components/prism-typescript';
-import 'prismjs/components/prism-jsx';
-import 'prismjs/components/prism-tsx';
-import 'prismjs/components/prism-c';
-import 'prismjs/components/prism-cpp';
-import 'prismjs/components/prism-csharp';
-import 'prismjs/components/prism-java';
-import 'prismjs/components/prism-markup-templating'; // Required by PHP
-import 'prismjs/components/prism-php';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-rust';
-import 'prismjs/components/prism-go';
-import 'prismjs/components/prism-ruby';
-import 'prismjs/components/prism-swift';
-import 'prismjs/components/prism-kotlin';
-import 'prismjs/components/prism-scala';
-import 'prismjs/components/prism-bash';
-import 'prismjs/components/prism-shell-session';
-import 'prismjs/components/prism-sql';
-import 'prismjs/components/prism-json';
-import 'prismjs/components/prism-yaml';
-import 'prismjs/components/prism-toml';
-import 'prismjs/components/prism-markdown';
-import 'prismjs/components/prism-scss';
-import 'prismjs/components/prism-sass';
-import 'prismjs/components/prism-less';
-import 'prismjs/components/prism-diff';
-import 'prismjs/components/prism-docker';
-import 'prismjs/components/prism-nginx';
-import 'prismjs/components/prism-ini';
-import 'prismjs/components/prism-git';
-import 'prismjs/components/prism-makefile';
-import 'prismjs/components/prism-lua';
-import 'prismjs/components/prism-perl';
-import 'prismjs/components/prism-regex';
-import 'prismjs/components/prism-vim';
-
-import { useSettingsStore } from '../../store/settingsStore';
-
-// Get font family CSS value from settings key
-const getFontFamilyCSS = (val: string): string => {
-  switch(val) {
-    case 'jetbrains': return '"JetBrains Mono", monospace';
-    case 'meslo': return '"MesloLGM Nerd Font", monospace';
-    case 'tinos': return '"Tinos Nerd Font", monospace';
-    case 'menlo': return 'Menlo, Monaco, "Courier New", monospace';
-    case 'courier': return '"Courier New", Courier, monospace';
-    default: return '"JetBrains Mono", monospace';
-  }
-};
+// Register Prism languages (side-effects)
+import './prismLanguages';
 
 export interface CodeHighlightProps {
   code: string;

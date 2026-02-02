@@ -89,6 +89,8 @@
     "nextFile": "下一个文件",
     "toggleInfo": "切换信息面板",
     "readonly": "只读",
-    "readwrite": "可读写"
+    "readwrite": "可读写",
+    "loadingMore": "加载中...",
+    "emptyFile": "空文件"
   }
 }

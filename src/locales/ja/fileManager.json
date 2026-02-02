@@ -89,6 +89,8 @@
     "nextFile": "次のファイル",
     "toggleInfo": "情報パネル切替",
     "readonly": "読み取り専用",
-    "readwrite": "読み書き可能"
+    "readwrite": "読み書き可能",
+    "loadingMore": "読み込み中...",
+    "emptyFile": "空のファイル"
   }
 }

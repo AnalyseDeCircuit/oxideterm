@@ -89,6 +89,8 @@
     "nextFile": "Nächste Datei",
     "toggleInfo": "Info-Panel umschalten",
     "readonly": "Schreibgeschützt",
-    "readwrite": "Lesen/Schreiben"
+    "readwrite": "Lesen/Schreiben",
+    "loadingMore": "Wird geladen...",
+    "emptyFile": "Leere Datei"
   }
 }

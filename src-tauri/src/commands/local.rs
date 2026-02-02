@@ -326,6 +326,14 @@ pub struct FileMetadata {
     pub mime_type: Option<String>,
 }
 
+/// File chunk response for streaming preview
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChunk {
+    pub data: Vec<u8>,
+    pub eof: bool,
+}
+
 /// Get detailed file metadata
 /// 
 /// Returns comprehensive file information including size, timestamps, and permissions.
@@ -391,6 +399,32 @@ pub async fn local_get_file_metadata(path: String) -> Result<FileMetadata, Strin
             mime_type,
         })
     }
+}
+
+/// Read a chunk from a file for streaming preview
+#[tauri::command]
+pub async fn local_read_file_range(path: String, offset: u64, length: u64) -> Result<FileChunk, String> {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = File::open(&path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let metadata = file.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?;
+    let file_len = metadata.len();
+
+    if offset >= file_len {
+        return Ok(FileChunk { data: Vec::new(), eof: true });
+    }
+
+    let safe_len = length.min(1024 * 1024); // Cap to 1MB per read
+    file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Failed to seek file: {}", e))?;
+
+    let mut buffer = vec![0u8; safe_len as usize];
+    let bytes_read = file.read(&mut buffer).map_err(|e| format!("Failed to read file: {}", e))?;
+    buffer.truncate(bytes_read);
+
+    let eof = offset + bytes_read as u64 >= file_len || bytes_read == 0;
+
+    Ok(FileChunk { data: buffer, eof })
 }
 
 /// Guess MIME type from file extension

@@ -31,6 +31,7 @@ import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 import { formatUnixPermissions, formatFileSize, formatTimestamp, formatRelativeTime } from './utils';
 import { CodeHighlight } from './CodeHighlight';
+import { VirtualTextPreview } from './VirtualTextPreview';
 import { OfficePreview } from './OfficePreview';
 import type { FilePreview, PreviewType, ArchiveEntry, FileInfo } from './types';
 
@@ -354,22 +355,43 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
           {/* Code Preview with Syntax Highlighting */}
           {preview.type === 'code' && (
-            <div className="overflow-auto bg-zinc-950">
-              <CodeHighlight
-                code={preview.data}
-                language={preview.language || undefined}
-                filename={preview.name}
+            preview.stream ? (
+              <VirtualTextPreview
+                path={preview.stream.path}
+                size={preview.stream.size}
+                language={preview.stream.language}
+                highlight={true}
                 showLineNumbers={true}
                 className="p-4"
               />
-            </div>
+            ) : (
+              <div className="overflow-auto bg-zinc-950">
+                <CodeHighlight
+                  code={preview.data}
+                  language={preview.language || undefined}
+                  filename={preview.name}
+                  showLineNumbers={true}
+                  className="p-4"
+                />
+              </div>
+            )
           )}
 
           {/* Text Preview */}
           {preview.type === 'text' && (
-            <pre className="p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
-              {preview.data}
-            </pre>
+            preview.stream ? (
+              <VirtualTextPreview
+                path={preview.stream.path}
+                size={preview.stream.size}
+                highlight={false}
+                showLineNumbers={true}
+                className="p-4"
+              />
+            ) : (
+              <pre className="p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
+                {preview.data}
+              </pre>
+            )
           )}
 
           {/* PDF Preview (iframe) */}
