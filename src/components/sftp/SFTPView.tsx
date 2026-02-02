@@ -34,6 +34,7 @@ import { TransferConflictDialog, ConflictInfo, ConflictResolution } from './Tran
 import { PathBreadcrumb } from './PathBreadcrumb';
 import { FileDiffDialog } from './FileDiffDialog';
 import { RemoteFileEditor } from '../editor/RemoteFileEditor';
+import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { api } from '../../lib/api';
 import { FileInfo } from '../../types';
 import { listen } from '@tauri-apps/api/event';
@@ -1681,9 +1682,13 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
                 
                 {/* Text Preview with syntax highlighting */}
                 {!previewLoading && previewFile?.type === 'text' && (
-                    <pre className="p-4 font-mono text-xs text-zinc-300 whitespace-pre overflow-x-auto">
-                        <code>{previewFile.data}</code>
-                    </pre>
+                    <CodeHighlight
+                        code={previewFile.data}
+                        language={previewFile.language || undefined}
+                        filename={previewFile.name}
+                        showLineNumbers={true}
+                        className="p-4"
+                    />
                 )}
                 
                 {/* Image Preview */}

@@ -135,14 +135,20 @@ export const CodeHighlight: React.FC<CodeHighlightProps> = ({
     <div className={`code-highlight-container ${className || ''}`}>
       <pre
         className="overflow-auto m-0 p-0 bg-transparent"
-        style={{ 
+        style={{
           tabSize: 4,
           fontFamily: getFontFamilyCSS(fontFamily),
           fontSize: `${fontSize}px`,
           lineHeight: 1.5,
         }}
       >
-        <code className={`language-${prismLanguage} block`}>
+        <code
+          className={`language-${prismLanguage} block`}
+          style={{
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+          }}
+        >
           {highlightedLines.map((lineHtml, index) => (
             <div
               key={index}

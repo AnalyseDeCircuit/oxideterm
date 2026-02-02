@@ -250,6 +250,10 @@ pub fn extension_to_language(ext: &str) -> Option<String> {
     let lang = match ext.to_lowercase().as_str() {
         // Shell scripts
         "sh" | "bash" | "zsh" | "fish" => "bash",
+        // Shell config dotfiles (.bashrc -> ext="bashrc", .zshrc -> ext="zshrc")
+        "bashrc" | "bash_profile" | "bash_login" | "bash_logout" | "bash_aliases" => "bash",
+        "zshrc" | "zprofile" | "zshenv" | "zlogin" | "zlogout" => "bash",
+        "profile" | "cshrc" | "tcshrc" | "kshrc" => "bash",
         // Config files
         "conf" | "cfg" | "ini" | "properties" => "ini",
         "yaml" | "yml" => "yaml",
