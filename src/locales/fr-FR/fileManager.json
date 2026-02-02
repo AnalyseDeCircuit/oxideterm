@@ -89,6 +89,8 @@
     "nextFile": "Fichier suivant",
     "toggleInfo": "Basculer le panneau d'info",
     "readonly": "Lecture seule",
-    "readwrite": "Lecture/Écriture"
+    "readwrite": "Lecture/Écriture",
+    "loadingMore": "Chargement...",
+    "emptyFile": "Fichier vide"
   }
 }

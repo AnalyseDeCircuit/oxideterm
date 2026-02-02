@@ -89,6 +89,8 @@
     "nextFile": "Tệp tiếp theo",
     "toggleInfo": "Bật/tắt bảng thông tin",
     "readonly": "Chỉ đọc",
-    "readwrite": "Đọc/Ghi"
+    "readwrite": "Đọc/Ghi",
+    "loadingMore": "Đang tải...",
+    "emptyFile": "Tệp rỗng"
   }
 }

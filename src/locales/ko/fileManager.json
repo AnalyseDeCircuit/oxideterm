@@ -89,6 +89,8 @@
     "nextFile": "다음 파일",
     "toggleInfo": "정보 패널 전환",
     "readonly": "읽기 전용",
-    "readwrite": "읽기/쓰기"
+    "readwrite": "읽기/쓰기",
+    "loadingMore": "로딩 중...",
+    "emptyFile": "빈 파일"
   }
 }

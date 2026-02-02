@@ -114,6 +114,14 @@ export interface FileMetadata {
   mimeType?: string;
 }
 
+export interface StreamPreviewInfo {
+  path: string;
+  size: number;
+  type: 'text' | 'code';
+  language?: string;
+  mimeType?: string;
+}
+
 export interface FilePreview {
   name: string;
   path: string;
@@ -125,6 +133,8 @@ export interface FilePreview {
   size?: number;
   // Metadata (loaded on preview)
   metadata?: FileMetadata;
+  // Stream preview info (for large text/code files)
+  stream?: StreamPreviewInfo;
   // Hex specific
   hexOffset?: number;
   hexTotalSize?: number;

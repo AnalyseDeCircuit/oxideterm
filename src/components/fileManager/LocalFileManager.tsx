@@ -73,8 +73,10 @@ const SHELL_CONFIG_FILES = new Set([
   'CMakeLists.txt', 'Cargo.toml', 'package.json', 'tsconfig.json'
 ]);
 
-// Max file size for text preview (5MB)
-const MAX_PREVIEW_SIZE = 5 * 1024 * 1024;
+// Max file size for text preview (10MB)
+const MAX_PREVIEW_SIZE = 10 * 1024 * 1024;
+// Stream preview threshold for large text/code files (256KB)
+const STREAM_PREVIEW_THRESHOLD = 256 * 1024;
 
 // Helper: Convert Uint8Array to base64 safely (handles large files)
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -194,6 +196,13 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       let mimeType: string | undefined;
       let language: string | undefined;
       let archiveInfo: ArchiveInfo | undefined;
+      let stream: FilePreview['stream'];
+
+      const isShellConfig = SHELL_CONFIG_FILES.has(file.name) || (file.name.startsWith('.') && ext === '');
+      const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
+      const isCode = isShellConfig || CODE_EXTENSIONS.has(ext);
+      const isText = TEXT_EXTENSIONS.has(ext);
+      const shouldStream = (isCode || isText) && fileSize >= STREAM_PREVIEW_THRESHOLD;
       
       if (IMAGE_EXTENSIONS.has(ext)) {
         previewType = 'image';
@@ -230,26 +239,47 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
           previewType = 'unsupported';
           data = '';
         }
+      } else if (shouldStream) {
+        if (isCode) {
+          previewType = 'code';
+          language = isShellConfig ? 'bash' : LANGUAGE_MAP[ext];
+          stream = {
+            path: filePath,
+            size: fileSize,
+            type: 'code',
+            language,
+            mimeType,
+          };
+        } else {
+          previewType = 'text';
+          stream = {
+            path: filePath,
+            size: fileSize,
+            type: 'text',
+            mimeType,
+          };
+        }
       } else if (fileSize > MAX_PREVIEW_SIZE) {
         previewType = 'too-large';
         data = '';
-      } else if (SHELL_CONFIG_FILES.has(file.name) || (file.name.startsWith('.') && ext === '')) {
+      } else if (isShellConfig) {
         // Handle shell config files (dotfiles) as code
+        
         // Also handle any dotfile without extension (e.g., .tcshrc, .hidden, etc.)
         previewType = 'code';
         language = 'bash'; // Default to bash for shell configs
         const content = await readFile(filePath);
         data = new TextDecoder().decode(content);
-      } else if (MARKDOWN_EXTENSIONS.has(ext)) {
+      } else if (isMarkdown) {
         previewType = 'markdown';
         const content = await readFile(filePath);
         data = new TextDecoder().decode(content);
-      } else if (CODE_EXTENSIONS.has(ext)) {
+      } else if (isCode) {
         previewType = 'code';
         language = LANGUAGE_MAP[ext];
         const content = await readFile(filePath);
         data = new TextDecoder().decode(content);
-      } else if (TEXT_EXTENSIONS.has(ext)) {
+      } else if (isText) {
         previewType = 'text';
         const content = await readFile(filePath);
         data = new TextDecoder().decode(content);
