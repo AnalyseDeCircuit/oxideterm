@@ -2,7 +2,7 @@
 
 use russh::client::Handle;
 use russh::ChannelMsg;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info};
 
 use super::client::ClientHandler;
@@ -37,7 +37,7 @@ pub struct ExtendedSessionHandle {
     /// Channel for sending commands to the SSH session
     pub cmd_tx: mpsc::Sender<SessionCommand>,
     /// Channel for receiving data from the SSH session
-    pub stdout_rx: mpsc::Receiver<Vec<u8>>,
+    pub stdout_rx: broadcast::Receiver<Vec<u8>>,
 }
 
 impl Drop for SessionHandle {
@@ -82,7 +82,7 @@ impl ExtendedSessionHandle {
     ) -> (
         String,
         mpsc::Sender<SessionCommand>,
-        mpsc::Receiver<Vec<u8>>,
+        broadcast::Receiver<Vec<u8>>,
     ) {
         // Use ManuallyDrop to prevent Drop from running
         let handle = std::mem::ManuallyDrop::new(self);
@@ -173,7 +173,7 @@ impl SshSession {
 
         // Create channels for communication
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<SessionCommand>(1024);
-        let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(1024);
+        let (stdout_tx, stdout_rx) = broadcast::channel::<Vec<u8>>(1024);
 
         // Spawn task to handle the SSH channel with extended commands
         let sid = session_id.clone();
@@ -212,18 +212,12 @@ impl SshSession {
                     Some(msg) = channel.wait() => {
                         match msg {
                             ChannelMsg::Data { data } => {
-                                if stdout_tx.send(data.to_vec()).await.is_err() {
-                                    debug!("stdout receiver dropped, closing channel");
-                                    break;
-                                }
+                                let _ = stdout_tx.send(data.to_vec());
                             }
                             ChannelMsg::ExtendedData { data, ext } => {
                                 // Extended data (usually stderr)
-                                if ext == 1
-                                    && stdout_tx.send(data.to_vec()).await.is_err()
-                                {
-                                    debug!("stdout receiver dropped, closing channel");
-                                    break;
+                                if ext == 1 {
+                                    let _ = stdout_tx.send(data.to_vec());
                                 }
                             }
                             ChannelMsg::Eof => {

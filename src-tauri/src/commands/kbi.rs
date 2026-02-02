@@ -318,7 +318,7 @@ async fn run_kbi_flow(
 
     // Start WebSocket bridge with disconnect tracking
     let (_, ws_port, ws_token, _disconnect_rx) =
-        WsBridge::start_extended_with_disconnect(session_handle, scroll_buffer)
+        WsBridge::start_extended_with_disconnect(session_handle, scroll_buffer, false)
             .await
             .map_err(|e| {
                 registry.remove(&sid);

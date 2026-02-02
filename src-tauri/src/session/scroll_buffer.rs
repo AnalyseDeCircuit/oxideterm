@@ -130,6 +130,14 @@ impl ScrollBuffer {
         lines.iter().skip(start).take(count).cloned().collect()
     }
 
+    /// Get the last N lines from the buffer
+    pub async fn tail_lines(&self, count: usize) -> Vec<TerminalLine> {
+        let lines = self.lines.read().await;
+        let len = lines.len();
+        let start = len.saturating_sub(count);
+        lines.iter().skip(start).cloned().collect()
+    }
+
     /// Get all lines in the buffer
     pub async fn get_all(&self) -> Vec<TerminalLine> {
         let lines = self.lines.read().await;

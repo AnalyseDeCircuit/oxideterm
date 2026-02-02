@@ -6,7 +6,8 @@
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::time::Duration;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
 
 use super::state::SessionState;
@@ -194,6 +195,10 @@ impl SessionRegistry {
         entry.ws_port = Some(ws_port);
         entry.cmd_tx = Some(cmd_tx);
         entry.handle_controller = Some(handle_controller);
+        entry.ws_detached = false;
+        if let Some(cancel) = entry.ws_detach_cancel.take() {
+            let _ = cancel.send(());
+        }
 
         info!("Session {} connected on port {}", session_id, ws_port);
         Ok(())
@@ -224,6 +229,11 @@ impl SessionRegistry {
         entry.ws_token = Some(ws_token);
         entry.cmd_tx = Some(cmd_tx);
         entry.handle_controller = Some(handle_controller);
+        entry.ws_detached = false;
+
+        if let Some(cancel) = entry.ws_detach_cancel.take() {
+            let _ = cancel.send(());
+        }
         entry.connection_id = Some(connection_id.clone());
 
         info!(
@@ -266,6 +276,43 @@ impl SessionRegistry {
         entry.handle_controller = Some(handle_controller);
 
         info!("Session {} ws_info updated after PTY recreation (port: {})", session_id, ws_port);
+        Ok(())
+    }
+
+    /// Mark WS detached and schedule PTY cleanup after TTL (for seamless reconnect)
+    pub fn mark_ws_detached(
+        self: &Arc<Self>,
+        session_id: &str,
+        ttl: Duration,
+    ) -> Result<(), RegistryError> {
+        let mut entry = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
+
+        entry.ws_detached = true;
+
+        if let Some(cancel) = entry.ws_detach_cancel.take() {
+            let _ = cancel.send(());
+        }
+
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        entry.ws_detach_cancel = Some(cancel_tx);
+
+        let registry = Arc::clone(self);
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = tokio::time::sleep(ttl) => {
+                    if let Some(entry) = registry.sessions.get(&session_id) {
+                        let _ = entry.close().await;
+                    }
+                    let _ = registry.disconnect_complete(&session_id, false);
+                }
+                _ = cancel_rx => {}
+            }
+        });
+
         Ok(())
     }
 
@@ -317,6 +364,9 @@ impl SessionRegistry {
                 if entry.state_machine.is_active() {
                     self.decrement_active();
                 }
+                if let Some(cancel) = entry.ws_detach_cancel.take() {
+                    let _ = cancel.send(());
+                }
                 let _ = entry.state_machine.disconnect_complete();
                 info!("Session {} disconnected and removed", session_id);
             }
@@ -342,6 +392,10 @@ impl SessionRegistry {
             entry.ws_port = None;
             entry.cmd_tx = None;
             entry.handle_controller = None;
+            entry.ws_detached = false;
+            if let Some(cancel) = entry.ws_detach_cancel.take() {
+                let _ = cancel.send(());
+            }
 
             info!("Session {} disconnected", session_id);
         }
@@ -387,6 +441,21 @@ impl SessionRegistry {
         F: FnOnce(&SessionEntry) -> R,
     {
         self.sessions.get(session_id).map(|entry| f(entry.value()))
+    }
+
+    /// Get output broadcast sender for a session
+    pub fn get_output_tx(&self, session_id: &str) -> Option<broadcast::Sender<Vec<u8>>> {
+        self.sessions
+            .get(session_id)
+            .map(|entry| entry.output_tx.clone())
+    }
+
+    /// Check if session is currently WS-detached
+    pub fn is_ws_detached(&self, session_id: &str) -> bool {
+        self.sessions
+            .get(session_id)
+            .map(|entry| entry.ws_detached)
+            .unwrap_or(false)
     }
 
     /// Get session config by ID (for reconnection)
