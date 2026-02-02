@@ -97,6 +97,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const isMountedRef = useRef(true); // Track mount state for StrictMode
   const reconnectingRef = useRef(false); // Suppress close/error during intentional reconnect
+  const manualCloseRef = useRef(false); // Suppress recovery on intentional close
   const wsRecoveryInFlightRef = useRef(false);
   const wsRecoveryAttemptsRef = useRef(0);
   const wsRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -346,6 +347,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         reconnectingRef.current = true;
         const oldWs = wsRef.current;
         wsRef.current = null;
+        manualCloseRef.current = true;
         oldWs.close(1000, 'Reconnect');
       } else {
         return; // Same URL, already connected
@@ -483,12 +485,16 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
       ws.onclose = (event) => {
         if (!isMountedRef.current || wsRef.current !== ws) return;
+        if (manualCloseRef.current) {
+          manualCloseRef.current = false;
+          return;
+        }
         console.log('WebSocket closed after reconnect:', event.code, event.reason);
         if (event.code !== 1000) {
           term.writeln(`\r\n\x1b[33m${i18n.t('terminal.ssh.connection_closed_code', { code: event.code })}\x1b[0m`);
         }
-        if (!opened) {
-          recoverWebSocket('reconnect-close');
+        if (!reconnectingRef.current) {
+          recoverWebSocket(opened ? 'reconnect-close-opened' : 'reconnect-close');
         }
       };
     } catch (e) {
@@ -811,13 +817,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                     }
                 };
 
-                ws.onclose = () => {
+                ws.onclose = (event) => {
                   if (!isMountedRef.current || wsRef.current !== ws) return;
+                  if (manualCloseRef.current) {
+                    manualCloseRef.current = false;
+                    return;
+                  }
                   if (!reconnectingRef.current) {
                     term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_closed')}\x1b[0m`);
                   }
-                  if (!opened) {
-                    recoverWebSocket('initial-close');
+                  if (!reconnectingRef.current) {
+                    recoverWebSocket(opened ? 'initial-close-opened' : 'initial-close');
                   }
                 };
 
@@ -984,6 +994,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       }
       pendingDataRef.current = [];
       if (wsRef.current) {
+          manualCloseRef.current = true;
           wsRef.current.close();
           wsRef.current = null;
       }
