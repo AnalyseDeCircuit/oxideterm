@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Terminal, FolderOpen, GitFork, RefreshCw, XCircle, WifiOff, Settings, Activity, Network, Plug, Square } from 'lucide-react';
+import { X, Terminal, FolderOpen, GitFork, RefreshCw, XCircle, WifiOff, Settings, Activity, Network, Plug, Square, HardDrive } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
@@ -32,6 +32,8 @@ const TabIcon = ({ type }: { type: string }) => {
       return <Plug className={iconClass} />;
     case 'topology':
       return <div className="text-[10px]"><Network className={iconClass} /></div>;
+    case 'file_manager':
+      return <HardDrive className={iconClass} />;
     default:
       return null;
   }
@@ -53,6 +55,8 @@ const getTabTitle = (
       return t('sidebar.panels.connection_pool');
     case 'topology':
       return t('sidebar.panels.connection_matrix');
+    case 'file_manager':
+      return t('fileManager.title');
   }
 
   // Calculate pane count for terminal tabs with split panes

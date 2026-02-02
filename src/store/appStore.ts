@@ -612,7 +612,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   createTab: (type, sessionId) => {
     // Handle global/singleton tabs
-    if (type === 'settings' || type === 'connection_monitor' || type === 'connection_pool' || type === 'topology') {
+    if (type === 'settings' || type === 'connection_monitor' || type === 'connection_pool' || type === 'topology' || type === 'file_manager') {
       const existingTab = get().tabs.find(t => t.type === type);
       if (existingTab) {
         set({ activeTabId: existingTab.id });
@@ -631,6 +631,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } else if (type === 'topology') {
         title = i18n.t('tabs.connection_matrix');
         icon = '🕸️';
+      } else if (type === 'file_manager') {
+        title = i18n.t('fileManager.title');
+        icon = '💾';
       }
 
       const newTab: Tab = {

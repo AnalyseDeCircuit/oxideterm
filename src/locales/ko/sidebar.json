@@ -12,6 +12,7 @@
       "saved_title": "저장된 연결",
       "sftp": "SFTP",
       "sftp_sessions": "SFTP 세션",
+      "files": "파일 관리자",
       "forwards": "포트 포워딩",
       "forwards_title": "포트 포워딩",
       "connection_pool": "연결 풀",

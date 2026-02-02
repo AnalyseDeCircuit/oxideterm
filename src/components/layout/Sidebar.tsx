@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Terminal,
   Folder,
+  FolderOpen,
   ArrowLeftRight,
   Settings,
   Plus,
@@ -29,6 +30,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { useToast } from '../../hooks/useToast';
 import { AiChatPanel } from '../ai/AiChatPanel';
+import { LocalFileManager } from '../fileManager';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -657,6 +659,17 @@ export const Sidebar = () => {
             )}
           </div>
 
+          {/* File Manager */}
+          <Button
+            variant={tabs.find(t => t.id === activeTabId)?.type === 'file_manager' ? 'secondary' : 'ghost'}
+            size="icon"
+            onClick={() => createTab('file_manager')}
+            title={t('sidebar.panels.files')}
+            className="rounded-md h-9 w-9"
+          >
+            <FolderOpen className="h-5 w-5" />
+          </Button>
+
           <Button
             variant={tabs.find(t => t.id === activeTabId)?.type === 'settings' ? 'secondary' : 'ghost'}
             size="icon"
@@ -802,6 +815,17 @@ export const Sidebar = () => {
             </span>
           )}
         </div>
+
+        {/* File Manager */}
+        <Button
+          variant={tabs.find(t => t.id === activeTabId)?.type === 'file_manager' ? 'secondary' : 'ghost'}
+          size="icon"
+          onClick={() => createTab('file_manager')}
+          title={t('sidebar.panels.files')}
+          className="rounded-md h-9 w-9"
+        >
+          <FolderOpen className="h-5 w-5" />
+        </Button>
 
         <Button
           variant={tabs.find(t => t.id === activeTabId)?.type === 'settings' ? 'secondary' : 'ghost'}
@@ -1131,6 +1155,7 @@ export const Sidebar = () => {
               <AiChatPanel />
             </div>
           )}
+
         </div>
       </div>
 

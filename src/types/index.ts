@@ -320,7 +320,7 @@ export interface PersistedSessionInfo {
 }
 
 // Tab Types
-export type TabType = 'terminal' | 'sftp' | 'forwards' | 'settings' | 'connection_monitor' | 'connection_pool' | 'topology' | 'local_terminal' | 'ide';
+export type TabType = 'terminal' | 'sftp' | 'forwards' | 'settings' | 'connection_monitor' | 'connection_pool' | 'topology' | 'local_terminal' | 'ide' | 'file_manager';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split Pane Types (Layout Tree)

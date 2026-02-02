@@ -12,6 +12,7 @@
       "saved_title": "保存済み接続",
       "sftp": "SFTP",
       "sftp_sessions": "SFTPセッション",
+      "files": "ファイルマネージャー",
       "forwards": "ポートフォワーディング",
       "forwards_title": "ポートフォワーディング",
       "connection_pool": "接続プール",

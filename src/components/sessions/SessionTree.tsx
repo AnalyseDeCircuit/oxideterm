@@ -178,7 +178,7 @@ const TreeItem: React.FC<TreeItemProps> = ({
   depth,
   isLast = false,
   showLine = true,
-  lineColor = 'border-zinc-700',
+  lineColor: _lineColor = 'border-zinc-700',
   children,
 }) => {
   const paddingLeft = depth * INDENT_SIZE;

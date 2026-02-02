@@ -12,6 +12,7 @@
       "saved_title": "已儲存的連線",
       "sftp": "SFTP",
       "sftp_sessions": "SFTP 工作階段",
+      "files": "檔案管理器",
       "forwards": "連接埠轉發",
       "forwards_title": "連接埠轉發",
       "connection_pool": "連線池",

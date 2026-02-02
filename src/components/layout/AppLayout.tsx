@@ -19,6 +19,7 @@ import { Plus } from 'lucide-react';
 const SFTPView = lazy(() => import('../sftp/SFTPView').then(m => ({ default: m.SFTPView })));
 const ForwardsView = lazy(() => import('../forwards/ForwardsView').then(m => ({ default: m.ForwardsView })));
 const IdeWorkspace = lazy(() => import('../ide').then(m => ({ default: m.IdeWorkspace })));
+const LocalFileManager = lazy(() => import('../fileManager').then(m => ({ default: m.LocalFileManager })));
 
 // Loading fallback for lazy components
 const ViewLoader = () => {
@@ -126,6 +127,11 @@ export const AppLayout = () => {
                         sftpSessionId={tab.sessionId}
                         rootPath="~"
                       />
+                    </Suspense>
+                  )}
+                  {tab.type === 'file_manager' && (
+                    <Suspense fallback={<ViewLoader />}>
+                      <LocalFileManager />
                     </Suspense>
                   )}
                 </div>

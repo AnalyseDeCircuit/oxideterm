@@ -12,6 +12,7 @@
       "saved_title": "Conexões salvas",
       "sftp": "SFTP",
       "sftp_sessions": "Sessões SFTP",
+      "files": "Gerenciador de Arquivos",
       "forwards": "Encaminhamento de portas",
       "forwards_title": "Encaminhamento de portas",
       "connection_pool": "Pool de conexões",

@@ -12,6 +12,7 @@
       "saved_title": "Saved Connections",
       "sftp": "SFTP",
       "sftp_sessions": "SFTP Sessions",
+      "files": "File Manager",
       "forwards": "Port Forwarding",
       "forwards_title": "Port Forwarding",
       "connection_pool": "Connection Pool",
