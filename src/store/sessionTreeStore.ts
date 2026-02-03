@@ -123,6 +123,12 @@ interface SessionTreeStore {
   /** 断开前的终端数量 (nodeId -> count) - 用于重连时恢复终端 */
   disconnectedTerminalCounts: Map<string, number>;
   
+  // ========== Concurrency Lock (并发锁) ==========
+  /** 正在连接的节点 ID 集合（节点级锁） */
+  connectingNodeIds: Set<string>;
+  /** 全局连接锁（防止多条链同时执行） */
+  isConnectingChain: boolean;
+  
   // ========== Data Actions ==========
   fetchTree: () => Promise<void>;
   fetchSummary: () => Promise<void>;
@@ -142,6 +148,15 @@ interface SessionTreeStore {
   disconnectNode: (nodeId: string) => Promise<void>;
   /** 级联重连节点及其之前已连接的子节点 */
   reconnectCascade: (nodeId: string, options?: { skipChildren?: boolean }) => Promise<string[]>;
+  /** 
+   * 重置节点状态（焦土式清理）
+   * 
+   * 用于连接前确保节点状态干净，包括：
+   * - 关闭现有终端
+   * - 清理本地映射
+   * - 重置状态为 pending
+   */
+  resetNodeState: (nodeId: string) => Promise<void>;
   
   // ========== Terminal Management (新增) ==========
   /** 为节点创建新终端 */
@@ -167,7 +182,7 @@ interface SessionTreeStore {
   
   // ========== SFTP Management ==========
   /** 打开节点的 SFTP 会话 */
-  openSftpForNode: (nodeId: string) => Promise<string>;
+  openSftpForNode: (nodeId: string) => Promise<string | null>;
   /** 关闭节点的 SFTP 会话 */
   closeSftpForNode: (nodeId: string) => Promise<void>;
   
@@ -189,6 +204,18 @@ interface SessionTreeStore {
   clearLinkDown: (nodeId: string) => void;
   /** 设置重连进度 */
   setReconnectProgress: (nodeId: string, progress: ReconnectProgress | null) => void;
+  
+  // ========== Concurrency Lock Methods (并发锁方法) ==========
+  /** 尝试获取节点连接锁 */
+  acquireConnectLock: (nodeId: string) => boolean;
+  /** 释放节点连接锁 */
+  releaseConnectLock: (nodeId: string) => void;
+  /** 尝试获取链式连接锁（全局唯一） */
+  acquireChainLock: () => boolean;
+  /** 释放链式连接锁 */
+  releaseChainLock: () => void;
+  /** 检查节点是否正在连接中 */
+  isNodeConnecting: (nodeId: string) => boolean;
   
   // ========== State Drift Detection ==========
   /** 从后端同步状态并修复漂移 */
@@ -299,6 +326,10 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     linkDownNodeIds: new Set<string>(),
     reconnectProgress: new Map<string, ReconnectProgress>(),
     disconnectedTerminalCounts: new Map<string, number>(),
+    
+    // ========== Concurrency Lock Initial State ==========
+    connectingNodeIds: new Set<string>(),
+    isConnectingChain: false,
     
     // ========== Data Actions ==========
     
@@ -496,27 +527,55 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     
     // ========== Connection Management ==========
     
+    /**
+     * 连接节点（建立 SSH 连接）
+     * 
+     * 包含并发锁机制：
+     * 1. 获取节点锁，防止重复连接
+     * 2. 执行连接
+     * 3. finally 释放锁
+     * 
+     * 异常处理：
+     * - 锁获取失败：静默返回，不抛异常
+     * - 连接失败：回滚状态，释放锁，抛出异常
+     */
     connectNode: async (nodeId: string) => {
       const node = get().getRawNode(nodeId);
       if (!node) throw new Error(`Node ${nodeId} not found`);
       
-      // 检查前端状态，避免重复连接
-      if (node.state.status === 'connecting' || node.state.status === 'connected') {
-        console.log(`Node ${nodeId} is already ${node.state.status}, skipping connect`);
+      // ========== 并发锁检查 ==========
+      
+      // 检查节点是否已在连接中（通过锁）
+      if (get().isNodeConnecting(nodeId)) {
+        console.log(`[connectNode] Node ${nodeId} is already connecting (locked), skipping`);
         return;
       }
       
-      // 乐观更新：立即在本地设置为 connecting，阻止竞态重复调用
-      set((state) => ({
-        rawNodes: state.rawNodes.map(n => 
-          n.id === nodeId 
-            ? { ...n, state: { ...n.state, status: 'connecting' as const } }
-            : n
-        )
-      }));
-      get().rebuildUnifiedNodes();
+      // 检查前端状态，避免重复连接（双重检查）
+      if (node.state.status === 'connecting' || node.state.status === 'connected') {
+        console.log(`[connectNode] Node ${nodeId} is already ${node.state.status}, skipping`);
+        return;
+      }
+      
+      // 尝试获取锁
+      if (!get().acquireConnectLock(nodeId)) {
+        console.warn(`[connectNode] Failed to acquire lock for node ${nodeId}`);
+        return;
+      }
+      
+      console.log(`[connectNode] Starting connection for node ${nodeId}`);
       
       try {
+        // 乐观更新：立即在本地设置为 connecting
+        set((state) => ({
+          rawNodes: state.rawNodes.map(n => 
+            n.id === nodeId 
+              ? { ...n, state: { ...n.state, status: 'connecting' as const } }
+              : n
+          )
+        }));
+        get().rebuildUnifiedNodes();
+        
         const response = await api.connectTreeNode({ nodeId });
         
         // 更新连接 ID
@@ -537,11 +596,21 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         set({ linkDownNodeIds: newLinkDownIds });
         
         await get().fetchTree();
+        
+        console.log(`[connectNode] Node ${nodeId} connected successfully`);
       } catch (e) {
         // 失败时回滚到 failed 状态
-        await api.updateTreeNodeState(nodeId, 'failed', String(e));
+        console.error(`[connectNode] Node ${nodeId} connection failed:`, e);
+        try {
+          await api.updateTreeNodeState(nodeId, 'failed', String(e));
+        } catch (updateErr) {
+          console.warn(`[connectNode] Failed to update node state to failed:`, updateErr);
+        }
         await get().fetchTree();
         throw e;
+      } finally {
+        // ========== 始终释放锁 ==========
+        get().releaseConnectLock(nodeId);
       }
     },
     
@@ -671,6 +740,141 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       await get().fetchTree();
       
       return reconnected;
+    },
+    
+    /**
+     * 重置节点状态（焦土式清理）
+     * 
+     * 执行顺序：
+     * 1. 关闭该节点的所有终端（调用后端）
+     * 2. 清理本地映射
+     * 3. 重置节点状态为 pending
+     * 
+     * 异常处理：
+     * - 后端调用失败时记录警告但不中断流程
+     * - 确保本地状态一定被清理（即使后端失败）
+     */
+    resetNodeState: async (nodeId: string): Promise<void> => {
+      const node = get().getRawNode(nodeId);
+      if (!node) {
+        console.warn(`[resetNodeState] Node ${nodeId} not found`);
+        return;
+      }
+      
+      console.log(`[resetNodeState] Resetting node ${nodeId}`);
+      
+      // ========== Phase 1: 后端物理销毁 ==========
+      
+      // 1a. 关闭该节点的所有终端
+      const terminalIds = get().nodeTerminalMap.get(nodeId) || [];
+      
+      // 也检查后端记录的 terminalSessionId
+      if (node.terminalSessionId && !terminalIds.includes(node.terminalSessionId)) {
+        terminalIds.push(node.terminalSessionId);
+      }
+      
+      for (const terminalId of terminalIds) {
+        try {
+          await api.closeTerminal(terminalId);
+          console.debug(`[resetNodeState] Closed terminal ${terminalId}`);
+        } catch (e) {
+          // 终端可能已不存在，忽略错误
+          console.warn(`[resetNodeState] Failed to close terminal ${terminalId}:`, e);
+        }
+      }
+      
+      // 1b. 关闭 SFTP 会话（如果有）
+      if (node.sftpSessionId) {
+        try {
+          // 使用第一个终端 ID 来关闭 SFTP（SFTP 依赖终端会话）
+          const anyTerminalId = terminalIds[0];
+          if (anyTerminalId) {
+            await api.sftpClose(anyTerminalId);
+            console.debug(`[resetNodeState] Closed SFTP for node ${nodeId}`);
+          }
+        } catch (e) {
+          console.warn(`[resetNodeState] Failed to close SFTP:`, e);
+        }
+      }
+      
+      // 1c. 短暂等待确保后端资源释放
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // ========== Phase 2: 清理 appStore sessions ==========
+      
+      try {
+        const { useAppStore } = await import('./appStore');
+        useAppStore.setState((state) => {
+          const newSessions = new Map(state.sessions);
+          for (const terminalId of terminalIds) {
+            newSessions.delete(terminalId);
+          }
+          return { sessions: newSessions };
+        });
+      } catch (e) {
+        console.warn(`[resetNodeState] Failed to clear appStore sessions:`, e);
+      }
+      
+      // ========== Phase 3: 清理本地映射 ==========
+      
+      const { nodeTerminalMap, terminalNodeMap } = get();
+      const newTerminalMap = new Map(nodeTerminalMap);
+      const newNodeMap = new Map(terminalNodeMap);
+      
+      // 清理该节点的所有终端映射
+      const existingTerminals = newTerminalMap.get(nodeId) || [];
+      newTerminalMap.delete(nodeId);
+      for (const tid of existingTerminals) {
+        newNodeMap.delete(tid);
+      }
+      // 也清理后端记录的 terminalSessionId
+      if (node.terminalSessionId) {
+        newNodeMap.delete(node.terminalSessionId);
+      }
+      
+      set({ 
+        nodeTerminalMap: newTerminalMap, 
+        terminalNodeMap: newNodeMap 
+      });
+      
+      // ========== Phase 4: 重置节点状态为 pending ==========
+      
+      set((state) => ({
+        rawNodes: state.rawNodes.map(n => 
+          n.id === nodeId 
+            ? { 
+                ...n, 
+                state: { status: 'pending' as const },
+                sshConnectionId: null,
+                terminalSessionId: null,
+                sftpSessionId: null,
+              }
+            : n
+        )
+      }));
+      
+      // ========== Phase 5: 清除 link-down 标记 ==========
+      
+      const { linkDownNodeIds } = get();
+      if (linkDownNodeIds.has(nodeId)) {
+        const newLinkDownIds = new Set(linkDownNodeIds);
+        newLinkDownIds.delete(nodeId);
+        set({ linkDownNodeIds: newLinkDownIds });
+      }
+      
+      // ========== Phase 6: 清除重连进度 ==========
+      
+      const { reconnectProgress } = get();
+      if (reconnectProgress.has(nodeId)) {
+        const newProgress = new Map(reconnectProgress);
+        newProgress.delete(nodeId);
+        set({ reconnectProgress: newProgress });
+      }
+      
+      // 重建统一节点
+      get().rebuildUnifiedNodes();
+      
+      console.log(`[resetNodeState] Node ${nodeId} reset complete`);
     },
     
     // ========== Terminal Management ==========
@@ -1045,6 +1249,91 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       }
       
       set({ reconnectProgress: newProgress });
+    },
+    
+    // ========== Concurrency Lock Methods ==========
+    
+    /**
+     * 尝试获取节点连接锁
+     * 
+     * @param nodeId 节点 ID
+     * @returns true 如果成功获取锁，false 如果节点已在连接中
+     * 
+     * 异常处理：
+     * - 如果节点已被锁定，返回 false 而不是抛出异常
+     * - 调用者负责处理返回 false 的情况（显示 Toast 等）
+     */
+    acquireConnectLock: (nodeId: string): boolean => {
+      const { connectingNodeIds } = get();
+      if (connectingNodeIds.has(nodeId)) {
+        console.warn(`[Lock] Node ${nodeId} is already connecting, rejecting duplicate request`);
+        return false;
+      }
+      
+      const newSet = new Set(connectingNodeIds);
+      newSet.add(nodeId);
+      set({ connectingNodeIds: newSet });
+      console.debug(`[Lock] Acquired lock for node ${nodeId}`);
+      return true;
+    },
+    
+    /**
+     * 释放节点连接锁
+     * 
+     * 安全性：即使节点未被锁定也不会报错（幂等操作）
+     */
+    releaseConnectLock: (nodeId: string): void => {
+      const { connectingNodeIds } = get();
+      if (!connectingNodeIds.has(nodeId)) {
+        console.debug(`[Lock] Node ${nodeId} was not locked, skipping release`);
+        return;
+      }
+      
+      const newSet = new Set(connectingNodeIds);
+      newSet.delete(nodeId);
+      set({ connectingNodeIds: newSet });
+      console.debug(`[Lock] Released lock for node ${nodeId}`);
+    },
+    
+    /**
+     * 尝试获取链式连接锁（全局唯一）
+     * 
+     * @returns true 如果成功获取锁，false 如果已有链在连接中
+     * 
+     * 用途：防止多条跳板链同时执行，避免竞态条件
+     */
+    acquireChainLock: (): boolean => {
+      if (get().isConnectingChain) {
+        console.warn('[Lock] A chain connection is already in progress');
+        return false;
+      }
+      set({ isConnectingChain: true });
+      console.debug('[Lock] Acquired chain lock');
+      return true;
+    },
+    
+    /**
+     * 释放链式连接锁
+     * 
+     * 安全性：即使未被锁定也不会报错（幂等操作）
+     */
+    releaseChainLock: (): void => {
+      if (!get().isConnectingChain) {
+        console.debug('[Lock] Chain was not locked, skipping release');
+        return;
+      }
+      set({ isConnectingChain: false });
+      console.debug('[Lock] Released chain lock');
+    },
+    
+    /**
+     * 检查节点是否正在连接中
+     * 
+     * @param nodeId 节点 ID
+     * @returns true 如果节点正在连接中
+     */
+    isNodeConnecting: (nodeId: string): boolean => {
+      return get().connectingNodeIds.has(nodeId);
     },
     
     // ========== State Drift Detection ==========
