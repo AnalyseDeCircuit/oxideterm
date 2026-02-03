@@ -366,6 +366,7 @@ pub fn run() {
             commands::connect_tree_node,
             commands::disconnect_tree_node,
             commands::connect_manual_preset,
+            commands::destroy_node_sessions,
             // Config commands
             commands::config::get_connections,
             commands::config::get_recent_connections,
@@ -527,6 +528,7 @@ pub fn run() {
             commands::connect_tree_node,
             commands::disconnect_tree_node,
             commands::connect_manual_preset,
+            commands::destroy_node_sessions,
             // Config commands
             commands::config::get_connections,
             commands::config::get_recent_connections,

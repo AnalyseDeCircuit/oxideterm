@@ -136,7 +136,8 @@ interface SessionTreeStore {
   // ========== Node Operations ==========
   addRootNode: (request: ConnectServerRequest) => Promise<string>;
   drillDown: (request: DrillDownRequest) => Promise<string>;
-  expandManualPreset: (request: ConnectPresetChainRequest) => Promise<string>;
+  /** 展开手工预设链，返回目标节点ID和路径（Phase 2.2: 只展开不连接） */
+  expandManualPreset: (request: ConnectPresetChainRequest) => Promise<{ targetNodeId: string; pathNodeIds: string[]; chainDepth: number }>;
   expandAutoRoute: (request: import('../types').ExpandAutoRouteRequest) => Promise<import('../types').ExpandAutoRouteResponse>;
   removeNode: (nodeId: string) => Promise<string[]>;
   clearTree: () => Promise<void>;
@@ -417,10 +418,10 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     expandManualPreset: async (request: ConnectPresetChainRequest) => {
       set({ isLoading: true, error: null });
       try {
-        const targetId = await api.expandManualPreset(request);
+        const response = await api.expandManualPreset(request);
         await get().fetchTree();
-        set({ selectedNodeId: targetId, isLoading: false });
-        return targetId;
+        set({ selectedNodeId: response.targetNodeId, isLoading: false });
+        return response;
       } catch (e) {
         set({ error: String(e), isLoading: false });
         throw e;

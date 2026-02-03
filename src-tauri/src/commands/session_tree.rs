@@ -242,14 +242,32 @@ pub async fn tree_drill_down(
     Ok(node_id)
 }
 
-/// 展开静态手工预设链（模式1）
+/// 展开手工预设链响应
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpandManualPresetResponse {
+    /// 目标节点 ID
+    pub target_node_id: String,
+    /// 路径上所有节点的 ID（从根到目标）
+    pub path_node_ids: Vec<String>,
+    /// 链的深度（跳板数量 + 1）
+    pub chain_depth: u32,
+}
+
+/// 展开静态手工预设链（模式1，Phase 2.2 升级版）
 /// 
-/// 将 proxy_chain 配置展开为树节点。
+/// 将 proxy_chain 配置展开为树节点，返回完整路径信息。
+/// 前端使用 pathNodeIds 进行线性连接。
 #[tauri::command]
 pub async fn expand_manual_preset(
     state: State<'_, Arc<SessionTreeState>>,
     request: ConnectPresetChainRequest,
-) -> Result<String, String> {
+) -> Result<ExpandManualPresetResponse, String> {
+    tracing::info!(
+        "[expand_manual_preset] Expanding preset chain for saved_connection: {}",
+        request.saved_connection_id
+    );
+    
     let mut hops = Vec::new();
     for hop in &request.hops {
         let auth = build_auth(&hop.auth_type, hop.password.clone(), hop.key_path.clone(), hop.passphrase.clone())?;
@@ -270,12 +288,34 @@ pub async fn expand_manual_preset(
         None,
     );
     
-    let mut tree = state.tree.write().await;
-    let target_id = tree.expand_manual_preset(&request.saved_connection_id, hops, target)
-        .map_err(|e| e.to_string())?;
+    // 展开为树节点
+    let target_node_id = {
+        let mut tree = state.tree.write().await;
+        tree.expand_manual_preset(&request.saved_connection_id, hops, target)
+            .map_err(|e| e.to_string())?
+    };
     
-    tracing::info!("Expanded manual preset chain, target node: {}", target_id);
-    Ok(target_id)
+    // 收集从根到目标的路径
+    let path_node_ids: Vec<String> = {
+        let tree = state.tree.read().await;
+        tree.get_path_to_node(&target_node_id)
+            .iter()
+            .map(|n| n.id.clone())
+            .collect()
+    };
+    
+    let chain_depth = path_node_ids.len() as u32;
+    
+    tracing::info!(
+        "[expand_manual_preset] Expanded chain '{}': target={}, path={:?}, depth={}",
+        request.saved_connection_id, target_node_id, path_node_ids, chain_depth
+    );
+    
+    Ok(ExpandManualPresetResponse {
+        target_node_id,
+        path_node_ids,
+        chain_depth,
+    })
 }
 
 /// 更新节点状态
@@ -1090,4 +1130,171 @@ fn topology_auth_to_session_auth(
         }
         "agent" | _ => Ok(AuthMethod::Agent),
     }
+}
+
+// ============================================================================
+// Node Resource Destruction (Phase 2.1: destroy_node_sessions)
+// ============================================================================
+
+use crate::bridge::BridgeManager;
+use crate::session::SessionRegistry;
+use crate::sftp::session::SftpRegistry;
+
+/// 销毁节点会话响应
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DestroyNodeSessionsResponse {
+    /// 已销毁的终端 ID 列表
+    pub destroyed_terminals: Vec<String>,
+    /// SSH 连接是否已断开
+    pub ssh_disconnected: bool,
+    /// SFTP 会话是否已关闭
+    pub sftp_closed: bool,
+}
+
+/// 销毁节点关联的所有会话资源（焦土式清理）
+/// 
+/// 此命令用于前端"焦土式清理"，确保后端资源完全释放：
+/// - 关闭所有关联的终端（BridgeManager + SessionRegistry）
+/// - 关闭 SFTP 会话（SftpRegistry）
+/// - 如果 SSH 连接无剩余引用，断开 SSH 连接
+/// - 重置节点元数据
+/// 
+/// # 设计原则
+/// 
+/// 后端作为纯粹的"执行者"，不做决策：
+/// - 前端明确要求销毁什么，后端就销毁什么
+/// - 返回详细的销毁结果，让前端知道发生了什么
+/// - 幂等性：重复调用不会产生错误
+#[tauri::command]
+pub async fn destroy_node_sessions(
+    state: State<'_, Arc<SessionTreeState>>,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+    session_registry: State<'_, Arc<SessionRegistry>>,
+    bridge_manager: State<'_, BridgeManager>,
+    sftp_registry: State<'_, Arc<SftpRegistry>>,
+    node_id: String,
+) -> Result<DestroyNodeSessionsResponse, String> {
+    tracing::info!("[destroy_node_sessions] Starting cleanup for node: {}", node_id);
+    
+    let mut destroyed_terminals = Vec::new();
+    let mut ssh_disconnected = false;
+    let mut sftp_closed = false;
+    
+    // 1. 获取节点信息（快照，避免长时间持锁）
+    let (ssh_connection_id, terminal_session_id, sftp_session_id) = {
+        let tree = state.tree.read().await;
+        let node = match tree.get_node(&node_id) {
+            Some(n) => n,
+            None => {
+                tracing::warn!("[destroy_node_sessions] Node not found: {}, treating as already cleaned", node_id);
+                return Ok(DestroyNodeSessionsResponse {
+                    destroyed_terminals: vec![],
+                    ssh_disconnected: false,
+                    sftp_closed: false,
+                });
+            }
+        };
+        (
+            node.ssh_connection_id.clone(),
+            node.terminal_session_id.clone(),
+            node.sftp_session_id.clone(),
+        )
+    };
+    
+    tracing::debug!(
+        "[destroy_node_sessions] Node {} resources: ssh={:?}, terminal={:?}, sftp={:?}",
+        node_id, ssh_connection_id, terminal_session_id, sftp_session_id
+    );
+    
+    // 2. 关闭终端（BridgeManager 会发送 Close 命令到 PTY）
+    if let Some(terminal_id) = &terminal_session_id {
+        tracing::info!("[destroy_node_sessions] Closing terminal: {}", terminal_id);
+        
+        // 从 BridgeManager 注销（会发送 Close 命令）
+        if let Some(_bridge_info) = bridge_manager.unregister(terminal_id) {
+            tracing::debug!("[destroy_node_sessions] Bridge unregistered: {}", terminal_id);
+        }
+        
+        // 从 SessionRegistry 移除
+        session_registry.remove(terminal_id);
+        tracing::debug!("[destroy_node_sessions] Session removed from registry: {}", terminal_id);
+        
+        destroyed_terminals.push(terminal_id.clone());
+    }
+    
+    // 3. 关闭 SFTP 会话
+    if let Some(sftp_id) = &sftp_session_id {
+        tracing::info!("[destroy_node_sessions] Closing SFTP session: {}", sftp_id);
+        if sftp_registry.remove(sftp_id).is_some() {
+            sftp_closed = true;
+            tracing::debug!("[destroy_node_sessions] SFTP session removed: {}", sftp_id);
+        }
+    }
+    
+    // 4. 检查 SSH 连接是否需要断开
+    if let Some(ssh_id) = &ssh_connection_id {
+        tracing::info!("[destroy_node_sessions] Checking SSH connection: {}", ssh_id);
+        
+        // 从 SSH 连接中移除该终端
+        if let Some(terminal_id) = &terminal_session_id {
+            if let Err(e) = connection_registry.remove_terminal(ssh_id, terminal_id).await {
+                tracing::warn!(
+                    "[destroy_node_sessions] Failed to remove terminal {} from SSH connection {}: {}",
+                    terminal_id, ssh_id, e
+                );
+            }
+        }
+        
+        // 检查剩余引用（终端 + SFTP）
+        if let Some(info) = connection_registry.get_info(ssh_id).await {
+            let terminal_count = info.terminal_ids.len();
+            let has_sftp = info.sftp_session_id.is_some();
+            
+            tracing::debug!(
+                "[destroy_node_sessions] SSH {} remaining refs: terminals={}, has_sftp={}",
+                ssh_id, terminal_count, has_sftp
+            );
+            
+            if terminal_count == 0 && !has_sftp {
+                // 无剩余引用，断开 SSH 连接
+                tracing::info!("[destroy_node_sessions] Disconnecting SSH connection: {} (no remaining refs)", ssh_id);
+                if let Err(e) = connection_registry.disconnect(ssh_id).await {
+                    tracing::warn!("[destroy_node_sessions] Failed to disconnect SSH {}: {}", ssh_id, e);
+                } else {
+                    ssh_disconnected = true;
+                }
+            }
+        } else {
+            tracing::warn!("[destroy_node_sessions] SSH connection {} not found in registry", ssh_id);
+        }
+    }
+    
+    // 5. 重置节点元数据（不改变节点状态，交给前端决定）
+    {
+        let mut tree = state.tree.write().await;
+        if let Some(node) = tree.get_node_mut(&node_id) {
+            node.terminal_session_id = None;
+            node.sftp_session_id = None;
+            
+            if ssh_disconnected {
+                node.ssh_connection_id = None;
+                // 重置为 Pending，让前端可以重新发起连接
+                node.state = NodeState::Pending;
+            }
+            
+            tracing::debug!("[destroy_node_sessions] Node {} metadata reset", node_id);
+        }
+    }
+    
+    tracing::info!(
+        "[destroy_node_sessions] Completed for node {}: destroyed_terminals={:?}, ssh_disconnected={}, sftp_closed={}",
+        node_id, destroyed_terminals, ssh_disconnected, sftp_closed
+    );
+    
+    Ok(DestroyNodeSessionsResponse {
+        destroyed_terminals,
+        ssh_disconnected,
+        sftp_closed,
+    })
 }

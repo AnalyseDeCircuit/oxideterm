@@ -546,20 +546,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   reconnect: async (sessionId: string) => {
     const session = get().sessions.get(sessionId);
     if (!session) {
-      console.warn(`[AppStore] createTab(${type}) missing session ${sessionId}, attempting to hydrate`);
-      api.getSession(sessionId)
-        .then((fetched) => {
-          set((state) => {
-            const newSessions = new Map(state.sessions);
-            newSessions.set(sessionId, fetched);
-            return { sessions: newSessions };
-          });
-          // Retry tab creation after hydration
-          get().createTab(type, sessionId);
-        })
-        .catch((error) => {
-          console.error(`[AppStore] Failed to hydrate session ${sessionId} for ${type} tab:`, error);
-        });
+      console.warn(`[AppStore] reconnect: session ${sessionId} not found`);
       return;
     }
 

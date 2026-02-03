@@ -418,25 +418,26 @@ pub async fn create_terminal(
                 || err_str.contains("channel error");
             
             if is_connection_error {
-                // 连接已断开，标记为 LinkDown 并触发重连
+                // 连接已断开，标记为 LinkDown
+                // 🛑 后端禁止自动重连：只广播事件，等待前端指令
                 warn!("Channel open failed, connection {} may be dead: {}", conn_id, e);
                 tokio::spawn(async move {
                     // 先释放引用
                     let _ = conn_reg.release(&conn_id).await;
-                    // 标记连接为 LinkDown 并触发重连
+                    // 标记连接为 LinkDown
                     if let Some(entry) = conn_reg.get_connection(&conn_id) {
                         let current_state = entry.state().await;
-                        // 只有当连接还不是 LinkDown/Reconnecting 时才触发
+                        // 只有当连接还不是 LinkDown/Reconnecting 时才标记
                         if !matches!(current_state, ConnectionState::LinkDown | ConnectionState::Reconnecting) {
                             entry.set_state(ConnectionState::LinkDown).await;
                             // 发送状态变更事件
                             conn_reg.emit_connection_status_changed(&conn_id, "link_down").await;
-                            // 触发重连
-                            conn_reg.start_reconnect(&conn_id).await;
+                            // ❌ 已删除: conn_reg.start_reconnect(&conn_id).await;
+                            // 后端只广播，前端决定是否重连
                         }
                     }
                 });
-                return Err("CONNECTION_RECONNECTING: Connection lost, please wait for reconnect".to_string());
+                return Err("CONNECTION_LINK_DOWN: Connection lost, waiting for frontend command".to_string());
             } else {
                 tokio::spawn(async move {
                     let _ = conn_reg.release(&conn_id).await;

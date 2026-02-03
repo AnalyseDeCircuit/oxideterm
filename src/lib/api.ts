@@ -785,14 +785,6 @@ export const api = {
     return invoke('tree_drill_down', { request });
   },
 
-  /**
-   * 展开静态手工预设链（模式1）
-   */
-  expandManualPreset: async (request: import('../types').ConnectPresetChainRequest): Promise<string> => {
-    if (USE_MOCK) return 'mock-target-node-id';
-    return invoke('expand_manual_preset', { request });
-  },
-
   // ===== Auto-Route (Auto-generated from Saved Connections) APIs =====
 
   /**
@@ -955,6 +947,49 @@ export const api = {
       };
     }
     return invoke('connect_manual_preset', { request, cols, rows });
+  },
+
+  /**
+   * 展开手工预设链为树节点（不执行连接）
+   * 
+   * Phase 2.2: 后端降级 - 只展开节点，不建立连接
+   * 前端负责通过 connectNodeWithAncestors 进行线性连接
+   */
+  expandManualPreset: async (
+    request: { savedConnectionId: string; hops: Array<{ host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string }>; target: { host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string } }
+  ): Promise<{ targetNodeId: string; pathNodeIds: string[]; chainDepth: number }> => {
+    if (USE_MOCK) {
+      const mockId = crypto.randomUUID();
+      return {
+        targetNodeId: mockId,
+        pathNodeIds: [mockId],
+        chainDepth: request.hops.length + 1,
+      };
+    }
+    return invoke('expand_manual_preset', { request });
+  },
+
+  /**
+   * 销毁节点关联的所有会话资源（焦土式清理）
+   * 
+   * Phase 2.1: 前端调用此接口进行彻底清理
+   * - 关闭终端和 WebSocket bridges
+   * - 关闭 SFTP 会话
+   * - 条件性断开 SSH 连接（无剩余引用时）
+   * 
+   * 幂等性：重复调用不会产生错误
+   */
+  destroyNodeSessions: async (
+    nodeId: string
+  ): Promise<{ destroyedTerminals: string[]; sshDisconnected: boolean; sftpClosed: boolean }> => {
+    if (USE_MOCK) {
+      return {
+        destroyedTerminals: [],
+        sshDisconnected: false,
+        sftpClosed: false,
+      };
+    }
+    return invoke('destroy_node_sessions', { nodeId });
   },
 
   // ============ AI API Key Commands ============
