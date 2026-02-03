@@ -1,44 +1,122 @@
 /**
  * Hook to listen for SSH connection status change events from backend
  * 
- * 统一事件系统 (Phase 2 重构)
+ * Phase 3.5: 前端驱动的自动重连
  * 
  * Events:
  * - connection_status_changed: { connection_id, status, affected_children, timestamp }
- * - connection_reconnect_progress: { connection_id, attempt, max_attempts, next_retry_ms, timestamp }
- * - connection_reconnected: { connection_id, terminal_ids, forward_ids }
+ * 
+ * 🛑 已移除的事件监听（后端不再发送）：
+ * - connection_reconnect_progress: 后端重连引擎已物理删除
+ * - connection_reconnected: 后端不再自主重连
+ * 
+ * 重连策略：
+ * - 监听 link_down 事件
+ * - 防抖聚合：短时间内大量节点掉线时，只触发一次 reconnectCascade
+ * - 由 reconnectCascade 内部的 BFS 深度排序逻辑进行有序恢复
  */
 
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../store/appStore';
 import { useTransferStore } from '../store/transferStore';
-import { useSessionTreeStore, type ReconnectProgress } from '../store/sessionTreeStore';
+import { useSessionTreeStore } from '../store/sessionTreeStore';
 import { topologyResolver } from '../lib/topologyResolver';
-import { api } from '../lib/api';
 import i18n from '../i18n';
 import type { SshConnectionState } from '../types';
 
 interface ConnectionStatusEvent {
   connection_id: string;
   status: 'connected' | 'link_down' | 'reconnecting' | 'disconnected';
-  affected_children: string[];  // 新增：受影响的子连接
-  timestamp: number;            // 新增：时间戳
+  affected_children: string[];  // 受影响的子连接
+  timestamp: number;            // 时间戳
 }
 
-interface ConnectionReconnectProgressEvent {
-  connection_id: string;
-  attempt: number;
-  max_attempts: number | null;
-  next_retry_ms: number;
-  timestamp: number;
+// ═══════════════════════════════════════════════════════════════════════════════
+// 防抖重连管理器
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 防抖延迟（毫秒）- 聚合短时间内的多个 link_down 事件 */
+const RECONNECT_DEBOUNCE_MS = 500;
+
+/** 待重连的节点集合 */
+const pendingReconnectNodes = new Set<string>();
+
+/** 防抖定时器 */
+let reconnectDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 是否正在执行重连 */
+let isReconnecting = false;
+
+/**
+ * 调度防抖重连
+ * 
+ * 设计原则：
+ * - 短时间内多个节点掉线时（如跳板机断开），聚合为一次重连
+ * - 选择深度最浅的节点作为起点，让 reconnectCascade 处理级联恢复
+ * - 避免重复触发正在进行的重连操作
+ */
+function scheduleReconnect(nodeId: string): void {
+  pendingReconnectNodes.add(nodeId);
+  
+  // 清除之前的定时器
+  if (reconnectDebounceTimer) {
+    clearTimeout(reconnectDebounceTimer);
+  }
+  
+  // 设置新的防抖定时器
+  reconnectDebounceTimer = setTimeout(async () => {
+    reconnectDebounceTimer = null;
+    
+    // 如果正在重连，跳过此次调度
+    if (isReconnecting) {
+      console.log('[ReconnectScheduler] Reconnect already in progress, skipping');
+      return;
+    }
+    
+    // 获取所有待重连节点
+    const nodeIds = Array.from(pendingReconnectNodes);
+    pendingReconnectNodes.clear();
+    
+    if (nodeIds.length === 0) return;
+    
+    console.log(`[ReconnectScheduler] Processing ${nodeIds.length} pending reconnect nodes:`, nodeIds);
+    
+    // 找到深度最浅的节点（根节点优先）
+    // 这样 reconnectCascade 会自动处理所有后代的恢复
+    const treeStore = useSessionTreeStore.getState();
+    const nodes = nodeIds
+      .map(id => treeStore.getNode(id))
+      .filter((n): n is NonNullable<typeof n> => n !== undefined);
+    
+    if (nodes.length === 0) {
+      console.warn('[ReconnectScheduler] No valid nodes found for reconnect');
+      return;
+    }
+    
+    // 按深度排序，找到最浅的节点
+    nodes.sort((a, b) => a.depth - b.depth);
+    const rootNode = nodes[0];
+    
+    console.log(`[ReconnectScheduler] Starting reconnect from shallowest node: ${rootNode.id} (depth=${rootNode.depth})`);
+    
+    isReconnecting = true;
+    try {
+      // 使用 reconnectCascade 进行有序恢复
+      const reconnected = await treeStore.reconnectCascade(rootNode.id);
+      console.log(`[ReconnectScheduler] Reconnect completed: ${reconnected.length} nodes reconnected`);
+    } catch (e) {
+      console.error('[ReconnectScheduler] Reconnect failed:', e);
+      // 重连失败不重试，用户可以手动触发
+    } finally {
+      isReconnecting = false;
+    }
+  }, RECONNECT_DEBOUNCE_MS);
 }
 
-interface ConnectionReconnectedEvent {
-  connection_id: string;
-  terminal_ids: string[];
-  forward_ids: string[];
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// 主 Hook
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export function useConnectionEvents(): void {
   // Use selectors to get stable function references
@@ -82,6 +160,8 @@ export function useConnectionEvents(): void {
               state = 'link_down';
               break;
             case 'reconnecting':
+              // 🛑 后端不再发送 reconnecting 状态（重连引擎已删除）
+              // 保留此分支以兼容可能的遗留事件
               state = 'reconnecting';
               break;
             case 'disconnected':
@@ -94,40 +174,44 @@ export function useConnectionEvents(): void {
 
           updateConnectionState(connection_id, state);
 
-          // 使用拓扑解析器处理 link-down 级联
+          // ========== link_down 处理：前端驱动重连 ==========
           if (status === 'link_down') {
+            // 1. 标记受影响的节点
             const affectedNodeIds = topologyResolver.handleLinkDown(connection_id, affected_children);
             if (affectedNodeIds.length > 0) {
               console.log(`[ConnectionEvents] Marking nodes as link-down:`, affectedNodeIds);
               getTreeStore().markLinkDownBatch(affectedNodeIds);
             }
+            
+            // 2. 调度防抖重连
+            // 找到断开连接对应的节点
+            const nodeId = topologyResolver.getNodeId(connection_id);
+            if (nodeId) {
+              console.log(`[ConnectionEvents] Scheduling reconnect for node ${nodeId}`);
+              scheduleReconnect(nodeId);
+            }
+            
+            // 3. 中断 SFTP 传输
+            const sessions = sessionsRef.current;
+            sessions.forEach((session, sessionId) => {
+              if (session.connectionId === connection_id) {
+                interruptTransfersBySession(sessionId, i18n.t('connections.events.connection_lost_reconnecting'));
+              }
+            });
           }
 
-          // 重连成功时清除 link-down 标记
+          // ========== connected 处理：清除 link-down 标记 ==========
           if (status === 'connected') {
             const nodeId = topologyResolver.getNodeId(connection_id);
             if (nodeId) {
               console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
               getTreeStore().clearLinkDown(nodeId);
-              // 清除重连进度
+              // 清除重连进度（如果有）
               getTreeStore().setReconnectProgress(nodeId, null);
             }
           }
-
-          // When connection goes down, interrupt all SFTP transfers for related sessions
-          if (status === 'link_down' || status === 'disconnected') {
-            const sessions = sessionsRef.current;
-            
-            sessions.forEach((session, sessionId) => {
-              if (session.connectionId === connection_id) {
-                // Interrupt SFTP transfers
-                interruptTransfersBySession(sessionId, 
-                  status === 'link_down' ? i18n.t('connections.events.connection_lost_reconnecting') : i18n.t('connections.events.connection_closed')
-                );
-              }
-            });
-          }
           
+          // ========== disconnected 处理：关闭相关 tabs ==========
           // 只有在彻底断开时才关闭 tabs
           // link_down 时保留 tabs，让终端进入待命模式等待自动重连
           if (status === 'disconnected') {
@@ -149,6 +233,14 @@ export function useConnectionEvents(): void {
                 appStore.closeTab(tab.id);
               }
             }
+            
+            // 中断 SFTP 传输
+            const sessions2 = sessionsRef.current;
+            sessions2.forEach((session, sessionId) => {
+              if (session.connectionId === connection_id) {
+                interruptTransfersBySession(sessionId, i18n.t('connections.events.connection_closed'));
+              }
+            });
           }
         });
         
@@ -161,73 +253,15 @@ export function useConnectionEvents(): void {
         console.error('[ConnectionEvents] Failed to listen to connection_status_changed:', error);
       }
 
-      // Listen for reconnect progress events
-      try {
-        const unlistenProgress = await listen<ConnectionReconnectProgressEvent>('connection_reconnect_progress', (event) => {
-          if (!mounted) return;
-          const { connection_id, attempt, max_attempts, next_retry_ms } = event.payload;
-          console.log(`[ConnectionEvents] Reconnect progress: ${connection_id} attempt ${attempt}/${max_attempts ?? '∞'}`);
-
-          // 通过拓扑解析器找到对应节点
-          const nodeId = topologyResolver.getNodeId(connection_id);
-          if (nodeId) {
-            const progress: ReconnectProgress = {
-              attempt,
-              maxAttempts: max_attempts,
-              nextRetryMs: next_retry_ms,
-            };
-            getTreeStore().setReconnectProgress(nodeId, progress);
-          }
-        });
-
-        if (mounted) {
-          unlisteners.push(unlistenProgress);
-        } else {
-          unlistenProgress();
-        }
-      } catch (error) {
-        console.error('[ConnectionEvents] Failed to listen to connection_reconnect_progress:', error);
-      }
-
-      // Listen for connection reconnected events from backend
-      try {
-        const unlistenReconnected = await listen<ConnectionReconnectedEvent>('connection_reconnected', (event) => {
-          if (!mounted) return;
-          const { connection_id, terminal_ids, forward_ids } = event.payload;
-          console.log(`[ConnectionEvents] Connection ${connection_id} reconnected`, {
-            terminal_ids,
-            forward_ids,
-          });
-
-          // Update connection state to active
-          updateConnectionState(connection_id, 'active');
-
-          // 通过拓扑解析器找到对应节点并清除 link-down
-          const nodeId = topologyResolver.getNodeId(connection_id);
-          if (nodeId) {
-            console.log(`[ConnectionEvents] Clearing link-down for node ${nodeId}`);
-            getTreeStore().clearLinkDown(nodeId);
-            getTreeStore().setReconnectProgress(nodeId, null);
-          }
-
-          // 同步前端终端与后端：清理已失效的、恢复有效的
-          syncTerminalsAfterReconnect(connection_id, terminal_ids);
-
-          // 恢复端口转发
-          if (forward_ids.length > 0) {
-            console.log(`[ConnectionEvents] Restoring port forwards:`, forward_ids);
-            restorePortForwards(connection_id, forward_ids);
-          }
-        });
-
-        if (mounted) {
-          unlisteners.push(unlistenReconnected);
-        } else {
-          unlistenReconnected();
-        }
-      } catch (error) {
-        console.error('[ConnectionEvents] Failed to listen to connection_reconnected:', error);
-      }
+      // ═══════════════════════════════════════════════════════════════════════════════
+      // 🛑 已移除的事件监听
+      // ═══════════════════════════════════════════════════════════════════════════════
+      // 
+      // connection_reconnect_progress: 后端重连引擎已物理删除，不再发送此事件
+      // connection_reconnected: 后端不再自主重连，所有重连由前端 reconnectCascade 驱动
+      //
+      // 前端通过 connectingNodeIds 状态跟踪连接进度，无需监听后端事件
+      // ═══════════════════════════════════════════════════════════════════════════════
     };
 
     setupListeners();
@@ -236,156 +270,15 @@ export function useConnectionEvents(): void {
     return () => {
       mounted = false;
       unlisteners.forEach((unlisten) => unlisten());
+      
+      // 清理防抖定时器
+      if (reconnectDebounceTimer) {
+        clearTimeout(reconnectDebounceTimer);
+        reconnectDebounceTimer = null;
+      }
+      pendingReconnectNodes.clear();
     };
   // Dependencies are stable: updateConnectionState and interruptTransfersBySession are selectors
   // sessionsRef is updated via subscription, not as a dependency
   }, [updateConnectionState, interruptTransfersBySession]);
-}
-
-/**
- * 恢复终端 WebSocket 连接
- * 
- * 原理：
- * 1. 调用后端 recreate_terminal_pty 为每个终端重建 PTY 和 WebSocket bridge
- * 2. 更新 appStore.sessions 中的 ws_url
- * 3. TerminalView 监听 session.ws_url 变化，自动重连
- */
-async function restoreTerminalConnections(terminalIds: string[]): Promise<void> {
-  const appStore = useAppStore.getState();
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 500;
-
-  for (const terminalId of terminalIds) {
-    const session = appStore.sessions.get(terminalId);
-    if (!session) {
-      console.warn(`[ConnectionEvents] Session ${terminalId} not found, skipping restore`);
-      continue;
-    }
-
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        console.log(`[ConnectionEvents] Recreating PTY for terminal ${terminalId} (attempt ${attempt}/${MAX_RETRIES})`);
-        
-        // 调用后端重建 PTY 并获取新的 WebSocket 信息
-        const result = await api.recreateTerminalPty(terminalId);
-
-        // 直接更新 sessions Map 中的 ws_url 和 ws_token
-        // 这会触发 TerminalView 的 useEffect 重连
-        useAppStore.setState((state) => {
-          const newSessions = new Map(state.sessions);
-          const existingSession = newSessions.get(terminalId);
-          if (existingSession) {
-            newSessions.set(terminalId, {
-              ...existingSession,
-              ws_url: result.wsUrl,
-              ws_token: result.wsToken,
-            });
-          }
-          return { sessions: newSessions };
-        });
-
-        console.log(`[ConnectionEvents] Terminal ${terminalId} PTY recreated, new ws_url: ${result.wsUrl}`);
-        lastError = null;
-        break; // Success, exit retry loop
-      } catch (e) {
-        lastError = e;
-        console.warn(`[ConnectionEvents] Failed to restore terminal ${terminalId} (attempt ${attempt}/${MAX_RETRIES}):`, e);
-        
-        if (attempt < MAX_RETRIES) {
-          // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
-        }
-      }
-    }
-    
-    if (lastError) {
-      console.error(`[ConnectionEvents] Failed to restore terminal ${terminalId} after ${MAX_RETRIES} attempts:`, lastError);
-
-      const msg = String(lastError);
-      if (msg.includes('Connection not found') || msg.includes('Session') && msg.includes('not found')) {
-        console.warn(`[ConnectionEvents] Purging orphaned terminal ${terminalId} after restore failure`);
-        useAppStore.getState().purgeTerminalSession(terminalId);
-      }
-    }
-  }
-}
-/**
- * 恢复端口转发规则
- * 
- * 后端在重连时会自动恢复端口转发配置，但前端需要：
- * 1. 刷新端口转发列表以获取最新状态
- * 2. 更新 UI 显示
- * 
- * @param connectionId - 重连成功的连接 ID
- * @param forwardIds - 需要恢复的转发规则 ID 列表
- */
-async function restorePortForwards(connectionId: string, forwardIds: string[]): Promise<void> {
-  console.log(`[ConnectionEvents] Restoring ${forwardIds.length} port forwards for connection ${connectionId}`);
-  
-  // 找到使用此 connectionId 的所有会话
-  const appStore = useAppStore.getState();
-  const sessionIds: string[] = [];
-  
-  appStore.sessions.forEach((session, sessionId) => {
-    if (session.connectionId === connectionId) {
-      sessionIds.push(sessionId);
-    }
-  });
-
-  if (sessionIds.length === 0) {
-    console.warn(`[ConnectionEvents] No sessions found for connection ${connectionId}`);
-    return;
-  }
-
-  // 对每个会话刷新端口转发列表
-  for (const sessionId of sessionIds) {
-    try {
-      // 后端已经自动恢复了端口转发，这里只需刷新前端状态
-      const forwards = await api.listPortForwards(sessionId);
-      console.log(`[ConnectionEvents] Session ${sessionId} has ${forwards.length} port forwards after restore`);
-      
-      // 如果需要，可以在这里发送通知告知用户端口转发已恢复
-      const activeForwards = forwards.filter(f => f.status === 'active');
-      if (activeForwards.length > 0) {
-        console.log(`[ConnectionEvents] ${activeForwards.length} port forwards are now active for session ${sessionId}`);
-      }
-    } catch (e) {
-      console.error(`[ConnectionEvents] Failed to refresh port forwards for session ${sessionId}:`, e);
-    }
-  }
-}
-
-/**
- * 同步前端终端与后端状态
- * 
- * 重连后，后端返回当前有效的 terminal_ids：
- * 1. 如果前端有不在列表中的旧终端 → 静默清理
- * 2. 如果列表中的终端前端没有 → 获取新 session info（创建 Tab）
- * 3. 如果前端已有且在列表中 → 恢复 WS 连接
- */
-async function syncTerminalsAfterReconnect(connectionId: string, backendTerminalIds: string[]): Promise<void> {
-  const appStore = useAppStore.getState();
-  const backendSet = new Set(backendTerminalIds);
-
-  // 收集前端属于此连接的所有终端
-  const frontendTerminalIds: string[] = [];
-  appStore.sessions.forEach((session, sessionId) => {
-    if (session.connectionId === connectionId) {
-      frontendTerminalIds.push(sessionId);
-    }
-  });
-
-  // 1. 清理前端有但后端没有的（孤儿）
-  for (const terminalId of frontendTerminalIds) {
-    if (!backendSet.has(terminalId)) {
-      console.log(`[ConnectionEvents] Purging orphaned terminal ${terminalId} (not in backend list)`);
-      appStore.purgeTerminalSession(terminalId);
-    }
-  }
-
-  // 2. 恢复后端有的终端
-  if (backendTerminalIds.length > 0) {
-    await restoreTerminalConnections(backendTerminalIds);
-  }
 }

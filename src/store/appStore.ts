@@ -234,10 +234,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Connection Pool Actions (新架构)
+  // Connection Pool Actions (旧架构 - 已废弃)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /** 
+   * @deprecated 使用 sessionTreeStore.connectNodeWithAncestors() 代替
+   * 
+   * 新架构中使用 api.connectTreeNode() 建立连接，
+   * 后端从 ConnectionPreset 获取认证信息，无需前端传递密码/密钥。
+   */
   connectSsh: async (request: SshConnectRequest) => {
+    console.warn(`[AppStore] connectSsh() is deprecated. Use sessionTreeStore.connectNodeWithAncestors() instead.`);
     try {
       const response = await api.sshConnect(request);
       
@@ -543,7 +550,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  /** 
+   * @deprecated 已废弃 - 使用 sessionTreeStore.reconnectCascade() 代替
+   * 
+   * 此函数使用旧的 sshConnect API，不支持新的拓扑驱动重连架构。
+   * 新架构中所有重连都通过前端 reconnectCascade 驱动，
+   * 后端只负责执行 connectTreeNode。
+   */
   reconnect: async (sessionId: string) => {
+    console.warn(`[AppStore] reconnect() is deprecated. Use sessionTreeStore.reconnectCascade() instead.`);
     const session = get().sessions.get(sessionId);
     if (!session) {
       console.warn(`[AppStore] reconnect: session ${sessionId} not found`);
@@ -627,7 +642,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  /** 
+   * @deprecated 已废弃 - 新架构中密码应存储在 ConnectionPreset 中
+   * 
+   * 此函数用于旧的会话级重连流程。新架构中：
+   * 1. 密码等认证信息存储在 ConnectionPreset
+   * 2. 重连时由 connectTreeNode 从 preset 获取认证信息
+   * 3. 如果需要交互式认证，由后端 keyboard_interactive 处理
+   */
   reconnectWithPassword: async (sessionId: string, password: string) => {
+    console.warn(`[AppStore] reconnectWithPassword() is deprecated.`);
     const session = get().sessions.get(sessionId);
     if (!session) {
       set({ reconnectPendingSessionId: null });
@@ -1182,30 +1206,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ selectedGroup: group });
   },
 
+  /**
+   * 连接到保存的连接
+   * 
+   * Phase 3.4: 使用新的前端驱动架构
+   * - 对于 proxy_chain: 使用 expandManualPreset + connectNodeWithAncestors
+   * - 对于直连: 使用 addRootNode + connectNodeWithAncestors
+   * 
+   * 注意: 此方法保留向后兼容，但推荐直接使用 Sidebar 的 handleConnectSaved
+   */
   connectToSaved: async (connectionId) => {
     try {
       // Get full connection info with credentials from backend
       const savedConn = await api.getSavedConnectionForConnect(connectionId);
-
-      // Map auth_type for SshConnectRequest
-      const mapAuthType = (authType: string): 'password' | 'key' | 'default_key' | 'agent' => {
-        if (authType === 'agent') return 'agent';
-        if (authType === 'key') return 'key';
-        if (authType === 'password') return 'password';
-        return 'default_key';
-      };
 
       // Map auth_type for manual preset (no default_key in HopInfo)
       const mapPresetAuthType = (authType: string): 'password' | 'key' | 'agent' => {
         if (authType === 'agent') return 'agent';
         if (authType === 'key') return 'key';
         if (authType === 'password') return 'password';
-        return 'key';
+        return 'key'; // default_key fallback to key
       };
 
-      // TODO: 暂不支持 proxy_chain，需要后续扩展 sshConnect
+      // 动态导入 sessionTreeStore
+      const { useSessionTreeStore } = await import('./sessionTreeStore');
+      const treeStore = useSessionTreeStore.getState();
+
+      // ========== Phase 3.4: Proxy Chain 支持 ==========
+      // 使用 expandManualPreset + connectNodeWithAncestors 实现前端驱动的线性连接
       if (savedConn.proxy_chain && savedConn.proxy_chain.length > 0) {
-        // 使用 session_tree 的手工预设链连接（避免改动 connect_v2 核心握手）
         const hops: ConnectPresetChainRequest['hops'] = savedConn.proxy_chain.map((hop) => ({
           host: hop.host,
           port: hop.port,
@@ -1232,28 +1261,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
           target,
         };
 
-        const response = await api.connectManualPreset(request);
+        // Step 1: 展开预设链为树节点（不建立连接）
+        const expandResult = await treeStore.expandManualPreset(request);
 
-        // 同步会话树并注册拓扑映射
-        const { useSessionTreeStore } = await import('./sessionTreeStore');
-        const treeStore = useSessionTreeStore.getState();
-        await treeStore.fetchTree();
-        treeStore.selectNode(response.targetNodeId);
+        // Step 2: 使用线性连接器连接整条链路
+        const connectedNodeIds = await treeStore.connectNodeWithAncestors(expandResult.targetNodeId);
 
-        for (const nodeId of response.connectedNodeIds) {
+        // Step 3: 注册拓扑映射
+        for (const nodeId of connectedNodeIds) {
           const rawNode = treeStore.getRawNode(nodeId);
           if (rawNode?.sshConnectionId) {
             topologyResolver.register(rawNode.sshConnectionId, nodeId);
           }
         }
 
-        // 为目标节点创建终端并打开标签页
-        const terminalId = await treeStore.createTerminalForNode(response.targetNodeId);
+        // Step 4: 为目标节点创建终端并打开标签页
+        const terminalId = await treeStore.createTerminalForNode(expandResult.targetNodeId);
         get().createTab('terminal', terminalId);
 
         useToastStore.getState().addToast({
           title: i18n.t('connections.toast.proxy_chain_established'),
-          description: i18n.t('connections.toast.proxy_chain_desc', { depth: response.chainDepth }),
+          description: i18n.t('connections.toast.proxy_chain_desc', { depth: expandResult.chainDepth }),
           variant: 'success',
         });
 
@@ -1261,25 +1289,61 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return;
       }
 
-      // 使用新的 sshConnect API - 只建立连接，不创建终端
-      const sshRequest: SshConnectRequest = {
-        host: savedConn.host,
-        port: savedConn.port,
-        username: savedConn.username,
-        authType: mapAuthType(savedConn.auth_type),
-        password: savedConn.password,
-        keyPath: savedConn.key_path,
-        passphrase: savedConn.passphrase,
-        name: savedConn.name,
-        reuseConnection: true, // 尝试复用已有连接
-      };
+      // ========== 直连（无 proxy_chain）==========
+      // 检查是否已有相同主机的根节点
+      const existingNode = treeStore.nodes.find((n) =>
+        n.depth === 0 &&
+        n.host === savedConn.host &&
+        n.port === savedConn.port &&
+        n.username === savedConn.username
+      );
 
-      await get().connectSsh(sshRequest);
+      let nodeId: string;
+
+      if (existingNode) {
+        // 已存在相同节点 - 直接使用
+        nodeId = existingNode.id;
+        treeStore.selectNode(nodeId);
+
+        // 如果节点未连接，尝试连接
+        if (existingNode.runtime.status === 'idle' || existingNode.runtime.status === 'error') {
+          await treeStore.connectNodeWithAncestors(nodeId);
+        }
+      } else {
+        // 创建新根节点
+        const mapAuthType = (authType: string): 'password' | 'key' | 'agent' | undefined => {
+          if (authType === 'agent') return 'agent';
+          if (authType === 'key') return 'key';
+          if (authType === 'password') return 'password';
+          return undefined; // default_key
+        };
+
+        nodeId = await treeStore.addRootNode({
+          host: savedConn.host,
+          port: savedConn.port,
+          username: savedConn.username,
+          authType: mapAuthType(savedConn.auth_type),
+          password: savedConn.password,
+          keyPath: savedConn.key_path,
+          passphrase: savedConn.passphrase,
+          displayName: savedConn.name,
+        });
+
+        // 自动连接新创建的节点
+        await treeStore.connectNodeWithAncestors(nodeId);
+      }
+
       await api.markConnectionUsed(connectionId);
     } catch (error) {
       console.error('Failed to connect to saved connection:', error);
-      // Open editor on any error
-      get().openConnectionEditor(connectionId);
+      // 只有真正的连接错误才打开编辑器，不包括锁错误
+      const errorMsg = String(error);
+      if (!errorMsg.includes('already connecting') && 
+          !errorMsg.includes('already connected') &&
+          !errorMsg.includes('CHAIN_LOCK_BUSY') &&
+          !errorMsg.includes('NODE_LOCK_BUSY')) {
+        get().openConnectionEditor(connectionId);
+      }
     }
   },
 

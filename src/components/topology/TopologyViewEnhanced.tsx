@@ -479,13 +479,15 @@ export const TopologyViewEnhanced: React.FC<TopologyViewEnhancedProps> = ({
   }, [menu.nodeId, nodeMap, createTab]);
 
   const handleOpenSftp = useCallback(async () => {
-    if (!menu.nodeId) return;
-    const node = nodeMap.get(menu.nodeId);
+    const nodeId = menu.nodeId;
+    if (!nodeId) return;
+    const node = nodeMap.get(nodeId);
     if (!node || node.status !== 'connected') return;
 
     try {
       const { openSftpForNode } = useSessionTreeStore.getState();
-      const sftpId = await openSftpForNode(menu.nodeId);
+      const sftpId = await openSftpForNode(nodeId);
+      if (!sftpId) return;
 
       // Create SFTP tab (sessionId is second argument)
       createTab('sftp', sftpId);

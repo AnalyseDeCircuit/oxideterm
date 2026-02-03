@@ -932,12 +932,24 @@ export const api = {
 
   /**
    * 连接手工预设的跳板链（模式1: 静态全手工）
+   * 
+   * @deprecated 使用 expandManualPreset + connectNodeWithAncestors 替代
+   * 
+   * 此 API 已被弃用。OxideTerm 现在采用"前端驱动、后端执行"的架构：
+   * 1. 调用 expandManualPreset() 展开预设链为树节点（不建立连接）
+   * 2. 调用 connectNodeWithAncestors() 进行前端驱动的线性连接
+   * 
+   * 新架构的优势：
+   * - 前端持有连接锁，防止竞态条件
+   * - 连接失败时可以精确定位失败节点
+   * - 支持连接中断恢复
    */
   connectManualPreset: async (
     request: { savedConnectionId: string; hops: Array<{ host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string }>; target: { host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string } },
     cols?: number,
     rows?: number
   ): Promise<{ targetNodeId: string; targetSshConnectionId: string; connectedNodeIds: string[]; chainDepth: number }> => {
+    console.warn('[DEPRECATED] connectManualPreset is deprecated. Use expandManualPreset + connectNodeWithAncestors instead.');
     if (USE_MOCK) {
       return {
         targetNodeId: crypto.randomUUID(),
