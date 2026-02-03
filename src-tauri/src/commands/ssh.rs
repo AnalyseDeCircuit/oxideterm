@@ -98,11 +98,30 @@ pub struct SshConnectResponse {
 /// 建立 SSH 连接（不创建终端）
 ///
 /// 返回 connection_id，后续可用于创建终端、SFTP、端口转发等
+///
+/// # ⚠️ DEPRECATED
+/// 
+/// 此命令已被弃用。请使用 `connect_tree_node` 作为唯一的 SSH 连接入口。
+/// 
+/// **原因**：
+/// - OxideTerm 采用"前端驱动、后端执行"架构
+/// - 所有连接必须通过 SessionTree 管理，以确保锁机制生效
+/// - `ssh_connect` 绕过了 SessionTree，可能导致状态不一致
+/// 
+/// **迁移指南**：
+/// 1. 在 SessionTree 中创建节点
+/// 2. 使用 `connect_tree_node(node_id)` 建立连接
+/// 3. 前端使用 `connectNodeWithAncestors` 处理跳板链
 #[tauri::command]
+#[deprecated(since = "0.8.0", note = "Use connect_tree_node instead for proper lock management")]
 pub async fn ssh_connect(
     request: SshConnectRequest,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
 ) -> Result<SshConnectResponse, String> {
+    warn!(
+        "⚠️ DEPRECATED: ssh_connect called for {}@{}:{} - please migrate to connect_tree_node",
+        request.username, request.host, request.port
+    );
     info!(
         "SSH connect request: {}@{}:{}",
         request.username, request.host, request.port

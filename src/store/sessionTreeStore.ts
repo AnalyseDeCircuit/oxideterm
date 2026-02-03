@@ -147,6 +147,21 @@ interface SessionTreeStore {
   connectNode: (nodeId: string) => Promise<void>;
   /** 断开节点 (级联断开所有子节点) */
   disconnectNode: (nodeId: string) => Promise<void>;
+  /**
+   * 线性连接节点及其所有祖先（前端驱动）
+   * 
+   * Phase 3.1: 核心连接器
+   * - 获取祖先路径（从根到目标节点）
+   * - 批量获取并发锁
+   * - 连接前焦土式清理（resetNodeState）
+   * - 线性 await 依次连接每个节点
+   * - finally 块确保释放所有锁
+   * 
+   * @param nodeId 目标节点 ID
+   * @returns 成功连接的节点 ID 列表
+   * @throws 如果任何节点连接失败，抛出错误并指出失败点
+   */
+  connectNodeWithAncestors: (nodeId: string) => Promise<string[]>;
   /** 级联重连节点及其之前已连接的子节点 */
   reconnectCascade: (nodeId: string, options?: { skipChildren?: boolean }) => Promise<string[]>;
   /** 
@@ -158,6 +173,8 @@ interface SessionTreeStore {
    * - 重置状态为 pending
    */
   resetNodeState: (nodeId: string) => Promise<void>;
+  /** 内部连接方法（无锁检查，供 connectNodeWithAncestors 使用） */
+  connectNodeInternal: (nodeId: string) => Promise<void>;
   
   // ========== Terminal Management (新增) ==========
   /** 为节点创建新终端 */
@@ -687,6 +704,14 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     /**
      * 级联重连节点及其之前已连接的子节点
      * 
+     * Phase 3.2 重写：使用线性连接逻辑
+     * 
+     * 执行流程：
+     * 1. 获取链式锁
+     * 2. 先重连目标节点自身（使用 connectNodeWithAncestors 确保祖先链畅通）
+     * 3. 如果不跳过子节点，收集所有 link-down 的子节点
+     * 4. 按深度排序，线性重连子节点
+     * 
      * @param nodeId 要重连的节点 ID
      * @param options 配置选项
      * @returns 成功重连的节点 ID 列表
@@ -695,42 +720,54 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       const node = get().getNode(nodeId);
       if (!node) throw new Error(`Node ${nodeId} not found`);
       
+      console.log(`[reconnectCascade] Starting cascade reconnect for ${nodeId}`);
+      
       const reconnected: string[] = [];
       
-      // 1. 首先重连目标节点本身
+      // 1. 首先确保目标节点及其祖先都已连接
       try {
-        await get().connectNode(nodeId);
-        reconnected.push(nodeId);
+        // 使用 connectNodeWithAncestors 确保整条链路畅通
+        const chainResult = await get().connectNodeWithAncestors(nodeId);
+        reconnected.push(...chainResult.filter(id => !reconnected.includes(id)));
+        console.log(`[reconnectCascade] Target node ${nodeId} and ancestors connected`);
       } catch (e) {
-        console.error(`Failed to reconnect node ${nodeId}:`, e);
-        throw e; // 父节点重连失败，不继续重连子节点
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[reconnectCascade] Failed to reconnect node ${nodeId}:`, errorMsg);
+        throw e; // 目标节点重连失败，不继续重连子节点
       }
       
-      // 2. 如果不跳过子节点，且有 link-down 的子节点，尝试重连它们
+      // 2. 如果不跳过子节点，尝试重连 link-down 的子节点
       if (!options?.skipChildren) {
         const descendants = get().getDescendants(nodeId);
         const { linkDownNodeIds } = get();
         
-        // 按深度排序，确保从上到下依次重连
-        const sortedDescendants = [...descendants].sort((a, b) => a.depth - b.depth);
+        // 只处理标记为 link-down 的子节点
+        const linkDownChildren = descendants.filter(child => linkDownNodeIds.has(child.id));
         
-        for (const child of sortedDescendants) {
-          // 只重连之前标记为 link-down 的子节点
-          if (linkDownNodeIds.has(child.id)) {
+        if (linkDownChildren.length > 0) {
+          console.log(`[reconnectCascade] Found ${linkDownChildren.length} link-down children to reconnect`);
+          
+          // 按深度排序，确保从上到下依次重连
+          const sortedChildren = [...linkDownChildren].sort((a, b) => a.depth - b.depth);
+          
+          for (const child of sortedChildren) {
             // 检查父节点是否已连接（确保链路畅通）
             const parent = get().getNode(child.parentId!);
             if (parent?.runtime.status !== 'connected' && parent?.runtime.status !== 'active') {
-              // 父节点未连接，跳过此子节点
+              console.debug(`[reconnectCascade] Skipping ${child.id}: parent not connected`);
               continue;
             }
             
             try {
+              // 使用单节点连接（父节点已确认连接）
               await get().connectNode(child.id);
               reconnected.push(child.id);
+              console.debug(`[reconnectCascade] Child ${child.id} reconnected`);
+              
               // 短暂延迟，避免同时发起太多连接
               await new Promise(resolve => setTimeout(resolve, 100));
             } catch (e) {
-              console.warn(`Failed to reconnect child node ${child.id}:`, e);
+              console.warn(`[reconnectCascade] Failed to reconnect child ${child.id}:`, e);
               // 子节点重连失败不中断流程，继续尝试其他节点
             }
           }
@@ -740,7 +777,202 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       // 3. 刷新树状态
       await get().fetchTree();
       
+      console.log(`[reconnectCascade] Completed: ${reconnected.length} nodes reconnected`);
+      
       return reconnected;
+    },
+    
+    /**
+     * 线性连接节点及其所有祖先（前端驱动）
+     * 
+     * Phase 3.1: 核心连接器 - 解决 OxideTerm 假死、端口占用和重影问题
+     * 
+     * 执行流程：
+     * 1. 获取链式锁（全局唯一，防止多条链同时执行）
+     * 2. 获取祖先路径（从根到目标节点）
+     * 3. 跳过已连接的前缀节点（复用现有连接）
+     * 4. 批量获取节点级锁
+     * 5. 焦土式清理所有待连接节点（resetNodeState）
+     * 6. 线性 await 依次连接每个节点
+     * 7. finally 块确保释放所有锁
+     * 
+     * 锁机制：
+     * - acquireChainLock: 全局锁，同一时刻只能有一条链在连接
+     * - acquireConnectLock: 节点级锁，防止同一节点被重复连接
+     * 
+     * 熔断机制：
+     * - 任何节点连接失败，立即中断后续节点连接
+     * - 已连接的节点保持连接状态
+     * - 返回部分成功结果
+     * 
+     * @param nodeId 目标节点 ID
+     * @returns 成功连接的节点 ID 列表
+     * @throws ConnectionChainError 如果任何节点连接失败
+     */
+    connectNodeWithAncestors: async (nodeId: string): Promise<string[]> => {
+      // ========== Step 1: 获取链式锁 ==========
+      if (!get().acquireChainLock()) {
+        console.warn(`[connectNodeWithAncestors] Chain lock busy, rejecting request for ${nodeId}`);
+        throw new Error('CHAIN_LOCK_BUSY: Another connection chain is in progress');
+      }
+      
+      const lockedNodeIds: string[] = [];
+      const connectedNodeIds: string[] = [];
+      
+      try {
+        // ========== Step 2: 获取祖先路径 ==========
+        console.log(`[connectNodeWithAncestors] Fetching path for node ${nodeId}`);
+        const pathNodes = await get().getNodePath(nodeId);
+        
+        if (pathNodes.length === 0) {
+          throw new Error(`Node path not found for ${nodeId}`);
+        }
+        
+        console.log(`[connectNodeWithAncestors] Path: ${pathNodes.map(n => n.id).join(' → ')}`);
+        
+        // ========== Step 3: 跳过已连接的前缀节点 ==========
+        // 找到第一个需要连接的节点（状态非 connected/active）
+        let startIndex = 0;
+        for (let i = 0; i < pathNodes.length; i++) {
+          const node = get().getRawNode(pathNodes[i].id);
+          if (!node) continue;
+          
+          const isConnected = node.state.status === 'connected';
+          const hasConnectionId = !!node.sshConnectionId;
+          
+          if (isConnected && hasConnectionId) {
+            // 该节点已连接，跳过
+            startIndex = i + 1;
+            console.debug(`[connectNodeWithAncestors] Skipping already connected node ${pathNodes[i].id}`);
+          } else {
+            // 遇到第一个未连接节点，停止跳过
+            break;
+          }
+        }
+        
+        const nodesToConnect = pathNodes.slice(startIndex);
+        
+        if (nodesToConnect.length === 0) {
+          console.log(`[connectNodeWithAncestors] All nodes already connected`);
+          return pathNodes.map(n => n.id);
+        }
+        
+        console.log(`[connectNodeWithAncestors] Nodes to connect: ${nodesToConnect.map(n => n.id).join(' → ')}`);
+        
+        // ========== Step 4: 批量获取节点级锁 ==========
+        for (const node of nodesToConnect) {
+          if (!get().acquireConnectLock(node.id)) {
+            throw new Error(`NODE_LOCK_BUSY: Node ${node.id} is already connecting`);
+          }
+          lockedNodeIds.push(node.id);
+        }
+        
+        console.debug(`[connectNodeWithAncestors] Acquired locks for ${lockedNodeIds.length} nodes`);
+        
+        // ========== Step 5: 焦土式清理所有待连接节点 ==========
+        console.log(`[connectNodeWithAncestors] Phase: Scorched earth cleanup`);
+        for (const node of nodesToConnect) {
+          await get().resetNodeState(node.id);
+        }
+        
+        // ========== Step 6: 线性 await 依次连接 ==========
+        console.log(`[connectNodeWithAncestors] Phase: Linear connection`);
+        
+        for (let i = 0; i < nodesToConnect.length; i++) {
+          const node = nodesToConnect[i];
+          const isTarget = i === nodesToConnect.length - 1;
+          
+          console.log(`[connectNodeWithAncestors] Connecting node ${i + 1}/${nodesToConnect.length}: ${node.id}${isTarget ? ' (TARGET)' : ''}`);
+          
+          try {
+            // 调用单节点连接（不带锁检查，因为我们已经持有锁）
+            await get().connectNodeInternal(node.id);
+            connectedNodeIds.push(node.id);
+            
+            // 短暂延迟，让后端有时间稳定
+            if (!isTarget) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          } catch (e) {
+            // ========== 熔断：连接失败，中断链式连接 ==========
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error(`[connectNodeWithAncestors] Node ${node.id} connection failed: ${errorMsg}`);
+            
+            // 标记失败节点
+            try {
+              await api.updateTreeNodeState(node.id, 'failed', errorMsg);
+            } catch (updateErr) {
+              console.warn(`[connectNodeWithAncestors] Failed to update node state:`, updateErr);
+            }
+            
+            // 刷新树状态
+            await get().fetchTree();
+            
+            // 抛出详细错误，包含失败位置
+            throw new Error(
+              `CONNECTION_CHAIN_FAILED: Node ${node.id} (position ${i + 1}/${nodesToConnect.length}) failed: ${errorMsg}`
+            );
+          }
+        }
+        
+        // ========== 全部成功 ==========
+        console.log(`[connectNodeWithAncestors] Chain completed successfully: ${connectedNodeIds.length} nodes connected`);
+        
+        // 刷新树状态
+        await get().fetchTree();
+        
+        // 返回所有成功连接的节点（包括之前已连接的）
+        return [...pathNodes.slice(0, startIndex).map(n => n.id), ...connectedNodeIds];
+        
+      } finally {
+        // ========== Step 7: 始终释放所有锁 ==========
+        for (const nodeId of lockedNodeIds) {
+          get().releaseConnectLock(nodeId);
+        }
+        get().releaseChainLock();
+        console.debug(`[connectNodeWithAncestors] Released all locks`);
+      }
+    },
+    
+    /**
+     * 内部连接方法（无锁检查，供 connectNodeWithAncestors 使用）
+     * 
+     * 与 connectNode 的区别：
+     * - 不检查/获取锁（调用者已持有锁）
+     * - 不在 finally 中释放锁
+     * - 专为批量连接设计
+     */
+    connectNodeInternal: async (nodeId: string) => {
+      const node = get().getRawNode(nodeId);
+      if (!node) throw new Error(`Node ${nodeId} not found`);
+      
+      // 乐观更新：立即在本地设置为 connecting
+      set((state) => ({
+        rawNodes: state.rawNodes.map(n => 
+          n.id === nodeId 
+            ? { ...n, state: { ...n.state, status: 'connecting' as const } }
+            : n
+        )
+      }));
+      get().rebuildUnifiedNodes();
+      
+      const response = await api.connectTreeNode({ nodeId });
+      
+      // 更新连接 ID
+      await api.setTreeNodeConnection(nodeId, response.sshConnectionId);
+      
+      // 注册连接映射 (connectionId -> nodeId)
+      topologyResolver.register(response.sshConnectionId, nodeId);
+      
+      // 清除该节点的 link-down 标记
+      const { linkDownNodeIds } = get();
+      if (linkDownNodeIds.has(nodeId)) {
+        const newLinkDownIds = new Set(linkDownNodeIds);
+        newLinkDownIds.delete(nodeId);
+        set({ linkDownNodeIds: newLinkDownIds });
+      }
+      
+      console.log(`[connectNodeInternal] Node ${nodeId} connected with SSH ID: ${response.sshConnectionId}`);
     },
     
     /**

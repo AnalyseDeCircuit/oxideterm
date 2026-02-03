@@ -127,6 +127,9 @@ export const Sidebar = () => {
   // Local terminal store
   const { createTerminal: createLocalTerminal, terminals: localTerminals } = useLocalTerminalStore();
 
+  // Toast hook (需要在所有使用 toast 的 useCallback 之前声明)
+  const { toast } = useToast();
+
   // Handle creating a new local terminal
   const handleNewLocalTerminal = useCallback(async () => {
     try {
@@ -196,32 +199,73 @@ export const Sidebar = () => {
     }
   }, [getNode]);
 
+  /**
+   * Phase 3.3: 使用 connectNodeWithAncestors 线性连接器
+   * 
+   * 执行流程：
+   * 1. 通过 sessionTreeStore.connectNodeWithAncestors 建立连接链
+   * 2. 连接成功后创建终端会话
+   * 3. 关联终端到节点
+   * 4. 打开终端 Tab
+   * 
+   * 错误处理：
+   * - CHAIN_LOCK_BUSY: 提示用户稍后重试
+   * - NODE_LOCK_BUSY: 提示节点正在连接中
+   * - CONNECTION_CHAIN_FAILED: 显示失败节点信息
+   */
   const handleTreeConnect = useCallback(async (nodeId: string) => {
+    const { connectNodeWithAncestors, isNodeConnecting, isConnectingChain } = useSessionTreeStore.getState();
+    
+    // 前端预检查（避免不必要的请求）
+    if (isConnectingChain) {
+      toast({
+        title: t('connection.errors.chain_busy_title', { defaultValue: 'Operation in Progress' }),
+        description: t('connection.errors.chain_busy_desc', { defaultValue: 'Another connection chain is in progress. Please wait.' }),
+        variant: 'error',
+      });
+      return;
+    }
+    
+    if (isNodeConnecting(nodeId)) {
+      toast({
+        title: t('connection.errors.node_connecting_title', { defaultValue: 'Already Connecting' }),
+        description: t('connection.errors.node_connecting_desc', { defaultValue: 'This node is already being connected.' }),
+        variant: 'error',
+      });
+      return;
+    }
+    
     try {
-      // 1. 建立 SSH 连接
-      const result = await api.connectTreeNode({ nodeId, cols: 80, rows: 24 });
-
-      // 2. 创建终端会话并添加到 appStore.sessions
+      // 1. 使用线性连接器建立 SSH 连接链
+      const connectedNodeIds = await connectNodeWithAncestors(nodeId);
+      console.log(`[handleTreeConnect] Connected ${connectedNodeIds.length} nodes`);
+      
+      // 2. 获取目标节点的连接 ID
+      await fetchTree(); // 确保状态同步
+      const node = getNode(nodeId);
+      if (!node?.runtime.connectionId) {
+        throw new Error('Connection ID not found after connect');
+      }
+      
+      // 3. 创建终端会话
       const terminalResponse = await api.createTerminal({
-        connectionId: result.sshConnectionId,
+        connectionId: node.runtime.connectionId,
         cols: 80,
         rows: 24,
       });
 
-      // 🔴 关键修复：把 session 添加到 appStore.sessions，否则 createTab 会失败
+      // 4. 把 session 添加到 appStore.sessions
       useAppStore.setState((state) => {
         const newSessions = new Map(state.sessions);
         newSessions.set(terminalResponse.sessionId, terminalResponse.session);
 
         // 更新连接的 terminalIds 和 refCount
         const newConnections = new Map(state.connections);
-        const connection = newConnections.get(result.sshConnectionId);
+        const connection = newConnections.get(node.runtime.connectionId!);
         if (connection) {
-          newConnections.set(result.sshConnectionId, {
+          newConnections.set(node.runtime.connectionId!, {
             ...connection,
-            // ✅ 重连时替换而非追加：旧终端 ID 已失效，只保留新的
             terminalIds: [terminalResponse.sessionId],
-            // ✅ 重连后引用计数重置为 1（当前只有一个活跃终端）
             refCount: 1,
             state: 'active',
           });
@@ -230,23 +274,68 @@ export const Sidebar = () => {
         return { sessions: newSessions, connections: newConnections };
       });
 
-      // 3. 关联终端会话到节点
+      // 5. 关联终端会话到节点
       await api.setTreeNodeTerminal(nodeId, terminalResponse.sessionId);
 
-      // 4. 刷新树和连接池
+      // 6. 刷新树和连接池
       await Promise.all([
         fetchTree(),
         refreshConnections(),
       ]);
 
-      // 5. 打开终端 tab（现在 sessions 中有这个 sessionId 了）
+      // 7. 打开终端 tab
       createTab('terminal', terminalResponse.sessionId);
+      
     } catch (err) {
-      console.error('Failed to connect tree node:', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error('[handleTreeConnect] Failed:', errorMsg);
+      
+      // 根据错误类型显示不同提示
+      if (errorMsg.includes('CHAIN_LOCK_BUSY')) {
+        toast({
+          title: t('connection.errors.chain_busy_title', { defaultValue: 'Operation in Progress' }),
+          description: t('connection.errors.chain_busy_desc', { defaultValue: 'Another connection chain is in progress. Please wait.' }),
+          variant: 'error',
+        });
+      } else if (errorMsg.includes('NODE_LOCK_BUSY')) {
+        toast({
+          title: t('connection.errors.node_connecting_title', { defaultValue: 'Already Connecting' }),
+          description: t('connection.errors.node_connecting_desc', { defaultValue: 'This node is already being connected.' }),
+          variant: 'error',
+        });
+      } else if (errorMsg.includes('CONNECTION_CHAIN_FAILED')) {
+        // 解析失败节点信息
+        const match = errorMsg.match(/Node ([\w-]+) \(position (\d+)\/(\d+)\) failed: (.+)/);
+        if (match) {
+          toast({
+            title: t('connection.errors.chain_failed_title', { defaultValue: 'Connection Failed' }),
+            description: t('connection.errors.chain_failed_desc', { 
+              defaultValue: 'Failed at node {{position}}/{{total}}: {{error}}',
+              position: match[2],
+              total: match[3],
+              error: match[4],
+            }),
+            variant: 'error',
+          });
+        } else {
+          toast({
+            title: t('connection.errors.chain_failed_title', { defaultValue: 'Connection Failed' }),
+            description: errorMsg,
+            variant: 'error',
+          });
+        }
+      } else {
+        toast({
+          title: t('connection.errors.generic_title', { defaultValue: 'Connection Error' }),
+          description: errorMsg,
+          variant: 'error',
+        });
+      }
+      
       // 刷新树以显示错误状态
       await fetchTree();
     }
-  }, [fetchTree, refreshConnections, createTab]);
+  }, [fetchTree, refreshConnections, createTab, getNode, toast, t]);
 
   const handleTreeDisconnect = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
@@ -363,8 +452,6 @@ export const Sidebar = () => {
   const handleTreeSaveAsPreset = useCallback((nodeId: string) => {
     setSavePresetDialog({ open: true, nodeId });
   }, []);
-
-  const { toast } = useToast();
 
   // 新建终端 (使用统一 store)
   const handleTreeNewTerminal = useCallback(async (nodeId: string) => {
@@ -524,7 +611,7 @@ export const Sidebar = () => {
       // 获取保存连接的完整信息
       const savedConn = await api.getSavedConnectionForConnect(connectionId);
 
-      // 映射 auth_type
+      // 映射 auth_type（带 default_key → key fallback）
       const mapAuthType = (authType: string): 'password' | 'key' | 'agent' | undefined => {
         if (authType === 'agent') return 'agent';
         if (authType === 'key') return 'key';
@@ -532,12 +619,69 @@ export const Sidebar = () => {
         return undefined; // default_key
       };
 
-      // TODO: 暂不支持 proxy_chain，显示提示
+      // 映射 auth_type（用于 proxy_chain hops，无 default_key）
+      const mapPresetAuthType = (authType: string): 'password' | 'key' | 'agent' => {
+        if (authType === 'agent') return 'agent';
+        if (authType === 'key') return 'key';
+        if (authType === 'password') return 'password';
+        return 'key'; // default_key fallback to key
+      };
+
+      // ========== Phase 3.4: Proxy Chain 支持 ==========
+      // 使用 expandManualPreset + connectNodeWithAncestors 实现前端驱动的线性连接
       if (savedConn.proxy_chain && savedConn.proxy_chain.length > 0) {
-        console.warn('Proxy chain connections not yet supported in unified tree');
-        // 可以后续用 expandManualPreset 实现
+        const { expandManualPreset, connectNodeWithAncestors, createTerminalForNode } = useSessionTreeStore.getState();
+
+        // 构建预设链请求
+        const hops = savedConn.proxy_chain.map((hop: { host: string; port: number; username: string; auth_type: string; password?: string; key_path?: string; passphrase?: string }) => ({
+          host: hop.host,
+          port: hop.port,
+          username: hop.username,
+          authType: mapPresetAuthType(hop.auth_type),
+          password: hop.password,
+          keyPath: hop.key_path,
+          passphrase: hop.passphrase,
+        }));
+
+        const target = {
+          host: savedConn.host,
+          port: savedConn.port,
+          username: savedConn.username,
+          authType: mapPresetAuthType(savedConn.auth_type),
+          password: savedConn.password,
+          keyPath: savedConn.key_path,
+          passphrase: savedConn.passphrase,
+        };
+
+        const request = {
+          savedConnectionId: connectionId,
+          hops,
+          target,
+        };
+
+        // Step 1: 展开预设链为树节点（不建立连接）
+        const expandResult = await expandManualPreset(request);
+        
+        // Step 2: 使用线性连接器连接整条链路
+        await connectNodeWithAncestors(expandResult.targetNodeId);
+        
+        // Step 3: 为目标节点创建终端并打开标签页
+        const terminalId = await createTerminalForNode(expandResult.targetNodeId);
+        createTab('terminal', terminalId);
+
+        // 显示成功提示
+        toast({
+          title: t('connections.toast.proxy_chain_established'),
+          description: t('connections.toast.proxy_chain_desc', { depth: expandResult.chainDepth }),
+          variant: 'success',
+        });
+
+        // 标记连接已使用
+        await api.markConnectionUsed(connectionId);
+        return;
       }
 
+      // ========== 直连（无 proxy_chain）==========
       // 检查是否已有相同主机的根节点
       const { nodes } = useSessionTreeStore.getState();
       const existingNode = nodes.find((n: UnifiedFlatNode) =>
@@ -554,9 +698,10 @@ export const Sidebar = () => {
         nodeId = existingNode.id;
         useSessionTreeStore.setState({ selectedNodeId: nodeId });
 
-        // 如果节点未连接，尝试连接
+        // 如果节点未连接，尝试连接（使用线性连接器）
         if (existingNode.runtime.status === 'idle' || existingNode.runtime.status === 'error') {
-          await connectNode(nodeId);
+          const { connectNodeWithAncestors } = useSessionTreeStore.getState();
+          await connectNodeWithAncestors(nodeId);
         }
       } else {
         // 创建新节点
@@ -571,21 +716,25 @@ export const Sidebar = () => {
           displayName: savedConn.name,
         });
 
-        // 自动连接新创建的节点
-        await connectNode(nodeId);
+        // 自动连接新创建的节点（使用线性连接器）
+        const { connectNodeWithAncestors } = useSessionTreeStore.getState();
+        await connectNodeWithAncestors(nodeId);
       }
 
       // 标记连接已使用
       await api.markConnectionUsed(connectionId);
     } catch (error) {
       console.error('Failed to connect to saved connection:', error);
-      // 只有真正的连接错误才打开编辑器，不包括 "already connecting"
+      // 只有真正的连接错误才打开编辑器，不包括锁错误
       const errorMsg = String(error);
-      if (!errorMsg.includes('already connecting') && !errorMsg.includes('already connected')) {
+      if (!errorMsg.includes('already connecting') && 
+          !errorMsg.includes('already connected') &&
+          !errorMsg.includes('CHAIN_LOCK_BUSY') &&
+          !errorMsg.includes('NODE_LOCK_BUSY')) {
         openConnectionEditor(connectionId);
       }
     }
-  }, [addRootNode, connectNode, openConnectionEditor]);
+  }, [addRootNode, openConnectionEditor, createTab, toast, t]);
 
   const toggleGroup = (groupName: string) => {
     setExpandedGroups(prev => {

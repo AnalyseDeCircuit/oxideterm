@@ -429,7 +429,22 @@ async fn register_session_services(
 /// - Establish SSH connection (direct or via proxy)
 /// - Request shell and create WebSocket bridge
 /// - Register supporting services (forwarding, heartbeat)
+///
+/// # ⚠️ DEPRECATED
+/// 
+/// 此命令已被弃用。请使用 `connect_tree_node` + `expand_manual_preset` 组合作为唯一的 SSH 连接入口。
+/// 
+/// **原因**：
+/// - OxideTerm 采用"前端驱动、后端执行"架构
+/// - 所有连接必须通过 SessionTree 管理，以确保锁机制生效
+/// - `connect_v2` 的 proxy_chain 处理绕过了 SessionTree，可能导致状态不一致
+/// 
+/// **迁移指南**：
+/// 1. 使用 `expand_manual_preset` 在 SessionTree 中展开跳板链
+/// 2. 前端使用 `connectNodeWithAncestors` 线性连接每个节点
+/// 3. 每个节点通过 `connect_tree_node(node_id)` 建立连接
 #[tauri::command]
+#[deprecated(since = "0.8.0", note = "Use connect_tree_node + expand_manual_preset instead")]
 pub async fn connect_v2(
     _app_handle: AppHandle,
     request: ConnectRequest,
@@ -437,6 +452,10 @@ pub async fn connect_v2(
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
 ) -> Result<ConnectResponseV2, String> {
+    warn!(
+        "⚠️ DEPRECATED: connect_v2 called for {}@{}:{} - please migrate to connect_tree_node + expand_manual_preset",
+        request.username, request.host, request.port
+    );
     info!(
         "Connect request: {}@{}:{}",
         request.username, request.host, request.port

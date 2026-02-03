@@ -59,19 +59,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// 15s × 2 = 30s 内必触发重连
 const HEARTBEAT_FAIL_THRESHOLD: u32 = 2;
 
-/// 重连间隔（初始值，使用指数退避）
-/// 优化：从 2s 降至 0.5s，加速短时断网恢复
-const RECONNECT_INITIAL_DELAY: Duration = Duration::from_millis(500);
-
-/// 首次重连延迟（快速首跳）
-/// 设计：首次重连仅等待 200ms，瞬断场景近乎无感
-const RECONNECT_FIRST_DELAY: Duration = Duration::from_millis(200);
-
-/// 重连最大间隔
-const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
-
-/// 普通模式最大重连次数
-const RECONNECT_MAX_ATTEMPTS: u32 = 5;
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🛑 RECONNECT CONSTANTS - REMOVED
+// ═══════════════════════════════════════════════════════════════════════════════
+// 以下常量已被移除（自动重连引擎已被物理删除）：
+// - RECONNECT_INITIAL_DELAY
+// - RECONNECT_FIRST_DELAY  
+// - RECONNECT_MAX_DELAY
+// - RECONNECT_MAX_ATTEMPTS
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /// 连接池配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1778,389 +1774,28 @@ impl SshConnectionRegistry {
         });
     }
 
-    /// 启动连接重连任务
-    pub async fn start_reconnect(self: &Arc<Self>, connection_id: &str) {
-        let Some(entry) = self.connections.get(connection_id) else {
-            return;
-        };
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 🛑 AUTO-RECONNECT ENGINE - PHYSICALLY REMOVED
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //
+    // 以下函数已被物理删除，后端禁止自主重连：
+    // - start_reconnect: 启动重连任务
+    // - try_reconnect: 尝试重连（路由）
+    // - try_reconnect_direct: 直连重连
+    // - try_reconnect_tunneled: 隧道重连
+    //
+    // 设计原则：后端是纯执行器，只响应前端的 connect_tree_node 命令。
+    // 所有重连逻辑必须由前端的 connectNodeWithAncestors 驱动。
+    // ═══════════════════════════════════════════════════════════════════════════════
 
-        let conn = entry.value().clone();
-        
-        // 抢占式清理：取消旧的重连任务（如果存在）
-        // 确保新任务不会与旧任务竞争
-        if conn.is_reconnecting() {
-            debug!("Connection {} cancelling previous reconnect task", connection_id);
-            conn.cancel_reconnect().await;
-        }
-
-        // 生成新的 attempt_id（用于状态幂等检查）
-        let attempt_id = conn.new_attempt_id();
-        debug!("Connection {} starting reconnect with attempt_id={}", connection_id, attempt_id);
-
-        let is_pinned = conn.is_keep_alive().await;
-        let registry = Arc::clone(self);
-        let connection_id = connection_id.to_string();
-        let config = conn.config.clone();
-        let conn_for_task = conn.clone();
-
-        let task = tokio::spawn(async move {
-            info!(
-                "Reconnect task started for connection {} (pinned={}, attempt_id={})",
-                connection_id, is_pinned, attempt_id
-            );
-
-            conn_for_task.set_state(ConnectionState::Reconnecting).await;
-            registry.emit_connection_status_changed(&connection_id, "reconnecting").await;
-
-            // 首跳提速：第一次重连使用短延迟，后续使用指数退避
-            let mut delay = RECONNECT_FIRST_DELAY;
-            let max_attempts = if is_pinned { u32::MAX } else { RECONNECT_MAX_ATTEMPTS };
-
-            loop {
-                // 状态幂等检查：如果 attempt_id 已经变化，说明新的重连任务已启动，当前任务应退出
-                if conn_for_task.current_attempt_id() != attempt_id {
-                    warn!(
-                        "Connection {} reconnect task {} superseded by newer attempt {}, exiting",
-                        connection_id, attempt_id, conn_for_task.current_attempt_id()
-                    );
-                    return;
-                }
-
-                let attempt = conn_for_task.increment_reconnect_attempts();
-                info!(
-                    "Connection {} reconnect attempt {}/{} (attempt_id={})",
-                    connection_id,
-                    attempt,
-                    if is_pinned { "∞".to_string() } else { max_attempts.to_string() },
-                    attempt_id
-                );
-
-                // 发送重连进度事件
-                registry.emit_reconnect_progress(
-                    &connection_id,
-                    attempt,
-                    if is_pinned { None } else { Some(max_attempts) },
-                    delay.as_millis() as u64,
-                ).await;
-
-                // 等待延迟（首次 200ms，后续指数退避）
-                tokio::time::sleep(delay).await;
-
-                // 再次检查幂等性（延迟期间可能有新任务启动）
-                if conn_for_task.current_attempt_id() != attempt_id {
-                    warn!(
-                        "Connection {} reconnect task {} superseded during delay, exiting",
-                        connection_id, attempt_id
-                    );
-                    return;
-                }
-
-                // 尝试重连
-                match registry.try_reconnect(&connection_id, &config).await {
-                    Ok(new_controller) => {
-                        // 最终幂等性检查：确保这个结果仍然有效
-                        if conn_for_task.current_attempt_id() != attempt_id {
-                            warn!(
-                                "Connection {} reconnect task {} succeeded but superseded, discarding result",
-                                connection_id, attempt_id
-                            );
-                            // 关闭新创建的连接，避免泄漏
-                            drop(new_controller);
-                            return;
-                        }
-
-                        info!("Connection {} reconnected successfully (attempt_id={})", connection_id, attempt_id);
-
-                        // 获取关联的 terminal IDs 和 forward IDs（在更新前获取）
-                        let terminal_ids = conn_for_task.terminal_ids().await;
-                        let forward_ids = conn_for_task.forward_ids().await;
-
-                        // 更新 handle_controller - 需要替换整个连接条目
-                        // 注意：由于 ConnectionEntry 的字段是不可变的，我们需要创建新条目
-                        // 这里简化处理：更新现有条目的状态，新的 handle_controller 通过事件传递
-                        
-                        conn_for_task.reset_heartbeat_failures();
-                        conn_for_task.reset_reconnect_state();
-                        conn_for_task.set_state(ConnectionState::Active).await;
-
-                        // 用新的 HandleController 替换旧的连接条目
-                        registry.replace_handle_controller(&connection_id, new_controller.clone()).await;
-
-                        // 广播重连成功事件（包含需要恢复的 terminal 和 forward 信息）
-                        registry.emit_connection_reconnected(
-                            &connection_id,
-                            terminal_ids,
-                            forward_ids,
-                        ).await;
-
-                        // 广播状态变更事件
-                        registry.emit_connection_status_changed(&connection_id, "connected").await;
-
-                        // 重新启动心跳
-                        registry.start_heartbeat(&connection_id);
-
-                        // ❌ 已删除: cascade_reconnect_children
-                        // 🛑 后端禁止级联重连，前端决定是否重连子节点
-
-                        break;
-                    }
-                    Err(e) => {
-                        warn!("Connection {} reconnect attempt {} failed: {}", connection_id, attempt, e);
-
-                        if !is_pinned && attempt >= max_attempts {
-                            // 普通模式：达到最大重连次数，放弃
-                            error!(
-                                "Connection {} reconnect failed after {} attempts, giving up",
-                                connection_id, attempt
-                            );
-                            conn_for_task.set_state(ConnectionState::Disconnected).await;
-                            registry.emit_connection_status_changed(&connection_id, "disconnected").await;
-
-                            // 清理连接
-                            registry.connections.remove(&connection_id);
-                            break;
-                        }
-
-                        // 增加延迟（指数退避）
-                        // 首次失败后从 RECONNECT_INITIAL_DELAY 开始，然后倍增
-                        if delay == RECONNECT_FIRST_DELAY {
-                            delay = RECONNECT_INITIAL_DELAY;
-                        } else {
-                            delay = std::cmp::min(delay * 2, RECONNECT_MAX_DELAY);
-                        }
-                    }
-                }
-            }
-
-            info!("Reconnect task stopped for connection {}", connection_id);
-        });
-
-        // 保存任务句柄
-        tokio::spawn(async move {
-            conn.set_reconnect_task(task).await;
-        });
-    }
-
-    /// 尝试重连
+    /// 🛑 REMOVED: start_reconnect
     /// 
-    /// 支持直连和隧道连接两种模式：
-    /// - 直连：直接建立 SSH 连接
-    /// - 隧道连接：先检查父连接状态，然后通过父连接建立 direct-tcpip 隧道
-    async fn try_reconnect(
-        &self,
-        connection_id: &str,
-        config: &SessionConfig,
-    ) -> Result<HandleController, String> {
-        // 检查是否为隧道连接
-        let parent_connection_id = self.connections.get(connection_id)
-            .and_then(|e| e.value().parent_connection_id.clone());
-
-        if let Some(parent_id) = parent_connection_id {
-            // 隧道连接：需要通过父连接重连
-            return self.try_reconnect_tunneled(connection_id, &parent_id, config).await;
-        }
-
-        // 直连模式
-        self.try_reconnect_direct(connection_id, config).await
-    }
-
-    /// 直连模式重连
-    async fn try_reconnect_direct(
-        &self,
-        connection_id: &str,
-        config: &SessionConfig,
-    ) -> Result<HandleController, String> {
-        // 转换 SessionConfig 到 SshConfig
-        let ssh_config = SshConfig {
-            host: config.host.clone(),
-            port: config.port,
-            username: config.username.clone(),
-            auth: match &config.auth {
-                AuthMethod::Password { password } => SshAuthMethod::Password { password: password.clone() },
-                AuthMethod::Key {
-                    key_path,
-                    passphrase,
-                } => SshAuthMethod::Key {
-                    key_path: key_path.clone(),
-                    passphrase: passphrase.clone(),
-                },
-                AuthMethod::Certificate {
-                    key_path,
-                    cert_path,
-                    passphrase,
-                } => SshAuthMethod::Certificate {
-                    key_path: key_path.clone(),
-                    cert_path: cert_path.clone(),
-                    passphrase: passphrase.clone(),
-                },
-                AuthMethod::Agent => SshAuthMethod::Agent,
-                AuthMethod::KeyboardInteractive => {
-                    return Err(
-                        "KeyboardInteractive sessions cannot be auto-reconnected. Please manually reconnect with 2FA."
-                            .to_string(),
-                    );
-                }
-            },
-            timeout_secs: 30,
-            cols: config.cols,
-            rows: config.rows,
-            proxy_chain: None,
-            strict_host_key_checking: false,
-            trust_host_key: None, // Reconnect uses known_hosts, no TOFU needed
-        };
-
-        // 尝试建立新连接
-        let client = SshClient::new(ssh_config);
-        let session = client
-            .connect()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // 启动 Handle Owner Task
-        let handle_controller = session.start(connection_id.to_string());
-
-        Ok(handle_controller)
-    }
-
-    /// 隧道连接模式重连
-    async fn try_reconnect_tunneled(
-        &self,
-        connection_id: &str,
-        parent_connection_id: &str,
-        config: &SessionConfig,
-    ) -> Result<HandleController, String> {
-        // 1. 获取父连接
-        let parent_entry = self.connections.get(parent_connection_id)
-            .ok_or_else(|| format!("Parent connection {} not found", parent_connection_id))?;
-        
-        let parent_conn = parent_entry.value().clone();
-        drop(parent_entry);
-
-        // 2. 检查父连接状态
-        let parent_state = parent_conn.state().await;
-        if parent_state != ConnectionState::Active && parent_state != ConnectionState::Idle {
-            return Err(format!(
-                "Parent connection {} is not available (state: {:?}), cannot reconnect tunneled connection",
-                parent_connection_id, parent_state
-            ));
-        }
-
-        info!(
-            "Reconnecting tunneled connection {} via parent {}",
-            connection_id, parent_connection_id
-        );
-
-        // 3. 通过父连接打开 direct-tcpip 隧道
-        let channel = parent_conn
-            .handle_controller
-            .open_direct_tcpip(
-                &config.host,
-                config.port as u32,
-                "127.0.0.1",
-                0,
-            )
-            .await
-            .map_err(|e| format!("Failed to open direct-tcpip channel: {}", e))?;
-
-        debug!("Direct-tcpip channel opened to {}:{}", config.host, config.port);
-
-        // 4. 将 channel 转换为 stream 用于 SSH-over-SSH
-        let stream = channel.into_stream();
-
-        // 5. 在隧道上建立新的 SSH 连接
-        let ssh_config = russh::client::Config {
-            inactivity_timeout: Some(std::time::Duration::from_secs(300)),
-            keepalive_interval: Some(std::time::Duration::from_secs(30)),
-            keepalive_max: 3,
-            ..Default::default()
-        };
-
-        let handler = super::client::ClientHandler::new(
-            config.host.clone(),
-            config.port,
-            false, // 隧道连接不严格检查主机密钥
-        );
-
-        // 使用 russh::connect_stream 在隧道上建立 SSH
-        let mut handle = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            russh::client::connect_stream(std::sync::Arc::new(ssh_config), stream, handler),
-        )
-        .await
-        .map_err(|_| format!(
-            "Reconnection to {}:{} via tunnel timed out",
-            config.host, config.port
-        ))?
-        .map_err(|e| format!("Failed to reconnect via tunnel: {}", e))?;
-
-        debug!("SSH handshake via tunnel completed for reconnection");
-
-        // 6. 认证
-        let authenticated = match &config.auth {
-            AuthMethod::Password { password } => {
-                handle
-                    .authenticate_password(&config.username, password)
-                    .await
-                    .map_err(|e| format!("Authentication failed: {}", e))?
-            }
-            AuthMethod::Key { key_path, passphrase } => {
-                let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
-                    .map_err(|e| format!("Failed to load key: {}", e))?;
-
-                let key_with_hash =
-                    russh_keys::key::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None)
-                        .map_err(|e| format!("Failed to prepare key: {}", e))?;
-
-                handle
-                    .authenticate_publickey(&config.username, key_with_hash)
-                    .await
-                    .map_err(|e| format!("Authentication failed: {}", e))?
-            }
-            AuthMethod::Certificate { key_path, cert_path, passphrase } => {
-                let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
-                    .map_err(|e| format!("Failed to load key: {}", e))?;
-
-                let cert = russh_keys::load_openssh_certificate(cert_path)
-                    .map_err(|e| format!("Failed to load certificate: {}", e))?;
-
-                handle
-                    .authenticate_openssh_cert(&config.username, std::sync::Arc::new(key), cert)
-                    .await
-                    .map_err(|e| format!("Certificate authentication failed: {}", e))?
-            }
-            AuthMethod::Agent => {
-                let mut agent = crate::ssh::agent::SshAgentClient::connect()
-                    .await
-                    .map_err(|e| format!("Failed to connect to SSH agent: {}", e))?;
-                
-                agent.authenticate(&handle, &config.username)
-                    .await
-                    .map_err(|e| format!("Agent authentication failed: {}", e))?;
-                true
-            }
-            AuthMethod::KeyboardInteractive => {
-                // KBI reconnection via proxy chain is not supported
-                return Err(
-                    "KeyboardInteractive sessions cannot be auto-reconnected via proxy chain"
-                        .to_string(),
-                );
-            }
-        };
-
-        if !authenticated {
-            return Err(format!("Authentication to {} rejected", config.host));
-        }
-
-        info!(
-            "Tunneled connection {} reconnected successfully via {}",
-            connection_id, parent_connection_id
-        );
-
-        // 7. 创建 SshSession 并启动 Handle Owner Task
-        let session = super::session::SshSession::new(handle, config.cols, config.rows);
-        let handle_controller = session.start(connection_id.to_string());
-
-        Ok(handle_controller)
+    /// 此函数已被物理删除。后端禁止自主启动重连任务。
+    /// 前端应通过 connect_tree_node 命令发起重连。
+    #[allow(dead_code)]
+    pub async fn start_reconnect(self: &Arc<Self>, _connection_id: &str) {
+        // 🛑 NO-OP: 后端禁止自主重连
+        tracing::warn!("🛑 start_reconnect called but DISABLED - backend cannot auto-reconnect");
     }
 
     /// 广播连接状态变更事件
@@ -2246,141 +1881,15 @@ impl SshConnectionRegistry {
         }
     }
 
-    /// 替换连接的 HandleController（用于重连后更新）
-    ///
-    /// # 锁安全
-    /// 此方法先收集所有需要的数据到局部变量，然后再释放 DashMap 引用，
-    /// 避免在持有 DashMap 引用时获取多个 RwLock。
-    async fn replace_handle_controller(&self, connection_id: &str, new_controller: HandleController) {
-        // 先收集所有需要的数据到局部变量
-        let old_data = if let Some(entry) = self.connections.get(connection_id) {
-            let old_entry = entry.value();
-            
-            // 按锁顺序依次读取，每个 await 后锁自动释放
-            let keep_alive = *old_entry.keep_alive.read().await;
-            let terminal_ids = old_entry.terminal_ids.read().await.clone();
-            let sftp_session_id = old_entry.sftp_session_id.read().await.clone();
-            let forward_ids = old_entry.forward_ids.read().await.clone();
-            
-            Some((
-                old_entry.id.clone(),
-                old_entry.config.clone(),
-                old_entry.ref_count.load(Ordering::SeqCst),
-                old_entry.created_at,
-                old_entry.current_attempt_id.load(Ordering::SeqCst),
-                old_entry.parent_connection_id.clone(),
-                keep_alive,
-                terminal_ids,
-                sftp_session_id,
-                forward_ids,
-            ))
-        } else {
-            None
-        };
-        
-        // 在 DashMap 引用释放后，使用收集的数据创建新条目
-        if let Some((id, config, ref_count, created_at, attempt_id, parent_id, keep_alive, terminal_ids, sftp_session_id, forward_ids)) = old_data {
-            let new_entry = Arc::new(ConnectionEntry {
-                id,
-                config,
-                handle_controller: new_controller,
-                state: RwLock::new(ConnectionState::Active),
-                ref_count: AtomicU32::new(ref_count),
-                last_active: AtomicU64::new(Utc::now().timestamp() as u64),
-                keep_alive: RwLock::new(keep_alive),
-                created_at,
-                idle_timer: Mutex::new(None),
-                terminal_ids: RwLock::new(terminal_ids),
-                sftp_session_id: RwLock::new(sftp_session_id),
-                forward_ids: RwLock::new(forward_ids),
-                heartbeat_task: Mutex::new(None),
-                heartbeat_failures: AtomicU32::new(0),
-                reconnect_task: Mutex::new(None),
-                is_reconnecting: AtomicBool::new(false),
-                reconnect_attempts: AtomicU32::new(0),
-                current_attempt_id: AtomicU64::new(attempt_id),
-                last_emitted_status: RwLock::new(None),
-                parent_connection_id: parent_id,
-            });
-            
-            // 替换条目
-            self.connections.insert(connection_id.to_string(), new_entry);
-            
-            info!("Connection {} HandleController replaced after reconnect", connection_id);
-        }
-    }
-
-    /// 广播连接重连成功事件（通知前端恢复 Shell 和 Forward）
-    async fn emit_connection_reconnected(
-        &self,
-        connection_id: &str,
-        terminal_ids: Vec<String>,
-        forward_ids: Vec<String>,
-    ) {
-        let app_handle = self.app_handle.read().await;
-        if let Some(handle) = app_handle.as_ref() {
-            use tauri::Emitter;
-            
-            #[derive(Clone, serde::Serialize)]
-            struct ConnectionReconnectedEvent {
-                connection_id: String,
-                terminal_ids: Vec<String>,
-                forward_ids: Vec<String>,
-            }
-
-            let event = ConnectionReconnectedEvent {
-                connection_id: connection_id.to_string(),
-                terminal_ids,
-                forward_ids,
-            };
-
-            if let Err(e) = handle.emit("connection_reconnected", event) {
-                error!("Failed to emit connection_reconnected: {}", e);
-            } else {
-                info!("Emitted connection_reconnected for {}", connection_id);
-            }
-        }
-    }
-
-    /// 广播重连进度事件（让前端显示重连进度）
-    async fn emit_reconnect_progress(
-        &self,
-        connection_id: &str,
-        attempt: u32,
-        max_attempts: Option<u32>,
-        next_retry_ms: u64,
-    ) {
-        let app_handle = self.app_handle.read().await;
-        if let Some(handle) = app_handle.as_ref() {
-            use tauri::Emitter;
-            
-            #[derive(Clone, serde::Serialize)]
-            struct ConnectionReconnectProgressEvent {
-                connection_id: String,
-                attempt: u32,
-                max_attempts: Option<u32>,
-                next_retry_ms: u64,
-                timestamp: u64,
-            }
-
-            let event = ConnectionReconnectProgressEvent {
-                connection_id: connection_id.to_string(),
-                attempt,
-                max_attempts,
-                next_retry_ms,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-            };
-
-            if let Err(e) = handle.emit("connection_reconnect_progress", event) {
-                error!("Failed to emit connection_reconnect_progress: {}", e);
-            } else {
-                debug!("Emitted reconnect progress for {}: attempt {}", connection_id, attempt);
-            }
-        }
-    }
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 🛑 RECONNECT HELPER FUNCTIONS - PHYSICALLY REMOVED
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //
+    // 以下辅助函数已被物理删除（它们只服务于已删除的重连逻辑）：
+    // - replace_handle_controller: 重连后替换 HandleController
+    // - emit_connection_reconnected: 广播重连成功事件
+    // - emit_reconnect_progress: 广播重连进度事件
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     /// 收集所有后代连接（递归）
     /// 用于级联传播 link-down 状态
