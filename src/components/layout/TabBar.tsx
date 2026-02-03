@@ -6,6 +6,7 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { cn } from '../../lib/utils';
 import { Tab, PaneNode } from '../../types';
+import { topologyResolver } from '../../lib/topologyResolver';
 
 /** Count leaf panes in a pane tree */
 function countPanes(node: PaneNode): number {
@@ -113,11 +114,11 @@ export const TabBar = () => {
     setActiveTab,
     closeTab,
     closeTerminalSession,
-    reconnect,
     cancelReconnect,
     sessions,
     networkOnline
   } = useAppStore();
+  const { reconnectCascade } = useSessionTreeStore();
   const [reconnecting, setReconnecting] = React.useState<string | null>(null);
   const [closing, setClosing] = React.useState<string | null>(null);
   // Force re-render for countdown
@@ -156,7 +157,18 @@ export const TabBar = () => {
     e.stopPropagation();
     setReconnecting(sessionId);
     try {
-      await reconnect(sessionId);
+      // 从 session 获取 connectionId，再通过 topologyResolver 获取 nodeId
+      const session = sessions.get(sessionId);
+      const connectionId = session?.connectionId;
+      const nodeId = connectionId ? topologyResolver.getNodeId(connectionId) : undefined;
+      
+      if (nodeId) {
+        // 新架构: 通过 SessionTree 重连
+        await reconnectCascade(nodeId);
+      } else {
+        // 旧会话或直接会话：只打印警告
+        console.warn(`[TabBar] Cannot reconnect session ${sessionId}: no associated tree node`);
+      }
     } finally {
       setReconnecting(null);
     }

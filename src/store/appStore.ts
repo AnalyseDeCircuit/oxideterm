@@ -49,14 +49,10 @@ interface AppStore {
   selectedGroup: string | null;
   editingConnection: ConnectionInfo | null;
   networkOnline: boolean;
-  reconnectPendingSessionId: string | null; // Session awaiting password for reconnect
 
   // Actions - Sessions (legacy, still working)
   connect: (request: ConnectRequest) => Promise<string>;
   disconnect: (sessionId: string) => Promise<void>;
-  reconnect: (sessionId: string) => Promise<void>;
-  reconnectWithPassword: (sessionId: string, password: string) => Promise<void>;
-  cancelReconnectDialog: () => void;
   cancelReconnect: (sessionId: string) => Promise<void>;
   updateSessionState: (sessionId: string, state: SessionState, error?: string) => void;
   
@@ -158,7 +154,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   get sidebarActiveSection() {
     return useSettingsStore.getState().settings.sidebarUI.activeSection;
   },
-  reconnectPendingSessionId: null,
   modals: {
     newConnection: false,
     settings: false,
@@ -548,175 +543,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (error) {
       console.error('Disconnect failed:', error);
     }
-  },
-
-  /** 
-   * @deprecated 已废弃 - 使用 sessionTreeStore.reconnectCascade() 代替
-   * 
-   * 此函数使用旧的 sshConnect API，不支持新的拓扑驱动重连架构。
-   * 新架构中所有重连都通过前端 reconnectCascade 驱动，
-   * 后端只负责执行 connectTreeNode。
-   */
-  reconnect: async (sessionId: string) => {
-    console.warn(`[AppStore] reconnect() is deprecated. Use sessionTreeStore.reconnectCascade() instead.`);
-    const session = get().sessions.get(sessionId);
-    if (!session) {
-      console.warn(`[AppStore] reconnect: session ${sessionId} not found`);
-      return;
-    }
-
-    // Password auth requires user to re-enter password
-    if (session.auth_type === 'password') {
-      set({ reconnectPendingSessionId: sessionId });
-      return;
-    }
-
-    // Update state to connecting
-    get().updateSessionState(sessionId, 'connecting');
-
-    try {
-      // Disconnect existing session first
-      // 🔄 迁移到新 API: closeTerminal
-      await api.closeTerminal(sessionId).catch((err) => {
-        console.warn(`[Reconnect] Failed to close old terminal ${sessionId}:`, err);
-        useToastStore.getState().addToast({
-          title: i18n.t('connections.toast.close_terminal_failed'),
-          description: String(err),
-          variant: 'warning',
-        });
-      });
-      
-      // Determine auth_type for reconnection:
-      // - 'agent' -> use agent
-      // - 'key' with key_path -> use key with the specific path
-      // - 'key' without key_path -> use default_key (fallback)
-      // - 'default_key' -> use default_key
-      let reconnectAuthType: 'key' | 'default_key' | 'agent' = 'default_key';
-      let reconnectKeyPath: string | undefined = undefined;
-
-      if (session.auth_type === 'agent') {
-        reconnectAuthType = 'agent';
-      } else if (session.auth_type === 'key' && session.key_path) {
-        reconnectAuthType = 'key';
-        reconnectKeyPath = session.key_path;
-      }
-      // else: default_key fallback
-
-      // Reconnect with saved authentication info
-      // 🔄 迁移到新 API: sshConnect + createTerminal
-      const connResponse = await api.sshConnect({
-        host: session.host,
-        port: session.port,
-        username: session.username,
-        authType: reconnectAuthType,
-        keyPath: reconnectKeyPath,
-        name: session.name,
-      });
-      
-      const termResponse = await api.createTerminal({
-        connectionId: connResponse.connectionId,
-      });
-      
-      const newSession = { ...termResponse.session, ws_token: termResponse.wsToken };
-
-      // Update session map with new session info but keep same sessionId in tabs
-      set((state) => {
-        const newSessions = new Map(state.sessions);
-        newSessions.delete(sessionId); // Remove old
-        newSessions.set(newSession.id, newSession); // Add new
-        
-        // Update tabs to point to new session
-        const newTabs = state.tabs.map(tab => 
-          tab.sessionId === sessionId 
-            ? { ...tab, sessionId: newSession.id }
-            : tab
-        );
-        
-        return { sessions: newSessions, tabs: newTabs };
-      });
-
-      console.log(`Reconnected session: ${sessionId} -> ${newSession.id}`);
-    } catch (error) {
-      console.error('Reconnect failed:', error);
-      get().updateSessionState(sessionId, 'error', String(error));
-    }
-  },
-
-  /** 
-   * @deprecated 已废弃 - 新架构中密码应存储在 ConnectionPreset 中
-   * 
-   * 此函数用于旧的会话级重连流程。新架构中：
-   * 1. 密码等认证信息存储在 ConnectionPreset
-   * 2. 重连时由 connectTreeNode 从 preset 获取认证信息
-   * 3. 如果需要交互式认证，由后端 keyboard_interactive 处理
-   */
-  reconnectWithPassword: async (sessionId: string, password: string) => {
-    console.warn(`[AppStore] reconnectWithPassword() is deprecated.`);
-    const session = get().sessions.get(sessionId);
-    if (!session) {
-      set({ reconnectPendingSessionId: null });
-      return;
-    }
-
-    // Clear pending state
-    set({ reconnectPendingSessionId: null });
-
-    // Update state to connecting
-    get().updateSessionState(sessionId, 'connecting');
-
-    try {
-      // Disconnect existing session first
-      // 🔄 迁移到新 API: closeTerminal
-      await api.closeTerminal(sessionId).catch((err) => {
-        console.warn(`[ReconnectWithPassword] Failed to close old terminal ${sessionId}:`, err);
-        useToastStore.getState().addToast({
-          title: i18n.t('connections.toast.close_terminal_failed'),
-          description: String(err),
-          variant: 'warning',
-        });
-      });
-      
-      // Reconnect with password
-      // 🔄 迁移到新 API: sshConnect + createTerminal
-      const connResponse = await api.sshConnect({
-        host: session.host,
-        port: session.port,
-        username: session.username,
-        authType: 'password',
-        password,
-        name: session.name,
-      });
-      
-      const termResponse = await api.createTerminal({
-        connectionId: connResponse.connectionId,
-      });
-      
-      const newSession = { ...termResponse.session, ws_token: termResponse.wsToken };
-
-      // Update session map with new session info
-      set((state) => {
-        const newSessions = new Map(state.sessions);
-        newSessions.delete(sessionId);
-        newSessions.set(newSession.id, newSession);
-        
-        const newTabs = state.tabs.map(tab => 
-          tab.sessionId === sessionId 
-            ? { ...tab, sessionId: newSession.id }
-            : tab
-        );
-        
-        return { sessions: newSessions, tabs: newTabs };
-      });
-
-      console.log(`Reconnected session with password: ${sessionId} -> ${newSession.id}`);
-    } catch (error) {
-      console.error('Reconnect with password failed:', error);
-      get().updateSessionState(sessionId, 'error', String(error));
-    }
-  },
-
-  cancelReconnectDialog: () => {
-    set({ reconnectPendingSessionId: null });
   },
 
   cancelReconnect: async (sessionId: string) => {

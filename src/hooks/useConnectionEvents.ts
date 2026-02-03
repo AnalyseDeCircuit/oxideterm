@@ -49,6 +49,37 @@ let reconnectDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isReconnecting = false;
 
 /**
+ * 从待重连队列中移除节点
+ * 
+ * 用于防止"诈尸重连"：当用户手动断开连接或关闭标签页时，
+ * 调用此函数移除该节点，防止防抖期间仍然尝试重连已关闭的节点。
+ * 
+ * @param nodeId 要移除的节点 ID
+ */
+export function cancelPendingReconnect(nodeId: string): void {
+  if (pendingReconnectNodes.has(nodeId)) {
+    console.log(`[ReconnectScheduler] Canceling pending reconnect for node ${nodeId}`);
+    pendingReconnectNodes.delete(nodeId);
+  }
+}
+
+/**
+ * 清除所有待重连节点
+ * 
+ * 用于全局重置，如用户退出应用或刷新页面。
+ */
+export function clearAllPendingReconnects(): void {
+  if (pendingReconnectNodes.size > 0) {
+    console.log(`[ReconnectScheduler] Clearing ${pendingReconnectNodes.size} pending reconnects`);
+    pendingReconnectNodes.clear();
+  }
+  if (reconnectDebounceTimer) {
+    clearTimeout(reconnectDebounceTimer);
+    reconnectDebounceTimer = null;
+  }
+}
+
+/**
  * 调度防抖重连
  * 
  * 设计原则：

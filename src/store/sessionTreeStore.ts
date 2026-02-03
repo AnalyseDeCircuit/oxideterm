@@ -13,6 +13,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { api } from '../lib/api';
 import { guardSessionConnection, isConnectionGuardError } from '../lib/connectionGuard';
+import { cancelPendingReconnect } from '../hooks/useConnectionEvents';
 import { topologyResolver } from '../lib/topologyResolver';
 import { useSettingsStore } from './settingsStore';
 import type { 
@@ -639,6 +640,11 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       // 1. 获取所有子节点 (包括当前节点)
       const descendants = get().getDescendants(nodeId);
       const allAffectedNodes = [node, ...descendants];
+      
+      // 1.5 取消待重连队列中的节点（防止诈尸重连）
+      for (const n of allAffectedNodes) {
+        cancelPendingReconnect(n.id);
+      }
       
       // 2. 保存断开前的终端数量（用于重连时恢复）
       const { disconnectedTerminalCounts } = get();

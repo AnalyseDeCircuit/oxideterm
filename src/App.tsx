@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { AppLayout } from './components/layout/AppLayout';
 import { Toaster } from './components/ui/toaster';
-import { ReconnectDialog } from './components/modals/ReconnectDialog';
 import { AutoRouteModal } from './components/modals/AutoRouteModal';
 import { LocalShellLauncher } from './components/local/LocalShellLauncher';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -141,7 +140,6 @@ function App() {
     <ErrorBoundary>
       <AppLayout />
       <Toaster />
-      <ReconnectDialog />
       <AutoRouteModal />
       <LocalShellLauncher 
         open={shellLauncherOpen} 
