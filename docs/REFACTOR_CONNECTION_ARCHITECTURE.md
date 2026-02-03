@@ -132,10 +132,10 @@ closeTab: (tabId) => {
 
 | ID | 任务 | 优先级 | 状态 |
 |----|------|--------|------|
-| F1 | 重写 `closeTab`，加入物理清理逻辑 | P0 | 待执行 |
-| F2 | 新增 `resetNodeState`，全量覆盖状态 | P0 | 待执行 |
+| F1 | 重写 `closeTab`，加入物理清理逻辑 | P0 | ✅ 已完成 |
+| F2 | 新增 `resetNodeState`，全量覆盖状态 | P0 | ✅ 已完成 |
 | F3 | 新增 `connectNodeWithAncestors` 线性连接器 | P0 | 待执行 |
-| F4 | 新增 `isConnecting` 并发锁机制 | P0 | 待执行 |
+| F4 | 新增 `isConnecting` 并发锁机制 | P0 | ✅ 已完成 |
 | F5 | 修改 `rebuildUnifiedNodes` 验证 terminalIds 有效性 | P1 | 待执行 |
 | F6 | 重写 `reconnectCascade` 使用线性连接器 | P1 | 待执行 |
 
@@ -143,10 +143,10 @@ closeTab: (tabId) => {
 
 | ID | 任务 | 优先级 | 状态 |
 |----|------|--------|------|
-| B1 | `connect_manual_preset` 重命名为 `expand_manual_preset`，移除循环连接 | P1 | 待执行 |
-| B2 | 移除 `cascade_reconnect_children` 自动级联重连 | P1 | 待执行 |
-| B3 | 新增 `destroy_node_sessions` 命令，物理销毁节点残余资源 | P0 | 待执行 |
-| B4 | 心跳重连只广播事件，不执行动作 | P1 | 待执行 |
+| B1 | `expand_manual_preset` 返回 `pathNodeIds`，移除循环连接 | P1 | ✅ 已完成 |
+| B2 | 移除 `cascade_reconnect_children` 自动级联重连 | P1 | ✅ 已完成 |
+| B3 | 新增 `destroy_node_sessions` 命令，物理销毁节点残余资源 | P0 | ✅ 已完成 |
+| B4 | 心跳重连只广播事件，级联重连由前端决定 | P1 | ✅ 已完成 |
 
 ---
 

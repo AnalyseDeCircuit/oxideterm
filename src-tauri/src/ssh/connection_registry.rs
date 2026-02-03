@@ -1733,11 +1733,12 @@ impl SshConnectionRegistry {
                         debug!("Connection {} heartbeat OK", connection_id);
                     }
                     crate::ssh::handle_owner::PingResult::IoError => {
-                        // IO 错误，物理连接已断，立即触发重连
-                        error!("Connection {} IO error detected, triggering immediate reconnect", connection_id);
+                        // IO 错误，物理连接已断
+                        // 🛑 后端禁止自动重连：只广播事件，等待前端指令
+                        error!("Connection {} IO error detected, link_down broadcast only", connection_id);
                         conn.set_state(ConnectionState::LinkDown).await;
                         registry.emit_connection_status_changed(&connection_id, "link_down").await;
-                        registry.start_reconnect(&connection_id).await;
+                        // ❌ 已删除: registry.start_reconnect(&connection_id).await;
                         break;
                     }
                     crate::ssh::handle_owner::PingResult::Timeout => {
@@ -1750,6 +1751,7 @@ impl SshConnectionRegistry {
 
                         if failures >= HEARTBEAT_FAIL_THRESHOLD {
                             // 达到失败阈值，标记为 LinkDown
+                            // 🛑 后端禁止自动重连：只广播事件，等待前端指令
                             error!("Connection {} marked as LinkDown after {} heartbeat failures", 
                                    connection_id, failures);
                             conn.set_state(ConnectionState::LinkDown).await;
@@ -1757,8 +1759,8 @@ impl SshConnectionRegistry {
                             // 广播状态变更事件
                             registry.emit_connection_status_changed(&connection_id, "link_down").await;
 
-                            // 启动重连
-                            registry.start_reconnect(&connection_id).await;
+                            // ❌ 已删除: registry.start_reconnect(&connection_id).await;
+                            // 后端只广播，前端决定是否重连
 
                             break;
                         }
@@ -1897,8 +1899,8 @@ impl SshConnectionRegistry {
                         // 重新启动心跳
                         registry.start_heartbeat(&connection_id);
 
-                        // 🔴 新增：触发子连接级联重连
-                        registry.cascade_reconnect_children(&connection_id).await;
+                        // ❌ 已删除: cascade_reconnect_children
+                        // 🛑 后端禁止级联重连，前端决定是否重连子节点
 
                         break;
                     }
@@ -2399,109 +2401,9 @@ impl SshConnectionRegistry {
         result
     }
 
-    /// 父连接恢复后触发子连接级联重连
-    /// 
-    /// # Jitter 抖动
-    /// 使用 50-200ms 随机延迟防止重连风暴（Reconnect Storm）
-    async fn cascade_reconnect_children(self: &Arc<Self>, parent_connection_id: &str) {
-        // 收集处于 LinkDown 状态的直接子连接
-        let children: Vec<String> = self.connections.iter()
-            .filter(|e| e.value().parent_connection_id.as_deref() == Some(parent_connection_id))
-            .filter(|e| {
-                // 只处理 LinkDown 状态的子连接
-                // 使用 try_read 避免死锁，如果读取失败则跳过
-                if let Ok(guard) = e.value().state.try_read() {
-                    *guard == ConnectionState::LinkDown
-                } else {
-                    false
-                }
-            })
-            .map(|e| e.key().clone())
-            .collect();
-        
-        if children.is_empty() {
-            return;
-        }
-        
-        info!("Starting cascade reconnect for {} children of {}", children.len(), parent_connection_id);
-        
-        for child_id in children {
-            let registry = Arc::clone(self);
-            let child_id_clone = child_id.clone();
-            
-            tokio::spawn(async move {
-                // 🔴 关键：随机抖动防止重连风暴
-                let jitter = rand::random::<u64>() % 150 + 50; // 50-200ms
-                tokio::time::sleep(Duration::from_millis(jitter)).await;
-                
-                info!("Cascade reconnecting child {} (jitter: {}ms)", child_id_clone, jitter);
-                
-                // 尝试级联重连
-                if let Err(e) = registry.try_cascade_reconnect_single(&child_id_clone).await {
-                    warn!("Cascade reconnect failed for {}: {}", child_id_clone, e);
-                }
-            });
-        }
-    }
-
-    /// 单个子连接的级联重连
-    async fn try_cascade_reconnect_single(&self, connection_id: &str) -> Result<(), String> {
-        let entry = self.connections.get(connection_id)
-            .ok_or_else(|| format!("Connection {} not found", connection_id))?;
-        
-        let conn = entry.value().clone();
-        let config = conn.config.clone();
-        let parent_id = conn.parent_connection_id.clone()
-            .ok_or_else(|| "Not a tunneled connection".to_string())?;
-        drop(entry);
-        
-        // 检查父连接状态
-        let parent_entry = self.connections.get(&parent_id)
-            .ok_or_else(|| format!("Parent connection {} not found", parent_id))?;
-        let parent_state = parent_entry.value().state().await;
-        if parent_state != ConnectionState::Active {
-            return Err(format!("Parent {} is not active: {:?}", parent_id, parent_state));
-        }
-        drop(parent_entry);
-        
-        // 更新状态为重连中
-        conn.set_state(ConnectionState::Reconnecting).await;
-        self.emit_connection_status_changed(connection_id, "reconnecting").await;
-        
-        // 通过父连接重建隧道
-        match self.try_reconnect(connection_id, &config).await {
-            Ok(new_controller) => {
-                info!("Cascade reconnect successful for {}", connection_id);
-                
-                // 获取关联资源
-                let terminal_ids = conn.terminal_ids().await;
-                let forward_ids = conn.forward_ids().await;
-                
-                // 重置状态
-                conn.reset_heartbeat_failures();
-                conn.reset_reconnect_state();
-                conn.set_state(ConnectionState::Active).await;
-                
-                // 替换 HandleController
-                self.replace_handle_controller(connection_id, new_controller).await;
-                
-                // 发送事件
-                self.emit_connection_reconnected(connection_id, terminal_ids, forward_ids).await;
-                self.emit_connection_status_changed(connection_id, "connected").await;
-                
-                // 注意：心跳由 on_reconnect_success 统一启动
-                // 子连接的级联重连由 cascade_reconnect_children 递归处理
-                
-                Ok(())
-            }
-            Err(e) => {
-                warn!("Cascade reconnect failed for {}: {}", connection_id, e);
-                // 保持 LinkDown 状态，等待下次机会
-                conn.set_state(ConnectionState::LinkDown).await;
-                Err(e)
-            }
-        }
-    }
+    // ❌ 已删除: cascade_reconnect_children 函数
+    // ❌ 已删除: try_cascade_reconnect_single 函数
+    // 🛑 后端禁止级联重连，所有重连决策由前端驱动
 
     /// 获取连接条目（用于外部访问）
     pub fn get_connection(&self, connection_id: &str) -> Option<Arc<ConnectionEntry>> {
