@@ -78,7 +78,17 @@ interface AppStore {
   
   // Actions - Tabs
   createTab: (type: TabType, sessionId?: string) => void;
-  closeTab: (tabId: string) => void;
+  /**
+   * 关闭标签页并执行完整的清理
+   * 
+   * 清理步骤：
+   * 1. 从 UI 移除 Tab（乐观更新）
+   * 2. 从 sessions Map 移除 session
+   * 3. 通知 sessionTreeStore 清理映射
+   * 4. 调用后端 closeTerminal
+   * 5. 检查并可能断开 SSH 连接
+   */
+  closeTab: (tabId: string) => Promise<void>;
   setActiveTab: (tabId: string) => void;
   
   // Actions - Split Panes
@@ -535,7 +545,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   reconnect: async (sessionId: string) => {
     const session = get().sessions.get(sessionId);
-    if (!session) return;
+    if (!session) {
+      console.warn(`[AppStore] createTab(${type}) missing session ${sessionId}, attempting to hydrate`);
+      api.getSession(sessionId)
+        .then((fetched) => {
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            newSessions.set(sessionId, fetched);
+            return { sessions: newSessions };
+          });
+          // Retry tab creation after hydration
+          get().createTab(type, sessionId);
+        })
+        .catch((error) => {
+          console.error(`[AppStore] Failed to hydrate session ${sessionId} for ${type} tab:`, error);
+        });
+      return;
+    }
 
     // Password auth requires user to re-enter password
     if (session.auth_type === 'password') {
@@ -851,7 +877,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
 
-  closeTab: (tabId) => {
+  closeTab: async (tabId) => {
+    const tab = get().tabs.find(t => t.id === tabId);
+    if (!tab) {
+      console.warn(`[closeTab] Tab ${tabId} not found`);
+      return;
+    }
+    
+    const sessionId = tab.sessionId;
+    const tabType = tab.type;
+    
+    // ========== Phase 1: UI 乐观更新（立即响应） ==========
     set((state) => {
       const newTabs = state.tabs.filter(t => t.id !== tabId);
       let newActiveId = state.activeTabId;
@@ -865,6 +901,81 @@ export const useAppStore = create<AppStore>((set, get) => ({
         activeTabId: newActiveId
       };
     });
+    
+    // 非终端类型的 Tab 无需额外清理
+    if (!sessionId || (tabType !== 'terminal' && tabType !== 'local_terminal')) {
+      return;
+    }
+    
+    // ========== Phase 2: 获取 session 信息（在删除前） ==========
+    const session = get().sessions.get(sessionId);
+    const connectionId = session?.connectionId;
+    
+    // ========== Phase 3: 从 sessions Map 移除 ==========
+    set((state) => {
+      const newSessions = new Map(state.sessions);
+      newSessions.delete(sessionId);
+      return { sessions: newSessions };
+    });
+    
+    // ========== Phase 4: 通知 sessionTreeStore 清理映射 ==========
+    // 使用动态导入避免循环依赖
+    try {
+      const { useSessionTreeStore } = await import('./sessionTreeStore');
+      useSessionTreeStore.getState().purgeTerminalMapping(sessionId);
+    } catch (e) {
+      console.warn('[closeTab] Failed to purge terminal mapping:', e);
+    }
+    
+    // ========== Phase 5: 调用后端关闭终端 ==========
+    // 本地终端使用不同的关闭接口
+    if (tabType === 'local_terminal') {
+      try {
+        await api.localCloseTerminal(sessionId);
+        console.log(`[closeTab] Local terminal ${sessionId} closed`);
+      } catch (e) {
+        // 终端可能已经不存在，忽略错误
+        console.warn(`[closeTab] Failed to close local terminal ${sessionId}:`, e);
+      }
+      return;
+    }
+    
+    // SSH 终端
+    try {
+      await api.closeTerminal(sessionId);
+      console.log(`[closeTab] Terminal ${sessionId} closed`);
+    } catch (e) {
+      // 终端可能已经不存在，忽略错误
+      console.warn(`[closeTab] Failed to close terminal ${sessionId}:`, e);
+    }
+    
+    // ========== Phase 6: 检查是否需要断开 SSH 连接 ==========
+    // 只有当该连接下没有其他终端时才断开
+    if (connectionId) {
+      const remainingTerminals = Array.from(get().sessions.values())
+        .filter(s => s.connectionId === connectionId);
+      
+      if (remainingTerminals.length === 0) {
+        console.log(`[closeTab] No remaining terminals for connection ${connectionId}, disconnecting SSH`);
+        try {
+          await api.sshDisconnect(connectionId);
+          
+          // 从 connections Map 移除
+          set((state) => {
+            const newConnections = new Map(state.connections);
+            newConnections.delete(connectionId);
+            return { connections: newConnections };
+          });
+          
+          console.log(`[closeTab] SSH connection ${connectionId} disconnected`);
+        } catch (e) {
+          // 连接可能已经断开，忽略错误
+          console.warn(`[closeTab] Failed to disconnect SSH ${connectionId}:`, e);
+        }
+      } else {
+        console.debug(`[closeTab] Connection ${connectionId} still has ${remainingTerminals.length} terminals`);
+      }
+    }
   },
 
   setActiveTab: (tabId) => {
