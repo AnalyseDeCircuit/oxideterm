@@ -571,12 +571,28 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     }
   }, [session?.ws_url, recoverWebSocket, cleanupWebSocket, connectionStatus]);
 
-  const getFontFamily = (val: string) => {
-      switch(val) {
-          case 'jetbrains': return '"JetBrains Mono", monospace';
-          case 'meslo': return '"MesloLGM Nerd Font", monospace';
-          default: return '"JetBrains Mono", monospace';
-      }
+  // Font family helper - system fonts first, bundled Nerd Fonts as fallback
+  const getFontFamily = (val: string): string => {
+    switch(val) {
+      case 'jetbrains':
+        return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
+      case 'meslo':
+        return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
+      case 'cascadia':
+        return '"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", monospace';
+      case 'firacode':
+        return '"FiraCode Nerd Font", "FiraCode Nerd Font Mono", "Fira Code", monospace';
+      case 'menlo':
+        return 'Menlo, Monaco, "Courier New", monospace';
+      case 'consolas':
+        return 'Consolas, "Courier New", monospace';
+      case 'courier':
+        return '"Courier New", Courier, monospace';
+      case 'monospace':
+        return 'monospace';
+      default:
+        return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
+    }
   };
 
   useEffect(() => {
