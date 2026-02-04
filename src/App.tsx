@@ -40,9 +40,14 @@ function App() {
   }, [shellsLoaded, loadShells]);
 
   // Preload fonts based on user settings (lazy load CJK font)
+  // Delayed 500ms to let Tauri window and PTY initialize first
   useEffect(() => {
-    const { settings } = useSettingsStore.getState();
-    preloadTerminalFonts(settings.terminal.fontFamily);
+    const timer = setTimeout(() => {
+      const { settings } = useSettingsStore.getState();
+      preloadTerminalFonts(settings.terminal.fontFamily);
+    }, 500);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   // Sync SFTP settings to backend on app startup
