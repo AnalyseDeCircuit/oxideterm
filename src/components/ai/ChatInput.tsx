@@ -16,15 +16,32 @@ interface ChatInputProps {
   onStop: () => void;
   isLoading: boolean;
   disabled?: boolean;
+  externalValue?: string;
+  onExternalValueChange?: (value: string) => void;
 }
 
-export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, onExternalValueChange }: ChatInputProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState('');
   const [includeContext, setIncludeContext] = useState(false);
   const [includeAllPanes, setIncludeAllPanes] = useState(false);
   const [fetchingContext, setFetchingContext] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Sync with external value (from quick prompts)
+  useEffect(() => {
+    if (externalValue !== undefined && externalValue !== input) {
+      setInput(externalValue);
+      // Focus the textarea when value is set externally
+      textareaRef.current?.focus();
+    }
+  }, [externalValue]);
+
+  // Notify parent of changes
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    onExternalValueChange?.(value);
+  };
 
   // Get active terminal session
   const tabs = useAppStore((state) => state.tabs);
@@ -98,9 +115,10 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
 
     onSend(trimmed, context);
     setInput('');
+    onExternalValueChange?.('');
     setIncludeContext(false);
     setIncludeAllPanes(false);
-  }, [input, isLoading, disabled, includeContext, includeAllPanes, hasSplitPanes, hasActiveTerminal, activeTab, contextMaxChars, onSend]);
+  }, [input, isLoading, disabled, includeContext, includeAllPanes, hasSplitPanes, hasActiveTerminal, activeTab, contextMaxChars, onSend, onExternalValueChange]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -131,7 +149,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             >
               <Terminal className="w-3 h-3" />
-              <span>{fetchingContext ? 'CTX...' : 'CONTEXT'}</span>
+              <span>{fetchingContext ? t('ai.input.context_loading') : t('ai.input.context')}</span>
             </button>
           )}
 
@@ -146,7 +164,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             >
               <Layers className="w-3 h-3" />
-              <span>PANES</span>
+              <span>{t('ai.input.panes')}</span>
             </button>
           )}
         </div>
@@ -158,9 +176,9 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? t('ai.input.placeholder_disabled') : 'Ask Copilot...'}
+            placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
             disabled={disabled || isLoading}
             rows={1}
             className="w-full resize-none bg-transparent border-none rounded-none px-3 py-2 text-[13px] text-theme-text placeholder-theme-text-muted/40 focus:outline-none focus:ring-0 disabled:opacity-50 leading-relaxed min-h-[40px]"
@@ -172,17 +190,17 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
             {isLoading ? (
               <div className="flex items-center gap-1.5 text-theme-accent animate-pulse">
                 <Sparkles className="w-3 h-3" />
-                <span>COPILOT IS THINKING...</span>
+                <span>{t('ai.input.thinking')}</span>
               </div>
             ) : (
               <>
                 <div className="flex items-center gap-1.5">
                   <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">ENTER</span>
-                  <span>SEND</span>
+                  <span>{t('ai.input.send_key')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 ml-2">
                   <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">SHIFT+ENTER</span>
-                  <span>NEW LINE</span>
+                  <span>{t('ai.input.newline_key')}</span>
                 </div>
               </>
             )}
@@ -197,7 +215,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
                 title={t('ai.input.stop_generation')}
               >
                 <StopCircle className="w-3 h-3" />
-                <span className="text-[10px] font-bold">STOP</span>
+                <span className="text-[10px] font-bold">{t('ai.input.stop')}</span>
               </button>
             ) : (
               <button
@@ -207,7 +225,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
                 className="p-1 px-3 rounded-sm bg-theme-accent text-theme-bg hover:opacity-90 transition-all disabled:opacity-20 disabled:grayscale font-bold text-[10px]"
                 title={t('ai.input.send')}
               >
-                SEND
+                {t('ai.input.send_btn')}
               </button>
             )}
           </div>

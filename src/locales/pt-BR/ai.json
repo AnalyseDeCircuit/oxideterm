@@ -1,6 +1,8 @@
 {
   "ai": {
     "chat": {
+      "header": "Chat",
+      "get_started": "Começar com Copilot",
       "title": "Chat IA",
       "disabled_message": "Ative a IA nas Configurações para começar a conversar com seu assistente de terminal.",
       "open_settings": "Abrir configurações",
@@ -33,7 +35,15 @@
       "include_all_panes": "Todos os painéis",
       "fetching_context": "Buscando...",
       "stop_generation": "Parar geração",
-      "send": "Enviar mensagem"
+      "send": "Enviar mensagem",
+      "context": "Contexto",
+      "context_loading": "Carregando...",
+      "panes": "Painéis",
+      "stop": "Parar",
+      "send_btn": "Enviar",
+      "send_key": "Enviar",
+      "newline_key": "Nova linha",
+      "thinking": "Copilot está pensando..."
     },
     "message": {
       "you": "Você",

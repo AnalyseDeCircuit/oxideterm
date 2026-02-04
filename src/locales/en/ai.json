@@ -2,6 +2,8 @@
   "ai": {
     "chat": {
       "title": "AI Chat",
+      "header": "Chat",
+      "get_started": "Get Started with Copilot",
       "disabled_message": "Enable AI in Settings to start chatting with your terminal assistant.",
       "open_settings": "Open Settings",
       "new_chat": "New Chat",
@@ -18,22 +20,30 @@
     },
     "quick_prompts": {
       "explain_command": "Explain a command",
-      "explain_command_prompt": "Explain what this command does:",
+      "explain_command_prompt": "Explain what this command does: ",
       "find_files": "Find files matching...",
       "find_files_prompt": "How do I find files matching a pattern in the terminal?",
       "write_script": "Write a shell script",
-      "write_script_prompt": "Write a shell script that",
+      "write_script_prompt": "Write a shell script that ",
       "optimize_command": "Optimize this command",
-      "optimize_command_prompt": "How can I optimize this command:"
+      "optimize_command_prompt": "How can I optimize this command: "
     },
     "input": {
       "placeholder": "Ask anything about terminal...",
       "placeholder_disabled": "Enable AI in Settings first...",
+      "context": "Context",
+      "context_loading": "Loading...",
+      "panes": "Panes",
       "include_context": "Include context",
       "include_all_panes": "All panes",
       "fetching_context": "Fetching...",
       "stop_generation": "Stop generation",
-      "send": "Send message"
+      "stop": "Stop",
+      "send": "Send message",
+      "send_btn": "Send",
+      "send_key": "Send",
+      "newline_key": "New Line",
+      "thinking": "Copilot is thinking..."
     },
     "message": {
       "you": "You",

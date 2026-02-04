@@ -220,6 +220,7 @@ fn decompress_buffer(content: &str, is_compressed: bool) -> Result<String, AiCha
 /// AI Chat persistence store using redb
 pub struct AiChatStore {
     db: Arc<Database>,
+    path: PathBuf,
 }
 
 impl AiChatStore {
@@ -254,7 +255,10 @@ impl AiChatStore {
             }
         }
 
-        let store = Self { db: Arc::new(db) };
+        let store = Self { 
+            db: Arc::new(db),
+            path,
+        };
         store.initialize()?;
 
         Ok(store)
@@ -667,9 +671,13 @@ impl AiChatStore {
         let conversation_count = conv_table.iter()?.count();
         let message_count = msg_table.iter()?.count();
 
+        // Get database file size on disk
+        let db_size_bytes = self.path.metadata().map(|m| m.len()).unwrap_or(0);
+
         Ok(AiChatStats {
             conversation_count,
             message_count,
+            db_size_bytes,
         })
     }
 }
@@ -679,6 +687,7 @@ impl AiChatStore {
 pub struct AiChatStats {
     pub conversation_count: usize,
     pub message_count: usize,
+    pub db_size_bytes: u64,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -784,5 +793,95 @@ mod tests {
         let (result, is_compressed) = compress_buffer(small_buffer);
         assert!(!is_compressed);
         assert_eq!(result, small_buffer);
+    }
+
+    #[test]
+    fn test_cascading_delete() {
+        // Verify that deleting a conversation removes ALL associated data
+        let (store, _dir) = create_test_store();
+
+        // Create conversation
+        let meta = ConversationMeta {
+            id: "conv-cascade".to_string(),
+            title: "Cascade Test".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            message_count: 0,
+            session_id: None,
+        };
+        store.create_conversation(&meta).unwrap();
+
+        // Add multiple messages
+        for i in 0..5 {
+            let msg = PersistedMessage {
+                id: format!("msg-{}", i),
+                conversation_id: "conv-cascade".to_string(),
+                role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
+                content: format!("Message {}", i),
+                timestamp: 1000 + i as i64,
+                context_snapshot: None,
+            };
+            store.save_message(msg).unwrap();
+        }
+
+        // Verify initial state
+        let stats_before = store.get_stats().unwrap();
+        assert_eq!(stats_before.conversation_count, 1);
+        assert_eq!(stats_before.message_count, 5);
+
+        // Delete conversation
+        store.delete_conversation("conv-cascade").unwrap();
+
+        // Verify ALL data is cleaned up
+        let stats_after = store.get_stats().unwrap();
+        assert_eq!(stats_after.conversation_count, 0, "Conversation meta should be deleted");
+        assert_eq!(stats_after.message_count, 0, "All messages should be deleted");
+
+        // Verify conversation cannot be retrieved
+        let result = store.get_conversation("conv-cascade");
+        assert!(result.is_err(), "Deleted conversation should not be found");
+    }
+
+    #[test]
+    fn test_clear_all() {
+        let (store, _dir) = create_test_store();
+
+        // Create multiple conversations with messages
+        for c in 0..3 {
+            let meta = ConversationMeta {
+                id: format!("conv-{}", c),
+                title: format!("Conversation {}", c),
+                created_at: 1000,
+                updated_at: 1000,
+                message_count: 0,
+                session_id: None,
+            };
+            store.create_conversation(&meta).unwrap();
+
+            for m in 0..4 {
+                let msg = PersistedMessage {
+                    id: format!("conv-{}-msg-{}", c, m),
+                    conversation_id: format!("conv-{}", c),
+                    role: "user".to_string(),
+                    content: "Test".to_string(),
+                    timestamp: 1000_i64,
+                    context_snapshot: None,
+                };
+                store.save_message(msg).unwrap();
+            }
+        }
+
+        // Verify initial state: 3 conversations, 12 messages
+        let stats_before = store.get_stats().unwrap();
+        assert_eq!(stats_before.conversation_count, 3);
+        assert_eq!(stats_before.message_count, 12);
+
+        // Clear all
+        store.clear_all().unwrap();
+
+        // Verify complete cleanup
+        let stats_after = store.get_stats().unwrap();
+        assert_eq!(stats_after.conversation_count, 0, "All conversations should be cleared");
+        assert_eq!(stats_after.message_count, 0, "All messages should be cleared");
     }
 }

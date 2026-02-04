@@ -1,6 +1,8 @@
 {
   "ai": {
     "chat": {
+      "header": "채팅",
+      "get_started": "Copilot 시작하기",
       "title": "AI 채팅",
       "disabled_message": "설정에서 AI를 활성화하여 터미널 어시스턴트와 대화를 시작하세요.",
       "open_settings": "설정 열기",
@@ -33,7 +35,15 @@
       "include_all_panes": "모든 창",
       "fetching_context": "가져오는 중...",
       "stop_generation": "생성 중지",
-      "send": "메시지 보내기"
+      "send": "메시지 보내기",
+      "context": "컨텍스트",
+      "context_loading": "로딩 중...",
+      "panes": "창",
+      "stop": "중지",
+      "send_btn": "전송",
+      "send_key": "전송",
+      "newline_key": "줄바꿈",
+      "thinking": "Copilot 생각 중..."
     },
     "message": {
       "you": "나",

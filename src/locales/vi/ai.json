@@ -1,6 +1,8 @@
 {
   "ai": {
     "chat": {
+      "header": "Trò chuyện",
+      "get_started": "Bắt đầu với Copilot",
       "title": "AI Chat",
       "disabled_message": "Bật AI trong Cài đặt để bắt đầu trò chuyện với trợ lý terminal của bạn.",
       "open_settings": "Mở cài đặt",
@@ -33,7 +35,15 @@
       "include_all_panes": "Tất cả khung",
       "fetching_context": "Đang tải...",
       "stop_generation": "Dừng tạo",
-      "send": "Gửi tin nhắn"
+      "send": "Gửi tin nhắn",
+      "context": "Ngữ cảnh",
+      "context_loading": "Đang tải...",
+      "panes": "Khung",
+      "stop": "Dừng",
+      "send_btn": "Gửi",
+      "send_key": "Gửi",
+      "newline_key": "Dòng mới",
+      "thinking": "Copilot đang suy nghĩ..."
     },
     "message": {
       "you": "Bạn",

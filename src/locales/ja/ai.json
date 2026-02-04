@@ -1,6 +1,8 @@
 {
   "ai": {
     "chat": {
+      "header": "チャット",
+      "get_started": "Copilot を始める",
       "title": "AI チャット",
       "disabled_message": "設定で AI を有効にして、ターミナルアシスタントとの会話を始めましょう。",
       "open_settings": "設定を開く",
@@ -33,7 +35,15 @@
       "include_all_panes": "全ペイン",
       "fetching_context": "取得中...",
       "stop_generation": "生成を停止",
-      "send": "メッセージを送信"
+      "send": "メッセージを送信",
+      "context": "コンテキスト",
+      "context_loading": "読込中...",
+      "panes": "ペイン",
+      "stop": "停止",
+      "send_btn": "送信",
+      "send_key": "送信",
+      "newline_key": "改行",
+      "thinking": "Copilot が考え中..."
     },
     "message": {
       "you": "あなた",

@@ -32,6 +32,7 @@ export function AiChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showConversations, setShowConversations] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [inputValue, setInputValue] = useState('');
 
   const activeConversation = getActiveConversation();
 
@@ -114,7 +115,7 @@ export function AiChatPanel() {
       {/* Header - Strictly Utilitarian */}
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-theme-border/30 bg-theme-bg">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase">Chat</span>
+          <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase">{t('ai.chat.header')}</span>
           {activeConversation?.title && (
             <div className="flex items-center gap-2 max-w-[120px]">
               <span className="text-theme-border/40 font-thin">|</span>
@@ -198,7 +199,7 @@ export function AiChatPanel() {
         {!activeConversation || activeConversation.messages.length === 0 ? (
           <div className="h-full flex flex-col p-6 pt-12">
             <h3 className="text-[13px] font-bold text-theme-text mb-6 tracking-tight">
-              Get Started with Copilot
+              {t('ai.chat.get_started')}
             </h3>
 
             {/* Utilitarian prompt list */}
@@ -207,25 +208,25 @@ export function AiChatPanel() {
                 icon={<HelpCircle className="w-3.5 h-3.5" />}
                 label={t('ai.quick_prompts.explain_command')}
                 prompt={t('ai.quick_prompts.explain_command_prompt')}
-                onSend={handleSend}
+                onFillInput={setInputValue}
               />
               <QuickPromptButton
                 icon={<Terminal className="w-3.5 h-3.5" />}
                 label={t('ai.quick_prompts.find_files')}
                 prompt={t('ai.quick_prompts.find_files_prompt')}
-                onSend={handleSend}
+                onFillInput={setInputValue}
               />
               <QuickPromptButton
                 icon={<FileCode className="w-3.5 h-3.5" />}
                 label={t('ai.quick_prompts.write_script')}
                 prompt={t('ai.quick_prompts.write_script_prompt')}
-                onSend={handleSend}
+                onFillInput={setInputValue}
               />
               <QuickPromptButton
                 icon={<Zap className="w-3.5 h-3.5" />}
                 label={t('ai.quick_prompts.optimize_command')}
                 prompt={t('ai.quick_prompts.optimize_command_prompt')}
-                onSend={handleSend}
+                onFillInput={setInputValue}
               />
             </div>
           </div>
@@ -252,6 +253,8 @@ export function AiChatPanel() {
         onStop={stopGeneration}
         isLoading={isLoading}
         disabled={!aiEnabled}
+        externalValue={inputValue}
+        onExternalValueChange={setInputValue}
       />
     </div>
   );
@@ -299,24 +302,21 @@ function ConversationItem({
   );
 }
 
-// Quick prompt button for empty state
+// Quick prompt button for empty state - fills input instead of sending directly
 function QuickPromptButton({
   icon,
   label,
   prompt,
-  onSend,
+  onFillInput,
 }: {
   icon: React.ReactNode;
   label: string;
   prompt: string;
-  onSend: (content: string, context?: string) => void;
+  onFillInput: (value: string) => void;
 }) {
   const handleClick = () => {
-    if (prompt.endsWith(' ') || prompt.endsWith(': ')) {
-      onSend(prompt.trim());
-    } else {
-      onSend(prompt);
-    }
+    // Fill the input with the prompt template, user can edit before sending
+    onFillInput(prompt);
   };
 
   return (

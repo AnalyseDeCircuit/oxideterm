@@ -2,6 +2,8 @@
   "ai": {
     "chat": {
       "title": "AI 聊天",
+      "header": "聊天",
+      "get_started": "开始使用 Copilot",
       "disabled_message": "在设置中启用 AI 功能，开始与终端助手对话。",
       "open_settings": "打开设置",
       "new_chat": "新对话",
@@ -29,11 +31,19 @@
     "input": {
       "placeholder": "询问任何终端相关问题...",
       "placeholder_disabled": "请先在设置中启用 AI...",
+      "context": "上下文",
+      "context_loading": "加载中...",
+      "panes": "分屏",
       "include_context": "包含上下文",
       "include_all_panes": "所有分屏",
       "fetching_context": "获取中...",
       "stop_generation": "停止生成",
-      "send": "发送消息"
+      "stop": "停止",
+      "send": "发送消息",
+      "send_btn": "发送",
+      "send_key": "发送",
+      "newline_key": "换行",
+      "thinking": "Copilot 思考中..."
     },
     "message": {
       "you": "你",
