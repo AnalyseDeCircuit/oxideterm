@@ -251,6 +251,98 @@ unsafe impl Sync for PtyHandle {}
 └─────────────────────────────────────────────────────────┘
 ```
 
+### 分屏生命周期管理 (v1.4.0)
+
+> **重要约束**: 分屏中的每个 Pane 都拥有独立的 PTY 进程，关闭 Tab 时必须**递归清理所有 PTY**。
+
+#### 问题背景
+
+当本地终端 Tab 包含分屏布局时，`Tab.sessionId` 为 `undefined`（已迁移到 `rootPane` 模式），如果只关闭 `sessionId` 会导致：
+- 后端 PTY 进程泄漏（孤儿进程）
+- `LocalTerminalRegistry` 计数不回落
+- 侧边栏显示的终端数量与实际不符
+
+#### 解决方案：递归清理
+
+```typescript
+// appStore.ts - closeTab 实现
+closeTab: async (tabId) => {
+  const tab = get().tabs.find(t => t.id === tabId);
+  
+  // Phase 1: 收集分屏中所有终端 session
+  let localTerminalIds: string[] = [];
+  
+  if (tab.rootPane) {
+    // 递归收集所有 pane 的 sessionId
+    const sessions = collectAllPaneSessions(tab.rootPane);
+    localTerminalIds = sessions.localTerminalIds;
+  } else if (tab.sessionId && tab.type === 'local_terminal') {
+    localTerminalIds = [tab.sessionId];
+  }
+  
+  // Phase 2: 并行关闭所有本地终端 PTY
+  await Promise.all(
+    localTerminalIds.map((sid) => api.localCloseTerminal(sid))
+  );
+  
+  // Phase 3: Strong Sync - 刷新状态确保一致
+  await useLocalTerminalStore.getState().refreshTerminals();
+}
+```
+
+#### 辅助函数
+
+```typescript
+// 递归收集 paneTree 中所有 session
+export function collectAllPaneSessions(node: PaneNode): {
+  localTerminalIds: string[];
+  sshTerminalIds: string[];
+} {
+  if (node.type === 'leaf') {
+    if (node.terminalType === 'local_terminal') {
+      return { localTerminalIds: [node.sessionId], sshTerminalIds: [] };
+    } else {
+      return { localTerminalIds: [], sshTerminalIds: [node.sessionId] };
+    }
+  }
+  
+  // Group node: 递归收集子节点
+  const result = { localTerminalIds: [], sshTerminalIds: [] };
+  for (const child of node.children) {
+    const childResult = collectAllPaneSessions(child);
+    result.localTerminalIds.push(...childResult.localTerminalIds);
+    result.sshTerminalIds.push(...childResult.sshTerminalIds);
+  }
+  return result;
+}
+```
+
+#### 一致性约束
+
+| 约束 | 描述 |
+|------|------|
+| **递归清理** | 关闭 Tab 必须遍历 `rootPane` 关闭所有 PTY |
+| **Strong Sync** | 清理后调用 `refreshTerminals()` 同步状态 |
+| **无孤儿进程** | 任何情况下都不能留下未关闭的 PTY |
+| **禁止 unmount 杀 PTY** | 组件 cleanup 不能关闭 PTY（StrictMode 会 double-mount） |
+
+#### ⚠️ 重要：React StrictMode 兼容性
+
+```typescript
+// ❌ 错误：在 useEffect cleanup 中关闭 PTY
+return () => {
+  useLocalTerminalStore.getState().closeTerminal(sessionId); // 会被 StrictMode 触发！
+};
+
+// ✅ 正确：只清理前端资源，PTY 由 closeTab 管理
+return () => {
+  terminalRef.current?.dispose();
+  console.debug(`[LocalTerminalView] Unmount cleanup (PTY kept alive)`);
+};
+```
+
+**原因**：React StrictMode 在开发模式下会 `mount → unmount → mount` 组件，如果在 unmount 时关闭 PTY，会导致"秒退"。
+
 ### Feature Gate
 
 本地终端功能通过 Cargo feature 控制：
@@ -472,4 +564,4 @@ if ($env:TERM_PROGRAM -eq "OxideTerm") {
 
 ---
 
-*文档版本: v1.1.0 | 最后更新: 2026-01-19*
+*文档版本: v1.4.0 (Strong Sync + 分屏生命周期管理) | 最后更新: 2026-02-04*

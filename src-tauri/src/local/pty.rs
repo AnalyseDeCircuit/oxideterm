@@ -189,10 +189,22 @@ impl PtyHandle {
         }
 
         // Spawn the shell
+        tracing::info!(
+            "Spawning PTY shell: {:?} (args: {:?}, cwd: {:?})",
+            config.shell.path,
+            shell_args,
+            config.cwd
+        );
+        
         let child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| PtyError::SpawnFailed(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!("Failed to spawn PTY shell: {}", e);
+                PtyError::SpawnFailed(e.to_string())
+            })?;
+        
+        tracing::info!("PTY shell spawned successfully, PID: {:?}", child.process_id());
 
         // Get reader/writer handles
         let reader = pair
@@ -270,6 +282,7 @@ impl PtyHandle {
 
     /// Kill the child process
     pub fn kill(&self) -> Result<(), PtyError> {
+        tracing::info!("Killing PTY child process (PID: {:?})", self.pid());
         let mut child = self.child.lock().map_err(|_| PtyError::LockError)?;
         child
             .kill()

@@ -721,10 +721,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
     
-    const sessionId = tab.sessionId;
     const tabType = tab.type;
     
-    // ========== Phase 1: UI 乐观更新（立即响应） ==========
+    // ========== Phase 1: 收集分屏中所有终端 session ==========
+    // v1.4.0: 支持递归清理分屏中的所有 PTY 进程
+    let localTerminalIds: string[] = [];
+    let sshTerminalIds: string[] = [];
+    
+    if (tab.rootPane) {
+      // Tab 有分屏布局，递归收集所有 pane 的 sessionId
+      const sessions = collectAllPaneSessions(tab.rootPane);
+      localTerminalIds = sessions.localTerminalIds;
+      sshTerminalIds = sessions.sshTerminalIds;
+      console.log(`[closeTab] Split pane tab: ${localTerminalIds.length} local, ${sshTerminalIds.length} ssh terminals`);
+    } else if (tab.sessionId) {
+      // 单窗格模式
+      if (tabType === 'local_terminal') {
+        localTerminalIds = [tab.sessionId];
+      } else if (tabType === 'terminal') {
+        sshTerminalIds = [tab.sessionId];
+      }
+    }
+    
+    // ========== Phase 2: UI 乐观更新（立即响应） ==========
     set((state) => {
       const newTabs = state.tabs.filter(t => t.id !== tabId);
       let newActiveId = state.activeTabId;
@@ -740,18 +759,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     
     // 非终端类型的 Tab 无需额外清理
-    if (!sessionId || (tabType !== 'terminal' && tabType !== 'local_terminal')) {
+    if (tabType !== 'terminal' && tabType !== 'local_terminal') {
       return;
     }
     
-    // ========== Phase 2: 获取 session 信息（在删除前） ==========
-    const session = get().sessions.get(sessionId);
-    const connectionId = session?.connectionId;
+    // ========== Phase 3: 从 sessions Map 移除所有关联 session ==========
+    const allSessionIds = [...localTerminalIds, ...sshTerminalIds];
+    const connectionIds = new Set<string>();
     
-    // ========== Phase 3: 从 sessions Map 移除 ==========
     set((state) => {
       const newSessions = new Map(state.sessions);
-      newSessions.delete(sessionId);
+      for (const sid of allSessionIds) {
+        const session = newSessions.get(sid);
+        if (session?.connectionId) {
+          connectionIds.add(session.connectionId);
+        }
+        newSessions.delete(sid);
+      }
       return { sessions: newSessions };
     });
     
@@ -759,36 +783,51 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // 使用动态导入避免循环依赖
     try {
       const { useSessionTreeStore } = await import('./sessionTreeStore');
-      useSessionTreeStore.getState().purgeTerminalMapping(sessionId);
+      for (const sid of allSessionIds) {
+        useSessionTreeStore.getState().purgeTerminalMapping(sid);
+      }
     } catch (e) {
       console.warn('[closeTab] Failed to purge terminal mapping:', e);
     }
     
-    // ========== Phase 5: 调用后端关闭终端 ==========
-    // 本地终端使用不同的关闭接口
-    if (tabType === 'local_terminal') {
+    // ========== Phase 5: 关闭所有本地终端 PTY ==========
+    // v1.4.0: 递归关闭分屏中的所有本地终端
+    if (localTerminalIds.length > 0) {
+      const { useLocalTerminalStore } = await import('./localTerminalStore');
+      
+      // 并行关闭所有本地终端
+      await Promise.all(
+        localTerminalIds.map(async (sid) => {
+          try {
+            await api.localCloseTerminal(sid);
+            console.log(`[closeTab] Local terminal ${sid} closed`);
+          } catch (e) {
+            // 终端可能已经不存在，忽略错误
+            console.warn(`[closeTab] Failed to close local terminal ${sid}:`, e);
+          }
+        })
+      );
+      
+      // Strong Sync: 刷新 localTerminalStore 确保状态一致
+      // 这会从后端重新获取终端列表，确保侧边栏计数正确
+      await useLocalTerminalStore.getState().refreshTerminals();
+      console.log('[closeTab] Local terminal store refreshed (Strong Sync)');
+    }
+    
+    // ========== Phase 6: 关闭所有 SSH 终端 ==========
+    for (const sid of sshTerminalIds) {
       try {
-        await api.localCloseTerminal(sessionId);
-        console.log(`[closeTab] Local terminal ${sessionId} closed`);
+        await api.closeTerminal(sid);
+        console.log(`[closeTab] Terminal ${sid} closed`);
       } catch (e) {
         // 终端可能已经不存在，忽略错误
-        console.warn(`[closeTab] Failed to close local terminal ${sessionId}:`, e);
+        console.warn(`[closeTab] Failed to close terminal ${sid}:`, e);
       }
-      return;
     }
     
-    // SSH 终端
-    try {
-      await api.closeTerminal(sessionId);
-      console.log(`[closeTab] Terminal ${sessionId} closed`);
-    } catch (e) {
-      // 终端可能已经不存在，忽略错误
-      console.warn(`[closeTab] Failed to close terminal ${sessionId}:`, e);
-    }
-    
-    // ========== Phase 6: 检查是否需要断开 SSH 连接 ==========
+    // ========== Phase 7: 检查是否需要断开 SSH 连接 ==========
     // 只有当该连接下没有其他终端时才断开
-    if (connectionId) {
+    for (const connectionId of connectionIds) {
       const remainingTerminals = Array.from(get().sessions.values())
         .filter(s => s.connectionId === connectionId);
       
@@ -1447,6 +1486,31 @@ function findFirstLeaf(node: PaneNode): PaneLeaf | null {
 export function getAllPaneIds(node: PaneNode): string[] {
   if (node.type === 'leaf') return [node.id];
   return node.children.flatMap(child => getAllPaneIds(child));
+}
+
+/**
+ * Collect all session IDs from a pane tree, grouped by terminal type
+ * Used for recursive cleanup when closing a tab with split panes
+ */
+export function collectAllPaneSessions(node: PaneNode): {
+  localTerminalIds: string[];
+  sshTerminalIds: string[];
+} {
+  if (node.type === 'leaf') {
+    if (node.terminalType === 'local_terminal') {
+      return { localTerminalIds: [node.sessionId], sshTerminalIds: [] };
+    } else {
+      return { localTerminalIds: [], sshTerminalIds: [node.sessionId] };
+    }
+  }
+  
+  const result = { localTerminalIds: [] as string[], sshTerminalIds: [] as string[] };
+  for (const child of node.children) {
+    const childResult = collectAllPaneSessions(child);
+    result.localTerminalIds.push(...childResult.localTerminalIds);
+    result.sshTerminalIds.push(...childResult.sshTerminalIds);
+  }
+  return result;
 }
 
 /**

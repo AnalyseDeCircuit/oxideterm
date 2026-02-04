@@ -356,6 +356,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         terminalRef.current.dispose();
         terminalRef.current = null;
       }
+      
+      // NOTE: DO NOT close PTY here!
+      // React StrictMode double-mounts components (mount -> unmount -> mount)
+      // If we close PTY on unmount, it will kill the running shell on remount.
+      // PTY cleanup is handled ONLY by appStore.closeTab() when the tab is closed.
+      console.debug(`[LocalTerminalView] Unmount cleanup for ${sessionId} (PTY kept alive)`);
     };
   }, [sessionId]);
 
@@ -433,6 +439,10 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     listen<{ sessionId: string; exitCode: number | null }>(closedEventName, (event) => {
       if (!mounted || !isMountedRef.current || !terminalRef.current) return;
       const { exitCode } = event.payload;
+      
+      // Enhanced logging for debugging "秒退" issues
+      console.warn(`[LocalTerminalView] Session ${sessionId} closed, exitCode: ${exitCode}`);
+      
       setIsRunning(false);
       updateTerminalState(sessionId, false);
       
