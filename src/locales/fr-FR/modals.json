@@ -38,6 +38,7 @@
       "password": "Mot de passe",
       "agent_desc": "S'authentifier en utilisant l'agent SSH système",
       "agent_hint": "Assurez-vous que l'agent SSH est en cours d'exécution et contient les clés requises",
+      "agent_not_supported": "L'authentification par agent SSH n'est actuellement pas prise en charge. Veuillez utiliser une clé SSH ou un mot de passe à la place.",
       "cancel": "Annuler",
       "add": "Ajouter"
     },
@@ -334,6 +335,7 @@
         "description": "Configurer le tampon de défilement backend pour la recherche et la persistance.",
         "max_lines": "Lignes de tampon maximum",
         "lines_hint": "Les anciennes lignes seront automatiquement supprimées lorsque la limite est atteinte.",
+        "new_sessions_only": "Les modifications ne s'appliquent qu'aux nouvelles sessions.",
         "save_on_disconnect": "Enregistrer le contenu du tampon à la déconnexion",
         "save_hint": "Le contenu du tampon sera persisté et restauré lors de la reconnexion à la session."
       },

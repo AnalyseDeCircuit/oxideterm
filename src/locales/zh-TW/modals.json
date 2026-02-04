@@ -38,6 +38,7 @@
       "password": "密碼",
       "agent_desc": "使用系統 SSH Agent 進行驗證",
       "agent_hint": "請確保 SSH Agent 正在執行且包含所需的金鑰",
+      "agent_not_supported": "SSH Agent 驗證目前不受支援，請改用 SSH 金鑰或密碼驗證。",
       "cancel": "取消",
       "add": "新增"
     },
@@ -334,6 +335,7 @@
         "description": "設定後端捲動緩衝區以進行搜尋和持久化。",
         "max_lines": "緩衝區最大行數",
         "lines_hint": "達到限制時，較舊的行將自動捨棄。",
+        "new_sessions_only": "變更僅對新會話生效。",
         "save_on_disconnect": "中斷連線時儲存緩衝區內容",
         "save_hint": "緩衝區內容將被持久化，並在重新連線時還原。"
       },

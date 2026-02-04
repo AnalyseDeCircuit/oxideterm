@@ -38,6 +38,7 @@
       "password": "비밀번호",
       "agent_desc": "시스템 SSH Agent로 인증",
       "agent_hint": "SSH Agent가 실행 중이고 필요한 키가 포함되어 있는지 확인하세요",
+      "agent_not_supported": "SSH Agent 인증은 현재 지원되지 않습니다. SSH 키 또는 비밀번호 인증을 대신 사용하세요.",
       "cancel": "취소",
       "add": "추가"
     },
@@ -334,6 +335,7 @@
         "description": "검색 및 지속성을 위한 백엔드 스크롤 버퍼를 구성합니다.",
         "max_lines": "최대 버퍼 줄",
         "lines_hint": "제한에 도달하면 오래된 줄이 자동으로 삭제됩니다.",
+        "new_sessions_only": "변경 사항은 새 세션에만 적용됩니다.",
         "save_on_disconnect": "연결 해제 시 버퍼 내용 저장",
         "save_hint": "버퍼 내용이 저장되고 세션에 다시 연결할 때 복원됩니다."
       },

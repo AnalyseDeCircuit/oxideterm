@@ -38,6 +38,7 @@
       "password": "密码",
       "agent_desc": "使用系统 SSH Agent 进行认证",
       "agent_hint": "确保 SSH Agent 已运行并包含所需密钥",
+      "agent_not_supported": "SSH Agent 认证目前不受支持，请改用 SSH 密钥或密码认证。",
       "cancel": "取消",
       "add": "添加"
     },
@@ -334,6 +335,7 @@
         "description": "配置后端滚动缓冲区以支持搜索和持久化。",
         "max_lines": "最大缓冲行数",
         "lines_hint": "达到限制时，旧行将被自动丢弃。",
+        "new_sessions_only": "更改仅对新会话生效。",
         "save_on_disconnect": "断开连接时保存缓冲区内容",
         "save_hint": "缓冲区内容将被持久化，并在重新连接到会话时恢复。"
       },
