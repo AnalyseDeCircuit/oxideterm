@@ -55,6 +55,53 @@ OxideTerm 会自动扫描您系统上可用的 Shell，并允许您选择使用�
 
 **推荐**：PowerShell 7 或 WSL（Ubuntu）
 
+### 🪟 Windows 终端增强功能 (v1.4.0+)
+
+OxideTerm v1.4.0 引入了多项 Windows 终端增强功能：
+
+#### 1. 自动 UTF-8 编码初始化
+
+启用 **Oh My Posh** 后，PowerShell 会自动执行以下初始化：
+
+```powershell
+# 自动注入的初始化脚本
+[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+```
+
+**效果**：
+- ✅ 中文、日文、韩文正确显示
+- ✅ Emoji 正确渲染（🎉 🚀 ✅）
+- ✅ Nerd Font 图标正确显示（  ）
+
+#### 2. Oh My Posh 自动初始化
+
+启用后，OxideTerm 会自动执行 Oh My Posh 初始化：
+
+```powershell
+# 自动注入（如果检测到 oh-my-posh 命令）
+oh-my-posh init pwsh --config 'C:\Users\你的用户名\.poshthemes\主题.omp.json' | Invoke-Expression
+```
+
+**前提条件**：
+1. 安装 Oh My Posh：`winget install JanDeDobbeleer.OhMyPosh`
+2. 安装 Nerd Font 字体：[Nerd Fonts](https://www.nerdfonts.com/)
+3. 在 OxideTerm 设置中选择 Nerd Font
+
+#### 3. WSL 环境变量传递增强
+
+WSL 发行版会自动接收以下环境变量：
+
+| 变量 | 值 | 用途 |
+|------|----|----|
+| `TERM` | `xterm-256color` | 终端类型 |
+| `COLORTERM` | `truecolor` | 真彩色支持 |
+| `TERM_PROGRAM` | `OxideTerm` | 终端程序标识 |
+| `TERM_PROGRAM_VERSION` | `1.4.0` | 版本号 |
+| `POSH_THEME` | 用户配置路径 | Oh My Posh 主题（自动转换 Windows 路径） |
+
+**配置方式**：设置 → 本地终端 → 启用 Oh My Posh
+
 ### macOS 支持的 Shell
 
 | Shell | 路径 | 优先级 |

@@ -169,6 +169,12 @@ const LocalTerminalSettings = () => {
 
                     {localSettings?.ohMyPoshEnabled && (
                         <>
+                            {/* Info note about auto-initialization */}
+                            <div className="px-3 py-2 rounded bg-blue-500/10 border border-blue-500/20">
+                                <p className="text-xs text-blue-400">
+                                    💡 {t('settings_view.local_terminal.oh_my_posh_note')}
+                                </p>
+                            </div>
                             <Separator className="opacity-50" />
                             <div className="flex items-center justify-between">
                                 <div>
