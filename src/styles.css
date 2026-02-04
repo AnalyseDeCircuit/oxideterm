@@ -561,3 +561,60 @@ body {
   animation: shimmer 1.5s ease-in-out infinite;
   width: 50%;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   QuickLook Resizable Window - IDE-Style Minimal Grip
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.quicklook-resizable {
+  resize: both;
+  /* Use 'hidden' instead of 'auto' to avoid showing scrollbars on the outer container */
+  /* The inner content area handles its own scrolling */
+  overflow: hidden;
+  position: relative;
+}
+
+/* Make the native resize handle invisible but FUNCTIONAL */
+.quicklook-resizable::-webkit-resizer {
+  /* Don't use display:none - it kills the drag zone! */
+  background: transparent;
+  border: none;
+}
+
+/* IDE-style minimal grip - subtle corner indicator */
+.quicklook-resizable::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  /* CRITICAL: Let clicks pass through to the native resizer underneath */
+  pointer-events: none;
+  z-index: 50;
+  /* Three subtle diagonal lines */
+  background:
+    linear-gradient(
+      -45deg,
+      transparent 0%,
+      transparent 30%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 30%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 35%,
+      transparent 35%,
+      transparent 50%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 50%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 55%,
+      transparent 55%,
+      transparent 70%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 70%,
+      var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 75%,
+      transparent 75%
+    );
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+/* Brighten on hover */
+.quicklook-resizable:hover::after {
+  opacity: 0.9;
+}

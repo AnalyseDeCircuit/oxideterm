@@ -481,6 +481,27 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     try {
       let fullContent = '';
+      let lastUpdateTime = 0;
+      const UPDATE_INTERVAL = 50; // ms - throttle updates for smoother streaming
+
+      const updateContent = (content: string, force = false) => {
+        const now = Date.now();
+        if (!force && now - lastUpdateTime < UPDATE_INTERVAL) return;
+        lastUpdateTime = now;
+        
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== convId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantMessage.id ? { ...m, content } : m
+              ),
+              updatedAt: now,
+            };
+          }),
+        }));
+      };
 
       for await (const chunk of streamChatCompletion(
         aiSettings.baseUrl,
@@ -490,20 +511,12 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         abortController.signal
       )) {
         fullContent += chunk;
-        // Update local state immediately (backend update after streaming completes)
-        set((state) => ({
-          conversations: state.conversations.map((c) => {
-            if (c.id !== convId) return c;
-            return {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === assistantMessage.id ? { ...m, content: fullContent } : m
-              ),
-              updatedAt: Date.now(),
-            };
-          }),
-        }));
+        // Throttled update for smoother streaming
+        updateContent(fullContent);
       }
+
+      // Final update to ensure complete content is shown
+      updateContent(fullContent, true);
 
       _setStreaming(convId, assistantMessage.id, false);
 

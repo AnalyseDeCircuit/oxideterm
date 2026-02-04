@@ -3,7 +3,7 @@
  * Smart file preview with support for images, markdown, code, fonts, archives, and more
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   X, 
@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+import { renderMarkdown, markdownStyles } from '../../lib/markdownRenderer';
+import { useMermaid } from '../../hooks/useMermaid';
 import { formatUnixPermissions, formatFileSize, formatTimestamp, formatRelativeTime } from './utils';
 import { CodeHighlight } from './CodeHighlight';
 import { VirtualTextPreview } from './VirtualTextPreview';
@@ -66,46 +68,6 @@ const getPreviewIcon = (type: PreviewType) => {
   }
 };
 
-// Simple markdown renderer (basic support)
-const renderMarkdown = (text: string): string => {
-  let html = text
-    // Escape HTML
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // Headers
-    .replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold text-zinc-200 mt-4 mb-2">$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold text-zinc-100 mt-5 mb-2">$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold text-zinc-50 mt-6 mb-3">$1</h1>')
-    // Bold & Italic
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong class="text-zinc-100">$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/___(.+?)___/g, '<strong><em>$1</em></strong>')
-    .replace(/__(.+?)__/g, '<strong class="text-zinc-100">$1</strong>')
-    .replace(/_(.+?)_/g, '<em>$1</em>')
-    // Code blocks
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-zinc-900 rounded p-3 my-3 overflow-x-auto"><code class="text-xs text-emerald-400">$2</code></pre>')
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code class="bg-zinc-800 px-1 py-0.5 rounded text-xs text-amber-400">$1</code>')
-    // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-theme-accent hover:underline" target="_blank" rel="noopener">$1</a>')
-    // Images (rendered as placeholder)
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="inline-block bg-zinc-800 px-2 py-1 rounded text-xs text-zinc-400">[Image: $1]</span>')
-    // Blockquotes
-    .replace(/^&gt; (.*$)/gim, '<blockquote class="border-l-2 border-theme-accent pl-3 my-2 text-zinc-400 italic">$1</blockquote>')
-    // Horizontal rule
-    .replace(/^---$/gim, '<hr class="my-4 border-theme-border" />')
-    // Lists
-    .replace(/^\* (.*)$/gim, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/^- (.*)$/gim, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/^\d+\. (.*)$/gim, '<li class="ml-4 list-decimal">$1</li>')
-    // Paragraphs (lines with content)
-    .replace(/^(?!<[hpuol]|<li|<bl|<hr|<pre)(.+)$/gim, '<p class="my-2">$1</p>');
-
-  return html;
-};
-
 export interface QuickLookProps {
   preview: FilePreview | null;
   onClose: () => void;
@@ -131,6 +93,10 @@ export const QuickLook: React.FC<QuickLookProps> = ({
   const [imageZoom, setImageZoom] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [showMetadata, setShowMetadata] = useState(true);
+  const markdownRef = useRef<HTMLDivElement>(null);
+
+  // Handle Mermaid diagram rendering for markdown previews
+  useMermaid(markdownRef, preview?.data || '');
 
   // Filter file list to only include previewable files (not directories)
   const previewableFiles = useMemo(() => {
@@ -165,8 +131,16 @@ export const QuickLook: React.FC<QuickLookProps> = ({
     setCopied(false);
     setImageZoom(1);
     setImageRotation(0);
-
   }, [preview?.path]);
+
+  // Inject markdown styles once
+  useEffect(() => {
+    if (document.getElementById('quicklook-markdown-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'quicklook-markdown-styles';
+    style.textContent = markdownStyles;
+    document.head.appendChild(style);
+  }, []);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -230,10 +204,10 @@ export const QuickLook: React.FC<QuickLookProps> = ({
     }
   };
 
-  // Rendered markdown content
+  // Rendered markdown content (disable RUN button for file preview)
   const markdownHtml = useMemo(() => {
     if (preview?.type !== 'markdown') return '';
-    return renderMarkdown(preview.data);
+    return renderMarkdown(preview.data, { showRunButton: false });
   }, [preview?.type, preview?.data]);
 
   if (!preview) return null;
@@ -244,7 +218,15 @@ export const QuickLook: React.FC<QuickLookProps> = ({
       onClick={onClose}
     >
       <div 
-        className="relative w-full max-w-4xl max-h-[90vh] m-4 bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl flex flex-col overflow-hidden"
+        className="relative bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl flex flex-col quicklook-resizable"
+        style={{
+          width: 'min(90vw, 1000px)',
+          height: 'min(90vh, 800px)',
+          minWidth: '400px',
+          minHeight: '300px',
+          maxWidth: '95vw',
+          maxHeight: '95vh',
+        }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -333,11 +315,11 @@ export const QuickLook: React.FC<QuickLookProps> = ({
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-auto">
+        {/* Content - use flex to ensure child fills entire area */}
+        <div className="flex-1 overflow-auto min-h-0 flex flex-col bg-zinc-950">
           {/* Image Preview */}
           {preview.type === 'image' && (
-            <div className="flex items-center justify-center min-h-[300px] p-4 bg-zinc-950">
+            <div className="flex-1 flex items-center justify-center min-h-[300px] p-4">
               <img
                 src={preview.data}
                 alt={preview.name}
@@ -352,7 +334,8 @@ export const QuickLook: React.FC<QuickLookProps> = ({
           {/* Markdown Preview */}
           {preview.type === 'markdown' && (
             <div 
-              className="p-6 prose prose-invert prose-sm max-w-none"
+              ref={markdownRef}
+              className="flex-1 p-6 md-content max-w-none"
               dangerouslySetInnerHTML={{ __html: markdownHtml }}
             />
           )}
@@ -366,16 +349,16 @@ export const QuickLook: React.FC<QuickLookProps> = ({
                 language={preview.stream.language}
                 highlight={true}
                 showLineNumbers={true}
-                className="p-4"
+                className="flex-1 p-4"
               />
             ) : (
-              <div className="overflow-auto bg-zinc-950">
+              <div className="flex-1">
                 <CodeHighlight
                   code={preview.data}
                   language={preview.language || undefined}
                   filename={preview.name}
                   showLineNumbers={true}
-                  className="p-4"
+                  className="p-4 min-h-full"
                 />
               </div>
             )
@@ -389,10 +372,10 @@ export const QuickLook: React.FC<QuickLookProps> = ({
                 size={preview.stream.size}
                 highlight={false}
                 showLineNumbers={true}
-                className="p-4"
+                className="flex-1 p-4"
               />
             ) : (
-              <pre className="p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
+              <pre className="flex-1 p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
                 {preview.data}
               </pre>
             )
