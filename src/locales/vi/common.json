@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "Không thể xóa một số kết nối: {{message}}"
     },
-    "retry": "Thử lại"
+    "retry": "Thử lại",
+    "create": "Tạo",
+    "cancel": "Hủy",
+    "rename": "Đổi tên",
+    "delete": "Xóa",
+    "save": "Lưu"
   },
   "layout": {
     "empty": {

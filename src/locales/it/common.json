@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "Impossibile eliminare alcune connessioni: {{message}}"
     },
-    "retry": "Riprova"
+    "retry": "Riprova",
+    "create": "Crea",
+    "cancel": "Annulla",
+    "rename": "Rinomina",
+    "delete": "Elimina",
+    "save": "Salva"
   },
   "layout": {
     "empty": {

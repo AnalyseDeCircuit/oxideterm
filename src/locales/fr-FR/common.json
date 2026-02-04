@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "Échec de la suppression de certaines connexions : {{message}}"
     },
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "create": "Créer",
+    "cancel": "Annuler",
+    "rename": "Renommer",
+    "delete": "Supprimer",
+    "save": "Enregistrer"
   },
   "layout": {
     "empty": {

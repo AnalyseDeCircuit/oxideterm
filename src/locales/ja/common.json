@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "一部の接続の削除に失敗しました: {{message}}"
     },
-    "retry": "再試行"
+    "retry": "再試行",
+    "create": "作成",
+    "cancel": "キャンセル",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "save": "保存"
   },
   "layout": {
     "empty": {

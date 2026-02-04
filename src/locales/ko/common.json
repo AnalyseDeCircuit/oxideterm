@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "일부 연결 삭제 실패: {{message}}"
     },
-    "retry": "재시도"
+    "retry": "재시도",
+    "create": "생성",
+    "cancel": "취소",
+    "rename": "이름 변경",
+    "delete": "삭제",
+    "save": "저장"
   },
   "layout": {
     "empty": {

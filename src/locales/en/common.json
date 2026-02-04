@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "Failed to delete some connections: {{message}}"
     },
-    "retry": "Retry"
+    "retry": "Retry",
+    "create": "Create",
+    "cancel": "Cancel",
+    "rename": "Rename",
+    "delete": "Delete",
+    "save": "Save"
   },
   "layout": {
     "empty": {

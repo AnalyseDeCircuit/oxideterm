@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "部分连接删除失败: {{message}}"
     },
-    "retry": "重试"
+    "retry": "重试",
+    "create": "创建",
+    "cancel": "取消",
+    "rename": "重命名",
+    "delete": "删除",
+    "save": "保存"
   },
   "layout": {
     "empty": {

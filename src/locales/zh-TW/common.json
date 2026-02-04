@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "無法刪除部分連線：{{message}}"
     },
-    "retry": "重試"
+    "retry": "重試",
+    "create": "建立",
+    "cancel": "取消",
+    "rename": "重新命名",
+    "delete": "刪除",
+    "save": "儲存"
   },
   "layout": {
     "empty": {

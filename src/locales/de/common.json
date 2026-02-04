@@ -13,7 +13,12 @@
     "errors": {
       "delete_failed": "Einige Verbindungen konnten nicht gelöscht werden: {{message}}"
     },
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "create": "Erstellen",
+    "cancel": "Abbrechen",
+    "rename": "Umbenennen",
+    "delete": "Löschen",
+    "save": "Speichern"
   },
   "layout": {
     "empty": {
