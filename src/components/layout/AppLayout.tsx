@@ -102,12 +102,18 @@ export const AppLayout = () => {
                   )}
                   {tab.type === 'sftp' && tab.sessionId && (
                     <Suspense fallback={<ViewLoader />}>
-                      <SFTPView sessionId={tab.sessionId} />
+                      <SFTPView 
+                        key={`sftp-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`} 
+                        sessionId={tab.sessionId} 
+                      />
                     </Suspense>
                   )}
                   {tab.type === 'forwards' && tab.sessionId && (
                     <Suspense fallback={<ViewLoader />}>
-                      <ForwardsView sessionId={tab.sessionId} />
+                      <ForwardsView 
+                        key={`forwards-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`} 
+                        sessionId={tab.sessionId} 
+                      />
                     </Suspense>
                   )}
                   {tab.type === 'settings' && <SettingsView />}
@@ -124,6 +130,7 @@ export const AppLayout = () => {
                   {tab.type === 'ide' && tab.sessionId && (
                     <Suspense fallback={<ViewLoader />}>
                       <IdeWorkspace
+                        key={`ide-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`}
                         connectionId={tab.sessionId}
                         sftpSessionId={tab.sessionId}
                         rootPath="~"

@@ -4,12 +4,20 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Progress } from '../ui/progress';
 import { useTransferStore, formatBytes, formatSpeed, calculateSpeed, TransferItem } from '../../store/transferStore';
+import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { IncompleteTransferInfo } from '../../types';
 
 export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
   const { t } = useTranslation();
   const { getAllTransfers, clearCompleted, cancelTransfer, removeTransfer, addTransfer, pauseTransfer, resumeTransfer } = useTransferStore();
+  
+  // 🔴 前端熔断：获取连接状态
+  const { getSession, connections } = useAppStore();
+  const session = getSession(sessionId);
+  const connectionId = session?.connectionId;
+  const connectionState = connectionId ? connections.get(connectionId)?.state : undefined;
+  const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
 
   const items = getAllTransfers();
   const [incompleteTransfers, setIncompleteTransfers] = useState<IncompleteTransferInfo[]>([]);
@@ -21,8 +29,15 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
   const hasIncomplete = incompleteTransfers.length > 0;
 
   // Load incomplete transfers on mount and when session changes
+  // 🔴 前端熔断：只有当连接真正 ready 时才加载
   useEffect(() => {
     if (!sessionId) return;
+    
+    // 🚦 状态门禁：必须等待连接 active 才能请求后端
+    if (!isConnectionReady) {
+      console.debug(`[TransferQueue] Waiting for connection to be ready (current: ${connectionState})`);
+      return;
+    }
 
     const loadIncomplete = async () => {
       setLoadingIncomplete(true);
@@ -33,26 +48,18 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
         const errorMsg = e instanceof Error ? e.message : String(e);
 
         // 防御性处理：如果是反序列化错误（存储结构版本不兼容），静默忽略
-        // 这些旧格式的数据会在下次成功写入时被覆盖
         if (errorMsg.includes('deserialize') || errorMsg.includes('invalid type')) {
-          console.warn('[TransferQueue] Storage format incompatible, ignoring old data. Will be overwritten on next transfer.');
+          console.debug('[TransferQueue] Storage format incompatible, ignoring old data.');
           setIncompleteTransfers([]);
         }
-        // 🔴 关键修复: CONNECTION_NOT_FOUND 表示连接已断开或切换
-        // 作为 Warning 记录，停止恢复尝试，并清理本地缓存
+        // CONNECTION_NOT_FOUND 应该不会发生了（有状态门禁），但保留兜底
         else if (errorMsg.includes('CONNECTION_NOT_FOUND') || errorMsg.includes('NotFound')) {
-          console.warn(`[TransferQueue] Connection ${sessionId} not found, skipping incomplete transfer recovery.`);
+          console.debug(`[TransferQueue] Connection ${sessionId} not found, skipping.`);
           setIncompleteTransfers([]);
-          // 清理该 session 在 transferStore 中的无效任务
-          const staleTransfers = getAllTransfers().filter(
-            t => t.sessionId === sessionId && (t.state === 'pending' || t.state === 'active')
-          );
-          for (const t of staleTransfers) {
-            removeTransfer(t.id);
-          }
         }
         else {
-          console.error('Failed to load incomplete transfers:', e);
+          // 其他错误静默处理，不打扰用户
+          console.debug('[TransferQueue] Failed to load incomplete transfers:', e);
         }
       } finally {
         setLoadingIncomplete(false);
@@ -60,7 +67,7 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
     };
 
     loadIncomplete();
-  }, [sessionId, getAllTransfers, removeTransfer]);
+  }, [sessionId, isConnectionReady, connectionState]);
 
   const getProgress = (item: TransferItem): number => {
     if (item.size === 0) return 0;

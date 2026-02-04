@@ -16,6 +16,7 @@ import { guardSessionConnection, isConnectionGuardError } from '../lib/connectio
 import { cancelPendingReconnect } from '../hooks/useConnectionEvents';
 import { topologyResolver } from '../lib/topologyResolver';
 import { useSettingsStore } from './settingsStore';
+import { useAppStore } from './appStore';
 import type { 
   FlatNode, 
   SessionTreeSummary,
@@ -997,6 +998,15 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       }));
       get().rebuildUnifiedNodes();
       
+      // 🔴 Phase 5.0: 同步 appStore.connections，唤醒 SFTPView/TransferQueue
+      // 它们依赖 appStore.connections.get(connectionId)?.state 判断连接状态
+      try {
+        await useAppStore.getState().refreshConnections();
+        console.debug(`[connectNodeInternal] AppStore connections refreshed for ${response.sshConnectionId}`);
+      } catch (e) {
+        console.warn(`[connectNodeInternal] Failed to refresh AppStore connections:`, e);
+      }
+      
       console.log(`[connectNodeInternal] Node ${nodeId} connected with SSH ID: ${response.sshConnectionId}`);
     },
     
@@ -1714,6 +1724,16 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
           });
           
           get().rebuildUnifiedNodes();
+          
+          // 🔴 Phase 5.0: 自愈后"大声说话" - 刷新 appStore.connections 唤醒 UI 组件
+          // SFTPView/TransferQueue 依赖 appStore.connections 的 connectionState
+          // 必须同步刷新，否则它们会继续 "Waiting for connection"
+          try {
+            await useAppStore.getState().refreshConnections();
+            console.info('[StateDrift] AppStore connections refreshed after auto-fix');
+          } catch (e) {
+            console.warn('[StateDrift] Failed to refresh AppStore connections:', e);
+          }
         }
         
         const syncDuration = performance.now() - startTime;

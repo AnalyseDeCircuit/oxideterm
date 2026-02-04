@@ -43,6 +43,10 @@ import { listen } from '@tauri-apps/api/event';
 import { readDir, stat, remove, rename, mkdir } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
+
+// 🔴 Key-Driven: 全局路径记忆 Map，用于跨重连恢复用户位置
+const sftpPathMemory = new Map<string, string>();
+
 import { 
   Dialog, 
   DialogContent, 
@@ -754,93 +758,72 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     }
   }, [remotePath, isRemotePathEditing]);
 
-  // 🔴 Phase 3.8: 跟踪上一次的 connectionId，用于检测重连
-  const prevConnectionIdRef = useRef<string | undefined>(undefined);
+  // 🔴 Key-Driven 路径记忆：卸载前保存当前路径
+  useEffect(() => {
+    return () => {
+      // 组件卸载时，保存当前路径到全局 Map（用于重连后恢复）
+      if (remotePath && remotePath !== '/' && remotePath !== '/home') {
+        sftpPathMemory.set(sessionId, remotePath);
+        console.debug(`[SFTPView] Path saved for session ${sessionId}: ${remotePath}`);
+      }
+    };
+  }, [sessionId, remotePath]);
 
-  // Initialize SFTP on mount - 只有当连接处于 ready 状态时才初始化
-  // 🔴 关键修复: 监听 connectionId 变化，重连后强制重新初始化
-    useEffect(() => {
-     // 🔍 调试日志：打印当前 session 和 connection 状态
-     console.debug(`[SFTPView] Init check: sessionId=${sessionId}, connectionId=${connectionId}, connectionState=${connectionState}, isConnectionReady=${isConnectionReady}`);
+  // 🔴 Key-Driven 极简初始化模型
+  // 由于 AppLayout 使用 key={sessionId-connectionId}，connectionId 变更会触发组件重新挂载
+  // 因此这里只需要处理单次初始化，无需追踪 prevConnectionId
+  useEffect(() => {
+    // 🔍 调试日志
+    console.debug(`[SFTPView] Mount: sessionId=${sessionId}, connectionId=${connectionId}, connectionState=${connectionState}, isConnectionReady=${isConnectionReady}`);
 
-     if (!session) {
-       console.warn(`[SFTPView] Session ${sessionId} not found in store, skipping SFTP init`);
-       // 🧹 Session 不存在，清理状态
-       setSftpInitialized(false);
-       setRemoteFiles([]);
-       return;
-     }
-     
-     // 🚦 状态门禁：必须等待连接真正 active 后再初始化 SFTP
-     if (!isConnectionReady) {
-       console.debug(`[SFTPView] Waiting for connection to be ready (current: ${connectionState})`);
-       return;
-     }
+    if (!session) {
+      console.warn(`[SFTPView] Session ${sessionId} not found in store`);
+      return;
+    }
+    
+    // 🚦 状态门禁：必须等待连接 ready
+    if (!isConnectionReady) {
+      console.debug(`[SFTPView] Waiting for connection (current: ${connectionState})`);
+      return;
+    }
 
-     // 🔴 额外校验：如果 connectionId 为空但 session 存在，说明连接断开了
-     if (!connectionId) {
-       console.warn(`[SFTPView] Session ${sessionId} exists but connectionId is undefined, connection may be disconnected`);
-       setSftpInitialized(false);
-       setRemoteFiles([]);
-       return;
-     }
+    if (!connectionId) {
+      console.warn(`[SFTPView] No connectionId for session ${sessionId}`);
+      return;
+    }
 
-     // 检测是否为重连场景（connectionId 发生变化）
-     const isReconnect = prevConnectionIdRef.current !== undefined && 
-                         prevConnectionIdRef.current !== connectionId;
-     
-     if (isReconnect) {
-       console.info(`[SFTPView] Connection changed (${prevConnectionIdRef.current} -> ${connectionId}), reinitializing SFTP...`);
-       // 🧹 状态清理：清除旧的文件列表和初始化状态，避免显示过期数据
-       setSftpInitialized(false);
-       setRemoteFiles([]);
-     }
-     
-     // 更新 ref
-     prevConnectionIdRef.current = connectionId;
-     
-     let cancelled = false;
-     
-     const init = async () => {
+    let cancelled = false;
+    
+    const init = async () => {
+      console.info(`[SFTPView] Initializing SFTP: session=${sessionId}, connection=${connectionId}`);
+      
       try {
-        console.info(`[SFTPView] Initializing SFTP for session=${sessionId}, connection=${connectionId}`);
         await guardSessionConnection(sessionId);
         if (cancelled) return;
 
-        // 🔴 重连场景下，强制重新初始化而非检查已初始化
-        if (!isReconnect) {
-          const initialized = await api.sftpIsInitialized(sessionId);
-          if (cancelled) return;
-          if (initialized) {
-            setSftpInitialized(true);
-            const cwd = await api.sftpPwd(sessionId);
-            if (!cancelled && cwd) setRemotePath(cwd);
-            console.info(`[SFTPView] SFTP already initialized, cwd=${cwd}`);
-            return;
-          }
-        }
-
-        // 初始化 SFTP
+        // 初始化 SFTP（后端已幂等，重复调用安全）
         const cwd = await api.sftpInit(sessionId);
-        if (!cancelled) {
-          setSftpInitialized(true);
-          if (cwd) setRemotePath(cwd);
-          console.info(`[SFTPView] SFTP initialized successfully, cwd=${cwd}`);
-        }
+        if (cancelled) return;
+
+        setSftpInitialized(true);
+        
+        // 🔴 路径继承：优先恢复记忆的路径，否则使用 SFTP 返回的 cwd
+        const savedPath = sftpPathMemory.get(sessionId);
+        const targetPath = savedPath || cwd || '/';
+        setRemotePath(targetPath);
+        
+        console.info(`[SFTPView] SFTP ready: cwd=${cwd}, restored=${savedPath}, using=${targetPath}`);
       } catch (err) {
         if (!cancelled && !isConnectionGuardError(err)) {
-          console.error("SFTP Init Error:", err);
-          // 🔴 初始化失败，清理状态，让用户可以重试
+          console.error(`[SFTPView] Init failed:`, err);
           setSftpInitialized(false);
         }
       }
-     };
+    };
 
-     init();
-     return () => {
-       cancelled = true;
-     };
-    }, [sessionId, session, isConnectionReady, connectionState, connectionId]);
+    init();
+    return () => { cancelled = true; };
+  }, [sessionId, session, isConnectionReady, connectionState, connectionId]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {
