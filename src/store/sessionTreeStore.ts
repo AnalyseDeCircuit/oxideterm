@@ -723,10 +723,14 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
      * @returns 成功重连的节点 ID 列表
      */
     reconnectCascade: async (nodeId: string, options?: { skipChildren?: boolean }) => {
+      console.log(`[reconnectCascade] 📥 ENTRY: reconnectCascade called for node ${nodeId}`);
       const node = get().getNode(nodeId);
-      if (!node) throw new Error(`Node ${nodeId} not found`);
+      if (!node) {
+        console.error(`[reconnectCascade] ❌ Node ${nodeId} not found!`);
+        throw new Error(`Node ${nodeId} not found`);
+      }
       
-      console.log(`[reconnectCascade] Starting cascade reconnect for ${nodeId}`);
+      console.log(`[reconnectCascade] 🚀 Starting cascade reconnect for ${nodeId}, node status: ${node.runtime.status}`);
       
       const reconnected: string[] = [];
       
@@ -816,8 +820,12 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
      * @throws ConnectionChainError 如果任何节点连接失败
      */
     connectNodeWithAncestors: async (nodeId: string): Promise<string[]> => {
+      console.log(`[connectNodeWithAncestors] 📥 ENTRY: connectNodeWithAncestors called for node ${nodeId}`);
+      
       // ========== Step 1: 获取链式锁 ==========
-      if (!get().acquireChainLock()) {
+      const lockAcquired = get().acquireChainLock();
+      console.log(`[connectNodeWithAncestors] Chain lock acquire attempt: ${lockAcquired ? '✅ SUCCESS' : '❌ BUSY'}`);
+      if (!lockAcquired) {
         console.warn(`[connectNodeWithAncestors] Chain lock busy, rejecting request for ${nodeId}`);
         throw new Error('CHAIN_LOCK_BUSY: Another connection chain is in progress');
       }
@@ -977,6 +985,17 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         newLinkDownIds.delete(nodeId);
         set({ linkDownNodeIds: newLinkDownIds });
       }
+      
+      // ⚡ 关键修复：立即从后端同步状态，减少状态漂移
+      // 不使用 fetchTree() 因为它会获取全部节点，这里只更新单个节点
+      set((state) => ({
+        rawNodes: state.rawNodes.map(n => 
+          n.id === nodeId 
+            ? { ...n, state: { status: 'connected' as const }, sshConnectionId: response.sshConnectionId }
+            : n
+        )
+      }));
+      get().rebuildUnifiedNodes();
       
       console.log(`[connectNodeInternal] Node ${nodeId} connected with SSH ID: ${response.sshConnectionId}`);
     },

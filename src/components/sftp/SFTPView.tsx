@@ -559,7 +559,7 @@ const FileList = ({
 
 export const SFTPView = ({ sessionId }: { sessionId: string }) => {
   const { t } = useTranslation();
-  const { getSession } = useAppStore();
+  const { getSession, connections } = useAppStore();
   const session = getSession(sessionId);
   const { error: toastError } = useToast();
   const [remoteFiles, setRemoteFiles] = useState<FileInfo[]>([]);
@@ -571,6 +571,11 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
 
   const [activePane, setActivePane] = useState<'local' | 'remote'>('remote');
   const [sftpInitialized, setSftpInitialized] = useState(false);
+  
+  // 连接状态门禁：只有当连接为 active/idle 时才允许 SFTP 操作
+  const connectionId = session?.connectionId;
+  const connectionState = connectionId ? connections.get(connectionId)?.state : undefined;
+  const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
 
   // Path input state for editable path bars
   const [localPathInput, setLocalPathInput] = useState('');
@@ -749,9 +754,15 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     }
   }, [remotePath, isRemotePathEditing]);
 
-  // Initialize SFTP on mount
+  // Initialize SFTP on mount - 只有当连接处于 ready 状态时才初始化
     useEffect(() => {
      if (!session) return;
+     // 🚦 状态门禁：必须等待连接真正 active 后再初始化 SFTP
+     if (!isConnectionReady) {
+       console.debug(`[SFTPView] Waiting for connection to be ready (current: ${connectionState})`);
+       return;
+     }
+     
      let cancelled = false;
      
      const init = async () => {
@@ -782,7 +793,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
      return () => {
        cancelled = true;
      };
-    }, [sessionId, session]);
+    }, [sessionId, session, isConnectionReady, connectionState]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {

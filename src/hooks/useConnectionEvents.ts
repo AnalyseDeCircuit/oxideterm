@@ -45,6 +45,15 @@ const pendingReconnectNodes = new Set<string>();
 /** 防抖定时器 */
 let reconnectDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** 最大重试次数 */
+const MAX_RECONNECT_RETRIES = 3;
+
+/** 重试间隔（毫秒） */
+const RECONNECT_RETRY_DELAY_MS = 2000;
+
+/** 当前重试次数 */
+let reconnectRetryCount = 0;
+
 /** 是否正在执行重连 */
 let isReconnecting = false;
 
@@ -88,20 +97,26 @@ export function clearAllPendingReconnects(): void {
  * - 避免重复触发正在进行的重连操作
  */
 function scheduleReconnect(nodeId: string): void {
+  console.log(`[ReconnectScheduler] 📥 scheduleReconnect called for node ${nodeId}`);
+  console.log(`[ReconnectScheduler] Current state: pending=${pendingReconnectNodes.size}, isReconnecting=${isReconnecting}, timerActive=${reconnectDebounceTimer !== null}`);
+  
   pendingReconnectNodes.add(nodeId);
   
   // 清除之前的定时器
   if (reconnectDebounceTimer) {
     clearTimeout(reconnectDebounceTimer);
+    console.log(`[ReconnectScheduler] Cleared previous debounce timer`);
   }
   
   // 设置新的防抖定时器
+  console.log(`[ReconnectScheduler] Setting debounce timer for ${RECONNECT_DEBOUNCE_MS}ms`);
   reconnectDebounceTimer = setTimeout(async () => {
+    console.log(`[ReconnectScheduler] ⏰ Debounce timer fired`);
     reconnectDebounceTimer = null;
     
     // 如果正在重连，跳过此次调度
     if (isReconnecting) {
-      console.log('[ReconnectScheduler] Reconnect already in progress, skipping');
+      console.log('[ReconnectScheduler] ❌ Reconnect already in progress, skipping');
       return;
     }
     
@@ -129,18 +144,51 @@ function scheduleReconnect(nodeId: string): void {
     nodes.sort((a, b) => a.depth - b.depth);
     const rootNode = nodes[0];
     
-    console.log(`[ReconnectScheduler] Starting reconnect from shallowest node: ${rootNode.id} (depth=${rootNode.depth})`);
+    console.log(`[ReconnectScheduler] 🚀 Starting reconnect from shallowest node: ${rootNode.id} (depth=${rootNode.depth})`);
+    console.log(`[ReconnectScheduler] All pending nodes:`, nodeIds);
     
     isReconnecting = true;
+    reconnectRetryCount = 0;
+    
+    const attemptReconnect = async (): Promise<void> => {
+      try {
+        // 使用 reconnectCascade 进行有序恢复
+        const reconnected = await treeStore.reconnectCascade(rootNode.id);
+        console.log(`[ReconnectScheduler] ✅ Reconnect completed: ${reconnected.length} nodes reconnected`);
+        reconnectRetryCount = 0; // 重置重试计数
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[ReconnectScheduler] ❌ Reconnect failed (attempt ${reconnectRetryCount + 1}/${MAX_RECONNECT_RETRIES}):`, errorMsg);
+        
+        // 检查是否是锁忙错误，如果是则重试
+        const isRetryable = errorMsg.includes('CHAIN_LOCK_BUSY') || errorMsg.includes('NODE_LOCK_BUSY');
+        
+        if (isRetryable && reconnectRetryCount < MAX_RECONNECT_RETRIES - 1) {
+          reconnectRetryCount++;
+          console.log(`[ReconnectScheduler] 🔄 Scheduling retry ${reconnectRetryCount}/${MAX_RECONNECT_RETRIES} in ${RECONNECT_RETRY_DELAY_MS}ms`);
+          
+          // 延迟后重试
+          await new Promise(resolve => setTimeout(resolve, RECONNECT_RETRY_DELAY_MS));
+          
+          // 检查节点是否还需要重连（可能用户已手动处理）
+          const currentNode = treeStore.getNode(rootNode.id);
+          if (currentNode && (currentNode.runtime.status === 'link-down' || currentNode.runtime.status === 'idle' || currentNode.runtime.status === 'error')) {
+            console.log(`[ReconnectScheduler] 🔄 Retrying reconnect for node ${rootNode.id}`);
+            await attemptReconnect();
+          } else {
+            console.log(`[ReconnectScheduler] Node ${rootNode.id} status changed to ${currentNode?.runtime.status}, skipping retry`);
+          }
+        } else {
+          console.warn(`[ReconnectScheduler] ⚠️ Reconnect failed after ${reconnectRetryCount + 1} attempts, giving up. User can trigger manual reconnect.`);
+        }
+      }
+    };
+    
     try {
-      // 使用 reconnectCascade 进行有序恢复
-      const reconnected = await treeStore.reconnectCascade(rootNode.id);
-      console.log(`[ReconnectScheduler] Reconnect completed: ${reconnected.length} nodes reconnected`);
-    } catch (e) {
-      console.error('[ReconnectScheduler] Reconnect failed:', e);
-      // 重连失败不重试，用户可以手动触发
+      await attemptReconnect();
     } finally {
       isReconnecting = false;
+      reconnectRetryCount = 0;
     }
   }, RECONNECT_DEBOUNCE_MS);
 }
@@ -207,19 +255,27 @@ export function useConnectionEvents(): void {
 
           // ========== link_down 处理：前端驱动重连 ==========
           if (status === 'link_down') {
+            console.log(`[ConnectionEvents] 🔴 LINK_DOWN received for connection ${connection_id}`);
+            console.log(`[ConnectionEvents] topologyResolver size: ${topologyResolver.size()}`);
+            
             // 1. 标记受影响的节点
             const affectedNodeIds = topologyResolver.handleLinkDown(connection_id, affected_children);
             if (affectedNodeIds.length > 0) {
               console.log(`[ConnectionEvents] Marking nodes as link-down:`, affectedNodeIds);
               getTreeStore().markLinkDownBatch(affectedNodeIds);
+            } else {
+              console.warn(`[ConnectionEvents] ⚠️ No affected nodes found for connection ${connection_id}`);
             }
             
             // 2. 调度防抖重连
             // 找到断开连接对应的节点
             const nodeId = topologyResolver.getNodeId(connection_id);
+            console.log(`[ConnectionEvents] topologyResolver.getNodeId(${connection_id}) = ${nodeId}`);
             if (nodeId) {
-              console.log(`[ConnectionEvents] Scheduling reconnect for node ${nodeId}`);
+              console.log(`[ConnectionEvents] ✅ Scheduling reconnect for node ${nodeId}`);
               scheduleReconnect(nodeId);
+            } else {
+              console.error(`[ConnectionEvents] ❌ Cannot schedule reconnect: no nodeId found for connection ${connection_id}`);
             }
             
             // 3. 中断 SFTP 传输

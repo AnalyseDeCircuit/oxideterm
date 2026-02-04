@@ -30,7 +30,15 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
         const transfers = await api.sftpListIncompleteTransfers(sessionId);
         setIncompleteTransfers(transfers);
       } catch (e) {
-        console.error('Failed to load incomplete transfers:', e);
+        // 防御性处理：如果是反序列化错误（存储结构版本不兼容），静默忽略
+        // 这些旧格式的数据会在下次成功写入时被覆盖
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        if (errorMsg.includes('deserialize') || errorMsg.includes('invalid type')) {
+          console.warn('[TransferQueue] Storage format incompatible, ignoring old data. Will be overwritten on next transfer.');
+          setIncompleteTransfers([]);
+        } else {
+          console.error('Failed to load incomplete transfers:', e);
+        }
       } finally {
         setLoadingIncomplete(false);
       }

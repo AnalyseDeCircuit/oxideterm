@@ -89,6 +89,16 @@ class TopologyResolver {
   size(): number {
     return this.connectionToNode.size;
   }
+
+  /**
+   * 调试：打印所有映射
+   */
+  dump(): void {
+    console.log('[TopologyResolver] Current mappings:');
+    this.connectionToNode.forEach((nodeId, connId) => {
+      console.log(`  ${connId} -> ${nodeId}`);
+    });
+  }
 }
 
 export const topologyResolver = new TopologyResolver();
