@@ -14,7 +14,9 @@ export function AiChatPanel() {
     conversations,
     activeConversationId,
     isLoading,
+    isInitialized,
     error,
+    init,
     createConversation,
     deleteConversation,
     setActiveConversation,
@@ -32,6 +34,13 @@ export function AiChatPanel() {
   const [showMenu, setShowMenu] = useState(false);
 
   const activeConversation = getActiveConversation();
+
+  // Initialize store on mount
+  useEffect(() => {
+    if (!isInitialized) {
+      init();
+    }
+  }, [init, isInitialized]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

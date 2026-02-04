@@ -73,6 +73,7 @@ use session::{AutoReconnectService, SessionRegistry};
 use sftp::session::SftpRegistry;
 use sftp::{ProgressStore, RedbProgressStore, TransferManager};
 use ssh::SshConnectionRegistry;
+use state::ai_chat::AiChatStore;
 use state::StateStore;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -170,6 +171,39 @@ pub fn run() {
 
     write_startup_log("State store initialized");
 
+    // Initialize AI chat store for conversation persistence
+    let ai_chat_db_path = match config::storage::config_dir() {
+        Ok(dir) => dir.join("chat_history.redb"),
+        Err(e) => {
+            let msg = format!("Failed to get config directory for AI chat: {}", e);
+            tracing::warn!("{}", msg);
+            write_startup_log(&msg);
+            // Continue without AI chat persistence - not critical
+            std::path::PathBuf::from("")
+        }
+    };
+
+    let ai_chat_store = if !ai_chat_db_path.as_os_str().is_empty() {
+        match AiChatStore::new(ai_chat_db_path.clone()) {
+            Ok(store) => {
+                tracing::info!("AI chat store initialized at {:?}", ai_chat_db_path);
+                write_startup_log(&format!("AI chat store initialized at {:?}", ai_chat_db_path));
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                let msg = format!(
+                    "Failed to initialize AI chat store at {:?}: {}. AI chat persistence disabled.",
+                    ai_chat_db_path, e
+                );
+                tracing::warn!("{}", msg);
+                write_startup_log(&msg);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Create shared session registry with state store
     let registry = Arc::new(SessionRegistry::new(state_store.clone()));
 
@@ -238,6 +272,13 @@ pub fn run() {
         .manage(progress_store)
         .manage(ssh_connection_registry.clone())
         .manage(session_tree_state);
+
+    // Conditionally add AI chat store (may be None if initialization failed)
+    let builder = if let Some(ai_store) = ai_chat_store {
+        builder.manage(ai_store)
+    } else {
+        builder
+    };
 
     // Conditionally add local terminal state
     #[cfg(feature = "local-terminal")]
@@ -460,6 +501,17 @@ pub fn run() {
             commands::compress_files,
             commands::extract_archive,
             commands::list_archive_contents,
+            // AI chat persistence commands
+            commands::ai_chat_list_conversations,
+            commands::ai_chat_get_conversation,
+            commands::ai_chat_create_conversation,
+            commands::ai_chat_update_conversation,
+            commands::ai_chat_delete_conversation,
+            commands::ai_chat_save_message,
+            commands::ai_chat_update_message,
+            commands::ai_chat_delete_messages_after,
+            commands::ai_chat_clear_all,
+            commands::ai_chat_get_stats,
         ]);
 
     #[cfg(not(feature = "local-terminal"))]
@@ -621,6 +673,17 @@ pub fn run() {
             commands::compress_files,
             commands::extract_archive,
             commands::list_archive_contents,
+            // AI chat persistence commands
+            commands::ai_chat_list_conversations,
+            commands::ai_chat_get_conversation,
+            commands::ai_chat_create_conversation,
+            commands::ai_chat_update_conversation,
+            commands::ai_chat_delete_conversation,
+            commands::ai_chat_save_message,
+            commands::ai_chat_update_message,
+            commands::ai_chat_delete_messages_after,
+            commands::ai_chat_clear_all,
+            commands::ai_chat_get_stats,
         ]);
 
     builder

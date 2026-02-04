@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { invoke } from '@tauri-apps/api/core';
 import { api } from '../lib/api';
 import { useSettingsStore } from './settingsStore';
 import { gatherSidebarContext, type SidebarContext } from '../lib/sidebarContextProvider';
@@ -9,9 +9,42 @@ import type { AiChatMessage, AiConversation } from '../types';
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MAX_CONVERSATIONS = 50;
 const MAX_MESSAGES_PER_CONVERSATION = 100;
-const STORAGE_KEY = 'oxide-ai-chat';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Backend Types (matching Rust structs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ContextSnapshotDto {
+  sessionId: string | null;
+  connectionName: string | null;
+  remoteOs: string | null;
+  cwd: string | null;
+  selection: string | null;
+  bufferTail: string | null;
+}
+
+interface ConversationMetaDto {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
+interface PersistedMessageDto {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  contextSnapshot: ContextSnapshotDto | null;
+}
+
+interface FullConversationDto {
+  meta: ConversationMetaDto;
+  messages: PersistedMessageDto[];
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Store Interface
@@ -22,25 +55,30 @@ interface AiChatStore {
   conversations: AiConversation[];
   activeConversationId: string | null;
   isLoading: boolean;
+  isInitialized: boolean;
   error: string | null;
   abortController: AbortController | null;
 
+  // Initialization
+  init: () => Promise<void>;
+
   // Actions
-  createConversation: (title?: string) => string;
-  deleteConversation: (id: string) => void;
+  createConversation: (title?: string) => Promise<string>;
+  deleteConversation: (id: string) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
-  renameConversation: (id: string, title: string) => void;
-  clearAllConversations: () => void;
+  renameConversation: (id: string, title: string) => Promise<void>;
+  clearAllConversations: () => Promise<void>;
 
   // Message actions
   sendMessage: (content: string, context?: string) => Promise<void>;
   stopGeneration: () => void;
   regenerateLastResponse: () => Promise<void>;
 
-  // Internal
-  _addMessage: (conversationId: string, message: AiChatMessage) => void;
-  _updateMessage: (conversationId: string, messageId: string, content: string) => void;
+  // Internal (persist to backend)
+  _addMessage: (conversationId: string, message: AiChatMessage, sidebarContext?: SidebarContext | null) => Promise<void>;
+  _updateMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   _setStreaming: (conversationId: string, messageId: string, streaming: boolean) => void;
+  _loadConversation: (id: string) => Promise<void>;
 
   // Getters
   getActiveConversation: () => AiConversation | null;
@@ -55,9 +93,35 @@ function generateId(): string {
 }
 
 function generateTitle(firstMessage: string): string {
-  // Use first 30 chars of message as title
   const cleaned = firstMessage.replace(/\n/g, ' ').trim();
   return cleaned.length > 30 ? cleaned.slice(0, 30) + '...' : cleaned;
+}
+
+// Convert backend DTO to frontend model
+function dtoToConversation(dto: FullConversationDto): AiConversation {
+  return {
+    id: dto.meta.id,
+    title: dto.meta.title,
+    createdAt: dto.meta.createdAt,
+    updatedAt: dto.meta.updatedAt,
+    messages: dto.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp,
+      context: m.contextSnapshot?.bufferTail || undefined,
+    })),
+  };
+}
+
+function metaToConversation(meta: ConversationMetaDto): AiConversation {
+  return {
+    id: meta.id,
+    title: meta.title,
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    messages: [], // Will be loaded on demand
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -139,360 +203,486 @@ async function* streamChatCompletion(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Store Implementation
+// Store Implementation (redb Backend)
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const useAiChatStore = create<AiChatStore>()(
-  persist(
-    (set, get) => ({
-      // Initial state
+export const useAiChatStore = create<AiChatStore>()((set, get) => ({
+  // Initial state
+  conversations: [],
+  activeConversationId: null,
+  isLoading: false,
+  isInitialized: false,
+  error: null,
+  abortController: null,
+
+  // Initialize store from backend
+  init: async () => {
+    if (get().isInitialized) return;
+
+    try {
+      // Load conversation list (metadata only)
+      const metas = await invoke<ConversationMetaDto[]>('ai_chat_list_conversations');
+      const conversations = metas.map(metaToConversation);
+
+      set({
+        conversations,
+        activeConversationId: conversations[0]?.id ?? null,
+        isInitialized: true,
+      });
+
+      // Load first conversation's messages if exists
+      if (conversations[0]) {
+        await get()._loadConversation(conversations[0].id);
+      }
+
+      console.log(`[AiChatStore] Initialized with ${conversations.length} conversations`);
+    } catch (e) {
+      console.warn('[AiChatStore] Backend not available, using memory-only mode:', e);
+      set({ isInitialized: true });
+    }
+  },
+
+  // Load full conversation with messages
+  _loadConversation: async (id) => {
+    try {
+      const fullConv = await invoke<FullConversationDto>('ai_chat_get_conversation', { id });
+      const conversation = dtoToConversation(fullConv);
+
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === id ? conversation : c
+        ),
+      }));
+    } catch (e) {
+      console.warn(`[AiChatStore] Failed to load conversation ${id}:`, e);
+    }
+  },
+
+  // Create a new conversation
+  createConversation: async (title) => {
+    const id = generateId();
+    const now = Date.now();
+    const conversation: AiConversation = {
+      id,
+      title: title || 'New Chat',
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Update local state immediately
+    set((state) => ({
+      conversations: [conversation, ...state.conversations],
+      activeConversationId: id,
+    }));
+
+    // Persist to backend
+    try {
+      await invoke('ai_chat_create_conversation', {
+        request: {
+          id,
+          title: conversation.title,
+          createdAt: now,
+        },
+      });
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to persist conversation:', e);
+    }
+
+    return id;
+  },
+
+  // Delete a conversation
+  deleteConversation: async (id) => {
+    set((state) => {
+      const conversations = state.conversations.filter((c) => c.id !== id);
+      const activeConversationId =
+        state.activeConversationId === id
+          ? conversations[0]?.id ?? null
+          : state.activeConversationId;
+      return { conversations, activeConversationId };
+    });
+
+    try {
+      await invoke('ai_chat_delete_conversation', { id });
+    } catch (e) {
+      console.warn(`[AiChatStore] Failed to delete conversation ${id}:`, e);
+    }
+  },
+
+  // Set active conversation (and load messages if needed)
+  setActiveConversation: (id) => {
+    set({ activeConversationId: id, error: null });
+
+    if (id) {
+      const conv = get().conversations.find((c) => c.id === id);
+      if (conv && conv.messages.length === 0) {
+        // Load messages on demand
+        get()._loadConversation(id);
+      }
+    }
+  },
+
+  // Rename a conversation
+  renameConversation: async (id, title) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, title, updatedAt: Date.now() } : c
+      ),
+    }));
+
+    try {
+      await invoke('ai_chat_update_conversation', {
+        id,
+        title,
+      });
+    } catch (e) {
+      console.warn(`[AiChatStore] Failed to rename conversation ${id}:`, e);
+    }
+  },
+
+  // Clear all conversations
+  clearAllConversations: async () => {
+    set({
       conversations: [],
       activeConversationId: null,
-      isLoading: false,
       error: null,
-      abortController: null,
+    });
 
-      // Create a new conversation
-      createConversation: (title) => {
-        const id = generateId();
-        const now = Date.now();
-        const conversation: AiConversation = {
-          id,
-          title: title || 'New Chat',
-          messages: [],
-          createdAt: now,
-          updatedAt: now,
-        };
+    try {
+      await invoke('ai_chat_clear_all');
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to clear all conversations:', e);
+    }
+  },
 
-        set((state) => {
-          // Limit total conversations
-          let conversations = [conversation, ...state.conversations];
-          if (conversations.length > MAX_CONVERSATIONS) {
-            conversations = conversations.slice(0, MAX_CONVERSATIONS);
-          }
-          return {
-            conversations,
-            activeConversationId: id,
-          };
-        });
+  // Send a message
+  sendMessage: async (content, context) => {
+    const { activeConversationId, createConversation, _addMessage, _setStreaming } = get();
 
-        return id;
-      },
+    // Get or create conversation
+    let convId = activeConversationId;
+    if (!convId) {
+      convId = await createConversation(generateTitle(content));
+    }
 
-      // Delete a conversation
-      deleteConversation: (id) => {
-        set((state) => {
-          const conversations = state.conversations.filter((c) => c.id !== id);
-          const activeConversationId =
-            state.activeConversationId === id
-              ? conversations[0]?.id ?? null
-              : state.activeConversationId;
-          return { conversations, activeConversationId };
-        });
-      },
+    const conversation = get().conversations.find((c) => c.id === convId);
+    if (!conversation) return;
 
-      // Set active conversation
-      setActiveConversation: (id) => {
-        set({ activeConversationId: id, error: null });
-      },
+    // Get AI settings
+    const aiSettings = useSettingsStore.getState().settings.ai;
+    if (!aiSettings.enabled) {
+      set({ error: 'AI is not enabled. Please enable it in Settings.' });
+      return;
+    }
 
-      // Rename a conversation
-      renameConversation: (id, title) => {
-        set((state) => ({
-          conversations: state.conversations.map((c) =>
-            c.id === id ? { ...c, title, updatedAt: Date.now() } : c
-          ),
-        }));
-      },
+    // Get API key
+    let apiKey: string | null;
+    try {
+      apiKey = await api.getAiApiKey();
+      if (!apiKey) {
+        set({ error: 'API key not found. Please configure it in Settings > AI.' });
+        return;
+      }
+    } catch (e) {
+      set({ error: 'Failed to get API key.' });
+      return;
+    }
 
-      // Clear all conversations
-      clearAllConversations: () => {
-        set({
-          conversations: [],
-          activeConversationId: null,
-          error: null,
-        });
-      },
+    // ════════════════════════════════════════════════════════════════════
+    // Automatic Context Injection (Sidebar Deep Awareness)
+    // ════════════════════════════════════════════════════════════════════
 
-      // Send a message
-      sendMessage: async (content, context) => {
-        const { activeConversationId, createConversation, _addMessage, _updateMessage, _setStreaming } = get();
+    let sidebarContext: SidebarContext | null = null;
+    try {
+      sidebarContext = gatherSidebarContext({
+        maxBufferLines: aiSettings.contextVisibleLines || 50,
+        maxBufferChars: aiSettings.contextMaxChars || 8000,
+        maxSelectionChars: 2000,
+      });
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to gather sidebar context:', e);
+    }
 
-        // Get or create conversation
-        let convId = activeConversationId;
-        if (!convId) {
-          convId = createConversation(generateTitle(content));
-        }
+    const effectiveContext = context || sidebarContext?.contextBlock || '';
 
-        const conversation = get().conversations.find((c) => c.id === convId);
-        if (!conversation) return;
+    // Add user message
+    const userMessage: AiChatMessage = {
+      id: generateId(),
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+      context: effectiveContext || undefined,
+    };
+    await _addMessage(convId, userMessage, sidebarContext);
 
-        // Get AI settings
-        const aiSettings = useSettingsStore.getState().settings.ai;
-        if (!aiSettings.enabled) {
-          set({ error: 'AI is not enabled. Please enable it in Settings.' });
-          return;
-        }
+    // Update title if this is first message
+    if (conversation.messages.length === 0) {
+      const title = generateTitle(content);
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === convId ? { ...c, title } : c
+        ),
+      }));
+      try {
+        await invoke('ai_chat_update_conversation', { id: convId, title });
+      } catch (e) {
+        console.warn('[AiChatStore] Failed to update conversation title:', e);
+      }
+    }
 
-        // Get API key
-        let apiKey: string | null;
-        try {
-          apiKey = await api.getAiApiKey();
-          if (!apiKey) {
-            set({ error: 'API key not found. Please configure it in Settings > AI.' });
-            return;
-          }
-        } catch (e) {
-          set({ error: 'Failed to get API key.' });
-          return;
-        }
+    // Create assistant message placeholder
+    const assistantMessage: AiChatMessage = {
+      id: generateId(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    await _addMessage(convId, assistantMessage, null);
 
-        // ════════════════════════════════════════════════════════════════════
-        // Automatic Context Injection (Sidebar Deep Awareness)
-        // ════════════════════════════════════════════════════════════════════
-        
-        // Gather environment snapshot: OS, connection details, buffer, selection
-        let sidebarContext: SidebarContext | null = null;
-        try {
-          sidebarContext = gatherSidebarContext({
-            maxBufferLines: aiSettings.contextVisibleLines || 50,
-            maxBufferChars: aiSettings.contextMaxChars || 8000,
-            maxSelectionChars: 2000,
-          });
-        } catch (e) {
-          console.warn('[AiChatStore] Failed to gather sidebar context:', e);
-        }
-        
-        // Merge provided context with auto-gathered context
-        const effectiveContext = context || sidebarContext?.contextBlock || '';
+    // Prepare messages for API
+    const apiMessages: ChatCompletionMessage[] = [];
 
-        // Add user message
-        const userMessage: AiChatMessage = {
-          id: generateId(),
-          role: 'user',
-          content,
-          timestamp: Date.now(),
-          context: effectiveContext || undefined,
-        };
-        _addMessage(convId, userMessage);
+    // ════════════════════════════════════════════════════════════════════
+    // Enhanced System Prompt with Environment Awareness
+    // ════════════════════════════════════════════════════════════════════
 
-        // Update title if this is first message
-        if (conversation.messages.length === 0) {
-          set((state) => ({
-            conversations: state.conversations.map((c) =>
-              c.id === convId ? { ...c, title: generateTitle(content) } : c
-            ),
-          }));
-        }
+    let systemPrompt = `You are a helpful terminal assistant. You help users with shell commands, scripts, and terminal operations. Be concise and direct. When providing commands, format them clearly. You can use markdown for formatting.`;
 
-        // Create assistant message placeholder
-        const assistantMessage: AiChatMessage = {
-          id: generateId(),
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          isStreaming: true,
-        };
-        _addMessage(convId, assistantMessage);
+    if (sidebarContext?.systemPromptSegment) {
+      systemPrompt += `\n\n${sidebarContext.systemPromptSegment}`;
+    }
 
-        // Prepare messages for API
-        const apiMessages: ChatCompletionMessage[] = [];
+    apiMessages.push({
+      role: 'system',
+      content: systemPrompt,
+    });
 
-        // ════════════════════════════════════════════════════════════════════
-        // Enhanced System Prompt with Environment Awareness
-        // ════════════════════════════════════════════════════════════════════
-        
-        let systemPrompt = `You are a helpful terminal assistant. You help users with shell commands, scripts, and terminal operations. Be concise and direct. When providing commands, format them clearly. You can use markdown for formatting.`;
-        
-        // Add environment context if available
-        if (sidebarContext?.systemPromptSegment) {
-          systemPrompt += `\n\n${sidebarContext.systemPromptSegment}`;
-        }
-        
-        apiMessages.push({
-          role: 'system',
-          content: systemPrompt,
-        });
+    if (effectiveContext) {
+      apiMessages.push({
+        role: 'system',
+        content: `Current terminal context:\n\`\`\`\n${effectiveContext}\n\`\`\``,
+      });
+    }
 
-        // Add terminal context if available
-        if (effectiveContext) {
-          apiMessages.push({
-            role: 'system',
-            content: `Current terminal context:\n\`\`\`\n${effectiveContext}\n\`\`\``,
-          });
-        }
+    // Add conversation history (limited)
+    const historyMessages = get().conversations.find((c) => c.id === convId)?.messages || [];
+    const recentHistory = historyMessages.slice(-10);
+    for (const msg of recentHistory) {
+      if ((msg.role === 'user' || msg.role === 'assistant') && msg.content.trim() !== '') {
+        apiMessages.push({ role: msg.role, content: msg.content });
+      }
+    }
 
-        // Add conversation history (limited)
-        const historyMessages = get().conversations.find((c) => c.id === convId)?.messages || [];
-        const recentHistory = historyMessages.slice(-10); // Last 10 messages
-        for (const msg of recentHistory) {
-          // Skip empty messages and the current streaming placeholder
-          if ((msg.role === 'user' || msg.role === 'assistant') && msg.content.trim() !== '') {
-            apiMessages.push({ role: msg.role, content: msg.content });
-          }
-        }
+    // Create abort controller
+    const abortController = new AbortController();
+    set({ isLoading: true, error: null, abortController });
 
-        // Create abort controller
-        const abortController = new AbortController();
-        set({ isLoading: true, error: null, abortController });
+    try {
+      let fullContent = '';
 
-        try {
-          let fullContent = '';
-
-          for await (const chunk of streamChatCompletion(
-            aiSettings.baseUrl,
-            aiSettings.model,
-            apiKey,
-            apiMessages,
-            abortController.signal
-          )) {
-            fullContent += chunk;
-            _updateMessage(convId, assistantMessage.id, fullContent);
-          }
-
-          _setStreaming(convId, assistantMessage.id, false);
-        } catch (e) {
-          if (e instanceof Error && e.name === 'AbortError') {
-            // User cancelled - keep the partial message if any content
-            const currentMsg = get().conversations
-              .find((c) => c.id === convId)
-              ?.messages.find((m) => m.id === assistantMessage.id);
-            if (!currentMsg?.content) {
-              // Remove empty message
-              set((state) => ({
-                conversations: state.conversations.map((c) =>
-                  c.id === convId
-                    ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
-                    : c
-                ),
-              }));
-            } else {
-              _setStreaming(convId, assistantMessage.id, false);
-            }
-          } else {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            set({ error: errorMessage });
-            // Remove the empty assistant message on error
-            set((state) => ({
-              conversations: state.conversations.map((c) =>
-                c.id === convId
-                  ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
-                  : c
-              ),
-            }));
-          }
-        } finally {
-          set({ isLoading: false, abortController: null });
-        }
-      },
-
-      // Stop generation
-      stopGeneration: () => {
-        const { abortController } = get();
-        if (abortController) {
-          abortController.abort();
-          set({ abortController: null, isLoading: false });
-        }
-      },
-
-      // Regenerate last response
-      regenerateLastResponse: async () => {
-        const { activeConversationId, conversations, sendMessage } = get();
-        if (!activeConversationId) return;
-
-        const conversation = conversations.find((c) => c.id === activeConversationId);
-        if (!conversation || conversation.messages.length < 2) return;
-
-        // Find last user message
-        const messages = [...conversation.messages];
-        let lastUserMessageIndex = -1;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'user') {
-            lastUserMessageIndex = i;
-            break;
-          }
-        }
-
-        if (lastUserMessageIndex === -1) return;
-
-        const lastUserMessage = messages[lastUserMessageIndex];
-
-        // Remove messages after last user message
-        set((state) => ({
-          conversations: state.conversations.map((c) =>
-            c.id === activeConversationId
-              ? {
-                  ...c,
-                  messages: c.messages.slice(0, lastUserMessageIndex),
-                  updatedAt: Date.now(),
-                }
-              : c
-          ),
-        }));
-
-        // Resend
-        await sendMessage(lastUserMessage.content, lastUserMessage.context);
-      },
-
-      // Internal: Add message to conversation
-      _addMessage: (conversationId, message) => {
+      for await (const chunk of streamChatCompletion(
+        aiSettings.baseUrl,
+        aiSettings.model,
+        apiKey,
+        apiMessages,
+        abortController.signal
+      )) {
+        fullContent += chunk;
+        // Update local state immediately (backend update after streaming completes)
         set((state) => ({
           conversations: state.conversations.map((c) => {
-            if (c.id !== conversationId) return c;
-            let messages = [...c.messages, message];
-            // Limit messages
-            if (messages.length > MAX_MESSAGES_PER_CONVERSATION) {
-              messages = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
-            }
-            return { ...c, messages, updatedAt: Date.now() };
-          }),
-        }));
-      },
-
-      // Internal: Update message content
-      _updateMessage: (conversationId, messageId, content) => {
-        set((state) => ({
-          conversations: state.conversations.map((c) => {
-            if (c.id !== conversationId) return c;
+            if (c.id !== convId) return c;
             return {
               ...c,
               messages: c.messages.map((m) =>
-                m.id === messageId ? { ...m, content } : m
+                m.id === assistantMessage.id ? { ...m, content: fullContent } : m
               ),
               updatedAt: Date.now(),
             };
           }),
         }));
-      },
+      }
 
-      // Internal: Set streaming state
-      _setStreaming: (conversationId, messageId, streaming) => {
+      _setStreaming(convId, assistantMessage.id, false);
+
+      // Persist final content to backend
+      try {
+        await invoke('ai_chat_update_message', {
+          messageId: assistantMessage.id,
+          content: fullContent,
+        });
+      } catch (e) {
+        console.warn('[AiChatStore] Failed to persist final message content:', e);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        const currentMsg = get().conversations
+          .find((c) => c.id === convId)
+          ?.messages.find((m) => m.id === assistantMessage.id);
+        if (!currentMsg?.content) {
+          set((state) => ({
+            conversations: state.conversations.map((c) =>
+              c.id === convId
+                ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+                : c
+            ),
+          }));
+        } else {
+          _setStreaming(convId, assistantMessage.id, false);
+        }
+      } else {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        set({ error: errorMessage });
         set((state) => ({
-          conversations: state.conversations.map((c) => {
-            if (c.id !== conversationId) return c;
-            return {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === messageId ? { ...m, isStreaming: streaming } : m
-              ),
-            };
-          }),
+          conversations: state.conversations.map((c) =>
+            c.id === convId
+              ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+              : c
+          ),
         }));
-      },
-
-      // Getter: Get active conversation
-      getActiveConversation: () => {
-        const { activeConversationId, conversations } = get();
-        if (!activeConversationId) return null;
-        return conversations.find((c) => c.id === activeConversationId) ?? null;
-      },
-    }),
-    {
-      name: STORAGE_KEY,
-      partialize: (state) => ({
-        conversations: state.conversations,
-        activeConversationId: state.activeConversationId,
-      }),
+      }
+    } finally {
+      set({ isLoading: false, abortController: null });
     }
-  )
-);
+  },
+
+  // Stop generation
+  stopGeneration: () => {
+    const { abortController } = get();
+    if (abortController) {
+      abortController.abort();
+      set({ abortController: null, isLoading: false });
+    }
+  },
+
+  // Regenerate last response
+  regenerateLastResponse: async () => {
+    const { activeConversationId, conversations, sendMessage } = get();
+    if (!activeConversationId) return;
+
+    const conversation = conversations.find((c) => c.id === activeConversationId);
+    if (!conversation || conversation.messages.length < 2) return;
+
+    const messages = [...conversation.messages];
+    let lastUserMessageIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMessageIndex = i;
+        break;
+      }
+    }
+
+    if (lastUserMessageIndex === -1) return;
+
+    const lastUserMessage = messages[lastUserMessageIndex];
+
+    // Remove messages after last user message (local)
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === activeConversationId
+          ? {
+              ...c,
+              messages: c.messages.slice(0, lastUserMessageIndex),
+              updatedAt: Date.now(),
+            }
+          : c
+      ),
+    }));
+
+    // Delete from backend
+    try {
+      await invoke('ai_chat_delete_messages_after', {
+        conversationId: activeConversationId,
+        afterMessageId: lastUserMessage.id,
+      });
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to delete messages from backend:', e);
+    }
+
+    // Resend
+    await sendMessage(lastUserMessage.content, lastUserMessage.context);
+  },
+
+  // Internal: Add message to conversation and persist
+  _addMessage: async (conversationId, message, sidebarContext) => {
+    // Update local state immediately
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        let messages = [...c.messages, message];
+        if (messages.length > MAX_MESSAGES_PER_CONVERSATION) {
+          messages = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
+        }
+        return { ...c, messages, updatedAt: Date.now() };
+      }),
+    }));
+
+    // Persist to backend
+    try {
+      const contextSnapshot: ContextSnapshotDto | null = sidebarContext
+        ? {
+            sessionId: sidebarContext.env.sessionId,
+            connectionName: sidebarContext.env.connection?.formatted || null,
+            remoteOs: sidebarContext.env.remoteOSHint,
+            cwd: null, // Not captured in current context
+            selection: sidebarContext.terminal.selection,
+            bufferTail: sidebarContext.terminal.buffer,
+          }
+        : null;
+
+      await invoke('ai_chat_save_message', {
+        request: {
+          id: message.id,
+          conversationId,
+          role: message.role,
+          content: message.content,
+          timestamp: message.timestamp,
+          contextSnapshot,
+        },
+      });
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to persist message:', e);
+    }
+  },
+
+  // Internal: Update message content (for streaming - batch persist)
+  _updateMessage: async (conversationId, messageId, content) => {
+    // Just update local state - backend persisted after streaming completes
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        return {
+          ...c,
+          messages: c.messages.map((m) =>
+            m.id === messageId ? { ...m, content } : m
+          ),
+          updatedAt: Date.now(),
+        };
+      }),
+    }));
+  },
+
+  // Internal: Set streaming state (local only)
+  _setStreaming: (conversationId, messageId, streaming) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        return {
+          ...c,
+          messages: c.messages.map((m) =>
+            m.id === messageId ? { ...m, isStreaming: streaming } : m
+          ),
+        };
+      }),
+    }));
+  },
+
+  // Getter: Get active conversation
+  getActiveConversation: () => {
+    const { activeConversationId, conversations } = get();
+    if (!activeConversationId) return null;
+    return conversations.find((c) => c.id === activeConversationId) ?? null;
+  },
+}));

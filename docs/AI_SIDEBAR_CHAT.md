@@ -8,7 +8,7 @@ The AI Sidebar Chat provides an integrated AI assistant directly in the OxideTer
 
 | Feature | Description |
 |---------|-------------|
-| **Persistent History** | Conversations are saved to localStorage and survive app restarts |
+| **Persistent History** | Conversations are saved to redb database and survive app restarts |
 | **Streaming Responses** | Real-time streaming responses with stop capability |
 | **Auto Context Injection** | Automatically captures environment, buffer, and selection context |
 | **Terminal Context** | Optionally include terminal buffer content for context-aware assistance |
@@ -82,6 +82,54 @@ AI Chat uses the same settings as the inline AI assistant. Configure in **Settin
 
 ## Architecture
 
+### Persistence Layer (redb Backend)
+
+AI conversations are persisted using a dedicated redb database (`chat_history.redb`) in the config directory:
+
+```
+~/.config/oxideterm/
+├── state.redb            # Sessions, forwards, settings
+└── chat_history.redb     # AI conversations (NEW)
+```
+
+**Database Schema:**
+
+| Table | Key | Value |
+|-------|-----|-------|
+| `conversations` | conversation_id (string) | ConversationMeta (msgpack) |
+| `messages` | message_id (string) | PersistedMessage (msgpack) |
+| `conversation_messages` | conversation_id | Vec<message_id> (msgpack) |
+| `ai_chat_metadata` | key | value |
+
+**Data Types:**
+
+```rust
+struct PersistedMessage {
+    id: String,
+    conversation_id: String,
+    role: MessageRole,        // "user" | "assistant"
+    content: String,
+    timestamp: u64,           // Unix millis
+    context_snapshot: Option<ContextSnapshot>,
+}
+
+struct ContextSnapshot {
+    session_id: Option<String>,
+    connection_name: Option<String>,
+    remote_os: Option<String>,
+    cwd: Option<String>,
+    selection: Option<String>,
+    buffer_tail: Option<String>,  // zstd compressed if >4KB
+    buffer_compressed: bool,
+}
+```
+
+**Features:**
+- **zstd Compression**: Buffer snapshots >4KB are automatically compressed
+- **LRU Eviction**: Max 100 conversations, oldest auto-deleted
+- **Message Limits**: Max 200 messages per conversation
+- **Lazy Loading**: Only conversation list loaded initially, messages loaded on demand
+
 ### State Management
 
 The AI chat uses a Zustand store (`aiChatStore.ts`) for state management:
@@ -91,6 +139,7 @@ interface AiChatState {
   conversations: AiConversation[];
   activeConversationId: string | null;
   isLoading: boolean;
+  isInitialized: boolean;  // NEW: Backend sync status
   error: string | null;
   abortController: AbortController | null;
 }
