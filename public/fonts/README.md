@@ -68,15 +68,54 @@ font-family:
 
 ## 内置字体文件
 
-| 文件夹 | 格式 | 大小 | 许可证 |
-|--------|------|------|--------|
-| `JetBrainsMono/` | WOFF2 | ~4.0 MB | OFL |
-| `Meslo/` | WOFF2 | ~4.7 MB | Apache 2.0 |
-| `MapleMono/` | WOFF2 | ~25 MB | OFL |
+| 文件夹 | 格式 | 大小 | 许可证 | 说明 |
+|--------|------|------|--------|------|
+| `JetBrainsMono/` | WOFF2 | ~4.0 MB | OFL | Hinted |
+| `Meslo/` | WOFF2 | ~4.7 MB | Apache 2.0 | Hinted |
+| `MapleMono/` | WOFF2 | ~25 MB | OFL | **Unhinted** (高分屏优化) |
 
 **总计 ~34 MB**（WOFF2 压缩格式）
 
-> **注意**: Maple Mono NF CN 包含完整 CJK（中日韩）字符集，因此体积较大，但对中文用户体验极佳，且作为所有字体的 CJK fallback 非常值得。
+## ⚡ 性能优化：CJK 字体懒加载
+
+Maple Mono NF CN (~25MB) 使用**懒加载策略**，避免阻塞应用启动：
+
+### CSS 层面
+所有 `@font-face` 声明都包含 `font-display: swap;`：
+- 终端立即使用系统等宽字体渲染
+- CJK 字体加载完成后自动切换，无需刷新
+
+### 组件层面
+使用 `document.fonts.load()` API 实现按需预加载：
+
+```typescript
+// src/lib/fontLoader.ts
+import { ensureCJKFallback, onFontLoaded } from './lib/fontLoader';
+
+// 在终端初始化时触发 CJK 预加载（非阻塞）
+ensureCJKFallback();
+
+// 监听字体加载完成，刷新终端布局
+onFontLoaded('Maple Mono NF CN', () => {
+  terminal.refresh(0, terminal.rows - 1);
+  fitAddon.fit();
+});
+```
+
+### 加载流程
+```
+App 启动
+    ↓
+JetBrains/Meslo 立即加载 (小文件，~4MB)
+终端立即可用 (系统等宽字体渲染)
+    ↓
+Maple Mono NF CN 后台加载 (~25MB)
+    ↓
+CJK 字体加载完成
+终端自动刷新，中文字符切换到 Maple Mono
+```
+
+> **注意**: Maple Mono NF CN 使用 **Unhinted** 版本，在 Retina/HiDPI 高分屏上显示更平滑自然。Hinted 版本针对低分屏优化，在高分屏上反而显得过度锐化。
 
 ---
 

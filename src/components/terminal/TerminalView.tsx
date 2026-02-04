@@ -29,6 +29,7 @@ import {
   setActivePaneId as setRegistryActivePaneId,
   touchTerminalEntry 
 } from '../../lib/terminalRegistry';
+import { onFontLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 
 interface TerminalViewProps {
   sessionId: string;
@@ -373,6 +374,27 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         fitAddonRef.current?.fit();
       }
     );
+    return unsubscribe;
+  }, []);
+
+  // CJK Font lazy loading: refresh terminal when Maple Mono loads
+  useEffect(() => {
+    // Trigger CJK font preload in background (non-blocking)
+    ensureCJKFallback();
+    
+    // Listen for font load completion and refresh terminal
+    const unsubscribe = onFontLoaded('Maple Mono NF CN', () => {
+      const term = terminalRef.current;
+      if (term) {
+        // Refresh terminal to apply newly loaded CJK font
+        term.refresh(0, term.rows - 1);
+        fitAddonRef.current?.fit();
+        if (import.meta.env.DEV) {
+          console.log('[TerminalView] CJK font loaded, terminal refreshed');
+        }
+      }
+    });
+    
     return unsubscribe;
   }, []);
 

@@ -12,6 +12,7 @@ import { useAppStore } from './store/appStore';
 import { useSettingsStore } from './store/settingsStore';
 import { useAppShortcuts, ShortcutDefinition, isTerminalReservedKey } from './hooks/useTerminalKeyboard';
 import { useSplitPaneShortcuts } from './hooks/useSplitPaneShortcuts';
+import { preloadTerminalFonts } from './lib/fontLoader';
 
 function App() {
   // Initialize global event listeners
@@ -37,6 +38,12 @@ function App() {
       loadShells();
     }
   }, [shellsLoaded, loadShells]);
+
+  // Preload fonts based on user settings (lazy load CJK font)
+  useEffect(() => {
+    const { settings } = useSettingsStore.getState();
+    preloadTerminalFonts(settings.terminal.fontFamily);
+  }, []);
 
   // Sync SFTP settings to backend on app startup
   useEffect(() => {
