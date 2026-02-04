@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
+use super::events::ForwardEventEmitter;
+use super::manager::ForwardStatus;
 use crate::ssh::{HandleController, SshError};
 
 /// Local port forwarding configuration
@@ -138,13 +140,51 @@ impl LocalForwardHandle {
 /// 3. Bridges data between the local socket and the SSH channel
 ///
 /// Uses HandleController to communicate with Handle Owner Task for opening channels.
+///
+/// # Arguments
+/// * `handle_controller` - Controller for SSH operations
+/// * `config` - Forward configuration
+/// * `disconnect_rx` - Receiver for SSH disconnect notification (optional for backward compat)
 pub async fn start_local_forward(
     handle_controller: HandleController,
     config: LocalForward,
 ) -> Result<LocalForwardHandle, SshError> {
+    // Subscribe to disconnect notifications
+    let disconnect_rx = handle_controller.subscribe_disconnect();
+    start_local_forward_with_disconnect(handle_controller, config, disconnect_rx, None, None).await
+}
+
+/// Start local port forwarding with explicit disconnect receiver
+pub async fn start_local_forward_with_disconnect(
+    handle_controller: HandleController,
+    config: LocalForward,
+    mut disconnect_rx: broadcast::Receiver<()>,
+    forward_id: Option<String>,
+    event_emitter: Option<ForwardEventEmitter>,
+) -> Result<LocalForwardHandle, SshError> {
     // Bind to local address
     let listener = TcpListener::bind(&config.local_addr).await.map_err(|e| {
-        SshError::ConnectionFailed(format!("Failed to bind to {}: {}", config.local_addr, e))
+        match e.kind() {
+            std::io::ErrorKind::AddrInUse => {
+                SshError::ConnectionFailed(format!(
+                    "Port already in use: {}. Another application may be using this port.",
+                    config.local_addr
+                ))
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                SshError::ConnectionFailed(format!(
+                    "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
+                    config.local_addr
+                ))
+            }
+            std::io::ErrorKind::AddrNotAvailable => {
+                SshError::ConnectionFailed(format!(
+                    "Address not available: {}. The specified address is not valid on this system.",
+                    config.local_addr
+                ))
+            }
+            _ => SshError::ConnectionFailed(format!("Failed to bind to {}: {}", config.local_addr, e)),
+        }
     })?;
 
     let bound_addr = listener
@@ -167,12 +207,25 @@ pub async fn start_local_forward(
 
     // Spawn the forwarding task
     tokio::spawn(async move {
-        loop {
+        // Track exit reason for event emission
+        enum ExitReason {
+            SshDisconnected,
+            StopRequested,
+            Error,
+        }
+        
+        let exit_reason = loop {
             tokio::select! {
+                // Handle SSH disconnect signal
+                _ = disconnect_rx.recv() => {
+                    info!("Local port forward stopped: SSH disconnected");
+                    break ExitReason::SshDisconnected;
+                }
+
                 // Handle stop signal
                 _ = stop_rx.recv() => {
                     info!("Local port forward stopped by request");
-                    break;
+                    break ExitReason::StopRequested;
                 }
 
                 // Accept new connections
@@ -180,7 +233,7 @@ pub async fn start_local_forward(
                     match accept_result {
                         Ok((stream, peer_addr)) => {
                             if !running_clone.load(Ordering::SeqCst) {
-                                break;
+                                break ExitReason::StopRequested;
                             }
 
                             // Disable Nagle's algorithm for low-latency forwarding
@@ -231,9 +284,33 @@ pub async fn start_local_forward(
                     }
                 }
             }
-        }
+        };
 
         running_clone.store(false, Ordering::SeqCst);
+        
+        // Emit status event based on exit reason
+        if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
+            match exit_reason {
+                ExitReason::SshDisconnected => {
+                    emitter.emit_status_changed(
+                        fwd_id,
+                        ForwardStatus::Suspended,
+                        Some("SSH connection lost".into()),
+                    );
+                }
+                ExitReason::Error => {
+                    emitter.emit_status_changed(
+                        fwd_id,
+                        ForwardStatus::Error,
+                        Some("Forward task error".into()),
+                    );
+                }
+                ExitReason::StopRequested => {
+                    // Stopped by user request, manager already handles this
+                }
+            }
+        }
+        
         info!("Local port forward task exited");
     });
 

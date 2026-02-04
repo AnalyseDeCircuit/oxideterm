@@ -11,14 +11,15 @@ use tracing::info;
 use uuid::Uuid;
 
 use super::dynamic::{
-    start_dynamic_forward, DynamicForward, DynamicForwardHandle,
+    start_dynamic_forward_with_disconnect, DynamicForward, DynamicForwardHandle,
     ForwardStats as DynamicForwardStats,
 };
+use super::events::ForwardEventEmitter;
 use super::local::{
-    start_local_forward, ForwardStats as LocalForwardStats, LocalForward, LocalForwardHandle,
+    start_local_forward_with_disconnect, ForwardStats as LocalForwardStats, LocalForward, LocalForwardHandle,
 };
 use super::remote::{
-    start_remote_forward, ForwardStats as RemoteForwardStats, RemoteForward, RemoteForwardHandle,
+    start_remote_forward_with_disconnect, ForwardStats as RemoteForwardStats, RemoteForward, RemoteForwardHandle,
 };
 use crate::ssh::{HandleController, SshError};
 
@@ -88,10 +89,12 @@ pub enum ForwardStatus {
     Starting,
     /// Forward is active and running
     Active,
-    /// Forward has stopped
+    /// Forward has stopped (user requested)
     Stopped,
     /// Forward encountered an error
     Error,
+    /// Forward is suspended due to SSH disconnect (awaiting reconnect)
+    Suspended,
 }
 
 /// Port forward rule configuration (for serialization)
@@ -224,6 +227,8 @@ struct DynamicForwardEntry {
 pub struct ForwardingManager {
     /// Handle controller for SSH operations
     handle_controller: HandleController,
+    /// Event emitter for frontend notifications (optional)
+    event_emitter: Option<ForwardEventEmitter>,
     /// Active local forwards
     local_forwards: RwLock<HashMap<String, LocalForwardEntry>>,
     /// Active remote forwards
@@ -239,13 +244,45 @@ pub struct ForwardingManager {
 impl ForwardingManager {
     /// Create a new forwarding manager
     pub fn new(handle_controller: HandleController, session_id: impl Into<String>) -> Self {
+        let session_id = session_id.into();
         Self {
             handle_controller,
+            event_emitter: None,
             local_forwards: RwLock::new(HashMap::new()),
             remote_forwards: RwLock::new(HashMap::new()),
             dynamic_forwards: RwLock::new(HashMap::new()),
             stopped_forwards: RwLock::new(HashMap::new()),
-            session_id: session_id.into(),
+            session_id,
+        }
+    }
+    
+    /// Create a new forwarding manager with event emitter
+    pub fn with_event_emitter(
+        handle_controller: HandleController,
+        session_id: impl Into<String>,
+        event_emitter: ForwardEventEmitter,
+    ) -> Self {
+        let session_id = session_id.into();
+        Self {
+            handle_controller,
+            event_emitter: Some(event_emitter),
+            local_forwards: RwLock::new(HashMap::new()),
+            remote_forwards: RwLock::new(HashMap::new()),
+            dynamic_forwards: RwLock::new(HashMap::new()),
+            stopped_forwards: RwLock::new(HashMap::new()),
+            session_id,
+        }
+    }
+    
+    /// Set event emitter after construction
+    pub fn set_event_emitter(&mut self, event_emitter: ForwardEventEmitter) {
+        self.event_emitter = Some(event_emitter);
+    }
+    
+    /// Emit status changed event if emitter is configured
+    fn emit_status_changed(&self, forward_id: &str, status: ForwardStatus, error: Option<String>) {
+        if let Some(ref emitter) = self.event_emitter {
+            emitter.emit_status_changed(forward_id, status, error);
         }
     }
 
@@ -280,7 +317,15 @@ impl ForwardingManager {
             config.local_addr, config.remote_host, config.remote_port
         );
 
-        let handle = start_local_forward(self.handle_controller.clone(), config).await?;
+        // Subscribe to disconnect and pass event emitter for death reporting
+        let disconnect_rx = self.handle_controller.subscribe_disconnect();
+        let handle = start_local_forward_with_disconnect(
+            self.handle_controller.clone(),
+            config,
+            disconnect_rx,
+            Some(rule.id.clone()),
+            self.event_emitter.clone(),
+        ).await?;
 
         // Update rule with actual bound address
         rule.bind_address = handle.bound_addr.ip().to_string();
@@ -296,6 +341,9 @@ impl ForwardingManager {
             .write()
             .await
             .insert(rule.id.clone(), entry);
+
+        // Emit event after releasing lock
+        self.emit_status_changed(&rule.id, ForwardStatus::Active, None);
 
         info!("Local forward created: {}", rule.id);
         Ok(rule)
@@ -323,7 +371,15 @@ impl ForwardingManager {
             config.remote_addr, config.remote_port, config.local_host, config.local_port
         );
 
-        let handle = start_remote_forward(self.handle_controller.clone(), config).await?;
+        // Subscribe to disconnect and pass event emitter for death reporting
+        let disconnect_rx = self.handle_controller.subscribe_disconnect();
+        let handle = start_remote_forward_with_disconnect(
+            self.handle_controller.clone(),
+            config,
+            disconnect_rx,
+            Some(rule.id.clone()),
+            self.event_emitter.clone(),
+        ).await?;
         rule.status = ForwardStatus::Active;
 
         let entry = RemoteForwardEntry {
@@ -335,6 +391,9 @@ impl ForwardingManager {
             .write()
             .await
             .insert(rule.id.clone(), entry);
+
+        // Emit event after releasing lock
+        self.emit_status_changed(&rule.id, ForwardStatus::Active, None);
 
         info!("Remote forward created: {}", rule.id);
         Ok(rule)
@@ -356,7 +415,15 @@ impl ForwardingManager {
 
         info!("Creating dynamic (SOCKS5) forward on {}", config.local_addr);
 
-        let handle = start_dynamic_forward(self.handle_controller.clone(), config).await?;
+        // Subscribe to disconnect and pass event emitter for death reporting
+        let disconnect_rx = self.handle_controller.subscribe_disconnect();
+        let handle = start_dynamic_forward_with_disconnect(
+            self.handle_controller.clone(),
+            config,
+            disconnect_rx,
+            Some(rule.id.clone()),
+            self.event_emitter.clone(),
+        ).await?;
 
         // Update rule with actual bound address
         rule.bind_address = handle.bound_addr.ip().to_string();
@@ -372,6 +439,9 @@ impl ForwardingManager {
             .write()
             .await
             .insert(rule.id.clone(), entry);
+
+        // Emit event after releasing lock
+        self.emit_status_changed(&rule.id, ForwardStatus::Active, None);
 
         info!("Dynamic forward created: {}", rule.id);
         Ok(rule)
@@ -398,6 +468,8 @@ impl ForwardingManager {
                 .write()
                 .await
                 .insert(forward_id.to_string(), rule);
+            // Emit event after releasing lock
+            self.emit_status_changed(forward_id, ForwardStatus::Stopped, None);
             info!("Stopped local forward: {}", forward_id);
             return Ok(());
         }
@@ -412,6 +484,8 @@ impl ForwardingManager {
                 .write()
                 .await
                 .insert(forward_id.to_string(), rule);
+            // Emit event after releasing lock
+            self.emit_status_changed(forward_id, ForwardStatus::Stopped, None);
             info!("Stopped remote forward: {}", forward_id);
             return Ok(());
         }
@@ -426,6 +500,8 @@ impl ForwardingManager {
                 .write()
                 .await
                 .insert(forward_id.to_string(), rule);
+            // Emit event after releasing lock
+            self.emit_status_changed(forward_id, ForwardStatus::Stopped, None);
             info!("Stopped dynamic forward: {}", forward_id);
             return Ok(());
         }

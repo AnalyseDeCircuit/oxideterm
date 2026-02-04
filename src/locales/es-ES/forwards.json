@@ -23,14 +23,17 @@
     "status": {
       "active": "Activo",
       "stopped": "Detenido",
-      "failed": "Fallido"
+      "failed": "Fallido",
+      "suspended": "Suspendido",
+      "suspended_hint": "SSH desconectado"
     },
     "actions": {
       "new_forward": "Nuevo reenvío",
       "stop": "Detener reenvío",
       "restart": "Reiniciar reenvío",
       "edit": "Editar reenvío",
-      "delete": "Eliminar reenvío"
+      "delete": "Eliminar reenvío",
+      "will_recover": "Recuperación automática al reconectar"
     },
     "form": {
       "new_title": "Nueva regla de reenvío",
@@ -65,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Error al crear el reenvío",
       "forward_updated": "Reenvío actualizado correctamente",
-      "update_failed": "Error al actualizar el reenvío"
+      "update_failed": "Error al actualizar el reenvío",
+      "suspended_title": "Reenvío suspendido",
+      "suspended_desc": "Conexión SSH perdida. Se recuperará automáticamente al reconectar.",
+      "error_title": "Error de reenvío",
+      "session_suspended_title": "Sesión desconectada",
+      "session_suspended_desc": "{{count}} reenvíos suspendidos. Se recuperarán automáticamente al reconectar."
     }
   }
 }

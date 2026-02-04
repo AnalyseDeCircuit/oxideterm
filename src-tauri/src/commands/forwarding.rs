@@ -294,6 +294,7 @@ impl From<ForwardRule> for ForwardRuleDto {
                 ForwardStatus::Active => "active".to_string(),
                 ForwardStatus::Stopped => "stopped".to_string(),
                 ForwardStatus::Error => "error".to_string(),
+                ForwardStatus::Suspended => "suspended".to_string(),
             },
             description: rule.description,
         }

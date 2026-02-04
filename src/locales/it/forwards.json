@@ -23,14 +23,17 @@
     "status": {
       "active": "attivo",
       "stopped": "fermato",
-      "failed": "fallito"
+      "failed": "Fallito",
+      "suspended": "Sospeso",
+      "suspended_hint": "SSH disconnesso"
     },
     "actions": {
-      "new_forward": "Nuovo Inoltro",
+      "new_forward": "Nuovo inoltro",
       "stop": "Ferma inoltro",
       "restart": "Riavvia inoltro",
       "edit": "Modifica inoltro",
-      "delete": "Elimina inoltro"
+      "delete": "Elimina inoltro",
+      "will_recover": "Recupero automatico alla riconnessione"
     },
     "form": {
       "new_title": "Nuova Regola Inoltro",

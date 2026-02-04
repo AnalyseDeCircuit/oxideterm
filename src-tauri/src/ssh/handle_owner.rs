@@ -27,7 +27,7 @@
 
 use russh::client::{Handle, Msg};
 use russh::Channel;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
 
 use super::client::ClientHandler;
@@ -106,6 +106,9 @@ pub enum HandleCommand {
 #[derive(Clone)]
 pub struct HandleController {
     cmd_tx: mpsc::Sender<HandleCommand>,
+    /// Broadcast sender for SSH disconnect notification.
+    /// Subscribers (like port forwards) can listen for disconnection.
+    disconnect_tx: broadcast::Sender<()>,
 }
 
 impl HandleController {
@@ -113,7 +116,28 @@ impl HandleController {
     /// 
     /// This is primarily used for testing. In production, use `spawn_handle_owner_task`.
     pub fn new(cmd_tx: mpsc::Sender<HandleCommand>) -> Self {
-        Self { cmd_tx }
+        let (disconnect_tx, _) = broadcast::channel(1);
+        Self { cmd_tx, disconnect_tx }
+    }
+
+    /// Subscribe to SSH disconnect notifications.
+    /// 
+    /// Returns a receiver that will receive `()` when the SSH connection is closed.
+    /// Use this in `tokio::select!` to detect SSH disconnection.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let mut disconnect_rx = controller.subscribe_disconnect();
+    /// tokio::select! {
+    ///     _ = disconnect_rx.recv() => {
+    ///         info!("SSH disconnected, stopping forward");
+    ///         break;
+    ///     }
+    ///     // ... other branches
+    /// }
+    /// ```
+    pub fn subscribe_disconnect(&self) -> broadcast::Receiver<()> {
+        self.disconnect_tx.subscribe()
     }
 
     /// Get a clone of the command sender for the SessionCommand channel
@@ -247,6 +271,8 @@ pub fn spawn_handle_owner_task(
     session_id: String,
 ) -> HandleController {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<HandleCommand>(64);
+    let (disconnect_tx, _) = broadcast::channel::<()>(1);
+    let disconnect_tx_clone = disconnect_tx.clone();
 
     tokio::spawn(async move {
         let mut handle = handle; // Move into task, becomes sole owner
@@ -391,6 +417,10 @@ pub fn spawn_handle_owner_task(
         }
 
         // === Cleanup phase ===
+        // Notify all disconnect subscribers (port forwards, etc.)
+        // The send() may fail if no subscribers, which is fine
+        let _ = disconnect_tx_clone.send(());
+        
         // Drain all pending commands, notify callers that connection is closed
         drain_pending_commands(&mut cmd_rx);
 
@@ -401,7 +431,7 @@ pub fn spawn_handle_owner_task(
         info!("Handle owner task terminated for session {}", session_id);
     });
 
-    HandleController { cmd_tx }
+    HandleController { cmd_tx, disconnect_tx }
 }
 
 /// Drain all pending commands, returning Disconnected error to each

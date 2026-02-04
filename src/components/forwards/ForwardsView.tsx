@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Play, Square, RefreshCcw, Plus, Trash2, ArrowRight, Pencil, Activity, X, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -12,6 +12,7 @@ import { createTypeGuard } from '../../lib/utils';
 import { ForwardRule, ForwardType } from '../../types';
 import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
+import { useForwardEvents, ForwardStatus as EventForwardStatus } from '../../hooks/useForwardEvents';
 
 // Type guard for ForwardType using const type parameter (TS 5.0+)
 const FORWARD_TYPES = ['local', 'remote', 'dynamic'] as const;
@@ -59,7 +60,7 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
   const [editTargetPort, setEditTargetPort] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
 
-  const fetchForwards = async () => {
+  const fetchForwards = useCallback(async () => {
     try {
       setLoading(true);
       const list = await api.listPortForwards(sessionId);
@@ -81,7 +82,60 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  // Listen for forward events from backend (death reports, status changes)
+  useForwardEvents({
+    sessionId,
+    onStatusChanged: useCallback((forwardId: string, status: EventForwardStatus, error?: string) => {
+      console.log(`[ForwardsView] Forward ${forwardId} status changed to ${status}`, error);
+      
+      // Update local state immediately for responsive UI
+      setForwards((prev) =>
+        prev.map((fw) =>
+          fw.id === forwardId
+            ? { ...fw, status: status as ForwardRule['status'] }
+            : fw
+        )
+      );
+
+      // Show toast for important status changes
+      if (status === 'suspended') {
+        toast({
+          title: t('forwards.toast.suspended_title'),
+          description: t('forwards.toast.suspended_desc'),
+          variant: 'warning',
+        });
+      } else if (status === 'error' && error) {
+        toast({
+          title: t('forwards.toast.error_title'),
+          description: error,
+          variant: 'error',
+        });
+      }
+    }, [t, toast]),
+    onStatsUpdated: useCallback((forwardId: string, stats: ForwardStats) => {
+      setForwardStats((prev) => ({ ...prev, [forwardId]: stats }));
+    }, []),
+    onSessionSuspended: useCallback((forwardIds: string[]) => {
+      console.log(`[ForwardsView] Session suspended, forwards affected:`, forwardIds);
+      
+      // Mark all affected forwards as suspended
+      setForwards((prev) =>
+        prev.map((fw) =>
+          forwardIds.includes(fw.id)
+            ? { ...fw, status: 'suspended' as ForwardRule['status'] }
+            : fw
+        )
+      );
+
+      toast({
+        title: t('forwards.toast.session_suspended_title'),
+        description: t('forwards.toast.session_suspended_desc', { count: forwardIds.length }),
+        variant: 'warning',
+      });
+    }, [t, toast]),
+  });
 
   useEffect(() => {
     // Only poll when session exists and connection state is connected
@@ -93,7 +147,7 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
     // Poll every 5 seconds for status updates
     const interval = setInterval(fetchForwards, 5000);
     return () => clearInterval(interval);
-  }, [sessionId, session?.state]);
+  }, [sessionId, session?.state, fetchForwards]);
 
   const handleCreateQuick = async (type: 'jupyter' | 'tensorboard' | 'vscode') => {
       try {
@@ -236,8 +290,11 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                       <div className="flex items-center gap-1.5">
                         <div className={`w-2 h-2 rounded-full 
                           ${fw.status === 'active' ? 'bg-green-500' : 
-                            fw.status === 'stopped' ? 'bg-zinc-500' : 'bg-red-500'}`} />
-                        <span className="capitalize text-zinc-400">{fw.status}</span>
+                            fw.status === 'stopped' ? 'bg-zinc-500' : 
+                            fw.status === 'suspended' ? 'bg-orange-500 animate-pulse' : 'bg-red-500'}`} />
+                        <span className={`capitalize ${fw.status === 'suspended' ? 'text-orange-400' : 'text-zinc-400'}`}>
+                          {fw.status === 'suspended' ? t('forwards.status.suspended') : fw.status}
+                        </span>
                         {/* Show stats for active forwards */}
                         {fw.status === 'active' && forwardStats[fw.id] && (
                           <span className="ml-2 text-xs text-zinc-500 flex items-center gap-1">
@@ -246,6 +303,12 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                             <span className="text-zinc-600">|</span>
                             ↑{formatBytes(forwardStats[fw.id].bytes_sent)} 
                             ↓{formatBytes(forwardStats[fw.id].bytes_received)}
+                          </span>
+                        )}
+                        {/* Show hint for suspended forwards */}
+                        {fw.status === 'suspended' && (
+                          <span className="ml-2 text-xs text-orange-500/70">
+                            {t('forwards.status.suspended_hint')}
                           </span>
                         )}
                       </div>
@@ -263,6 +326,11 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                           >
                             <Square className="h-3 w-3 fill-current" />
                           </Button>
+                        ) : fw.status === 'suspended' ? (
+                          // Suspended forward: show hint that it will auto-recover
+                          <span className="text-xs text-orange-400/70 px-2">
+                            {t('forwards.actions.will_recover')}
+                          </span>
                         ) : (
                           // Stopped forward: show Restart and Edit buttons
                           <>

@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
+use super::events::ForwardEventEmitter;
+use super::manager::ForwardStatus;
 use crate::ssh::{HandleController, SshError};
 
 /// Forward statistics
@@ -138,12 +140,45 @@ pub async fn start_dynamic_forward(
     handle_controller: HandleController,
     config: DynamicForward,
 ) -> Result<DynamicForwardHandle, SshError> {
+    // Subscribe to disconnect notifications
+    let disconnect_rx = handle_controller.subscribe_disconnect();
+    start_dynamic_forward_with_disconnect(handle_controller, config, disconnect_rx, None, None).await
+}
+
+/// Start dynamic forward with explicit disconnect receiver
+pub async fn start_dynamic_forward_with_disconnect(
+    handle_controller: HandleController,
+    config: DynamicForward,
+    mut disconnect_rx: broadcast::Receiver<()>,
+    forward_id: Option<String>,
+    event_emitter: Option<ForwardEventEmitter>,
+) -> Result<DynamicForwardHandle, SshError> {
     // Bind to local address
     let listener = TcpListener::bind(&config.local_addr).await.map_err(|e| {
-        SshError::ConnectionFailed(format!(
-            "Failed to bind SOCKS5 proxy to {}: {}",
-            config.local_addr, e
-        ))
+        match e.kind() {
+            std::io::ErrorKind::AddrInUse => {
+                SshError::ConnectionFailed(format!(
+                    "Port already in use: {}. Another application may be using this port.",
+                    config.local_addr
+                ))
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                SshError::ConnectionFailed(format!(
+                    "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
+                    config.local_addr
+                ))
+            }
+            std::io::ErrorKind::AddrNotAvailable => {
+                SshError::ConnectionFailed(format!(
+                    "Address not available: {}. The specified address is not valid on this system.",
+                    config.local_addr
+                ))
+            }
+            _ => SshError::ConnectionFailed(format!(
+                "Failed to bind SOCKS5 proxy to {}: {}",
+                config.local_addr, e
+            )),
+        }
     })?;
 
     let bound_addr = listener
@@ -160,12 +195,25 @@ pub async fn start_dynamic_forward(
 
     // Spawn the proxy task
     tokio::spawn(async move {
-        loop {
+        // Track exit reason for event emission
+        enum ExitReason {
+            SshDisconnected,
+            StopRequested,
+            Error,
+        }
+        
+        let exit_reason = loop {
             tokio::select! {
+                // Handle SSH disconnect signal
+                _ = disconnect_rx.recv() => {
+                    info!("SOCKS5 proxy stopped: SSH disconnected");
+                    break ExitReason::SshDisconnected;
+                }
+
                 // Handle stop signal
                 _ = stop_rx.recv() => {
                     info!("SOCKS5 proxy stopped by request");
-                    break;
+                    break ExitReason::StopRequested;
                 }
 
                 // Accept new connections
@@ -173,7 +221,7 @@ pub async fn start_dynamic_forward(
                     match accept_result {
                         Ok((stream, peer_addr)) => {
                             if !running_clone.load(Ordering::SeqCst) {
-                                break;
+                                break ExitReason::StopRequested;
                             }
 
                             // Disable Nagle's algorithm for low-latency SOCKS5 proxy
@@ -215,9 +263,33 @@ pub async fn start_dynamic_forward(
                     }
                 }
             }
-        }
+        };
 
         running_clone.store(false, Ordering::SeqCst);
+        
+        // Emit status event based on exit reason
+        if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
+            match exit_reason {
+                ExitReason::SshDisconnected => {
+                    emitter.emit_status_changed(
+                        fwd_id,
+                        ForwardStatus::Suspended,
+                        Some("SSH connection lost".into()),
+                    );
+                }
+                ExitReason::Error => {
+                    emitter.emit_status_changed(
+                        fwd_id,
+                        ForwardStatus::Error,
+                        Some("SOCKS5 proxy error".into()),
+                    );
+                }
+                ExitReason::StopRequested => {
+                    // Stopped by user request, manager already handles this
+                }
+            }
+        }
+        
         info!("SOCKS5 proxy task exited");
     });
 
@@ -406,6 +478,9 @@ async fn send_socks5_reply(stream: &mut TcpStream, status: u8) -> Result<(), Ssh
         .map_err(|e| SshError::ConnectionFailed(format!("Failed to send SOCKS5 reply: {}", e)))
 }
 
+/// Idle timeout for SOCKS5 connections (5 minutes)
+const SOCKS5_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Bridge data between SOCKS5 client and SSH channel
 async fn bridge_socks5_connection(
     mut local_stream: TcpStream,
@@ -420,13 +495,13 @@ async fn bridge_socks5_connection(
     let stats_for_send = stats.clone();
     let stats_for_recv = stats.clone();
 
-    // Local -> SSH channel
+    // Local -> SSH channel (with idle timeout)
     let local_to_ssh = async {
         let mut buf = vec![0u8; 32768];
         loop {
-            match local_read.read(&mut buf).await {
-                Ok(0) => break, // EOF
-                Ok(n) => {
+            match tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, local_read.read(&mut buf)).await {
+                Ok(Ok(0)) => break, // EOF
+                Ok(Ok(n)) => {
                     let ch = channel_for_write.lock().await;
                     if let Err(e) = ch.data(&buf[..n]).await {
                         debug!("SSH channel write error: {}", e);
@@ -435,8 +510,12 @@ async fn bridge_socks5_connection(
                     // Update bytes sent
                     stats_for_send.write().bytes_sent += n as u64;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     debug!("Local read error: {}", e);
+                    break;
+                }
+                Err(_) => {
+                    debug!("SOCKS5 local read idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
                     break;
                 }
             }
@@ -446,12 +525,12 @@ async fn bridge_socks5_connection(
         let _ = ch.eof().await;
     };
 
-    // SSH channel -> Local
+    // SSH channel -> Local (with idle timeout)
     let ssh_to_local = async {
         loop {
             let mut ch = channel_for_read.lock().await;
-            match ch.wait().await {
-                Some(russh::ChannelMsg::Data { data }) => {
+            match tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, ch.wait()).await {
+                Ok(Some(russh::ChannelMsg::Data { data })) => {
                     let data_len = data.len();
                     drop(ch); // Release lock before writing
                     if let Err(e) = local_write.write_all(&data).await {
@@ -461,19 +540,23 @@ async fn bridge_socks5_connection(
                     // Update bytes received
                     stats_for_recv.write().bytes_received += data_len as u64;
                 }
-                Some(russh::ChannelMsg::Eof) => {
+                Ok(Some(russh::ChannelMsg::Eof)) => {
                     debug!("SSH channel EOF");
                     break;
                 }
-                Some(russh::ChannelMsg::Close) => {
+                Ok(Some(russh::ChannelMsg::Close)) => {
                     debug!("SSH channel closed");
                     break;
                 }
-                None => {
+                Ok(None) => {
                     debug!("SSH channel ended");
                     break;
                 }
-                _ => continue,
+                Ok(_) => continue,
+                Err(_) => {
+                    debug!("SOCKS5 SSH read idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
+                    break;
+                }
             }
         }
     };

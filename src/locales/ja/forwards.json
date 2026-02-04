@@ -23,14 +23,17 @@
     "status": {
       "active": "アクティブ",
       "stopped": "停止",
-      "failed": "失敗"
+      "failed": "失敗",
+      "suspended": "中断",
+      "suspended_hint": "SSH切断"
     },
     "actions": {
       "new_forward": "新規転送",
       "stop": "転送を停止",
       "restart": "転送を再起動",
       "edit": "転送を編集",
-      "delete": "転送を削除"
+      "delete": "転送を削除",
+      "will_recover": "再接続時に自動復旧"
     },
     "form": {
       "new_title": "新規転送ルール",
@@ -65,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "転送の作成に失敗しました",
       "forward_updated": "転送が正常に更新されました",
-      "update_failed": "転送の更新に失敗しました"
+      "update_failed": "転送の更新に失敗しました",
+      "suspended_title": "転送が中断されました",
+      "suspended_desc": "SSH接続が切断されました。再接続時に自動復旧します。",
+      "error_title": "転送エラー",
+      "session_suspended_title": "セッション切断",
+      "session_suspended_desc": "{{count}}個の転送が中断されました。再接続時に自動復旧します。"
     }
   }
 }

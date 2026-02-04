@@ -23,14 +23,17 @@
     "status": {
       "active": "hoạt động",
       "stopped": "đã dừng",
-      "failed": "thất bại"
+      "failed": "Thất bại",
+      "suspended": "Tạm ngưng",
+      "suspended_hint": "SSH ngắt kết nối"
     },
     "actions": {
       "new_forward": "Chuyển tiếp mới",
       "stop": "Dừng chuyển tiếp",
       "restart": "Khởi động lại chuyển tiếp",
-      "edit": "Sửa chuyển tiếp",
-      "delete": "Xóa chuyển tiếp"
+      "edit": "Chỉnh sửa chuyển tiếp",
+      "delete": "Xóa chuyển tiếp",
+      "will_recover": "Tự động khôi phục khi kết nối lại"
     },
     "form": {
       "new_title": "Quy tắc chuyển tiếp mới",

@@ -23,14 +23,17 @@
     "status": {
       "active": "actif",
       "stopped": "arrêté",
-      "failed": "échoué"
+      "failed": "Échec",
+      "suspended": "Suspendu",
+      "suspended_hint": "SSH déconnecté"
     },
     "actions": {
       "new_forward": "Nouveau transfert",
       "stop": "Arrêter le transfert",
       "restart": "Redémarrer le transfert",
       "edit": "Modifier le transfert",
-      "delete": "Supprimer le transfert"
+      "delete": "Supprimer le transfert",
+      "will_recover": "Récupération auto à la reconnexion"
     },
     "form": {
       "new_title": "Nouvelle règle de transfert",
@@ -65,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Échec de la création du transfert",
       "forward_updated": "Transfert mis à jour avec succès",
-      "update_failed": "Échec de la mise à jour du transfert"
+      "update_failed": "Échec de la mise à jour du transfert",
+      "suspended_title": "Transfert suspendu",
+      "suspended_desc": "Connexion SSH perdue. Récupération automatique à la reconnexion.",
+      "error_title": "Erreur de transfert",
+      "session_suspended_title": "Session déconnectée",
+      "session_suspended_desc": "{{count}} transferts suspendus. Récupération automatique à la reconnexion."
     }
   }
 }

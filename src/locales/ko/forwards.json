@@ -23,14 +23,17 @@
     "status": {
       "active": "활성",
       "stopped": "중지됨",
-      "failed": "실패"
+      "failed": "실패",
+      "suspended": "일시중단",
+      "suspended_hint": "SSH 연결끊김"
     },
     "actions": {
-      "new_forward": "새 포워딩",
-      "stop": "포워딩 중지",
-      "restart": "포워딩 재시작",
-      "edit": "포워딩 편집",
-      "delete": "포워딩 삭제"
+      "new_forward": "새 포워드",
+      "stop": "포워드 중지",
+      "restart": "포워드 재시작",
+      "edit": "포워드 편집",
+      "delete": "포워드 삭제",
+      "will_recover": "재연결 시 자동 복구"
     },
     "form": {
       "new_title": "새 포워딩 규칙",

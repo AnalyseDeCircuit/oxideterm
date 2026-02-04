@@ -23,14 +23,17 @@
     "status": {
       "active": "aktiv",
       "stopped": "gestoppt",
-      "failed": "fehlgeschlagen"
+      "failed": "Fehlgeschlagen",
+      "suspended": "Ausgesetzt",
+      "suspended_hint": "SSH getrennt"
     },
     "actions": {
       "new_forward": "Neue Weiterleitung",
       "stop": "Weiterleitung stoppen",
       "restart": "Weiterleitung neu starten",
       "edit": "Weiterleitung bearbeiten",
-      "delete": "Weiterleitung löschen"
+      "delete": "Weiterleitung löschen",
+      "will_recover": "Auto-Wiederherstellung bei Wiederverbindung"
     },
     "form": {
       "new_title": "Neue Weiterleitungsregel",

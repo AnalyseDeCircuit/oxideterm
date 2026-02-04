@@ -20,10 +20,12 @@ use std::sync::Arc;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, info, warn};
 
 use crate::ssh::{HandleController, SshError};
+use super::events::ForwardEventEmitter;
+use super::manager::ForwardStatus;
 
 /// Forward statistics
 #[derive(Debug, Clone, Default)]
@@ -278,6 +280,19 @@ pub async fn start_remote_forward(
     handle_controller: HandleController,
     config: RemoteForward,
 ) -> Result<RemoteForwardHandle, SshError> {
+    // Subscribe to disconnect notifications
+    let disconnect_rx = handle_controller.subscribe_disconnect();
+    start_remote_forward_with_disconnect(handle_controller, config, disconnect_rx, None, None).await
+}
+
+/// Start remote forward with explicit disconnect receiver and optional event emitter
+pub async fn start_remote_forward_with_disconnect(
+    handle_controller: HandleController,
+    config: RemoteForward,
+    mut disconnect_rx: broadcast::Receiver<()>,
+    forward_id: Option<String>,
+    event_emitter: Option<ForwardEventEmitter>,
+) -> Result<RemoteForwardHandle, SshError> {
     info!(
         "Requesting remote port forward: {}:{} -> {}:{}",
         config.remote_addr, config.remote_port, config.local_host, config.local_port
@@ -308,23 +323,49 @@ pub async fn start_remote_forward(
     let running = Arc::new(AtomicBool::new(true));
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
     let running_clone = running.clone();
+    let remote_addr_clone = config.remote_addr.clone();
+    let bound_port_clone = actual_port as u16;
 
-    // Spawn a monitoring task (mainly for cleanup signaling)
+    // Spawn a monitoring task that listens for stop signal or SSH disconnect
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = stop_rx.recv() => {
-                    info!("Remote port forward stopped by request");
-                    break;
+        enum ExitReason {
+            StopRequested,
+            SshDisconnected,
+        }
+        
+        let exit_reason = tokio::select! {
+            _ = stop_rx.recv() => {
+                info!("Remote port forward stopped by request");
+                ExitReason::StopRequested
+            }
+            _ = disconnect_rx.recv() => {
+                info!("Remote port forward stopped: SSH disconnected");
+                ExitReason::SshDisconnected
+            }
+        };
+        running_clone.store(false, Ordering::SeqCst);
+        
+        // Unregister from registry on exit
+        REMOTE_FORWARD_REGISTRY
+            .unregister(&remote_addr_clone, bound_port_clone)
+            .await;
+        
+        // Emit status event based on exit reason
+        if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
+            match exit_reason {
+                ExitReason::SshDisconnected => {
+                    emitter.emit_status_changed(
+                        fwd_id,
+                        ForwardStatus::Suspended,
+                        Some("SSH connection lost".into()),
+                    );
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                    if !running_clone.load(Ordering::SeqCst) {
-                        break;
-                    }
+                ExitReason::StopRequested => {
+                    // Stopped by user request, manager already handles this
                 }
             }
         }
-        running_clone.store(false, Ordering::SeqCst);
+        
         info!("Remote port forward monitor task exited");
     });
 

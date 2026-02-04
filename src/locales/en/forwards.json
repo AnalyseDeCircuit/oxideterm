@@ -23,14 +23,17 @@
     "status": {
       "active": "active",
       "stopped": "stopped",
-      "failed": "failed"
+      "failed": "failed",
+      "suspended": "suspended",
+      "suspended_hint": "SSH disconnected"
     },
     "actions": {
       "new_forward": "New Forward",
       "stop": "Stop forward",
       "restart": "Restart forward",
       "edit": "Edit forward",
-      "delete": "Delete forward"
+      "delete": "Delete forward",
+      "will_recover": "Auto-recover on reconnect"
     },
     "form": {
       "new_title": "New Forward Rule",
@@ -65,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Failed to create forward",
       "forward_updated": "Forward updated successfully",
-      "update_failed": "Failed to update forward"
+      "update_failed": "Failed to update forward",
+      "suspended_title": "Forward Suspended",
+      "suspended_desc": "SSH connection lost. Forward will auto-recover on reconnect.",
+      "error_title": "Forward Error",
+      "session_suspended_title": "Session Disconnected",
+      "session_suspended_desc": "{{count}} forwards suspended. Will auto-recover on reconnect."
     }
   }
 }

@@ -23,14 +23,17 @@
     "status": {
       "active": "使用中",
       "stopped": "已停止",
-      "failed": "失敗"
+      "failed": "失敗",
+      "suspended": "已掛起",
+      "suspended_hint": "SSH 斷開"
     },
     "actions": {
-      "new_forward": "新增轉發",
+      "new_forward": "新建轉發",
       "stop": "停止轉發",
-      "restart": "重新啟動轉發",
+      "restart": "重啟轉發",
       "edit": "編輯轉發",
-      "delete": "刪除轉發"
+      "delete": "刪除轉發",
+      "will_recover": "重連後自動恢復"
     },
     "form": {
       "new_title": "新增轉發規則",

@@ -23,14 +23,17 @@
     "status": {
       "active": "Ativo",
       "stopped": "Parado",
-      "failed": "Falhou"
+      "failed": "Falhou",
+      "suspended": "Suspenso",
+      "suspended_hint": "SSH desconectado"
     },
     "actions": {
       "new_forward": "Novo encaminhamento",
       "stop": "Parar encaminhamento",
       "restart": "Reiniciar encaminhamento",
       "edit": "Editar encaminhamento",
-      "delete": "Excluir encaminhamento"
+      "delete": "Excluir encaminhamento",
+      "will_recover": "Recuperação automática ao reconectar"
     },
     "form": {
       "new_title": "Nova regra de encaminhamento",
@@ -65,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Falha ao criar encaminhamento",
       "forward_updated": "Encaminhamento atualizado com sucesso",
-      "update_failed": "Falha ao atualizar encaminhamento"
+      "update_failed": "Falha ao atualizar encaminhamento",
+      "suspended_title": "Encaminhamento suspenso",
+      "suspended_desc": "Conexão SSH perdida. Será recuperado automaticamente ao reconectar.",
+      "error_title": "Erro no encaminhamento",
+      "session_suspended_title": "Sessão desconectada",
+      "session_suspended_desc": "{{count}} encaminhamentos suspensos. Serão recuperados automaticamente ao reconectar."
     }
   }
 }

@@ -549,7 +549,7 @@ export interface ForwardRule {
   bind_port: number;
   target_host: string;
   target_port: number;
-  status: 'starting' | 'active' | 'stopped' | 'error';
+  status: 'starting' | 'active' | 'stopped' | 'error' | 'suspended';
   description?: string;
 }
 

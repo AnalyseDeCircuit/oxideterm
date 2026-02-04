@@ -1,19 +1,22 @@
 # OxideTerm 端口转发功能文档
 
-> 依托于 v1.4.0 核心架构的智能端口转发系统，支持自愈与状态同步。
+> 依托于 v1.4.x 核心架构的智能端口转发系统，支持自愈、状态同步与精确的生命周期管理。
 
 ## 📖 概述
 
-OxideTerm 提供企业级的 SSH 端口转发功能，不仅支持标准的本地、远程和动态转发，还集成了 v1.4.0 的 **自动重连自愈** 和 **强一致性同步** 机制，确保隧道在网络波动时依然稳定可靠。
+OxideTerm 提供企业级的 SSH 端口转发功能，不仅支持标准的本地、远程和动态转发，还集成了 **自动重连自愈**、**强一致性同步** 和 **死亡报告** 机制，确保隧道在网络波动时依然稳定可靠。
 
-### 核心特性 (v1.4.0)
+### 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| **Link Resilience** | SSH 连接断开重连后，自动恢复所有转发规则 |
-| **强一致性同步** | 规则变更强制触发 `AppStore` 刷新，确保连接引用计数准确 |
-| **实时流量监控** | 基于 Tauri Event 的实时流量统计 (Bytes In/Out) |
-| **状态门禁** | UI 操作严格受连接状态 (`Active`) 保护 |
+| 特性 | 版本 | 说明 |
+|------|------|------|
+| **Link Resilience** | v1.4.0 | SSH 连接断开重连后，自动恢复所有转发规则 |
+| **强一致性同步** | v1.4.0 | 规则变更强制触发 `AppStore` 刷新，确保连接引用计数准确 |
+| **实时流量监控** | v1.4.0 | 基于 Tauri Event 的实时流量统计 (Bytes In/Out) |
+| **状态门禁** | v1.4.0 | UI 操作严格受连接状态 (`Active`) 保护 |
+| **死亡报告 (Death Reporting)** | v1.4.1 | 转发任务异常退出时主动上报，保持状态一致性 |
+| **SSH 断连广播** | v1.4.1 | HandleController 提供 `subscribe_disconnect()` 广播通道 |
+| **Suspended 状态** | v1.4.1 | 新增 `ForwardStatus::Suspended` 表示 SSH 断连导致的挂起 |
 
 ---
 
@@ -190,7 +193,7 @@ interface ForwardRule {
   bind_port: number;
   target_host?: string;     // Dynamic 类型为空
   target_port?: number;     // Dynamic 类型为空
-  status: 'Starting' | 'Active' | 'Stopped' | 'Error';
+  status: 'Starting' | 'Active' | 'Stopped' | 'Error' | 'Suspended';
   error_msg?: string;
   stats: {
     connections: number;
@@ -207,20 +210,52 @@ interface ForwardRule {
 ### 1. 自动重连行为
 
 当 SSH 连接断开时：
-1. **LinkDown**: 所有转发规则状态变更为 `Stopped` (黄色)。
-2. **Reconnecting**: 后端尝试重建 SSH 通道。
-3. **Restored**:
+1. **LinkDown**: 所有转发规则状态变更为 `Suspended` (橙色)。
+2. **Death Reporting**: 转发任务检测到 SSH 断连，通过 `ForwardEventEmitter` 上报状态。
+3. **Reconnecting**: 后端尝试重建 SSH 通道。
+4. **Restored**:
     - 连接恢复 `Active`。
     - 后端自动遍历 `SavedRules` 并重新申请端口绑定。
     - 前端收到 `refreshConnections` 信号，更新列表颜色为绿色。
 
-### 2. 常见错误处理
+### 2. 死亡报告机制 (v1.4.1)
+
+转发任务（local.rs / dynamic.rs / remote.rs）现在具备主动上报能力：
+
+```rust
+// 任务内部维护退出原因
+enum ExitReason {
+    SshDisconnected,  // SSH 连接断开
+    StopRequested,    // 用户主动停止
+    Error,            // 其他错误
+}
+
+// 任务退出时，根据原因发送事件
+match exit_reason {
+    ExitReason::SshDisconnected => {
+        emitter.emit_status_changed(
+            forward_id,
+            ForwardStatus::Suspended,
+            Some("SSH connection lost".into()),
+        );
+    }
+    // ...
+}
+```
+
+这确保了：
+- **状态一致性**: `ForwardingManager` 的内存状态与实际任务状态同步
+- **UI 响应性**: 前端立即收到状态变更事件，更新显示
+- **可恢复性**: `Suspended` 状态的转发规则可在重连后自动恢复
+
+### 3. 常见错误处理
 
 | 错误信息 | 原因 | 解决方案 |
 |---------|------|----------|
 | `EADDRINUSE` | 端口已被占用 | 检查本地其他进程或僵尸 SSH 进程 |
 | `EACCES` | 权限不足 | 绑定 <1024 端口需要管理员权限 (sudo) |
 | `Remote Port Forward Failed` | 服务器拒绝 | 检查服务器 `AllowTcpForwarding` 和 `GatewayPorts` 设置 |
+| `SSH connection lost` | SSH 连接意外断开 | 检查网络稳定性，转发将在重连后自动恢复 |
 
 ---
 
@@ -234,4 +269,4 @@ interface ForwardRule {
 
 ---
 
-*文档版本: v1.4.0 | 适配架构: Strong Sync + Auto Recovery*
+*文档版本: v1.4.1 | 适配架构: Strong Sync + Auto Recovery + Death Reporting*
