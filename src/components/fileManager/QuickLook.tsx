@@ -1,6 +1,6 @@
 /**
  * QuickLook Component
- * Smart file preview with support for images, markdown, code, archives, and more
+ * Smart file preview with support for images, markdown, code, fonts, archives, and more
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -25,7 +25,8 @@ import {
   Clock,
   HardDrive,
   Shield,
-  Info
+  Info,
+  Type
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
@@ -33,6 +34,7 @@ import { formatUnixPermissions, formatFileSize, formatTimestamp, formatRelativeT
 import { CodeHighlight } from './CodeHighlight';
 import { VirtualTextPreview } from './VirtualTextPreview';
 import { OfficePreview } from './OfficePreview';
+import { FontPreview } from './FontPreview';
 import type { FilePreview, PreviewType, ArchiveEntry, FileInfo } from './types';
 
 // Format file size
@@ -55,6 +57,8 @@ const getPreviewIcon = (type: PreviewType) => {
     case 'text':
     case 'office':
       return <FileText className="h-4 w-4" />;
+    case 'font':
+      return <Type className="h-4 w-4" />;
     case 'archive':
       return <Archive className="h-4 w-4" />;
     default:
@@ -408,6 +412,15 @@ export const QuickLook: React.FC<QuickLookProps> = ({
             <OfficePreview
               data={preview.data}
               mimeType={preview.mimeType || 'application/octet-stream'}
+              filename={preview.name}
+              className="h-[70vh]"
+            />
+          )}
+
+          {/* Font Preview */}
+          {preview.type === 'font' && (
+            <FontPreview
+              data={preview.data}
               filename={preview.name}
               className="h-[70vh]"
             />

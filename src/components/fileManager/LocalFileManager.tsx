@@ -41,6 +41,7 @@ const CODE_EXTENSIONS = new Set([
 ]);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp']);
+const FONT_EXTENSIONS = new Set(['ttf', 'otf', 'woff', 'woff2', 'eot']);
 const PDF_EXTENSIONS = new Set(['pdf']);
 const OFFICE_EXTENSIONS = new Set(['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'odt', 'ods', 'odp']);
 const ARCHIVE_EXTENSIONS = new Set(['zip', 'jar', 'war', 'ear', 'apk', 'xpi', 'crx', 'epub']);
@@ -215,6 +216,17 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
                         ext === 'webp' ? 'image/webp' :
                         ext === 'ico' ? 'image/x-icon' :
                         ext === 'bmp' ? 'image/bmp' : 'image/jpeg';
+        const base64 = uint8ArrayToBase64(content);
+        data = `data:${mimeType};base64,${base64}`;
+      } else if (FONT_EXTENSIONS.has(ext)) {
+        previewType = 'font';
+        // Read font and convert to base64 data URL
+        const content = await readFile(filePath);
+        mimeType = ext === 'ttf' ? 'font/ttf' :
+                   ext === 'otf' ? 'font/otf' :
+                   ext === 'woff' ? 'font/woff' :
+                   ext === 'woff2' ? 'font/woff2' :
+                   ext === 'eot' ? 'application/vnd.ms-fontobject' : 'font/ttf';
         const base64 = uint8ArrayToBase64(content);
         data = `data:${mimeType};base64,${base64}`;
       } else if (PDF_EXTENSIONS.has(ext)) {

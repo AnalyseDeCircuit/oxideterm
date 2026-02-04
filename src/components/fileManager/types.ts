@@ -77,6 +77,7 @@ export type PreviewType =
   | 'audio'
   | 'pdf'
   | 'office'
+  | 'font'
   | 'archive'
   | 'hex'
   | 'too-large'
