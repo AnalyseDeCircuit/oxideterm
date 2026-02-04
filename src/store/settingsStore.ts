@@ -42,7 +42,7 @@ const LEGACY_KEYS = [
 export type RendererType = 'auto' | 'webgl' | 'canvas';
 
 /** Font family options */
-export type FontFamily = 'jetbrains' | 'meslo' | 'tinos' | 'menlo' | 'courier' | 'monospace';
+export type FontFamily = 'jetbrains' | 'meslo' | 'menlo' | 'courier' | 'monospace';
 
 /** Cursor style options */
 export type CursorStyle = 'block' | 'underline' | 'bar';

@@ -235,7 +235,6 @@ export const SettingsModal = () => {
                                         <SelectContent>
                                             <SelectItem value="jetbrains">JetBrains Mono</SelectItem>
                                             <SelectItem value="meslo">MesloLGM Nerd Font</SelectItem>
-                                            <SelectItem value="tinos">Tinos Nerd Font</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
