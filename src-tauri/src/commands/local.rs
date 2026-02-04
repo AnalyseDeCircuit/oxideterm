@@ -120,25 +120,55 @@ pub async fn local_create_terminal(
     state: State<'_, Arc<LocalTerminalState>>,
     app: AppHandle,
 ) -> Result<CreateLocalTerminalResponse, String> {
+    tracing::info!(
+        "local_create_terminal called with shell_path: {:?}, cwd: {:?}",
+        request.shell_path,
+        request.cwd
+    );
+    
     // Determine which shell to use
     let shell = if let Some(path) = request.shell_path {
         // Find shell by path
         let shells = scan_shells();
         let path_buf = std::path::PathBuf::from(&path);
-        shells
+        
+        let found_shell = shells
             .into_iter()
-            .find(|s| s.path == path_buf)
-            .unwrap_or_else(|| {
+            .find(|s| {
+                // Normalize path for comparison (handles case-insensitivity on Windows)
+                #[cfg(target_os = "windows")]
+                {
+                    s.path.to_string_lossy().to_lowercase() == path.to_lowercase()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    s.path == path_buf
+                }
+            });
+        
+        match found_shell {
+            Some(shell) => {
+                tracing::info!("Found matching shell: {} ({})", shell.label, shell.path.display());
+                shell
+            }
+            None => {
                 // Create shell info for custom path
+                tracing::warn!(
+                    "Shell path '{}' not found in scanned shells, creating custom shell info",
+                    path
+                );
                 let id = std::path::Path::new(&path)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("custom")
                     .to_string();
                 ShellInfo::new(id.clone(), id, path_buf)
-            })
+            }
+        }
     } else {
-        default_shell()
+        let shell = default_shell();
+        tracing::info!("No shell_path provided, using default: {} ({})", shell.label, shell.path.display());
+        shell
     };
 
     let cwd = request.cwd.map(std::path::PathBuf::from);
