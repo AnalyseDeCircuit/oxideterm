@@ -1,50 +1,64 @@
 # OxideTerm Fonts
 
-This directory contains three monospace fonts with Nerd Font support for terminal use.
+This directory contains bundled **fallback** fonts for terminal use.
 
-## Installed Fonts
+## Font Loading Strategy: System-First with Bundled Fallback
 
-### 1. JetBrains Mono Nerd Font
-**Location**: `JetBrainsMono/`
-**License**: OFL (Open Font License) - see `JetBrainsMono/OFL.txt`
-**Variants**: Regular, Bold, Italic, BoldItalic
-**Description**: Modern, developer-focused monospace font with excellent readability
+OxideTerm uses a **"system fonts first"** strategy for optimal performance and compatibility:
 
-### 2. MesloLGM Nerd Font
-**Location**: `Meslo/`
-**License**: Apache 2.0 - see `Meslo/LICENSE.txt`
-**Variants**: Regular, Bold, Italic, BoldItalic
-**Description**: Customized version of Apple's Menlo, with medium line gap (LGM)
+1. **System Nerd Fonts** (if installed) → Best icons/glyphs support
+2. **Bundled WOFF2 fonts** (this folder) → Guaranteed fallback
+3. **Generic monospace** → Ultimate fallback
 
-### 3. Tinos Nerd Font
-**Location**: `Tinos/`
-**License**: Apache 2.0 - see `Tinos/Apache License.txt`
-**Variants**: Regular, Bold, Italic, BoldItalic
-**Description**: Times New Roman-inspired monospace font
+This approach:
+- Reduces initial bundle load when users have Nerd Fonts installed
+- Ensures Nerd Font icons **always work** via bundled fallback
+- Provides better font rendering via native system fonts
 
-## Font Selection
+## Bundled Fonts
 
-All fonts can be selected via:
-**Settings → Terminal → Font Family**
+### JetBrains Mono Nerd Font
+**Location**: `JetBrainsMono/`  
+**Format**: WOFF2 (compressed)  
+**License**: OFL (Open Font License) - see `JetBrainsMono/OFL.txt`  
+**Variants**: Regular, Bold, Italic, BoldItalic  
+**Size**: ~4.0 MB total
 
-Available options:
-- JetBrains Mono (default)
-- MesloLGM Nerd Font
-- Tinos Nerd Font
+### MesloLGM Nerd Font
+**Location**: `Meslo/`  
+**Format**: WOFF2 (compressed)  
+**License**: Apache 2.0 - see `Meslo/LICENSE.txt`  
+**Variants**: Regular, Bold, Italic, BoldItalic  
+**Size**: ~4.7 MB total
+
+## Font Family Options
+
+Available in **Settings → Terminal → Font Family**:
+
+| Option | Font Stack | Notes |
+|--------|-----------|-------|
+| JetBrains Mono NF | System → Bundled → monospace | **Default**, excellent readability |
+| MesloLGM Nerd Font | System → Bundled → monospace | Apple Menlo-based |
+| Cascadia Code NF | System only | Windows Terminal default |
+| Fira Code NF | System only | Popular ligature font |
+| Menlo | macOS system font | No Nerd Font icons |
+| Consolas | Windows system font | No Nerd Font icons |
+| Courier New | Cross-platform | Basic monospace |
+| System Monospace | OS default | Basic monospace |
 
 ## Technical Details
 
-- All fonts include **Nerd Font** icons and glyphs
-- Only **Mono** variants are included (fixed-width characters)
-- Fonts are loaded via `@font-face` in `src/styles.css`
-- Font switching is handled by `TerminalView.tsx` using xterm.js
+- All bundled fonts are **WOFF2** format (~58% smaller than TTF)
+- Fonts declared in `src/styles.css` via `@font-face`
+- Font stack logic in terminal components ensures graceful fallback
+- Nerd Font glyphs require system or bundled NF variants
 
-## Cleanup Notes
+## Bundle Size Optimization
 
-The original font packages contained 96+ files with multiple variants (Propo, NL, etc.).
-We've retained only the essential **Mono** variants (4 files per family) to reduce bundle size
-while maintaining full functionality for terminal use.
+| Before (TTF) | After (WOFF2) | Reduction |
+|--------------|---------------|-----------|
+| 20.5 MB | 8.7 MB | **~58%** |
 
 ---
 
-Last updated: 2026-01-13
+Last updated: 2025-01-13

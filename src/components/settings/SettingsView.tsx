@@ -473,8 +473,14 @@ export const SettingsView = () => {
                                                 <SelectValue placeholder={t('settings_view.terminal.select_font')} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="jetbrains">JetBrains Mono</SelectItem>
+                                                <SelectItem value="jetbrains">JetBrains Mono NF</SelectItem>
                                                 <SelectItem value="meslo">MesloLGM Nerd Font</SelectItem>
+                                                <SelectItem value="cascadia">Cascadia Code NF</SelectItem>
+                                                <SelectItem value="firacode">Fira Code NF</SelectItem>
+                                                <SelectItem value="menlo">Menlo</SelectItem>
+                                                <SelectItem value="consolas">Consolas</SelectItem>
+                                                <SelectItem value="courier">Courier New</SelectItem>
+                                                <SelectItem value="monospace">System Monospace</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>

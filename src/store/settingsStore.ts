@@ -41,8 +41,22 @@ const LEGACY_KEYS = [
 /** Renderer type */
 export type RendererType = 'auto' | 'webgl' | 'canvas';
 
-/** Font family options */
-export type FontFamily = 'jetbrains' | 'meslo' | 'menlo' | 'courier' | 'monospace';
+/** 
+ * Font family options
+ * 
+ * v1.4.0+: Extended with more Nerd Font options
+ * - System fonts are preferred (user may have installed Nerd Fonts)
+ * - Bundled woff2 fonts serve as fallback
+ */
+export type FontFamily = 
+  | 'jetbrains'   // JetBrains Mono Nerd Font (bundled fallback)
+  | 'meslo'       // Meslo Nerd Font (bundled fallback)
+  | 'cascadia'    // Cascadia Code (Windows system)
+  | 'firacode'    // Fira Code (system only)
+  | 'menlo'       // Menlo (macOS system)
+  | 'consolas'    // Consolas (Windows system)
+  | 'courier'     // Courier New (universal)
+  | 'monospace';  // System monospace
 
 /** Cursor style options */
 export type CursorStyle = 'block' | 'underline' | 'bar';

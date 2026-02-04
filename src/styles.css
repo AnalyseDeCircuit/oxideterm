@@ -1,68 +1,74 @@
 @import "tailwindcss";
 
 /* ===== Font Declarations ===== */
+/* 
+ * Font Loading Strategy (v1.4.0+):
+ * 1. System fonts are preferred (user may have Nerd Fonts installed)
+ * 2. Bundled woff2 fonts serve as fallback for Nerd Font icons
+ * 3. This reduces bundle size while ensuring icon compatibility
+ */
 
-/* JetBrains Mono Nerd Font */
+/* JetBrains Mono Nerd Font (Bundled Fallback) */
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Regular.ttf') format('truetype');
+  font-family: 'JetBrains Mono NF';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Bold.ttf') format('truetype');
+  font-family: 'JetBrains Mono NF';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Italic.ttf') format('truetype');
+  font-family: 'JetBrains Mono NF';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Italic.woff2') format('woff2');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-BoldItalic.ttf') format('truetype');
+  font-family: 'JetBrains Mono NF';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-BoldItalic.woff2') format('woff2');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
 }
 
-/* Meslo Nerd Font */
+/* Meslo Nerd Font (Bundled Fallback) */
 @font-face {
-  font-family: 'MesloLGM Nerd Font';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Regular.ttf') format('truetype');
+  font-family: 'MesloLGM NF';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM Nerd Font';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Bold.ttf') format('truetype');
+  font-family: 'MesloLGM NF';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM Nerd Font';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Italic.ttf') format('truetype');
+  font-family: 'MesloLGM NF';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Italic.woff2') format('woff2');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM Nerd Font';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-BoldItalic.ttf') format('truetype');
+  font-family: 'MesloLGM NF';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-BoldItalic.woff2') format('woff2');
   font-weight: 700;
   font-style: italic;
   font-display: swap;

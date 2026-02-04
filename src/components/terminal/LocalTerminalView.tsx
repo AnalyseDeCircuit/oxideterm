@@ -93,11 +93,28 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   // Get terminal settings
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
 
-  const getFontFamily = (val: string) => {
+  // Import font utility for consistent font stack
+  const getFontFamily = (val: string): string => {
+    // Use the same font stack as fontUtils.ts for consistency
     switch(val) {
-      case 'jetbrains': return '"JetBrains Mono", monospace';
-      case 'meslo': return '"MesloLGM Nerd Font", monospace';
-      default: return '"JetBrains Mono", monospace';
+      case 'jetbrains':
+        return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
+      case 'meslo':
+        return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
+      case 'cascadia':
+        return '"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", monospace';
+      case 'firacode':
+        return '"FiraCode Nerd Font", "FiraCode Nerd Font Mono", "Fira Code", monospace';
+      case 'menlo':
+        return 'Menlo, Monaco, "Courier New", monospace';
+      case 'consolas':
+        return 'Consolas, "Courier New", monospace';
+      case 'courier':
+        return '"Courier New", Courier, monospace';
+      case 'monospace':
+        return 'monospace';
+      default:
+        return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
     }
   };
 
