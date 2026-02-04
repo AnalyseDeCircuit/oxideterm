@@ -42,21 +42,27 @@ const LEGACY_KEYS = [
 export type RendererType = 'auto' | 'webgl' | 'canvas';
 
 /** 
- * Font family options
+ * Font family options - "双轨制" (Dual-Track System)
  * 
- * v1.4.0+: Extended with more Nerd Font options
- * - System fonts are preferred (user may have installed Nerd Fonts)
- * - Bundled woff2 fonts serve as fallback
+ * v1.4.0+: Extended with dual-track font system
+ * 
+ * 预设轨道 (Preset Track):
+ * - jetbrains: JetBrains Mono NF (bundled woff2 fallback)
+ * - meslo: MesloLGM NF (bundled woff2 fallback)
+ * - cascadia: Cascadia Code (system, Windows)
+ * - consolas: Consolas (system, Windows)
+ * - menlo: Menlo (system, macOS)
+ * 
+ * 自定义轨道 (Custom Track):
+ * - custom: User-defined font stack via customFontFamily field
  */
 export type FontFamily = 
-  | 'jetbrains'   // JetBrains Mono Nerd Font (bundled fallback)
-  | 'meslo'       // Meslo Nerd Font (bundled fallback)
-  | 'cascadia'    // Cascadia Code (Windows system)
-  | 'firacode'    // Fira Code (system only)
-  | 'menlo'       // Menlo (macOS system)
-  | 'consolas'    // Consolas (Windows system)
-  | 'courier'     // Courier New (universal)
-  | 'monospace';  // System monospace
+  | 'jetbrains'   // JetBrains Mono Nerd Font (内置保底)
+  | 'meslo'       // Meslo Nerd Font (内置保底)
+  | 'cascadia'    // Cascadia Code (系统字体)
+  | 'consolas'    // Consolas (系统字体)
+  | 'menlo'       // Menlo (系统字体)
+  | 'custom';     // 自定义字体栈
 
 /** Cursor style options */
 export type CursorStyle = 'block' | 'underline' | 'bar';
@@ -76,6 +82,7 @@ export interface GeneralSettings {
 export interface TerminalSettings {
   theme: string;
   fontFamily: FontFamily;
+  customFontFamily: string; // 自定义轨道: user-defined font stack (e.g. "'Sarasa Fixed SC', monospace")
   fontSize: number;        // 8-32
   lineHeight: number;      // 0.8-3.0
   cursorStyle: CursorStyle;
@@ -183,6 +190,7 @@ const defaultGeneralSettings: GeneralSettings = {
 const defaultTerminalSettings: TerminalSettings = {
   theme: 'default',
   fontFamily: 'jetbrains',
+  customFontFamily: '',  // 自定义轨道为空时不生效
   fontSize: 14,
   lineHeight: 1.2,
   cursorStyle: 'block',

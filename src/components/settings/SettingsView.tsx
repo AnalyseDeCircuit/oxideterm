@@ -460,6 +460,7 @@ export const SettingsView = () => {
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
                                 <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.terminal.font')}</h4>
                                 <div className="space-y-5">
+                                    {/* 预设轨道: Preset Font Selector */}
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <Label className="text-theme-text">{t('settings_view.terminal.font_family')}</Label>
@@ -473,17 +474,32 @@ export const SettingsView = () => {
                                                 <SelectValue placeholder={t('settings_view.terminal.select_font')} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="jetbrains">JetBrains Mono NF</SelectItem>
-                                                <SelectItem value="meslo">MesloLGM Nerd Font</SelectItem>
-                                                <SelectItem value="cascadia">Cascadia Code NF</SelectItem>
-                                                <SelectItem value="firacode">Fira Code NF</SelectItem>
-                                                <SelectItem value="menlo">Menlo</SelectItem>
+                                                <SelectItem value="jetbrains">JetBrains Mono NF ✓</SelectItem>
+                                                <SelectItem value="meslo">MesloLGM NF ✓</SelectItem>
+                                                <SelectItem value="cascadia">Cascadia Code</SelectItem>
                                                 <SelectItem value="consolas">Consolas</SelectItem>
-                                                <SelectItem value="courier">Courier New</SelectItem>
-                                                <SelectItem value="monospace">System Monospace</SelectItem>
+                                                <SelectItem value="menlo">Menlo</SelectItem>
+                                                <SelectItem value="custom">{t('settings_view.terminal.custom_font')}</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
+
+                                    {/* 自定义轨道: Custom Font Input */}
+                                    {terminal.fontFamily === 'custom' && (
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <Label className="text-theme-text">{t('settings_view.terminal.custom_font_stack')}</Label>
+                                                <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.custom_font_stack_hint')}</p>
+                                            </div>
+                                            <Input
+                                                type="text"
+                                                value={terminal.customFontFamily}
+                                                onChange={(e) => updateTerminal('customFontFamily', e.target.value)}
+                                                placeholder="'Sarasa Fixed SC', 'Fira Code', monospace"
+                                                className="w-[300px] font-mono text-sm"
+                                            />
+                                        </div>
+                                    )}
 
                                     <Separator className="opacity-50" />
 

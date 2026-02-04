@@ -233,14 +233,12 @@ export const SettingsModal = () => {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="jetbrains">JetBrains Mono NF</SelectItem>
-                                            <SelectItem value="meslo">MesloLGM Nerd Font</SelectItem>
-                                            <SelectItem value="cascadia">Cascadia Code NF</SelectItem>
-                                            <SelectItem value="firacode">Fira Code NF</SelectItem>
-                                            <SelectItem value="menlo">Menlo</SelectItem>
+                                            <SelectItem value="jetbrains">JetBrains Mono NF ✓</SelectItem>
+                                            <SelectItem value="meslo">MesloLGM NF ✓</SelectItem>
+                                            <SelectItem value="cascadia">Cascadia Code</SelectItem>
                                             <SelectItem value="consolas">Consolas</SelectItem>
-                                            <SelectItem value="courier">Courier New</SelectItem>
-                                            <SelectItem value="monospace">System Monospace</SelectItem>
+                                            <SelectItem value="menlo">Menlo</SelectItem>
+                                            <SelectItem value="custom">{t('modals.settings.terminal.custom_font')}</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -261,6 +259,21 @@ export const SettingsModal = () => {
                                     </Select>
                                 </div>
                             </div>
+
+                            {/* 自定义轨道: Custom Font Input */}
+                            {terminal.fontFamily === 'custom' && (
+                                <div className="grid gap-2">
+                                    <Label>{t('modals.settings.terminal.custom_font_stack')}</Label>
+                                    <Input
+                                        type="text"
+                                        value={terminal.customFontFamily}
+                                        onChange={(e) => updateTerminal('customFontFamily', e.target.value)}
+                                        placeholder="'Sarasa Fixed SC', 'Fira Code', monospace"
+                                        className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-zinc-500">{t('modals.settings.terminal.custom_font_stack_hint')}</p>
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="grid gap-2">

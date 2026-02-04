@@ -359,7 +359,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         const term = terminalRef.current;
         if (!term) return;
         
-        term.options.fontFamily = getFontFamily(terminal.fontFamily);
+        term.options.fontFamily = getFontFamily(terminal.fontFamily, terminal.customFontFamily);
         term.options.fontSize = terminal.fontSize;
         term.options.cursorStyle = terminal.cursorStyle;
         term.options.cursorBlink = terminal.cursorBlink;
@@ -571,25 +571,32 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     }
   }, [session?.ws_url, recoverWebSocket, cleanupWebSocket, connectionStatus]);
 
-  // Font family helper - system fonts first, bundled Nerd Fonts as fallback
-  const getFontFamily = (val: string): string => {
-    switch(val) {
+  /**
+   * 字体双轨制 - Font Family Resolver
+   * 
+   * 预设轨道: 返回内置字体栈（系统优先 → 内置 woff2 兜底）
+   * 自定义轨道: 返回用户输入的字体栈 + monospace 兜底
+   */
+  const getFontFamily = (fontFamily: string, customFontFamily?: string): string => {
+    // 自定义轨道: 用户输入优先
+    if (fontFamily === 'custom' && customFontFamily?.trim()) {
+      // 确保有 monospace 兜底
+      const stack = customFontFamily.trim();
+      return stack.toLowerCase().includes('monospace') ? stack : `${stack}, monospace`;
+    }
+    
+    // 预设轨道: 系统字体优先 → 内置 woff2 兜底
+    switch(fontFamily) {
       case 'jetbrains':
         return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
       case 'meslo':
         return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
       case 'cascadia':
         return '"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", monospace';
-      case 'firacode':
-        return '"FiraCode Nerd Font", "FiraCode Nerd Font Mono", "Fira Code", monospace';
-      case 'menlo':
-        return 'Menlo, Monaco, "Courier New", monospace';
       case 'consolas':
         return 'Consolas, "Courier New", monospace';
-      case 'courier':
-        return '"Courier New", Courier, monospace';
-      case 'monospace':
-        return 'monospace';
+      case 'menlo':
+        return 'Menlo, Monaco, "Courier New", monospace';
       default:
         return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
     }
@@ -604,7 +611,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const term = new Terminal({
       cursorBlink: terminalSettings.cursorBlink,
       cursorStyle: terminalSettings.cursorStyle,
-      fontFamily: getFontFamily(terminalSettings.fontFamily),
+      fontFamily: getFontFamily(terminalSettings.fontFamily, terminalSettings.customFontFamily),
       fontSize: terminalSettings.fontSize,
       lineHeight: terminalSettings.lineHeight,
       theme: themes[terminalSettings.theme] || themes.default,

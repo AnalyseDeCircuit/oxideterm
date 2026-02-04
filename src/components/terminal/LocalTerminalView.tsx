@@ -93,26 +93,32 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   // Get terminal settings
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
 
-  // Import font utility for consistent font stack
-  const getFontFamily = (val: string): string => {
-    // Use the same font stack as fontUtils.ts for consistency
-    switch(val) {
+  /**
+   * 字体双轨制 - Font Family Resolver
+   * 
+   * 预设轨道: 返回内置字体栈（系统优先 → 内置 woff2 兜底）
+   * 自定义轨道: 返回用户输入的字体栈 + monospace 兜底
+   */
+  const getFontFamily = (fontFamily: string, customFontFamily?: string): string => {
+    // 自定义轨道: 用户输入优先
+    if (fontFamily === 'custom' && customFontFamily?.trim()) {
+      // 确保有 monospace 兜底
+      const stack = customFontFamily.trim();
+      return stack.toLowerCase().includes('monospace') ? stack : `${stack}, monospace`;
+    }
+    
+    // 预设轨道: 系统字体优先 → 内置 woff2 兜底
+    switch(fontFamily) {
       case 'jetbrains':
         return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
       case 'meslo':
         return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
       case 'cascadia':
         return '"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", monospace';
-      case 'firacode':
-        return '"FiraCode Nerd Font", "FiraCode Nerd Font Mono", "Fira Code", monospace';
-      case 'menlo':
-        return 'Menlo, Monaco, "Courier New", monospace';
       case 'consolas':
         return 'Consolas, "Courier New", monospace';
-      case 'courier':
-        return '"Courier New", Courier, monospace';
-      case 'monospace':
-        return 'monospace';
+      case 'menlo':
+        return 'Menlo, Monaco, "Courier New", monospace';
       default:
         return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
     }
@@ -126,7 +132,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         const term = terminalRef.current;
         if (!term) return;
         
-        term.options.fontFamily = getFontFamily(terminal.fontFamily);
+        term.options.fontFamily = getFontFamily(terminal.fontFamily, terminal.customFontFamily);
         term.options.fontSize = terminal.fontSize;
         term.options.cursorStyle = terminal.cursorStyle;
         term.options.cursorBlink = terminal.cursorBlink;
@@ -164,7 +170,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const term = new Terminal({
       cursorBlink: terminalSettings.cursorBlink,
       cursorStyle: terminalSettings.cursorStyle,
-      fontFamily: getFontFamily(terminalSettings.fontFamily),
+      fontFamily: getFontFamily(terminalSettings.fontFamily, terminalSettings.customFontFamily),
       fontSize: terminalSettings.fontSize,
       lineHeight: terminalSettings.lineHeight,
       theme: themes[terminalSettings.theme] || themes.default,

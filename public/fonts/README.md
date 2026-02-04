@@ -1,64 +1,60 @@
-# OxideTerm Fonts
+# OxideTerm 字体双轨制
 
-This directory contains bundled **fallback** fonts for terminal use.
+OxideTerm 使用 **"双轨制"** 字体系统，提供开箱即用的保底方案与完全自由的自定义能力。
 
-## Font Loading Strategy: System-First with Bundled Fallback
+## 双轨制架构
 
-OxideTerm uses a **"system fonts first"** strategy for optimal performance and compatibility:
+### 预设轨道：内置保底，开箱即用
 
-1. **System Nerd Fonts** (if installed) → Best icons/glyphs support
-2. **Bundled WOFF2 fonts** (this folder) → Guaranteed fallback
-3. **Generic monospace** → Ultimate fallback
+在设置下拉菜单中提供预设字体选项：
 
-This approach:
-- Reduces initial bundle load when users have Nerd Fonts installed
-- Ensures Nerd Font icons **always work** via bundled fallback
-- Provides better font rendering via native system fonts
+| 字体 | 说明 | 图标支持 |
+|------|------|----------|
+| **JetBrains Mono NF ✓** | 内置 woff2，绝对不乱码 | ✅ Nerd Font |
+| **MesloLGM NF ✓** | 内置 woff2，Apple Menlo 风格 | ✅ Nerd Font |
+| Cascadia Code | Windows 系统字体（如有） | ⚠️ 需安装 NF 版 |
+| Consolas | Windows 系统字体 | ❌ |
+| Menlo | macOS 系统字体 | ❌ |
 
-## Bundled Fonts
+> ✓ 表示内置保底，即使系统没装也能正常显示
 
-### JetBrains Mono Nerd Font
-**Location**: `JetBrainsMono/`  
-**Format**: WOFF2 (compressed)  
-**License**: OFL (Open Font License) - see `JetBrainsMono/OFL.txt`  
-**Variants**: Regular, Bold, Italic, BoldItalic  
-**Size**: ~4.0 MB total
+### 自定义轨道：无限自由，吃准本机
 
-### MesloLGM Nerd Font
-**Location**: `Meslo/`  
-**Format**: WOFF2 (compressed)  
-**License**: Apache 2.0 - see `Meslo/LICENSE.txt`  
-**Variants**: Regular, Bold, Italic, BoldItalic  
-**Size**: ~4.7 MB total
+选择 **"自定义..."** 后，可输入任意字体栈：
 
-## Font Family Options
+```
+'Sarasa Fixed SC', 'JetBrainsMono Nerd Font', monospace
+```
 
-Available in **Settings → Terminal → Font Family**:
+支持：
+- 任意系统已安装的字体
+- 多字体优先级排列（按逗号分隔）
+- 自动追加 `monospace` 兜底
 
-| Option | Font Stack | Notes |
-|--------|-----------|-------|
-| JetBrains Mono NF | System → Bundled → monospace | **Default**, excellent readability |
-| MesloLGM Nerd Font | System → Bundled → monospace | Apple Menlo-based |
-| Cascadia Code NF | System only | Windows Terminal default |
-| Fira Code NF | System only | Popular ligature font |
-| Menlo | macOS system font | No Nerd Font icons |
-| Consolas | Windows system font | No Nerd Font icons |
-| Courier New | Cross-platform | Basic monospace |
-| System Monospace | OS default | Basic monospace |
+## 字体加载策略
 
-## Technical Details
+所有预设字体使用 **系统优先 → 内置兜底** 策略：
 
-- All bundled fonts are **WOFF2** format (~58% smaller than TTF)
-- Fonts declared in `src/styles.css` via `@font-face`
-- Font stack logic in terminal components ensures graceful fallback
-- Nerd Font glyphs require system or bundled NF variants
+```
+用户选择 "JetBrains Mono NF"
+    ↓
+浏览器依次尝试：
+  1. "JetBrainsMono Nerd Font"      ← 系统安装的 NF
+  2. "JetBrainsMono Nerd Font Mono" ← 系统安装的 NF Mono
+  3. "JetBrains Mono NF"            ← 内置 woff2 (保底)
+  4. "JetBrains Mono"               ← 系统原版
+  5. monospace                      ← 最终兜底
+```
 
-## Bundle Size Optimization
+## 内置字体文件
 
-| Before (TTF) | After (WOFF2) | Reduction |
-|--------------|---------------|-----------|
-| 20.5 MB | 8.7 MB | **~58%** |
+| 文件夹 | 格式 | 大小 | 许可证 |
+|--------|------|------|--------|
+| `JetBrainsMono/` | WOFF2 | ~4.0 MB | OFL |
+| `Meslo/` | WOFF2 | ~4.7 MB | Apache 2.0 |
+
+**总计 ~8.7 MB**（相比 TTF 格式减少 58%）
 
 ---
 
-Last updated: 2025-01-13
+Last updated: 2025-02-04
