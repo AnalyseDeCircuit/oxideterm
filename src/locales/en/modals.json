@@ -314,6 +314,7 @@
         "custom_font": "Custom...",
         "custom_font_stack": "Custom Font Stack",
         "custom_font_stack_hint": "Enter font names in priority order, separated by commas",
+        "font_preview": "Font Preview",
         "font_size": "Font Size",
         "line_height": "Line Height",
         "scrollback": "Scrollback Lines (Frontend)",

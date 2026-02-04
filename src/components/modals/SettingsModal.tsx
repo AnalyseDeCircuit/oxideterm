@@ -275,6 +275,33 @@ export const SettingsModal = () => {
                                 </div>
                             )}
 
+                            {/* 字体预览 */}
+                            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+                                <p className="text-xs text-zinc-500 mb-2">{t('modals.settings.terminal.font_preview')}</p>
+                                <div 
+                                    className="text-zinc-100 leading-relaxed"
+                                    style={{ 
+                                        fontFamily: terminal.fontFamily === 'custom' && terminal.customFontFamily 
+                                            ? (terminal.customFontFamily.toLowerCase().includes('monospace') 
+                                                ? terminal.customFontFamily 
+                                                : `${terminal.customFontFamily}, monospace`)
+                                            : terminal.fontFamily === 'jetbrains' ? '"JetBrainsMono Nerd Font", "JetBrains Mono NF", monospace'
+                                            : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF", monospace'
+                                            : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", monospace'
+                                            : terminal.fontFamily === 'consolas' ? 'Consolas, monospace'
+                                            : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, monospace'
+                                            : 'monospace',
+                                        fontSize: `${terminal.fontSize}px`,
+                                        lineHeight: terminal.lineHeight,
+                                    }}
+                                >
+                                    <div>ABCabc 0123456789</div>
+                                    <div className="text-zinc-400">{'-> => == {}'}</div>
+                                    <div className="text-emerald-400">天地 Fox</div>
+                                    <div className="text-amber-400" style={{ letterSpacing: '0.1em' }}>    </div>
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="grid gap-2">
                                     <Label>{t('modals.settings.terminal.line_height')}</Label>

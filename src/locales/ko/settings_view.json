@@ -56,6 +56,7 @@
       "custom_font": "사용자 지정...",
       "custom_font_stack": "사용자 지정 글꼴 스택",
       "custom_font_stack_hint": "우선 순위에 따라 글꼴 이름을 쉼표로 구분하여 입력",
+      "font_preview": "글꼴 미리보기",
       "font_size": "글꼴 크기",
       "font_size_hint": "터미널 문자 크기",
       "line_height": "줄 높이",

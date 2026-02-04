@@ -56,6 +56,7 @@
       "custom_font": "Personnalisée...",
       "custom_font_stack": "Liste de polices personnalisée",
       "custom_font_stack_hint": "Entrez les noms de polices par ordre de priorité, séparés par des virgules",
+      "font_preview": "Aperçu de la police",
       "font_size": "Taille de police",
       "font_size_hint": "Taille des caractères du terminal",
       "line_height": "Hauteur de ligne",

@@ -56,6 +56,7 @@
       "custom_font": "自定义...",
       "custom_font_stack": "自定义字体栈",
       "custom_font_stack_hint": "输入字体名称，按优先级排列，用逗号分隔",
+      "font_preview": "字体预览",
       "font_size": "字号",
       "font_size_hint": "终端字符大小",
       "line_height": "行高",

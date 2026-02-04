@@ -56,6 +56,7 @@
       "custom_font": "Personalizzato...",
       "custom_font_stack": "Elenco font personalizzato",
       "custom_font_stack_hint": "Inserisci i nomi dei font in ordine di priorità, separati da virgole",
+      "font_preview": "Anteprima font",
       "font_size": "Dimensione Font",
       "font_size_hint": "Dimensione dei caratteri del terminale",
       "line_height": "Altezza Linea",

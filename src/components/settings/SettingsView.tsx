@@ -501,6 +501,33 @@ export const SettingsView = () => {
                                         </div>
                                     )}
 
+                                    {/* 字体预览 */}
+                                    <div className="rounded-md border border-theme-border bg-zinc-950 p-4">
+                                        <p className="text-xs text-theme-text-muted mb-2">{t('settings_view.terminal.font_preview')}</p>
+                                        <div 
+                                            className="text-theme-text leading-relaxed"
+                                            style={{ 
+                                                fontFamily: terminal.fontFamily === 'custom' && terminal.customFontFamily 
+                                                    ? (terminal.customFontFamily.toLowerCase().includes('monospace') 
+                                                        ? terminal.customFontFamily 
+                                                        : `${terminal.customFontFamily}, monospace`)
+                                                    : terminal.fontFamily === 'jetbrains' ? '"JetBrainsMono Nerd Font", "JetBrains Mono NF", monospace'
+                                                    : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF", monospace'
+                                                    : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", monospace'
+                                                    : terminal.fontFamily === 'consolas' ? 'Consolas, monospace'
+                                                    : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, monospace'
+                                                    : 'monospace',
+                                                fontSize: `${terminal.fontSize}px`,
+                                                lineHeight: terminal.lineHeight,
+                                            }}
+                                        >
+                                            <div>ABCDEFG abcdefg 0123456789</div>
+                                            <div className="text-zinc-400">{'-> => == != <= >= {}'}</div>
+                                            <div className="text-emerald-400">天地玄黄 The quick brown fox</div>
+                                            <div className="text-amber-400" style={{ letterSpacing: '0.1em' }}>       󰊤  </div>
+                                        </div>
+                                    </div>
+
                                     <Separator className="opacity-50" />
 
                                     <div className="flex items-center justify-between">

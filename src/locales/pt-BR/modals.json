@@ -314,6 +314,7 @@
         "custom_font": "Personalizada...",
         "custom_font_stack": "Lista de fontes personalizada",
         "custom_font_stack_hint": "Insira os nomes das fontes em ordem de prioridade, separados por vírgulas",
+        "font_preview": "Pré-visualização da fonte",
         "font_size": "Tamanho da fonte",
         "line_height": "Altura da linha",
         "scrollback": "Linhas de scrollback (frontend)",
