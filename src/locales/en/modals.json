@@ -266,6 +266,7 @@
       "default_key_desc": "Use the default SSH key (e.g. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
       "agent_desc": "Authenticate using the system SSH Agent",
       "agent_hint": "Ensure the SSH Agent is running and has the required keys loaded",
+      "agent_not_supported": "SSH Agent authentication is currently not supported. Please use SSH Key or Password authentication instead.",
       "private_key": "Private Key",
       "certificate": "Certificate",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
@@ -334,6 +335,7 @@
         "description": "Configure backend scroll buffer for search and persistence.",
         "max_lines": "Maximum Buffer Lines",
         "lines_hint": "Older lines will be automatically discarded when limit is reached.",
+        "new_sessions_only": "Changes only apply to new sessions.",
         "save_on_disconnect": "Save buffer content on disconnect",
         "save_hint": "Buffer content will be persisted and restored when reconnecting to the session."
       },

@@ -48,6 +48,8 @@ export const KbiDialog = ({ onSuccess, onFailure }: KbiDialogProps) => {
   // Track listeners for cleanup
   const listenersRef = useRef<UnlistenFn[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Track current auth flow ID for cleanup cancellation
+  const currentAuthFlowIdRef = useRef<string | null>(null);
 
   // Set up event listeners
   useEffect(() => {
@@ -56,6 +58,8 @@ export const KbiDialog = ({ onSuccess, onFailure }: KbiDialogProps) => {
     // Listen for prompt events from backend
     listen<KbiPromptEvent>('ssh_kbi_prompt', (event) => {
       if (!mounted) return;
+      // Track the auth flow ID for cleanup
+      currentAuthFlowIdRef.current = event.payload.authFlowId;
       setCurrentPrompt(event.payload);
       setResponses(new Array(event.payload.prompts.length).fill(''));
       setLoading(false);
@@ -92,6 +96,8 @@ export const KbiDialog = ({ onSuccess, onFailure }: KbiDialogProps) => {
       }
 
       const result = event.payload;
+      // Clear the auth flow ID since authentication completed
+      currentAuthFlowIdRef.current = null;
       if (result.success && result.sessionId && result.wsPort && result.wsToken) {
         setCurrentPrompt(null);
         onSuccess(result.sessionId, result.wsPort, result.wsToken);
@@ -119,6 +125,18 @@ export const KbiDialog = ({ onSuccess, onFailure }: KbiDialogProps) => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+
+      // CRITICAL: Cancel pending auth flow if component unmounts during authentication
+      // This prevents the backend from waiting 60s for a response that will never come
+      if (currentAuthFlowIdRef.current) {
+        const authFlowId = currentAuthFlowIdRef.current;
+        currentAuthFlowIdRef.current = null;
+        invoke('ssh_kbi_cancel', { 
+          request: { authFlowId } as KbiCancelRequest 
+        }).catch(() => {
+          // Ignore errors - the flow may have already completed or timed out
+        });
       }
     };
   }, [onSuccess]);

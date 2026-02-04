@@ -38,6 +38,7 @@
       "password": "Passwort",
       "agent_desc": "Mit dem System-SSH-Agent authentifizieren",
       "agent_hint": "Stellen Sie sicher, dass der SSH Agent läuft und die erforderlichen Schlüssel enthält",
+      "agent_not_supported": "SSH-Agent-Authentifizierung wird derzeit nicht unterstützt. Bitte verwenden Sie stattdessen SSH-Schlüssel- oder Passwort-Authentifizierung.",
       "cancel": "Abbrechen",
       "add": "Hinzufügen"
     },
@@ -334,6 +335,7 @@
         "description": "Backend-Scrollpuffer für Suche und Persistenz konfigurieren.",
         "max_lines": "Maximale Pufferzeilen",
         "lines_hint": "Ältere Zeilen werden automatisch verworfen, wenn das Limit erreicht ist.",
+        "new_sessions_only": "Änderungen gelten nur für neue Sitzungen.",
         "save_on_disconnect": "Pufferinhalt beim Trennen speichern",
         "save_hint": "Pufferinhalt wird gespeichert und bei erneuter Verbindung wiederhergestellt."
       },

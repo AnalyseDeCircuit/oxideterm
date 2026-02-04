@@ -34,6 +34,21 @@ use super::client::ClientHandler;
 use super::config::AuthMethod;
 use super::error::SshError;
 
+/// Expand ~ to home directory for path normalization
+/// This ensures paths like ~/... work correctly with russh_keys
+fn expand_tilde(path: &str) -> String {
+    if let Some(stripped) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped).to_string_lossy().into_owned();
+        }
+    } else if path == "~" {
+        if let Some(home) = dirs::home_dir() {
+            return home.to_string_lossy().into_owned();
+        }
+    }
+    path.to_string()
+}
+
 /// Proxy hop configuration
 #[derive(Debug, Clone)]
 pub struct ProxyHop {
@@ -229,11 +244,14 @@ async fn direct_connect(
             cert_path,
             passphrase,
         } => {
-            info!("Authenticating to jump host with certificate: {}", cert_path);
-            let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+            // Expand ~ in paths before loading (russh_keys doesn't handle tilde)
+            let expanded_key_path = expand_tilde(key_path);
+            let expanded_cert_path = expand_tilde(cert_path);
+            info!("Authenticating to jump host with certificate: {}", expanded_cert_path);
+            let key = russh_keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let cert = russh_keys::load_openssh_certificate(cert_path)
+            let cert = russh_keys::load_openssh_certificate(&expanded_cert_path)
                 .map_err(|e| SshError::CertificateParseError(e.to_string()))?;
 
             handle
@@ -357,11 +375,14 @@ async fn connect_via_stream(
             cert_path,
             passphrase,
         } => {
-            info!("Authenticating via stream with certificate: {}", cert_path);
-            let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+            // Expand ~ in paths before loading (russh_keys doesn't handle tilde)
+            let expanded_key_path = expand_tilde(key_path);
+            let expanded_cert_path = expand_tilde(cert_path);
+            info!("Authenticating via stream with certificate: {}", expanded_cert_path);
+            let key = russh_keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let cert = russh_keys::load_openssh_certificate(cert_path)
+            let cert = russh_keys::load_openssh_certificate(&expanded_cert_path)
                 .map_err(|e| SshError::CertificateParseError(e.to_string()))?;
 
             handle

@@ -38,6 +38,7 @@
       "password": "Mật khẩu",
       "agent_desc": "Xác thực bằng SSH Agent hệ thống",
       "agent_hint": "Đảm bảo SSH Agent đang chạy và chứa key cần thiết",
+      "agent_not_supported": "Xác thực SSH Agent hiện không được hỗ trợ. Vui lòng sử dụng xác thực bằng khóa SSH hoặc mật khẩu.",
       "cancel": "Hủy",
       "add": "Thêm"
     },
@@ -334,6 +335,7 @@
         "description": "Cấu hình buffer cuộn backend cho tìm kiếm và lưu trữ.",
         "max_lines": "Số dòng Buffer tối đa",
         "lines_hint": "Các dòng cũ hơn sẽ tự động bị xóa khi đạt giới hạn.",
+        "new_sessions_only": "Thay đổi chỉ áp dụng cho phiên làm việc mới.",
         "save_on_disconnect": "Lưu nội dung buffer khi ngắt kết nối",
         "save_hint": "Nội dung buffer sẽ được lưu trữ và khôi phục khi kết nối lại phiên."
       },

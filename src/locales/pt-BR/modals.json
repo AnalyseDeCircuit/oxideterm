@@ -38,6 +38,7 @@
       "password": "Senha",
       "agent_desc": "Usar agente SSH do sistema para autenticação",
       "agent_hint": "Certifique-se de que o agente SSH esteja em execução e contenha as chaves necessárias",
+      "agent_not_supported": "A autenticação via agente SSH não é suportada no momento. Por favor, use autenticação por chave SSH ou senha.",
       "cancel": "Cancelar",
       "add": "Adicionar"
     },
@@ -334,6 +335,7 @@
         "description": "Configure o buffer de scrollback do backend para busca e persistência.",
         "max_lines": "Linhas máximas de buffer",
         "lines_hint": "Linhas antigas serão descartadas automaticamente quando o limite for atingido.",
+        "new_sessions_only": "As alterações se aplicam apenas a novas sessões.",
         "save_on_disconnect": "Salvar conteúdo do buffer ao desconectar",
         "save_hint": "O conteúdo do buffer será persistido e restaurado ao reconectar à sessão."
       },

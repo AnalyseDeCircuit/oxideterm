@@ -427,6 +427,9 @@ export const SettingsModal = () => {
                                 <p className="text-xs text-zinc-500">
                                     {t('modals.settings.buffer.lines_hint')}
                                 </p>
+                                <p className="text-xs text-yellow-500">
+                                    {t('modals.settings.buffer.new_sessions_only')}
+                                </p>
                             </div>
                             
                             <div className="flex items-center space-x-2">

@@ -105,6 +105,9 @@ pub struct SshConfigHost {
     /// Identity file path (IdentityFile directive)
     pub identity_file: Option<String>,
 
+    /// Certificate file path (CertificateFile directive)
+    pub certificate_file: Option<String>,
+
     /// ProxyJump chain (parsed from ProxyJump directive)
     #[serde(default)]
     pub proxy_jump: Vec<ProxyJumpHost>,
@@ -282,6 +285,19 @@ pub fn parse_ssh_config_content(content: &str) -> Result<Vec<SshConfigHost>, Ssh
                         value.to_string()
                     };
                     host.identity_file = Some(expanded);
+                }
+                "certificatefile" => {
+                    // Expand ~ to home directory (same logic as IdentityFile)
+                    let expanded = if let Some(stripped) = value.strip_prefix("~/") {
+                        if let Some(home) = dirs::home_dir() {
+                            home.join(stripped).to_string_lossy().into_owned()
+                        } else {
+                            value.to_string()
+                        }
+                    } else {
+                        value.to_string()
+                    };
+                    host.certificate_file = Some(expanded);
                 }
                 // ProxyJump: can be comma-separated for multi-hop
                 "proxyjump" => {
