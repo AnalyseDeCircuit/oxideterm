@@ -575,7 +575,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       switch(val) {
           case 'jetbrains': return '"JetBrains Mono", monospace';
           case 'meslo': return '"MesloLGM Nerd Font", monospace';
-          case 'tinos': return '"Tinos Nerd Font", monospace';
           default: return '"JetBrains Mono", monospace';
       }
   };
@@ -757,7 +756,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     // Font loading detection - ensure fonts are loaded before connecting
     const ensureFontsLoaded = async () => {
         try {
-            const fontsToCheck = ['JetBrains Mono', 'MesloLGM Nerd Font', 'Tinos Nerd Font'];
+            const fontsToCheck = ['JetBrains Mono', 'MesloLGM Nerd Font'];
             for (const fontName of fontsToCheck) {
                 await document.fonts.load(`16px "${fontName}"`);
                 if (import.meta.env.DEV) {

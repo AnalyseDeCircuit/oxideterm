@@ -97,7 +97,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     switch(val) {
       case 'jetbrains': return '"JetBrains Mono", monospace';
       case 'meslo': return '"MesloLGM Nerd Font", monospace';
-      case 'tinos': return '"Tinos Nerd Font", monospace';
       default: return '"JetBrains Mono", monospace';
     }
   };

@@ -167,8 +167,6 @@ Generated: 2026-01-30T16:18:20.263Z
   - Excerpt: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) / This Font Software is licensed under the SIL Open Font License, Version 1.1.
 - Meslo — Apache License 2.0 (see ../public/fonts/Meslo/LICENSE.txt)
   - Excerpt: Copyright 2009, 2010, 2013 André Berg / Licensed under the Apache License, Version 2.0 (the "License");
-- Tinos — Apache License 2.0 (see ../public/fonts/Tinos/Apache License.txt)
-  - Excerpt: Apache License / Version 2.0, January 2004
 
 ## Notes
 
