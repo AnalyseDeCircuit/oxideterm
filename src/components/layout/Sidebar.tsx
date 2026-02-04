@@ -4,7 +4,6 @@ import {
   Terminal,
   Folder,
   FolderOpen,
-  ArrowLeftRight,
   Settings,
   Plus,
   ChevronRight,
@@ -939,6 +938,7 @@ export const Sidebar = () => {
   }
 
   const sessionList = Array.from(sessions.values());
+  void sessionList; // For future use
 
   return (
     <div

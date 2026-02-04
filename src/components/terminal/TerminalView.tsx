@@ -15,7 +15,7 @@ import { themes } from '../../lib/themes';
 import { platform } from '../../lib/platform';
 import { useTerminalViewShortcuts } from '../../hooks/useTerminalKeyboard';
 import { SearchBar, DeepSearchState } from './SearchBar';
-import { AiInlinePanel } from './AiInlinePanel';
+import { AiInlinePanel, type CursorPosition } from './AiInlinePanel';
 import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { SearchMatch, SessionInfo } from '../../types';
@@ -106,6 +106,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsConnectAbortRef = useRef<AbortController | null>(null); // Cancel WS connect retries on unmount
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
   
   // Effective pane ID: use provided paneId or fall back to sessionId
   const effectivePaneId = paneId || sessionId;
@@ -1541,6 +1542,52 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     return lines.join('\n');
   }, []);
   
+  // Get cursor position for AI inline panel positioning
+  const getCursorPosition = useCallback((): CursorPosition | null => {
+    const term = terminalRef.current;
+    const container = containerRef.current;
+    if (!term || !container) return null;
+    
+    const buffer = term.buffer.active;
+    const cursorX = buffer.cursorX;
+    const cursorY = buffer.cursorY;
+    const absoluteY = buffer.baseY + cursorY;
+    
+    // Get cell dimensions from xterm.js (requires DOM access)
+    const termElement = term.element;
+    if (!termElement) return null;
+    
+    // Get container rect for boundary calculations
+    const containerRect = container.getBoundingClientRect();
+    
+    // Calculate cell dimensions
+    // xterm.js stores dimensions in _core (internal API, but reliable)
+    const core = (term as unknown as { _core?: { _renderService?: { dimensions?: { css: { cell: { width: number; height: number } } } } } })._core;
+    const dimensions = core?._renderService?.dimensions;
+    
+    let lineHeight = 20; // Default fallback
+    let charWidth = 9;   // Default fallback
+    
+    if (dimensions?.css?.cell) {
+      lineHeight = dimensions.css.cell.height;
+      charWidth = dimensions.css.cell.width;
+    } else {
+      // Fallback: estimate from font size
+      const fontSize = useSettingsStore.getState().settings.terminal.fontSize;
+      lineHeight = Math.ceil(fontSize * 1.2);
+      charWidth = Math.ceil(fontSize * 0.6);
+    }
+    
+    return {
+      x: cursorX,
+      y: cursorY,
+      absoluteY,
+      lineHeight,
+      charWidth,
+      containerRect,
+    };
+  }, []);
+  
   // Insert text at cursor
   const handleAiInsert = useCallback((text: string) => {
     const ws = wsRef.current;
@@ -1567,6 +1614,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   
   const handleCloseAiPanel = useCallback(() => {
     setAiPanelOpen(false);
+    setAiCursorPosition(null);
     terminalRef.current?.focus();
   }, []);
 
@@ -1627,6 +1675,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Check if AI is enabled in settings
         const { settings } = useSettingsStore.getState();
         if (settings.ai.enabled) {
+          // Calculate cursor position before opening panel
+          const position = getCursorPosition();
+          setAiCursorPosition(position);
           setAiPanelOpen(true);
         }
       },
@@ -1700,7 +1751,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          deepSearchState={deepSearchState}
        />
        
-       {/* AI Inline Panel */}
+       {/* AI Inline Panel - VS Code style inline chat */}
        <AiInlinePanel
          isOpen={aiPanelOpen}
          onClose={handleCloseAiPanel}
@@ -1708,6 +1759,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          getVisibleBuffer={getVisibleBuffer}
          onInsert={handleAiInsert}
          onExecute={handleAiExecute}
+         cursorPosition={aiCursorPosition}
        />
     </div>
   );

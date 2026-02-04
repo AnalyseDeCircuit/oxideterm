@@ -43,12 +43,19 @@
       "context_none": "None",
       "tokens_estimate": "~{{count}} tokens",
       "prompt_placeholder": "Ask AI for help with commands...",
+      "inline_placeholder": "Ask AI for a command...",
+      "selection_placeholder": "Asking about selection...",
       "send_shortcut": "to send",
       "close_shortcut": "to close",
+      "to_send": "send",
+      "to_insert": "insert",
+      "to_run": "run",
+      "generating": "Generating...",
       "copy": "Copy",
       "copied": "Copied",
       "insert": "Insert",
-      "execute": "Execute"
+      "execute": "Run",
+      "regenerate": "Retry"
     },
     "paste": {
       "title": "Multiple lines detected ({{count}} lines)",

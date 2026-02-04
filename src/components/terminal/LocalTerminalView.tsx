@@ -13,7 +13,7 @@ import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { themes } from '../../lib/themes';
 import { useTerminalViewShortcuts } from '../../hooks/useTerminalKeyboard';
 import { SearchBar } from './SearchBar';
-import { AiInlinePanel } from './AiInlinePanel';
+import { AiInlinePanel, type CursorPosition } from './AiInlinePanel';
 import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { listen } from '@tauri-apps/api/event';
@@ -65,6 +65,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const isMountedRef = useRef(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
   const [isRunning, setIsRunning] = useState(true);
   
   // Paste protection state
@@ -638,9 +639,52 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     terminalRef.current?.focus();
   }, []);
 
+  // Get cursor position for AI inline panel positioning
+  const getCursorPosition = useCallback((): CursorPosition | null => {
+    const term = terminalRef.current;
+    const container = containerRef.current;
+    if (!term || !container) return null;
+    
+    const buffer = term.buffer.active;
+    const cursorX = buffer.cursorX;
+    const cursorY = buffer.cursorY;
+    const absoluteY = buffer.baseY + cursorY;
+    
+    const termElement = term.element;
+    if (!termElement) return null;
+    
+    const containerRect = container.getBoundingClientRect();
+    
+    // Get cell dimensions from xterm.js internal API
+    const core = (term as unknown as { _core?: { _renderService?: { dimensions?: { css: { cell: { width: number; height: number } } } } } })._core;
+    const dimensions = core?._renderService?.dimensions;
+    
+    let lineHeight = 20;
+    let charWidth = 9;
+    
+    if (dimensions?.css?.cell) {
+      lineHeight = dimensions.css.cell.height;
+      charWidth = dimensions.css.cell.width;
+    } else {
+      const fontSize = useSettingsStore.getState().settings.terminal.fontSize;
+      lineHeight = Math.ceil(fontSize * 1.2);
+      charWidth = Math.ceil(fontSize * 0.6);
+    }
+    
+    return {
+      x: cursorX,
+      y: cursorY,
+      absoluteY,
+      lineHeight,
+      charWidth,
+      containerRect,
+    };
+  }, []);
+
   // AI Panel close handler
   const handleCloseAiPanel = useCallback(() => {
     setAiPanelOpen(false);
+    setAiCursorPosition(null);
     terminalRef.current?.focus();
   }, []);
 
@@ -652,7 +696,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     {
       onOpenSearch: () => setSearchOpen(true),
       onCloseSearch: handleSearchClose,
-      onOpenAiPanel: () => setAiPanelOpen(true),
+      onOpenAiPanel: () => {
+        const position = getCursorPosition();
+        setAiCursorPosition(position);
+        setAiPanelOpen(true);
+      },
       onCloseAiPanel: handleCloseAiPanel,
       onFocusTerminal: () => terminalRef.current?.focus(),
       searchOpen,
@@ -813,7 +861,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         />
       )}
       
-      {/* AI Inline Panel */}
+      {/* AI Inline Panel - VS Code style inline chat */}
       <AiInlinePanel
         isOpen={aiPanelOpen}
         onClose={handleCloseAiPanel}
@@ -821,6 +869,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         getVisibleBuffer={getVisibleBuffer}
         onInsert={handleAiInsert}
         onExecute={handleAiExecute}
+        cursorPosition={aiCursorPosition}
       />
       
       {/* Paste Confirmation Overlay */}

@@ -1156,7 +1156,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       
       // 从 settingsStore 获取后端缓冲区配置
       const { useSettingsStore } = await import('./settingsStore');
-      const bufferSettings = useSettingsStore.getState().buffer;
+      const bufferSettings = useSettingsStore.getState().settings.buffer;
       
       // 调用 API 创建终端
       const response = await api.createTerminal({

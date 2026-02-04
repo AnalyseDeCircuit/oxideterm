@@ -300,7 +300,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // 从 settingsStore 获取后端缓冲区配置
       const { useSettingsStore } = await import('./settingsStore');
-      const bufferSettings = useSettingsStore.getState().buffer;
+      const bufferSettings = useSettingsStore.getState().settings.buffer;
       
       const response = await api.createTerminal({
         connectionId,

@@ -43,12 +43,19 @@
       "context_none": "无",
       "tokens_estimate": "约 {{count}} tokens",
       "prompt_placeholder": "向 AI 询问命令帮助...",
+      "inline_placeholder": "向 AI 请求命令...",
+      "selection_placeholder": "询问选中内容...",
       "send_shortcut": "发送",
       "close_shortcut": "关闭",
+      "to_send": "发送",
+      "to_insert": "插入",
+      "to_run": "执行",
+      "generating": "生成中...",
       "copy": "复制",
       "copied": "已复制",
       "insert": "插入",
-      "execute": "执行"
+      "execute": "执行",
+      "regenerate": "重试"
     },
     "paste": {
       "title": "检测到多行内容 ({{count}} 行)",

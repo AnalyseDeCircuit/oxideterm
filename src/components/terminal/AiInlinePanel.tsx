@@ -1,12 +1,22 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, X, Send, Loader2, Copy, Check, Play, CornerDownLeft, AlertCircle } from 'lucide-react';
-import { Button } from '../ui/button';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Sparkles, X, Check, AlertCircle, CornerDownLeft, Play, Copy, RotateCcw } from 'lucide-react';
 import { useSettingsStore } from '../../store/settingsStore';
 import { api } from '../../lib/api';
 import { useTranslation } from 'react-i18next';
+import { platform } from '../../lib/platform';
 
-// Context source for AI
-export type ContextSource = 'selection' | 'visible' | 'none';
+// ═══════════════════════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface CursorPosition {
+  x: number;           // Cursor column (0-based)
+  y: number;           // Cursor row relative to viewport (0-based)
+  absoluteY: number;   // Absolute cursor row in buffer
+  lineHeight: number;  // Pixel height per line
+  charWidth: number;   // Pixel width per character
+  containerRect: DOMRect;  // Terminal container bounding rect
+}
 
 interface AiInlinePanelProps {
   isOpen: boolean;
@@ -17,6 +27,8 @@ interface AiInlinePanelProps {
   // Action handlers
   onInsert: (text: string) => void;
   onExecute: (command: string) => void;
+  // Cursor position for VS Code-style positioning
+  cursorPosition: CursorPosition | null;
 }
 
 interface Message {
@@ -24,59 +36,76 @@ interface Message {
   content: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper: Get OS Name
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getOSName(): string {
+  if (platform.isMac) return 'macOS';
+  if (platform.isWindows) return 'Windows';
+  if (platform.isLinux) return 'Linux';
+  return 'Unknown';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Component
+// ═══════════════════════════════════════════════════════════════════════════
+
 export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   isOpen,
   onClose,
   getSelection,
-  getVisibleBuffer,
+  getVisibleBuffer: _getVisibleBuffer,  // Reserved for future use
   onInsert,
   onExecute,
+  cursorPosition,
 }) => {
+  // Suppress unused warning - kept for API compatibility
+  void _getVisibleBuffer;
+  
   const { t } = useTranslation();
   const { settings } = useSettingsStore();
   const { ai: aiSettings } = settings;
 
   // State
   const [prompt, setPrompt] = useState('');
-  const [contextSource, setContextSource] = useState<ContextSource>('selection');
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);  // Track if selection exists on open
 
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const responseRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const selectionContextRef = useRef<string>('');  // Cache selection at open time
 
-  // Check API key on open
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Effects
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Check API key and selection on open
   useEffect(() => {
     if (isOpen) {
-      console.log('[AiInlinePanel] Panel opened, checking API key...');
+      // Check API key
       api.getAiApiKey()
-        .then((key) => {
-          console.log('[AiInlinePanel] API key check result:', key ? `found (length: ${key.length})` : 'not found');
-          setHasApiKey(!!key);
-        })
-        .catch((e) => {
-          console.error('[AiInlinePanel] Failed to check API key:', e);
-          setHasApiKey(false);
-        });
+        .then((key) => setHasApiKey(!!key))
+        .catch(() => setHasApiKey(false));
+      
+      // Capture selection at open time (freeze it)
+      const selection = getSelection();
+      selectionContextRef.current = selection;
+      setHasSelection(!!selection.trim());
     }
-  }, [isOpen]);
+  }, [isOpen, getSelection]);
 
+  // Listen for API key updates
   useEffect(() => {
     const handleKeyUpdated = () => {
-      console.log('[AiInlinePanel] API key updated event received');
       api.getAiApiKey()
-        .then((key) => {
-          console.log('[AiInlinePanel] API key after update:', key ? `found (length: ${key.length})` : 'not found');
-          setHasApiKey(!!key);
-        })
-        .catch((e) => {
-          console.error('[AiInlinePanel] Failed to check API key after update:', e);
-          setHasApiKey(false);
-        });
+        .then((key) => setHasApiKey(!!key))
+        .catch(() => setHasApiKey(false));
     };
     window.addEventListener('ai-api-key-updated', handleKeyUpdated);
     return () => window.removeEventListener('ai-api-key-updated', handleKeyUpdated);
@@ -85,81 +114,94 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   // Focus input when opened
   useEffect(() => {
     if (isOpen && inputRef.current) {
-      inputRef.current.focus();
+      // Small delay to ensure panel is rendered
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
     }
   }, [isOpen]);
 
-  // Auto-scroll response
+  // Reset state when closed
   useEffect(() => {
-    if (responseRef.current && response) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    if (!isOpen) {
+      setPrompt('');
+      setResponse('');
+      setError(null);
+      setIsLoading(false);
+      setHasSelection(false);
+      selectionContextRef.current = '';
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
     }
-  }, [response]);
+  }, [isOpen]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isOpen) return;
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Position Calculation (VS Code Style)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      // Esc to close
-      if (e.key === 'Escape') {
-        handleClose();
-        e.preventDefault();
-        return;
+  const panelStyle = useMemo((): React.CSSProperties => {
+    if (!cursorPosition) {
+      // Fallback: center horizontally, near top
+      return {
+        left: '50%',
+        transform: 'translateX(-50%)',
+        top: '48px',
+      };
+    }
+
+    const { y, lineHeight, containerRect } = cursorPosition;
+    const PANEL_WIDTH = 520;
+    const PANEL_MARGIN = 12;
+    const VERTICAL_OFFSET = 4; // Gap between cursor line and panel
+
+    // Calculate top position: below the cursor line
+    let top = (y + 1) * lineHeight + VERTICAL_OFFSET;
+
+    // Calculate horizontal position: center with boundary checks
+    let left = (containerRect.width - PANEL_WIDTH) / 2;
+    
+    // Ensure panel stays within container bounds
+    if (left < PANEL_MARGIN) {
+      left = PANEL_MARGIN;
+    } else if (left + PANEL_WIDTH > containerRect.width - PANEL_MARGIN) {
+      left = containerRect.width - PANEL_WIDTH - PANEL_MARGIN;
+    }
+
+    // If panel would go below viewport, position above cursor
+    const panelEstimatedHeight = response ? 160 : 56; // Expanded vs collapsed height
+    if (top + panelEstimatedHeight > containerRect.height - PANEL_MARGIN) {
+      top = y * lineHeight - panelEstimatedHeight - VERTICAL_OFFSET;
+      if (top < PANEL_MARGIN) {
+        top = PANEL_MARGIN;
       }
+    }
 
-      // Cmd/Ctrl + Enter to send
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        handleSend();
-        e.preventDefault();
-      }
+    return {
+      left: `${left}px`,
+      top: `${top}px`,
     };
+  }, [cursorPosition, response]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, prompt, isLoading]);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
 
   const handleClose = useCallback(() => {
-    // Abort any ongoing request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    setPrompt('');
-    setResponse('');
-    setError(null);
-    setIsLoading(false);
     onClose();
   }, [onClose]);
 
-  // Get context based on source
-  const getContext = useCallback((): string => {
-    let context = '';
+  // Get selection context (cached at open time)
+  const getSelectionContext = useCallback((): string => {
+    return selectionContextRef.current;
+  }, []);
 
-    if (contextSource === 'selection') {
-      context = getSelection();
-      // Fall back to visible buffer if no selection
-      if (!context.trim()) {
-        context = getVisibleBuffer();
-      }
-    } else if (contextSource === 'visible') {
-      context = getVisibleBuffer();
-    }
-
-    // Truncate to max chars
-    if (context.length > aiSettings.contextMaxChars) {
-      context = context.slice(-aiSettings.contextMaxChars);
-    }
-
-    return context;
-  }, [contextSource, getSelection, getVisibleBuffer, aiSettings.contextMaxChars]);
-
-  // Estimate tokens (Method A: ~4 chars per token)
-  const estimateTokens = (text: string): number => {
-    return Math.ceil(text.length / 4);
-  };
-
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     if (!prompt.trim() || isLoading) return;
 
     setIsLoading(true);
@@ -167,41 +209,45 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
     setResponse('');
 
     try {
-      // Get API key
       const apiKey = await api.getAiApiKey();
       if (!apiKey) {
-        throw new Error('API key not found. Please configure it in Settings > AI.');
+        throw new Error(t('terminal.ai.api_key_required'));
       }
 
-      // Build messages
-      const context = getContext();
+      // 1. Get OS metadata
+      const osName = getOSName();
+      
+      // 2. Get selection context (frozen at open time)
+      const selectionContext = getSelectionContext();
+      
+      // 3. Build messages with structured prompt template
       const messages: Message[] = [];
-
-      // System prompt
+      
+      // System prompt with OS info
       messages.push({
         role: 'system',
-        content: `You are a helpful terminal assistant. You help users with shell commands, scripts, and terminal operations. Be concise and direct. When providing commands, just give the command without markdown code blocks unless the user is asking for an explanation.`
+        content: `You are an expert terminal assistant. Current OS: ${osName}. Respond ONLY with the command or code itself unless asked for explanation.`
       });
 
-      // Context as system message if available
-      if (context.trim()) {
-        messages.push({
-          role: 'system',
-          content: `Current terminal context:\n\`\`\`\n${context}\n\`\`\``
-        });
+      // User message with structured context
+      let userContent = '';
+      
+      if (selectionContext.trim()) {
+        // Truncate selection if too long
+        let truncatedSelection = selectionContext;
+        if (truncatedSelection.length > aiSettings.contextMaxChars) {
+          truncatedSelection = truncatedSelection.slice(-aiSettings.contextMaxChars);
+        }
+        userContent += `### Context (Selected Text):\n${truncatedSelection}\n\n`;
       }
+      
+      userContent += `### Question/Instruction:\n${prompt}`;
+      
+      messages.push({ role: 'user', content: userContent });
 
-      // User prompt
-      messages.push({
-        role: 'user',
-        content: prompt
-      });
-
-      // Create abort controller
       abortControllerRef.current = new AbortController();
 
-      // Call API
-      const result = await fetchChatCompletion({
+      await fetchChatCompletion({
         baseUrl: aiSettings.baseUrl,
         model: aiSettings.model,
         apiKey,
@@ -211,230 +257,192 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
           setResponse(prev => prev + chunk);
         }
       });
-
-      if (!abortControllerRef.current?.signal.aborted) {
-        setResponse(result);
-      }
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
-        // Request was cancelled
-        return;
-      }
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      setError(errorMessage);
+      if (e instanceof Error && e.name === 'AbortError') return;
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  };
+  }, [prompt, isLoading, getSelectionContext, aiSettings, t]);
 
-  const handleCopy = async () => {
-    if (!response) return;
-    await navigator.clipboard.writeText(response);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleInsert = () => {
-    if (!response) return;
-    onInsert(response);
+  // Insert without executing (Tab)
+  const handleInsert = useCallback(() => {
+    if (!response.trim()) return;
+    // Extract command (first non-empty line, strip any backticks)
+    const command = extractCommand(response);
+    onInsert(command);
     handleClose();
-  };
+  }, [response, onInsert, handleClose]);
 
-  const handleExecute = () => {
-    if (!response) return;
-    // Extract first line as command (common pattern)
-    const command = response.trim().split('\n')[0];
+  // Execute command (Enter when response ready)
+  const handleExecute = useCallback(() => {
+    if (!response.trim()) return;
+    const command = extractCommand(response);
     onExecute(command);
     handleClose();
-  };
+  }, [response, onExecute, handleClose]);
 
-  // Prevent terminal from stealing focus
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // Copy response
+  const handleCopy = useCallback(async () => {
+    if (!response) return;
+    await navigator.clipboard.writeText(extractCommand(response));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [response]);
+
+  // Regenerate
+  const handleRegenerate = useCallback(() => {
+    if (isLoading) return;
+    setResponse('');
+    setError(null);
+    handleSend();
+  }, [isLoading, handleSend]);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Keyboard Handling
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     e.stopPropagation();
-  };
 
+    // Esc: Close panel
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      handleClose();
+      return;
+    }
+
+    // Enter: Send (if no response) or Execute (if response ready)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!response && prompt.trim() && !isLoading) {
+        handleSend();
+      } else if (response && !isLoading) {
+        handleExecute();
+      }
+      return;
+    }
+
+    // Tab: Insert without executing (when response ready)
+    if (e.key === 'Tab' && response && !isLoading) {
+      e.preventDefault();
+      handleInsert();
+      return;
+    }
+  }, [response, prompt, isLoading, handleClose, handleSend, handleExecute, handleInsert]);
+
+  // Prevent terminal from capturing events
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
   };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Render
+  // ═══════════════════════════════════════════════════════════════════════════
+
   if (!isOpen) return null;
 
-  const contextPreview = getContext();
-  const contextTokens = estimateTokens(contextPreview);
+  const extractedCommand = response ? extractCommand(response) : '';
 
   return (
     <div
-      className="absolute top-4 right-4 z-50 w-[420px] bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl"
+      ref={panelRef}
+      className="absolute z-50 w-[520px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md shadow-xl overflow-hidden"
+      style={panelStyle}
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border bg-theme-bg/50 rounded-t-lg">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-theme-accent" />
-          <span className="text-sm font-medium text-theme-text">{t('terminal.ai.title')}</span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 p-0 text-theme-text-muted hover:text-theme-text"
-          onClick={handleClose}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* API Key Warning */}
-      {!hasApiKey && (
-        <div className="mx-3 mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
-          <div className="flex items-start gap-2 text-yellow-500/80">
-            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-            <div className="text-sm">
-              <p className="font-medium">{t('terminal.ai.api_key_required')}</p>
-              <p className="text-xs opacity-80 mt-1">
-                {t('terminal.ai.api_key_hint')}
-              </p>
-            </div>
-          </div>
+      {/* Loading indicator bar */}
+      {isLoading && (
+        <div className="absolute top-0 left-0 right-0 h-[2px] overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-transparent via-[#0078d4] to-transparent animate-shimmer" />
         </div>
       )}
 
-      {/* Context Source Selector */}
-      <div className="px-3 pt-3 pb-2">
-        <div className="flex items-center gap-2 text-xs text-theme-text-muted">
-          <span>{t('terminal.ai.context')}</span>
-          <div className="flex gap-1">
-            {(['selection', 'visible', 'none'] as ContextSource[]).map((source) => (
-              <button
-                key={source}
-                className={`px-2 py-1 rounded transition-colors ${contextSource === source
-                    ? 'bg-theme-accent/10 text-theme-accent border border-theme-accent/30'
-                    : 'bg-theme-bg text-theme-text-muted hover:text-theme-text border border-theme-border/50'
-                  }`}
-                onClick={() => setContextSource(source)}
-              >
-                {source === 'selection' ? t('terminal.ai.context_selection') : source === 'visible' ? t('terminal.ai.context_visible') : t('terminal.ai.context_none')}
-              </button>
-            ))}
-          </div>
-          {contextSource !== 'none' && contextPreview && (
-            <span className="ml-auto text-theme-text-muted opacity-50">
-              {t('terminal.ai.tokens_estimate', { count: contextTokens })}
+      {/* Main input row */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <Sparkles className="w-4 h-4 text-[#0078d4] flex-shrink-0" />
+        
+        <input
+          ref={inputRef}
+          type="text"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={hasSelection 
+            ? t('terminal.ai.selection_placeholder', 'Asking about selection...') 
+            : t('terminal.ai.inline_placeholder', 'Ask AI for a command...')
+          }
+          className="flex-1 bg-transparent text-sm text-[#cccccc] placeholder-[#6e6e6e] outline-none font-[var(--terminal-font-family)]"
+          disabled={isLoading}
+        />
+
+        {/* Action hints */}
+        <div className="flex items-center gap-1.5 text-[10px] text-[#6e6e6e]">
+          {!response && !isLoading && prompt.trim() && (
+            <span className="flex items-center gap-1">
+              <kbd className="px-1 py-0.5 bg-[#2d2d2d] rounded text-[9px]">Enter</kbd>
+              <span>{t('terminal.ai.to_send', 'send')}</span>
             </span>
+          )}
+          {response && !isLoading && (
+            <>
+              <span className="flex items-center gap-1">
+                <kbd className="px-1 py-0.5 bg-[#2d2d2d] rounded text-[9px]">Tab</kbd>
+                <span>{t('terminal.ai.to_insert', 'insert')}</span>
+              </span>
+              <span className="flex items-center gap-1 ml-1">
+                <kbd className="px-1 py-0.5 bg-[#2d2d2d] rounded text-[9px]">Enter</kbd>
+                <span>{t('terminal.ai.to_run', 'run')}</span>
+              </span>
+            </>
           )}
         </div>
 
-        {/* Context Preview */}
-        {contextSource !== 'none' && contextPreview && (
-          <div className="mt-2 p-2 bg-theme-bg/50 border border-theme-border rounded text-xs font-mono text-theme-text-muted max-h-20 overflow-y-auto">
-            <pre className="whitespace-pre-wrap break-all">
-              {contextPreview.length > 200
-                ? contextPreview.slice(0, 200) + '...'
-                : contextPreview}
-            </pre>
-          </div>
-        )}
+        {/* Close button */}
+        <button
+          onClick={handleClose}
+          className="p-1 text-[#6e6e6e] hover:text-[#cccccc] transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
 
-      {/* Prompt Input */}
-      <div className="px-3 pb-2">
-        <div className="relative">
-          <textarea
-            ref={inputRef}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={t('terminal.ai.prompt_placeholder')}
-            className="w-full h-20 px-3 py-2 pr-12 bg-theme-bg border border-theme-border rounded-md text-sm text-theme-text placeholder-theme-text-muted/50 resize-none focus:outline-none focus:border-theme-accent/50"
-            disabled={isLoading}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="absolute right-2 bottom-2 h-7 w-7 p-0 text-theme-accent hover:text-theme-accent hover:bg-theme-accent/10"
-            onClick={handleSend}
-            disabled={!prompt.trim() || isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
+      {/* API Key Warning */}
+      {!hasApiKey && !isLoading && (
+        <div className="mx-3 mb-2 px-2 py-1.5 bg-[#4d3800] border border-[#6e5c00] rounded text-xs text-[#cca700] flex items-center gap-2">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>{t('terminal.ai.api_key_hint')}</span>
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && (
+        <div className="mx-3 mb-2 px-2 py-1.5 bg-[#5a1d1d] border border-[#8b2c2c] rounded text-xs text-[#f48771] flex items-center gap-2">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+          <span className="truncate">{error}</span>
+        </div>
+      )}
+
+      {/* Response preview */}
+      {(response || isLoading) && !error && (
+        <div className="border-t border-[#3c3c3c]">
+          {/* Command preview */}
+          <div className="px-3 py-2 bg-[#252526] font-mono text-sm text-[#9cdcfe] whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto">
+            {extractedCommand || (isLoading && <span className="text-[#6e6e6e]">{t('terminal.ai.generating', 'Generating...')}</span>)}
+            {isLoading && extractedCommand && (
+              <span className="inline-block w-[2px] h-[14px] bg-[#0078d4] ml-0.5 animate-pulse" />
             )}
-          </Button>
-        </div>
-        <div className="flex items-center justify-between mt-1 text-xs text-theme-text-muted">
-          <span>
-            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">⌘</kbd>
-            <span className="mx-0.5">+</span>
-            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">Enter</kbd>
-            {' '}{t('terminal.ai.send_shortcut')}
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 bg-theme-bg border border-theme-border rounded text-[10px]">Esc</kbd>
-            {' '}{t('terminal.ai.close_shortcut')}
-          </span>
-        </div>
-      </div>
+          </div>
 
-      {/* Response Area */}
-      {(response || error) && (
-        <div className="border-t border-theme-border">
-          {error ? (
-            <div className="p-3 text-sm text-red-500 bg-red-500/10">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
+          {/* Action buttons */}
+          {response && !isLoading && (
+            <div className="flex items-center gap-1 px-2 py-1.5 bg-[#1e1e1e] border-t border-[#3c3c3c]">
+              <ActionButton icon={<Play className="w-3 h-3" />} label={t('terminal.ai.execute')} onClick={handleExecute} primary />
+              <ActionButton icon={<CornerDownLeft className="w-3 h-3" />} label={t('terminal.ai.insert')} onClick={handleInsert} />
+              <ActionButton icon={copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} label={copied ? t('terminal.ai.copied') : t('terminal.ai.copy')} onClick={handleCopy} />
+              <ActionButton icon={<RotateCcw className="w-3 h-3" />} label={t('terminal.ai.regenerate', 'Retry')} onClick={handleRegenerate} />
             </div>
-          ) : (
-            <>
-              <div
-                ref={responseRef}
-                className="p-3 max-h-48 overflow-y-auto text-sm text-theme-text font-mono whitespace-pre-wrap"
-              >
-                {response}
-                {isLoading && (
-                  <span className="inline-block w-2 h-4 ml-1 bg-theme-accent animate-pulse" />
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              {!isLoading && response && (
-                <div className="flex items-center gap-2 px-3 py-2 border-t border-theme-border bg-theme-bg/50">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-theme-text-muted hover:text-theme-text"
-                    onClick={handleCopy}
-                  >
-                    {copied ? (
-                      <Check className="h-3 w-3 mr-1" />
-                    ) : (
-                      <Copy className="h-3 w-3 mr-1" />
-                    )}
-                    {copied ? t('terminal.ai.copied') : t('terminal.ai.copy')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-theme-text-muted hover:text-theme-text"
-                    onClick={handleInsert}
-                  >
-                    <CornerDownLeft className="h-3 w-3 mr-1" />
-                    {t('terminal.ai.insert')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-theme-accent hover:text-theme-accent hover:bg-theme-accent/10"
-                    onClick={handleExecute}
-                  >
-                    <Play className="h-3 w-3 mr-1" />
-                    {t('terminal.ai.execute')}
-                  </Button>
-                </div>
-              )}
-            </>
           )}
         </div>
       )}
@@ -442,7 +450,67 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   );
 };
 
-// ============ OpenAI-compatible API Call ============
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper Components
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ActionButtonProps {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+}
+
+function ActionButton({ icon, label, onClick, primary }: ActionButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${
+        primary
+          ? 'bg-[#0078d4] text-white hover:bg-[#106ebe]'
+          : 'text-[#cccccc] hover:bg-[#2d2d2d]'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Extract command from AI response.
+ * Handles markdown code blocks, strips explanation text.
+ */
+function extractCommand(text: string): string {
+  // Try to extract from code block first
+  const codeBlockMatch = text.match(/```(?:\w*\n)?([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // Try inline code
+  const inlineCodeMatch = text.match(/`([^`]+)`/);
+  if (inlineCodeMatch) {
+    return inlineCodeMatch[1].trim();
+  }
+
+  // Just use first non-empty line
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length > 0) {
+    // Strip common prefixes like "$ ", "> ", etc.
+    return lines[0].replace(/^[$>]\s*/, '').trim();
+  }
+
+  return text.trim();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OpenAI-compatible API Call
+// ═══════════════════════════════════════════════════════════════════════════
 
 interface ChatCompletionOptions {
   baseUrl: string;
@@ -456,7 +524,6 @@ interface ChatCompletionOptions {
 async function fetchChatCompletion(options: ChatCompletionOptions): Promise<string> {
   const { baseUrl, model, apiKey, messages, signal, onChunk } = options;
 
-  // Ensure baseUrl ends without trailing slash
   const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBaseUrl}/chat/completions`;
 
@@ -481,18 +548,13 @@ async function fetchChatCompletion(options: ChatCompletionOptions): Promise<stri
       const errorJson = JSON.parse(errorText);
       errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
     } catch {
-      if (errorText) {
-        errorMessage = errorText.slice(0, 200);
-      }
+      if (errorText) errorMessage = errorText.slice(0, 200);
     }
     throw new Error(errorMessage);
   }
 
-  // Handle streaming response
   const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('No response body');
-  }
+  if (!reader) throw new Error('No response body');
 
   const decoder = new TextDecoder();
   let fullContent = '';
