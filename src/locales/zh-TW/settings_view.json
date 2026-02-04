@@ -56,6 +56,7 @@
       "custom_font": "自訂...",
       "custom_font_stack": "自訂字型清單",
       "custom_font_stack_hint": "按優先順序輸入字型名稱，以逗號分隔",
+      "font_preview": "字型預覽",
       "font_size": "字型大小",
       "font_size_hint": "終端機字元的大小",
       "line_height": "行高",

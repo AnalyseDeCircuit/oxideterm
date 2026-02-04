@@ -56,6 +56,7 @@
       "custom_font": "Personalizada...",
       "custom_font_stack": "Lista de fuentes personalizada",
       "custom_font_stack_hint": "Ingrese nombres de fuentes en orden de prioridad, separados por comas",
+      "font_preview": "Vista previa de fuente",
       "font_size": "Tamaño de fuente",
       "font_size_hint": "Tamaño de los caracteres del terminal",
       "line_height": "Altura de línea",

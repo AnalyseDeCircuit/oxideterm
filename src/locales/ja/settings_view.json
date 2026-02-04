@@ -56,6 +56,7 @@
       "custom_font": "カスタム...",
       "custom_font_stack": "カスタムフォントスタック",
       "custom_font_stack_hint": "優先順にフォント名をカンマ区切りで入力",
+      "font_preview": "フォントプレビュー",
       "font_size": "フォントサイズ",
       "font_size_hint": "ターミナル文字のサイズ",
       "line_height": "行の高さ",

@@ -56,6 +56,7 @@
       "custom_font": "Benutzerdefiniert...",
       "custom_font_stack": "Benutzerdefinierte Schriftliste",
       "custom_font_stack_hint": "Schriftnamen in Prioritätsreihenfolge eingeben, durch Kommas getrennt",
+      "font_preview": "Schriftartvorschau",
       "font_size": "Schriftgröße",
       "font_size_hint": "Größe der Terminalzeichen",
       "line_height": "Zeilenhöhe",
