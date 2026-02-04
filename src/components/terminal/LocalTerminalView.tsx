@@ -24,7 +24,7 @@ import {
   setActivePaneId as setRegistryActivePaneId,
   touchTerminalEntry 
 } from '../../lib/terminalRegistry';
-import { onFontLoaded, ensureCJKFallback } from '../../lib/fontLoader';
+import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 
 interface LocalTerminalViewProps {
   sessionId: string;
@@ -161,26 +161,35 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     return unsubscribe;
   }, []);
 
-  // CJK Font lazy loading: refresh terminal when Maple Mono loads
+  // CJK Font lazy loading: refresh terminal ONCE when Maple Mono Regular loads
+  // Only Regular triggers refresh, secondary weights (Bold/Italic) load silently
   useEffect(() => {
     // Trigger CJK font preload in background (non-blocking)
     ensureCJKFallback();
     
-    // Listen for font load completion and refresh terminal
-    const unsubscribe = onFontLoaded('Maple Mono NF CN', () => {
+    // Listen for Regular weight load completion only (prevents 4x refresh)
+    const unsubscribe = onMapleRegularLoaded(() => {
       const term = terminalRef.current;
-      if (term) {
-        // Refresh terminal to apply newly loaded CJK font
-        term.refresh(0, term.rows - 1);
-        fitAddonRef.current?.fit();
+      const fitAddon = fitAddonRef.current;
+      if (!term || !fitAddon) return;
+      
+      // Refresh terminal to apply newly loaded CJK font
+      term.refresh(0, term.rows - 1);
+      fitAddon.fit();
+      
+      // 🔴 关键修复：显式同步尺寸给本地 PTY
+      // fitAddon.fit() 不一定触发 resize 事件（如果尺寸没变），这里显式同步
+      const dims = fitAddon.proposeDimensions();
+      if (dims) {
+        resizeTerminal(sessionId, dims.cols, dims.rows);
         if (import.meta.env.DEV) {
-          console.log('[LocalTerminalView] CJK font loaded, terminal refreshed');
+          console.log(`[LocalTerminalView] CJK font loaded, synced resize: ${dims.cols}x${dims.rows}`);
         }
       }
     });
     
     return unsubscribe;
-  }, []);
+  }, [sessionId, resizeTerminal]);
 
   // Focus terminal when active
   useEffect(() => {

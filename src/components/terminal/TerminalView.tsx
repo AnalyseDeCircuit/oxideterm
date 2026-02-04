@@ -29,7 +29,7 @@ import {
   setActivePaneId as setRegistryActivePaneId,
   touchTerminalEntry 
 } from '../../lib/terminalRegistry';
-import { onFontLoaded, ensureCJKFallback } from '../../lib/fontLoader';
+import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 
 interface TerminalViewProps {
   sessionId: string;
@@ -377,20 +377,33 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     return unsubscribe;
   }, []);
 
-  // CJK Font lazy loading: refresh terminal when Maple Mono loads
+  // CJK Font lazy loading: refresh terminal ONCE when Maple Mono Regular loads
+  // Only Regular triggers refresh, secondary weights (Bold/Italic) load silently
   useEffect(() => {
     // Trigger CJK font preload in background (non-blocking)
     ensureCJKFallback();
     
-    // Listen for font load completion and refresh terminal
-    const unsubscribe = onFontLoaded('Maple Mono NF CN', () => {
+    // Listen for Regular weight load completion only (prevents 4x refresh)
+    const unsubscribe = onMapleRegularLoaded(() => {
       const term = terminalRef.current;
-      if (term) {
-        // Refresh terminal to apply newly loaded CJK font
-        term.refresh(0, term.rows - 1);
-        fitAddonRef.current?.fit();
-        if (import.meta.env.DEV) {
-          console.log('[TerminalView] CJK font loaded, terminal refreshed');
+      const fitAddon = fitAddonRef.current;
+      if (!term || !fitAddon) return;
+      
+      // Refresh terminal to apply newly loaded CJK font
+      term.refresh(0, term.rows - 1);
+      fitAddon.fit();
+      
+      // 🔴 关键修复：显式同步尺寸给远程 PTY
+      // fitAddon.fit() 会触发 term.onResize，但为避免竞态，这里显式发送
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN && !inputLockedRef.current) {
+        const dims = fitAddon.proposeDimensions();
+        if (dims) {
+          const frame = encodeResizeFrame(dims.cols, dims.rows);
+          ws.send(frame);
+          if (import.meta.env.DEV) {
+            console.log(`[TerminalView] CJK font loaded, synced resize: ${dims.cols}x${dims.rows}`);
+          }
         }
       }
     });
