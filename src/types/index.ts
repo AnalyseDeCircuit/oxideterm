@@ -1034,6 +1034,12 @@ export interface AiChatMessage {
   context?: string;
   /** Whether the message is being streamed */
   isStreaming?: boolean;
+  /** Thinking content from extended thinking models (Anthropic) */
+  thinkingContent?: string;
+  /** Whether the thinking block is expanded in UI */
+  isThinkingExpanded?: boolean;
+  /** Whether thinking is currently streaming */
+  isThinkingStreaming?: boolean;
 }
 
 /**

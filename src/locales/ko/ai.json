@@ -51,7 +51,24 @@
       "context_attached": "터미널 컨텍스트가 첨부되었습니다",
       "all_panes_context_attached": "모든 {{count}}개 창의 컨텍스트가 첨부되었습니다",
       "copy_code": "코드 복사",
-      "insert_to_terminal": "터미널에 삽입"
+      "insert_to_terminal": "터미널에 삽입",
+      "regenerate": "응답 재생성",
+      "regenerating": "재생성 중..."
+    },
+    "thinking": {
+      "thinking": "생각 중...",
+      "thought": "사고 과정",
+      "loading": "처리 중...",
+      "expand": "사고 표시",
+      "collapse": "사고 숨기기"
+    },
+    "context": {
+      "breakdown": "컨텍스트 창",
+      "system": "시스템",
+      "history": "기록",
+      "pending": "입력",
+      "total": "총계",
+      "warning_limit": "컨텍스트 한도에 근접"
     }
   }
 }

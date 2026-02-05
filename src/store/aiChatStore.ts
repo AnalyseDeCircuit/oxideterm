@@ -32,18 +32,25 @@ interface ConversationMetaDto {
   messageCount: number;
 }
 
-interface PersistedMessageDto {
+// Backend returns flat structure, not nested meta
+interface FullConversationDto {
   id: string;
-  conversationId: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  contextSnapshot: ContextSnapshotDto | null;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  sessionId: string | null;
+  messages: Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: number;
+    context: string | null; // Backend returns just the buffer_tail as 'context'
+  }>;
 }
 
-interface FullConversationDto {
-  meta: ConversationMetaDto;
-  messages: PersistedMessageDto[];
+// Wrapper for list conversations response
+interface ConversationListResponseDto {
+  conversations: ConversationMetaDto[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -100,16 +107,16 @@ function generateTitle(firstMessage: string): string {
 // Convert backend DTO to frontend model
 function dtoToConversation(dto: FullConversationDto): AiConversation {
   return {
-    id: dto.meta.id,
-    title: dto.meta.title,
-    createdAt: dto.meta.createdAt,
-    updatedAt: dto.meta.updatedAt,
+    id: dto.id,
+    title: dto.title,
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
     messages: dto.messages.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
       timestamp: m.timestamp,
-      context: m.contextSnapshot?.bufferTail || undefined,
+      context: m.context || undefined,
     })),
   };
 }
@@ -121,6 +128,45 @@ function metaToConversation(meta: ConversationMetaDto): AiConversation {
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
     messages: [], // Will be loaded on demand
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Thinking Content Parser
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ParsedResponse {
+  /** Main response content (without thinking tags) */
+  content: string;
+  /** Extracted thinking content (if present) */
+  thinkingContent?: string;
+}
+
+/**
+ * Parse AI response to extract thinking content
+ * Supports: <thinking>...</thinking> tags (common in Claude-style responses)
+ */
+function parseThinkingContent(rawContent: string): ParsedResponse {
+  // Match <thinking>...</thinking> block (case-insensitive, multiline)
+  const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  let thinkingContent = '';
+  let content = rawContent;
+  
+  // Extract all thinking blocks
+  let match;
+  while ((match = thinkingRegex.exec(rawContent)) !== null) {
+    if (thinkingContent) thinkingContent += '\n\n';
+    thinkingContent += match[1].trim();
+  }
+  
+  // Remove thinking tags from main content
+  if (thinkingContent) {
+    content = rawContent.replace(thinkingRegex, '').trim();
+  }
+  
+  return {
+    content,
+    thinkingContent: thinkingContent || undefined,
   };
 }
 
@@ -221,8 +267,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     try {
       // Load conversation list (metadata only)
-      const metas = await invoke<ConversationMetaDto[]>('ai_chat_list_conversations');
-      const conversations = metas.map(metaToConversation);
+      const response = await invoke<ConversationListResponseDto>('ai_chat_list_conversations');
+      const conversations = response.conversations.map(metaToConversation);
 
       set({
         conversations,
@@ -245,7 +291,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   // Load full conversation with messages
   _loadConversation: async (id) => {
     try {
-      const fullConv = await invoke<FullConversationDto>('ai_chat_get_conversation', { id });
+      const fullConv = await invoke<FullConversationDto>('ai_chat_get_conversation', { conversationId: id });
       const conversation = dtoToConversation(fullConv);
 
       set((state) => ({
@@ -304,7 +350,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     });
 
     try {
-      await invoke('ai_chat_delete_conversation', { id });
+      await invoke('ai_chat_delete_conversation', { conversationId: id });
     } catch (e) {
       console.warn(`[AiChatStore] Failed to delete conversation ${id}:`, e);
     }
@@ -333,7 +379,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     try {
       await invoke('ai_chat_update_conversation', {
-        id,
+        conversationId: id,
         title,
       });
     } catch (e) {
@@ -425,7 +471,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         ),
       }));
       try {
-        await invoke('ai_chat_update_conversation', { id: convId, title });
+        await invoke('ai_chat_update_conversation', { conversationId: convId, title });
       } catch (e) {
         console.warn('[AiChatStore] Failed to update conversation title:', e);
       }
@@ -484,7 +530,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 50; // ms - throttle updates for smoother streaming
 
-      const updateContent = (content: string, force = false) => {
+      const updateContent = (content: string, force = false, isThinkingStreaming = false) => {
         const now = Date.now();
         if (!force && now - lastUpdateTime < UPDATE_INTERVAL) return;
         lastUpdateTime = now;
@@ -495,7 +541,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
             return {
               ...c,
               messages: c.messages.map((m) =>
-                m.id === assistantMessage.id ? { ...m, content } : m
+                m.id === assistantMessage.id 
+                  ? { ...m, content, isThinkingStreaming } 
+                  : m
               ),
               updatedAt: now,
             };
@@ -512,19 +560,41 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       )) {
         fullContent += chunk;
         // Throttled update for smoother streaming
-        updateContent(fullContent);
+        // Also check if we're in thinking mode (incomplete thinking tag)
+        const isInThinking = fullContent.includes('<thinking>') && !fullContent.includes('</thinking>');
+        updateContent(fullContent, false, isInThinking);
       }
 
-      // Final update to ensure complete content is shown
-      updateContent(fullContent, true);
+      // Parse thinking content from final response
+      const { content: mainContent, thinkingContent } = parseThinkingContent(fullContent);
 
-      _setStreaming(convId, assistantMessage.id, false);
+      // Final update with parsed content
+      set((state) => ({
+        conversations: state.conversations.map((c) => {
+          if (c.id !== convId) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantMessage.id
+                ? {
+                    ...m,
+                    content: mainContent,
+                    thinkingContent,
+                    isThinkingStreaming: false,
+                    isStreaming: false,
+                  }
+                : m
+            ),
+            updatedAt: Date.now(),
+          };
+        }),
+      }));
 
-      // Persist final content to backend
+      // Persist final content to backend (store original fullContent for recovery)
       try {
         await invoke('ai_chat_update_message', {
           messageId: assistantMessage.id,
-          content: fullContent,
+          content: fullContent, // Store full content including thinking tags
         });
       } catch (e) {
         console.warn('[AiChatStore] Failed to persist final message content:', e);

@@ -24,6 +24,7 @@ export function AiChatPanel() {
     stopGeneration,
     clearAllConversations,
     getActiveConversation,
+    regenerateLastResponse,
   } = useAiChatStore();
 
   const aiEnabled = useSettingsStore((state) => state.settings.ai.enabled);
@@ -33,8 +34,15 @@ export function AiChatPanel() {
   const [showConversations, setShowConversations] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   const activeConversation = getActiveConversation();
+  
+  // Find the last assistant message index for regenerate button
+  const lastAssistantIndex = activeConversation?.messages
+    .map((msg, i) => msg.role === 'assistant' ? i : -1)
+    .filter(i => i !== -1)
+    .pop() ?? -1;
 
   // Initialize store on mount
   useEffect(() => {
@@ -87,6 +95,17 @@ export function AiChatPanel() {
     createTab('settings');
     setShowMenu(false);
   }, [createTab]);
+
+  // Handle regenerate last response
+  const handleRegenerate = useCallback(async () => {
+    if (isRegenerating || isLoading) return;
+    setIsRegenerating(true);
+    try {
+      await regenerateLastResponse();
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [regenerateLastResponse, isRegenerating, isLoading]);
 
   // Not enabled state
   if (!aiEnabled) {
@@ -232,8 +251,14 @@ export function AiChatPanel() {
           </div>
         ) : (
           <div className="flex flex-col">
-            {activeConversation.messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
+            {activeConversation.messages.map((msg, index) => (
+              <ChatMessage 
+                key={msg.id} 
+                message={msg}
+                isLastAssistant={index === lastAssistantIndex}
+                onRegenerate={handleRegenerate}
+                isRegenerating={isRegenerating}
+              />
             ))}
             <div ref={messagesEndRef} className="h-4" />
           </div>
@@ -276,9 +301,12 @@ function ConversationItem({
   const timeStr = new Date(conversation.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors group/item border-l-2 ${isActive
+      onKeyDown={(e) => e.key === 'Enter' && onSelect()}
+      className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors group/item border-l-2 cursor-pointer ${isActive
         ? 'bg-theme-accent/5 border-theme-accent'
         : 'hover:bg-theme-bg-panel/40 border-transparent'
         }`}
@@ -298,7 +326,7 @@ function ConversationItem({
       >
         <Trash2 className="w-3 h-3" />
       </button>
-    </button>
+    </div>
   );
 }
 

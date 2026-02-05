@@ -51,7 +51,24 @@
       "context_attached": "ターミナルのコンテキストが添付されました",
       "all_panes_context_attached": "全 {{count}} ペインのコンテキストが添付されました",
       "copy_code": "コードをコピー",
-      "insert_to_terminal": "ターミナルに挿入"
+      "insert_to_terminal": "ターミナルに挿入",
+      "regenerate": "回答を再生成",
+      "regenerating": "再生成中..."
+    },
+    "thinking": {
+      "thinking": "考え中...",
+      "thought": "思考プロセス",
+      "loading": "処理中...",
+      "expand": "思考を表示",
+      "collapse": "思考を非表示"
+    },
+    "context": {
+      "breakdown": "コンテキストウィンドウ",
+      "system": "システム",
+      "history": "履歴",
+      "pending": "入力",
+      "total": "合計",
+      "warning_limit": "コンテキスト上限に近付いています"
     }
   }
 }

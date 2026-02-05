@@ -28,7 +28,6 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { useToast } from '../../hooks/useToast';
-import { AiChatPanel } from '../ai/AiChatPanel';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -53,7 +52,8 @@ export const Sidebar = () => {
   const sidebarCollapsed = useSettingsStore((s) => s.settings.sidebarUI.collapsed);
   const sidebarActiveSection = useSettingsStore((s) => s.settings.sidebarUI.activeSection);
   const sidebarWidth = useSettingsStore((s) => s.settings.sidebarUI.width);
-  const { setSidebarWidth, toggleSidebar } = useSettingsStore();
+  const aiSidebarCollapsed = useSettingsStore((s) => s.settings.sidebarUI.aiSidebarCollapsed);
+  const { setSidebarWidth, toggleSidebar, toggleAiSidebar } = useSettingsStore();
 
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
@@ -881,11 +881,11 @@ export const Sidebar = () => {
             <Network className="h-5 w-5" />
           </Button>
 
-          {/* AI Assistant (placeholder for future sidebar panel) */}
+          {/* AI Sidebar Toggle */}
           <Button
-            variant={sidebarActiveSection === 'ai' ? 'secondary' : 'ghost'}
+            variant={!aiSidebarCollapsed ? 'secondary' : 'ghost'}
             size="icon"
-            onClick={() => { setSidebarSection('ai'); toggleSidebar(); }}
+            onClick={toggleAiSidebar}
             title={t('sidebar.panels.ai')}
             className="rounded-md h-9 w-9"
           >
@@ -1022,11 +1022,11 @@ export const Sidebar = () => {
           </Button>
         </div>
 
-        {/* AI Assistant (placeholder for future sidebar panel) */}
+        {/* AI Sidebar Toggle */}
         <Button
-          variant={sidebarActiveSection === 'ai' ? 'secondary' : 'ghost'}
+          variant={!aiSidebarCollapsed ? 'secondary' : 'ghost'}
           size="icon"
-          onClick={() => setSidebarSection('ai')}
+          onClick={toggleAiSidebar}
           title={t('sidebar.panels.ai')}
           className="rounded-md h-9 w-9"
         >
@@ -1321,12 +1321,6 @@ export const Sidebar = () => {
                   ));
                 })()}
               </div>
-            </div>
-          )}
-
-          {sidebarActiveSection === 'ai' && (
-            <div className="h-full -m-2">
-              <AiChatPanel />
             </div>
           )}
 

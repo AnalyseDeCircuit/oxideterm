@@ -51,7 +51,24 @@
       "context_attached": "已附加终端上下文",
       "all_panes_context_attached": "已附加全部 {{count}} 个分屏的上下文",
       "copy_code": "复制代码",
-      "insert_to_terminal": "插入到终端"
+      "insert_to_terminal": "插入到终端",
+      "regenerate": "重新生成",
+      "regenerating": "重新生成中..."
+    },
+    "thinking": {
+      "thinking": "思考中...",
+      "thought": "思考过程",
+      "loading": "处理中...",
+      "expand": "展开思考",
+      "collapse": "收起思考"
+    },
+    "context": {
+      "breakdown": "上下文窗口",
+      "system": "系统提示",
+      "history": "历史消息",
+      "pending": "输入内容",
+      "total": "总计",
+      "warning_limit": "即将达到上下文限制"
     }
   }
 }

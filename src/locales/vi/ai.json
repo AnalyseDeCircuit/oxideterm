@@ -51,7 +51,24 @@
       "context_attached": "Đã đính kèm ngữ cảnh terminal",
       "all_panes_context_attached": "Đã đính kèm ngữ cảnh từ {{count}} khung",
       "copy_code": "Sao chép mã",
-      "insert_to_terminal": "Chèn vào terminal"
+      "insert_to_terminal": "Chèn vào terminal",
+      "regenerate": "Tạo lại phản hồi",
+      "regenerating": "Đang tạo lại..."
+    },
+    "thinking": {
+      "thinking": "Đang suy nghĩ...",
+      "thought": "Quá trình suy nghĩ",
+      "loading": "Đang xử lý...",
+      "expand": "Hiển thị suy nghĩ",
+      "collapse": "Ẩn suy nghĩ"
+    },
+    "context": {
+      "breakdown": "Cửa sổ ngữ cảnh",
+      "system": "Hệ thống",
+      "history": "Lịch sử",
+      "pending": "Đầu vào",
+      "total": "Tổng",
+      "warning_limit": "Sắp đạt giới hạn ngữ cảnh"
     }
   }
 }

@@ -4,6 +4,7 @@ import { StopCircle, Terminal, Layers, Sparkles } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
+import { ContextIndicator } from './ContextIndicator';
 import {
   getActiveTerminalBuffer,
   getActivePaneId,
@@ -137,13 +138,13 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
     <div className="bg-theme-bg border-t border-theme-border/50 p-4">
       {/* Context Toggles - Copilot Style Minimalist Chips */}
       {(hasActiveTerminal || hasSplitPanes) && (
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           {hasActiveTerminal && (
             <button
               type="button"
               onClick={() => setIncludeContext(!includeContext)}
               disabled={fetchingContext}
-              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border ${includeContext
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border shrink-0 ${includeContext
                 ? 'bg-theme-accent/10 border-theme-accent/40 text-theme-accent'
                 : 'bg-theme-bg-panel/20 text-theme-text-muted border-theme-border/30 hover:border-theme-border/60'
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
@@ -158,7 +159,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
               type="button"
               onClick={() => setIncludeAllPanes(!includeAllPanes)}
               disabled={fetchingContext}
-              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border ${includeAllPanes
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border shrink-0 ${includeAllPanes
                 ? 'bg-blue-500/10 border-blue-500/40 text-blue-500'
                 : 'bg-theme-bg-panel/20 text-theme-text-muted border-theme-border/30 hover:border-theme-border/60'
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
@@ -186,19 +187,21 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
         </div>
 
         <div className="flex items-center justify-between px-2 py-1.5 bg-theme-bg-panel/10 border-t border-theme-border/10">
-          <div className="flex items-center gap-3 text-[9px] font-bold tracking-tight text-theme-text-muted opacity-40 uppercase">
+          <div className="flex items-center gap-2 sm:gap-3 text-[9px] font-bold tracking-tight text-theme-text-muted opacity-40 uppercase min-w-0 overflow-hidden">
             {isLoading ? (
               <div className="flex items-center gap-1.5 text-theme-accent animate-pulse">
-                <Sparkles className="w-3 h-3" />
-                <span>{t('ai.input.thinking')}</span>
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span className="truncate">{t('ai.input.thinking')}</span>
               </div>
             ) : (
               <>
-                <div className="flex items-center gap-1.5">
+                <ContextIndicator pendingInput={input} />
+                <div className="w-px h-3 bg-theme-border/30 shrink-0 hidden sm:block" />
+                <div className="hidden sm:flex items-center gap-1.5">
                   <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">ENTER</span>
                   <span>{t('ai.input.send_key')}</span>
                 </div>
-                <div className="flex items-center gap-1.5 ml-2">
+                <div className="hidden md:flex items-center gap-1.5 ml-2">
                   <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">SHIFT+ENTER</span>
                   <span>{t('ai.input.newline_key')}</span>
                 </div>

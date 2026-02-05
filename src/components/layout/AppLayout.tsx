@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './Sidebar';
+import { AiSidebar } from './AiSidebar';
 import { TabBar } from './TabBar';
 import { useAppStore, getSession } from '../../store/appStore';
 import { TerminalView } from '../terminal/TerminalView';
@@ -148,6 +149,9 @@ export const AppLayout = () => {
           )}
         </div>
       </div>
+
+      {/* AI Sidebar - Right side */}
+      <AiSidebar />
     </div>
   );
 };

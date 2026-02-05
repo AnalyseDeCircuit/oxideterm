@@ -51,7 +51,24 @@
       "context_attached": "Contexto del terminal adjunto",
       "all_panes_context_attached": "Contexto de los {{count}} paneles adjunto",
       "copy_code": "Copiar código",
-      "insert_to_terminal": "Insertar en terminal"
+      "insert_to_terminal": "Insertar en terminal",
+      "regenerate": "Regenerar respuesta",
+      "regenerating": "Regenerando..."
+    },
+    "thinking": {
+      "thinking": "Pensando...",
+      "thought": "Proceso de pensamiento",
+      "loading": "Procesando...",
+      "expand": "Mostrar pensamiento",
+      "collapse": "Ocultar pensamiento"
+    },
+    "context": {
+      "breakdown": "Ventana de contexto",
+      "system": "Sistema",
+      "history": "Historial",
+      "pending": "Entrada",
+      "total": "Total",
+      "warning_limit": "Cerca del límite de contexto"
     }
   }
 }

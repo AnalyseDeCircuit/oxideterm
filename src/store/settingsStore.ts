@@ -122,7 +122,13 @@ export interface SidebarUIState {
   collapsed: boolean;
   activeSection: SidebarSection;
   width: number;  // Sidebar width in pixels (200-600)
+  // AI sidebar (right side)
+  aiSidebarCollapsed: boolean;
+  aiSidebarWidth: number;  // AI sidebar width in pixels (280-500)
 }
+
+/** AI thinking display style */
+export type AiThinkingStyle = 'detailed' | 'compact';
 
 /** AI context source */
 export type AiContextSource = 'selection' | 'visible' | 'command';
@@ -135,6 +141,10 @@ export interface AiSettings {
   model: string;
   contextMaxChars: number;      // Max characters to send
   contextVisibleLines: number;  // Max visible lines to capture
+  /** Thinking block display style: detailed (full) or compact (collapsed) */
+  thinkingStyle: AiThinkingStyle;
+  /** Whether thinking blocks are expanded by default */
+  thinkingDefaultExpanded: boolean;
 }
 
 /** Local terminal settings */
@@ -225,6 +235,9 @@ const defaultSidebarUIState: SidebarUIState = {
   collapsed: false,
   activeSection: 'sessions',
   width: 300,  // Default sidebar width
+  // AI sidebar defaults
+  aiSidebarCollapsed: true,  // Start collapsed
+  aiSidebarWidth: 340,       // Default AI sidebar width
 };
 
 const defaultAiSettings: AiSettings = {
@@ -234,6 +247,8 @@ const defaultAiSettings: AiSettings = {
   model: 'gpt-4o-mini',
   contextMaxChars: 8000,
   contextVisibleLines: 120,
+  thinkingStyle: 'detailed',         // Default: show full thinking content
+  thinkingDefaultExpanded: false,    // Default: collapsed for less noise
 };
 
 const defaultLocalTerminalSettings: LocalTerminalSettings = {
@@ -360,6 +375,10 @@ interface SettingsStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSidebarWidth: (width: number) => void;
   toggleSidebar: () => void;
+  // AI sidebar actions
+  setAiSidebarCollapsed: (collapsed: boolean) => void;
+  setAiSidebarWidth: (width: number) => void;
+  toggleAiSidebar: () => void;
 
   // Actions - Bulk operations
   resetToDefaults: () => void;
@@ -584,6 +603,45 @@ export const useSettingsStore = create<SettingsStore>()(
         const newSettings: PersistedSettingsV2 = {
           ...state.settings,
           sidebarUI: { ...state.settings.sidebarUI, width: clampedWidth },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    // ========== AI Sidebar UI State ==========
+    setAiSidebarCollapsed: (collapsed) => {
+      set((state) => {
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          sidebarUI: { ...state.settings.sidebarUI, aiSidebarCollapsed: collapsed },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    setAiSidebarWidth: (width) => {
+      // Clamp width between 280 and 500
+      const clampedWidth = Math.max(280, Math.min(500, width));
+      set((state) => {
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          sidebarUI: { ...state.settings.sidebarUI, aiSidebarWidth: clampedWidth },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    toggleAiSidebar: () => {
+      set((state) => {
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          sidebarUI: {
+            ...state.settings.sidebarUI,
+            aiSidebarCollapsed: !state.settings.sidebarUI.aiSidebarCollapsed
+          },
         };
         persistSettings(newSettings);
         return { settings: newSettings };

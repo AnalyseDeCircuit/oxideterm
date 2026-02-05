@@ -51,7 +51,24 @@
       "context_attached": "Contesto dal terminale allegato",
       "all_panes_context_attached": "Contesto da tutti i {{count}} pannelli allegato",
       "copy_code": "Copia codice",
-      "insert_to_terminal": "Inserisci nel terminale"
+      "insert_to_terminal": "Inserisci nel terminale",
+      "regenerate": "Rigenera risposta",
+      "regenerating": "Rigenerazione..."
+    },
+    "thinking": {
+      "thinking": "Pensando...",
+      "thought": "Processo di pensiero",
+      "loading": "Elaborazione...",
+      "expand": "Mostra il pensiero",
+      "collapse": "Nascondi il pensiero"
+    },
+    "context": {
+      "breakdown": "Finestra di contesto",
+      "system": "Sistema",
+      "history": "Cronologia",
+      "pending": "Input",
+      "total": "Totale",
+      "warning_limit": "Limite contesto vicino"
     }
   }
 }

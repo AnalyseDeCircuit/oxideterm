@@ -51,7 +51,24 @@
       "context_attached": "Terminal-Kontext angehängt",
       "all_panes_context_attached": "Kontext aus allen {{count}} Fenstern angehängt",
       "copy_code": "Code kopieren",
-      "insert_to_terminal": "Ins Terminal einfügen"
+      "insert_to_terminal": "Ins Terminal einfügen",
+      "regenerate": "Antwort neu generieren",
+      "regenerating": "Wird neu generiert..."
+    },
+    "thinking": {
+      "thinking": "Denkt nach...",
+      "thought": "Denkprozess",
+      "loading": "Verarbeitung...",
+      "expand": "Denkprozess anzeigen",
+      "collapse": "Denkprozess ausblenden"
+    },
+    "context": {
+      "breakdown": "Kontextfenster",
+      "system": "System",
+      "history": "Verlauf",
+      "pending": "Eingabe",
+      "total": "Gesamt",
+      "warning_limit": "Kontextlimit fast erreicht"
     }
   }
 }

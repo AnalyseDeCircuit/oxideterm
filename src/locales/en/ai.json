@@ -51,7 +51,24 @@
       "context_attached": "Context from terminal attached",
       "all_panes_context_attached": "Context from all {{count}} panes attached",
       "copy_code": "Copy code",
-      "insert_to_terminal": "Insert to terminal"
+      "insert_to_terminal": "Insert to terminal",
+      "regenerate": "Regenerate response",
+      "regenerating": "Regenerating..."
+    },
+    "thinking": {
+      "thinking": "Thinking...",
+      "thought": "Thought process",
+      "loading": "Processing...",
+      "expand": "Show thinking",
+      "collapse": "Hide thinking"
+    },
+    "context": {
+      "breakdown": "Context Window",
+      "system": "System",
+      "history": "History",
+      "pending": "Input",
+      "total": "Total",
+      "warning_limit": "Approaching context limit"
     }
   }
 }
