@@ -7,13 +7,11 @@ import i18n from '../i18n';
 import { 
   SessionInfo, 
   Tab, 
-  ConnectRequest, 
   TabType,
   SessionState,
   ConnectionInfo,
   SshConnectionInfo,
   SshConnectionState,
-  SshConnectRequest,
   ConnectPresetChainRequest,
   PaneNode,
   PaneLeaf,
@@ -50,14 +48,11 @@ interface AppStore {
   editingConnection: ConnectionInfo | null;
   networkOnline: boolean;
 
-  // Actions - Sessions (legacy, still working)
-  connect: (request: ConnectRequest) => Promise<string>;
-  disconnect: (sessionId: string) => Promise<void>;
+  // Actions - Sessions
   cancelReconnect: (sessionId: string) => Promise<void>;
   updateSessionState: (sessionId: string, state: SessionState, error?: string) => void;
   
-  // Actions - Connection Pool (新 API)
-  connectSsh: (request: SshConnectRequest) => Promise<string>;
+  // Actions - Connection Pool
   disconnectSsh: (connectionId: string) => Promise<void>;
   createTerminalSession: (connectionId: string, cols?: number, rows?: number) => Promise<SessionInfo>;
   closeTerminalSession: (sessionId: string) => Promise<void>;
@@ -167,96 +162,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   editingConnection: null,
   networkOnline: true,
 
-  /** @deprecated Use connectSsh() + createTerminalSession() instead */
-  connect: async (request: ConnectRequest) => {
-    try {
-      // 🔄 迁移到新 API: sshConnect + createTerminal
-      const connResponse = await api.sshConnect({
-        host: request.host,
-        port: request.port,
-        username: request.username,
-        authType: request.auth_type,
-        password: request.password,
-        keyPath: request.key_path,
-        passphrase: request.passphrase,
-        name: request.name,
-      });
-
-      // 更新连接池状态
-      set((state) => {
-        const newConnections = new Map(state.connections);
-        newConnections.set(connResponse.connectionId, connResponse.connection);
-        return { connections: newConnections };
-      });
-
-      // 创建终端
-      const termResponse = await api.createTerminal({
-        connectionId: connResponse.connectionId,
-        cols: request.cols,
-        rows: request.rows,
-      });
-
-      // 合并 ws_token 到 session
-      const sessionInfo = { ...termResponse.session, ws_token: termResponse.wsToken };
-      
-      set((state) => {
-        const newSessions = new Map(state.sessions);
-        newSessions.set(sessionInfo.id, sessionInfo);
-        
-        // 更新连接的 terminalIds
-        const newConnections = new Map(state.connections);
-        const conn = newConnections.get(connResponse.connectionId);
-        if (conn) {
-          newConnections.set(connResponse.connectionId, {
-            ...conn,
-            terminalIds: [...conn.terminalIds, sessionInfo.id],
-            refCount: conn.refCount + 1,
-            state: 'active',
-          });
-        }
-        
-        return { sessions: newSessions, connections: newConnections };
-      });
-
-      // Open terminal tab by default
-      get().createTab('terminal', sessionInfo.id);
-      
-      return sessionInfo.id;
-    } catch (error) {
-      console.error('Connection failed:', error);
-      throw error;
-    }
-  },
-
   // ═══════════════════════════════════════════════════════════════════════════
-  // Connection Pool Actions (旧架构 - 已废弃)
+  // Connection Pool Actions
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /** 
-   * @deprecated 使用 sessionTreeStore.connectNodeWithAncestors() 代替
-   * 
-   * 新架构中使用 api.connectTreeNode() 建立连接，
-   * 后端从 ConnectionPreset 获取认证信息，无需前端传递密码/密钥。
-   */
-  connectSsh: async (request: SshConnectRequest) => {
-    console.warn(`[AppStore] connectSsh() is deprecated. Use sessionTreeStore.connectNodeWithAncestors() instead.`);
-    try {
-      const response = await api.sshConnect(request);
-      
-      // 更新连接池状态
-      set((state) => {
-        const newConnections = new Map(state.connections);
-        newConnections.set(response.connectionId, response.connection);
-        return { connections: newConnections };
-      });
-      
-      console.log(`SSH connected: ${response.connectionId} (reused: ${response.reused})`);
-      return response.connectionId;
-    } catch (error) {
-      console.error('SSH connection failed:', error);
-      throw error;
-    }
-  },
 
   disconnectSsh: async (connectionId: string) => {
     try {
@@ -503,52 +411,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /** @deprecated Use closeTerminalSession() instead */
-  disconnect: async (sessionId: string) => {
-    try {
-      // 🔄 迁移到新 API: closeTerminal
-      await api.closeTerminal(sessionId);
-      
-      set((state) => {
-        const newSessions = new Map(state.sessions);
-        const session = newSessions.get(sessionId);
-        newSessions.delete(sessionId);
-        
-        // 更新连接的 terminalIds
-        const newConnections = new Map(state.connections);
-        if (session?.connectionId) {
-          const conn = newConnections.get(session.connectionId);
-          if (conn) {
-            const newTerminalIds = conn.terminalIds.filter(id => id !== sessionId);
-            newConnections.set(session.connectionId, {
-              ...conn,
-              terminalIds: newTerminalIds,
-              refCount: Math.max(0, conn.refCount - 1),
-              state: newTerminalIds.length === 0 ? 'idle' : 'active',
-            });
-          }
-        }
-        
-        // Close associated tabs
-        const newTabs = state.tabs.filter(t => t.sessionId !== sessionId);
-        let newActiveId = state.activeTabId;
-        
-        if (state.activeTabId && !newTabs.find(t => t.id === state.activeTabId)) {
-          newActiveId = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
-        }
-
-        return { 
-          sessions: newSessions,
-          connections: newConnections,
-          tabs: newTabs,
-          activeTabId: newActiveId
-        };
-      });
-    } catch (error) {
-      console.error('Disconnect failed:', error);
-    }
-  },
 
   cancelReconnect: async (sessionId: string) => {
     try {

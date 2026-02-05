@@ -140,25 +140,6 @@ impl HandleController {
         self.disconnect_tx.subscribe()
     }
 
-    /// Get a clone of the command sender for the SessionCommand channel
-    /// 
-    /// DEPRECATED: This method creates an orphaned channel and should not be used.
-    /// Instead, clone cmd_tx from ExtendedSessionHandle before passing it to WsBridge.
-    #[deprecated(note = "Use session_handle.cmd_tx.clone() before consuming the handle")]
-    pub fn cmd_tx_clone(&self) -> mpsc::Sender<crate::ssh::SessionCommand> {
-        // This creates a new channel with no receiver - any messages sent will be lost.
-        // The method is kept for API compatibility but will panic in debug builds.
-        #[cfg(debug_assertions)]
-        panic!("cmd_tx_clone is deprecated: clone cmd_tx from ExtendedSessionHandle before consuming it");
-        
-        #[cfg(not(debug_assertions))]
-        {
-            tracing::error!("cmd_tx_clone called - this creates an orphaned channel!");
-            let (tx, _) = mpsc::channel(1);
-            tx
-        }
-    }
-
     /// Open a session channel (for PTY/shell)
     pub async fn open_session_channel(&self) -> Result<Channel<Msg>, SshError> {
         let (reply_tx, reply_rx) = oneshot::channel();

@@ -23,10 +23,8 @@ import {
   SessionStats,
   QuickHealthCheck,
   IncompleteTransferInfo,
-  // New connection pool types
+  // Connection pool types
   SshConnectionInfo,
-  SshConnectRequest,
-  SshConnectResponse,
   CreateTerminalRequest,
   CreateTerminalResponse,
   ConnectionPoolConfig,
@@ -43,35 +41,6 @@ const USE_MOCK = false;
 // --- API Implementation ---
 
 export const api = {
-  /**
-   * @deprecated Use sshConnect() + createTerminal() instead.
-   * This legacy API creates a connection AND terminal in one call.
-   * The new API separates these concerns for better resource management.
-   */
-  connect: async (request: ConnectRequest): Promise<SessionInfo> => {
-    if (USE_MOCK) return mockConnect(request);
-    // Backend returns ConnectResponseV2, extract session info and add ws_token
-    // Convert proxy_chain if present
-    const proxy_chain = request.proxy_chain;
-    const response = await invoke<{ session: SessionInfo; ws_token?: string }>('connect_v2', { request, proxy_chain });
-    const session = response.session || response;
-    // Add ws_token from response if available
-    if (response.ws_token) {
-      session.ws_token = response.ws_token;
-    }
-    return session;
-  },
-
-  /**
-   * @deprecated Use closeTerminal() instead.
-   * This legacy API closes both terminal AND connection.
-   * The new API only closes the terminal, leaving the connection for reuse.
-   */
-  disconnect: async (sessionId: string): Promise<void> => {
-    if (USE_MOCK) return;
-    return invoke('disconnect_v2', { sessionId });
-  },
-
   listSessions: async (): Promise<SessionInfo[]> => {
     if (USE_MOCK) return [];
     return invoke('list_sessions_v2');
@@ -97,35 +66,8 @@ export const api = {
     return invoke('reorder_sessions', { orderedIds });
   },
 
-  // ============ SSH Connection Pool (New Architecture) ============
+  // ============ SSH Connection Pool ============
   
-  /**
-   * Establish a new SSH connection (without creating a terminal)
-   * Returns connection ID for subsequent operations
-   */
-  sshConnect: async (request: SshConnectRequest): Promise<SshConnectResponse> => {
-    if (USE_MOCK) {
-      return {
-        connectionId: 'mock-conn-id',
-        reused: false,
-        connection: {
-          id: 'mock-conn-id',
-          host: request.host,
-          port: request.port,
-          username: request.username,
-          state: 'active',
-          refCount: 0,
-          keepAlive: false,
-          createdAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          terminalIds: [],
-          forwardIds: [],
-        }
-      };
-    }
-    return invoke('ssh_connect', { request });
-  },
-
   /**
    * Disconnect an SSH connection (force close)
    */
@@ -928,37 +870,6 @@ export const api = {
   disconnectTreeNode: async (nodeId: string): Promise<string[]> => {
     if (USE_MOCK) return [nodeId];
     return invoke('disconnect_tree_node', { nodeId });
-  },
-
-  /**
-   * 连接手工预设的跳板链（模式1: 静态全手工）
-   * 
-   * @deprecated 使用 expandManualPreset + connectNodeWithAncestors 替代
-   * 
-   * 此 API 已被弃用。OxideTerm 现在采用"前端驱动、后端执行"的架构：
-   * 1. 调用 expandManualPreset() 展开预设链为树节点（不建立连接）
-   * 2. 调用 connectNodeWithAncestors() 进行前端驱动的线性连接
-   * 
-   * 新架构的优势：
-   * - 前端持有连接锁，防止竞态条件
-   * - 连接失败时可以精确定位失败节点
-   * - 支持连接中断恢复
-   */
-  connectManualPreset: async (
-    request: { savedConnectionId: string; hops: Array<{ host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string }>; target: { host: string; port: number; username: string; authType?: string; password?: string; keyPath?: string; passphrase?: string } },
-    cols?: number,
-    rows?: number
-  ): Promise<{ targetNodeId: string; targetSshConnectionId: string; connectedNodeIds: string[]; chainDepth: number }> => {
-    console.warn('[DEPRECATED] connectManualPreset is deprecated. Use expandManualPreset + connectNodeWithAncestors instead.');
-    if (USE_MOCK) {
-      return {
-        targetNodeId: crypto.randomUUID(),
-        targetSshConnectionId: crypto.randomUUID(),
-        connectedNodeIds: [crypto.randomUUID()],
-        chainDepth: request.hops.length + 1,
-      };
-    }
-    return invoke('connect_manual_preset', { request, cols, rows });
   },
 
   /**

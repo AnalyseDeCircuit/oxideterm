@@ -4,7 +4,6 @@
 //!
 //! # 命令列表
 //!
-//! - `ssh_connect` - 建立 SSH 连接（不创建终端）
 //! - `ssh_disconnect` - 断开 SSH 连接
 //! - `ssh_list_connections` - 列出所有连接
 //! - `ssh_set_keep_alive` - 设置连接保持
@@ -15,197 +14,19 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, State};
-use tokio::time::timeout;
 use tracing::{info, warn};
 
 use super::ForwardingRegistry;
 use crate::bridge::{BridgeManager, WsBridge};
 use crate::forwarding::ForwardingManager;
 use crate::session::{
-    parse_terminal_output, AuthMethod, KeyAuth, SessionConfig, SessionInfo, SessionRegistry,
+    parse_terminal_output, AuthMethod, SessionConfig, SessionInfo, SessionRegistry,
 };
 use crate::sftp::session::SftpRegistry;
 use crate::ssh::{
     ConnectionInfo, ConnectionPoolConfig, SshConnectionRegistry,
     HostKeyStatus, check_host_key, accept_host_key, get_host_key_cache,
 };
-
-/// 连接超时
-const CONNECT_TIMEOUT_SECS: u64 = 30;
-
-/// SSH 连接请求
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshConnectRequest {
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    #[serde(flatten)]
-    pub auth: SshAuthRequest,
-    pub name: Option<String>,
-    /// 是否复用已有连接
-    #[serde(default = "default_true")]
-    pub reuse_connection: bool,
-    /// 是否信任主机密钥（TOFU 模式）
-    /// - None: 使用默认行为（需要预检查）
-    /// - Some(true): 信任并保存到 known_hosts
-    /// - Some(false): 仅本次信任（不保存）
-    #[serde(default)]
-    pub trust_host_key: Option<bool>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "authType", rename_all = "snake_case")]
-pub enum SshAuthRequest {
-    Password {
-        password: String,
-    },
-    Key {
-        #[serde(rename = "keyPath")]
-        key_path: String,
-        passphrase: Option<String>,
-    },
-    DefaultKey {
-        passphrase: Option<String>,
-    },
-    Agent,
-    /// SSH certificate authentication (OpenSSH certificates)
-    Certificate {
-        #[serde(rename = "keyPath")]
-        key_path: String,
-        #[serde(rename = "certPath")]
-        cert_path: String,
-        passphrase: Option<String>,
-    },
-}
-
-/// SSH 连接响应
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshConnectResponse {
-    /// 连接 ID
-    pub connection_id: String,
-    /// 是否复用已有连接
-    pub reused: bool,
-    /// 连接信息
-    pub connection: ConnectionInfo,
-}
-
-/// 建立 SSH 连接（不创建终端）
-///
-/// 返回 connection_id，后续可用于创建终端、SFTP、端口转发等
-///
-/// # ⚠️ DEPRECATED
-/// 
-/// 此命令已被弃用。请使用 `connect_tree_node` 作为唯一的 SSH 连接入口。
-/// 
-/// **原因**：
-/// - OxideTerm 采用"前端驱动、后端执行"架构
-/// - 所有连接必须通过 SessionTree 管理，以确保锁机制生效
-/// - `ssh_connect` 绕过了 SessionTree，可能导致状态不一致
-/// 
-/// **迁移指南**：
-/// 1. 在 SessionTree 中创建节点
-/// 2. 使用 `connect_tree_node(node_id)` 建立连接
-/// 3. 前端使用 `connectNodeWithAncestors` 处理跳板链
-#[tauri::command]
-#[deprecated(since = "0.8.0", note = "Use connect_tree_node instead for proper lock management")]
-pub async fn ssh_connect(
-    request: SshConnectRequest,
-    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
-) -> Result<SshConnectResponse, String> {
-    warn!(
-        "⚠️ DEPRECATED: ssh_connect called for {}@{}:{} - please migrate to connect_tree_node",
-        request.username, request.host, request.port
-    );
-    info!(
-        "SSH connect request: {}@{}:{}",
-        request.username, request.host, request.port
-    );
-
-    // 转换认证方式
-    let auth = match request.auth {
-        SshAuthRequest::Password { password } => AuthMethod::Password { password },
-        SshAuthRequest::Key {
-            key_path,
-            passphrase,
-        } => AuthMethod::Key {
-            key_path,
-            passphrase,
-        },
-        SshAuthRequest::DefaultKey { passphrase } => {
-            let key_auth = KeyAuth::from_default_locations(passphrase.as_deref())
-                .map_err(|e| format!("No SSH key found: {}", e))?;
-            AuthMethod::Key {
-                key_path: key_auth.key_path.to_string_lossy().to_string(),
-                passphrase,
-            }
-        }
-        SshAuthRequest::Agent => {
-            return Err("SSH Agent not yet supported".to_string());
-        }
-        SshAuthRequest::Certificate {
-            key_path,
-            cert_path,
-            passphrase,
-        } => AuthMethod::Certificate {
-            key_path,
-            cert_path,
-            passphrase,
-        },
-    };
-
-    let config = SessionConfig {
-        host: request.host.clone(),
-        port: request.port,
-        username: request.username.clone(),
-        auth,
-        name: request.name,
-        color: None,
-        cols: 80,
-        rows: 24,
-    };
-
-    // 尝试复用已有连接
-    if request.reuse_connection {
-        if let Some(connection_id) = connection_registry.find_by_config(&config) {
-            info!("Reusing existing connection: {}", connection_id);
-            let connection = connection_registry
-                .get_info(&connection_id)
-                .await
-                .ok_or_else(|| "Connection disappeared".to_string())?;
-            return Ok(SshConnectResponse {
-                connection_id,
-                reused: true,
-                connection,
-            });
-        }
-    }
-
-    // 创建新连接
-    let connect_future = connection_registry.connect(config);
-    let connection_id = timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS), connect_future)
-        .await
-        .map_err(|_| format!("Connection timeout after {}s", CONNECT_TIMEOUT_SECS))?
-        .map_err(|e| format!("Connection failed: {}", e))?;
-
-    let connection = connection_registry
-        .get_info(&connection_id)
-        .await
-        .ok_or_else(|| "Connection disappeared after creation".to_string())?;
-
-    info!("SSH connection established: {}", connection_id);
-
-    Ok(SshConnectResponse {
-        connection_id,
-        reused: false,
-        connection,
-    })
-}
 
 /// 断开 SSH 连接
 #[tauri::command]

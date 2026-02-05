@@ -76,37 +76,6 @@ export interface ConnectionPoolStats {
   idleTimeoutSecs: number;
 }
 
-/**
- * SSH connect request (new API)
- */
-export interface SshConnectRequest {
-  host: string;
-  port: number;
-  username: string;
-  authType: 'password' | 'key' | 'default_key' | 'agent' | 'certificate';
-  password?: string;
-  keyPath?: string;
-  certPath?: string;  // For certificate authentication
-  passphrase?: string;
-  name?: string;
-  reuseConnection?: boolean;
-  /** Trust host key mode for TOFU (Trust On First Use)
-   * - undefined: use default behavior (requires preflight check)
-   * - true: trust and save to known_hosts
-   * - false: trust for this session only (don't save)
-   */
-  trustHostKey?: boolean;
-}
-
-/**
- * SSH connect response
- */
-export interface SshConnectResponse {
-  connectionId: string;
-  reused: boolean;
-  connection: SshConnectionInfo;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // SSH Host Key Preflight (TOFU - Trust On First Use)
 // ═══════════════════════════════════════════════════════════════════════════

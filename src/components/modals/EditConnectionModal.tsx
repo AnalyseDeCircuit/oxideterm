@@ -15,7 +15,7 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { ConnectionInfo } from '../../types';
 import { useAppStore } from '../../store/appStore';
-import { useSettingsStore } from '../../store/settingsStore';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { api } from '../../lib/api';
 
 interface EditConnectionModalProps {
@@ -32,7 +32,8 @@ export const EditConnectionModal: React.FC<EditConnectionModalProps> = ({
   onConnect
 }) => {
   const { t } = useTranslation();
-  const { groups, loadGroups, connect } = useAppStore();
+  const { groups, loadGroups } = useAppStore();
+  const { connectNodeWithAncestors } = useSessionTreeStore();
   const [password, setPassword] = useState('');
   const [keyPath, setKeyPath] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -63,25 +64,27 @@ export const EditConnectionModal: React.FC<EditConnectionModalProps> = ({
     setError('');
 
     try {
-      // Get buffer configuration from settingsStore
-      const { buffer } = useSettingsStore.getState().settings;
-      const bufferConfig = {
-        max_lines: buffer.maxLines,
-        save_on_disconnect: buffer.saveOnDisconnect,
-      };
-
-      await connect({
+      // Build the preset chain request (direct connection, no hops)
+      const target = {
         host: connection.host,
         port: connection.port,
         username: connection.username,
-        auth_type: authType,
+        authType: authType,
         password: authType === 'password' ? password : undefined,
-        key_path: authType === 'key' ? keyPath : undefined,
+        keyPath: authType === 'key' ? keyPath : undefined,
         passphrase: authType === 'key' && passphrase ? passphrase : undefined,
-        name: connection.name,
-        group: group || undefined,
-        buffer_config: bufferConfig,
+      };
+
+      // Expand the preset into a session tree node
+      const { expandManualPreset } = useSessionTreeStore.getState();
+      const result = await expandManualPreset({
+        savedConnectionId: connection.id,
+        hops: [],
+        target,
       });
+
+      // Connect via the session tree
+      await connectNodeWithAncestors(result.targetNodeId);
 
       // Mark as used
       await api.markConnectionUsed(connection.id);
