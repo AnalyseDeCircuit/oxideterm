@@ -17,6 +17,9 @@ OxideTerm 提供企业级的 SSH 端口转发功能，不仅支持标准的本�
 | **死亡报告 (Death Reporting)** | v1.4.1 | 转发任务异常退出时主动上报，保持状态一致性 |
 | **SSH 断连广播** | v1.4.1 | HandleController 提供 `subscribe_disconnect()` 广播通道 |
 | **Suspended 状态** | v1.4.1 | 新增 `ForwardStatus::Suspended` 表示 SSH 断连导致的挂起 |
+| **无锁 Channel I/O** | v1.4.2 | 移除 `Arc<Mutex<Channel>>`，采用消息传递模式消除锁竞争 |
+| **子任务信号传播** | v1.4.2 | 子连接任务接收 shutdown 广播信号，SSH 断开时主动退出 |
+| **全链路超时保护** | v1.4.2 | 所有 I/O 路径都有 `IDLE_TIMEOUT` (300s) 保护，防止僵尸连接 |
 
 ---
 
@@ -248,7 +251,41 @@ match exit_reason {
 - **UI 响应性**: 前端立即收到状态变更事件，更新显示
 - **可恢复性**: `Suspended` 状态的转发规则可在重连后自动恢复
 
-### 3. 常见错误处理
+### 3. 无锁 Channel I/O 架构 (v1.4.2)
+
+v1.4.2 重构了转发连接的数据桥接逻辑，从 `Arc<Mutex<Channel>>` 模式升级为消息传递模式：
+
+**问题背景：**
+- 旧架构中，读写任务竞争同一个 Mutex 锁
+- 持锁调用 `.await` 可能导致其他任务长时间等待
+- 某些边缘情况下存在死锁风险
+
+**新架构：**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  handle_forward_connection                                  │
+│                                                             │
+│  ┌─────────────┐   mpsc    ┌─────────────────────────────┐  │
+│  │ local_reader├──────────►│                             │  │
+│  │ (无锁读)    │           │   ssh_io                    │  │
+│  └─────────────┘           │   (单独持有 Channel,        │  │
+│                            │    无需 Mutex)              │  │
+│  ┌─────────────┐   mpsc    │                             │  │
+│  │ local_writer│◄──────────┤                             │  │
+│  │ (无锁写)    │           └─────────────────────────────┘  │
+│  └─────────────┘                                            │
+│                                                             │
+│  shutdown_rx ← 来自主任务的 broadcast 信号                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**关键改进：**
+- **Channel 单所有权**: SSH Channel 由 `ssh_io` 任务独占持有，无需 Mutex
+- **mpsc 解耦**: 读写任务通过 `mpsc::channel` 与 SSH I/O 任务通信
+- **信号传播**: 子连接任务订阅 `shutdown_rx`，SSH 断开时主动退出
+- **全链路超时**: 所有 I/O 操作都有 `IDLE_TIMEOUT` (300s) 保护
+
+### 4. 常见错误处理
 
 | 错误信息 | 原因 | 解决方案 |
 |---------|------|----------|
@@ -269,4 +306,4 @@ match exit_reason {
 
 ---
 
-*文档版本: v1.4.1 | 适配架构: Strong Sync + Auto Recovery + Death Reporting*
+*文档版本: v1.4.2 | 适配架构: Strong Sync + Auto Recovery + Death Reporting + Lock-Free I/O*

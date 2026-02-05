@@ -147,6 +147,8 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 - **Redirection Distante (-R)** : Exposer les services locaux aux réseaux distants (ex : pénétration intranet).
 - **Proxy Dynamique (-D)** : Implémentation complète du protocole SOCKS5 supportant IPv4/IPv6/résolution de domaine, associée aux canaux `direct-tcpip` pour un proxy transparent.
 - **Surveillance de Santé** : Stats en temps réel sur les connexions, le débit et les sessions actives.
+- **Rapport de Décès** : Les tâches de transfert signalent activement les changements d'état lorsque SSH se déconnecte.
+- **I/O Sans Verrou** : Utilise une architecture de passage de messages au lieu de `Arc<Mutex<Channel>>`, éliminant la contention de verrou.
 
 ### 🤖 Assistant Terminal AI
 - **Double Mode** : Panneau rapide inline (`⌘I`) + Chat persistant dans la barre latérale avec historique des conversations.

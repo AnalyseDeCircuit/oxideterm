@@ -147,6 +147,8 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 - **Remote Forward (-R)**: Expose local services to remote networks (e.g., intranet penetration).
 - **Dynamic Proxy (-D)**: Complete SOCKS5 protocol implementation supporting IPv4/IPv6/domain resolution, paired with `direct-tcpip` channels for transparent proxying.
 - **Health Monitoring**: Real-time stats on connections, throughput, and active sessions.
+- **Death Reporting**: Forward tasks actively report status changes when SSH disconnects.
+- **Lock-Free I/O**: Uses message-passing architecture instead of `Arc<Mutex<Channel>>`, eliminating lock contention.
 
 ### 🤖 AI Terminal Assistant
 - **Dual Mode**: Inline quick panel (`⌘I`) + Sidebar persistent chat with conversation history.

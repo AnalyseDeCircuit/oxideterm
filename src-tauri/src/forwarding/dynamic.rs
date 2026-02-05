@@ -483,96 +483,167 @@ async fn send_socks5_reply(stream: &mut TcpStream, status: u8) -> Result<(), Ssh
 const SOCKS5_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Bridge data between SOCKS5 client and SSH channel
+/// 
+/// # Architecture: Lock-Free Channel I/O
+/// 
+/// Uses the same message-passing pattern as local.rs and remote.rs to avoid lock contention.
+/// A single task owns the SSH Channel, communicating with read/write tasks via mpsc.
 async fn bridge_socks5_connection(
     mut local_stream: TcpStream,
-    channel: russh::Channel<russh::client::Msg>,
+    mut channel: russh::Channel<russh::client::Msg>,
     stats: Arc<parking_lot::RwLock<ForwardStats>>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
-    let channel = Arc::new(tokio::sync::Mutex::new(channel));
-    let channel_for_read = channel.clone();
-    let channel_for_write = channel.clone();
+    
+    // Create internal channels for lock-free data flow
+    let (local_to_ssh_tx, mut local_to_ssh_rx) = mpsc::channel::<Vec<u8>>(32);
+    let (ssh_to_local_tx, mut ssh_to_local_rx) = mpsc::channel::<Vec<u8>>(32);
+    
+    // Control signals for clean shutdown
+    let (close_tx, _) = broadcast::channel::<()>(1);
+    let mut close_rx1 = close_tx.subscribe();
+    let mut close_rx2 = close_tx.subscribe();
 
     let stats_for_send = stats.clone();
     let stats_for_recv = stats.clone();
 
-    // Local -> SSH channel (with idle timeout)
-    let local_to_ssh = async {
+    // Task 1: Read from local socket, send to mpsc channel
+    let local_reader = async move {
         let mut buf = vec![0u8; 32768];
         loop {
-            match tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, local_read.read(&mut buf)).await {
-                Ok(Ok(0)) => break, // EOF
-                Ok(Ok(n)) => {
-                    let ch = channel_for_write.lock().await;
-                    if let Err(e) = ch.data(&buf[..n]).await {
-                        debug!("SSH channel write error: {}", e);
-                        break;
+            tokio::select! {
+                biased;
+                
+                _ = close_rx1.recv() => {
+                    debug!("SOCKS5 local reader: received close signal");
+                    break;
+                }
+                
+                result = tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, local_read.read(&mut buf)) => {
+                    match result {
+                        Ok(Ok(0)) => {
+                            debug!("SOCKS5 local reader: EOF");
+                            break;
+                        }
+                        Ok(Ok(n)) => {
+                            stats_for_send.write().bytes_sent += n as u64;
+                            if local_to_ssh_tx.send(buf[..n].to_vec()).await.is_err() {
+                                debug!("SOCKS5 local reader: channel closed");
+                                break;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            debug!("SOCKS5 local reader: error {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            debug!("SOCKS5 local reader: idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
+                            break;
+                        }
                     }
-                    // Update bytes sent
-                    stats_for_send.write().bytes_sent += n as u64;
-                }
-                Ok(Err(e)) => {
-                    debug!("Local read error: {}", e);
-                    break;
-                }
-                Err(_) => {
-                    debug!("SOCKS5 local read idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
-                    break;
                 }
             }
         }
-        // Signal EOF to SSH
-        let ch = channel_for_write.lock().await;
-        let _ = ch.eof().await;
     };
 
-    // SSH channel -> Local (with idle timeout)
-    let ssh_to_local = async {
+    // Task 2: Read from mpsc channel, write to local socket
+    let local_writer = async move {
         loop {
-            let mut ch = channel_for_read.lock().await;
-            match tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, ch.wait()).await {
-                Ok(Some(russh::ChannelMsg::Data { data })) => {
-                    let data_len = data.len();
-                    drop(ch); // Release lock before writing
-                    if let Err(e) = local_write.write_all(&data).await {
-                        debug!("Local write error: {}", e);
-                        break;
+            tokio::select! {
+                biased;
+                
+                _ = close_rx2.recv() => {
+                    debug!("SOCKS5 local writer: received close signal");
+                    break;
+                }
+                
+                data = ssh_to_local_rx.recv() => {
+                    match data {
+                        Some(data) => {
+                            if let Err(e) = local_write.write_all(&data).await {
+                                debug!("SOCKS5 local writer: error {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            debug!("SOCKS5 local writer: channel closed");
+                            break;
+                        }
                     }
-                    // Update bytes received
-                    stats_for_recv.write().bytes_received += data_len as u64;
-                }
-                Ok(Some(russh::ChannelMsg::Eof)) => {
-                    debug!("SSH channel EOF");
-                    break;
-                }
-                Ok(Some(russh::ChannelMsg::Close)) => {
-                    debug!("SSH channel closed");
-                    break;
-                }
-                Ok(None) => {
-                    debug!("SSH channel ended");
-                    break;
-                }
-                Ok(_) => continue,
-                Err(_) => {
-                    debug!("SOCKS5 SSH read idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
-                    break;
                 }
             }
         }
     };
 
-    // Run both directions concurrently
-    tokio::select! {
-        _ = local_to_ssh => {}
-        _ = ssh_to_local => {}
-    }
+    // Task 3: SSH channel I/O loop (single owner of Channel, no mutex needed)
+    let ssh_io = async move {
+        loop {
+            tokio::select! {
+                biased;
+                
+                // Priority 1: Send data to SSH channel
+                data = local_to_ssh_rx.recv() => {
+                    match data {
+                        Some(data) => {
+                            if let Err(e) = channel.data(&data[..]).await {
+                                debug!("SOCKS5 SSH I/O: send error {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            debug!("SOCKS5 SSH I/O: local reader closed, sending EOF");
+                            let _ = channel.eof().await;
+                            break;
+                        }
+                    }
+                }
+                
+                // Priority 2: Receive data from SSH channel (with timeout)
+                result = tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, channel.wait()) => {
+                    match result {
+                        Ok(Some(russh::ChannelMsg::Data { data })) => {
+                            let data_len = data.len();
+                            stats_for_recv.write().bytes_received += data_len as u64;
+                            if ssh_to_local_tx.send(data.to_vec()).await.is_err() {
+                                debug!("SOCKS5 SSH I/O: local writer closed");
+                                break;
+                            }
+                        }
+                        Ok(Some(russh::ChannelMsg::Eof)) => {
+                            debug!("SOCKS5 SSH I/O: received EOF");
+                            break;
+                        }
+                        Ok(Some(russh::ChannelMsg::Close)) => {
+                            debug!("SOCKS5 SSH I/O: channel closed by remote");
+                            break;
+                        }
+                        Ok(None) => {
+                            debug!("SOCKS5 SSH I/O: channel ended");
+                            break;
+                        }
+                        Ok(_) => continue,
+                        Err(_) => {
+                            debug!("SOCKS5 SSH I/O: idle timeout ({}s)", SOCKS5_IDLE_TIMEOUT.as_secs());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Cleanup: close the channel
+        let _ = channel.close().await;
+    };
 
-    // Close the channel
-    {
-        let ch = channel.lock().await;
-        let _ = ch.close().await;
+    // Run all tasks concurrently, exit when any completes
+    tokio::select! {
+        _ = local_reader => {}
+        _ = local_writer => {}
+        _ = ssh_io => {}
     }
+    
+    // Signal all tasks to close
+    let _ = close_tx.send(());
 
     debug!("SOCKS5 connection closed");
     Ok(())

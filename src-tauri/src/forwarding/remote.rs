@@ -444,81 +444,176 @@ pub async fn handle_forwarded_connection(
     result
 }
 
+/// Idle timeout for remote forwarded connections (5 minutes)
+const REMOTE_FORWARD_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Bridge data between local socket and SSH channel
+/// 
+/// # Architecture: Lock-Free Channel I/O with Timeout Protection
+/// 
+/// Uses the same message-passing pattern as local.rs to avoid lock contention.
+/// A single task owns the SSH Channel, communicating with read/write tasks via mpsc.
+/// 
+/// Key improvements over the original Arc<Mutex<Channel>> approach:
+/// 1. No lock contention between concurrent read/write operations
+/// 2. Explicit timeout on all I/O operations (protects against zombie connections)
+/// 3. Clean shutdown propagation via broadcast channel
 async fn bridge_forwarded_connection(
     mut local_stream: TcpStream,
-    channel: russh::Channel<russh::client::Msg>,
+    mut channel: russh::Channel<russh::client::Msg>,
     stats: Arc<RemoteForwardStatsAtomic>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
-    let channel = Arc::new(tokio::sync::Mutex::new(channel));
-    let channel_for_read = channel.clone();
-    let channel_for_write = channel.clone();
+    
+    // Create internal channels for lock-free data flow
+    let (local_to_ssh_tx, mut local_to_ssh_rx) = mpsc::channel::<Vec<u8>>(32);
+    let (ssh_to_local_tx, mut ssh_to_local_rx) = mpsc::channel::<Vec<u8>>(32);
+    
+    // Control signals for clean shutdown
+    let (close_tx, _) = broadcast::channel::<()>(1);
+    let mut close_rx1 = close_tx.subscribe();
+    let mut close_rx2 = close_tx.subscribe();
 
     let stats_for_send = stats.clone();
     let stats_for_recv = stats.clone();
 
-    // SSH channel -> Local (receiving from remote)
-    let channel_to_local = async {
-        loop {
-            let mut ch = channel_for_read.lock().await;
-            match ch.wait().await {
-                Some(russh::ChannelMsg::Data { data }) => {
-                    let data_len = data.len();
-                    drop(ch);
-                    if let Err(e) = local_write.write_all(&data).await {
-                        debug!("Local write error: {}", e);
-                        break;
-                    }
-                    // Update bytes received
-                    stats_for_recv
-                        .bytes_received
-                        .fetch_add(data_len as u64, Ordering::Relaxed);
-                }
-                Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
-                    break;
-                }
-                _ => continue,
-            }
-        }
-    };
-
-    // Local -> SSH channel (sending to remote)
-    let local_to_channel = async {
+    // Task 1: Read from local socket, send to mpsc channel
+    let local_reader = async move {
         let mut buf = vec![0u8; 32768];
         loop {
-            match local_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    let ch = channel_for_write.lock().await;
-                    if let Err(e) = ch.data(&buf[..n]).await {
-                        debug!("Channel write error: {}", e);
-                        break;
-                    }
-                    // Update bytes sent
-                    stats_for_send
-                        .bytes_sent
-                        .fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    debug!("Local read error: {}", e);
+            tokio::select! {
+                biased;
+                
+                _ = close_rx1.recv() => {
+                    debug!("Remote forward local reader: received close signal");
                     break;
+                }
+                
+                result = tokio::time::timeout(REMOTE_FORWARD_IDLE_TIMEOUT, local_read.read(&mut buf)) => {
+                    match result {
+                        Ok(Ok(0)) => {
+                            debug!("Remote forward local reader: EOF");
+                            break;
+                        }
+                        Ok(Ok(n)) => {
+                            stats_for_send.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
+                            if local_to_ssh_tx.send(buf[..n].to_vec()).await.is_err() {
+                                debug!("Remote forward local reader: channel closed");
+                                break;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            debug!("Remote forward local reader: error {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            debug!("Remote forward local reader: idle timeout ({}s)", REMOTE_FORWARD_IDLE_TIMEOUT.as_secs());
+                            break;
+                        }
+                    }
                 }
             }
         }
-        let ch = channel_for_write.lock().await;
-        let _ = ch.eof().await;
     };
 
-    tokio::select! {
-        _ = channel_to_local => {}
-        _ = local_to_channel => {}
-    }
+    // Task 2: Read from mpsc channel, write to local socket
+    let local_writer = async move {
+        loop {
+            tokio::select! {
+                biased;
+                
+                _ = close_rx2.recv() => {
+                    debug!("Remote forward local writer: received close signal");
+                    break;
+                }
+                
+                data = ssh_to_local_rx.recv() => {
+                    match data {
+                        Some(data) => {
+                            if let Err(e) = local_write.write_all(&data).await {
+                                debug!("Remote forward local writer: error {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            debug!("Remote forward local writer: channel closed");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    };
 
-    {
-        let ch = channel.lock().await;
-        let _ = ch.close().await;
+    // Task 3: SSH channel I/O loop (single owner of Channel, no mutex needed)
+    let ssh_io = async move {
+        loop {
+            tokio::select! {
+                biased;
+                
+                // Priority 1: Send data to SSH channel
+                data = local_to_ssh_rx.recv() => {
+                    match data {
+                        Some(data) => {
+                            if let Err(e) = channel.data(&data[..]).await {
+                                debug!("Remote forward SSH I/O: send error {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            debug!("Remote forward SSH I/O: local reader closed, sending EOF");
+                            let _ = channel.eof().await;
+                            break;
+                        }
+                    }
+                }
+                
+                // Priority 2: Receive data from SSH channel (with timeout)
+                result = tokio::time::timeout(REMOTE_FORWARD_IDLE_TIMEOUT, channel.wait()) => {
+                    match result {
+                        Ok(Some(russh::ChannelMsg::Data { data })) => {
+                            let data_len = data.len();
+                            stats_for_recv.bytes_received.fetch_add(data_len as u64, Ordering::Relaxed);
+                            if ssh_to_local_tx.send(data.to_vec()).await.is_err() {
+                                debug!("Remote forward SSH I/O: local writer closed");
+                                break;
+                            }
+                        }
+                        Ok(Some(russh::ChannelMsg::Eof)) => {
+                            debug!("Remote forward SSH I/O: received EOF");
+                            break;
+                        }
+                        Ok(Some(russh::ChannelMsg::Close)) => {
+                            debug!("Remote forward SSH I/O: channel closed by remote");
+                            break;
+                        }
+                        Ok(None) => {
+                            debug!("Remote forward SSH I/O: channel ended");
+                            break;
+                        }
+                        Ok(_) => continue,
+                        Err(_) => {
+                            debug!("Remote forward SSH I/O: idle timeout ({}s)", REMOTE_FORWARD_IDLE_TIMEOUT.as_secs());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Cleanup: close the channel
+        let _ = channel.close().await;
+    };
+
+    // Run all tasks concurrently, exit when any completes
+    tokio::select! {
+        _ = local_reader => {}
+        _ = local_writer => {}
+        _ = ssh_io => {}
     }
+    
+    // Signal all tasks to close
+    let _ = close_tx.send(());
 
     debug!("Remote forward connection closed");
     Ok(())
