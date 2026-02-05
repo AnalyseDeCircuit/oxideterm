@@ -69,7 +69,7 @@ Cargo.lock linguist-generated
 src-tauri/gen/* linguist-generated
 
 # ============================================
-# 🦀 Rust 主权修正案 v2.0 - 让 Rust 占优
+# 🦀 Rust 主权修正案 v3.0 - 让 Rust 占优
 # ============================================
 
 # 1. 翻译文件是数据，不是代码
@@ -87,18 +87,20 @@ src/types/** linguist-documentation
 # 5. Store 状态管理 - Zustand 样板代码居多
 src/store/** linguist-vendored
 
-# 6. CodeMirror 配置 - 第三方编辑器集成
-src/lib/codemirror/** linguist-vendored
+# 6. lib 工具库 - API wrapper、工具函数、第三方集成
+# 这些是粘合代码，核心逻辑在 Rust 侧
+src/lib/** linguist-vendored
 
-# 7. hooks 目录 - 多为 React 粘合代码
+# 7. hooks 目录 - React 粘合代码
 src/hooks/** linguist-vendored
 
-# 8. 工具库/配置类文件
-src/lib/themes.ts linguist-vendored
-src/lib/utils.ts linguist-vendored
+# 8. i18n 配置
 src/i18n.ts linguist-vendored
 src/vite-env.d.ts linguist-generated
 
-# 9. 确保 Rust 核心目录始终被检测（最高优先级）
+# 9. modals 目录 - 表单/对话框 UI（样板代码居多）
+src/components/modals/** linguist-vendored
+
+# 10. 确保 Rust 核心目录始终被检测（最高优先级）
 src-tauri/src/**/*.rs linguist-detectable=true
 src-tauri/benches/**/*.rs linguist-detectable=true
