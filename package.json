@@ -1,7 +1,7 @@
 {
   "name": "tauri-app",
   "private": true,
-  "version": "1.4.5",
+  "version": "1.4.6",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
