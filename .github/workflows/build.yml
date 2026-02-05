@@ -103,6 +103,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: release_notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES=$(pnpm release:notes "$VERSION" --stdout 2>/dev/null || echo "See the assets below to download the installer for your platform.")
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -110,7 +120,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'OxideTerm ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download the installer for your platform.'
+          releaseBody: ${{ steps.release_notes.outputs.body || 'See the assets below to download the installer for your platform.' }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

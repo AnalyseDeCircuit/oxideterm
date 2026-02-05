@@ -13,7 +13,10 @@
     "license:generate:backend": "cd src-tauri && node scripts/generate-third-party-notices.cjs",
     "i18n:check": "node scripts/check-i18n.cjs",
     "i18n:check:all": "node scripts/check-i18n.cjs",
-    "project:stats": "node scripts/project-stats.cjs"
+    "project:stats": "node scripts/project-stats.cjs",
+    "version:bump": "node scripts/bump-version.cjs",
+    "version:check": "node scripts/bump-version.cjs --dry-run",
+    "release:notes": "node scripts/release-notes.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",
