@@ -1,21 +1,21 @@
 # Third-Party Notices (Backend / Rust)
 
 This file lists third-party crates used by the Rust backend and their detected licenses (including transitive dependencies).
-Generated: 2026-01-30T17:03:43.582Z
+Generated: 2026-02-05T13:38:19.650Z
 
 ## Summary
-- MIT: 589
-- Apache-2.0: 440
+- MIT: 606
+- Apache-2.0: 452
 - Unicode-3.0: 19
 - Zlib: 18
 - BSD-3-Clause: 10
 - Apache-2.0 WITH LLVM-exception: 7
 - Unlicense: 6
 - MPL-2.0: 5
-- BSL-1.0: 3
-- CC0-1.0: 2
+- CC0-1.0: 3
+- MIT-0: 2
+- BSL-1.0: 2
 - 0BSD: 1
-- MIT-0: 1
 - BSD-1-Clause: 1
 - LicenseRef-PolyForm-Noncommercial-1.0.0: 1
 - LGPL-2.1-or-later: 1
@@ -46,6 +46,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | alloc-stdlib | 0.2.2 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | android_system_properties | 0.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | anyhow | 1.0.100 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| arbitrary | 1.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | argon2 | 0.5.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | arrayvec | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | async-broadcast | 0.7.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -65,7 +66,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | base16ct | 0.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | base64 | 0.21.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | base64 | 0.22.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| base64ct | 1.8.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| base64ct | 1.8.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bcrypt-pbkdf | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | bitflags | 1.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | bitflags | 2.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -78,9 +79,11 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | brotli | 8.0.2 | BSD-3-Clause, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | brotli-decompressor | 5.0.0 | BSD-3-Clause, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bumpalo | 3.19.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bytemuck | 1.24.0 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| bytemuck | 1.25.0 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | byteorder | 1.5.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bytes | 1.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| bzip2 | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| bzip2-sys | 0.1.13+1.0.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cairo-rs | 0.18.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cairo-sys-rs | 0.18.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | camino | 1.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -88,7 +91,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | cargo_toml | 0.22.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cargo-platform | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cbc | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cc | 1.2.52 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| cc | 1.2.55 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cesu8 | 1.1.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cfb | 0.7.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cfg_aliases | 0.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -97,13 +100,14 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | chacha20 | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | chacha20poly1305 | 0.10.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | chardetng | 0.1.17 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| chrono | 0.4.42 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| chrono | 0.4.43 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cipher | 0.4.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | combine | 4.6.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | concurrent-queue | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | const-oid | 0.9.6 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | const-random | 0.1.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | const-random-macro | 0.1.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| constant_time_eq | 0.3.1 | CC0-1.0, MIT-0, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | convert_case | 0.4.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cookie | 0.18.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-foundation | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -111,6 +115,8 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | core-graphics | 0.24.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-graphics-types | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cpufeatures | 0.2.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| crc | 3.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| crc-catalog | 2.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | crc32fast | 1.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | crossbeam-channel | 0.5.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | crossbeam-utils | 0.8.21 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -128,9 +134,11 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | darling_macro | 0.21.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | dashmap | 6.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | data-encoding | 2.10.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| deflate64 | 0.1.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | delegate | 0.13.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | der | 0.7.10 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | deranged | 0.5.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| derive_arbitrary | 1.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | derive_more | 0.99.20 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | des | 0.8.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | digest | 0.10.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -170,8 +178,8 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | fiat-crypto | 0.2.9 | MIT, Apache-2.0, BSD-1-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | field-offset | 0.3.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | filedescriptor | 0.8.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| find-msvc-tools | 0.1.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| flate2 | 1.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| find-msvc-tools | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| flate2 | 1.1.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | flurry | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | fnv | 1.0.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | foreign-types | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -199,7 +207,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | gdkx11-sys | 0.18.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | generic-array | 0.14.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | getrandom | 0.1.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| getrandom | 0.2.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| getrandom | 0.2.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | getrandom | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ghash | 0.5.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | gio | 0.18.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -231,10 +239,10 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | http-body-util | 0.1.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | httparse | 1.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hyper | 1.8.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| hyper-util | 0.1.19 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| iana-time-zone | 0.1.64 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| hyper-util | 0.1.20 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| iana-time-zone | 0.1.65 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | iana-time-zone-haiku | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ico | 0.4.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| ico | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | icu_collections | 2.1.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | icu_locale_core | 2.1.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | icu_normalizer | 2.1.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -259,7 +267,8 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | javascriptcore-rs-sys | 1.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | jni | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | jni-sys | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| js-sys | 0.3.83 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| jobserver | 0.1.34 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| js-sys | 0.3.85 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | json-patch | 3.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | jsonptr | 0.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | keyboard-types | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -267,12 +276,15 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | kuchikiki | 0.8.8-speedreader | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | lazy_static | 1.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | libc | 0.2.180 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| libm | 0.2.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| libm | 0.2.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| libmimalloc-sys | 0.1.44 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libredox | 0.1.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | linux-raw-sys | 0.11.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | litemap | 0.8.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | lock_api | 0.4.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | log | 0.4.29 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| lzma-rs | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| lzma-sys | 0.1.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mac | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | markup5ever | 0.14.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | match_token | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -282,6 +294,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | memchr | 2.7.6 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | memoffset | 0.6.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | memoffset | 0.9.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| mimalloc | 0.1.48 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | mime | 0.3.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mime_guess | 2.0.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | miniz_oxide | 0.8.9 | MIT, Zlib, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -300,7 +313,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | num_enum_derive | 0.7.5 | BSD-3-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-bigint | 0.4.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-bigint-dig | 0.8.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-conv | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| num-conv | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-integer | 0.1.46 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-iter | 0.1.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-traits | 0.2.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -326,7 +339,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | open | 5.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | option-ext | 0.2.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ordered-stream | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| oxideterm | 1.3.2 | LicenseRef-PolyForm-Noncommercial-1.0.0 | path+file:///Users/dominical/Documents/OxideTerm/src-tauri |
+| oxideterm | 1.4.5 | LicenseRef-PolyForm-Noncommercial-1.0.0 | path+file:///Users/dominical/Documents/OxideTerm/src-tauri |
 | p256 | 0.13.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | p384 | 0.13.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | p521 | 0.13.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -378,9 +391,9 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | proc-macro-error | 1.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | proc-macro-error-attr | 1.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | proc-macro-hack | 0.5.20+deprecated | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proc-macro2 | 1.0.105 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| proc-macro2 | 1.0.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | quick-xml | 0.38.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| quote | 1.0.43 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| quote | 1.0.44 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
 | rand | 0.7.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand | 0.8.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -398,7 +411,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | regex | 1.12.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | regex-automata | 0.4.13 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | regex-syntax | 0.8.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| reqwest | 0.12.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| reqwest | 0.13.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rfc6979 | 0.4.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rfd | 0.16.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rmp | 0.8.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -412,7 +425,6 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | rustc_version | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rustix | 1.1.3 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rustversion | 1.0.22 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ryu | 1.0.22 | Apache-2.0, BSL-1.0 | registry+https://github.com/rust-lang/crates.io-index |
 | salsa20 | 0.10.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | same-file | 1.0.6 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | schemars | 0.8.22 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -431,7 +443,6 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | serde_repr | 0.1.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | serde_spanned | 0.6.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | serde_spanned | 1.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_urlencoded | 0.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | serde_with | 3.16.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | serde_with_macros | 3.16.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | serde-untagged | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -452,10 +463,10 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | signature | 2.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | simd-adler32 | 0.3.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | siphasher | 0.3.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| siphasher | 1.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| slab | 0.4.11 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| siphasher | 1.0.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| slab | 0.4.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | smallvec | 1.15.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| socket2 | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| socket2 | 0.6.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | softbuffer | 0.4.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | soup3 | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | soup3-sys | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -479,29 +490,29 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | tao | 0.34.5 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tao-macros | 0.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | target-lexicon | 0.12.16 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| tauri | 2.9.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-build | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-codegen | 2.5.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-macros | 2.5.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-plugin | 2.5.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-plugin-dialog | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri | 2.10.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-build | 2.5.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-codegen | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-macros | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-plugin | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-plugin-dialog | 2.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-fs | 2.4.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-opener | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-runtime | 2.9.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-runtime-wry | 2.9.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-utils | 2.8.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-runtime | 2.10.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-runtime-wry | 2.10.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-utils | 2.8.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-winres | 0.3.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tempfile | 3.24.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tendril | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | termios | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | thiserror | 1.0.69 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror | 2.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| thiserror | 2.0.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | thiserror-impl | 1.0.69 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror-impl | 2.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| thiserror-impl | 2.0.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | thread_local | 1.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| time | 0.3.44 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| time-core | 0.1.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| time-macros | 0.2.24 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| time | 0.3.46 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| time-core | 0.1.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| time-macros | 0.2.26 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tiny-keccak | 2.0.2 | CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tinystr | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tokio | 1.49.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -518,7 +529,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | toml_edit | 0.23.10+spec-1.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | toml_parser | 1.0.6+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | toml_writer | 1.0.6+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tower | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tower | 0.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tower-http | 0.6.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tower-layer | 0.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tower-service | 0.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -546,7 +557,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | utf-8 | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | utf8_iter | 1.0.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | utf8parse | 0.2.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| uuid | 1.19.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| uuid | 1.20.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | version_check | 0.9.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | version-compare | 0.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | vswhom | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -558,17 +569,17 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | want | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wasi | 0.9.0+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasip2 | 1.0.1+wasi-0.2.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wasip2 | 1.0.2+wasi-0.2.9 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wasite | 0.1.0 | Apache-2.0, BSL-1.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen | 0.2.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-futures | 0.4.56 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-macro | 0.2.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-macro-support | 0.2.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-shared | 0.2.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wasm-bindgen | 0.2.108 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wasm-bindgen-futures | 0.4.58 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wasm-bindgen-macro | 0.2.108 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wasm-bindgen-macro-support | 0.2.108 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wasm-bindgen-shared | 0.2.108 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | wasm-streams | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| web-sys | 0.3.83 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| webkit2gtk | 2.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| webkit2gtk-sys | 2.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| web-sys | 0.3.85 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| webkit2gtk | 2.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| webkit2gtk-sys | 2.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | webview2-com | 0.38.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | webview2-com-macros | 0.8.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | webview2-com-sys | 0.38.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -645,26 +656,33 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | winnow | 0.7.14 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | winreg | 0.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | winreg | 0.55.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wit-bindgen | 0.46.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wit-bindgen | 0.51.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | writeable | 0.6.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wry | 0.53.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wry | 0.54.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | x11 | 2.21.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | x11-dl | 2.21.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| xz2 | 0.1.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | yoke | 0.8.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | yoke-derive | 0.8.1 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zbus | 5.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus_macros | 5.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zbus | 5.13.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zbus_macros | 5.13.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zbus_names | 4.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zerocopy | 0.8.33 | BSD-2-Clause, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zerocopy | 0.8.37 | BSD-2-Clause, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zerofrom | 0.1.6 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zerofrom-derive | 0.1.6 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zeroize | 1.8.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zeroize_derive | 1.4.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zerotrie | 0.2.3 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zerovec | 0.11.5 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zerovec-derive | 0.11.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zmij | 1.0.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant | 5.9.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant_derive | 5.9.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zip | 2.4.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zmij | 1.0.19 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zopfli | 0.8.3 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| zstd | 0.13.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zstd-safe | 7.2.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| zstd-sys | 2.0.16+zstd.1.5.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| zvariant | 5.9.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zvariant_derive | 5.9.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zvariant_utils | 3.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 
 ## Notes
