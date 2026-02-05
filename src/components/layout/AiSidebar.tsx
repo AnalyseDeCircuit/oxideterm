@@ -64,8 +64,8 @@ export const AiSidebar = () => {
     };
   }, [isResizing, setAiSidebarWidth]);
 
-  // Collapsed state - hide completely (toggle button is in left sidebar)
-  if (aiSidebarCollapsed) {
+  // AI disabled or collapsed - hide completely
+  if (!aiEnabled || aiSidebarCollapsed) {
     return null;
   }
 
