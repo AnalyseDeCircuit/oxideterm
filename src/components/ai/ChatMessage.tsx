@@ -4,7 +4,7 @@ import { User, Bot } from 'lucide-react';
 import { emit } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { AiChatMessage } from '../../types';
-import { renderMarkdown, markdownStyles } from '../../lib/markdownRenderer';
+import { renderMarkdown, markdownStyles, renderMathInElement } from '../../lib/markdownRenderer';
 import { useMermaid } from '../../hooks/useMermaid';
 
 interface ChatMessageProps {
@@ -65,6 +65,14 @@ export const ChatMessage = memo(function ChatMessage({ message }: ChatMessagePro
 
   // Handle Mermaid diagram rendering
   useMermaid(contentRef, message.content);
+
+  // Handle KaTeX math formula rendering
+  useEffect(() => {
+    if (contentRef.current && !isUser) {
+      // Render math formulas after content is in DOM
+      renderMathInElement(contentRef.current);
+    }
+  }, [renderedHtml, isUser]);
 
   // Handle code block interactions
   const handleClick = useCallback(async (e: React.MouseEvent) => {
