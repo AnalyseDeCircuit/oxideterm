@@ -464,12 +464,35 @@ let mathBlockCounter = 0;
 
 /**
  * Protect math formulas from markdown parsing by replacing them with placeholders
+ * 
+ * Important: Skip code blocks (``` or `) to avoid replacing $ inside code
  */
 function protectMathFormulas(content: string): { processed: string; mathBlocks: MathBlock[] } {
   const mathBlocks: MathBlock[] = [];
   let processed = content;
   
-  // First, handle display math ($$...$$) - must be done before inline math
+  // Step 1: Temporarily protect code blocks and inline code
+  // This prevents math regex from matching inside code
+  const codeBlockPlaceholders: { placeholder: string; content: string }[] = [];
+  let codeBlockCounter = 0;
+  
+  // Protect fenced code blocks (```...```)
+  processed = processed.replace(/```[\s\S]*?```/g, (match) => {
+    const placeholder = `%%CODE_BLOCK_${++codeBlockCounter}%%`;
+    codeBlockPlaceholders.push({ placeholder, content: match });
+    return placeholder;
+  });
+  
+  // Protect inline code (`...`) - but not escaped backticks
+  processed = processed.replace(/(?<!\\)`[^`\n]+`/g, (match) => {
+    const placeholder = `%%CODE_INLINE_${++codeBlockCounter}%%`;
+    codeBlockPlaceholders.push({ placeholder, content: match });
+    return placeholder;
+  });
+  
+  // Step 2: Now handle math formulas (code is protected)
+  
+  // Handle display math ($$...$$) - must be done before inline math
   // Match $$ at start of line or after whitespace, and $$ at end or before whitespace
   const displayMathRegex = /\$\$([\s\S]*?)\$\$/g;
   processed = processed.replace(displayMathRegex, (_match, formula) => {
@@ -490,6 +513,11 @@ function protectMathFormulas(content: string): { processed: string; mathBlocks: 
     mathBlocks.push({ placeholder, formula: formula.trim(), isDisplay: false });
     return placeholder;
   });
+  
+  // Step 3: Restore code block placeholders
+  for (const { placeholder, content } of codeBlockPlaceholders) {
+    processed = processed.replace(placeholder, content);
+  }
   
   return { processed, mathBlocks };
 }
@@ -647,7 +675,7 @@ export const markdownStyles = `
   padding: 0.15em 0.4em;
   margin: 0 0.1em;
   font-size: 0.9em;
-  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace);
+  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace) !important;
   background: var(--theme-bg-panel, rgba(255, 255, 255, 0.05));
   border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.1));
   border-radius: 3px;
@@ -674,7 +702,7 @@ export const markdownStyles = `
 
 .md-code-lang {
   font-size: 10px;
-  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace);
+  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace) !important;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--theme-text-muted, rgba(255, 255, 255, 0.4));
@@ -725,13 +753,20 @@ export const markdownStyles = `
   overflow-x: auto;
   font-size: 13px;
   line-height: 1.5;
+  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace) !important;
 }
 
 .md-code {
-  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace);
+  font-family: var(--terminal-font-family, 'JetBrains Mono', monospace) !important;
   color: var(--theme-text, #fff);
   display: block;
   white-space: pre;
+}
+
+/* Force all Prism tokens to inherit font from parent */
+.md-code .token,
+.md-code span {
+  font-family: inherit !important;
 }
 
 /* Blockquote */

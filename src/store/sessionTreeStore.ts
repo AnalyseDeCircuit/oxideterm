@@ -1007,6 +1007,26 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         console.warn(`[connectNodeInternal] Failed to refresh AppStore connections:`, e);
       }
       
+      // 🔴 Phase 5.1: 同步 appStore.sessions 中关联终端的 connectionId
+      // 重连后 connectionId 变化，必须更新 sessions 否则 SFTPView 的 guardSessionConnection 会失败
+      const terminalIds = get().nodeTerminalMap.get(nodeId) || [];
+      if (terminalIds.length > 0) {
+        useAppStore.setState((state) => {
+          const newSessions = new Map(state.sessions);
+          for (const terminalId of terminalIds) {
+            const session = newSessions.get(terminalId);
+            if (session) {
+              newSessions.set(terminalId, {
+                ...session,
+                connectionId: response.sshConnectionId,
+              });
+            }
+          }
+          return { sessions: newSessions };
+        });
+        console.debug(`[connectNodeInternal] Updated connectionId for ${terminalIds.length} sessions: ${response.sshConnectionId}`);
+      }
+      
       console.log(`[connectNodeInternal] Node ${nodeId} connected with SSH ID: ${response.sshConnectionId}`);
     },
     
@@ -1738,6 +1758,39 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
             console.info('[StateDrift] AppStore connections refreshed after auto-fix');
           } catch (e) {
             console.warn('[StateDrift] Failed to refresh AppStore connections:', e);
+          }
+          
+          // 🔴 Phase 5.1: 同步 appStore.sessions 中终端的 connectionId
+          // StateDrift 可能包含 sshConnectionId 变化，必须同步到 sessions 否则 SFTP 会失败
+          try {
+            useAppStore.setState((state) => {
+              const newSessions = new Map(state.sessions);
+              let updated = 0;
+              
+              for (const backendNode of backendNodes) {
+                if (!backendNode.sshConnectionId) continue;
+                
+                // 获取该节点关联的终端 ID
+                const terminalIds = newTerminalMap.get(backendNode.id) || [];
+                for (const terminalId of terminalIds) {
+                  const session = newSessions.get(terminalId);
+                  if (session && session.connectionId !== backendNode.sshConnectionId) {
+                    newSessions.set(terminalId, {
+                      ...session,
+                      connectionId: backendNode.sshConnectionId,
+                    });
+                    updated++;
+                  }
+                }
+              }
+              
+              if (updated > 0) {
+                console.info(`[StateDrift] Updated connectionId for ${updated} sessions`);
+              }
+              return { sessions: newSessions };
+            });
+          } catch (e) {
+            console.warn('[StateDrift] Failed to sync sessions connectionId:', e);
           }
         }
         
