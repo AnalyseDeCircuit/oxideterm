@@ -612,7 +612,21 @@ pub async fn create_terminal(
         if let Ok(reason) = disconnect_rx.await {
             warn!("Session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
             if reason.is_recoverable() {
-                let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
+                // 🔧 修复 ref_count 泄漏：超时后释放连接引用
+                let conn_reg_for_cleanup = conn_registry_clone.clone();
+                let _ = registry_clone.mark_ws_detached_with_cleanup(
+                    &session_id_clone,
+                    Duration::from_secs(300),
+                    Some(move |conn_id: String| {
+                        // 在 TTL 过期时释放连接池引用
+                        let conn_reg = conn_reg_for_cleanup;
+                        tokio::spawn(async move {
+                            info!("Releasing connection {} ref after WS detach timeout", conn_id);
+                            let _ = conn_reg.remove_terminal(&conn_id, "").await; // session already removed
+                            let _ = conn_reg.release(&conn_id).await;
+                        });
+                    }),
+                );
             } else {
                 // AcceptTimeout 或其他不可恢复的断开：清理会话
                 // 这是因为如果前端从未连接，保留这个会话没有意义
@@ -623,6 +637,8 @@ pub async fn create_terminal(
                     conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
                     // 从连接的终端列表中移除
                     let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    // 释放连接引用
+                    let _ = conn_registry_clone.release(&conn_id_clone).await;
                     // 完全移除会话
                     let _ = registry_clone.disconnect_complete(&session_id_clone, true);
                 } else {
@@ -936,7 +952,20 @@ pub async fn recreate_terminal_pty(
         if let Ok(reason) = disconnect_rx.await {
             warn!("Recreated session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
             if reason.is_recoverable() {
-                let _ = registry_clone.mark_ws_detached(&session_id_clone, Duration::from_secs(300));
+                // 🔧 修复 ref_count 泄漏：超时后释放连接引用
+                let conn_reg_for_cleanup = conn_registry_clone.clone();
+                let _ = registry_clone.mark_ws_detached_with_cleanup(
+                    &session_id_clone,
+                    Duration::from_secs(300),
+                    Some(move |conn_id: String| {
+                        let conn_reg = conn_reg_for_cleanup;
+                        tokio::spawn(async move {
+                            info!("Releasing connection {} ref after recreated WS detach timeout", conn_id);
+                            let _ = conn_reg.remove_terminal(&conn_id, "").await;
+                            let _ = conn_reg.release(&conn_id).await;
+                        });
+                    }),
+                );
             } else {
                 // AcceptTimeout: 前端没有连接，清理会话
                 if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
@@ -944,6 +973,7 @@ pub async fn recreate_terminal_pty(
                     // 🔴 关键修复：发送 disconnected 事件通知前端
                     conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
                     let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    let _ = conn_registry_clone.release(&conn_id_clone).await;
                     let _ = registry_clone.disconnect_complete(&session_id_clone, true);
                 } else {
                     // 其他不可恢复的断开：只更新状态

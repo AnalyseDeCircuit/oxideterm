@@ -280,15 +280,26 @@ impl SessionRegistry {
     }
 
     /// Mark WS detached and schedule PTY cleanup after TTL (for seamless reconnect)
-    pub fn mark_ws_detached(
+    /// 
+    /// If `on_timeout` callback is provided, it will be called when the TTL expires
+    /// before the session is fully disconnected. This is useful for releasing
+    /// connection pool references.
+    pub fn mark_ws_detached_with_cleanup<F>(
         self: &Arc<Self>,
         session_id: &str,
         ttl: Duration,
-    ) -> Result<(), RegistryError> {
+        on_timeout: Option<F>,
+    ) -> Result<(), RegistryError>
+    where
+        F: FnOnce(String) + Send + 'static,
+    {
         let mut entry = self
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
+        
+        // Get connection_id before we release the entry lock
+        let connection_id = entry.connection_id.clone();
 
         entry.ws_detached = true;
 
@@ -304,16 +315,40 @@ impl SessionRegistry {
         tokio::spawn(async move {
             tokio::select! {
                 _ = tokio::time::sleep(ttl) => {
+                    info!("WS detach TTL expired for session {}, cleaning up", session_id);
+                    
                     if let Some(entry) = registry.sessions.get(&session_id) {
                         let _ = entry.close().await;
                     }
-                    let _ = registry.disconnect_complete(&session_id, false);
+                    
+                    // Call the cleanup callback (e.g., release connection ref_count)
+                    if let Some(callback) = on_timeout {
+                        if let Some(conn_id) = connection_id {
+                            callback(conn_id);
+                        }
+                    }
+                    
+                    let _ = registry.disconnect_complete(&session_id, true);
                 }
-                _ = cancel_rx => {}
+                _ = cancel_rx => {
+                    debug!("WS detach cleanup cancelled for session {}", session_id);
+                }
             }
         });
 
         Ok(())
+    }
+
+    /// Mark WS detached and schedule PTY cleanup after TTL (for seamless reconnect)
+    /// 
+    /// Simple version without cleanup callback. Use `mark_ws_detached_with_cleanup`
+    /// if you need to release connection pool references on timeout.
+    pub fn mark_ws_detached(
+        self: &Arc<Self>,
+        session_id: &str,
+        ttl: Duration,
+    ) -> Result<(), RegistryError> {
+        self.mark_ws_detached_with_cleanup::<fn(String)>(session_id, ttl, None)
     }
 
     /// Mark session as failed

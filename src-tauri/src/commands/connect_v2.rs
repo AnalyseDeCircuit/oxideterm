@@ -379,13 +379,28 @@ async fn register_session_services(
             );
 
             if reason.is_recoverable() {
-                let _ = registry_clone.mark_ws_detached(&sid_clone, std::time::Duration::from_secs(300));
+                // 🔧 修复 ref_count 泄漏：超时后释放连接引用
+                // 在 connect_v2 中，connection_id == session_id
+                let conn_reg_for_cleanup = conn_registry_clone.clone();
+                let _ = registry_clone.mark_ws_detached_with_cleanup(
+                    &sid_clone,
+                    std::time::Duration::from_secs(300),
+                    Some(move |conn_id: String| {
+                        let conn_reg = conn_reg_for_cleanup;
+                        tokio::spawn(async move {
+                            info!("Releasing connection {} ref after WS detach timeout (v2)", conn_id);
+                            let _ = conn_reg.remove_terminal(&conn_id, &conn_id).await;
+                            let _ = conn_reg.release(&conn_id).await;
+                        });
+                    }),
+                );
             } else {
                 // AcceptTimeout: 清理会话（在 connect_v2 中 session_id == connection_id）
                 if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
                     warn!("Session {} WS accept timeout, removing from registries", sid_clone);
                     // 在 connect_v2 模式中，connection_id == session_id
                     let _ = conn_registry_clone.remove_terminal(&sid_clone, &sid_clone).await;
+                    let _ = conn_registry_clone.release(&sid_clone).await;
                     let _ = registry_clone.disconnect_complete(&sid_clone, true);
                 } else {
                     let _ = registry_clone.disconnect_complete(&sid_clone, false);
