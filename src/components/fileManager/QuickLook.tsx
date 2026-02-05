@@ -382,9 +382,14 @@ export const QuickLook: React.FC<QuickLookProps> = ({
                 className="flex-1 p-4"
               />
             ) : (
-              <pre className="flex-1 p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
-                {preview.data}
-              </pre>
+              <div className="flex-1">
+                <CodeHighlight
+                  code={preview.data}
+                  language="text"
+                  showLineNumbers={true}
+                  className="p-4 min-h-full"
+                />
+              </div>
             )
           )}
 

@@ -30,6 +30,10 @@ export const getFontFamilyCSS = (val: string): string => {
       // Meslo: system → bundled fallback → generic
       return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
     
+    case 'maple':
+      // Maple Mono NF CN: bundled CJK-optimized font
+      return '"Maple Mono NF CN", "Maple Mono NF", "Maple Mono", monospace';
+    
     case 'cascadia':
       // Cascadia Code: Windows Terminal default, system only
       return '"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", monospace';

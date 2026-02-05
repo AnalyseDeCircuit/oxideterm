@@ -197,8 +197,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       let mimeType: string | undefined;
       let language: string | undefined;
       let archiveInfo: ArchiveInfo | undefined;
-      // TODO: stream 变量用于流式预览大文件，目前未完全实现
-      // let stream: FilePreview['stream'];
+      let stream: FilePreview['stream'];
 
       const isShellConfig = SHELL_CONFIG_FILES.has(file.name) || (file.name.startsWith('.') && ext === '');
       const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
@@ -253,14 +252,14 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
           data = '';
         }
       } else if (shouldStream) {
-        // TODO: 流式预览大文件功能未完全实现，暂时跳过
+        // Use streaming preview for large text/code files
         if (isCode) {
           previewType = 'code';
           language = isShellConfig ? 'bash' : LANGUAGE_MAP[ext];
-          // stream = { path: filePath, size: fileSize, type: 'code', language, mimeType };
+          stream = { path: filePath, size: fileSize, type: 'code', language, mimeType };
         } else {
           previewType = 'text';
-          // stream = { path: filePath, size: fileSize, type: 'text', mimeType };
+          stream = { path: filePath, size: fileSize, type: 'text', mimeType };
         }
       } else if (fileSize > MAX_PREVIEW_SIZE) {
         previewType = 'too-large';
@@ -328,6 +327,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
         reason: previewType === 'unsupported' ? t('fileManager.binaryFile') : undefined,
         archiveInfo,
         metadata,
+        stream,
       });
     } catch (err) {
       // Provide more detailed error info

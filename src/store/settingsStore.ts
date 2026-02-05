@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { themes } from '../lib/themes';
 import { useToastStore } from '../hooks/useToast';
+import { getFontFamilyCSS } from '../components/fileManager/fontUtils';
 import i18n from '../i18n';
 
 // ============================================================================
@@ -709,6 +710,21 @@ useSettingsStore.subscribe(
   }
 );
 
+// Subscribe to font family changes - update CSS variable globally
+useSettingsStore.subscribe(
+  (state) => ({
+    fontFamily: state.settings.terminal.fontFamily,
+    customFontFamily: state.settings.terminal.customFontFamily,
+  }),
+  ({ fontFamily, customFontFamily }) => {
+    const fontCSS = fontFamily === 'custom' && customFontFamily
+      ? customFontFamily
+      : getFontFamilyCSS(fontFamily);
+    document.documentElement.style.setProperty('--terminal-font-family', fontCSS);
+  },
+  { equalityFn: (a, b) => a.fontFamily === b.fontFamily && a.customFontFamily === b.customFontFamily }
+);
+
 // Subscribe to renderer changes - show Toast notification
 useSettingsStore.subscribe(
   (state) => state.settings.terminal.renderer,
@@ -744,6 +760,13 @@ export function initializeSettings(): void {
   // Apply theme immediately
   const themeName = themes[settings.terminal.theme] ? settings.terminal.theme : 'default';
   document.documentElement.setAttribute('data-theme', themeName);
+
+  // Apply terminal font CSS variable globally
+  const { fontFamily, customFontFamily } = settings.terminal;
+  const fontCSS = fontFamily === 'custom' && customFontFamily
+    ? customFontFamily
+    : getFontFamilyCSS(fontFamily);
+  document.documentElement.style.setProperty('--terminal-font-family', fontCSS);
 
   // Initialize previousRenderer for Toast tracking
   previousRenderer = settings.terminal.renderer;

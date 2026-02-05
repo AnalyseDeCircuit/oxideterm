@@ -145,6 +145,9 @@
   color-scheme: dark;
   --background: var(--color-oxide-bg);
   --foreground: var(--color-oxide-text);
+  
+  /* Terminal font - default, updated by settingsStore */
+  --terminal-font-family: "JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace;
 
   /* Theme Variables - Default Theme (Neutral) */
   --theme-bg: #09090b;
