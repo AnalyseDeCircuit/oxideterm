@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
-import { renderMarkdown, markdownStyles } from '../../lib/markdownRenderer';
+import { renderMarkdown, markdownStyles, renderMathInElement } from '../../lib/markdownRenderer';
 import { useMermaid } from '../../hooks/useMermaid';
 import { formatUnixPermissions, formatFileSize, formatTimestamp, formatRelativeTime } from './utils';
 import { CodeHighlight } from './CodeHighlight';
@@ -97,6 +97,13 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
   // Handle Mermaid diagram rendering for markdown previews
   useMermaid(markdownRef, preview?.data || '');
+
+  // Handle KaTeX math formula rendering for markdown previews
+  useEffect(() => {
+    if (markdownRef.current && preview?.type === 'markdown') {
+      renderMathInElement(markdownRef.current);
+    }
+  }, [preview?.type, preview?.data]);
 
   // Filter file list to only include previewable files (not directories)
   const previewableFiles = useMemo(() => {

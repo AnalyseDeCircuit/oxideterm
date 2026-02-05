@@ -31,8 +31,10 @@ tauri-plugin-dialog = "2.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Async Runtime
-tokio = { version = "1", features = ["full"] }
+# Async Runtime - 精简 features，移除不需要的 fs, signal 等
+# full = rt-multi-thread + io-util + io-std + net + time + process + macros + sync + signal + fs + tracing + parking_lot
+# 我们需要：rt-multi-thread(spawn), net(TcpListener), sync(mpsc/RwLock), time(timeout/sleep), macros(select!)
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
 
 # SSH Protocol
 russh = "0.49"

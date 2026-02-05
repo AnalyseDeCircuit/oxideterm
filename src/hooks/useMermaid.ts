@@ -3,21 +3,30 @@
  * 
  * Handles Mermaid diagram rendering with automatic re-render on content change.
  * Supports dark theme and responsive sizing.
+ * 
+ * Mermaid library (~500KB) is loaded dynamically on first use to reduce initial bundle size.
  */
 
 import { useEffect, useCallback, useRef } from 'react';
-import mermaid from 'mermaid';
 
-// Track if mermaid has been initialized
-let mermaidInitialized = false;
+// Dynamic import type for mermaid
+type MermaidAPI = typeof import('mermaid').default;
+
+// Lazy-loaded mermaid instance
+let mermaidInstance: MermaidAPI | null = null;
+let mermaidLoadPromise: Promise<MermaidAPI> | null = null;
 
 /**
- * Initialize Mermaid with OxideTerm dark theme
+ * Dynamically load and initialize Mermaid with OxideTerm dark theme
  */
-function initMermaid(): void {
-  if (mermaidInitialized) return;
+async function getMermaid(): Promise<MermaidAPI> {
+  if (mermaidInstance) return mermaidInstance;
   
-  mermaid.initialize({
+  if (!mermaidLoadPromise) {
+    mermaidLoadPromise = import('mermaid').then((module) => {
+      const mermaid = module.default;
+      
+      mermaid.initialize({
     startOnLoad: false,
     theme: 'dark',
     darkMode: true,
@@ -127,7 +136,12 @@ function initMermaid(): void {
     },
   });
   
-  mermaidInitialized = true;
+      mermaidInstance = mermaid;
+      return mermaid;
+    });
+  }
+  
+  return mermaidLoadPromise;
 }
 
 /**
@@ -138,6 +152,9 @@ async function renderDiagram(element: HTMLElement): Promise<void> {
   if (!encodedSrc) return;
   
   try {
+    // Load mermaid dynamically
+    const mermaid = await getMermaid();
+    
     // Decode the source
     const source = decodeURIComponent(atob(encodedSrc));
     const id = element.id || `mermaid-${Date.now()}`;
@@ -182,9 +199,8 @@ export function useMermaid(
     if (diagrams.length === 0) return;
     
     renderingRef.current = true;
-    initMermaid();
     
-    // Render each diagram
+    // Render each diagram (mermaid is loaded on first render)
     for (const diagram of diagrams) {
       await renderDiagram(diagram);
     }
@@ -264,11 +280,12 @@ export function useMermaid(
  * Useful for non-React contexts
  */
 export async function renderMermaidDiagrams(container: HTMLElement): Promise<void> {
-  initMermaid();
-  
   const diagrams = container.querySelectorAll<HTMLElement>(
     '.md-mermaid:not(.rendered):not(.error)'
   );
+  
+  // Only load mermaid if there are diagrams to render
+  if (diagrams.length === 0) return;
   
   for (const diagram of diagrams) {
     await renderDiagram(diagram);

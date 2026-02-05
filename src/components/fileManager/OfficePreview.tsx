@@ -1,12 +1,18 @@
 /**
  * Office Document Preview Component
  * Supports Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files
+ * 
+ * Libraries are loaded dynamically to reduce initial bundle size:
+ * - mammoth (~400KB) - only loaded when viewing Word documents
+ * - xlsx (~400KB) - only loaded when viewing Excel documents
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
-import { FileText, Table, FileJson } from 'lucide-react';
+import { FileText, Table, FileJson, Loader2 } from 'lucide-react';
+
+// Dynamic import types for Office libraries
+type MammothModule = typeof import('mammoth');
+type XLSXModule = typeof import('xlsx');
 
 export interface OfficePreviewProps {
   data: string; // base64 encoded Office file
@@ -92,19 +98,30 @@ function WordPreview({ arrayBuffer, filename }: { arrayBuffer: ArrayBuffer; file
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    mammoth.convertToHtml({ arrayBuffer })
-      .then(result => {
-        setHtml(result.value);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message);
-        setLoading(false);
-      });
+    // Dynamic import mammoth only when needed
+    import('mammoth').then((mammoth: MammothModule) => {
+      mammoth.convertToHtml({ arrayBuffer })
+        .then(result => {
+          setHtml(result.value);
+          setLoading(false);
+        })
+        .catch(err => {
+          setError(err.message);
+          setLoading(false);
+        });
+    }).catch(err => {
+      setError(`Failed to load Word parser: ${err.message}`);
+      setLoading(false);
+    });
   }, [arrayBuffer]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64 text-zinc-400">Loading Word document...</div>;
+    return (
+      <div className="flex items-center justify-center h-64 text-zinc-400 gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        Loading Word document...
+      </div>
+    );
   }
 
   if (error) {
@@ -129,33 +146,46 @@ function WordPreview({ arrayBuffer, filename }: { arrayBuffer: ArrayBuffer; file
  * Excel Spreadsheet Preview (.xlsx, .xls)
  */
 function ExcelPreview({ arrayBuffer, filename }: { arrayBuffer: ArrayBuffer; filename: string }) {
-  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const [xlsxModule, setXlsxModule] = useState<XLSXModule | null>(null);
+  const [workbook, setWorkbook] = useState<ReturnType<XLSXModule['read']> | null>(null);
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      // Support both .xlsx and .xls formats
-      const wb = XLSX.read(arrayBuffer, { type: 'array' });
-      if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
-        throw new Error('Invalid workbook: no sheets found');
+    // Dynamic import xlsx only when needed
+    import('xlsx').then((XLSX: XLSXModule) => {
+      setXlsxModule(XLSX);
+      try {
+        // Support both .xlsx and .xls formats
+        const wb = XLSX.read(arrayBuffer, { type: 'array' });
+        if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
+          throw new Error('Invalid workbook: no sheets found');
+        }
+        setWorkbook(wb);
+        setLoading(false);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to load spreadsheet';
+        console.error('Excel parse error:', err);
+        setError(errorMsg);
+        setLoading(false);
       }
-      setWorkbook(wb);
+    }).catch(err => {
+      setError(`Failed to load Excel parser: ${err.message}`);
       setLoading(false);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to load spreadsheet';
-      console.error('Excel parse error:', err);
-      setError(errorMsg);
-      setLoading(false);
-    }
+    });
   }, [arrayBuffer]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64 text-zinc-400">Loading spreadsheet...</div>;
+    return (
+      <div className="flex items-center justify-center h-64 text-zinc-400 gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        Loading spreadsheet...
+      </div>
+    );
   }
 
-  if (error || !workbook) {
+  if (error || !workbook || !xlsxModule) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <Table className="h-12 w-12 text-zinc-500" />
@@ -168,7 +198,7 @@ function ExcelPreview({ arrayBuffer, filename }: { arrayBuffer: ArrayBuffer; fil
 
   const sheetNames = workbook.SheetNames;
   const currentSheet = workbook.Sheets[sheetNames[activeSheet]];
-  const html = XLSX.utils.sheet_to_html(currentSheet, { editable: false });
+  const html = xlsxModule.utils.sheet_to_html(currentSheet, { editable: false });
 
   // Inject dark theme styles for the table
   const styledHtml = html.replace(
