@@ -742,7 +742,7 @@ pub async fn get_saved_connection_for_connect(
     let conn = config.get_connection(&id).ok_or("Connection not found")?;
 
     // Convert main auth
-    let (auth_type, password, key_path, cert_path, passphrase) = match &conn.auth {
+    let (auth_type, password, key_path, _cert_path, passphrase) = match &conn.auth {
         SavedAuth::Password { keychain_id } => {
             let pwd = state.keychain.get(keychain_id).map_err(|e| e.to_string())?;
             ("password".to_string(), Some(pwd), None, None, None)
