@@ -204,10 +204,11 @@ pub struct StoredTransferProgress {
 - ❌ 终端缓冲区（`SerializedBuffer`）
 - ❌ 端口转发规则（`PersistedForward`）
 
-仅包含：
+包含内容：
 - ✅ 连接配置（host, port, username, auth）
 - ✅ ProxyJump 跳板机链路
 - ✅ 连接选项（ConnectionOptions）
+- ✅ **[v1.4.1+]** 可选的私钥文件内嵌（embed_keys 选项）
 
 ```rust
 #[derive(Debug, Serialize, Deserialize)]
@@ -235,9 +236,27 @@ pub struct EncryptedConnection {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EncryptedAuth {
     Password { password: String },
-    Key { key_path: String, passphrase: Option<String> },
-    Certificate { key_path: String, cert_path: String, passphrase: Option<String> },
+    Key { 
+        key_path: String, 
+        passphrase: Option<String>,
+        embedded_key: Option<EmbeddedKeyData>,  // v1.4.1+ 内嵌私钥
+    },
+    Certificate { 
+        key_path: String, 
+        cert_path: String, 
+        passphrase: Option<String>,
+        embedded_key: Option<EmbeddedKeyData>,  // v1.4.1+ 内嵌私钥
+    },
     Agent,
+}
+
+// v1.4.1+: 私钥内嵌数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddedKeyData {
+    pub content: Vec<u8>,         // 密钥文件原始内容
+    pub original_path: String,    // 原始路径（用于导入时恢复）
+    pub file_name: String,        // 文件名
+    pub size_bytes: u64,          // 文件大小
 }
 ```
 
@@ -245,6 +264,45 @@ pub enum EncryptedAuth {
 - ✅ `.oxide` = 配置迁移工具（设备间同步）
 - ❌ 不是会话备份工具（不包含运行时状态）
 - ✅ 密码直接内联在加密负载中（无需系统钥匙串）
+- ✅ **[v1.4.1+]** 支持私钥内嵌，实现真正的可移植备份
+
+**v1.4.1 新增功能：私钥内嵌（embed_keys）**
+
+导出时可选择将私钥文件内容嵌入 .oxide 文件，优势：
+
+- ✅ **完全可移植**：无需手动复制 `~/.ssh/` 目录
+- ✅ **设备间迁移**：从 macOS 导出，在 Windows 导入，自动处理路径差异
+- ✅ **备份完整性**：单一 .oxide 文件包含所有认证凭据
+- ⚠️ **安全性**：文件大小会增加（每个密钥约 1-4KB），但全程加密保护
+
+**导入行为**：
+- 内嵌密钥会被提取到 `~/.ssh/imported/` 目录
+- 文件权限自动设置为 `600`（仅所有者可读写）
+- 路径会更新为新的导入位置
+- 原始路径信息保留在元数据中
+
+**Pre-flight 检查（v1.4.1+）**
+
+导出前端新增智能体检功能，自动分析选中连接：
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportPreflightResult {
+    pub total_connections: usize,
+    pub connections_with_passwords: usize,
+    pub connections_with_keys: usize,
+    pub connections_with_agent: usize,
+    pub missing_keys: Vec<(String, String)>,  // (connection_name, key_path)
+    pub total_key_bytes: u64,
+    pub can_export: bool,
+}
+```
+
+**前端 UI 增强**：
+- 📊 **导出概览面板**：显示密码/密钥/Agent 认证分布
+- ⚠️ **缺失密钥警告**：实时检测无法访问的密钥文件
+- 📦 **密钥大小预览**：显示内嵌后文件增加的大小
+- 🔄 **进度阶段显示**：读取密钥 → 加密 → 写入，清晰反馈
 
 ---
 

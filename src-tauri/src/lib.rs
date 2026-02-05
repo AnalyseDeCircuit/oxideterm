@@ -446,7 +446,9 @@ pub fn run() {
             commands::config::delete_ai_api_key,
             // Oxide file export/import commands
             commands::oxide_export::export_to_oxide,
+            commands::oxide_export::preflight_export,
             commands::oxide_import::validate_oxide_file,
+            commands::oxide_import::preview_oxide_import,
             commands::oxide_import::import_from_oxide,
             // Port forwarding commands
             commands::create_port_forward,
@@ -617,7 +619,9 @@ pub fn run() {
             commands::config::delete_ai_api_key,
             // Oxide file export/import commands
             commands::oxide_export::export_to_oxide,
+            commands::oxide_export::preflight_export,
             commands::oxide_import::validate_oxide_file,
+            commands::oxide_import::preview_oxide_import,
             commands::oxide_import::import_from_oxide,
             // Port forwarding commands
             commands::create_port_forward,

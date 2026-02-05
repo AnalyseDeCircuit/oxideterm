@@ -8,19 +8,58 @@ use zeroize::Zeroizing;
 
 use super::error::OxideFileError;
 use super::format::{
-    EncryptedConnection, EncryptedPayload, OxideFile, OxideMetadata, NONCE_LEN, SALT_LEN, TAG_LEN,
+    kdf_flags, EncryptedConnection, EncryptedPayload, OxideFile, OxideMetadata, NONCE_LEN,
+    SALT_LEN, TAG_LEN,
 };
 
-/// Derive encryption key from password using Argon2id
+/// KDF parameters for different versions
+struct KdfParams {
+    memory_cost: u32,  // in KB
+    iterations: u32,
+    parallelism: u32,
+}
+
+impl KdfParams {
+    /// Get KDF parameters for a specific version
+    fn for_version(version: u32) -> Result<Self, OxideFileError> {
+        match version {
+            kdf_flags::KDF_V1 | 0 => {
+                // v1 (default): 256MB, 4 iterations, parallelism=4
+                // Also handle legacy files with flags=0
+                Ok(KdfParams {
+                    memory_cost: 262144,  // 256 MB
+                    iterations: 4,
+                    parallelism: 4,
+                })
+            }
+            kdf_flags::KDF_V2 => {
+                // v2 (future): 512MB, 6 iterations, parallelism=4
+                Ok(KdfParams {
+                    memory_cost: 524288,  // 512 MB
+                    iterations: 6,
+                    parallelism: 4,
+                })
+            }
+            _ => Err(OxideFileError::UnsupportedKdfVersion(version)),
+        }
+    }
+}
+
+/// Derive encryption key from password using Argon2id with specified KDF version
 ///
-/// Parameters: 4 iterations, 256MB memory, parallelism=4 (~2 seconds on modern CPU)
+/// Default (v1): 4 iterations, 256MB memory, parallelism=4 (~2 seconds on modern CPU)
 /// Provides strong protection against GPU brute-force attacks
-pub fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, OxideFileError> {
-    // Argon2id parameters (high strength)
+pub fn derive_key(
+    password: &str,
+    salt: &[u8],
+    kdf_version: u32,
+) -> Result<Zeroizing<[u8; 32]>, OxideFileError> {
+    let kdf_params = KdfParams::for_version(kdf_version)?;
+
     let params = Params::new(
-        262144,   // 256 MB memory cost
-        4,        // 4 iterations
-        4,        // parallelism = 4
+        kdf_params.memory_cost,
+        kdf_params.iterations,
+        kdf_params.parallelism,
         Some(32), // 32 byte output
     )
     .map_err(|_| OxideFileError::CryptoError)?;
@@ -47,8 +86,8 @@ pub fn encrypt_oxide_file(
     rand::rngs::OsRng.fill_bytes(&mut salt);
     rand::rngs::OsRng.fill_bytes(&mut nonce);
 
-    // 2. Derive encryption key from password
-    let key = derive_key(password, &salt)?;
+    // 2. Derive encryption key from password using current KDF version
+    let key = derive_key(password, &salt, kdf_flags::CURRENT_KDF)?;
 
     // 3. Serialize payload with MessagePack (supports tagged enums)
     let plaintext = rmp_serde::to_vec_named(payload)?;
@@ -79,6 +118,7 @@ pub fn encrypt_oxide_file(
         nonce,
         encrypted_data: encrypted_data.to_vec(),
         tag,
+        kdf_version: kdf_flags::CURRENT_KDF,
     })
 }
 
@@ -89,8 +129,8 @@ pub fn decrypt_oxide_file(
     oxide_file: &OxideFile,
     password: &str,
 ) -> Result<EncryptedPayload, OxideFileError> {
-    // 1. Derive key from password and salt
-    let key = derive_key(password, &oxide_file.salt)?;
+    // 1. Derive key from password and salt using file's KDF version
+    let key = derive_key(password, &oxide_file.salt, oxide_file.kdf_version)?;
 
     // 2. Prepare cipher
     let cipher =
@@ -190,8 +230,8 @@ mod tests {
         let password = "TestPassword123!";
         let salt = [0u8; 32];
 
-        let key1 = derive_key(password, &salt).unwrap();
-        let key2 = derive_key(password, &salt).unwrap();
+        let key1 = derive_key(password, &salt, kdf_flags::KDF_V1).unwrap();
+        let key2 = derive_key(password, &salt, kdf_flags::KDF_V1).unwrap();
 
         // Same password and salt should produce same key
         assert_eq!(&*key1, &*key2);
@@ -199,7 +239,7 @@ mod tests {
         // Different salt should produce different key
         let mut different_salt = [0u8; 32];
         different_salt[0] = 1;
-        let key3 = derive_key(password, &different_salt).unwrap();
+        let key3 = derive_key(password, &different_salt, kdf_flags::KDF_V1).unwrap();
         assert_ne!(&*key1, &*key3);
     }
 

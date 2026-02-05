@@ -422,7 +422,38 @@ export interface OxideMetadata {
 export interface ImportResult {
   imported: number;
   skipped: number;
+  renamed: number;
   errors: string[];
+  /** List of name changes: [original_name, new_name][] */
+  renames: [string, string][];
+}
+
+export interface ImportPreview {
+  /** Total number of connections in the file */
+  totalConnections: number;
+  /** Connections that will be imported without changes */
+  unchanged: string[];
+  /** Connections that will be renamed: [original_name, new_name][] */
+  willRename: [string, string][];
+  /** Whether any embedded keys will be extracted */
+  hasEmbeddedKeys: boolean;
+}
+
+export interface ExportPreflightResult {
+  /** Total connections to export */
+  totalConnections: number;
+  /** Connections with missing private keys: [name, key_path][] */
+  missingKeys: [string, string][];
+  /** Connections using key authentication */
+  connectionsWithKeys: number;
+  /** Connections using password authentication */
+  connectionsWithPasswords: number;
+  /** Connections using SSH agent */
+  connectionsWithAgent: number;
+  /** Total bytes of key files (if embed_keys is enabled) */
+  totalKeyBytes: number;
+  /** Whether all connections can be exported */
+  canExport: boolean;
 }
 
 export interface SaveConnectionRequest {

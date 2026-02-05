@@ -1,6 +1,8 @@
 //! Tauri commands for .oxide file export
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::Utc;
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::State;
 use tracing::info;
@@ -11,6 +13,26 @@ use crate::oxide_file::{
     compute_checksum, encrypt_oxide_file, EncryptedAuth, EncryptedConnection, EncryptedPayload,
     EncryptedProxyHop, OxideMetadata,
 };
+
+/// Pre-flight check result for export
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreflightResult {
+    /// Total connections to export
+    pub total_connections: usize,
+    /// Connections with missing private keys (name, key_path)
+    pub missing_keys: Vec<(String, String)>,
+    /// Connections using key authentication (can have keys embedded)
+    pub connections_with_keys: usize,
+    /// Connections using password authentication
+    pub connections_with_passwords: usize,
+    /// Connections using SSH agent
+    pub connections_with_agent: usize,
+    /// Total bytes of key files (if embed_keys is enabled)
+    pub total_key_bytes: u64,
+    /// Whether all connections can be exported
+    pub can_export: bool,
+}
 
 /// Validate password strength
 fn validate_password(password: &str) -> Result<(), String> {
@@ -30,17 +52,187 @@ fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Read a key or certificate file and encode for embedding
+/// Returns None if the file cannot be read (non-fatal for portability)
+fn read_and_embed_key(path: &str) -> Result<Option<String>, String> {
+    use std::fs;
+    use std::path::Path;
+    
+    let path = Path::new(path);
+    
+    // Expand ~ to home directory
+    let expanded_path = if path.starts_with("~") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(path.strip_prefix("~").unwrap_or(path))
+        } else {
+            return Ok(None); // Can't expand ~, skip embedding
+        }
+    } else {
+        path.to_path_buf()
+    };
+    
+    // Check if file exists and is readable
+    if !expanded_path.exists() {
+        // File doesn't exist on this machine - skip embedding but don't fail
+        // This allows exporting connections even if key file is missing
+        return Ok(None);
+    }
+    
+    // Read file content (limit to 1MB to prevent memory issues)
+    let metadata = fs::metadata(&expanded_path)
+        .map_err(|e| format!("Cannot read file metadata: {}", e))?;
+    
+    if metadata.len() > 1_048_576 {
+        return Err("Key file exceeds 1MB limit".to_string());
+    }
+    
+    let content = fs::read(&expanded_path)
+        .map_err(|e| format!("Cannot read file: {}", e))?;
+    
+    // Encode as base64
+    Ok(Some(BASE64.encode(&content)))
+}
+
+/// Helper to check if a key file exists
+fn check_key_file_exists(path: &str) -> Option<u64> {
+    use std::fs;
+    use std::path::Path;
+    
+    let path_obj = Path::new(path);
+    
+    // Expand ~ to home directory
+    let expanded_path = if path_obj.starts_with("~") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(path_obj.strip_prefix("~").unwrap_or(path_obj))
+        } else {
+            return None;
+        }
+    } else {
+        path_obj.to_path_buf()
+    };
+    
+    // Check if file exists and return its size
+    fs::metadata(&expanded_path).ok().map(|m| m.len())
+}
+
+/// Pre-flight check before export - detects issues early
+#[tauri::command]
+pub async fn preflight_export(
+    connection_ids: Vec<String>,
+    embed_keys: Option<bool>,
+    config_state: State<'_, Arc<ConfigState>>,
+) -> Result<ExportPreflightResult, String> {
+    info!("Running pre-flight check for {} connections", connection_ids.len());
+    
+    let config = config_state.get_config_snapshot();
+    let should_embed_keys = embed_keys.unwrap_or(false);
+    
+    let mut missing_keys: Vec<(String, String)> = Vec::new();
+    let mut connections_with_keys = 0;
+    let mut connections_with_passwords = 0;
+    let mut connections_with_agent = 0;
+    let mut total_key_bytes: u64 = 0;
+    
+    for id in &connection_ids {
+        let saved_conn = match config.get_connection(id) {
+            Some(c) => c,
+            None => continue,
+        };
+        
+        // Check main connection auth
+        match &saved_conn.auth {
+            SavedAuth::Password { .. } => {
+                connections_with_passwords += 1;
+            }
+            SavedAuth::Key { key_path, .. } => {
+                connections_with_keys += 1;
+                if should_embed_keys {
+                    if let Some(size) = check_key_file_exists(key_path) {
+                        total_key_bytes += size;
+                    } else {
+                        missing_keys.push((saved_conn.name.clone(), key_path.clone()));
+                    }
+                }
+            }
+            SavedAuth::Certificate { key_path, cert_path, .. } => {
+                connections_with_keys += 1;
+                if should_embed_keys {
+                    if let Some(size) = check_key_file_exists(key_path) {
+                        total_key_bytes += size;
+                    } else {
+                        missing_keys.push((saved_conn.name.clone(), key_path.clone()));
+                    }
+                    if let Some(size) = check_key_file_exists(cert_path) {
+                        total_key_bytes += size;
+                    } else {
+                        missing_keys.push((saved_conn.name.clone(), cert_path.clone()));
+                    }
+                }
+            }
+            SavedAuth::Agent => {
+                connections_with_agent += 1;
+            }
+        }
+        
+        // Check proxy chain auth
+        for hop in &saved_conn.proxy_chain {
+            match &hop.auth {
+                SavedAuth::Password { .. } => {
+                    // Don't double count, proxy passwords are fine
+                }
+                SavedAuth::Key { key_path, .. } => {
+                    if should_embed_keys {
+                        if let Some(size) = check_key_file_exists(key_path) {
+                            total_key_bytes += size;
+                        } else {
+                            missing_keys.push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
+                        }
+                    }
+                }
+                SavedAuth::Certificate { key_path, cert_path, .. } => {
+                    if should_embed_keys {
+                        if let Some(size) = check_key_file_exists(key_path) {
+                            total_key_bytes += size;
+                        } else {
+                            missing_keys.push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
+                        }
+                        if let Some(size) = check_key_file_exists(cert_path) {
+                            total_key_bytes += size;
+                        } else {
+                            missing_keys.push((format!("{} (proxy)", saved_conn.name), cert_path.clone()));
+                        }
+                    }
+                }
+                SavedAuth::Agent => {}
+            }
+        }
+    }
+    
+    Ok(ExportPreflightResult {
+        total_connections: connection_ids.len(),
+        missing_keys,
+        connections_with_keys,
+        connections_with_passwords,
+        connections_with_agent,
+        total_key_bytes,
+        can_export: true, // We can always export, missing keys just won't be embedded
+    })
+}
+
 /// Export connections to encrypted .oxide file
 #[tauri::command]
 pub async fn export_to_oxide(
     connection_ids: Vec<String>,
     password: String,
     description: Option<String>,
+    embed_keys: Option<bool>,
     config_state: State<'_, Arc<ConfigState>>,
 ) -> Result<Vec<u8>, String> {
+    let should_embed_keys = embed_keys.unwrap_or(false);
     info!(
-        "Exporting {} connections to .oxide file",
-        connection_ids.len()
+        "Exporting {} connections to .oxide file (embed_keys={})",
+        connection_ids.len(),
+        should_embed_keys
     );
 
     // 1. Validate password strength
@@ -81,9 +273,20 @@ pub async fn export_to_oxide(
                         } else {
                             None
                         };
+                    
+                    // Optionally embed the private key content
+                    let embedded_key = if should_embed_keys {
+                        read_and_embed_key(key_path).map_err(|e| {
+                            format!("Failed to embed key for {}: {}", context, e)
+                        })?
+                    } else {
+                        None
+                    };
+                    
                     Ok(EncryptedAuth::Key {
                         key_path: key_path.clone(),
                         passphrase,
+                        embedded_key,
                     })
                 }
                 SavedAuth::Certificate {
@@ -104,10 +307,27 @@ pub async fn export_to_oxide(
                         } else {
                             None
                         };
+                    
+                    // Optionally embed key and cert content
+                    let (embedded_key, embedded_cert) = if should_embed_keys {
+                        (
+                            read_and_embed_key(key_path).map_err(|e| {
+                                format!("Failed to embed key for {}: {}", context, e)
+                            })?,
+                            read_and_embed_key(cert_path).map_err(|e| {
+                                format!("Failed to embed cert for {}: {}", context, e)
+                            })?,
+                        )
+                    } else {
+                        (None, None)
+                    };
+                    
                     Ok(EncryptedAuth::Certificate {
                         key_path: key_path.clone(),
                         cert_path: cert_path.clone(),
                         passphrase,
+                        embedded_key,
+                        embedded_cert,
                     })
                 }
                 SavedAuth::Agent => Ok(EncryptedAuth::Agent),

@@ -135,6 +135,8 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
   - **ChaCha20-Poly1305 AEAD** : Chiffrement authentifié empêchant les attaques de falsification et de replay.
   - **Argon2id KDF** : Fonction de dérivation de clé (coût mémoire 256MB, 4 itérations) résistant au brute-force GPU.
   - **Somme de Contrôle SHA-256** : Vérification d'intégrité double détectant toute corruption de données.
+  - **[v1.4.4+] Intégration de Clés Privées** : Intégration optionnelle de clés privées pour des sauvegardes entièrement portables.
+  - **[v1.4.4+] Vérification Préalable** : Analyse intelligente des connexions sélectionnées avec répartition des types d'authentification et détection des clés manquantes.
   - **Design Git-Friendly** : Métadonnées stockées en clair, supportant le déchiffrement hors ligne.
 
 ### 📊 Tampon de Défilement Backend

@@ -17,6 +17,23 @@ pub const SALT_LEN: usize = 32;
 pub const NONCE_LEN: usize = 12;
 pub const TAG_LEN: usize = 16;
 
+/// KDF (Key Derivation Function) version flags stored in header.flags
+/// Lower 8 bits are reserved for KDF version selector
+pub mod kdf_flags {
+    /// KDF v1: Argon2id with 256MB memory, 4 iterations, parallelism=4
+    /// This is the default and current version
+    pub const KDF_V1: u32 = 0x0001;
+    
+    /// KDF v2: Reserved for future use (e.g., higher memory cost)
+    pub const KDF_V2: u32 = 0x0002;
+    
+    /// Mask to extract KDF version from flags
+    pub const KDF_VERSION_MASK: u32 = 0x00FF;
+    
+    /// Current KDF version used for new files
+    pub const CURRENT_KDF: u32 = KDF_V1;
+}
+
 /// File header structure (21 bytes fixed)
 #[derive(Debug)]
 pub struct FileHeader {
@@ -32,10 +49,15 @@ impl FileHeader {
         Self {
             magic: *MAGIC,
             version: VERSION,
-            flags: 0,
+            flags: kdf_flags::CURRENT_KDF, // Set current KDF version in flags
             metadata_length,
             encrypted_data_length,
         }
+    }
+    
+    /// Get the KDF version from flags
+    pub fn kdf_version(&self) -> u32 {
+        self.flags & kdf_flags::KDF_VERSION_MASK
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -133,13 +155,23 @@ pub enum EncryptedAuth {
         password: String,
     },
     Key {
+        /// Original path to the key file (for reference)
         key_path: String,
         passphrase: Option<String>,
+        /// Embedded private key content (base64 encoded) for portable backups
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        embedded_key: Option<String>,
     },
     Certificate {
         key_path: String,
         cert_path: String,
         passphrase: Option<String>,
+        /// Embedded private key content (base64 encoded)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        embedded_key: Option<String>,
+        /// Embedded certificate content (base64 encoded)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        embedded_cert: Option<String>,
     },
     Agent,
 }
@@ -152,6 +184,8 @@ pub struct OxideFile {
     pub nonce: [u8; NONCE_LEN],
     pub encrypted_data: Vec<u8>,
     pub tag: [u8; TAG_LEN],
+    /// KDF version used for key derivation (extracted from header flags)
+    pub kdf_version: u32,
 }
 
 impl OxideFile {
@@ -231,6 +265,7 @@ impl OxideFile {
             nonce,
             encrypted_data,
             tag,
+            kdf_version: header.kdf_version(),
         })
     }
 }

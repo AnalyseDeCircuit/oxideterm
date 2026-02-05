@@ -10,6 +10,9 @@ pub enum OxideFileError {
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
 
+    #[error("Unsupported KDF version: {0}")]
+    UnsupportedKdfVersion(u32),
+
     #[error("Invalid file format: {0}")]
     InvalidFormat(String),
 

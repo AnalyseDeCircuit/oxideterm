@@ -135,6 +135,8 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
   - **ChaCha20-Poly1305 AEAD**: Authenticated encryption preventing tampering and replay attacks.
   - **Argon2id KDF**: Key derivation function (256MB memory cost, 4 iterations) resisting GPU brute-force.
   - **SHA-256 Checksum**: Dual integrity verification detecting any data corruption.
+  - **[v1.4.4+] Embed Private Keys**: Optional private key embedding for fully portable backups.
+  - **[v1.4.4+] Pre-flight Check**: Smart analysis of selected connections with authentication type breakdown and missing key detection.
   - **Git-Friendly Design**: Metadata stored in plaintext, supporting offline decryption.
 
 ### 📊 Backend Scroll Buffer
