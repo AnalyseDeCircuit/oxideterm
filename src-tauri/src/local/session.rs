@@ -3,9 +3,9 @@
 //! Manages a single local terminal session with PTY, data pump,
 //! and WebSocket integration for frontend communication.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -123,6 +123,7 @@ impl LocalTerminalSession {
                 match input_rx.recv().await {
                     Some(data) => {
                         if let Ok(mut w) = writer_clone.lock() {
+                            let w: &mut Box<dyn Write + Send> = &mut *w;
                             if let Err(e) = w.write_all(&data) {
                                 tracing::error!("Failed to write to PTY: {}", e);
                                 break;
@@ -158,7 +159,7 @@ impl LocalTerminalSession {
 
                 // Read from PTY (blocking)
                 let n = {
-                    let mut r = match reader.lock() {
+                    let mut r: MutexGuard<'_, Box<dyn Read + Send>> = match reader.lock() {
                         Ok(r) => r,
                         Err(_) => {
                             tracing::error!("Read pump: Failed to acquire reader lock");
@@ -303,8 +304,6 @@ pub struct LocalTerminalInfo {
     pub rows: u16,
     pub running: bool,
 }
-
-use std::io::Write;
 
 /// Find a safe UTF-8 boundary in a byte slice.
 /// Returns the index up to which the bytes form valid, complete UTF-8 characters.
