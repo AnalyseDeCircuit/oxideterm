@@ -257,6 +257,18 @@ pub fn run() {
 
     write_startup_log("All registries initialized, building Tauri app...");
 
+    // Windows: 设置 panic hook，确保异常退出时也能清理高精度定时器
+    #[cfg(target_os = "windows")]
+    {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            // 在 panic 时强制清理高精度定时器，避免影响系统
+            disable_high_precision_timer();
+            // 继续正常的 panic 处理（打印堆栈等）
+            default_hook(panic_info);
+        }));
+    }
+
     // Windows: 启用高精度定时器（必须在所有其他初始化之前）
     #[cfg(target_os = "windows")]
     if let Err(e) = enable_high_precision_timer() {
