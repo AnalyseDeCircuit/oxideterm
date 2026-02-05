@@ -208,10 +208,11 @@ pub async fn start_local_forward_with_disconnect(
     // Spawn the forwarding task
     tokio::spawn(async move {
         // Track exit reason for event emission
+        #[allow(dead_code)]
         enum ExitReason {
             SshDisconnected,
             StopRequested,
-            Error,
+            Error, // Reserved for future error handling
         }
         
         let exit_reason = loop {

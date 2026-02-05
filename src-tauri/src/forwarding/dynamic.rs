@@ -196,10 +196,11 @@ pub async fn start_dynamic_forward_with_disconnect(
     // Spawn the proxy task
     tokio::spawn(async move {
         // Track exit reason for event emission
+        #[allow(dead_code)]
         enum ExitReason {
             SshDisconnected,
             StopRequested,
-            Error,
+            Error, // Reserved for future error handling
         }
         
         let exit_reason = loop {

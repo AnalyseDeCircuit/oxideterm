@@ -344,7 +344,6 @@ pub fn run() {
             commands::local_get_file_metadata,
             commands::local_read_file_range,
             // Session commands (v2 with registry)
-            commands::connect_v2,
             commands::disconnect_v2,
             commands::list_sessions_v2,
             commands::get_session_stats,
@@ -359,7 +358,6 @@ pub fn run() {
             commands::establish_connection,
             commands::list_connections,
             commands::disconnect_connection,
-            commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_list_connections,
             commands::ssh_set_keep_alive,
@@ -517,7 +515,6 @@ pub fn run() {
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
             // Session commands (v2 with registry)
-            commands::connect_v2,
             commands::disconnect_v2,
             commands::list_sessions_v2,
             commands::get_session_stats,
@@ -532,7 +529,6 @@ pub fn run() {
             commands::establish_connection,
             commands::list_connections,
             commands::disconnect_connection,
-            commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_list_connections,
             commands::ssh_set_keep_alive,
