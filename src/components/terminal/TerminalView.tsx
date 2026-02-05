@@ -1293,8 +1293,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const currentSession = sessionRef.current;
     if (!currentSession || currentSession.state !== 'connected') return;
 
-    const unlisten = listen<{ command: string }>('ai-insert-command', (event) => {
-      if (!isMountedRef.current) return;
+    let mounted = true;
+    let unlistenFn: (() => void) | null = null;
+
+    listen<{ command: string }>('ai-insert-command', (event) => {
+      if (!mounted || !isMountedRef.current) return;
       if (inputLockedRef.current) return; // Don't insert during standby mode
       
       const ws = wsRef.current;
@@ -1318,10 +1321,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         const frame = encodeDataFrame(payload);
         ws.send(frame);
       }
+    }).then((fn) => {
+      if (mounted) {
+        unlistenFn = fn;
+      } else {
+        fn(); // Component unmounted before listener registered, clean up immediately
+      }
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      mounted = false;
+      unlistenFn?.();
     };
   }, [isActive, session?.state]);
 

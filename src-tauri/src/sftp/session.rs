@@ -1141,6 +1141,9 @@ impl SftpSession {
     ) -> Result<u64, SftpError> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
+        /// SFTP I/O timeout to prevent zombie transfers on SSH disconnect (5 minutes)
+        const SFTP_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
         // Open remote file
         let mut remote_file = self
             .sftp
@@ -1179,7 +1182,7 @@ impl SftpSession {
                 .map_err(SftpError::IoError)?;
         }
 
-        // Transfer loop with cooperative cancellation
+        // Transfer loop with cooperative cancellation and timeout protection
         let chunk_size = 65536; // 64 KB chunks
         let mut buffer = vec![0u8; chunk_size];
         let mut transferred = ctx.offset;
@@ -1202,20 +1205,35 @@ impl SftpSession {
                 }
             }
 
-            let bytes_read = remote_file
-                .read(&mut buffer)
-                .await
-                .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+            // Read with timeout to prevent zombie transfers on SSH disconnect
+            let bytes_read = match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_file.read(&mut buffer)).await {
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
+                Err(_) => {
+                    warn!("SFTP download read timeout after {:?} at {} bytes", SFTP_IO_TIMEOUT, transferred);
+                    return Err(SftpError::TransferError(format!(
+                        "Read timeout after {:?} - SSH connection may be dead",
+                        SFTP_IO_TIMEOUT
+                    )));
+                }
+            };
 
             if bytes_read == 0 {
                 break; // EOF
             }
 
-            // Write to local file
-            local_file
-                .write_all(&buffer[..bytes_read])
-                .await
-                .map_err(SftpError::IoError)?;
+            // Write to local file (with timeout for consistency)
+            match tokio::time::timeout(SFTP_IO_TIMEOUT, local_file.write_all(&buffer[..bytes_read])).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(SftpError::IoError(e)),
+                Err(_) => {
+                    warn!("SFTP download write timeout after {:?}", SFTP_IO_TIMEOUT);
+                    return Err(SftpError::TransferError(format!(
+                        "Local write timeout after {:?}",
+                        SFTP_IO_TIMEOUT
+                    )));
+                }
+            }
 
             transferred += bytes_read as u64;
 
@@ -1434,6 +1452,9 @@ impl SftpSession {
     ) -> Result<u64, SftpError> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
+        /// SFTP I/O timeout to prevent zombie transfers on SSH disconnect (5 minutes)
+        const SFTP_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
         // Open local file
         let mut local_file = tokio::fs::File::open(local_path).await
             .map_err(SftpError::IoError)?;
@@ -1469,7 +1490,7 @@ impl SftpSession {
                 .map_err(|e| SftpError::ProtocolError(e.to_string()))?
         };
 
-        // Transfer loop with cooperative cancellation
+        // Transfer loop with cooperative cancellation and timeout protection
         let chunk_size = 65536; // 64 KB chunks
         let mut buffer = vec![0u8; chunk_size];
         let mut transferred = ctx.offset;
@@ -1501,10 +1522,21 @@ impl SftpSession {
                 break; // EOF
             }
 
-            // Write to remote file
-            AsyncWriteExt::write_all(&mut remote_file, &buffer[..bytes_read])
-                .await
-                .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+            // Write to remote file with timeout to prevent zombie transfers
+            match tokio::time::timeout(
+                SFTP_IO_TIMEOUT,
+                AsyncWriteExt::write_all(&mut remote_file, &buffer[..bytes_read])
+            ).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
+                Err(_) => {
+                    warn!("SFTP upload write timeout after {:?} at {} bytes", SFTP_IO_TIMEOUT, transferred);
+                    return Err(SftpError::TransferError(format!(
+                        "Remote write timeout after {:?} - SSH connection may be dead",
+                        SFTP_IO_TIMEOUT
+                    )));
+                }
+            }
 
             transferred += bytes_read as u64;
 
@@ -1525,10 +1557,21 @@ impl SftpSession {
             }
         }
 
-        // Flush remote file
-        AsyncWriteExt::flush(&mut remote_file)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+        // Flush remote file (with timeout)
+        match tokio::time::timeout(
+            SFTP_IO_TIMEOUT,
+            AsyncWriteExt::flush(&mut remote_file)
+        ).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
+            Err(_) => {
+                warn!("SFTP upload flush timeout after {:?}", SFTP_IO_TIMEOUT);
+                return Err(SftpError::TransferError(format!(
+                    "Remote flush timeout after {:?} - SSH connection may be dead",
+                    SFTP_IO_TIMEOUT
+                )));
+            }
+        }
 
         info!("Upload inner complete: {} bytes transferred", transferred);
 
