@@ -14,9 +14,10 @@
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
-use std::path::Path;
+#[cfg(unix)]
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::path::Path;
 
 use crate::local::shell::{get_shell_args, ShellInfo};
 

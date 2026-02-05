@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
