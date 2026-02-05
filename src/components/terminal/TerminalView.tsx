@@ -96,6 +96,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
   const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
+  // xterm.js event listener disposables - must be explicitly disposed to prevent memory leaks
+  const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const onResizeDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isMountedRef = useRef(true); // Track mount state for StrictMode
   const reconnectingRef = useRef(false); // Suppress close/error during intentional reconnect
@@ -513,13 +516,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         
         const payload = data.slice(HEADER_SIZE, HEADER_SIZE + length);
         
+        // CRITICAL: Use slice() to create a copy, not a view!
+        // Views keep the entire original ArrayBuffer alive until GC
+        const payloadCopy = payload.slice();
+        
         switch (msgType) {
           case MSG_TYPE_DATA:
             if (platform.isWindows) {
               // Windows: 根据是否在 IME 合成中决定策略
               if (isComposingRef.current) {
                 // IME 合成期间：使用 RAF 缓冲，避免候选框抖动
-                pendingDataRef.current.push(payload);
+                pendingDataRef.current.push(payloadCopy);
                 if (rafIdRef.current === null) {
                   rafIdRef.current = requestAnimationFrame(() => {
                     if (pendingDataRef.current.length > 0 && terminalRef.current) {
@@ -540,12 +547,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               } else {
                 // 非合成期间：直接写入，最小化延迟
                 if (terminalRef.current) {
-                  terminalRef.current.write(payload);
+                  terminalRef.current.write(payloadCopy);
                 }
               }
             } else {
               // macOS/Linux: 继续使用 RAF 批处理以提升性能
-              pendingDataRef.current.push(payload);
+              pendingDataRef.current.push(payloadCopy);
               if (rafIdRef.current === null) {
                 rafIdRef.current = requestAnimationFrame(() => {
                   if (pendingDataRef.current.length > 0 && terminalRef.current) {
@@ -1009,7 +1016,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                     if (data.byteLength < HEADER_SIZE + length) return;
 
                     if (type === MSG_TYPE_DATA) {
-                        const payload = new Uint8Array(data, HEADER_SIZE, length);
+                        // CRITICAL: Use slice() to create a copy, not a view!
+                        // Views keep the entire original ArrayBuffer alive until GC
+                        const payload = new Uint8Array(data, HEADER_SIZE, length).slice();
                         // P3: Queue data and batch writes with RAF for backpressure handling
                         pendingDataRef.current.push(payload);
 
@@ -1045,7 +1054,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                         }
                     } else if (type === MSG_TYPE_ERROR) {
                         // Error message from backend - display in terminal
-                        const payload = new Uint8Array(data, HEADER_SIZE, length);
+                        // Use .slice() to create a copy, ensuring consistent memory handling
+                        const payload = new Uint8Array(data, HEADER_SIZE, length).slice();
                         const decoder = new TextDecoder('utf-8');
                         const errorMsg = decoder.decode(payload);
                         term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.server_error', { error: errorMsg })}\x1b[0m`);
@@ -1098,7 +1108,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
     // Terminal Input -> WebSocket (registered outside setTimeout to work immediately)
     // === Input Lock: Discard all input when in Standby mode ===
-    term.onData(data => {
+    // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
+    onDataDisposableRef.current = term.onData(data => {
         // Strict input interception: discard input when connection is down/reconnecting
         if (inputLockedRef.current) {
           console.log('[TerminalView] Input discarded - connection in standby mode');
@@ -1124,7 +1135,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         }
     });
 
-    term.onResize((size) => {
+    // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
+    onResizeDisposableRef.current = term.onResize((size) => {
         // Don't send resize when in Standby mode
         if (inputLockedRef.current) return;
         
@@ -1279,6 +1291,26 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             // Ignore errors during addon disposal
           }
           fitAddonRef.current = null;
+        }
+
+        // Dispose terminal event listeners (onData, onResize) before terminal
+        // This prevents "ghost references" from closures holding terminal buffer
+        if (onDataDisposableRef.current) {
+          try {
+            onDataDisposableRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during disposal
+          }
+          onDataDisposableRef.current = null;
+        }
+
+        if (onResizeDisposableRef.current) {
+          try {
+            onResizeDisposableRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during disposal
+          }
+          onResizeDisposableRef.current = null;
         }
 
         // Finally dispose terminal

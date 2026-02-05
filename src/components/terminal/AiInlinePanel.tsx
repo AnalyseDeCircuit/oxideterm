@@ -78,6 +78,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const selectionContextRef = useRef<string>('');  // Cache selection at open time
 
@@ -288,8 +289,25 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
     if (!response) return;
     await navigator.clipboard.writeText(extractCommand(response));
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    // Clear previous timeout to avoid stacking
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = setTimeout(() => {
+      setCopied(false);
+      copyTimeoutRef.current = null;
+    }, 1500);
   }, [response]);
+
+  // Cleanup copy timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+        copyTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Regenerate
   const handleRegenerate = useCallback(() => {

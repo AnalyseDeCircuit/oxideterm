@@ -51,6 +51,9 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
+  // xterm.js event listener disposables - must be explicitly disposed to prevent memory leaks
+  const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const onBinaryDisposableRef = useRef<{ dispose: () => void } | null>(null);
   
   // Get tab ID for this terminal (used for registry validation)
   // Use prop if provided, otherwise look up from store
@@ -357,7 +360,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     loadRenderer();
 
     // Handle terminal data input
-    term.onData((data) => {
+    // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
+    onDataDisposableRef.current = term.onData((data) => {
       if (!isRunning) return;
       const encoder = new TextEncoder();
       const bytes = encoder.encode(data);
@@ -365,7 +369,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     });
 
     // Handle terminal binary input (for special keys)
-    term.onBinary((data) => {
+    // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
+    onBinaryDisposableRef.current = term.onBinary((data) => {
       if (!isRunning) return;
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
@@ -424,6 +429,36 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           // Ignore errors during addon disposal
         }
         imageAddonRef.current = null;
+      }
+
+      // Dispose search addon to free index memory
+      if (searchAddonRef.current) {
+        try {
+          searchAddonRef.current.dispose();
+        } catch (e) {
+          // Ignore errors during addon disposal
+        }
+        searchAddonRef.current = null;
+      }
+
+      // Dispose terminal event listeners (onData, onBinary) before terminal
+      // This prevents "ghost references" from closures holding terminal buffer
+      if (onDataDisposableRef.current) {
+        try {
+          onDataDisposableRef.current.dispose();
+        } catch (e) {
+          // Ignore errors during disposal
+        }
+        onDataDisposableRef.current = null;
+      }
+
+      if (onBinaryDisposableRef.current) {
+        try {
+          onBinaryDisposableRef.current.dispose();
+        } catch (e) {
+          // Ignore errors during disposal
+        }
+        onBinaryDisposableRef.current = null;
       }
       
       // Finally dispose terminal

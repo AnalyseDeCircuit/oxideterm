@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { PaneNode, PaneLeaf, PaneGroup as PaneGroupType } from '../../types';
 import { TerminalPane } from './TerminalPane';
@@ -92,6 +92,16 @@ const PaneRenderer: React.FC<PaneRendererProps> = ({
 
   // Debounced layout change handler to avoid excessive state updates during resize
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup debounce timer on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, []);
   
   const handleLayoutChanged = useCallback(
     (layout: { [panelId: string]: number }) => {
