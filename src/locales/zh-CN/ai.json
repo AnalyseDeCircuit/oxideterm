@@ -68,7 +68,14 @@
       "history": "历史消息",
       "pending": "输入内容",
       "total": "总计",
-      "warning_limit": "即将达到上下文限制"
+      "warning_limit": "即将达到上下文限制"    },
+    "model_selector": {
+      "no_key": "无密钥",
+      "no_key_warning": "请先配置 API Key",
+      "offline": "离线",
+      "manage_providers": "管理提供商",
+      "no_provider": "未配置提供商",
+      "refresh_models": "刷新"
     }
   }
 }

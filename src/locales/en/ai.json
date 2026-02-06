@@ -69,6 +69,14 @@
       "pending": "Input",
       "total": "Total",
       "warning_limit": "Approaching context limit"
+    },
+    "model_selector": {
+      "no_key": "No Key",
+      "no_key_warning": "Please configure API Key first",
+      "offline": "Offline",
+      "manage_providers": "Manage Providers",
+      "no_provider": "No provider configured",
+      "refresh_models": "Refresh"
     }
   }
 }

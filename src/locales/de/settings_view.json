@@ -146,7 +146,17 @@
       "lines_50": "50 Zeilen",
       "lines_100": "100 Zeilen",
       "lines_200": "200 Zeilen",
-      "lines_400": "400 Zeilen"
+      "lines_400": "400 Zeilen",
+      "active": "Aktiv",
+      "set_active": "Aktivieren",
+      "default_model": "Standardmodell",
+      "custom_provider": "Benutzerdefinierter Anbieter",
+      "add_provider": "Anbieter hinzufügen",
+      "remove_provider_confirm": "Anbieter \"{{name}}\" entfernen?",
+      "available_models": "Verfügbare Modelle",
+      "refresh_models": "Modellliste aktualisieren",
+      "refresh_failed": "Modelle konnten nicht aktualisiert werden: {{error}}",
+      "click_to_set_default": "Klicken, um als Standardmodell festzulegen"
     },
     "sftp": {
       "title": "SFTP-Übertragung",

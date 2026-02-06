@@ -68,7 +68,14 @@
       "history": "歷史訊息",
       "pending": "輸入內容",
       "total": "總計",
-      "warning_limit": "即將達到上下文限制"
+      "warning_limit": "即將達到上下文限制"    },
+    "model_selector": {
+      "no_key": "無金鑰",
+      "no_key_warning": "請先設定 API Key",
+      "offline": "離線",
+      "manage_providers": "管理供應商",
+      "no_provider": "未設定供應商",
+      "refresh_models": "重新整理"
     }
   }
 }

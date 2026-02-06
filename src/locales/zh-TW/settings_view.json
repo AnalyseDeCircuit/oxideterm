@@ -146,7 +146,17 @@
       "lines_50": "50 行",
       "lines_100": "100 行",
       "lines_200": "200 行",
-      "lines_400": "400 行"
+      "lines_400": "400 行",
+      "active": "已啟用",
+      "set_active": "設為啟用",
+      "default_model": "預設模型",
+      "custom_provider": "自訂供應商",
+      "add_provider": "新增供應商",
+      "remove_provider_confirm": "移除供應商 \"{{name}}\"？",
+      "available_models": "可用模型",
+      "refresh_models": "重新整理模型列表",
+      "refresh_failed": "重新整理模型失敗：{{error}}",
+      "click_to_set_default": "點擊設為預設模型"
     },
     "sftp": {
       "title": "SFTP 傳輸",

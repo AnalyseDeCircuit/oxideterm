@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useAppStore } from '../../store/appStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
+import { ModelSelector } from './ModelSelector';
 import type { AiConversation } from '../../types';
 
 export function AiChatPanel() {
@@ -135,6 +136,7 @@ export function AiChatPanel() {
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-theme-border/30 bg-theme-bg">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase">{t('ai.chat.header')}</span>
+          <ModelSelector onOpenSettings={handleOpenSettings} />
           {activeConversation?.title && (
             <div className="flex items-center gap-2 max-w-[120px]">
               <span className="text-theme-border/40 font-thin">|</span>

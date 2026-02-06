@@ -146,7 +146,17 @@
       "lines_50": "50 dòng",
       "lines_100": "100 dòng",
       "lines_200": "200 dòng",
-      "lines_400": "400 dòng"
+      "lines_400": "400 dòng",
+      "active": "Đang hoạt động",
+      "set_active": "Đặt làm hoạt động",
+      "default_model": "Mô hình mặc định",
+      "custom_provider": "Nhà cung cấp tùy chỉnh",
+      "add_provider": "Thêm nhà cung cấp",
+      "remove_provider_confirm": "Xóa nhà cung cấp \"{{name}}\"?",
+      "available_models": "Mô hình có sẵn",
+      "refresh_models": "Làm mới danh sách mô hình",
+      "refresh_failed": "Làm mới mô hình thất bại: {{error}}",
+      "click_to_set_default": "Nhấp để đặt làm mô hình mặc định"
     },
     "sftp": {
       "title": "Truyền file SFTP",

@@ -26,12 +26,13 @@ import {
     SelectLabel,
     SelectSeparator
 } from '../ui/select';
-import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInput, Sparkles, Square, HardDrive, HelpCircle, Github, ExternalLink, Keyboard } from 'lucide-react';
+import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInput, Sparkles, Square, HardDrive, HelpCircle, Github, ExternalLink, Keyboard, RefreshCw } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { SshKeyInfo, SshHostInfo } from '../../types';
 import { themes } from '../../lib/themes';
 import { platform } from '../../lib/platform';
+import { cn } from '../../lib/utils';
 
 const formatThemeName = (key: string) => {
     return key.split('-')
@@ -56,6 +57,90 @@ const ThemePreview = ({ themeName }: { themeName: string }) => {
                     <span>&gt; </span>
                     <span className="w-2 h-4 ml-1 animate-pulse" style={{ backgroundColor: theme.cursor }}></span>
                 </div>
+            </div>
+        </div>
+    );
+};
+
+// Provider API Key Input Component
+const ProviderKeyInput = ({ providerId }: { providerId: string }) => {
+    const { t } = useTranslation();
+    const refreshProviderModels = useSettingsStore((s) => s.refreshProviderModels);
+    const [hasKey, setHasKey] = useState(false);
+    const [keyInput, setKeyInput] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        api.hasAiProviderApiKey(providerId)
+            .then(setHasKey)
+            .catch(() => setHasKey(false));
+    }, [providerId]);
+
+    return (
+        <div className="grid gap-1">
+            <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.api_key')}</Label>
+            <div className="flex gap-2">
+                {hasKey ? (
+                    <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 h-8 px-2 flex items-center bg-theme-bg-panel/50 border border-theme-border/50 rounded text-theme-text-muted text-xs italic">
+                            ••••••••••••••••
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-8 text-xs"
+                            onClick={async () => {
+                                if (confirm(t('settings_view.ai.remove_confirm'))) {
+                                    try {
+                                        await api.deleteAiProviderApiKey(providerId);
+                                        setHasKey(false);
+                                        window.dispatchEvent(new CustomEvent('ai-api-key-updated'));
+                                    } catch (e) {
+                                        alert(t('settings_view.ai.remove_failed', { error: e }));
+                                    }
+                                }
+                            }}
+                        >
+                            {t('settings_view.ai.remove')}
+                        </Button>
+                    </div>
+                ) : (
+                    <>
+                        <Input
+                            type="password"
+                            placeholder="sk-..."
+                            className="flex-1 bg-theme-bg h-8 text-xs"
+                            value={keyInput}
+                            onChange={(e) => setKeyInput(e.target.value)}
+                        />
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 text-xs"
+                            disabled={!keyInput.trim() || saving}
+                            onClick={async () => {
+                                if (!keyInput.trim()) return;
+                                setSaving(true);
+                                try {
+                                    await api.setAiProviderApiKey(providerId, keyInput);
+                                    setKeyInput('');
+                                    setHasKey(true);
+                                    window.dispatchEvent(new CustomEvent('ai-api-key-updated'));
+                                    // Auto-fetch models with the new key
+                                    refreshProviderModels(providerId).catch((e) =>
+                                        console.warn('[ProviderKeyInput] Auto-fetch models failed:', e)
+                                    );
+                                } catch (e) {
+                                    alert(t('settings_view.ai.save_failed', { error: e }));
+                                } finally {
+                                    setSaving(false);
+                                }
+                            }}
+                        >
+                            {saving ? t('settings_view.ai.saving') : t('settings_view.ai.save')}
+                        </Button>
+                    </>
+                )}
             </div>
         </div>
     );
@@ -430,14 +515,12 @@ export const SettingsView = () => {
     const [activeTab, setActiveTab] = useState('general');
 
     // Use unified settings store
-    const { settings, updateTerminal, updateConnectionDefaults, updateAi, updateSftp, setLanguage } = useSettingsStore();
+    const { settings, updateTerminal, updateConnectionDefaults, updateAi, updateSftp, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels } = useSettingsStore();
     const { general, terminal, connectionDefaults, ai, sftp } = settings;
 
     // AI enable confirmation dialog
     const [showAiConfirm, setShowAiConfirm] = useState(false);
-    const [hasApiKey, setHasApiKey] = useState(false);
-    const [apiKeyInput, setApiKeyInput] = useState('');
-    const [apiKeySaving, setApiKeySaving] = useState(false);
+    const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
 
     // Data State
     const [keys, setKeys] = useState<SshKeyInfo[]>([]);
@@ -465,13 +548,6 @@ export const SettingsView = () => {
                 .catch((e) => {
                     console.error('Failed to load SSH hosts:', e);
                     setSshHosts([]);
-                });
-        } else if (activeTab === 'ai') {
-            api.hasAiApiKey()
-                .then(setHasApiKey)
-                .catch((e) => {
-                    console.error('Failed to check API key:', e);
-                    setHasApiKey(false);
                 });
         }
     }, [activeTab]);
@@ -1086,95 +1162,176 @@ export const SettingsView = () => {
 
                                 <Separator className="my-6 opacity-50" />
 
-                                {/* API Configuration - Using Form/Grid Layout like Connections */}
+                                {/* API Configuration - Multi-Provider */}
                                 <div className={ai.enabled ? "" : "opacity-50 pointer-events-none"}>
                                     <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mb-6">
-                                        <div className="grid gap-2">
-                                            <Label>{t('settings_view.ai.base_url')}</Label>
-                                            <Input
-                                                value={ai.baseUrl}
-                                                onChange={(e) => updateAi('baseUrl', e.target.value)}
-                                                placeholder="https://api.openai.com/v1"
-                                                className="bg-theme-bg"
-                                            />
-                                        </div>
+                                    {/* Provider Cards */}
+                                    <div className="space-y-3 max-w-3xl mb-6">
+                                        {ai.providers.map((provider) => (
+                                            <div
+                                                key={provider.id}
+                                                className={cn(
+                                                    "rounded-lg border p-4 transition-colors",
+                                                    provider.id === ai.activeProviderId
+                                                        ? "border-theme-accent/50 bg-theme-accent/5"
+                                                        : "border-theme-border bg-theme-bg"
+                                                )}
+                                            >
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-medium text-sm text-theme-text">{provider.name}</span>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-bg-panel text-theme-text-muted uppercase tracking-wider">
+                                                            {provider.type}
+                                                        </span>
+                                                        {provider.id === ai.activeProviderId && (
+                                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent font-medium">
+                                                                {t('settings_view.ai.active')}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        {provider.id !== ai.activeProviderId && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="text-xs"
+                                                                onClick={() => setActiveProvider(provider.id)}
+                                                            >
+                                                                {t('settings_view.ai.set_active')}
+                                                            </Button>
+                                                        )}
+                                                        <Checkbox
+                                                            checked={provider.enabled}
+                                                            onCheckedChange={(checked) => updateProvider(provider.id, { enabled: !!checked })}
+                                                        />
+                                                        {provider.id.startsWith('custom-') && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-7 w-7 p-0"
+                                                                onClick={() => {
+                                                                    if (confirm(t('settings_view.ai.remove_provider_confirm', { name: provider.name }))) {
+                                                                        api.deleteAiProviderApiKey(provider.id).catch(() => {});
+                                                                        removeProvider(provider.id);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                                        <div className="grid gap-2">
-                                            <Label>{t('settings_view.ai.model')}</Label>
-                                            <Input
-                                                value={ai.model}
-                                                onChange={(e) => updateAi('model', e.target.value)}
-                                                placeholder="gpt-4o-mini"
-                                                className="bg-theme-bg"
-                                            />
-                                        </div>
-                                    </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                                    <div className="grid gap-1">
+                                                        <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.base_url')}</Label>
+                                                        <Input
+                                                            value={provider.baseUrl}
+                                                            onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
+                                                            className="bg-theme-bg h-8 text-xs"
+                                                        />
+                                                    </div>
+                                                    <div className="grid gap-1">
+                                                        <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.default_model')}</Label>
+                                                        <Input
+                                                            value={provider.defaultModel}
+                                                            onChange={(e) => updateProvider(provider.id, { defaultModel: e.target.value })}
+                                                            className="bg-theme-bg h-8 text-xs"
+                                                        />
+                                                    </div>
+                                                </div>
 
-                                    <div className="max-w-3xl mb-6">
-                                        <div className="grid gap-2">
-                                            <Label>{t('settings_view.ai.api_key')}</Label>
-                                            <div className="flex gap-2">
-                                                {hasApiKey ? (
-                                                    <div className="flex-1 flex items-center gap-2">
-                                                        <div className="flex-1 h-10 px-3 flex items-center bg-theme-bg-panel/50 border border-theme-border/50 rounded-md text-theme-text-muted text-sm italic">
-                                                            ••••••••••••••••••••••••
-                                                        </div>
+                                                {/* Models list + refresh */}
+                                                <div className="mt-3">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <Label className="text-xs text-theme-text-muted">
+                                                            {t('settings_view.ai.available_models')} ({provider.models.length})
+                                                        </Label>
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
-                                                            className="text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                                                            className="h-6 px-2 text-[10px] gap-1"
+                                                            disabled={refreshingModels === provider.id}
                                                             onClick={async () => {
-                                                                if (confirm(t('settings_view.ai.remove_confirm'))) {
+                                                                // Guard: check key before fetching models
+                                                                if (provider.type !== 'ollama') {
                                                                     try {
-                                                                        await api.deleteAiApiKey();
-                                                                        setHasApiKey(false);
-                                                                        window.dispatchEvent(new CustomEvent('ai-api-key-updated'));
-                                                                    } catch (e) {
-                                                                        alert(t('settings_view.ai.remove_failed', { error: e }));
-                                                                    }
+                                                                        const hasKey = await api.hasAiProviderApiKey(provider.id);
+                                                                        if (!hasKey) {
+                                                                            alert(t('ai.model_selector.no_key_warning'));
+                                                                            return;
+                                                                        }
+                                                                    } catch { /* proceed anyway */ }
+                                                                }
+                                                                setRefreshingModels(provider.id);
+                                                                try {
+                                                                    const models = await refreshProviderModels(provider.id);
+                                                                    console.log(`[Settings] Fetched ${models.length} models for ${provider.name}`);
+                                                                } catch (e) {
+                                                                    console.error('[Settings] Failed to refresh models:', e);
+                                                                    alert(t('settings_view.ai.refresh_failed', { error: String(e) }));
+                                                                } finally {
+                                                                    setRefreshingModels(null);
                                                                 }
                                                             }}
                                                         >
-                                                            {t('settings_view.ai.remove')}
+                                                            <RefreshCw className={cn("w-3 h-3", refreshingModels === provider.id && "animate-spin")} />
+                                                            {t('settings_view.ai.refresh_models')}
                                                         </Button>
                                                     </div>
-                                                ) : (
-                                                    <>
-                                                        <Input
-                                                            type="password"
-                                                            placeholder="sk-..."
-                                                            className="flex-1 bg-theme-bg"
-                                                            value={apiKeyInput}
-                                                            onChange={(e) => setApiKeyInput(e.target.value)}
-                                                        />
-                                                        <Button
-                                                            variant="secondary"
-                                                            disabled={!apiKeyInput.trim() || apiKeySaving}
-                                                            onClick={async () => {
-                                                                if (!apiKeyInput.trim()) return;
-                                                                setApiKeySaving(true);
-                                                                try {
-                                                                    await api.setAiApiKey(apiKeyInput);
-                                                                    setApiKeyInput('');
-                                                                    setHasApiKey(true);
-                                                                    window.dispatchEvent(new CustomEvent('ai-api-key-updated'));
-                                                                } catch (e) {
-                                                                    alert(t('settings_view.ai.save_failed', { error: e }));
-                                                                } finally {
-                                                                    setApiKeySaving(false);
-                                                                }
-                                                            }}
-                                                        >
-                                                            {apiKeySaving ? t('settings_view.ai.saving') : t('settings_view.ai.save')}
-                                                        </Button>
-                                                    </>
+                                                    {provider.models.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {provider.models.slice(0, 12).map((model) => (
+                                                                <span
+                                                                    key={model}
+                                                                    className="text-[10px] px-1.5 py-0.5 rounded border border-theme-border/50 bg-theme-bg text-theme-text-muted cursor-pointer hover:text-theme-text hover:border-theme-border transition-colors"
+                                                                    onClick={() => updateProvider(provider.id, { defaultModel: model })}
+                                                                    title={t('settings_view.ai.click_to_set_default')}
+                                                                >
+                                                                    {model}
+                                                                </span>
+                                                            ))}
+                                                            {provider.models.length > 12 && (
+                                                                <span className="text-[10px] px-1.5 py-0.5 text-theme-text-muted">
+                                                                    +{provider.models.length - 12}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Provider API Key */}
+                                                {provider.type !== 'ollama' && (
+                                                    <div className="mt-3">
+                                                        <ProviderKeyInput providerId={provider.id} />
+                                                    </div>
                                                 )}
                                             </div>
-                                            <p className="text-xs text-theme-text-muted">{t('settings_view.ai.api_key_stored')}</p>
-                                        </div>
+                                        ))}
                                     </div>
+
+                                    {/* Add Custom Provider */}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mb-6"
+                                        onClick={() => {
+                                            const id = `custom-${Date.now()}`;
+                                            addProvider({
+                                                id,
+                                                type: 'openai_compatible',
+                                                name: t('settings_view.ai.custom_provider'),
+                                                baseUrl: 'https://',
+                                                defaultModel: '',
+                                                models: [],
+                                                enabled: true,
+                                                createdAt: Date.now(),
+                                            });
+                                        }}
+                                    >
+                                        + {t('settings_view.ai.add_provider')}
+                                    </Button>
 
                                     <Separator className="my-6 opacity-50" />
 

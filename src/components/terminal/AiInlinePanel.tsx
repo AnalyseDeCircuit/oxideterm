@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Sparkles, X, Check, AlertCircle, CornerDownLeft, Play, Copy, RotateCcw } from 'lucide-react';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useAppStore } from '../../store/appStore';
 import { api } from '../../lib/api';
 import { useTranslation } from 'react-i18next';
 import { platform } from '../../lib/platform';
+import { getProvider } from '../../lib/ai/providerRegistry';
+import { ModelSelector } from '../ai/ModelSelector';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -66,6 +69,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   const { t } = useTranslation();
   const { settings } = useSettingsStore();
   const { ai: aiSettings } = settings;
+  const createTab = useAppStore((state) => state.createTab);
 
   // State
   const [prompt, setPrompt] = useState('');
@@ -89,24 +93,38 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   // Check API key and selection on open
   useEffect(() => {
     if (isOpen) {
-      // Check API key
-      api.getAiApiKey()
-        .then((key) => setHasApiKey(!!key))
-        .catch(() => setHasApiKey(false));
+      // Check API key for active provider - no fallback to legacy key
+      const activeProvider = aiSettings.providers.find(p => p.id === aiSettings.activeProviderId);
+      if (activeProvider?.type === 'ollama') {
+        setHasApiKey(true);
+      } else if (activeProvider) {
+        api.hasAiProviderApiKey(activeProvider.id)
+          .then(has => setHasApiKey(!!has))
+          .catch(() => setHasApiKey(false));
+      } else {
+        setHasApiKey(false);
+      }
       
       // Capture selection at open time (freeze it)
       const selection = getSelection();
       selectionContextRef.current = selection;
       setHasSelection(!!selection.trim());
     }
-  }, [isOpen, getSelection]);
+  }, [isOpen, getSelection, aiSettings.activeProviderId]);
 
   // Listen for API key updates
   useEffect(() => {
     const handleKeyUpdated = () => {
-      api.getAiApiKey()
-        .then((key) => setHasApiKey(!!key))
-        .catch(() => setHasApiKey(false));
+      const activeProvider = aiSettings.providers.find(p => p.id === aiSettings.activeProviderId);
+      if (activeProvider?.type === 'ollama') {
+        setHasApiKey(true);
+      } else if (activeProvider) {
+        api.hasAiProviderApiKey(activeProvider.id)
+          .then(has => setHasApiKey(!!has))
+          .catch(() => setHasApiKey(false));
+      } else {
+        setHasApiKey(false);
+      }
     };
     window.addEventListener('ai-api-key-updated', handleKeyUpdated);
     return () => window.removeEventListener('ai-api-key-updated', handleKeyUpdated);
@@ -197,6 +215,10 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
     onClose();
   }, [onClose]);
 
+  const handleOpenSettings = useCallback(() => {
+    createTab('settings');
+  }, [createTab]);
+
   // Get selection context (cached at open time)
   const getSelectionContext = useCallback((): string => {
     return selectionContextRef.current;
@@ -210,9 +232,26 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
     setResponse('');
 
     try {
-      const apiKey = await api.getAiApiKey();
-      if (!apiKey) {
-        throw new Error(t('terminal.ai.api_key_required'));
+      // Resolve active provider
+      const activeProvider = aiSettings.providers.find(p => p.id === aiSettings.activeProviderId);
+      if (!activeProvider) {
+        throw new Error('No AI provider configured');
+      }
+
+      // Resolve API key
+      let apiKey = '';
+      if (activeProvider.type !== 'ollama') {
+        try {
+          apiKey = await api.getAiProviderApiKey(activeProvider.id) || '';
+        } catch { /* ignore */ }
+        if (!apiKey) {
+          try {
+            apiKey = await api.getAiApiKey() || '';
+          } catch { /* ignore */ }
+        }
+        if (!apiKey) {
+          throw new Error(t('terminal.ai.api_key_required'));
+        }
       }
 
       // 1. Get OS metadata
@@ -248,16 +287,26 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
 
       abortControllerRef.current = new AbortController();
 
-      await fetchChatCompletion({
-        baseUrl: aiSettings.baseUrl,
-        model: aiSettings.model,
+      const provider = getProvider(activeProvider.type);
+      const model = aiSettings.activeModel || activeProvider.defaultModel;
+      const config = {
+        baseUrl: activeProvider.baseUrl,
+        model,
         apiKey,
-        messages,
-        signal: abortControllerRef.current.signal,
-        onChunk: (chunk) => {
-          setResponse(prev => prev + chunk);
+      };
+
+      let fullContent = '';
+      for await (const event of provider.streamCompletion(config, messages, abortControllerRef.current.signal)) {
+        if (event.type === 'content' && event.content) {
+          fullContent += event.content;
+          setResponse(prev => prev + event.content);
+        } else if (event.type === 'error') {
+          throw new Error(event.message);
+        } else if (event.type === 'done') {
+          break;
         }
-      });
+      }
+      void fullContent; // Used for potential future logging
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
@@ -366,7 +415,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className="absolute z-50 w-[520px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md shadow-xl overflow-hidden"
+      className="absolute z-50 w-[520px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md shadow-xl"
       style={panelStyle}
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
@@ -381,6 +430,7 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
       {/* Main input row */}
       <div className="flex items-center gap-2 px-3 py-2">
         <Sparkles className="w-4 h-4 text-[#0078d4] flex-shrink-0" />
+        <ModelSelector onOpenSettings={handleOpenSettings} />
         
         <input
           ref={inputRef}
@@ -524,88 +574,4 @@ function extractCommand(text: string): string {
   }
 
   return text.trim();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// OpenAI-compatible API Call
-// ═══════════════════════════════════════════════════════════════════════════
-
-interface ChatCompletionOptions {
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  messages: Message[];
-  signal?: AbortSignal;
-  onChunk?: (chunk: string) => void;
-}
-
-async function fetchChatCompletion(options: ChatCompletionOptions): Promise<string> {
-  const { baseUrl, model, apiKey, messages, signal, onChunk } = options;
-
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
-  const url = `${cleanBaseUrl}/chat/completions`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-    }),
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let errorMessage = `API error: ${response.status}`;
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
-    } catch {
-      if (errorText) errorMessage = errorText.slice(0, 200);
-    }
-    throw new Error(errorMessage);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let fullContent = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') continue;
-
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content || '';
-            if (content) {
-              fullContent += content;
-              onChunk?.(content);
-            }
-          } catch {
-            // Ignore parse errors for partial chunks
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return fullContent;
 }

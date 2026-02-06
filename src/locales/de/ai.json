@@ -68,7 +68,14 @@
       "history": "Verlauf",
       "pending": "Eingabe",
       "total": "Gesamt",
-      "warning_limit": "Kontextlimit fast erreicht"
+      "warning_limit": "Kontextlimit fast erreicht"    },
+    "model_selector": {
+      "no_key": "Kein Schlüssel",
+      "no_key_warning": "Bitte zuerst API Key konfigurieren",
+      "offline": "Offline",
+      "manage_providers": "Anbieter verwalten",
+      "no_provider": "Kein Anbieter konfiguriert",
+      "refresh_models": "Aktualisieren"
     }
   }
 }

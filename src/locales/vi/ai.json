@@ -69,6 +69,14 @@
       "pending": "Đầu vào",
       "total": "Tổng",
       "warning_limit": "Sắp đạt giới hạn ngữ cảnh"
+    },
+    "model_selector": {
+      "no_key": "Không có khóa",
+      "no_key_warning": "Vui lòng cấu hình API Key trước",
+      "offline": "Ngoại tuyến",
+      "manage_providers": "Quản lý nhà cung cấp",
+      "no_provider": "Chưa cấu hình nhà cung cấp",
+      "refresh_models": "Làm mới"
     }
   }
 }

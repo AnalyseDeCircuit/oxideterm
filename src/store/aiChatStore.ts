@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { api } from '../lib/api';
 import { useSettingsStore } from './settingsStore';
 import { gatherSidebarContext, type SidebarContext } from '../lib/sidebarContextProvider';
+import { getProvider } from '../lib/ai/providerRegistry';
+import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -171,82 +173,11 @@ function parseThinkingContent(rawContent: string): ParsedResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OpenAI-compatible Streaming API
+// Provider-based Streaming API
 // ═══════════════════════════════════════════════════════════════════════════
 
-interface ChatCompletionMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-async function* streamChatCompletion(
-  baseUrl: string,
-  model: string,
-  apiKey: string,
-  messages: ChatCompletionMessage[],
-  signal: AbortSignal
-): AsyncGenerator<string, void, unknown> {
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
-  const url = `${cleanBaseUrl}/chat/completions`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-    }),
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let errorMessage = `API error: ${response.status}`;
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
-    } catch {
-      if (errorText) errorMessage = errorText.slice(0, 200);
-    }
-    throw new Error(errorMessage);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') return;
-
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content || '';
-            if (content) yield content;
-          } catch {
-            // Ignore parse errors for partial chunks
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
+// Re-export ChatMessage type from providers for internal use
+type ChatCompletionMessage = ProviderChatMessage;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Store Implementation (redb Backend)
@@ -422,17 +353,37 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       return;
     }
 
-    // Get API key
-    let apiKey: string | null;
+    // ════════════════════════════════════════════════════════════════════
+    // Resolve Active Provider and API Key
+    // ════════════════════════════════════════════════════════════════════
+
+    const activeProvider = aiSettings.providers?.find(p => p.id === aiSettings.activeProviderId);
+    const providerType = activeProvider?.type || 'openai';
+    const providerBaseUrl = activeProvider?.baseUrl || aiSettings.baseUrl;
+    const providerModel = aiSettings.activeModel || activeProvider?.defaultModel || aiSettings.model;
+    const providerId = activeProvider?.id;
+
+    if (!providerModel) {
+      set({ error: 'No model selected. Please refresh models or select one in Settings > AI.' });
+      return;
+    }
+
+    // Get API key - provider-specific only
+    let apiKey: string | null = null;
     try {
-      apiKey = await api.getAiApiKey();
-      if (!apiKey) {
+      if (providerId) {
+        apiKey = await api.getAiProviderApiKey(providerId);
+      }
+      // Ollama doesn't require an API key
+      if (!apiKey && providerType !== 'ollama') {
         set({ error: 'API key not found. Please configure it in Settings > AI.' });
         return;
       }
     } catch (e) {
-      set({ error: 'Failed to get API key.' });
-      return;
+      if (providerType !== 'ollama') {
+        set({ error: 'Failed to get API key.' });
+        return;
+      }
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -551,22 +502,45 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         }));
       };
 
-      for await (const chunk of streamChatCompletion(
-        aiSettings.baseUrl,
-        aiSettings.model,
-        apiKey,
+      // ════════════════════════════════════════════════════════════════════
+      // Stream via Provider Abstraction Layer
+      // ════════════════════════════════════════════════════════════════════
+
+      const provider = getProvider(providerType);
+      let thinkingContent = '';
+
+      for await (const event of provider.streamCompletion(
+        { baseUrl: providerBaseUrl, model: providerModel, apiKey: apiKey || '' },
         apiMessages,
         abortController.signal
       )) {
-        fullContent += chunk;
-        // Throttled update for smoother streaming
-        // Also check if we're in thinking mode (incomplete thinking tag)
-        const isInThinking = fullContent.includes('<thinking>') && !fullContent.includes('</thinking>');
-        updateContent(fullContent, false, isInThinking);
+        switch (event.type) {
+          case 'content':
+            fullContent += event.content;
+            updateContent(fullContent, false, false);
+            break;
+          case 'thinking':
+            thinkingContent += event.content;
+            // Show thinking as temporary content with thinking tag
+            updateContent(fullContent || '...', false, true);
+            break;
+          case 'error':
+            throw new Error(event.message);
+          case 'done':
+            break;
+        }
       }
 
-      // Parse thinking content from final response
-      const { content: mainContent, thinkingContent } = parseThinkingContent(fullContent);
+      // For providers that handle thinking natively (Anthropic), use extracted thinking
+      // For others (OpenAI-compatible), parse <thinking> tags from content
+      let mainContent = fullContent;
+      let parsedThinking = thinkingContent || undefined;
+
+      if (!thinkingContent && fullContent.includes('<thinking>')) {
+        const parsed = parseThinkingContent(fullContent);
+        mainContent = parsed.content;
+        parsedThinking = parsed.thinkingContent;
+      }
 
       // Final update with parsed content
       set((state) => ({
@@ -579,7 +553,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
                 ? {
                     ...m,
                     content: mainContent,
-                    thinkingContent,
+                    thinkingContent: parsedThinking,
                     isThinkingStreaming: false,
                     isStreaming: false,
                   }

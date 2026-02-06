@@ -68,7 +68,14 @@
       "history": "Histórico",
       "pending": "Entrada",
       "total": "Total",
-      "warning_limit": "Próximo do limite de contexto"
+      "warning_limit": "Próximo do limite de contexto"    },
+    "model_selector": {
+      "no_key": "Sem chave",
+      "no_key_warning": "Configure a chave API primeiro",
+      "offline": "Offline",
+      "manage_providers": "Gerenciar provedores",
+      "no_provider": "Nenhum provedor configurado",
+      "refresh_models": "Atualizar"
     }
   }
 }

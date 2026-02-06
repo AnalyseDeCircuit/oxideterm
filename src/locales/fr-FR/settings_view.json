@@ -146,7 +146,17 @@
       "lines_50": "50 lignes",
       "lines_100": "100 lignes",
       "lines_200": "200 lignes",
-      "lines_400": "400 lignes"
+      "lines_400": "400 lignes",
+      "active": "Actif",
+      "set_active": "Activer",
+      "default_model": "Modèle par défaut",
+      "custom_provider": "Fournisseur personnalisé",
+      "add_provider": "Ajouter un fournisseur",
+      "remove_provider_confirm": "Supprimer le fournisseur \"{{name}}\" ?",
+      "available_models": "Modèles disponibles",
+      "refresh_models": "Actualiser la liste des modèles",
+      "refresh_failed": "Échec de l'actualisation des modèles : {{error}}",
+      "click_to_set_default": "Cliquer pour définir comme modèle par défaut"
     },
     "sftp": {
       "title": "Transfert SFTP",

@@ -69,6 +69,14 @@
       "pending": "Input",
       "total": "Totale",
       "warning_limit": "Limite contesto vicino"
+    },
+    "model_selector": {
+      "no_key": "Nessuna chiave",
+      "no_key_warning": "Configurare prima la chiave API",
+      "offline": "Offline",
+      "manage_providers": "Gestisci provider",
+      "no_provider": "Nessun provider configurato",
+      "refresh_models": "Aggiorna"
     }
   }
 }

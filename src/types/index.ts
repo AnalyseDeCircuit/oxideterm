@@ -1078,3 +1078,39 @@ export interface AiConversation {
   /** Associated terminal session ID (optional) */
   sessionId?: string;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Provider Types (Multi-Provider Support)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Supported AI provider types
+ */
+export type AiProviderType =
+  | 'openai'            // OpenAI native API
+  | 'anthropic'         // Anthropic Claude native API
+  | 'gemini'            // Google Gemini API
+  | 'ollama'            // Local Ollama
+  | 'openai_compatible'; // Any OpenAI-compatible endpoint
+
+/**
+ * A configured AI provider
+ */
+export interface AiProvider {
+  /** Unique provider ID (UUID) */
+  id: string;
+  /** Provider type */
+  type: AiProviderType;
+  /** Display name (user-customizable) */
+  name: string;
+  /** API base URL */
+  baseUrl: string;
+  /** Default model for this provider */
+  defaultModel: string;
+  /** Available models (user can add custom) */
+  models: string[];
+  /** Whether this provider is enabled */
+  enabled: boolean;
+  /** Creation timestamp */
+  createdAt: number;
+}

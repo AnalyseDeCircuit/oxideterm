@@ -68,7 +68,14 @@
       "history": "履歴",
       "pending": "入力",
       "total": "合計",
-      "warning_limit": "コンテキスト上限に近付いています"
+      "warning_limit": "コンテキスト上限に近付いています"    },
+    "model_selector": {
+      "no_key": "キーなし",
+      "no_key_warning": "先に API Key を設定してください",
+      "offline": "オフライン",
+      "manage_providers": "プロバイダーを管理",
+      "no_provider": "プロバイダー未設定",
+      "refresh_models": "更新"
     }
   }
 }

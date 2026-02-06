@@ -16,6 +16,7 @@ import { themes } from '../lib/themes';
 import { useToastStore } from '../hooks/useToast';
 import { getFontFamilyCSS } from '../components/fileManager/fontUtils';
 import i18n from '../i18n';
+import { DEFAULT_PROVIDERS } from '../lib/ai/providers';
 
 // ============================================================================
 // Constants
@@ -138,8 +139,14 @@ export type AiContextSource = 'selection' | 'visible' | 'command';
 export interface AiSettings {
   enabled: boolean;
   enabledConfirmed: boolean;  // User has confirmed the privacy notice
+  // Legacy single-provider fields (kept for migration)
   baseUrl: string;
   model: string;
+  // Multi-provider support
+  providers: import('../types').AiProvider[];
+  activeProviderId: string | null;
+  activeModel: string | null;
+  // Context settings
   contextMaxChars: number;      // Max characters to send
   contextVisibleLines: number;  // Max visible lines to capture
   /** Thinking block display style: detailed (full) or compact (collapsed) */
@@ -246,6 +253,9 @@ const defaultAiSettings: AiSettings = {
   enabledConfirmed: false,
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  providers: [],   // Populated on first migration
+  activeProviderId: null,
+  activeModel: null,
   contextMaxChars: 8000,
   contextVisibleLines: 120,
   thinkingStyle: 'detailed',         // Default: show full thinking content
@@ -311,6 +321,65 @@ function mergeWithDefaults(saved: Partial<PersistedSettingsV2>): PersistedSettin
   };
 }
 
+/** Migrate AI settings to multi-provider format */
+function migrateAiProviders(settings: PersistedSettingsV2): PersistedSettingsV2 {
+  const ai = settings.ai;
+
+  // Already migrated
+  if (ai.providers && ai.providers.length > 0) {
+    return settings;
+  }
+
+  console.log('[SettingsStore] Migrating AI settings to multi-provider format');
+
+  const providers: import('../types').AiProvider[] = DEFAULT_PROVIDERS.map(
+    (cfg) => ({
+      id: `builtin-${cfg.type}`,
+      type: cfg.type,
+      name: cfg.name,
+      baseUrl: cfg.baseUrl,
+      defaultModel: cfg.defaultModel,
+      models: cfg.models,
+      enabled: true,
+      createdAt: Date.now(),
+    })
+  );
+
+  // If user had a custom baseUrl, create an openai_compatible provider for it
+  const defaultOpenAiUrl = 'https://api.openai.com/v1';
+  if (ai.baseUrl && ai.baseUrl !== defaultOpenAiUrl) {
+    const customProvider: import('../types').AiProvider = {
+      id: `custom-migrated-${Date.now()}`,
+      type: 'openai_compatible',
+      name: 'Custom (Migrated)',
+      baseUrl: ai.baseUrl,
+      defaultModel: ai.model || 'gpt-4o-mini',
+      models: [ai.model || 'gpt-4o-mini'],
+      enabled: true,
+      createdAt: Date.now(),
+    };
+    providers.unshift(customProvider);
+  }
+
+  // Set active provider: if user had custom URL, use that; otherwise OpenAI
+  const activeProviderId = ai.baseUrl && ai.baseUrl !== defaultOpenAiUrl
+    ? providers[0].id
+    : 'builtin-openai';
+
+  const newSettings: PersistedSettingsV2 = {
+    ...settings,
+    ai: {
+      ...ai,
+      providers,
+      activeProviderId,
+      activeModel: ai.model || 'gpt-4o-mini',
+    },
+  };
+
+  persistSettings(newSettings);
+  return newSettings;
+}
+
 /** Load settings from localStorage, detect and clean legacy formats */
 function loadSettings(): PersistedSettingsV2 {
   try {
@@ -319,7 +388,9 @@ function loadSettings(): PersistedSettingsV2 {
       const parsed = JSON.parse(raw);
       if (parsed.version === SETTINGS_VERSION) {
         // Valid v2 format, merge with defaults for any new fields
-        return mergeWithDefaults(parsed);
+        const settings = mergeWithDefaults(parsed);
+        // Migrate: ensure providers array exists
+        return migrateAiProviders(settings);
       }
     }
 
@@ -333,7 +404,8 @@ function loadSettings(): PersistedSettingsV2 {
     console.error('[SettingsStore] Failed to load settings:', e);
   }
 
-  return createDefaultSettings();
+  const defaults = createDefaultSettings();
+  return migrateAiProviders(defaults);
 }
 
 /** Persist settings to localStorage */
@@ -360,6 +432,12 @@ interface SettingsStore {
   updateAppearance: <K extends keyof AppearanceSettings>(key: K, value: AppearanceSettings[K]) => void;
   updateConnectionDefaults: <K extends keyof ConnectionDefaults>(key: K, value: ConnectionDefaults[K]) => void;
   updateAi: <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => void;
+  // Provider management
+  addProvider: (provider: import('../types').AiProvider) => void;
+  removeProvider: (providerId: string) => void;
+  updateProvider: (providerId: string, updates: Partial<import('../types').AiProvider>) => void;
+  setActiveProvider: (providerId: string, model?: string) => void;
+  refreshProviderModels: (providerId: string) => Promise<string[]>;
   updateLocalTerminal: <K extends keyof LocalTerminalSettings>(key: K, value: LocalTerminalSettings[K]) => void;
   updateSftp: <K extends keyof SftpSettings>(key: K, value: SftpSettings[K]) => void;
 
@@ -659,6 +737,116 @@ export const useSettingsStore = create<SettingsStore>()(
         persistSettings(newSettings);
         return { settings: newSettings };
       });
+    },
+
+    addProvider: (provider) => {
+      set((state) => {
+        const ai = state.settings.ai;
+        const newProviders = [...ai.providers, provider];
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          ai: {
+            ...ai,
+            providers: newProviders,
+            // Auto-activate if first provider
+            activeProviderId: ai.activeProviderId || provider.id,
+            activeModel: ai.activeModel || provider.defaultModel,
+          },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    removeProvider: (providerId) => {
+      set((state) => {
+        const ai = state.settings.ai;
+        const newProviders = ai.providers.filter(p => p.id !== providerId);
+        const needsNewActive = ai.activeProviderId === providerId;
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          ai: {
+            ...ai,
+            providers: newProviders,
+            activeProviderId: needsNewActive ? (newProviders[0]?.id ?? null) : ai.activeProviderId,
+            activeModel: needsNewActive ? (newProviders[0]?.defaultModel ?? null) : ai.activeModel,
+          },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    updateProvider: (providerId, updates) => {
+      set((state) => {
+        const ai = state.settings.ai;
+        const newProviders = ai.providers.map(p =>
+          p.id === providerId ? { ...p, ...updates } : p
+        );
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          ai: { ...ai, providers: newProviders },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    setActiveProvider: (providerId, model) => {
+      set((state) => {
+        const ai = state.settings.ai;
+        const provider = ai.providers.find(p => p.id === providerId);
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          ai: {
+            ...ai,
+            activeProviderId: providerId,
+            activeModel: model || provider?.defaultModel || ai.activeModel,
+          },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    refreshProviderModels: async (providerId) => {
+      const state = get();
+      const provider = state.settings.ai.providers.find(p => p.id === providerId);
+      if (!provider) throw new Error(`Provider ${providerId} not found`);
+
+      const { getProvider } = await import('../lib/ai/providerRegistry');
+      const impl = getProvider(provider.type);
+      if (!impl.fetchModels) {
+        throw new Error(`Provider ${provider.type} does not support model listing`);
+      }
+
+      // Resolve API key (provider-specific only)
+      const { api } = await import('../lib/api');
+      let apiKey = '';
+      if (provider.type !== 'ollama') {
+        try { apiKey = await api.getAiProviderApiKey(providerId) || ''; } catch { /* */ }
+        if (!apiKey) {
+          throw new Error('API key not found for provider');
+        }
+      }
+
+      const models = await impl.fetchModels({ baseUrl: provider.baseUrl, apiKey });
+
+      // Update store
+      set((s) => {
+        const ai = s.settings.ai;
+        const updatedProviders = ai.providers.map(p =>
+          p.id === providerId ? { ...p, models } : p
+        );
+        const newSettings: PersistedSettingsV2 = {
+          ...s.settings,
+          ai: { ...ai, providers: updatedProviders },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+
+      return models;
     },
 
     // ========== Bulk Operations ==========

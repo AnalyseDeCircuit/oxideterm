@@ -15,4 +15,4 @@ pub use storage::{config_dir, connections_file, ConfigStorage, StorageError};
 pub use types::{
     ConfigFile, ConnectionOptions, ProxyHopConfig, SavedAuth, SavedConnection, CONFIG_VERSION,
 };
-pub use vault::{AiVault, VaultError};
+pub use vault::{AiProviderVault, AiVault, VaultError};

@@ -69,6 +69,14 @@
       "pending": "Entrée",
       "total": "Total",
       "warning_limit": "Limite de contexte proche"
+    },
+    "model_selector": {
+      "no_key": "Pas de clé",
+      "no_key_warning": "Veuillez d'abord configurer la clé API",
+      "offline": "Hors ligne",
+      "manage_providers": "Gérer les fournisseurs",
+      "no_provider": "Aucun fournisseur configuré",
+      "refresh_models": "Actualiser"
     }
   }
 }

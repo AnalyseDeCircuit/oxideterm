@@ -146,7 +146,17 @@
       "lines_50": "50 lines",
       "lines_100": "100 lines",
       "lines_200": "200 lines",
-      "lines_400": "400 lines"
+      "lines_400": "400 lines",
+      "active": "Active",
+      "set_active": "Set Active",
+      "default_model": "Default Model",
+      "custom_provider": "Custom Provider",
+      "add_provider": "Add Provider",
+      "remove_provider_confirm": "Remove provider \"{{name}}\"?",
+      "available_models": "Available Models",
+      "refresh_models": "Refresh Models",
+      "refresh_failed": "Failed to refresh models: {{error}}",
+      "click_to_set_default": "Click to set as default model"
     },
     "sftp": {
       "title": "SFTP Transfer",

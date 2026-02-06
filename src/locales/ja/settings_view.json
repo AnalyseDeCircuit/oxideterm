@@ -146,7 +146,17 @@
       "lines_50": "50 行",
       "lines_100": "100 行",
       "lines_200": "200 行",
-      "lines_400": "400 行"
+      "lines_400": "400 行",
+      "active": "アクティブ",
+      "set_active": "アクティブに設定",
+      "default_model": "デフォルトモデル",
+      "custom_provider": "カスタムプロバイダー",
+      "add_provider": "プロバイダーを追加",
+      "remove_provider_confirm": "プロバイダー \"{{name}}\" を削除しますか？",
+      "available_models": "利用可能なモデル",
+      "refresh_models": "モデルリストを更新",
+      "refresh_failed": "モデルの更新に失敗しました：{{error}}",
+      "click_to_set_default": "クリックしてデフォルトモデルに設定"
     },
     "sftp": {
       "title": "SFTP転送",

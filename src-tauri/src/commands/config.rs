@@ -3,8 +3,8 @@
 //! Tauri commands for managing saved connections and SSH config import.
 
 use crate::config::{
-    default_ssh_config_path, parse_ssh_config, AiVault, ConfigFile, ConfigStorage, Keychain,
-    ProxyHopConfig, SavedAuth, SavedConnection, SshConfigHost,
+    default_ssh_config_path, parse_ssh_config, AiProviderVault, AiVault, ConfigFile, ConfigStorage,
+    Keychain, ProxyHopConfig, SavedAuth, SavedConnection, SshConfigHost,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -985,4 +985,78 @@ pub async fn delete_ai_api_key(
     
     tracing::info!("AI API key deleted from all storage locations");
     Ok(())
+}
+
+// ============ AI Multi-Provider API Key Commands ============
+
+/// Helper to get the AI provider vault instance
+fn get_ai_provider_vault(app_handle: &tauri::AppHandle) -> Result<AiProviderVault, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+    Ok(AiProviderVault::new(app_data_dir))
+}
+
+/// Set API key for a specific AI provider
+#[tauri::command]
+pub async fn set_ai_provider_api_key(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+    api_key: String,
+) -> Result<(), String> {
+    let vault = get_ai_provider_vault(&app_handle)?;
+
+    if api_key.is_empty() {
+        vault.delete(&provider_id).map_err(|e| format!("Failed to delete provider key: {}", e))?;
+    } else {
+        vault.save(&provider_id, &api_key).map_err(|e| format!("Failed to save provider key: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Get API key for a specific AI provider
+#[tauri::command]
+pub async fn get_ai_provider_api_key(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+) -> Result<Option<String>, String> {
+    let vault = get_ai_provider_vault(&app_handle)?;
+
+    match vault.load(&provider_id) {
+        Ok(key) => Ok(Some(key)),
+        Err(crate::config::VaultError::NotFound) => Ok(None),
+        Err(e) => Err(format!("Failed to load provider key: {}", e)),
+    }
+}
+
+/// Check if API key exists for a specific AI provider
+#[tauri::command]
+pub async fn has_ai_provider_api_key(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+) -> Result<bool, String> {
+    let vault = get_ai_provider_vault(&app_handle)?;
+    Ok(vault.exists(&provider_id))
+}
+
+/// Delete API key for a specific AI provider
+#[tauri::command]
+pub async fn delete_ai_provider_api_key(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+) -> Result<(), String> {
+    let vault = get_ai_provider_vault(&app_handle)?;
+    vault.delete(&provider_id).map_err(|e| format!("Failed to delete provider key: {}", e))?;
+    Ok(())
+}
+
+/// List all provider IDs that have stored API keys
+#[tauri::command]
+pub async fn list_ai_provider_keys(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    let vault = get_ai_provider_vault(&app_handle)?;
+    vault.list_providers().map_err(|e| format!("Failed to list provider keys: {}", e))
 }

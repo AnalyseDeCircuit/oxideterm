@@ -146,7 +146,17 @@
       "lines_50": "50줄",
       "lines_100": "100줄",
       "lines_200": "200줄",
-      "lines_400": "400줄"
+      "lines_400": "400줄",
+      "active": "활성",
+      "set_active": "활성으로 설정",
+      "default_model": "기본 모델",
+      "custom_provider": "사용자 정의 공급자",
+      "add_provider": "공급자 추가",
+      "remove_provider_confirm": "공급자 \"{{name}}\"을(를) 제거하시겠습니까?",
+      "available_models": "사용 가능한 모델",
+      "refresh_models": "모델 목록 새로고침",
+      "refresh_failed": "모델 새로고침 실패: {{error}}",
+      "click_to_set_default": "클릭하여 기본 모델로 설정"
     },
     "sftp": {
       "title": "SFTP 전송",

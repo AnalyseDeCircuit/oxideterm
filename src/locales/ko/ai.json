@@ -68,7 +68,14 @@
       "history": "기록",
       "pending": "입력",
       "total": "총계",
-      "warning_limit": "컨텍스트 한도에 근접"
+      "warning_limit": "컨텍스트 한도에 근접"    },
+    "model_selector": {
+      "no_key": "키 없음",
+      "no_key_warning": "먼저 API Key를 설정하세요",
+      "offline": "오프라인",
+      "manage_providers": "공급자 관리",
+      "no_provider": "공급자 미설정",
+      "refresh_models": "새로고침"
     }
   }
 }

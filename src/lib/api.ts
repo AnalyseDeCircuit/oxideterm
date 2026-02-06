@@ -975,6 +975,48 @@ export const api = {
     return invoke('delete_ai_api_key');
   },
 
+  // ============ AI Provider API Key Commands ============
+
+  /**
+   * Set API key for a specific AI provider
+   */
+  setAiProviderApiKey: async (providerId: string, apiKey: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('set_ai_provider_api_key', { providerId, apiKey });
+  },
+
+  /**
+   * Get API key for a specific AI provider
+   */
+  getAiProviderApiKey: async (providerId: string): Promise<string | null> => {
+    if (USE_MOCK) return null;
+    return invoke('get_ai_provider_api_key', { providerId });
+  },
+
+  /**
+   * Check if API key exists for a specific AI provider
+   */
+  hasAiProviderApiKey: async (providerId: string): Promise<boolean> => {
+    if (USE_MOCK) return false;
+    return invoke('has_ai_provider_api_key', { providerId });
+  },
+
+  /**
+   * Delete API key for a specific AI provider
+   */
+  deleteAiProviderApiKey: async (providerId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('delete_ai_provider_api_key', { providerId });
+  },
+
+  /**
+   * List all provider IDs that have stored API keys
+   */
+  listAiProviderKeys: async (): Promise<string[]> => {
+    if (USE_MOCK) return [];
+    return invoke('list_ai_provider_keys');
+  },
+
   // ============ Local Terminal (PTY) ============
 
   /**

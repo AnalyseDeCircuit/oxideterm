@@ -146,7 +146,17 @@
       "lines_50": "50 行",
       "lines_100": "100 行",
       "lines_200": "200 行",
-      "lines_400": "400 行"
+      "lines_400": "400 行",
+      "active": "已激活",
+      "set_active": "设为激活",
+      "default_model": "默认模型",
+      "custom_provider": "自定义提供商",
+      "add_provider": "添加提供商",
+      "remove_provider_confirm": "移除提供商 \"{{name}}\"？",
+      "available_models": "可用模型",
+      "refresh_models": "刷新模型列表",
+      "refresh_failed": "刷新模型失败：{{error}}",
+      "click_to_set_default": "点击设为默认模型"
     },
     "sftp": {
       "title": "SFTP 传输",
