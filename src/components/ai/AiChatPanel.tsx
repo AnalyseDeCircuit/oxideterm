@@ -133,24 +133,31 @@ export function AiChatPanel() {
   return (
     <div className="h-full flex flex-col bg-theme-bg">
       {/* Header - Strictly Utilitarian */}
-      <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-theme-border/30 bg-theme-bg">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase">{t('ai.chat.header')}</span>
-          <ModelSelector onOpenSettings={handleOpenSettings} />
-          {activeConversation?.title && (
-            <div className="flex items-center gap-2 max-w-[120px]">
-              <span className="text-theme-border/40 font-thin">|</span>
-              <button
-                onClick={() => setShowConversations(!showConversations)}
-                className="text-[11px] text-theme-text-muted hover:text-theme-text truncate font-medium transition-colors"
-              >
-                {activeConversation.title}
-              </button>
+      <div className="flex-shrink-0 flex items-start justify-between px-3 py-2 border-b border-theme-border/30 bg-theme-bg gap-2">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 pb-1 border-b border-theme-border/20">
+            <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase shrink-0">{t('ai.chat.header')}</span>
+            {activeConversation?.title && (
+              <>
+                <span className="w-1 h-1 rounded-full bg-theme-border/50 shrink-0" />
+                <button
+                  onClick={() => setShowConversations(!showConversations)}
+                  className="text-[11px] text-theme-text-muted/80 hover:text-theme-text truncate font-medium transition-colors min-w-0"
+                  title={activeConversation.title}
+                >
+                  {activeConversation.title}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-md border border-theme-border/30 bg-theme-bg/60 max-w-full">
+              <ModelSelector onOpenSettings={handleOpenSettings} />
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 shrink-0 mt-[1px]">
           <button
             onClick={handleNewChat}
             className="p-1 px-1.5 rounded-sm hover:bg-theme-accent/10 text-theme-text-muted hover:text-theme-accent transition-colors"

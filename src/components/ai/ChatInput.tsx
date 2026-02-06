@@ -194,18 +194,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
                 <span className="truncate">{t('ai.input.thinking')}</span>
               </div>
             ) : (
-              <>
-                <ContextIndicator pendingInput={input} />
-                <div className="w-px h-3 bg-theme-border/30 shrink-0 hidden sm:block" />
-                <div className="hidden sm:flex items-center gap-1.5">
-                  <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">ENTER</span>
-                  <span>{t('ai.input.send_key')}</span>
-                </div>
-                <div className="hidden md:flex items-center gap-1.5 ml-2">
-                  <span className="px-1 py-0.5 rounded-sm border border-theme-border/30 bg-theme-bg/50">SHIFT+ENTER</span>
-                  <span>{t('ai.input.newline_key')}</span>
-                </div>
-              </>
+              <ContextIndicator pendingInput={input} />
             )}
           </div>
 

@@ -836,8 +836,8 @@ export const SessionTree: React.FC<SessionTreeProps> = ({
 
   if (nodes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-32 text-zinc-500 text-sm">
-        <Server className="w-8 h-8 mb-2 opacity-30" />
+      <div className="flex flex-col items-center justify-center h-32 text-zinc-500 text-sm text-center px-4">
+        <Server className="w-8 h-8 mb-2 opacity-30 shrink-0" />
         <p>{t('sessions.tree.no_sessions')}</p>
         <p className="text-xs mt-1 text-zinc-600">{t('sessions.tree.click_to_add')}</p>
       </div>

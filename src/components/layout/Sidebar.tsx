@@ -925,8 +925,8 @@ export const Sidebar = () => {
         <div className="flex-1 overflow-y-auto p-2">
           {sidebarActiveSection === 'sessions' && (
             <div className="space-y-4 flex flex-col h-full">
-              <div className="flex items-center justify-between px-2">
-                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider">{t('sidebar.panels.sessions')}</span>
+              <div className="flex items-center justify-between px-2 min-w-0">
+                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider truncate">{t('sidebar.panels.sessions')}</span>
                 <div className="flex items-center gap-1">
                   {/* 视图模式切换 */}
                   <Button
@@ -1020,8 +1020,8 @@ export const Sidebar = () => {
           {/* Saved Connections Section (Slim: quick-connect list + open Session Manager) */}
           {sidebarActiveSection === 'saved' && (
             <div className="flex flex-col h-full space-y-2">
-              <div className="flex items-center justify-between px-2">
-                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider">
+              <div className="flex items-center justify-between px-2 min-w-0">
+                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider truncate">
                   {t('sidebar.panels.saved_title')}
                 </span>
               </div>
@@ -1091,11 +1091,11 @@ export const Sidebar = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full gap-1.5 text-xs"
+                  className="w-full gap-1.5 text-xs min-w-0"
                   onClick={() => createTab('session_manager')}
                 >
-                  <LayoutList className="h-3 w-3" />
-                  {t('sidebar.panels.open_session_manager')}
+                  <LayoutList className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{t('sidebar.panels.open_session_manager')}</span>
                 </Button>
               </div>
             </div>
@@ -1104,8 +1104,8 @@ export const Sidebar = () => {
           {/* System Health Panel */}
           {sidebarActiveSection === 'system_health' && (
             <div className="space-y-4 flex flex-col h-full">
-              <div className="flex items-center justify-between px-2">
-                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider">
+              <div className="flex items-center justify-between px-2 min-w-0">
+                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider truncate">
                   {t('sidebar.panels.system_health')}
                 </span>
               </div>

@@ -34,8 +34,8 @@ export function IdeEditorArea() {
   
   if (tabs.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-theme-text-muted bg-theme-bg/50">
-        <Code2 className="w-16 h-16 mb-4 opacity-20" />
+      <div className="h-full flex flex-col items-center justify-center text-theme-text-muted bg-theme-bg/50 text-center px-4">
+        <Code2 className="w-16 h-16 mb-4 opacity-20 shrink-0" />
         <p className="text-sm">{t('ide.no_open_files')}</p>
         <p className="text-xs mt-1 opacity-60">{t('ide.click_to_open')}</p>
       </div>

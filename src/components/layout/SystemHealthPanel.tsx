@@ -199,8 +199,8 @@ export const SystemHealthPanel: React.FC = () => {
   // ─── No connection state ───
   if (!activeConnectionId) {
     return (
-      <div className="flex flex-col items-center justify-center py-8 text-theme-text-muted">
-        <WifiOff className="w-8 h-8 mb-2 opacity-30" />
+      <div className="flex flex-col items-center justify-center py-8 text-theme-text-muted text-center px-4">
+        <WifiOff className="w-8 h-8 mb-2 opacity-30 shrink-0" />
         <span className="text-sm">{t('profiler.panel.no_connection')}</span>
       </div>
     );

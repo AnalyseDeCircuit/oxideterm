@@ -150,22 +150,22 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
   }
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative min-w-0" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors",
+          "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors min-w-0",
           "text-theme-text-muted hover:text-theme-text hover:bg-theme-accent/10",
           open && "bg-theme-accent/10 text-theme-text"
         )}
         title={`${activeProvider?.name || 'AI'}: ${activeModel}`}
       >
         <Circle className={cn(
-          "w-1.5 h-1.5 fill-current",
+          "w-1.5 h-1.5 fill-current shrink-0",
           keyStatus[activeProvider?.id || ''] === true ? "text-emerald-400" : "text-amber-400"
         )} />
-        <span className="truncate max-w-[140px]">{truncatedName}</span>
-        <ChevronDown className="w-2.5 h-2.5 flex-shrink-0" />
+        <span className="truncate">{truncatedName}</span>
+        <ChevronDown className="w-2.5 h-2.5 shrink-0" />
       </button>
 
       {open && (

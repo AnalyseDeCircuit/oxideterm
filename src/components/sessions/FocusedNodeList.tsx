@@ -428,8 +428,8 @@ export const FocusedNodeList: React.FC<FocusedNodeListProps> = ({
       {/* Node list */}
       <div className="flex-1 overflow-y-auto py-2">
         {children.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-theme-text-muted">
-            <Server className="w-8 h-8 mb-2 opacity-30" />
+          <div className="flex flex-col items-center justify-center py-8 text-theme-text-muted text-center px-4">
+            <Server className="w-8 h-8 mb-2 opacity-30 shrink-0" />
             <span className="text-sm">
               {focusedNode ? t('sessions.focused_list.no_child_nodes') : t('sessions.focused_list.no_servers')}
             </span>
