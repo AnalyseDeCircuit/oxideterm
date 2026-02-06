@@ -86,7 +86,7 @@ export const SettingsModal = () => {
                   console.error('Failed to load SSH hosts:', e);
                   setSshHosts([]);
                 });
-
+          }
       }
   }, [activeTab, modals.settings]);
 
