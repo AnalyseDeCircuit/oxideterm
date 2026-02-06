@@ -38,7 +38,6 @@
       "password": "パスワード",
       "agent_desc": "システムSSHエージェントを使用して認証",
       "agent_hint": "SSHエージェントが実行中で、必要なキーが含まれていることを確認してください",
-      "agent_not_supported": "SSHエージェント認証は現在サポートされていません。代わりにSSHキーまたはパスワード認証を使用してください。",
       "cancel": "キャンセル",
       "add": "追加"
     },
@@ -290,6 +289,7 @@
       "default_key_desc": "デフォルトのSSHキーを使用（例：~/.ssh/id_rsa、~/.ssh/id_ed25519）",
       "agent_desc": "システムSSHエージェントを使用して認証",
       "agent_hint": "SSHエージェントが実行中で、必要なキーが読み込まれていることを確認してください",
+      "agent_not_supported": "SSHエージェント認証は現在サポートされていません。代わりにSSHキーまたはパスワード認証を使用してください。",
       "private_key": "秘密鍵",
       "certificate": "証明書",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",

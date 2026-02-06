@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "연결 재설정 중",
-      "reconnecting_wait": "연결을 복원하고 있습니다. 잠시 후 다시 시도해 주세요."
+      "reconnecting_wait": "연결을 복원하고 있습니다. 잠시 후 다시 시도해 주세요.",
+      "reconnect_unstable": "연결 불안정",
+      "try_again_later": "연결이 아직 안정되지 않았습니다. 나중에 다시 시도해 주세요."
     }
   }
 }

@@ -38,7 +38,6 @@
       "password": "Passwort",
       "agent_desc": "Mit dem System-SSH-Agent authentifizieren",
       "agent_hint": "Stellen Sie sicher, dass der SSH Agent läuft und die erforderlichen Schlüssel enthält",
-      "agent_not_supported": "SSH-Agent-Authentifizierung wird derzeit nicht unterstützt. Bitte verwenden Sie stattdessen SSH-Schlüssel- oder Passwort-Authentifizierung.",
       "cancel": "Abbrechen",
       "add": "Hinzufügen"
     },
@@ -290,6 +289,7 @@
       "default_key_desc": "Standard-SSH-Schlüssel verwenden (z.B. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
       "agent_desc": "Mit dem System-SSH-Agent authentifizieren",
       "agent_hint": "Stellen Sie sicher, dass der SSH Agent läuft und die erforderlichen Schlüssel geladen sind",
+      "agent_not_supported": "SSH-Agent-Authentifizierung wird derzeit nicht unterstützt. Bitte verwenden Sie stattdessen SSH-Schlüssel- oder Passwort-Authentifizierung.",
       "private_key": "Privater Schlüssel",
       "certificate": "Zertifikat",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",

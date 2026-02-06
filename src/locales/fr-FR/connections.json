@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "Reconnexion en cours",
-      "reconnecting_wait": "La connexion est en cours de restauration. Veuillez patienter et réessayer."
+      "reconnecting_wait": "La connexion est en cours de restauration. Veuillez patienter et réessayer.",
+      "reconnect_unstable": "Connexion instable",
+      "try_again_later": "La connexion n'est pas encore stable. Veuillez réessayer plus tard."
     }
   }
 }

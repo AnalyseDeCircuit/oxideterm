@@ -68,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Không thể tạo chuyển tiếp",
       "forward_updated": "Đã cập nhật chuyển tiếp thành công",
-      "update_failed": "Không thể cập nhật chuyển tiếp"
+      "update_failed": "Không thể cập nhật chuyển tiếp",
+      "suspended_title": "Chuyển tiếp bị tạm dừng",
+      "suspended_desc": "Mất kết nối SSH. Chuyển tiếp sẽ tự động khôi phục khi kết nối lại.",
+      "error_title": "Lỗi chuyển tiếp",
+      "session_suspended_title": "Phiên đã ngắt kết nối",
+      "session_suspended_desc": "{{count}} chuyển tiếp bị tạm dừng. Sẽ tự động khôi phục khi kết nối lại."
     }
   }
 }

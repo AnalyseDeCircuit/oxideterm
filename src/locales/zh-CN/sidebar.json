@@ -12,6 +12,7 @@
       "saved_title": "保存的连接",
       "sftp": "文件传输 (SFTP)",
       "sftp_sessions": "SFTP 会话",
+      "files": "文件管理器",
       "forwards": "端口转发",
       "forwards_title": "端口转发",
       "connection_pool": "连接池",

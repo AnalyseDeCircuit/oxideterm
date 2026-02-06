@@ -68,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remoto:8080",
       "create_failed": "Impossibile creare inoltro",
       "forward_updated": "Inoltro aggiornato con successo",
-      "update_failed": "Impossibile aggiornare inoltro"
+      "update_failed": "Impossibile aggiornare inoltro",
+      "suspended_title": "Inoltro sospeso",
+      "suspended_desc": "Connessione SSH persa. L'inoltro verrà ripristinato automaticamente alla riconnessione.",
+      "error_title": "Errore inoltro",
+      "session_suspended_title": "Sessione disconnessa",
+      "session_suspended_desc": "{{count}} inoltri sospesi. Verranno ripristinati automaticamente alla riconnessione."
     }
   }
 }

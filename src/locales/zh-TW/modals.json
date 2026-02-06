@@ -38,7 +38,6 @@
       "password": "密碼",
       "agent_desc": "使用系統 SSH Agent 進行驗證",
       "agent_hint": "請確保 SSH Agent 正在執行且包含所需的金鑰",
-      "agent_not_supported": "SSH Agent 驗證目前不受支援，請改用 SSH 金鑰或密碼驗證。",
       "cancel": "取消",
       "add": "新增"
     },
@@ -290,6 +289,7 @@
       "default_key_desc": "使用預設 SSH 金鑰（例如 ~/.ssh/id_rsa、~/.ssh/id_ed25519）",
       "agent_desc": "使用系統 SSH Agent 進行驗證",
       "agent_hint": "請確保 SSH Agent 正在執行且已載入所需的金鑰",
+      "agent_not_supported": "SSH Agent 驗證目前不受支援，請改用 SSH 金鑰或密碼驗證。",
       "private_key": "私鑰",
       "certificate": "憑證",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",

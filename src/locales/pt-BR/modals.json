@@ -38,7 +38,6 @@
       "password": "Senha",
       "agent_desc": "Usar agente SSH do sistema para autenticação",
       "agent_hint": "Certifique-se de que o agente SSH esteja em execução e contenha as chaves necessárias",
-      "agent_not_supported": "A autenticação via agente SSH não é suportada no momento. Por favor, use autenticação por chave SSH ou senha.",
       "cancel": "Cancelar",
       "add": "Adicionar"
     },
@@ -290,6 +289,7 @@
       "default_key_desc": "Usar chave SSH padrão (ex: ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
       "agent_desc": "Autenticar usando o agente SSH do sistema",
       "agent_hint": "Certifique-se de que o agente SSH esteja em execução e tenha as chaves necessárias carregadas",
+      "agent_not_supported": "A autenticação via agente SSH não é suportada no momento. Por favor, use autenticação por chave SSH ou senha.",
       "private_key": "Chave privada",
       "certificate": "Certificado",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",

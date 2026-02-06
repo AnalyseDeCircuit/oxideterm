@@ -68,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "포워딩 생성 실패",
       "forward_updated": "포워딩이 성공적으로 업데이트됨",
-      "update_failed": "포워딩 업데이트 실패"
+      "update_failed": "포워딩 업데이트 실패",
+      "suspended_title": "포워딩 일시 중단",
+      "suspended_desc": "SSH 연결이 끊어졌습니다. 재연결 시 자동으로 복구됩니다.",
+      "error_title": "포워딩 오류",
+      "session_suspended_title": "세션 연결 끊어짐",
+      "session_suspended_desc": "{{count}}개 포워딩이 일시 중단되었습니다. 재연결 시 자동으로 복구됩니다."
     }
   }
 }

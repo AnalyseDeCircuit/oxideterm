@@ -68,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "Weiterleitung konnte nicht erstellt werden",
       "forward_updated": "Weiterleitung erfolgreich aktualisiert",
-      "update_failed": "Weiterleitung konnte nicht aktualisiert werden"
+      "update_failed": "Weiterleitung konnte nicht aktualisiert werden",
+      "suspended_title": "Weiterleitung pausiert",
+      "suspended_desc": "SSH-Verbindung verloren. Weiterleitung wird bei Wiederverbindung automatisch wiederhergestellt.",
+      "error_title": "Weiterleitungsfehler",
+      "session_suspended_title": "Sitzung getrennt",
+      "session_suspended_desc": "{{count}} Weiterleitungen pausiert. Werden bei Wiederverbindung automatisch wiederhergestellt."
     }
   }
 }

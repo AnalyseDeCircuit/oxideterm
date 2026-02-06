@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "Verbindung wird wiederhergestellt",
-      "reconnecting_wait": "Die Verbindung wird wiederhergestellt. Bitte warten Sie und versuchen Sie es erneut."
+      "reconnecting_wait": "Die Verbindung wird wiederhergestellt. Bitte warten Sie und versuchen Sie es erneut.",
+      "reconnect_unstable": "Verbindung instabil",
+      "try_again_later": "Die Verbindung ist noch nicht stabil. Bitte versuchen Sie es später erneut."
     }
   }
 }

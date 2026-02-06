@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "Đang kết nối lại",
-      "reconnecting_wait": "Kết nối đang được khôi phục. Vui lòng đợi và thử lại."
+      "reconnecting_wait": "Kết nối đang được khôi phục. Vui lòng đợi và thử lại.",
+      "reconnect_unstable": "Kết nối không ổn định",
+      "try_again_later": "Kết nối chưa ổn định. Vui lòng thử lại sau."
     }
   }
 }

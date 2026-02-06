@@ -68,7 +68,12 @@
       "vscode_desc": "localhost:8080 → remote:8080",
       "create_failed": "無法建立轉發",
       "forward_updated": "轉發更新成功",
-      "update_failed": "無法更新轉發"
+      "update_failed": "無法更新轉發",
+      "suspended_title": "轉發已暫停",
+      "suspended_desc": "SSH 連線已中斷。重新連線後將自動恢復。",
+      "error_title": "轉發錯誤",
+      "session_suspended_title": "工作階段已中斷",
+      "session_suspended_desc": "{{count}} 個轉發已暫停。重新連線後將自動恢復。"
     }
   }
 }

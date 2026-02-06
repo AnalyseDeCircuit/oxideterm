@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "連線重新連接中",
-      "reconnecting_wait": "連線正在恢復中，請稍候再試。"
+      "reconnecting_wait": "連線正在恢復中，請稍候再試。",
+      "reconnect_unstable": "連線不穩定",
+      "try_again_later": "連線尚未穩定，請稍後再試。"
     }
   }
 }

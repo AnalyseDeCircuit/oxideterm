@@ -59,7 +59,9 @@
     },
     "status": {
       "reconnecting_title": "接続を再確立中",
-      "reconnecting_wait": "接続を復元しています。しばらくお待ちいただいてから再試行してください。"
+      "reconnecting_wait": "接続を復元しています。しばらくお待ちいただいてから再試行してください。",
+      "reconnect_unstable": "接続が不安定",
+      "try_again_later": "接続がまだ安定していません。しばらくしてから再試行してください。"
     }
   }
 }
