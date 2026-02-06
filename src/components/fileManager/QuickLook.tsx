@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { 
   X, 
@@ -219,18 +220,18 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
   if (!preview) return null;
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center overflow-auto"
       onClick={onClose}
     >
       <div 
-        className="relative bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl flex flex-col quicklook-resizable"
+        className="relative bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl flex flex-col quicklook-resizable m-auto shrink-0"
         style={{
           width: 'min(90vw, 1000px)',
           height: 'min(90vh, 800px)',
-          minWidth: '400px',
-          minHeight: '300px',
+          minWidth: 'min(400px, 95vw)',
+          minHeight: 'min(300px, 95vh)',
           maxWidth: '95vw',
           maxHeight: '95vh',
         }}
@@ -602,6 +603,7 @@ export const QuickLook: React.FC<QuickLookProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

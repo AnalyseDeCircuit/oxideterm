@@ -7,6 +7,12 @@
     "core:default",
     "dialog:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
     "fs:default",
     "core:event:default",
     {
