@@ -1,51 +1,37 @@
-# OxideTerm v1.5.0 Release Notes
+# OxideTerm v1.6.0 Release Notes
 
 ## 📋 What's Changed
 
 
-### ✨ 新特性
+### 🔒 安全升级
 
-#### 1. 资源监控器 (Resource Profiler)
+#### AI API Key 存储迁移至 OS Keychain
 
-实时采样远程 Linux 主机的 CPU、内存、负载和网络指标。
+**问题**：v1.5.x 及之前版本的 AI API Key 使用 XOR 混淆文件（`ai_keys/*.vault`）存储，安全性等同于明文。XOR 密钥由可预测的机器指纹（`hostname + username`）派生，无密码学保护。
 
-**后端** (`session/profiler.rs`, ~760 行)：
-- **持久化 Shell 通道**：整个生命周期仅打开 1 个 Shell Channel，避免 MaxSessions 耗尽
-- **轻量采样**：精简命令输出 ~500-1.5KB（`head -1 /proc/stat` + `grep MemTotal|MemAvailable`），10s 间隔
-- **Delta 计算**：CPU% 和网络速率基于两次采样差值，首次返回 `None`
-- **优雅降级**：非 Linux 主机或连续 3 次失败后自动降级到 RTT-Only 模式
-- **自动生命周期**：通过 `subscribe_disconnect()` 绑定，SSH 断连自动停止
-- **std::sync::RwLock**：极短临界区避免 async 调度开销，减少终端 PTY I/O 竞争
-- **ProfilerRegistry**：DashMap 注册表 + 4 个 Tauri 命令 + 应用退出统一清理
-- **8+ 单元测试**：覆盖 `/proc` 解析、delta 计算、首采空值、空输出降级
+**解决**：将 AI API Key 存储统一迁移至操作系统原生安全存储：
+- **macOS**: Keychain Services（`com.oxideterm.ai` 服务）
+- **Windows**: Credential Manager
+- **Linux**: Secret Service（libsecret / gnome-keyring）
+- 与 SSH 密码享有同等 OS 级别加密保护
 
-**前端**：
-- `profilerStore.ts`：Zustand Store，per-connection 状态，Tauri Event 订阅
-- `api.ts`：4 个 API 包装函数
-- `types/index.ts`：`ResourceMetrics` / `MetricsSource` 类型定义
-- 11 种语言 i18n 支持（`src/locales/*/profiler.json`）
+**改动文件**：
+- `src-tauri/src/commands/config.rs`：5 个 `*_ai_provider_*` 命令从 `AiProviderVault` 改为 `Keychain` 调用
+- `src-tauri/src/config/vault.rs`：标记为 DEPRECATED，仅保留供迁移读取
+- `src-tauri/src/config/mod.rs`：更新模块文档
 
-**性能影响**：~6-12 KB/min 额外 SSH 带宽，内存 ~30 KB/连接
+**迁移机制**：
+- **懒迁移**：首次读取 provider key 时自动检测旧 vault 文件 → 解密 → 存入 keychain → 删除 vault 文件
+- **零用户干预**：用户无需手动操作，升级后首次使用 AI 时自动完成
+- **兼容性**：`has_ai_provider_api_key` 同时检查 keychain 和遗留 vault 文件
 
-> 详见 [docs/RESOURCE_PROFILER.md](../RESOURCE_PROFILER.md)
+**前端**：零改动（Tauri 命令签名不变）
 
-### 🔧 修复
-
-#### 1. 文件预览窗口模式溢出修复
-- **问题**：QuickLook 预览窗口在窗口化模式下超出应用边界被裁剪
-- **原因**：`fixed inset-0 z-50` 定位在 `absolute inset-0 z-10` 的 tab wrapper 内部，受祖先 `overflow: hidden` 裁剪
-- **解决**：使用 `createPortal(…, document.body)` 将预览 overlay 渲染到 `<body>`，脱离 stacking context
-- **额外优化**：
-  - 背景层添加 `overflow-auto`，面板添加 `m-auto shrink-0`
-  - `minWidth`/`minHeight` 用 `min()` 函数钳位到视口尺寸，防止小窗口溢出
-
-#### 2. `opener:allow-open-path` 权限错误
-- **问题**：文件管理器中"打开方式"调用 `openPath()` 报错 `opener.open_path not allowed`
-- **解决**：在 `capabilities/default.json` 中添加 `opener:allow-open-path` scope 配置，允许所有路径 (`"path": "**"`)
-
-#### 3. Dotfile 路径无法用外部程序打开
-- **问题**：`.bashrc`、`.ssh` 等以点开头的路径不匹配 `**` 通配符
-- **解决**：在 `tauri.conf.json` 的 `plugins` 中为 `opener` 添加 `"requireLiteralLeadingDot": false`
+### 📝 文档更新
+- `README.md` / `README.zh-CN.md` / `README.fr.md`：安全章节新增 AI API Key 存储说明
+- `docs/AI_INLINE_CHAT.md`：API Key 存储描述从 "本地加密保险箱" 改为 "系统钥匙串"
+- `docs/AI_SIDEBAR_CHAT.md`：配置表标注 keychain 存储
+- `docs/SYSTEM_INVARIANTS.md`：新增 AI API Key 不变量
 
 ---
 
