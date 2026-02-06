@@ -136,7 +136,9 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
   },
 
   _updateMetrics: (connectionId: string, metrics: ResourceMetrics) => {
-    const connections = new Map(get().connections);
+    // Mutate the existing Map in-place and only set a new reference
+    // to minimise re-renders of unrelated connections.
+    const connections = get().connections;
     const existing = connections.get(connectionId);
     const prevHistory = existing?.history ?? [];
     const newHistory = [...prevHistory, metrics];
@@ -151,7 +153,8 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
       isEnabled: existing?.isEnabled ?? true,
       error: null,
     });
-    set({ connections });
+    // Shallow-copy to trigger Zustand subscribers, but only the Map reference changes.
+    set({ connections: new Map(connections) });
   },
 
   removeConnection: (connectionId: string) => {

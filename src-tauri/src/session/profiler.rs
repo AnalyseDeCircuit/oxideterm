@@ -17,14 +17,14 @@
 //! - P5: First sample returns None for CPU/network (no delta baseline)
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use russh::client::Msg;
 use russh::{Channel, ChannelMsg};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, trace, warn};
 
@@ -34,14 +34,14 @@ use crate::ssh::HandleController;
 /// Maximum number of history points kept (ring buffer)
 const HISTORY_CAPACITY: usize = 60;
 
-/// Maximum output size from exec command (1MB)
-const MAX_OUTPUT_SIZE: usize = 1_048_576;
+/// Maximum output size from a single sample (8KB — slimmed command output is ~1KB)
+const MAX_OUTPUT_SIZE: usize = 8_192;
 
 /// Timeout for reading a single sample's output from the shell channel
 const SAMPLE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Default sampling interval
-const DEFAULT_INTERVAL: Duration = Duration::from_secs(5);
+/// Default sampling interval (10s to minimise SSH bandwidth contention with PTY)
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Number of consecutive failures before degrading to RttOnly
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -49,9 +49,14 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 /// Timeout for opening the initial shell channel
 const CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The sampling command written to the persistent shell's stdin.
-/// Uses a unique end-marker so we know when output is complete.
-const SAMPLE_COMMAND: &str = "echo '===STAT==='; cat /proc/stat 2>/dev/null; echo '===MEMINFO==='; cat /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===NPROC==='; nproc 2>/dev/null; echo '===END==='\n";
+/// Slimmed sampling command — only reads the minimum data needed:
+/// - `head -1 /proc/stat` → CPU total line only (~80 bytes, skips per-core lines)
+/// - `grep` MemTotal + MemAvailable → 2 lines (~60 bytes, skips full meminfo)
+/// - `/proc/loadavg` → 1 line (~30 bytes)
+/// - `/proc/net/dev` is small and needed in full for multi-interface aggregation
+/// - `nproc` → 1 number
+/// Total output: ~500-1500 bytes (was ~10-30KB with full /proc/stat + /proc/meminfo)
+const SAMPLE_COMMAND: &str = "echo '===STAT==='; head -1 /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===NPROC==='; nproc 2>/dev/null; echo '===END==='\n";
 
 /// Raw CPU counters from /proc/stat
 #[derive(Debug, Clone, Default)]
@@ -162,17 +167,17 @@ impl ResourceProfiler {
 
     /// Get the latest metrics snapshot
     pub async fn latest(&self) -> Option<ResourceMetrics> {
-        self.latest.read().await.clone()
+        self.latest.read().unwrap().clone()
     }
 
     /// Get metrics history for sparkline rendering
     pub async fn history(&self) -> Vec<ResourceMetrics> {
-        self.history.read().await.iter().cloned().collect()
+        self.history.read().unwrap().iter().cloned().collect()
     }
 
     /// Get current profiler state
     pub async fn state(&self) -> ProfilerState {
-        *self.state.read().await
+        *self.state.read().unwrap()
     }
 
     /// Stop the profiler
@@ -215,10 +220,10 @@ async fn sampling_loop(
         Ok(ch) => ch,
         Err(e) => {
             warn!("Profiler failed to open shell channel for {}: {}", connection_id, e);
-            *state.write().await = ProfilerState::Degraded;
+            *state.write().unwrap() = ProfilerState::Degraded;
             // Emit degraded metrics so frontend knows
             let metrics = make_empty_metrics(MetricsSource::RttOnly);
-            store_metrics(&latest, &history, &metrics).await;
+            store_metrics(&latest, &history, &metrics);
             emit_metrics(&app_handle, &connection_id, &metrics);
             return;
         }
@@ -229,16 +234,16 @@ async fn sampling_loop(
             _ = interval.tick() => {
                 // Degraded mode: only emit RTT-only metrics
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    let current_state = *state.read().await;
+                    let current_state = *state.read().unwrap();
                     if current_state != ProfilerState::Degraded {
-                        *state.write().await = ProfilerState::Degraded;
+                        *state.write().unwrap() = ProfilerState::Degraded;
                         warn!(
                             "Resource profiler degraded for {} after {} consecutive failures",
                             connection_id, consecutive_failures
                         );
                     }
                     let metrics = make_empty_metrics(MetricsSource::RttOnly);
-                    store_metrics(&latest, &history, &metrics).await;
+                    store_metrics(&latest, &history, &metrics);
                     emit_metrics(&app_handle, &connection_id, &metrics);
                     continue;
                 }
@@ -257,7 +262,7 @@ async fn sampling_loop(
                             timestamp_ms: metrics.timestamp_ms,
                         });
 
-                        store_metrics(&latest, &history, &metrics).await;
+                        store_metrics(&latest, &history, &metrics);
                         emit_metrics(&app_handle, &connection_id, &metrics);
                         trace!("Profiler sample for {}: source={:?}", connection_id, metrics.source);
                     }
@@ -275,7 +280,7 @@ async fn sampling_loop(
                         }
 
                         let failed_metrics = make_empty_metrics(MetricsSource::Failed);
-                        store_metrics(&latest, &history, &failed_metrics).await;
+                        store_metrics(&latest, &history, &failed_metrics);
                         emit_metrics(&app_handle, &connection_id, &failed_metrics);
                     }
                 }
@@ -293,7 +298,7 @@ async fn sampling_loop(
 
     // Close the persistent channel
     let _ = shell_channel.close().await;
-    *state.write().await = ProfilerState::Stopped;
+    *state.write().unwrap() = ProfilerState::Stopped;
     debug!("Resource profiler stopped for {}", connection_id);
 }
 
@@ -615,13 +620,13 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-async fn store_metrics(
+fn store_metrics(
     latest: &Arc<RwLock<Option<ResourceMetrics>>>,
     history: &Arc<RwLock<VecDeque<ResourceMetrics>>>,
     metrics: &ResourceMetrics,
 ) {
-    *latest.write().await = Some(metrics.clone());
-    let mut hist = history.write().await;
+    *latest.write().unwrap() = Some(metrics.clone());
+    let mut hist = history.write().unwrap();
     if hist.len() >= HISTORY_CAPACITY {
         hist.pop_front();
     }
