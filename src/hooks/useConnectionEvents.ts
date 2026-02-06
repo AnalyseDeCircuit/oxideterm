@@ -32,6 +32,17 @@ interface ConnectionStatusEvent {
   timestamp: number;            // 时间戳
 }
 
+/** Event payload for env:detected */
+interface EnvDetectedEvent {
+  connectionId: string;
+  osType: string;
+  osVersion?: string;
+  kernel?: string;
+  arch?: string;
+  shell?: string;
+  detectedAt: number;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 防抖重连管理器
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -200,6 +211,7 @@ function scheduleReconnect(nodeId: string): void {
 export function useConnectionEvents(): void {
   // Use selectors to get stable function references
   const updateConnectionState = useAppStore((state) => state.updateConnectionState);
+  const updateConnectionRemoteEnv = useAppStore((state) => state.updateConnectionRemoteEnv);
   const interruptTransfersBySession = useTransferStore((state) => state.interruptTransfersBySession);
   
   // Use ref for sessions to avoid re-subscribing on every session change
@@ -341,6 +353,34 @@ export function useConnectionEvents(): void {
       }
 
       // ═══════════════════════════════════════════════════════════════════════════════
+      // Remote Environment Detection Event
+      // ═══════════════════════════════════════════════════════════════════════════════
+      try {
+        const unlistenEnvDetected = await listen<EnvDetectedEvent>('env:detected', (event) => {
+          if (!mounted) return;
+          const { connectionId, osType, osVersion, kernel, arch, shell, detectedAt } = event.payload;
+          console.log(`[ConnectionEvents] env:detected for ${connectionId}: ${osType}`);
+          
+          updateConnectionRemoteEnv(connectionId, {
+            osType,
+            osVersion,
+            kernel,
+            arch,
+            shell,
+            detectedAt,
+          });
+        });
+        
+        if (mounted) {
+          unlisteners.push(unlistenEnvDetected);
+        } else {
+          unlistenEnvDetected();
+        }
+      } catch (error) {
+        console.error('[ConnectionEvents] Failed to listen to env:detected:', error);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════════════
       // 🛑 已移除的事件监听
       // ═══════════════════════════════════════════════════════════════════════════════
       // 
@@ -365,7 +405,7 @@ export function useConnectionEvents(): void {
       }
       pendingReconnectNodes.clear();
     };
-  // Dependencies are stable: updateConnectionState and interruptTransfersBySession are selectors
+  // Dependencies are stable: updateConnectionState, updateConnectionRemoteEnv, and interruptTransfersBySession are selectors
   // sessionsRef is updated via subscription, not as a dependency
-  }, [updateConnectionState, interruptTransfersBySession]);
+  }, [updateConnectionState, updateConnectionRemoteEnv, interruptTransfersBySession]);
 }

@@ -933,3 +933,28 @@ pub async fn ssh_clear_host_key_cache() -> Result<(), String> {
     get_host_key_cache().clear();
     Ok(())
 }
+
+/// 获取已检测的远程环境信息
+///
+/// 返回 SSH 连接的远程操作系统、架构、shell 等信息。
+/// 如果检测尚未完成，返回 `None`。
+///
+/// # Arguments
+/// * `connection_id` - SSH 连接 ID
+///
+/// # Returns
+/// * `Ok(Some(RemoteEnvInfo))` - 检测完成
+/// * `Ok(None)` - 检测尚未完成或检测失败
+/// * `Err(String)` - 连接不存在
+#[tauri::command]
+pub async fn get_remote_env(
+    connection_id: String,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+) -> Result<Option<crate::session::RemoteEnvInfo>, String> {
+    let entry = connection_registry
+        .get_connection(&connection_id)
+        .ok_or_else(|| format!("Connection not found: {}", connection_id))?;
+
+    let env = entry.remote_env().await;
+    Ok(env)
+}

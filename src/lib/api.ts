@@ -35,6 +35,8 @@ import {
   AcceptHostKeyRequest,
   // Resource profiler types
   ResourceMetrics,
+  // Remote environment detection
+  RemoteEnvInfo,
 } from '../types';
 
 // Toggle this for development without a backend
@@ -129,6 +131,17 @@ export const api = {
   sshClearHostKeyCache: async (): Promise<void> => {
     if (USE_MOCK) return;
     return invoke('ssh_clear_host_key_cache');
+  },
+
+  /**
+   * Get remote environment info for an SSH connection
+   * 
+   * Returns null if detection is not yet complete or failed.
+   * Subscribe to `env:detected:{connectionId}` event for async updates.
+   */
+  getRemoteEnv: async (connectionId: string): Promise<RemoteEnvInfo | null> => {
+    if (USE_MOCK) return null;
+    return invoke('get_remote_env', { connectionId });
   },
 
   /**

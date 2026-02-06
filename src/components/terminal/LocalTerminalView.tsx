@@ -914,6 +914,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         onInsert={handleAiInsert}
         onExecute={handleAiExecute}
         cursorPosition={aiCursorPosition}
+        sessionId={sessionId}
+        terminalType="local_terminal"
       />
       
       {/* Paste Confirmation Overlay */}

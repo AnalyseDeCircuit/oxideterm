@@ -18,6 +18,7 @@ import {
 } from './terminalRegistry';
 import { useAppStore } from '../store/appStore';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
+import type { RemoteEnvInfo } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -43,7 +44,15 @@ export interface EnvironmentSnapshot {
     formatted: string;
   } | null;
   
-  /** Remote OS hint (from connection name or host patterns) */
+  /** 
+   * Remote environment info (detected after SSH connection)
+   * - undefined: Detection not yet triggered or in progress  
+   * - null: Detection failed (show "Unknown" in prompt)
+   * - RemoteEnvInfo: Detection succeeded
+   */
+  remoteEnv: RemoteEnvInfo | null | undefined;
+  
+  /** Remote OS hint (fallback: from connection name or host patterns) */
   remoteOSHint: string | null;
 }
 
@@ -162,6 +171,7 @@ export function gatherSidebarContext(config = DEFAULT_CONTEXT_CONFIG): SidebarCo
     terminalType: metadata?.terminalType ?? null,
     sessionId: metadata?.sessionId ?? null,
     connection: null,
+    remoteEnv: undefined, // Will be set if SSH connection has detected env
     remoteOSHint: null,
   };
   
@@ -182,6 +192,12 @@ export function gatherSidebarContext(config = DEFAULT_CONTEXT_CONFIG): SidebarCo
           username: conn.username,
           formatted: `${conn.username}@${conn.host}`,
         };
+        // Use detected remoteEnv if available, otherwise fall back to guessing
+        if (conn.remoteEnv) {
+          env.remoteEnv = conn.remoteEnv;
+        } else {
+          env.remoteEnv = undefined; // Still detecting
+        }
         env.remoteOSHint = guessRemoteOS(conn.host, conn.username);
       }
     } else if (session) {
@@ -210,6 +226,10 @@ export function gatherSidebarContext(config = DEFAULT_CONTEXT_CONFIG): SidebarCo
           username: conn.username,
           formatted: `${conn.username}@${conn.host}`,
         };
+        // Update remoteEnv from the most specific connection source
+        if (conn.remoteEnv) {
+          env.remoteEnv = conn.remoteEnv;
+        }
       }
     }
   }
@@ -276,8 +296,21 @@ function formatSystemPromptSegment(env: EnvironmentSnapshot, terminal: TerminalC
   
   if (env.terminalType === 'terminal' && env.connection) {
     parts.push(`- Terminal: SSH to ${env.connection.formatted}`);
-    if (env.remoteOSHint) {
-      parts.push(`- Remote OS: ${env.remoteOSHint}`);
+    
+    // Remote OS: prefer detected env, fall back to guessing
+    if (env.remoteEnv) {
+      // Full detected environment info
+      const { osType, osVersion, arch, kernel, shell } = env.remoteEnv;
+      parts.push(`- Remote OS: ${osType}${osVersion ? ` (${osVersion})` : ''}`);
+      if (arch) parts.push(`- Architecture: ${arch}`);
+      if (kernel) parts.push(`- Kernel: ${kernel}`);
+      if (shell) parts.push(`- Shell: ${shell}`);
+    } else if (env.remoteEnv === undefined) {
+      // Detection in progress
+      parts.push(`- Remote OS: [detecting...]${env.remoteOSHint ? ` (hint: ${env.remoteOSHint})` : ''}`);
+    } else {
+      // Detection failed (env.remoteEnv === null) - use fallback
+      parts.push(`- Remote OS: ${env.remoteOSHint ?? 'Unknown'}`);
     }
   } else if (env.terminalType === 'local_terminal') {
     parts.push(`- Terminal: Local (${env.localOS})`);

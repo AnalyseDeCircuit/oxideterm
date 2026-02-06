@@ -32,6 +32,9 @@ interface AiInlinePanelProps {
   onExecute: (command: string) => void;
   // Cursor position for VS Code-style positioning
   cursorPosition: CursorPosition | null;
+  // Session/connection context (for SSH remote env detection)
+  sessionId?: string;
+  terminalType?: 'terminal' | 'local_terminal';
 }
 
 interface Message {
@@ -40,14 +43,63 @@ interface Message {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Get OS Name
+// Helper: Get OS Name (for local terminals)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getOSName(): string {
+function getLocalOSName(): string {
   if (platform.isMac) return 'macOS';
   if (platform.isWindows) return 'Windows';
   if (platform.isLinux) return 'Linux';
   return 'Unknown';
+}
+
+/**
+ * Build OS context string for system prompt.
+ * Returns different strings for local vs SSH terminals.
+ */
+function buildOSContext(
+  terminalType: 'terminal' | 'local_terminal' | undefined,
+  sessionId: string | undefined,
+  connections: Map<string, import('../../types').SshConnectionInfo>,
+  sessions: Map<string, import('../../types').SessionInfo>
+): string {
+  const localOS = getLocalOSName();
+  
+  // Local terminal: just return local OS
+  if (!terminalType || terminalType === 'local_terminal' || !sessionId) {
+    return `Local terminal on ${localOS}`;
+  }
+  
+  // SSH terminal: try to get remote env
+  const session = sessions.get(sessionId);
+  if (!session?.connectionId) {
+    return `SSH terminal (remote OS unknown, local: ${localOS})`;
+  }
+  
+  const conn = connections.get(session.connectionId);
+  if (!conn) {
+    return `SSH terminal (remote OS unknown, local: ${localOS})`;
+  }
+  
+  const remoteEnv = conn.remoteEnv;
+  const hostInfo = `${conn.username}@${conn.host}`;
+  
+  if (remoteEnv) {
+    // Full detected environment
+    const parts = [`Remote: ${remoteEnv.osType}`];
+    if (remoteEnv.osVersion) parts[0] += ` (${remoteEnv.osVersion})`;
+    if (remoteEnv.arch) parts.push(`arch: ${remoteEnv.arch}`);
+    if (remoteEnv.shell) parts.push(`shell: ${remoteEnv.shell}`);
+    parts.push(`host: ${hostInfo}`);
+    parts.push(`local: ${localOS}`);
+    return `SSH terminal — ${parts.join(', ')}`;
+  } else if (remoteEnv === undefined) {
+    // Detection in progress
+    return `SSH terminal to ${hostInfo} (remote OS detecting..., local: ${localOS})`;
+  } else {
+    // Detection failed
+    return `SSH terminal to ${hostInfo} (remote OS unknown, local: ${localOS})`;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -62,6 +114,8 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   onInsert,
   onExecute,
   cursorPosition,
+  sessionId,
+  terminalType,
 }) => {
   // Suppress unused warning - kept for API compatibility
   void _getVisibleBuffer;
@@ -70,6 +124,8 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   const { settings } = useSettingsStore();
   const { ai: aiSettings } = settings;
   const createTab = useAppStore((state) => state.createTab);
+  const sessions = useAppStore((state) => state.sessions);
+  const connections = useAppStore((state) => state.connections);
 
   // State
   const [prompt, setPrompt] = useState('');
@@ -249,8 +305,8 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
         }
       }
 
-      // 1. Get OS metadata
-      const osName = getOSName();
+      // 1. Get OS metadata (aware of SSH remote env)
+      const osContext = buildOSContext(terminalType, sessionId, connections, sessions);
       
       // 2. Get selection context (frozen at open time)
       const selectionContext = getSelectionContext();
@@ -258,10 +314,10 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
       // 3. Build messages with structured prompt template
       const messages: Message[] = [];
       
-      // System prompt with OS info
+      // System prompt with OS context
       messages.push({
         role: 'system',
-        content: `You are an expert terminal assistant. Current OS: ${osName}. Respond ONLY with the command or code itself unless asked for explanation.`
+        content: `You are an expert terminal assistant. Environment: ${osContext}. Respond ONLY with the command or code itself unless asked for explanation.`
       });
 
       // User message with structured context

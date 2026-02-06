@@ -20,6 +20,31 @@ export type SshConnectionState =
   | { error: string };
 
 /**
+ * Remote environment information detected after SSH connection
+ * 
+ * osType special values:
+ * - "Windows" — native PowerShell/cmd
+ * - "Windows_MinGW" — Git Bash / MinGW environment
+ * - "Windows_MSYS" — MSYS2 environment
+ * - "Windows_Cygwin" — Cygwin environment
+ * - "Linux", "macOS", "FreeBSD", "Unknown", etc.
+ */
+export interface RemoteEnvInfo {
+  /** OS type: "Linux", "macOS", "Windows", "FreeBSD", "Windows_MinGW", "Unknown", etc. */
+  osType: string;
+  /** Human-readable OS version (e.g., "Ubuntu 22.04.3 LTS") */
+  osVersion?: string;
+  /** Kernel version (uname -r) */
+  kernel?: string;
+  /** Architecture (uname -m or PROCESSOR_ARCHITECTURE) */
+  arch?: string;
+  /** Default shell ($SHELL or "PowerShell 7.x") */
+  shell?: string;
+  /** Detection timestamp (Unix seconds) */
+  detectedAt: number;
+}
+
+/**
  * SSH connection info from the connection pool
  */
 export interface SshConnectionInfo {
@@ -37,6 +62,8 @@ export interface SshConnectionInfo {
   forwardIds: string[];
   /** Parent connection ID for tunneled connections */
   parentConnectionId?: string;
+  /** Remote environment info (async detected, may be null if not yet detected or failed) */
+  remoteEnv?: RemoteEnvInfo;
 }
 
 /**

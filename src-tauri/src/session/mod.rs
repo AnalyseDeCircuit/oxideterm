@@ -12,6 +12,7 @@
 
 pub mod auth;
 pub mod auto_reconnect;
+pub mod env_detector;
 pub mod events;
 pub mod health;
 pub mod parser;
@@ -27,6 +28,7 @@ pub mod types;
 
 pub use auth::{load_private_key, KeyAuth};
 pub use auto_reconnect::AutoReconnectService;
+pub use env_detector::RemoteEnvInfo;
 pub use events::{event_names, NetworkStatusPayload};
 pub use health::{HealthMetrics, HealthStatus, HealthThresholds, HealthTracker, MetricsSource, QuickHealthCheck, ResourceMetrics};
 pub use parser::{parse_terminal_output, parse_terminal_output_simple, BatchParser};
