@@ -13,8 +13,9 @@
 pub mod auth;
 pub mod auto_reconnect;
 pub mod events;
-mod health;
+pub mod health;
 pub mod parser;
+pub mod profiler;
 mod reconnect;
 mod registry;
 pub mod scroll_buffer;
@@ -27,8 +28,9 @@ pub mod types;
 pub use auth::{load_private_key, KeyAuth};
 pub use auto_reconnect::AutoReconnectService;
 pub use events::{event_names, NetworkStatusPayload};
-pub use health::{HealthMetrics, HealthStatus, HealthThresholds, HealthTracker, QuickHealthCheck};
+pub use health::{HealthMetrics, HealthStatus, HealthThresholds, HealthTracker, MetricsSource, QuickHealthCheck, ResourceMetrics};
 pub use parser::{parse_terminal_output, parse_terminal_output_simple, BatchParser};
+pub use profiler::{ProfilerState, ResourceProfiler};
 pub use reconnect::{
     ReconnectConfig, ReconnectError, ReconnectEvent, ReconnectState, SessionReconnector,
 };

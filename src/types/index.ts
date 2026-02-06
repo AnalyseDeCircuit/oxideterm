@@ -601,6 +601,25 @@ export interface HealthMetrics {
 
 export type HealthStatus = 'Healthy' | 'Degraded' | 'Unresponsive' | 'Disconnected' | 'Unknown';
 
+// Resource Profiler Types
+export type MetricsSource = 'full' | 'partial' | 'rtt_only' | 'failed';
+
+export type ResourceMetrics = {
+  timestampMs: number;
+  cpuPercent: number | null;
+  memoryUsed: number | null;
+  memoryTotal: number | null;
+  memoryPercent: number | null;
+  loadAvg1: number | null;
+  loadAvg5: number | null;
+  loadAvg15: number | null;
+  cpuCores: number | null;
+  netRxBytesPerSec: number | null;
+  netTxBytesPerSec: number | null;
+  sshRttMs: number | null;
+  source: MetricsSource;
+};
+
 // SSH Types
 export interface SshHostInfo {
     alias: string;

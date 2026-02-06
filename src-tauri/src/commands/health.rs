@@ -1,6 +1,6 @@
-//! Health Check Tauri Commands
+//! Health Check & Resource Profiler Tauri Commands
 //!
-//! Provides commands for monitoring connection health from the frontend.
+//! Provides commands for monitoring connection health and remote resource metrics.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,7 +8,10 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use tauri::State;
 
+use crate::session::health::ResourceMetrics;
+use crate::session::profiler::{ProfilerState, ResourceProfiler};
 use crate::session::{HealthMetrics, HealthStatus, HealthTracker, QuickHealthCheck};
+use crate::ssh::SshConnectionRegistry;
 
 /// Registry for health trackers
 pub struct HealthRegistry {
@@ -189,6 +192,111 @@ pub async fn get_health_for_display(
     Ok(HealthStatusResponse::from_check(check, metrics.uptime_secs))
 }
 
+// ─── Resource Profiler Registry & Commands ────────────────────────────────────
+
+/// Registry for resource profilers (one per connection)
+pub struct ProfilerRegistry {
+    profilers: DashMap<String, ResourceProfiler>,
+}
+
+impl ProfilerRegistry {
+    pub fn new() -> Self {
+        Self {
+            profilers: DashMap::new(),
+        }
+    }
+
+    /// Stop and remove all profilers (for exit cleanup)
+    pub fn stop_all(&self) {
+        let keys: Vec<String> = self.profilers.iter().map(|r| r.key().clone()).collect();
+        for key in keys {
+            if let Some((_, mut profiler)) = self.profilers.remove(&key) {
+                profiler.stop();
+            }
+        }
+    }
+}
+
+impl Default for ProfilerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Start resource profiling for a connection
+///
+/// Idempotent: if a profiler is already running for this connection, returns Ok.
+/// This prevents React StrictMode double-mount from spawning duplicate profilers.
+#[tauri::command]
+pub async fn start_resource_profiler(
+    connection_id: String,
+    profiler_registry: State<'_, ProfilerRegistry>,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // Idempotent: if already running, just return Ok
+    if let Some(entry) = profiler_registry.profilers.get(&connection_id) {
+        let state = entry.state().await;
+        if state == ProfilerState::Running {
+            return Ok(());
+        }
+        // Stopped or Degraded — drop the old entry and respawn below
+        drop(entry);
+        profiler_registry.profilers.remove(&connection_id);
+    }
+
+    // Get HandleController for the connection
+    let controller = connection_registry
+        .get_handle_controller(&connection_id)
+        .ok_or_else(|| format!("Connection not found: {}", connection_id))?;
+
+    let profiler = ResourceProfiler::spawn(connection_id.clone(), controller, app_handle);
+    profiler_registry.profilers.insert(connection_id, profiler);
+
+    Ok(())
+}
+
+/// Stop resource profiling for a connection
+#[tauri::command]
+pub async fn stop_resource_profiler(
+    connection_id: String,
+    profiler_registry: State<'_, ProfilerRegistry>,
+) -> Result<(), String> {
+    if let Some((_, mut profiler)) = profiler_registry.profilers.remove(&connection_id) {
+        profiler.stop();
+        Ok(())
+    } else {
+        // Not an error — idempotent stop
+        Ok(())
+    }
+}
+
+/// Get latest resource metrics for a connection
+#[tauri::command]
+pub async fn get_resource_metrics(
+    connection_id: String,
+    profiler_registry: State<'_, ProfilerRegistry>,
+) -> Result<Option<ResourceMetrics>, String> {
+    if let Some(entry) = profiler_registry.profilers.get(&connection_id) {
+        Ok(entry.latest().await)
+    } else {
+        Ok(None)
+    }
+}
+
+/// Get resource metrics history for sparkline rendering
+#[tauri::command]
+pub async fn get_resource_history(
+    connection_id: String,
+    profiler_registry: State<'_, ProfilerRegistry>,
+) -> Result<Vec<ResourceMetrics>, String> {
+    if let Some(entry) = profiler_registry.profilers.get(&connection_id) {
+        Ok(entry.history().await)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +307,11 @@ mod tests {
         assert_eq!(format_uptime(90), "1m 30s");
         assert_eq!(format_uptime(3661), "1h 1m");
         assert_eq!(format_uptime(90061), "1d 1h");
+    }
+
+    #[test]
+    fn test_profiler_registry_new() {
+        let registry = ProfilerRegistry::new();
+        assert!(registry.profilers.is_empty());
     }
 }

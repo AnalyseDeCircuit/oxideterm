@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "点击展开",
+      "no_data": "暂无数据",
+      "sampling": "采样中..."
+    },
+    "detail": {
+      "load_avg": "平均负载",
+      "cpu_cores": "CPU 核心数",
+      "memory": "内存",
+      "source": "数据来源"
+    },
+    "panel": {
+      "no_connection": "未选择活动连接",
+      "sampling": "采样中...",
+      "no_data": "暂无数据",
+      "cpu": "CPU",
+      "memory": "内存",
+      "network": "网络 I/O",
+      "load_avg": "平均负载",
+      "rtt": "RTT 延迟",
+      "source": "数据来源"
+    }
+  }
+}

@@ -63,6 +63,52 @@ impl Default for HealthMetrics {
     }
 }
 
+/// Remote host resource metrics (single sample)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMetrics {
+    /// Timestamp of the sample (ms since epoch)
+    pub timestamp_ms: u64,
+    /// CPU usage percentage (0-100), None if no delta baseline yet
+    pub cpu_percent: Option<f64>,
+    /// Memory used in bytes
+    pub memory_used: Option<u64>,
+    /// Total memory in bytes
+    pub memory_total: Option<u64>,
+    /// Memory usage percentage (0-100)
+    pub memory_percent: Option<f64>,
+    /// 1-minute load average
+    pub load_avg_1: Option<f64>,
+    /// 5-minute load average
+    pub load_avg_5: Option<f64>,
+    /// 15-minute load average
+    pub load_avg_15: Option<f64>,
+    /// Number of CPU cores
+    pub cpu_cores: Option<u32>,
+    /// Network RX bytes per second
+    pub net_rx_bytes_per_sec: Option<u64>,
+    /// Network TX bytes per second
+    pub net_tx_bytes_per_sec: Option<u64>,
+    /// SSH RTT in milliseconds (from HealthTracker)
+    pub ssh_rtt_ms: Option<u64>,
+    /// Source quality of the metrics
+    pub source: MetricsSource,
+}
+
+/// Quality indicator for resource metrics
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetricsSource {
+    /// All /proc metrics parsed successfully
+    Full,
+    /// Some /proc metrics parsed, others failed
+    Partial,
+    /// Only SSH RTT available (non-Linux or /proc unavailable)
+    RttOnly,
+    /// Sampling failed entirely
+    Failed,
+}
+
 /// Health check thresholds
 #[derive(Debug, Clone)]
 pub struct HealthThresholds {

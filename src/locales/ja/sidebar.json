@@ -25,7 +25,8 @@
       "no_active_sessions": "アクティブなセッションがありません",
       "no_connected_sessions": "接続中のセッションがありません",
       "import_tooltip": ".oxideファイルからインポート",
-      "export_tooltip": ".oxideファイルにエクスポート"
+      "export_tooltip": ".oxideファイルにエクスポート",
+      "system_health": "システムヘルス"
     },
     "tooltips": {
       "settings": "設定",

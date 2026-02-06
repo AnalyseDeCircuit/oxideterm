@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "クリックで展開",
+      "no_data": "データなし",
+      "sampling": "サンプリング中..."
+    },
+    "detail": {
+      "load_avg": "負荷平均",
+      "cpu_cores": "CPUコア数",
+      "memory": "メモリ",
+      "source": "ソース"
+    },
+    "panel": {
+      "no_connection": "アクティブな接続が選択されていません",
+      "sampling": "サンプリング中...",
+      "no_data": "データなし",
+      "cpu": "CPU",
+      "memory": "メモリ",
+      "network": "ネットワーク I/O",
+      "load_avg": "負荷平均",
+      "rtt": "RTT レイテンシ",
+      "source": "ソース"
+    }
+  }
+}

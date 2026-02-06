@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "點擊展開",
+      "no_data": "暫無數據",
+      "sampling": "採樣中..."
+    },
+    "detail": {
+      "load_avg": "平均負載",
+      "cpu_cores": "CPU 核心數",
+      "memory": "記憶體",
+      "source": "資料來源"
+    },
+    "panel": {
+      "no_connection": "未選擇活動連線",
+      "sampling": "採樣中...",
+      "no_data": "暫無資料",
+      "cpu": "CPU",
+      "memory": "記憶體",
+      "network": "網路 I/O",
+      "load_avg": "平均負載",
+      "rtt": "RTT 延遲",
+      "source": "資料來源"
+    }
+  }
+}

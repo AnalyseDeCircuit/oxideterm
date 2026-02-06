@@ -33,6 +33,8 @@ import {
   SshPreflightRequest,
   SshPreflightResponse,
   AcceptHostKeyRequest,
+  // Resource profiler types
+  ResourceMetrics,
 } from '../types';
 
 // Toggle this for development without a backend
@@ -641,6 +643,27 @@ export const api = {
   getHealthForDisplay: async (sessionId: string): Promise<QuickHealthCheck> => {
     if (USE_MOCK) return { session_id: sessionId, status: 'Healthy', latency_ms: 10, message: 'Connected • 10ms' };
     return invoke('get_health_for_display', { sessionId });
+  },
+
+  // ============ Resource Profiler ============
+  startResourceProfiler: async (connectionId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('start_resource_profiler', { connectionId });
+  },
+
+  stopResourceProfiler: async (connectionId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('stop_resource_profiler', { connectionId });
+  },
+
+  getResourceMetrics: async (connectionId: string): Promise<ResourceMetrics | null> => {
+    if (USE_MOCK) return null;
+    return invoke('get_resource_metrics', { connectionId });
+  },
+
+  getResourceHistory: async (connectionId: string): Promise<ResourceMetrics[]> => {
+    if (USE_MOCK) return [];
+    return invoke('get_resource_history', { connectionId });
   },
 
   // ============ Network & Reconnect ============

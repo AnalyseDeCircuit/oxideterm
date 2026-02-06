@@ -8,6 +8,17 @@
     "dialog:default",
     "opener:default",
     "fs:default",
+    "core:event:default",
+    {
+      "identifier": "core:event:allow-listen",
+      "allow": [
+        { "event": "profiler:update:*" },
+        { "event": "connection:*" },
+        { "event": "health:*" },
+        { "event": "sftp:*" },
+        { "event": "transfer:*" }
+      ]
+    },
     {
       "identifier": "fs:allow-read-file",
       "allow": [

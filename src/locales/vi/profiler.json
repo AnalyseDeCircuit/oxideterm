@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Nhấn để mở rộng",
+      "no_data": "Không có dữ liệu",
+      "sampling": "Đang lấy mẫu..."
+    },
+    "detail": {
+      "load_avg": "Tải TB",
+      "cpu_cores": "Lõi CPU",
+      "memory": "Bộ nhớ",
+      "source": "Nguồn"
+    },
+    "panel": {
+      "no_connection": "Chưa chọn kết nối hoạt động",
+      "sampling": "Đang lấy mẫu...",
+      "no_data": "Không có dữ liệu",
+      "cpu": "CPU",
+      "memory": "Bộ nhớ",
+      "network": "I/O Mạng",
+      "load_avg": "Tải trung bình",
+      "rtt": "Độ trễ RTT",
+      "source": "Nguồn"
+    }
+  }
+}
