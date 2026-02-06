@@ -20,7 +20,9 @@
       "network": "E/S Réseau",
       "load_avg": "Charge moyenne",
       "rtt": "Latence RTT",
-      "source": "Source"
+      "source": "Source",
+      "disabled": "Surveillance désactivée",
+      "enable": "Activer l'échantillonnage"
     }
   }
 }

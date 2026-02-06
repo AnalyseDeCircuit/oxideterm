@@ -20,7 +20,9 @@
       "network": "网络 I/O",
       "load_avg": "平均负载",
       "rtt": "RTT 延迟",
-      "source": "数据来源"
+      "source": "数据来源",
+      "disabled": "监控已关闭",
+      "enable": "开启采样"
     }
   }
 }

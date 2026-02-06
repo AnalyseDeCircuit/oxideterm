@@ -20,7 +20,9 @@
       "network": "I/O Mạng",
       "load_avg": "Tải trung bình",
       "rtt": "Độ trễ RTT",
-      "source": "Nguồn"
+      "source": "Nguồn",
+      "disabled": "Giám sát đã tắt",
+      "enable": "Bật lấy mẫu"
     }
   }
 }

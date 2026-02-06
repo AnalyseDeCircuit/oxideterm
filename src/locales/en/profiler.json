@@ -20,7 +20,9 @@
       "network": "Network I/O",
       "load_avg": "Load Average",
       "rtt": "RTT Latency",
-      "source": "Source"
+      "source": "Source",
+      "disabled": "Monitoring disabled",
+      "enable": "Enable sampling"
     }
   }
 }

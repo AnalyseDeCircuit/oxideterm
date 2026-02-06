@@ -20,7 +20,9 @@
       "network": "ネットワーク I/O",
       "load_avg": "負荷平均",
       "rtt": "RTT レイテンシ",
-      "source": "ソース"
+      "source": "ソース",
+      "disabled": "モニタリング無効",
+      "enable": "サンプリング開始"
     }
   }
 }

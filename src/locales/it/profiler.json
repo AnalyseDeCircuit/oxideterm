@@ -20,7 +20,9 @@
       "network": "I/O di Rete",
       "load_avg": "Carico medio",
       "rtt": "Latenza RTT",
-      "source": "Fonte"
+      "source": "Fonte",
+      "disabled": "Monitoraggio disattivato",
+      "enable": "Attiva campionamento"
     }
   }
 }
