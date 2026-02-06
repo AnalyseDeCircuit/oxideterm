@@ -433,6 +433,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   /* App-like feel */
+  height: 100%;
+}
+
+html {
+  height: 100%;
+}
+
+#root {
+  height: 100%;
 }
 
 /* Scrollbar styling for WebKit - Modern & Theme-aware */

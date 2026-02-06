@@ -47,7 +47,7 @@ export const AppLayout = () => {
   }, [closePane]);
 
   return (
-    <div className="flex h-screen w-screen bg-theme-bg text-oxide-text overflow-hidden">
+    <div className="flex h-full w-full bg-theme-bg text-oxide-text overflow-hidden">
       {/* Modals */}
       <NewConnectionModal />
       {/* SettingsModal removed - now a Tab View */}
