@@ -20,7 +20,9 @@
       "network": "Netzwerk-E/A",
       "load_avg": "Lastdurchschnitt",
       "rtt": "RTT-Latenz",
-      "source": "Quelle"
+      "source": "Quelle",
+      "disabled": "Überwachung deaktiviert",
+      "enable": "Abtastung aktivieren"
     }
   }
 }

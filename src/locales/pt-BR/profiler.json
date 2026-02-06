@@ -20,7 +20,9 @@
       "network": "E/S de Rede",
       "load_avg": "Carga média",
       "rtt": "Latência RTT",
-      "source": "Fonte"
+      "source": "Fonte",
+      "disabled": "Monitoramento desativado",
+      "enable": "Ativar amostragem"
     }
   }
 }

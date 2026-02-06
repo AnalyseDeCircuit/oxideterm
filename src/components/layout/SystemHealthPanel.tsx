@@ -5,7 +5,7 @@
  * Reads from global profilerStore, derives active connection from activeTabId.
  */
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../store/appStore';
 import { useProfilerStore } from '../../store/profilerStore';
@@ -21,6 +21,7 @@ import {
   Server,
   Wifi,
   WifiOff,
+  Power,
 } from 'lucide-react';
 
 const SPARKLINE_POINTS = 12;
@@ -156,22 +157,33 @@ export const SystemHealthPanel: React.FC = () => {
     return session?.connectionId ?? null;
   }, [activeTabId, tabs, sessions]);
 
-  // Auto-start profiler for active connection
-  const startProfiler = useProfilerStore((s) => s.startProfiler);
-  useEffect(() => {
-    if (activeConnectionId) {
-      startProfiler(activeConnectionId);
-    }
-  }, [activeConnectionId, startProfiler]);
-
   // Read profiler state for active connection
   const connState = useProfilerStore((s) =>
     activeConnectionId ? s.connections.get(activeConnectionId) : undefined
   );
+  const startProfiler = useProfilerStore((s) => s.startProfiler);
+  const stopProfiler = useProfilerStore((s) => s.stopProfiler);
 
+  const isEnabled = connState?.isEnabled ?? false;
   const metrics = connState?.metrics ?? null;
   const history = connState?.history?.slice(-SPARKLINE_POINTS) ?? [];
   const isRunning = connState?.isRunning ?? false;
+
+  // Auto-start profiler only if not explicitly disabled
+  useEffect(() => {
+    if (activeConnectionId && connState === undefined) {
+      startProfiler(activeConnectionId);
+    }
+  }, [activeConnectionId, connState, startProfiler]);
+
+  const handleToggle = useCallback(() => {
+    if (!activeConnectionId) return;
+    if (isEnabled || isRunning) {
+      stopProfiler(activeConnectionId);
+    } else {
+      startProfiler(activeConnectionId);
+    }
+  }, [activeConnectionId, isEnabled, isRunning, startProfiler, stopProfiler]);
 
   // Connection info for header
   const activeConnection = useAppStore((s) =>
@@ -194,11 +206,30 @@ export const SystemHealthPanel: React.FC = () => {
     );
   }
 
+  // ─── Disabled state ───
+  if (!isEnabled && !isRunning) {
+    return (
+      <div className="space-y-2 px-2">
+        <PanelHeader connection={activeConnection} isRunning={false} onToggle={handleToggle} isEnabled={false} />
+        <div className="flex flex-col items-center py-8 text-theme-text-muted">
+          <Power className="w-8 h-8 mb-3 opacity-20" />
+          <span className="text-sm mb-3">{t('profiler.panel.disabled')}</span>
+          <button
+            onClick={handleToggle}
+            className="px-3 py-1.5 text-xs rounded-md border border-theme-border/50 text-theme-text hover:bg-theme-bg-hover transition-colors"
+          >
+            {t('profiler.panel.enable')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Waiting for data ───
   if (!metrics && isRunning) {
     return (
       <div className="space-y-2 px-2">
-        <PanelHeader connection={activeConnection} isRunning />
+        <PanelHeader connection={activeConnection} isRunning onToggle={handleToggle} isEnabled />
         <div className="flex flex-col items-center py-6 text-theme-text-muted">
           <Activity className="w-5 h-5 animate-pulse mb-2 opacity-50" />
           <span className="text-xs">{t('profiler.panel.sampling')}</span>
@@ -210,7 +241,7 @@ export const SystemHealthPanel: React.FC = () => {
   if (!metrics) {
     return (
       <div className="space-y-2 px-2">
-        <PanelHeader connection={activeConnection} isRunning={false} />
+        <PanelHeader connection={activeConnection} isRunning={false} onToggle={handleToggle} isEnabled />
         <div className="flex flex-col items-center py-6 text-theme-text-muted">
           <span className="text-xs opacity-60">{t('profiler.panel.no_data')}</span>
         </div>
@@ -221,7 +252,7 @@ export const SystemHealthPanel: React.FC = () => {
   return (
     <div className="space-y-2 px-2 overflow-y-auto">
       {/* Connection Header */}
-      <PanelHeader connection={activeConnection} isRunning={isRunning} />
+      <PanelHeader connection={activeConnection} isRunning={isRunning} onToggle={handleToggle} isEnabled />
 
       {/* CPU Card */}
       {!isRttOnly && metrics.cpuPercent !== null && (
@@ -317,9 +348,13 @@ export const SystemHealthPanel: React.FC = () => {
 function PanelHeader({
   connection,
   isRunning,
+  onToggle,
+  isEnabled,
 }: {
   connection: { host: string; port: number; username: string } | undefined;
   isRunning?: boolean;
+  onToggle?: () => void;
+  isEnabled?: boolean;
 }) {
   if (!connection) return null;
 
@@ -337,6 +372,19 @@ function PanelHeader({
           :{connection.port}
         </div>
       </div>
+      {onToggle && (
+        <button
+          onClick={onToggle}
+          className={cn(
+            'p-1 rounded transition-colors shrink-0',
+            isEnabled
+              ? 'text-emerald-400 hover:text-red-400 hover:bg-red-500/10'
+              : 'text-theme-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'
+          )}
+        >
+          <Power className="w-3.5 h-3.5" />
+        </button>
+      )}
       <div className={cn(
         'w-2 h-2 rounded-full shrink-0',
         isRunning ? 'bg-emerald-500 ring-2 ring-emerald-500/20' : 'bg-theme-text-muted/50'

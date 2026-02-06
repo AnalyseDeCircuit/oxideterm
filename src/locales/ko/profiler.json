@@ -20,7 +20,9 @@
       "network": "네트워크 I/O",
       "load_avg": "평균 부하",
       "rtt": "RTT 지연",
-      "source": "소스"
+      "source": "소스",
+      "disabled": "모니터링 비활성화됨",
+      "enable": "샘플링 시작"
     }
   }
 }

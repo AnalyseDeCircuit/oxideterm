@@ -21,6 +21,7 @@ interface ConnectionProfilerState {
   metrics: ResourceMetrics | null;
   history: ResourceMetrics[];
   isRunning: boolean;
+  isEnabled: boolean;
   error: string | null;
 }
 
@@ -31,11 +32,14 @@ interface ProfilerStore {
   /** Active Tauri event unlisteners (not serialized) */
   _unlisteners: Map<string, UnlistenFn>;
 
-  /** Start profiler for a connection (idempotent) */
+  /** Enable and start profiler for a connection (idempotent) */
   startProfiler: (connectionId: string) => Promise<void>;
 
-  /** Stop profiler for a connection */
+  /** Disable and stop profiler for a connection, clearing metrics */
   stopProfiler: (connectionId: string) => Promise<void>;
+
+  /** Check if profiler is enabled for a connection */
+  isEnabled: (connectionId: string) => boolean;
 
   /** Update metrics from Tauri event (internal) */
   _updateMetrics: (connectionId: string, metrics: ResourceMetrics) => void;
@@ -85,6 +89,7 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
           : null,
         history: existingHistory.slice(-MAX_HISTORY),
         isRunning: true,
+        isEnabled: true,
         error: null,
       });
 
@@ -95,6 +100,7 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
         metrics: null,
         history: [],
         isRunning: false,
+        isEnabled: true,
         error: String(e),
       });
       set({ connections });
@@ -117,12 +123,16 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
       // idempotent
     }
 
+    // Clear metrics and mark disabled
     const connections = new Map(get().connections);
-    const existing = connections.get(connectionId);
-    if (existing) {
-      connections.set(connectionId, { ...existing, isRunning: false });
-      set({ connections });
-    }
+    connections.set(connectionId, {
+      metrics: null,
+      history: [],
+      isRunning: false,
+      isEnabled: false,
+      error: null,
+    });
+    set({ connections });
   },
 
   _updateMetrics: (connectionId: string, metrics: ResourceMetrics) => {
@@ -138,6 +148,7 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
       metrics,
       history: newHistory,
       isRunning: existing?.isRunning ?? true,
+      isEnabled: existing?.isEnabled ?? true,
       error: null,
     });
     set({ connections });
@@ -159,5 +170,10 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
     const state = get().connections.get(connectionId);
     if (!state) return [];
     return state.history.slice(-SPARKLINE_POINTS);
+  },
+
+  isEnabled: (connectionId: string) => {
+    const state = get().connections.get(connectionId);
+    return state?.isEnabled ?? false;
   },
 }));
