@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Click to expand",
+      "no_data": "No data",
+      "sampling": "Sampling..."
+    },
+    "detail": {
+      "load_avg": "Load Avg",
+      "cpu_cores": "CPU Cores",
+      "memory": "Memory",
+      "source": "Source"
+    },
+    "panel": {
+      "no_connection": "No active connection selected",
+      "sampling": "Sampling...",
+      "no_data": "No data available",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "network": "Network I/O",
+      "load_avg": "Load Average",
+      "rtt": "RTT Latency",
+      "source": "Source"
+    }
+  }
+}

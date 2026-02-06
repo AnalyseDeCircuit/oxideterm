@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Clicca per espandere",
+      "no_data": "Nessun dato",
+      "sampling": "Campionamento..."
+    },
+    "detail": {
+      "load_avg": "Carico medio",
+      "cpu_cores": "Core CPU",
+      "memory": "Memoria",
+      "source": "Fonte"
+    },
+    "panel": {
+      "no_connection": "Nessuna connessione attiva selezionata",
+      "sampling": "Campionamento...",
+      "no_data": "Nessun dato",
+      "cpu": "CPU",
+      "memory": "Memoria",
+      "network": "I/O di Rete",
+      "load_avg": "Carico medio",
+      "rtt": "Latenza RTT",
+      "source": "Fonte"
+    }
+  }
+}

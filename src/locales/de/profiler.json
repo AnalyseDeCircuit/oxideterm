@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Klicken zum Erweitern",
+      "no_data": "Keine Daten",
+      "sampling": "Abtastung..."
+    },
+    "detail": {
+      "load_avg": "Lastdurchschn.",
+      "cpu_cores": "CPU-Kerne",
+      "memory": "Speicher",
+      "source": "Quelle"
+    },
+    "panel": {
+      "no_connection": "Keine aktive Verbindung ausgewählt",
+      "sampling": "Abtastung...",
+      "no_data": "Keine Daten",
+      "cpu": "CPU",
+      "memory": "Speicher",
+      "network": "Netzwerk-E/A",
+      "load_avg": "Lastdurchschnitt",
+      "rtt": "RTT-Latenz",
+      "source": "Quelle"
+    }
+  }
+}

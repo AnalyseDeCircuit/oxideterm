@@ -17,6 +17,7 @@ import zhCNAi from './locales/zh-CN/ai.json';
 import zhCNEditor from './locales/zh-CN/editor.json';
 import zhCNIde from './locales/zh-CN/ide.json';
 import zhCNFileManager from './locales/zh-CN/fileManager.json';
+import zhCNProfiler from './locales/zh-CN/profiler.json';
 
 // en 翻译文件
 import enCommon from './locales/en/common.json';
@@ -34,6 +35,7 @@ import enAi from './locales/en/ai.json';
 import enEditor from './locales/en/editor.json';
 import enIde from './locales/en/ide.json';
 import enFileManager from './locales/en/fileManager.json';
+import enProfiler from './locales/en/profiler.json';
 
 // fr-FR 翻译文件
 import frFRCommon from './locales/fr-FR/common.json';
@@ -51,6 +53,7 @@ import frFRAi from './locales/fr-FR/ai.json';
 import frFREditor from './locales/fr-FR/editor.json';
 import frFRIde from './locales/fr-FR/ide.json';
 import frFRFileManager from './locales/fr-FR/fileManager.json';
+import frFRProfiler from './locales/fr-FR/profiler.json';
 
 // ja 翻译文件
 import jaCommon from './locales/ja/common.json';
@@ -68,6 +71,7 @@ import jaAi from './locales/ja/ai.json';
 import jaEditor from './locales/ja/editor.json';
 import jaIde from './locales/ja/ide.json';
 import jaFileManager from './locales/ja/fileManager.json';
+import jaProfiler from './locales/ja/profiler.json';
 
 // es-ES 翻译文件
 import esESCommon from './locales/es-ES/common.json';
@@ -85,6 +89,7 @@ import esESAi from './locales/es-ES/ai.json';
 import esESEditor from './locales/es-ES/editor.json';
 import esESIde from './locales/es-ES/ide.json';
 import esESFileManager from './locales/es-ES/fileManager.json';
+import esESProfiler from './locales/es-ES/profiler.json';
 
 // pt-BR 翻译文件
 import ptBRCommon from './locales/pt-BR/common.json';
@@ -102,6 +107,7 @@ import ptBRAi from './locales/pt-BR/ai.json';
 import ptBREditor from './locales/pt-BR/editor.json';
 import ptBRIde from './locales/pt-BR/ide.json';
 import ptBRFileManager from './locales/pt-BR/fileManager.json';
+import ptBRProfiler from './locales/pt-BR/profiler.json';
 
 // vi 翻译文件
 import viCommon from './locales/vi/common.json';
@@ -119,6 +125,7 @@ import viTopology from './locales/vi/topology.json';
 import viAi from './locales/vi/ai.json';
 import viIde from './locales/vi/ide.json';
 import viFileManager from './locales/vi/fileManager.json';
+import viProfiler from './locales/vi/profiler.json';
 
 // ko 翻译文件
 import koCommon from './locales/ko/common.json';
@@ -136,6 +143,7 @@ import koAi from './locales/ko/ai.json';
 import koEditor from './locales/ko/editor.json';
 import koIde from './locales/ko/ide.json';
 import koFileManager from './locales/ko/fileManager.json';
+import koProfiler from './locales/ko/profiler.json';
 
 // de 翻译文件
 import deCommon from './locales/de/common.json';
@@ -153,6 +161,7 @@ import deAi from './locales/de/ai.json';
 import deEditor from './locales/de/editor.json';
 import deIde from './locales/de/ide.json';
 import deFileManager from './locales/de/fileManager.json';
+import deProfiler from './locales/de/profiler.json';
 
 // it 翻译文件 (意大利语)
 import itCommon from './locales/it/common.json';
@@ -170,6 +179,7 @@ import itAi from './locales/it/ai.json';
 import itEditor from './locales/it/editor.json';
 import itIde from './locales/it/ide.json';
 import itFileManager from './locales/it/fileManager.json';
+import itProfiler from './locales/it/profiler.json';
 
 // zh-TW 翻译文件 (繁体中文)
 import zhTWCommon from './locales/zh-TW/common.json';
@@ -187,6 +197,7 @@ import zhTWAi from './locales/zh-TW/ai.json';
 import zhTWEditor from './locales/zh-TW/editor.json';
 import zhTWIde from './locales/zh-TW/ide.json';
 import zhTWFileManager from './locales/zh-TW/fileManager.json';
+import zhTWProfiler from './locales/zh-TW/profiler.json';
 
 // 合并翻译资源
 const zhCN = {
@@ -205,6 +216,7 @@ const zhCN = {
   ...zhCNEditor,
   ...zhCNIde,
   ...zhCNFileManager,
+  ...zhCNProfiler,
 };
 
 const enUS = {
@@ -223,6 +235,7 @@ const enUS = {
   ...enEditor,
   ...enIde,
   ...enFileManager,
+  ...enProfiler,
 };
 
 const frFR = {
@@ -241,6 +254,7 @@ const frFR = {
   ...frFREditor,
   ...frFRIde,
   ...frFRFileManager,
+  ...frFRProfiler,
 };
 
 const ja = {
@@ -259,6 +273,7 @@ const ja = {
   ...jaEditor,
   ...jaIde,
   ...jaFileManager,
+  ...jaProfiler,
 };
 
 const esES = {
@@ -277,6 +292,7 @@ const esES = {
   ...esESEditor,
   ...esESIde,
   ...esESFileManager,
+  ...esESProfiler,
 };
 
 const ptBR = {
@@ -295,6 +311,7 @@ const ptBR = {
   ...ptBREditor,
   ...ptBRIde,
   ...ptBRFileManager,
+  ...ptBRProfiler,
 };
 
 const vi = {
@@ -313,6 +330,7 @@ const vi = {
   ...viEditor,
   ...viIde,
   ...viFileManager,
+  ...viProfiler,
 };
 
 const ko = {
@@ -331,6 +349,7 @@ const ko = {
   ...koEditor,
   ...koIde,
   ...koFileManager,
+  ...koProfiler,
 };
 
 const de = {
@@ -349,6 +368,7 @@ const de = {
   ...deEditor,
   ...deIde,
   ...deFileManager,
+  ...deProfiler,
 };
 
 const it = {
@@ -367,6 +387,7 @@ const it = {
   ...itEditor,
   ...itIde,
   ...itFileManager,
+  ...itProfiler,
 };
 
 const zhTW = {
@@ -385,6 +406,7 @@ const zhTW = {
   ...zhTWEditor,
   ...zhTWIde,
   ...zhTWFileManager,
+  ...zhTWProfiler,
 };
 
 // 获取初始语言：优先本地存储 -> 浏览器语言 -> 默认中文

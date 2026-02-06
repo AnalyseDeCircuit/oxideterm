@@ -284,6 +284,7 @@ pub fn run() {
         .manage(registry.clone())
         .manage(forwarding_registry.clone())
         .manage(health_registry)
+        .manage(commands::ProfilerRegistry::new())
         .manage(sftp_registry)
         .manage(transfer_manager)
         .manage(progress_store)
@@ -473,6 +474,11 @@ pub fn run() {
             commands::get_all_health_status,
             commands::get_health_for_display,
             commands::simulate_health_response,
+            // Resource profiler commands
+            commands::start_resource_profiler,
+            commands::stop_resource_profiler,
+            commands::get_resource_metrics,
+            commands::get_resource_history,
             // IDE mode commands
             commands::ide_open_project,
             commands::ide_check_file,
@@ -646,6 +652,11 @@ pub fn run() {
             commands::get_all_health_status,
             commands::get_health_for_display,
             commands::simulate_health_response,
+            // Resource profiler commands
+            commands::start_resource_profiler,
+            commands::stop_resource_profiler,
+            commands::get_resource_metrics,
+            commands::get_resource_history,
             // IDE mode commands
             commands::ide_open_project,
             commands::ide_check_file,
@@ -722,6 +733,12 @@ pub fn run() {
                 // Windows: 清理高精度定时器（恢复系统默认值）
                 #[cfg(target_os = "windows")]
                 disable_high_precision_timer();
+
+                // Clean up ProfilerRegistry (resource profilers) — BEFORE BridgeManager
+                if let Some(profiler_registry) = app_handle.try_state::<commands::ProfilerRegistry>() {
+                    tracing::info!("Stopping all resource profilers...");
+                    profiler_registry.stop_all();
+                }
                 
                 // Clean up BridgeManager (WebSocket servers)
                 if let Some(bridge_manager) = app_handle.try_state::<BridgeManager>() {

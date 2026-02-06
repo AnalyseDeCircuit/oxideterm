@@ -1753,7 +1753,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
            isolation: 'isolate'
          }}
        />
-       
+
        {/* Input Lock Overlay - shown during reconnection */}
        {inputLocked && (
          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">

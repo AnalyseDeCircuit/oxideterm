@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Clic para expandir",
+      "no_data": "Sin datos",
+      "sampling": "Muestreando..."
+    },
+    "detail": {
+      "load_avg": "Carga prom.",
+      "cpu_cores": "Núcleos CPU",
+      "memory": "Memoria",
+      "source": "Fuente"
+    },
+    "panel": {
+      "no_connection": "No hay conexión activa seleccionada",
+      "sampling": "Muestreando...",
+      "no_data": "Sin datos",
+      "cpu": "CPU",
+      "memory": "Memoria",
+      "network": "E/S de Red",
+      "load_avg": "Carga promedio",
+      "rtt": "Latencia RTT",
+      "source": "Fuente"
+    }
+  }
+}

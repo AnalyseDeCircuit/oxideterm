@@ -1,0 +1,26 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "확장하려면 클릭",
+      "no_data": "데이터 없음",
+      "sampling": "샘플링 중..."
+    },
+    "detail": {
+      "load_avg": "평균 부하",
+      "cpu_cores": "CPU 코어",
+      "memory": "메모리",
+      "source": "소스"
+    },
+    "panel": {
+      "no_connection": "활성 연결이 선택되지 않았습니다",
+      "sampling": "샘플링 중...",
+      "no_data": "데이터 없음",
+      "cpu": "CPU",
+      "memory": "메모리",
+      "network": "네트워크 I/O",
+      "load_avg": "평균 부하",
+      "rtt": "RTT 지연",
+      "source": "소스"
+    }
+  }
+}

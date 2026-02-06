@@ -25,7 +25,8 @@
       "no_active_sessions": "활성 세션 없음",
       "no_connected_sessions": "연결된 세션 없음",
       "import_tooltip": ".oxide 파일에서 가져오기",
-      "export_tooltip": ".oxide 파일로 내보내기"
+      "export_tooltip": ".oxide 파일로 내보내기",
+      "system_health": "시스템 상태"
     },
     "tooltips": {
       "settings": "설정",

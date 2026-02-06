@@ -25,7 +25,8 @@
       "no_active_sessions": "Không có phiên hoạt động",
       "no_connected_sessions": "Không có phiên đã kết nối",
       "import_tooltip": "Nhập từ file .oxide",
-      "export_tooltip": "Xuất sang file .oxide"
+      "export_tooltip": "Xuất sang file .oxide",
+      "system_health": "Sức khỏe hệ thống"
     },
     "tooltips": {
       "settings": "Cài đặt",

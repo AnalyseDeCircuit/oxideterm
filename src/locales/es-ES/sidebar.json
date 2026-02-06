@@ -25,7 +25,8 @@
       "no_active_sessions": "No hay sesiones activas",
       "no_connected_sessions": "No hay sesiones conectadas",
       "import_tooltip": "Importar desde archivo .oxide",
-      "export_tooltip": "Exportar a archivo .oxide"
+      "export_tooltip": "Exportar a archivo .oxide",
+      "system_health": "Salud del sistema"
     },
     "tooltips": {
       "settings": "Configuración",

@@ -22,6 +22,7 @@ import {
   Square,
   PanelLeftClose,
   PanelLeft,
+  HeartPulse,
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -44,6 +45,7 @@ import { AddRootNodeDialog } from '../modals/AddRootNodeDialog';
 import { api } from '../../lib/api';
 import { waitForConnectionActive, isConnectionGuardError } from '../../lib/connectionGuard';
 import type { UnifiedFlatNode } from '../../types';
+import { SystemHealthPanel } from './SystemHealthPanel';
 
 export const Sidebar = () => {
   const { t } = useTranslation();
@@ -881,6 +883,17 @@ export const Sidebar = () => {
             <Network className="h-5 w-5" />
           </Button>
 
+          {/* System Health */}
+          <Button
+            variant={sidebarActiveSection === 'system_health' ? 'secondary' : 'ghost'}
+            size="icon"
+            onClick={() => { setSidebarSection('system_health'); toggleSidebar(); }}
+            title={t('sidebar.panels.system_health')}
+            className="rounded-md h-9 w-9"
+          >
+            <HeartPulse className="h-5 w-5" />
+          </Button>
+
           {/* AI Sidebar Toggle */}
           <Button
             variant={!aiSidebarCollapsed ? 'secondary' : 'ghost'}
@@ -1021,6 +1034,17 @@ export const Sidebar = () => {
             <Network className="h-5 w-5" />
           </Button>
         </div>
+
+        {/* System Health */}
+        <Button
+          variant={sidebarActiveSection === 'system_health' ? 'secondary' : 'ghost'}
+          size="icon"
+          onClick={() => setSidebarSection('system_health')}
+          title={t('sidebar.panels.system_health')}
+          className="rounded-md h-9 w-9"
+        >
+          <HeartPulse className="h-5 w-5" />
+        </Button>
 
         {/* AI Sidebar Toggle */}
         <Button
@@ -1321,6 +1345,18 @@ export const Sidebar = () => {
                   ));
                 })()}
               </div>
+            </div>
+          )}
+
+          {/* System Health Panel */}
+          {sidebarActiveSection === 'system_health' && (
+            <div className="space-y-4 flex flex-col h-full">
+              <div className="flex items-center justify-between px-2">
+                <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider">
+                  {t('sidebar.panels.system_health')}
+                </span>
+              </div>
+              <SystemHealthPanel />
             </div>
           )}
 
