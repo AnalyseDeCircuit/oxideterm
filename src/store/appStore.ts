@@ -18,6 +18,7 @@ import {
   SplitDirection,
   PaneTerminalType,
   MAX_PANES_PER_TAB,
+  RemoteEnvInfo,
 } from '../types';
 
 interface ModalsState {
@@ -102,6 +103,7 @@ interface AppStore {
   
   // Actions - Connection status updates (from backend events)
   updateConnectionState: (connectionId: string, state: SshConnectionState) => void;
+  updateConnectionRemoteEnv: (connectionId: string, remoteEnv: RemoteEnvInfo) => void;
   
   // Computed (Helper methods)
   getSession: (sessionId: string) => SessionInfo | undefined;
@@ -1121,6 +1123,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
 
       console.log(`[Store] Connection ${connectionId} state updated to:`, state);
+      return { connections: newConnections };
+    });
+  },
+
+  updateConnectionRemoteEnv: (connectionId, remoteEnv) => {
+    set((prev) => {
+      const connection = prev.connections.get(connectionId);
+      if (!connection) {
+        console.warn(`[Store] updateConnectionRemoteEnv: connection not found: ${connectionId}`);
+        return prev;
+      }
+
+      const newConnections = new Map(prev.connections);
+      newConnections.set(connectionId, {
+        ...connection,
+        remoteEnv,
+      });
+
+      console.log(`[Store] Connection ${connectionId} remoteEnv updated:`, remoteEnv.osType);
       return { connections: newConnections };
     });
   }

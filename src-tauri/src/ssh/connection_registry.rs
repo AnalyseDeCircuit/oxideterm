@@ -46,7 +46,7 @@ use tracing::{debug, error, info, warn};
 
 use super::handle_owner::HandleController;
 use super::{AuthMethod as SshAuthMethod, SshClient, SshConfig};
-use crate::session::{AuthMethod, SessionConfig};
+use crate::session::{AuthMethod, RemoteEnvInfo, SessionConfig};
 
 /// 默认空闲超时时间（30 分钟）
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -146,6 +146,8 @@ pub struct ConnectionInfo {
     pub forward_ids: Vec<String>,
     /// 父连接 ID（隧道连接时非空）
     pub parent_connection_id: Option<String>,
+    /// 远程环境信息（SSH 连接建立后异步检测，可能为 None）
+    pub remote_env: Option<RemoteEnvInfo>,
 }
 
 /// 连接池统计信息（用于监控面板）
@@ -256,6 +258,9 @@ pub struct ConnectionEntry {
     /// None = 直连本地
     /// Some(id) = 通过父连接的隧道建立
     parent_connection_id: Option<String>,
+
+    /// 远程环境信息（异步检测结果，可能为 None 表示检测中或失败）
+    remote_env: RwLock<Option<RemoteEnvInfo>>,
 }
 
 impl ConnectionEntry {
@@ -383,6 +388,16 @@ impl ConnectionEntry {
         self.forward_ids.read().await.clone()
     }
 
+    /// 获取远程环境信息
+    pub async fn remote_env(&self) -> Option<RemoteEnvInfo> {
+        self.remote_env.read().await.clone()
+    }
+
+    /// 设置远程环境信息
+    pub async fn set_remote_env(&self, env: RemoteEnvInfo) {
+        *self.remote_env.write().await = Some(env);
+    }
+
     /// 转换为 ConnectionInfo
     pub async fn to_info(&self) -> ConnectionInfo {
         ConnectionInfo {
@@ -401,6 +416,7 @@ impl ConnectionEntry {
             sftp_session_id: self.sftp_session_id().await,
             forward_ids: self.forward_ids().await,
             parent_connection_id: self.parent_connection_id.clone(),
+            remote_env: self.remote_env().await,
         }
     }
 
@@ -769,12 +785,16 @@ impl SshConnectionRegistry {
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             parent_connection_id: None, // 直连，无父连接
+            remote_env: RwLock::new(None), // 待异步检测
         });
 
         self.connections.insert(connection_id.clone(), entry);
 
         // 启动心跳检测
         self.start_heartbeat(&connection_id);
+
+        // 启动远程环境检测（异步，不阻塞）
+        self.spawn_env_detection(&connection_id);
 
         Ok(connection_id)
     }
@@ -1021,6 +1041,7 @@ impl SshConnectionRegistry {
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             parent_connection_id: Some(parent_connection_id.to_string()), // 隧道连接，记录父连接
+            remote_env: RwLock::new(None), // 待异步检测
         });
 
         self.connections.insert(connection_id.clone(), entry);
@@ -1034,6 +1055,9 @@ impl SshConnectionRegistry {
 
         // 启动心跳检测
         self.start_heartbeat(&connection_id);
+
+        // 启动远程环境检测（异步，不阻塞）
+        self.spawn_env_detection(&connection_id);
 
         Ok(connection_id)
     }
@@ -1548,15 +1572,21 @@ impl SshConnectionRegistry {
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             parent_connection_id: None, // 从旧连接注册，无父连接
+            remote_env: RwLock::new(None), // 待异步检测
         });
 
-        self.connections.insert(connection_id.clone(), entry);
+        self.connections.insert(connection_id.clone(), entry.clone());
 
         info!(
             "Connection {} registered, total connections: {}",
             connection_id,
             self.connections.len()
         );
+
+        // 启动远程环境检测（异步，不阻塞）
+        // 使用 inner 版本因为 register_existing 没有 Arc<Self>
+        let app_handle = self.app_handle.blocking_read().clone();
+        Self::spawn_env_detection_inner(entry, connection_id.clone(), app_handle);
 
         connection_id
     }
@@ -1774,6 +1804,115 @@ impl SshConnectionRegistry {
         });
     }
 
+    /// Spawn remote environment detection task
+    ///
+    /// Runs asynchronously after connection establishment. Results are cached
+    /// in ConnectionEntry and emitted as `env:detected:{connection_id}` event.
+    pub fn spawn_env_detection(self: &Arc<Self>, connection_id: &str) {
+        use crate::session::env_detector::detect_remote_env;
+        use tauri::Emitter;
+
+        let Some(entry) = self.connections.get(connection_id) else {
+            warn!("Cannot spawn env detection for non-existent connection {}", connection_id);
+            return;
+        };
+
+        let conn = entry.value().clone();
+        let registry = Arc::clone(self);
+        let connection_id = connection_id.to_string();
+        let controller = conn.handle_controller.clone();
+
+        tokio::spawn(async move {
+            info!("[EnvDetector] Starting detection for connection {}", connection_id);
+
+            // Run detection
+            let env_info = detect_remote_env(&controller, &connection_id).await;
+
+            info!(
+                "[EnvDetector] Detection complete for {}: os_type={}",
+                connection_id, env_info.os_type
+            );
+
+            // Cache result in ConnectionEntry
+            conn.set_remote_env(env_info.clone()).await;
+
+            // Emit event to frontend
+            let app_handle = registry.app_handle.read().await;
+            if let Some(handle) = app_handle.as_ref() {
+                #[derive(Clone, serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct EnvDetectedEvent {
+                    connection_id: String,
+                    #[serde(flatten)]
+                    env: RemoteEnvInfo,
+                }
+                
+                let event = EnvDetectedEvent {
+                    connection_id: connection_id.clone(),
+                    env: env_info,
+                };
+                
+                if let Err(e) = handle.emit("env:detected", &event) {
+                    error!("[EnvDetector] Failed to emit env:detected for {}: {}", connection_id, e);
+                } else {
+                    debug!("[EnvDetector] Emitted env:detected event for {}", connection_id);
+                }
+            } else {
+                warn!("[EnvDetector] AppHandle not available, event not emitted for {}", connection_id);
+            }
+        });
+    }
+
+    /// Spawn env detection without needing Arc<Self> (for `register_existing`)
+    ///
+    /// Like `spawn_env_detection` but doesn't need self. Uses provided entry and app_handle.
+    fn spawn_env_detection_inner(
+        conn: Arc<ConnectionEntry>,
+        connection_id: String,
+        app_handle: Option<AppHandle>,
+    ) {
+        use crate::session::env_detector::detect_remote_env;
+        use tauri::Emitter;
+
+        let controller = conn.handle_controller.clone();
+
+        tokio::spawn(async move {
+            info!("[EnvDetector] Starting detection for connection {}", connection_id);
+
+            let env_info = detect_remote_env(&controller, &connection_id).await;
+
+            info!(
+                "[EnvDetector] Detection complete for {}: os_type={}",
+                connection_id, env_info.os_type
+            );
+
+            conn.set_remote_env(env_info.clone()).await;
+
+            if let Some(handle) = app_handle {
+                #[derive(Clone, serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct EnvDetectedEvent {
+                    connection_id: String,
+                    #[serde(flatten)]
+                    env: RemoteEnvInfo,
+                }
+                
+                let event = EnvDetectedEvent {
+                    connection_id: connection_id.clone(),
+                    env: env_info,
+                };
+                
+                if let Err(e) = handle.emit("env:detected", &event) {
+                    error!("[EnvDetector] Failed to emit env:detected for {}: {}", connection_id, e);
+                } else {
+                    debug!("[EnvDetector] Emitted env:detected event for {}", connection_id);
+                }
+            } else {
+                warn!("[EnvDetector] AppHandle not available, event not emitted for {}", connection_id);
+            }
+        });
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════
     // 🛑 AUTO-RECONNECT ENGINE - PHYSICALLY REMOVED
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1970,6 +2109,7 @@ mod tests {
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             parent_connection_id: None,
+            remote_env: RwLock::new(None),
         };
 
         assert_eq!(entry.ref_count(), 0);

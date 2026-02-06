@@ -1808,6 +1808,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          onInsert={handleAiInsert}
          onExecute={handleAiExecute}
          cursorPosition={aiCursorPosition}
+         sessionId={sessionId}
+         terminalType="terminal"
        />
     </div>
   );
