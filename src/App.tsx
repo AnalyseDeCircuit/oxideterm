@@ -14,7 +14,8 @@ import { useAppShortcuts, ShortcutDefinition, isTerminalReservedKey } from './ho
 import { useSplitPaneShortcuts } from './hooks/useSplitPaneShortcuts';
 import { preloadTerminalFonts } from './lib/fontLoader';
 import { initializePluginSystem } from './lib/plugin/pluginLoader';
-import { setupConnectionBridge } from './lib/plugin/pluginEventBridge';
+import { setupConnectionBridge, pluginEventBridge } from './lib/plugin/pluginEventBridge';
+import { useToastStore } from './hooks/useToast';
 
 function App() {
   // Initialize global event listeners
@@ -55,10 +56,25 @@ function App() {
   // Initialize plugin system (discover + load enabled plugins)
   useEffect(() => {
     const bridgeCleanup = setupConnectionBridge(useAppStore);
+
+    // Wire plugin toast events → app toast system
+    const toastCleanup = pluginEventBridge.on('plugin:toast', (data) => {
+      const opts = data as { title?: string; message?: string; description?: string; variant?: string; duration?: number };
+      useToastStore.getState().addToast({
+        title: opts.title ?? opts.message ?? 'Plugin',
+        description: opts.description,
+        variant: (opts.variant as 'success' | 'error' | 'warning' | 'default') ?? 'default',
+        duration: opts.duration,
+      });
+    });
+
     initializePluginSystem().catch(err => {
       console.error('Failed to initialize plugin system:', err);
     });
-    return bridgeCleanup;
+    return () => {
+      bridgeCleanup();
+      toastCleanup();
+    };
   }, []);
 
   // Sync SFTP settings to backend on app startup

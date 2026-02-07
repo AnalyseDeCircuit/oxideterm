@@ -143,6 +143,24 @@ fn validate_relative_path(relative_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate that a plugin_id is a safe directory name (no traversal, no separators).
+fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
+    if plugin_id.is_empty() {
+        return Err("Plugin ID cannot be empty".to_string());
+    }
+    if plugin_id.contains("..") {
+        return Err("Plugin ID cannot contain path traversal (..)".to_string());
+    }
+    if plugin_id.contains('/') || plugin_id.contains('\\') {
+        return Err("Plugin ID cannot contain path separators".to_string());
+    }
+    // Reject null bytes and other control characters
+    if plugin_id.bytes().any(|b| b < 0x20) {
+        return Err("Plugin ID contains invalid characters".to_string());
+    }
+    Ok(())
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tauri Commands
 // ═══════════════════════════════════════════════════════════════════════════
@@ -210,12 +228,13 @@ pub async fn list_plugins() -> Result<Vec<PluginManifest>, String> {
 }
 
 /// Read a file from a plugin's directory.
-/// The relative_path must not contain ".." (path traversal protection).
+/// Both plugin_id and relative_path are validated against path traversal.
 #[tauri::command]
 pub async fn read_plugin_file(
     plugin_id: String,
     relative_path: String,
 ) -> Result<Vec<u8>, String> {
+    validate_plugin_id(&plugin_id)?;
     validate_relative_path(&relative_path)?;
 
     let file_path = plugins_dir()?.join(&plugin_id).join(&relative_path);

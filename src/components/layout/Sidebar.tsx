@@ -691,14 +691,16 @@ export const Sidebar = () => {
 
     if (def.badge !== undefined) {
       return (
-        <div key={def.key} className="relative">
+        <React.Fragment key={def.key}>
           {def.spacer && <div className="flex-1" />}
           {def.separator && <div className="w-6 h-px bg-theme-border my-1" />}
-          {btn}
-          <span className={`absolute -top-1 -right-1 ${def.badgeColor ?? 'bg-green-500'} text-[10px] text-white rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 pointer-events-none`}>
-            {def.badge}
-          </span>
-        </div>
+          <div className="relative">
+            {btn}
+            <span className={`absolute -top-1 -right-1 ${def.badgeColor ?? 'bg-green-500'} text-[10px] text-white rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 pointer-events-none`}>
+              {def.badge}
+            </span>
+          </div>
+        </React.Fragment>
       );
     }
 

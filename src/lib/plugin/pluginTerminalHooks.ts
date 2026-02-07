@@ -9,10 +9,15 @@
  * - Output pipeline is synchronous, fail-open
  * - Any interceptor returning null suppresses input entirely
  * - Circuit breaker: plugins exceeding error limits are auto-disabled
+ * - Time budget: per-hook calls exceeding HOOK_BUDGET_MS emit a warning
+ *   and count toward the circuit breaker
  */
 
 import { usePluginStore } from '../../store/pluginStore';
 import { trackPluginError } from './pluginLoader';
+
+/** Maximum time (ms) a single hook handler should take before warning */
+const HOOK_BUDGET_MS = 5;
 
 /**
  * Run the input interceptor pipeline.
@@ -31,7 +36,19 @@ export function runInputPipeline(data: string, sessionId: string): string | null
     if (current === null) return null;
 
     try {
+      const t0 = performance.now();
       current = entry.handler(current, { sessionId });
+      const elapsed = performance.now() - t0;
+
+      if (elapsed > HOOK_BUDGET_MS) {
+        console.warn(
+          `[PluginTerminalHooks] Input interceptor (plugin: ${entry.pluginId}) took ${elapsed.toFixed(1)}ms (budget: ${HOOK_BUDGET_MS}ms)`,
+        );
+        // Slow hooks count toward circuit breaker
+        if (trackPluginError(entry.pluginId)) {
+          import('./pluginLoader').then(({ unloadPlugin }) => unloadPlugin(entry.pluginId));
+        }
+      }
     } catch (err) {
       console.error(`[PluginTerminalHooks] Input interceptor error (plugin: ${entry.pluginId}):`, err);
 
@@ -63,7 +80,18 @@ export function runOutputPipeline(data: Uint8Array, sessionId: string): Uint8Arr
 
   for (const entry of processors) {
     try {
+      const t0 = performance.now();
       current = entry.handler(current, { sessionId });
+      const elapsed = performance.now() - t0;
+
+      if (elapsed > HOOK_BUDGET_MS) {
+        console.warn(
+          `[PluginTerminalHooks] Output processor (plugin: ${entry.pluginId}) took ${elapsed.toFixed(1)}ms (budget: ${HOOK_BUDGET_MS}ms)`,
+        );
+        if (trackPluginError(entry.pluginId)) {
+          import('./pluginLoader').then(({ unloadPlugin }) => unloadPlugin(entry.pluginId));
+        }
+      }
     } catch (err) {
       console.error(`[PluginTerminalHooks] Output processor error (plugin: ${entry.pluginId}):`, err);
 

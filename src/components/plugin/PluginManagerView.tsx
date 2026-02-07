@@ -18,7 +18,7 @@ import {
   ChevronRight,
   FolderOpen,
 } from 'lucide-react';
-import { homeDir } from '@tauri-apps/api/path';
+import { homeDir, join } from '@tauri-apps/api/path';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Separator } from '../ui/separator';
 import { usePluginStore } from '../../store/pluginStore';
@@ -89,7 +89,7 @@ function PluginRow({ info, onToggle, onReload }: {
               </span>
               <StatusBadge state={info.state} />
             </div>
-            <p className="text-xs text-theme-text-muted mt-0.5 truncate">
+            <p className="text-xs text-theme-text-muted mt-0.5 line-clamp-2">
               {manifest.description || manifest.id}
             </p>
           </div>
@@ -133,6 +133,9 @@ function PluginRow({ info, onToggle, onReload }: {
       {/* Expanded details */}
       {expanded && (
         <div className="ml-7 p-3 rounded bg-theme-bg-panel/30 border border-theme-border/50 space-y-2 text-xs text-theme-text-muted">
+          {manifest.description && (
+            <p className="text-theme-text-muted whitespace-pre-wrap">{manifest.description}</p>
+          )}
           <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
             <span className="font-medium text-theme-text">ID</span>
             <span className="font-mono">{manifest.id}</span>
@@ -246,10 +249,23 @@ export function PluginManagerView() {
     try {
       const manifests = await discoverPlugins();
       const store = usePluginStore.getState();
+      const discoveredIds = new Set(manifests.map((m) => m.id));
 
+      // Register any newly discovered plugins
       for (const manifest of manifests) {
         if (!store.getPlugin(manifest.id)) {
           store.registerPlugin(manifest);
+        }
+      }
+
+      // Remove plugins whose folders no longer exist
+      for (const [id, info] of store.plugins) {
+        if (!discoveredIds.has(id) && id !== '__builtin__') {
+          // Unload if active or still loading, then remove from store
+          if (info.state === 'active' || info.state === 'loading') {
+            await unloadPlugin(id);
+          }
+          store.removePlugin(id);
         }
       }
     } finally {
@@ -260,7 +276,7 @@ export function PluginManagerView() {
   const handleOpenPluginsDir = useCallback(async () => {
     try {
       const home = await homeDir();
-      const pluginsPath = `${home}.oxideterm/plugins`;
+      const pluginsPath = await join(home, '.oxideterm', 'plugins');
       await openPath(pluginsPath);
     } catch (err) {
       console.error('[PluginManager] Failed to open plugins directory:', err);

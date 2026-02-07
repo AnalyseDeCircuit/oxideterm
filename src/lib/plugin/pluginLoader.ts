@@ -46,10 +46,29 @@ export function trackPluginError(pluginId: string): boolean {
   if (tracker.count >= MAX_ERRORS) {
     console.error(`[PluginLoader] Plugin "${pluginId}" exceeded error limit (${MAX_ERRORS} in ${ERROR_WINDOW_MS / 1000}s), auto-disabling`);
     errorTrackers.delete(pluginId);
+
+    // Persist the disabled state so the plugin stays disabled across restarts
+    persistAutoDisable(pluginId);
+
     return true;
   }
 
   return false;
+}
+
+/**
+ * Persist auto-disable: update config and set store state to 'disabled'.
+ * Called by the circuit breaker when a plugin exceeds the error limit.
+ */
+async function persistAutoDisable(pluginId: string): Promise<void> {
+  try {
+    const config = await loadPluginGlobalConfig();
+    config.plugins[pluginId] = { enabled: false };
+    await savePluginGlobalConfig(config);
+    usePluginStore.getState().setPluginState(pluginId, 'disabled', 'Auto-disabled: exceeded error limit');
+  } catch (err) {
+    console.error(`[PluginLoader] Failed to persist auto-disable for "${pluginId}":`, err);
+  }
 }
 
 /**
@@ -164,10 +183,28 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
       await withTimeout(activateResult, LIFECYCLE_TIMEOUT, `Plugin "${id}" activate()`);
     }
 
+    // Guard: if the plugin was removed/unloaded while activate() was running
+    // (e.g. refresh removed it mid-load), bail out instead of marking active.
+    const postActivateInfo = store.getPlugin(id);
+    if (!postActivateInfo || postActivateInfo.state === 'inactive' || postActivateInfo.state === 'disabled') {
+      console.warn(`[PluginLoader] Plugin "${id}" was removed/disabled during activation, skipping`);
+      store.cleanupPlugin(id);
+      removePluginI18n(id);
+      return;
+    }
+
     store.setPluginState(id, 'active');
     console.log(`[PluginLoader] Plugin "${id}" v${manifest.version} activated successfully`);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+
+    // Clean up any partial state left by a failed activation:
+    // - module reference (set before activate() was called)
+    // - i18n resources (loaded before activate() was called)
+    // - any disposables registered during a partially-completed activate()
+    store.cleanupPlugin(id);
+    removePluginI18n(id);
+
     store.setPluginState(id, 'error', errorMsg);
     console.error(`[PluginLoader] Failed to load plugin "${id}":`, errorMsg);
   }
@@ -216,7 +253,12 @@ export async function unloadPlugin(pluginId: string): Promise<void> {
   // Clear error tracker
   errorTrackers.delete(pluginId);
 
-  store.setPluginState(pluginId, 'inactive');
+  // Respect 'disabled' state — if the plugin was auto-disabled by the circuit
+  // breaker (persistAutoDisable), don't overwrite with 'inactive'.
+  const currentState = store.getPlugin(pluginId)?.state;
+  if (currentState !== 'disabled') {
+    store.setPluginState(pluginId, 'inactive');
+  }
   console.log(`[PluginLoader] Plugin "${pluginId}" unloaded`);
 }
 

@@ -125,6 +125,12 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
       });
       return createDisposable(pluginId, unsub);
     },
+    onIdle(handler) {
+      const unsub = pluginEventBridge.on('connection:idle', (snapshot) => {
+        try { handler(snapshot as ConnectionSnapshot); } catch { /* swallow */ }
+      });
+      return createDisposable(pluginId, unsub);
+    },
     onSessionCreated(handler) {
       const unsub = pluginEventBridge.on('session:created', (info) => {
         try { handler(info as { sessionId: string; connectionId: string }); } catch { /* swallow */ }
@@ -323,11 +329,23 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
   });
 
   // ── ctx.api ───────────────────────────────────────────────────────
+  //
+  // SECURITY NOTE: This whitelist is advisory, not a hard boundary.
+  // Plugins run in the same JS context and can theoretically import
+  // @tauri-apps/api/core directly to bypass this check. True sandboxing
+  // would require an iframe or WebWorker with a message-passing bridge.
+  // The whitelist is defense-in-depth: it prevents accidental misuse
+  // and makes intentional abuse explicit (detectable via code review).
+  //
   const allowedCommands = new Set(manifest.contributes?.apiCommands ?? []);
 
   const api: PluginBackendAPI = Object.freeze({
     async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
       if (!allowedCommands.has(command)) {
+        console.warn(
+          `[PluginContext] Plugin "${pluginId}" attempted to invoke undeclared command "${command}". ` +
+          `Declare it in manifest contributes.apiCommands to allow.`,
+        );
         throw new Error(`Command "${command}" not whitelisted in manifest contributes.apiCommands`);
       }
       return invoke(command, args);

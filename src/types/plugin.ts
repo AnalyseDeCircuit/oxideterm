@@ -44,7 +44,7 @@ export type PluginTerminalHooksDef = {
 };
 
 /** Connection lifecycle hooks the plugin subscribes to */
-export type ConnectionHookType = 'onConnect' | 'onDisconnect' | 'onReconnect' | 'onLinkDown';
+export type ConnectionHookType = 'onConnect' | 'onDisconnect' | 'onReconnect' | 'onLinkDown' | 'onIdle';
 
 /** The plugin.json manifest loaded from disk */
 export type PluginManifest = {
@@ -162,6 +162,7 @@ export type PluginEventsAPI = {
   onDisconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onLinkDown(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onReconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
+  onIdle(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onSessionCreated(handler: (info: { sessionId: string; connectionId: string }) => void): Disposable;
   onSessionClosed(handler: (info: { sessionId: string }) => void): Disposable;
   /** Inter-plugin events (namespaced automatically as plugin:{pluginId}:{name}) */
@@ -262,6 +263,7 @@ declare global {
       ReactDOM: { createRoot: typeof import('react-dom/client').createRoot };
       zustand: { create: typeof import('zustand').create };
       lucideReact: typeof import('lucide-react');
+      ui: import('../lib/plugin/pluginUIKit').PluginUIKit;
     };
   }
 }
