@@ -68,7 +68,22 @@
       "ssh_restored": "SSH 연결이 복원되었습니다",
       "completed": "연결이 복원되었습니다. {{count}}개 서비스가 복구되었습니다",
       "failed": "재연결 실패: {{error}}",
-      "cancelled": "재연결이 취소되었습니다"
+      "cancelled": "재연결이 취소되었습니다",
+      "phase": {
+        "snapshot": "스냅샷",
+        "ssh_connect": "SSH 연결",
+        "await_terminal": "터미널 대기",
+        "restore_forwards": "포워딩 복원",
+        "resume_transfers": "전송 재개",
+        "restore_ide": "IDE 복원"
+      },
+      "result": {
+        "ok": "완료",
+        "failed": "실패",
+        "skipped": "건너뜀",
+        "running": "실행 중",
+        "services": "개 서비스 복원"
+      }
     }
   }
 }

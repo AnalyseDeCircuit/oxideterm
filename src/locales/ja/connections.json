@@ -68,7 +68,22 @@
       "ssh_restored": "SSH 接続が復元されました",
       "completed": "接続が復元されました。{{count}} 個のサービスが回復しました",
       "failed": "再接続に失敗しました: {{error}}",
-      "cancelled": "再接続がキャンセルされました"
+      "cancelled": "再接続がキャンセルされました",
+      "phase": {
+        "snapshot": "スナップショット",
+        "ssh_connect": "SSH 接続",
+        "await_terminal": "ターミナル待機",
+        "restore_forwards": "転送復元",
+        "resume_transfers": "転送再開",
+        "restore_ide": "IDE 復元"
+      },
+      "result": {
+        "ok": "完了",
+        "failed": "失敗",
+        "skipped": "スキップ",
+        "running": "実行中",
+        "services": "個のサービスを復元"
+      }
     }
   }
 }

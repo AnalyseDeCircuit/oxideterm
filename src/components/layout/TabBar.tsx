@@ -8,6 +8,7 @@ import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { cn } from '../../lib/utils';
 import { Tab, PaneNode } from '../../types';
 import { topologyResolver } from '../../lib/topologyResolver';
+import { ReconnectTimeline } from '../connections/ReconnectTimeline';
 
 /** Count leaf panes in a pane tree */
 function countPanes(node: PaneNode): number {
@@ -102,6 +103,57 @@ const getTabTitle = (
 
   // Fallback to stored title
   return tab.title;
+};
+
+// ─── Reconnect Indicator with Hover Timeline ────────────────────────────────
+
+import type { ReconnectJob } from '../../store/reconnectOrchestratorStore';
+
+const ReconnectIndicator = ({
+  job,
+  nodeId,
+  onCancel,
+  t,
+}: {
+  job: ReconnectJob;
+  nodeId: string;
+  onCancel: (e: React.MouseEvent, nodeId: string) => void;
+  t: (key: string) => string;
+}) => {
+  const [showTimeline, setShowTimeline] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative flex items-center gap-1 text-xs text-amber-400"
+      onMouseEnter={() => setShowTimeline(true)}
+      onMouseLeave={() => setShowTimeline(false)}
+    >
+      <RefreshCw className="h-3 w-3 animate-spin" />
+      <span>
+        {job.status}
+        {job.attempt > 1 && ` (${job.attempt}/${job.maxAttempts})`}
+      </span>
+      <button
+        onClick={(e) => onCancel(e, nodeId)}
+        className="hover:bg-theme-bg-hover rounded p-0.5"
+        title={t('tabbar.cancel_reconnect')}
+      >
+        <XCircle className="h-3 w-3" />
+      </button>
+
+      {/* Hover popover with timeline */}
+      {showTimeline && (
+        <div
+          className="absolute top-full right-0 mt-1 z-50 bg-theme-bg-panel border border-theme-border rounded-lg shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ReconnectTimeline job={job} />
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const TabBar = () => {
@@ -261,22 +313,14 @@ export const TabBar = () => {
                 <TabIcon type={tab.type} />
                 <span className="truncate flex-1">{getTabTitle(tab, sessions, t)}</span>
 
-                {/* Reconnect progress indicator */}
+                {/* Reconnect progress indicator with hover timeline */}
                 {showReconnectProgress && orchJob && nodeId && (
-                  <div className="flex items-center gap-1 text-xs text-amber-400">
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                    <span>
-                      {orchJob.status}
-                      {orchJob.attempt > 1 && ` (${orchJob.attempt}/${orchJob.maxAttempts})`}
-                    </span>
-                    <button
-                      onClick={(e) => handleCancelReconnect(e, nodeId)}
-                      className="hover:bg-theme-bg-hover rounded p-0.5"
-                      title={t('tabbar.cancel_reconnect')}
-                    >
-                      <XCircle className="h-3 w-3" />
-                    </button>
-                  </div>
+                  <ReconnectIndicator
+                    job={orchJob}
+                    nodeId={nodeId}
+                    onCancel={handleCancelReconnect}
+                    t={t}
+                  />
                 )}
 
                 {/* Normal tab controls */}

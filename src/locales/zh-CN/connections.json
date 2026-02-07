@@ -68,7 +68,22 @@
       "ssh_restored": "SSH 连接已恢复",
       "completed": "连接已恢复，{{count}} 个服务已重建",
       "failed": "连接恢复失败: {{error}}",
-      "cancelled": "已取消重连"
+      "cancelled": "已取消重连",
+      "phase": {
+        "snapshot": "快照",
+        "ssh_connect": "SSH 连接",
+        "await_terminal": "等待终端",
+        "restore_forwards": "恢复转发",
+        "resume_transfers": "恢复传输",
+        "restore_ide": "恢复 IDE"
+      },
+      "result": {
+        "ok": "已完成",
+        "failed": "失败",
+        "skipped": "已跳过",
+        "running": "进行中",
+        "services": "个服务已恢复"
+      }
     }
   }
 }

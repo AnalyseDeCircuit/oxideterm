@@ -68,7 +68,22 @@
       "ssh_restored": "Kết nối SSH đã được khôi phục",
       "completed": "Kết nối đã được khôi phục, {{count}} dịch vụ đã phục hồi",
       "failed": "Kết nối lại thất bại: {{error}}",
-      "cancelled": "Đã hủy kết nối lại"
+      "cancelled": "Đã hủy kết nối lại",
+      "phase": {
+        "snapshot": "Ảnh chụp",
+        "ssh_connect": "Kết nối SSH",
+        "await_terminal": "Đợi terminal",
+        "restore_forwards": "Khôi phục chuyển tiếp",
+        "resume_transfers": "Tiếp tục truyền tải",
+        "restore_ide": "Khôi phục IDE"
+      },
+      "result": {
+        "ok": "Hoàn thành",
+        "failed": "Thất bại",
+        "skipped": "Bỏ qua",
+        "running": "Đang chạy",
+        "services": "dịch vụ đã khôi phục"
+      }
     }
   }
 }

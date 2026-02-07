@@ -68,7 +68,22 @@
       "ssh_restored": "SSH-Verbindung wiederhergestellt",
       "completed": "Verbindung wiederhergestellt, {{count}} Dienst(e) wiederhergestellt",
       "failed": "Neuverbindung fehlgeschlagen: {{error}}",
-      "cancelled": "Neuverbindung abgebrochen"
+      "cancelled": "Neuverbindung abgebrochen",
+      "phase": {
+        "snapshot": "Snapshot",
+        "ssh_connect": "SSH-Verbindung",
+        "await_terminal": "Terminal abwarten",
+        "restore_forwards": "Weiterleitungen wiederherstellen",
+        "resume_transfers": "Übertragungen fortsetzen",
+        "restore_ide": "IDE wiederherstellen"
+      },
+      "result": {
+        "ok": "Abgeschlossen",
+        "failed": "Fehlgeschlagen",
+        "skipped": "Übersprungen",
+        "running": "Läuft",
+        "services": "Dienst(e) wiederhergestellt"
+      }
     }
   }
 }

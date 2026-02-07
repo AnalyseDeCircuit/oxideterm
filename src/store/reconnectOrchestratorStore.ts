@@ -63,6 +63,16 @@ export type ReconnectSnapshot = {
   };
 };
 
+export type PhaseResult = 'ok' | 'failed' | 'skipped' | 'running';
+
+export type PhaseEvent = {
+  phase: ReconnectPhase;
+  startedAt: number;
+  endedAt?: number;
+  result: PhaseResult;
+  detail?: string;
+};
+
 export type ReconnectJob = {
   nodeId: string;
   nodeName: string;
@@ -75,6 +85,8 @@ export type ReconnectJob = {
   snapshot: ReconnectSnapshot;
   abortController: AbortController;
   restoredCount: number;
+  /** Append-only phase event log for time-travel debugging */
+  phaseHistory: PhaseEvent[];
 };
 
 interface OrchestratorState {
@@ -151,7 +163,7 @@ export const useReconnectOrchestratorStore = create<OrchestratorState & Orchestr
     // ─── Actions ───
 
     scheduleReconnect: (nodeId: string) => {
-      console.log(`[Orchestrator] 📥 scheduleReconnect(${nodeId})`);
+      console.log(`[Orchestrator] scheduleReconnect(${nodeId})`);
 
       // Idempotent: skip if job already running for this node
       const existing = get().jobs.get(nodeId);
@@ -266,6 +278,29 @@ function getJob(nodeId: string): ReconnectJob | undefined {
   return useReconnectOrchestratorStore.getState().jobs.get(nodeId);
 }
 
+/** Record entry into a pipeline phase */
+function enterPhase(nodeId: string, phase: ReconnectPhase) {
+  const job = getJob(nodeId);
+  if (!job) return;
+  const history = [...job.phaseHistory, { phase, startedAt: Date.now(), result: 'running' as PhaseResult }];
+  updateJob(nodeId, { status: phase, phaseHistory: history });
+}
+
+/** Record exit from the current pipeline phase */
+function exitPhase(nodeId: string, result: PhaseResult, detail?: string) {
+  const job = getJob(nodeId);
+  if (!job) return;
+  const history = [...job.phaseHistory];
+  // Find the last 'running' entry and close it
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].result === 'running') {
+      history[i] = { ...history[i], endedAt: Date.now(), result, detail };
+      break;
+    }
+  }
+  updateJob(nodeId, { phaseHistory: history });
+}
+
 /**
  * Flush pending nodeIds → group into distinct subtrees → create one job per subtree root.
  *
@@ -319,7 +354,7 @@ function flushPending() {
     }
   }
 
-  console.log(`[Orchestrator] Flushing ${nodeIds.length} pending → ${selectedRoots.length} subtree root(s)`);
+  console.log(`[Orchestrator] Flushing ${nodeIds.length} pending -> ${selectedRoots.length} subtree root(s)`);
 
   const jobs = new Map(useReconnectOrchestratorStore.getState().jobs);
   const newJobIds: string[] = [];
@@ -351,6 +386,7 @@ function flushPending() {
       },
       abortController: new AbortController(),
       restoredCount: 0,
+      phaseHistory: [],
     };
 
     jobs.set(rootNodeId, job);
@@ -414,10 +450,11 @@ async function runPipeline(nodeId: string) {
     toast('connections.reconnect.completed', 'success', {
       count: finalJob?.restoredCount ?? 0,
     });
-    console.log(`[Orchestrator] ✅ Pipeline done for ${nodeId}, restored ${finalJob?.restoredCount ?? 0} services`);
+    console.log(`[Orchestrator] Pipeline done for ${nodeId}, restored ${finalJob?.restoredCount ?? 0} services`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[Orchestrator] ❌ Unexpected pipeline error for ${nodeId}:`, msg);
+    console.error(`[Orchestrator] Unexpected pipeline error for ${nodeId}:`, msg);
+    exitPhase(nodeId, 'failed', msg);
     updateJob(nodeId, { status: 'failed', error: msg, endedAt: Date.now() });
     toast('connections.reconnect.failed', 'error', { error: msg });
   } finally {
@@ -426,6 +463,7 @@ async function runPipeline(nodeId: string) {
 }
 
 function markCancelled(nodeId: string) {
+  exitPhase(nodeId, 'failed', 'cancelled');
   updateJob(nodeId, { status: 'cancelled', endedAt: Date.now() });
   toast('connections.reconnect.cancelled', 'default');
 }
@@ -433,8 +471,8 @@ function markCancelled(nodeId: string) {
 // ─── Phase 0: Snapshot ───────────────────────────────────────────────────────
 
 async function phaseSnapshot(nodeId: string) {
-  updateJob(nodeId, { status: 'snapshot' });
-  console.log(`[Orchestrator] 📸 Phase: snapshot for ${nodeId}`);
+  enterPhase(nodeId, 'snapshot');
+  console.log(`[Orchestrator] Phase: snapshot for ${nodeId}`);
 
   const treeStore = useSessionTreeStore.getState();
   const node = treeStore.getNode(nodeId);
@@ -520,6 +558,9 @@ async function phaseSnapshot(nodeId: string) {
       ideSnapshot,
     },
   });
+  const fwCount = forwardRules.reduce((s, e) => s + e.rules.length, 0);
+  const txCount = incompleteTransfers.reduce((s, e) => s + e.transfers.length, 0);
+  exitPhase(nodeId, 'ok', `${fwCount} forwards, ${txCount} transfers, ${ideSnapshot ? 'IDE' : 'no IDE'}`);
 }
 
 // ─── Phase 1: SSH Connect ────────────────────────────────────────────────────
@@ -528,14 +569,16 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
   const job = getJob(nodeId);
   if (!job) return false;
 
-  updateJob(nodeId, { status: 'ssh-connect', attempt: job.attempt + 1 });
-  console.log(`[Orchestrator] 🔌 Phase: ssh-connect for ${nodeId} (attempt ${job.attempt + 1})`);
+  enterPhase(nodeId, 'ssh-connect');
+  updateJob(nodeId, { attempt: job.attempt + 1 });
+  console.log(`[Orchestrator] Phase: ssh-connect for ${nodeId} (attempt ${job.attempt + 1})`);
 
   const treeStore = useSessionTreeStore.getState();
 
   try {
     const reconnected = await treeStore.reconnectCascade(nodeId);
     console.log(`[Orchestrator] SSH reconnect succeeded: ${reconnected.length} nodes`);
+    exitPhase(nodeId, 'ok', `${reconnected.length} nodes`);
     toast('connections.reconnect.ssh_restored', 'default');
     return true;
   } catch (e) {
@@ -543,7 +586,7 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
     const isRetryable = msg.includes('CHAIN_LOCK_BUSY') || msg.includes('NODE_LOCK_BUSY');
 
     if (isRetryable && (job.attempt + 1) < job.maxAttempts) {
-      console.log(`[Orchestrator] 🔄 Retryable error, will retry in ${RETRY_DELAY_MS}ms`);
+      console.log(`[Orchestrator] Retryable error, will retry in ${RETRY_DELAY_MS}ms`);
       await sleep(RETRY_DELAY_MS);
 
       // Check if cancelled during sleep
@@ -564,11 +607,13 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
       }
       // Node recovered on its own
       console.log(`[Orchestrator] Node ${nodeId} status changed, skipping retry`);
+      exitPhase(nodeId, 'ok', 'recovered on its own');
       return true;
     }
 
     // Non-retryable or exhausted retries
     console.error(`[Orchestrator] SSH reconnect failed permanently: ${msg}`);
+    exitPhase(nodeId, 'failed', msg);
     updateJob(nodeId, { status: 'failed', error: msg, endedAt: Date.now() });
     toast('connections.reconnect.failed', 'error', { error: msg });
     return false;
@@ -578,15 +623,21 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
 // ─── Phase 2: Await Terminal ─────────────────────────────────────────────────
 
 async function phaseAwaitTerminal(nodeId: string) {
-  updateJob(nodeId, { status: 'await-terminal' });
-  console.log(`[Orchestrator] ⏳ Phase: await-terminal for ${nodeId}`);
+  enterPhase(nodeId, 'await-terminal');
+  console.log(`[Orchestrator] Phase: await-terminal for ${nodeId}`);
 
   const treeStore = useSessionTreeStore.getState();
   const job = getJob(nodeId);
-  if (!job) return;
+  if (!job) {
+    exitPhase(nodeId, 'skipped', 'job missing');
+    return;
+  }
 
   const node = treeStore.getNode(nodeId);
-  if (!node) return;
+  if (!node) {
+    exitPhase(nodeId, 'skipped', 'node missing');
+    return;
+  }
 
   const { snapshot } = job;
 
@@ -651,22 +702,24 @@ async function phaseAwaitTerminal(nodeId: string) {
       console.warn(`[Orchestrator] Failed to create terminal for node ${n.id}:`, e);
     }
   }
+  exitPhase(nodeId, 'ok', `${nodesNeedingSession.size} nodes needed sessions`);
 }
 
 // ─── Phase 3: Restore Forwards ──────────────────────────────────────────────
 
 async function phaseRestoreForwards(nodeId: string) {
-  updateJob(nodeId, { status: 'restore-forwards' });
+  enterPhase(nodeId, 'restore-forwards');
   const job = getJob(nodeId);
   if (!job) return;
 
   const { snapshot } = job;
   if (snapshot.forwardRules.length === 0) {
     console.log(`[Orchestrator] No forwards to restore for ${nodeId}`);
+    exitPhase(nodeId, 'skipped', 'no forward rules in snapshot');
     return;
   }
 
-  console.log(`[Orchestrator] 🔀 Phase: restore-forwards for ${nodeId}`);
+  console.log(`[Orchestrator] Phase: restore-forwards for ${nodeId}`);
 
   // Build old→new session mapping
   const sessionMap = buildSessionMapping(snapshot, nodeId);
@@ -728,7 +781,7 @@ async function phaseRestoreForwards(nodeId: string) {
         await api.createPortForward(request);
         restored++;
         liveForwardKeys.add(key); // track so we don't duplicate within the same batch
-        console.log(`[Orchestrator] ✅ Restored forward: ${rule.bind_address}:${rule.bind_port} → ${rule.target_host}:${rule.target_port}`);
+        console.log(`[Orchestrator] Restored forward: ${rule.bind_address}:${rule.bind_port} -> ${rule.target_host}:${rule.target_port}`);
       } catch (e) {
         console.warn(`[Orchestrator] Failed to restore forward ${rule.id}:`, e);
         // Continue with next rule
@@ -740,27 +793,30 @@ async function phaseRestoreForwards(nodeId: string) {
     updateJob(nodeId, { restoredCount: (job.restoredCount || 0) + restored });
     console.log(`[Orchestrator] Restored ${restored} forward rules`);
   }
+  exitPhase(nodeId, 'ok', `restored ${restored} forward(s)`);
 }
 
 // ─── Phase 4: Resume Transfers ──────────────────────────────────────────────
 
 async function phaseResumeTransfers(nodeId: string) {
-  updateJob(nodeId, { status: 'resume-transfers' });
+  enterPhase(nodeId, 'resume-transfers');
   const job = getJob(nodeId);
   if (!job) return;
 
   const { snapshot } = job;
   if (snapshot.oldTerminalSessionIds.length === 0) {
     console.log(`[Orchestrator] No sessions to check for incomplete transfers`);
+    exitPhase(nodeId, 'skipped', 'no old sessions');
     return;
   }
 
-  console.log(`[Orchestrator] 📦 Phase: resume-transfers for ${nodeId}`);
+  console.log(`[Orchestrator] Phase: resume-transfers for ${nodeId}`);
 
   // Use pre-snapshotted incomplete transfers (captured before resetNodeState destroyed old sessions)
   // This avoids calling guardSessionConnection on dead old sessions.
   if (snapshot.incompleteTransfers.length === 0) {
     console.log(`[Orchestrator] No incomplete transfers in snapshot`);
+    exitPhase(nodeId, 'skipped', 'no incomplete transfers in snapshot');
     return;
   }
 
@@ -819,7 +875,7 @@ async function phaseResumeTransfers(nodeId: string) {
       try {
         await api.sftpResumeTransferWithRetry(newSessionId, transfer.transfer_id);
         resumed++;
-        console.log(`[Orchestrator] ✅ Resumed transfer ${transfer.transfer_id}`);
+        console.log(`[Orchestrator] Resumed transfer ${transfer.transfer_id}`);
       } catch (e) {
         console.warn(`[Orchestrator] Failed to resume transfer ${transfer.transfer_id}:`, e);
       }
@@ -830,19 +886,21 @@ async function phaseResumeTransfers(nodeId: string) {
     updateJob(nodeId, { restoredCount: (job.restoredCount || 0) + resumed });
     console.log(`[Orchestrator] Resumed ${resumed} transfers`);
   }
+  exitPhase(nodeId, 'ok', `resumed ${resumed} transfer(s)`);
 }
 
 // ─── Phase 5: Restore IDE ────────────────────────────────────────────────────
 
 async function phaseRestoreIde(nodeId: string) {
-  updateJob(nodeId, { status: 'restore-ide' });
+  enterPhase(nodeId, 'restore-ide');
   const job = getJob(nodeId);
   if (!job || !job.snapshot.ideSnapshot) {
     console.log(`[Orchestrator] No IDE state to restore for ${nodeId}`);
+    exitPhase(nodeId, 'skipped', 'no IDE snapshot');
     return;
   }
 
-  console.log(`[Orchestrator] 📝 Phase: restore-ide for ${nodeId}`);
+  console.log(`[Orchestrator] Phase: restore-ide for ${nodeId}`);
 
   const { ideSnapshot } = job.snapshot;
   const ideNodeId = topologyResolver.getNodeId(ideSnapshot.connectionId);
@@ -854,6 +912,7 @@ async function phaseRestoreIde(nodeId: string) {
 
   if (!ideNode) {
     console.warn(`[Orchestrator] IDE node ${targetNodeId} no longer exists`);
+    exitPhase(nodeId, 'skipped', 'IDE node no longer exists');
     return;
   }
 
@@ -862,6 +921,7 @@ async function phaseRestoreIde(nodeId: string) {
 
   if (!newConnectionId || !newSftpSessionId) {
     console.warn(`[Orchestrator] IDE node ${targetNodeId} missing connectionId or sftpSessionId, skipping IDE restore`);
+    exitPhase(nodeId, 'skipped', 'missing connectionId or sftpSessionId');
     return;
   }
 
@@ -870,11 +930,13 @@ async function phaseRestoreIde(nodeId: string) {
   // Respect user intent: if user opened a different project or closed IDE after snapshot, skip
   if (ideStore.project) {
     if (ideStore.project.rootPath !== ideSnapshot.projectPath) {
-      console.log(`[Orchestrator] IDE project changed by user (${ideStore.project.rootPath} ≠ ${ideSnapshot.projectPath}), skipping IDE restore`);
+      console.log(`[Orchestrator] IDE project changed by user (${ideStore.project.rootPath} != ${ideSnapshot.projectPath}), skipping IDE restore`);
+      exitPhase(nodeId, 'skipped', 'user changed project');
       return;
     }
     // Same project already open — no need to restore
     console.log(`[Orchestrator] IDE already has the same project open, skipping IDE restore`);
+    exitPhase(nodeId, 'skipped', 'same project already open');
     return;
   }
 
@@ -882,6 +944,7 @@ async function phaseRestoreIde(nodeId: string) {
   // If ideStore has a lastClosedAt timestamp after snapshot, user intentionally closed it
   if (ideStore.lastClosedAt && ideStore.lastClosedAt > job.snapshot.snapshotAt) {
     console.log(`[Orchestrator] IDE was closed by user after snapshot (${ideStore.lastClosedAt} > ${job.snapshot.snapshotAt}), skipping IDE restore`);
+    exitPhase(nodeId, 'skipped', 'user closed IDE after snapshot');
     return;
   }
 
@@ -905,8 +968,10 @@ async function phaseRestoreIde(nodeId: string) {
       updateJob(nodeId, { restoredCount: (job.restoredCount || 0) + 1 });
     }
     console.log(`[Orchestrator] IDE restored: project=${ideSnapshot.projectPath}, tabs=${openedTabs}`);
+    exitPhase(nodeId, 'ok', `project + ${openedTabs} tab(s)`);
   } catch (e) {
     console.warn(`[Orchestrator] Failed to restore IDE project:`, e);
+    exitPhase(nodeId, 'failed', e instanceof Error ? e.message : String(e));
   }
 }
 

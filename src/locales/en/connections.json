@@ -68,7 +68,22 @@
       "ssh_restored": "SSH connection restored",
       "completed": "Connection restored, {{count}} service(s) recovered",
       "failed": "Reconnection failed: {{error}}",
-      "cancelled": "Reconnection cancelled"
+      "cancelled": "Reconnection cancelled",
+      "phase": {
+        "snapshot": "Snapshot",
+        "ssh_connect": "SSH Connect",
+        "await_terminal": "Await Terminal",
+        "restore_forwards": "Restore Forwards",
+        "resume_transfers": "Resume Transfers",
+        "restore_ide": "Restore IDE"
+      },
+      "result": {
+        "ok": "Completed",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "running": "Running",
+        "services": "service(s) restored"
+      }
     }
   }
 }

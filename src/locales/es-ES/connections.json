@@ -68,7 +68,22 @@
       "ssh_restored": "Conexión SSH restaurada",
       "completed": "Conexión restaurada, {{count}} servicio(s) recuperado(s)",
       "failed": "Error de reconexión: {{error}}",
-      "cancelled": "Reconexión cancelada"
+      "cancelled": "Reconexión cancelada",
+      "phase": {
+        "snapshot": "Instantánea",
+        "ssh_connect": "Conexión SSH",
+        "await_terminal": "Esperar terminal",
+        "restore_forwards": "Restaurar reenvíos",
+        "resume_transfers": "Reanudar transferencias",
+        "restore_ide": "Restaurar IDE"
+      },
+      "result": {
+        "ok": "Completado",
+        "failed": "Fallido",
+        "skipped": "Omitido",
+        "running": "En ejecución",
+        "services": "servicio(s) restaurado(s)"
+      }
     }
   }
 }
