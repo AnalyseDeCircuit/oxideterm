@@ -189,7 +189,7 @@ gatherSidebarContext() ← Auto-inject environment snapshot
     ↓
 Enhanced System Prompt + Context Block
     ↓
-streamChatCompletion() (OpenAI API)
+AiStreamProvider.stream() (Provider-specific API)
     ↓
 Streaming response → ChatMessage render
     ↓
@@ -205,6 +205,9 @@ Command insertion (optional) → Active terminal
 | `AiChatPanel.tsx` | Main panel with conversation management |
 | `ChatMessage.tsx` | Message rendering with code block support |
 | `ChatInput.tsx` | Input area with context toggle |
+| `ModelSelector.tsx` | AI model selection dropdown |
+| `ContextIndicator.tsx` | Terminal context status indicator |
+| `ThinkingBlock.tsx` | Extended thinking content display (collapsible) |
 | `sidebarContextProvider.ts` | Environment and terminal context aggregation |
 
 ## Keyboard Shortcuts

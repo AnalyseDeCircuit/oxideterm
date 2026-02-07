@@ -193,6 +193,7 @@ src-tauri/src/
 │   ├── agent.rs            # SSH Agent (仅 UI/Types，核心待实现)
 │   ├── keyboard_interactive.rs  # 2FA/KBI 认证
 │   ├── known_hosts.rs      # 主机密钥验证
+│   ├── preflight.rs        # 连接预检 (TOFU 主机密钥验证)
 │   ├── handle_owner.rs     # Handle 控制器
 │   └── connection_registry.rs  # 连接池
 │
@@ -223,6 +224,8 @@ src-tauri/src/
 │   ├── search.rs           # 终端搜索
 │   ├── tree.rs             # 会话树管理
 │   ├── topology_graph.rs   # 拓扑图
+│   ├── env_detector.rs     # 远程环境检测
+│   ├── profiler.rs         # 资源性能分析
 │   └── types.rs            # 类型定义
 │
 ├── sftp/                   # SFTP 实现
@@ -247,6 +250,7 @@ src-tauri/src/
 │   ├── storage.rs          # 配置存储 (~/.oxideterm/connections.json)
 │   ├── keychain.rs         # 系统密钥链 (macOS/Windows/Linux)
 │   ├── ssh_config.rs       # ~/.ssh/config 解析
+│   ├── vault.rs            # 加密凭证存储
 │   └── types.rs            # 配置类型
 │
 ├── oxide_file/             # .oxide 文件加密格式
@@ -259,7 +263,8 @@ src-tauri/src/
 │   ├── mod.rs
 │   ├── store.rs            # 持久化存储 (redb)
 │   ├── session.rs          # 会话状态
-│   └── forwarding.rs       # 转发状态
+│   ├── forwarding.rs       # 转发状态
+│   └── ai_chat.rs          # AI 聊天状态持久化
 │
 └── commands/               # Tauri 命令
     ├── mod.rs
@@ -276,7 +281,10 @@ src-tauri/src/
     ├── oxide_export.rs     # .oxide 导出
     ├── oxide_import.rs     # .oxide 导入
     ├── scroll.rs           # 滚动缓冲区命令
-    └── session_tree.rs     # 会话树命令
+    ├── session_tree.rs     # 会话树命令
+    ├── ai_chat.rs          # AI 聊天命令
+    ├── archive.rs          # 归档操作命令
+    └── plugin.rs           # 插件管理命令
 ```
 
 ### 核心组件关系图
@@ -518,6 +526,7 @@ src/components/ide/
 ├── IdeInlineInput.tsx       # 内联重命名/新建输入
 ├── IdeTerminal.tsx          # 集成终端组件
 ├── IdeWorkspace.tsx         # IDE 工作区布局
+├── CodeEditorSearchBar.tsx  # 编辑器内搜索栏
 ├── dialogs/                 # 对话框组件
 │   └── ...                  # 冲突解决、确认对话框等
 ├── hooks/
@@ -923,11 +932,19 @@ src/
 │   ├── layout/             # 布局组件
 │   │   ├── AppLayout.tsx   # 主布局
 │   │   ├── Sidebar.tsx     # 侧边栏
-│   │   └── TabBar.tsx      # 标签栏
+│   │   ├── AiSidebar.tsx   # AI 侧边栏
+│   │   ├── TabBar.tsx      # 标签栏
+│   │   └── SystemHealthPanel.tsx # 系统健康面板
 │   │
 │   ├── terminal/           # 终端组件
 │   │   ├── TerminalView.tsx         # 远程SSH终端
-│   │   └── LocalTerminalView.tsx    # 本地PTY终端
+│   │   ├── LocalTerminalView.tsx    # 本地PTY终端
+│   │   ├── SplitTerminalContainer.tsx # 分屏终端容器
+│   │   ├── SplitPaneToolbar.tsx     # 分屏工具栏
+│   │   ├── TerminalPane.tsx         # 终端面板
+│   │   ├── AiInlinePanel.tsx        # AI 内联面板
+│   │   ├── SearchBar.tsx            # 终端搜索栏
+│   │   └── PasteConfirmOverlay.tsx  # 粘贴确认覆盖层
 │   │
 │   ├── sftp/               # SFTP 组件
 │   │   ├── SFTPView.tsx    # 文件浏览器
@@ -939,7 +956,10 @@ src/
 │   ├── ai/                 # AI 聊天组件 (v1.3.0)
 │   │   ├── AiChatPanel.tsx      # 侧边栏聊天面板
 │   │   ├── ChatMessage.tsx      # 消息气泡（支持代码块）
-│   │   └── ChatInput.tsx        # 输入区域（支持上下文捕获）
+│   │   ├── ChatInput.tsx        # 输入区域（支持上下文捕获）
+│   │   ├── ContextIndicator.tsx # 上下文状态指示器
+│   │   ├── ModelSelector.tsx    # AI 模型选择器
+│   │   └── ThinkingBlock.tsx    # 思考过程展示块
 │   │
 │   ├── plugin/             # 插件 UI 组件 (v1.6.2)
 │   │   ├── PluginManagerView.tsx
@@ -951,23 +971,38 @@ src/
 │       └── SettingsModal.tsx
 │
 ├── store/                  # Zustand 状态管理 (多Store架构)
-│   ├── appStore.ts            # 远程会话状态 (SSH连接)
+│   ├── sessionTreeStore.ts    # 会话树状态 (用户意图层)
+│   ├── appStore.ts            # 远程会话状态 (事实层，SSH连接)
 │   ├── ideStore.ts            # IDE模式状态 (v1.3.0)
 │   ├── localTerminalStore.ts  # 本地PTY状态
-│   ├── sessionTreeStore.ts    # 会话树状态
+│   ├── reconnectOrchestratorStore.ts  # 自动重连编排 (v1.6.2)
 │   ├── settingsStore.ts       # 统一设置存储
 │   ├── transferStore.ts       # SFTP传输队列状态
 │   ├── aiChatStore.ts         # AI聊天状态 (v1.3.0)
-│   └── pluginStore.ts         # 插件运行时状态 (v1.6.2)
+│   ├── pluginStore.ts         # 插件运行时状态 (v1.6.2)
+│   └── profilerStore.ts       # 资源性能分析状态
 │
 ├── lib/                    # 工具库
 │   ├── api.ts              # Tauri API 封装
 │   ├── terminalRegistry.ts # 终端缓冲区注册表 (v1.3.0)
-│   ├── plugin/              # 插件运行时与 UI Kit (v1.6.2)
+│   ├── ai/                 # AI 提供商注册表
+│   ├── plugin/             # 插件运行时与 UI Kit (v1.6.2)
+│   ├── codemirror/         # CodeMirror 语言加载器
+│   ├── themes.ts           # 终端主题定义
+│   ├── themeManager.ts     # 主题管理器
+│   ├── topologyUtils.ts    # 拓扑图工具
+│   ├── fontLoader.ts       # 字体加载与缓存
 │   └── utils.ts            # 通用工具函数
 │
 ├── hooks/                  # 自定义 Hooks
-│   └── useToast.ts
+│   ├── useConnectionEvents.ts  # 连接生命周期事件
+│   ├── useForwardEvents.ts     # 端口转发事件
+│   ├── useNetworkStatus.ts     # 网络状态检测
+│   ├── useTerminalKeyboard.ts  # 终端快捷键
+│   ├── useSplitPaneShortcuts.ts # 分屏快捷键
+│   ├── useTauriListener.ts     # Tauri 事件监听
+│   ├── useMermaid.ts           # Mermaid 图表渲染
+│   └── useToast.ts             # 提示消息
 │
 └── types/                  # TypeScript 类型
     └── index.ts

@@ -274,13 +274,14 @@ flowchart TD
 ```typescript
 // SFTPView.tsx
 const connectionState = appStore.connections.get(connectionId)?.state;
+const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
 
 useEffect(() => {
-  if (connectionState !== 'active') {
+  if (!isConnectionReady) {
     console.debug('[SFTPView] Waiting for connection:', connectionState);
     return;  // 阻止所有 IO
   }
-  initializeSftp();
+  // 初始化 SFTP 会话
 }, [connectionState, connectionId]);
 ```
 
@@ -370,13 +371,14 @@ flowchart LR
 ```typescript
 // TransferQueue.tsx
 const connectionState = connections.get(connectionId)?.state;
+const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
 
 useEffect(() => {
-  if (connectionState !== 'active') {
+  if (!isConnectionReady) {
     console.debug('[TransferQueue] Connection not ready');
     return;  // 暂停所有传输
   }
-  resumeTransfers();
+  // 恢复传输
 }, [connectionState]);
 ```
 
@@ -392,7 +394,7 @@ const cwd = await api.sftpInit(sessionId);
 // 返回当前工作目录，如 "/home/user"
 ```
 
-**v1.4.0 注意**: 调用前必须确保 `connectionState === 'active'`。
+**v1.4.0 注意**: 调用前必须确保 `connectionState === 'active' || connectionState === 'idle'`。
 
 ### 目录操作
 

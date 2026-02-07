@@ -97,25 +97,22 @@ sequenceDiagram
 为了解决 SSH 重连后旧状态残留的问题，我们引入了基于 React Key 的物理级重置机制：
 
 ```tsx
-// IdeWorkspaceWrapper.tsx
-const connectionKey = `${sessionId}-${connectionId}`;
-
+// AppLayout.tsx
 // 当重连发生 (connectionId 改变)，整个 IDE 树被销毁并重建
-return (
-  <IdeWorkspace 
-    key={connectionKey} 
-    sessionId={sessionId}
-    initialPath={restoredPath}
-  />
-);
+<IdeWorkspace
+  key={`ide-${sessionId}-${connectionId}`}
+  connectionId={sessionId}
+  sftpSessionId={sessionId}
+  rootPath="~"
+/>
 ```
 
-**生命周期流转**：
+**生命周期��转**：
 1. **断网**：Backend 重连，前一个 `connectionId` 失效。
 2. **销毁**：React 卸载旧组件，自动清理所有 Pending 的 SFTP 请求、Watcher 和各种内存状态。
 3. **重建**：重连成功，生成新 `connectionId`，组件重新挂载。
 4. **恢复**：
-    - 从全局 `pathMemory` 恢复上次的目录路径。
+    - 从 `ideStore` 的 `cachedProjectPath` 和 `cachedTabPaths` 恢复上次的状态。
     - 重新订阅 Git 状态变更。
     - 重新加载文件树根目录。
 
@@ -197,17 +194,22 @@ graph TD
 
 ### 路径记忆 (Path Memory)
 
-组件重装不应丢失上下文。我们使用全局 Map 存储会话状态：
+组件重装不应丢失上下文。`ideStore` 使用持久化状态存储会话信息：
 
 ```typescript
-// 全局内存，跨组件生命周期
-const idePathMemory = new Map<string, string>();
+// ideStore.ts - 使用 Zustand persist 中间件
+interface IdeState {
+  cachedProjectPath: string | null;   // 上次打开的项目路径
+  cachedTabPaths: string[];           // 上次打开的文件路径列表
+  cachedNodeId: string | null;        // 上次关联的节点 ID
+  lastClosedAt: number | null;        // 上次关闭时间
+}
 
-// Mount 时
-const lastPath = idePathMemory.get(sessionId) || defaultPath;
-
-// Unmount 时 (React Effect Cleanup)
-// 只有在 Close Session 时才清理，Reconnect 不清理
+// 打开项目时自动缓存
+set({
+  cachedProjectPath: projectInfo.rootPath,
+  cachedTabPaths: [...new Set([...state.cachedTabPaths, path])],
+});
 ```
 
 ## 📋 已知限制

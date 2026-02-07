@@ -167,23 +167,20 @@ v1.4.0 引入了精确的流量统计和状态反馈：
 ### 创建转发 (Strong Sync)
 
 ```typescript
-// src/store/appStore.ts
+// src/lib/api.ts
 
-async function addForwardRule(sessionId: string, rule: ForwardRule) {
-  // 1. 状态门禁
-  const conn = get().connections.get(sessionId);
-  if (conn?.state !== 'active') throw new Error("Link Down");
+// 创建端口转发
+const response = await api.createPortForward({
+  session_id: sessionId,
+  forward_type: 'Local',
+  bind_address: '127.0.0.1',
+  bind_port: 8080,
+  target_host: 'localhost',
+  target_port: 3000,
+});
 
-  // 2. 后端执行
-  await api.createPortForward({ ...rule, session_id: sessionId });
-
-  // 3. 🔴 强一致性同步：更新引用计数 (Ref Count)
-  // 添加规则会增加连接的引用计数，必须立即刷新 UI
-  await get().refreshConnections();
-  
-  // 4. 刷新规则列表
-  await refreshForwardRules(sessionId);
-}
+// 刷新转发规则列表
+const rules = await api.listPortForwards(sessionId);
 ```
 
 ### 规则实体定义
@@ -191,17 +188,18 @@ async function addForwardRule(sessionId: string, rule: ForwardRule) {
 ```typescript
 interface ForwardRule {
   id: string;               // UUID
-  type: 'Local' | 'Remote' | 'Dynamic';
-  bind_host: string;
+  forward_type: 'Local' | 'Remote' | 'Dynamic';
+  bind_address: string;
   bind_port: number;
-  target_host?: string;     // Dynamic 类型为空
-  target_port?: number;     // Dynamic 类型为空
-  status: 'Starting' | 'Active' | 'Stopped' | 'Error' | 'Suspended';
+  target_host: string;      // Dynamic 类型为空字符串
+  target_port: number;      // Dynamic 类型为 0
+  status: 'starting' | 'active' | 'stopped' | 'error' | 'suspended';
+  description?: string;
   error_msg?: string;
-  stats: {
+  stats?: {
     connections: number;
-    bytes_tx: number;
-    bytes_rx: number;
+    bytes_sent: number;
+    bytes_received: number;
   }
 }
 ```

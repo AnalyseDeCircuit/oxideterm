@@ -50,6 +50,7 @@ type ReconnectPhase =
 
 type ReconnectJob = {
   nodeId: string;
+  nodeName: string;           // For toast messages
   status: ReconnectPhase;
   attempt: number;
   maxAttempts: number;        // 3
@@ -59,10 +60,12 @@ type ReconnectJob = {
   snapshot: ReconnectSnapshot;
   abortController: AbortController;
   restoredCount: number;      // Number of services restored (for toast)
+  phaseHistory: PhaseEvent[]; // Append-only phase event log for debugging
 };
 
 type ReconnectSnapshot = {
   nodeId: string;
+  snapshotAt: number;          // Timestamp for user intent detection
   // Forward rules captured BEFORE resetNodeState destroys them
   forwardRules: Array<{
     sessionId: string;         // Old session ID
@@ -70,10 +73,18 @@ type ReconnectSnapshot = {
   }>;
   // Old terminal session IDs for querying incomplete transfers
   oldTerminalSessionIds: string[];
+  // Per-node mapping of old terminal session IDs
+  perNodeOldSessionIds: Map<string, string[]>;
+  // Incomplete SFTP transfers captured BEFORE resetNodeState destroys old sessions
+  incompleteTransfers: Array<{
+    oldSessionId: string;
+    transfers: IncompleteTransferInfo[];
+  }>;
   // IDE state (if IDE tab was open for this node)
   ideSnapshot?: {
     projectPath: string;
     tabPaths: string[];
+    connectionId: string;      // For topology resolution
   };
 };
 ```
@@ -101,13 +112,15 @@ Core methods:
 **MUST execute before `reconnectCascade` to capture data that resetNodeState destroys.**
 
 1. Collect `oldTerminalSessionIds` from `nodeTerminalMap.get(nodeId)` and descendants.
-2. For each old session ID:
+2. Build `perNodeOldSessionIds` mapping (nodeId → old session IDs) for deterministic session mapping later.
+3. For each old session ID:
    a. Call `api.listPortForwards(sessionId)` to snapshot forward rules.
    b. Filter: keep only rules with `status !== 'stopped'` (respect user intent).
-3. Check `ideStore`: if current project's nodeId matches, save `{ projectPath, tabPaths }`.
-4. Store snapshot in job.
+4. Snapshot incomplete SFTP transfers (`api.sftpListIncompleteTransfers`) BEFORE `resetNodeState` destroys old sessions. This is critical because `guardSessionConnection` will fail for old sessions after reset.
+5. Check `ideStore`: if current project's nodeId matches, save `{ projectPath, tabPaths, connectionId }`.
+6. Store snapshot in job with `snapshotAt` timestamp (used for user intent detection in Phase 5).
 
-**Why this works**: `listPortForwards` queries the backend forwarding manager which still exists at this point. `resetNodeState` hasn't been called yet.
+**Why this works**: `listPortForwards` and `sftpListIncompleteTransfers` query the backend which still exists at this point. `resetNodeState` hasn't been called yet.
 
 ### Phase 1: `ssh-connect`
 
@@ -126,39 +139,49 @@ React Key-Driven Reset handles terminal creation automatically:
 - `connectionId` changed → old component unmounts → new component mounts → calls `createTerminalForNode`.
 
 Orchestrator waits for the new `terminalSessionId` to appear:
-1. Poll `rawNodes[nodeId].terminalSessionId` every 500ms, timeout 10s.
-2. If no terminal tab is open for this node, skip (no terminal to wait for).
-3. Build `oldSessionId → newSessionId` mapping from snapshot + current state.
+1. Determine which nodes NEED a terminal session (nodes that had forwards or incomplete transfers in the snapshot).
+2. Poll `rawNodes[nodeId].terminalSessionId` every 500ms, timeout 10s.
+3. For nodes that need a session but have no terminal tab open, explicitly call `createTerminalForNode()` to ensure a valid session exists for forward/transfer restore.
+4. Build `oldSessionId → newSessionId` mapping from `perNodeOldSessionIds` + current state (deterministic per-node mapping).
 
 ### Phase 3: `restore-forwards`
 
-1. For each entry in `snapshot.forwardRules`:
+1. Collect existing live forwards to avoid duplicating or resurrecting user-stopped rules.
+2. For each entry in `snapshot.forwardRules`:
    a. Look up new sessionId from old→new mapping.
    b. If no new session exists for this node, skip.
-   c. For each rule (excluding `stopped`):
+   c. Re-check live forwards right before creation to catch user actions during the loop.
+   d. For each rule (excluding `stopped`):
+      - Skip if a forward with the same `type:bind_address:bind_port` key already exists.
       - Call `api.createPortForward({ sessionId: newSessionId, ...rule })`.
       - On failure: log warning, continue with next rule.
       - On success: increment `restoredCount`.
-2. Check `abortController.signal` between each rule.
+3. Check `abortController.signal` between each rule.
 
 ### Phase 4: `resume-transfers`
 
-1. For each old session ID in snapshot:
-   a. Call `api.sftpListIncompleteTransfers(oldSessionId)`.
-   b. Look up new sessionId from mapping.
-   c. For each incomplete transfer:
+1. Use pre-captured incomplete transfers from `snapshot.incompleteTransfers` (captured in Phase 0 before `resetNodeState` destroyed old sessions).
+2. Ensure SFTP sessions are initialized for all affected nodes before resuming (call `openSftpForNode` if needed).
+3. For each incomplete transfer entry:
+   a. Look up new sessionId from mapping.
+   b. For each incomplete transfer:
       - Call `api.sftpResumeTransferWithRetry(newSessionId, transferId)`.
       - On failure: log warning, continue.
       - On success: update `transferStore`, increment `restoredCount`.
-2. Check `abortController.signal` between each transfer.
+4. Check `abortController.signal` between each transfer.
 
 ### Phase 5: `restore-ide`
 
 1. If `snapshot.ideSnapshot` exists:
-   a. Look up new `connectionId` and `sftpSessionId` from current node state.
-   b. Call `ideStore.openProject(connectionId, sftpSessionId, projectPath)`.
-   c. For each cached tab path: call `ideStore.openFile(path)`.
-   d. Do NOT restore `content`/`originalContent` (files will be re-fetched from remote).
+   a. Use `topologyResolver.getNodeId(ideSnapshot.connectionId)` to find the target node.
+   b. Look up new `connectionId` and `sftpSessionId` from current node state.
+   c. **User intent detection**: Skip if user changed project or closed IDE after snapshot:
+      - If `ideStore.project` exists with a different `rootPath`, skip (user changed project).
+      - If `ideStore.project` exists with the same `rootPath`, skip (already open).
+      - If `ideStore.lastClosedAt > snapshot.snapshotAt`, skip (user intentionally closed IDE).
+   d. Call `ideStore.openProject(connectionId, sftpSessionId, projectPath)`.
+   e. For each cached tab path: call `ideStore.openFile(path)`.
+   f. Do NOT restore `content`/`originalContent` (files will be re-fetched from remote).
 2. To enable this, enhance `ideStore.partialize` to persist `cachedProjectPath` and `cachedTabPaths`.
 
 ## Integration Points

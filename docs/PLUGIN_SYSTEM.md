@@ -180,7 +180,7 @@ interface PluginTerminalAPI {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
-  writeToTerminal(sessionId: string, text: string): void;  // 仅显示，不发送到远端
+  writeToTerminal(sessionId: string, text: string): void;  // ⚠️ 尚未实现 (no-op stub)，插件可使用 output processor 替代
   getBuffer(sessionId: string): string | null;              // 只读
   getSelection(sessionId: string): string | null;           // 只读
 }

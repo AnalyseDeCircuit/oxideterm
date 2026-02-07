@@ -54,7 +54,7 @@ flowchart LR
 
 | 组件 | Key 格式 | Memory Map |
 |------|---------|------------|
-| `TerminalView` | `terminal-{sessionId}-{connectionId}` | N/A |
+| `TerminalView` | `{sessionId}-{ws_url}` | N/A |
 | `SFTPView` | `sftp-{sessionId}-{connectionId}` | `sftpPathMemory` |
 | `ForwardsView` | `forwards-{sessionId}-{connectionId}` | N/A (后端持久化) |
 

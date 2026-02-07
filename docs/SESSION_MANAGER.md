@@ -20,7 +20,7 @@
 |---------|------|---------|
 | Sidebar "Saved" 面板 | 简单连接列表 + 分组筛选 | **互补**。Sidebar 保留快速入口，Session Manager 提供完整管理 |
 | `ConnectionsPanel` | 活跃 SSH 连接监控（心跳/状态） | **不重叠**。ConnectionsPanel 是运行时监控 |
-| `EditConnectionModal` | 单连接编辑表单 | **复用**。Session Manager 的编辑操作调用此 Modal |
+| `EditConnectionPropertiesModal` | 单连接编辑表单 | **复用**。Session Manager 的编辑操作调用此 Modal |
 | `NewConnectionModal` | 新建连接表单 | **复用**。Session Manager 的"新建"操作调用此 Modal |
 
 ---
@@ -95,7 +95,7 @@ interface SaveConnectionRequest {
 │ Toolbar:  [🔍 Search...]  [New ▼]  [Batch ▼]  [Import] [Export] │
 ├──────────────┬───────────────────────────────────────────┤
 │ Folder Tree  │ Connection Table                         │
-│ (200px)      │                                          │
+│ (180px)      │                                          │
 │              │ Name    Host     Port  User  Auth  Tags  │
 │ ▼ All        │ ──────────────────────────────────────── │
 │   Production │ web-1   1.2.3.4  22   root  key   [web] │
@@ -114,7 +114,7 @@ interface SaveConnectionRequest {
 - 一级节点 = `group` 字段的值（`null` → "Ungrouped"）
 - 嵌套节点 = `group` 含 `/` 时自动拆分（如 `Production/Asia` → Production > Asia）
 - 选中文件夹 → 右侧表格过滤到该分组及子分组
-- 右键菜单：重命名分组、删除分组、新建子分组
+- 右键菜单：重命名分组、删除分组、新建子分组（⚠️ 推迟至 v1.1，当前未实现）
 - 底部 "Recent" 快捷节点：显示最近使用的连接
 
 ### 3.3 连接表格（右面板）
@@ -130,13 +130,13 @@ interface SaveConnectionRequest {
 | Username | `username` | ✅ | 120px |
 | Auth | `auth_type` | ✅ | 80px |
 | Group | `group` | ✅ | 120px |
-| Tags | `tags` | 否 | 120px |
+| Tags | `tags` | 否 | 120px | ⚠️ 推迟至 v1.1，当前未显示 |
 | Last Used | `last_used_at` | ✅ (默认) | 140px |
 | Actions | — | 否 | 120px |
 
 **行操作按钮**（Actions 列）：
 - ▶ 连接 — 调用提取后的 `connectToSaved(id)` 
-- ✏️ 编辑 — 打开 `EditConnectionModal`
+- ✏️ 编辑 — 打开 `EditConnectionPropertiesModal`
 - ⋮ 更多 — 下拉菜单：复制连接、删除、管理标签
 
 **交互**：
@@ -169,8 +169,8 @@ src/components/sessionManager/
 ├── ConnectionTableRow.tsx      // 单行组件
 ├── ManagerToolbar.tsx          // 顶部工具栏
 ├── BatchActionsMenu.tsx        // 批量操作下拉
-├── TagEditor.tsx               // 标签编辑弹出框
 └── useSessionManager.ts        // 本地状态 hook（搜索/排序/过滤/选中）
+// 注意: TagEditor.tsx 推迟至 v1.1，当前未实现
 
 src/locales/*/sessionManager.json  // i18n（11 个语言文件）
 ```

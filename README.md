@@ -26,7 +26,7 @@
 
 ## 📖 Core Evolution
 
-OxideTerm v1.4.0 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with over **65,000 lines** of meticulously crafted Rust + TypeScript code.
+OxideTerm v1.6.2 represents a complete architectural overhaul. We are no longer just an SSH client, but a **terminal engine** with over **90,000 lines** of meticulously crafted Rust + TypeScript code.
 
 ### ⚙️ Backend Breakthrough: Local Terminal & Concurrency Model
 We've introduced local terminal support based on `portable-pty`, completely solving concurrency challenges in Rust's async runtime:
@@ -41,71 +41,87 @@ To support future mobile builds (iOS/Android don't support native PTY), we've re
 
 ### ⚛️ Frontend Evolution: Multi-Store Architecture
 Facing drastically different state management needs for local, remote, and IDE sessions, the frontend adopts a **Multi-Store** pattern:
-- **AppStore**: Focuses on remote SSH connections, session trees, port forwarding rules, and other complex network states.
-- **IdeStore**: Dedicated to IDE mode state management, including remote file editing, Git status tracking, and multi-tab editor.
-- **LocalTerminalStore**: Dedicated to local PTY instance lifecycle management, Shell process monitoring, and independent I/O pipelines.
+- **SessionTreeStore**: User intent layer — tree structure, connection flow, session organization.
+- **AppStore**: Fact layer — actual SSH connection state via `connections` Map, synced from SessionTreeStore.
+- **IdeStore**: IDE mode state management, including remote file editing, Git status tracking, and multi-tab editor.
+- **LocalTerminalStore**: Local PTY instance lifecycle management, Shell process monitoring, and independent I/O pipelines.
+- **ReconnectOrchestratorStore**: Auto-reconnect pipeline orchestration (snapshot → ssh-connect → await-terminal → restore).
+- **TransferStore / PluginStore / ProfilerStore / AiChatStore / SettingsStore**: Domain-specific stores for SFTP transfers, plugin runtime, resource profiling, AI chat, and settings.
 - **Unified View Layer**: Despite different state sources, rendering logic is unified through the `TerminalView` and `IdeView` components at the UI level.
 
 ---
 
 ## 🏗️ System Architecture
 
-v1.4.0 employs a hybrid dataflow architecture that intelligently routes traffic based on session type:
+v1.6.2 employs a hybrid dataflow architecture that intelligently routes traffic based on session type:
 
 ```mermaid
 flowchart TB
     subgraph Frontend ["Frontend Layer (React 19)"]
         UI[User Interface]
-        
-        subgraph Stores ["Multi-Store State Management"]
-            RemoteStore["AppStore (Zustand)<br/>Remote Sessions"]
-            IdeStore["IdeStore (Zustand)<br/>IDE Mode"]
-            LocalStore["LocalTerminalStore (Zustand)<br/>Local PTYs"]
+
+        subgraph Stores ["Multi-Store State Management (Zustand)"]
+            TreeStore["SessionTreeStore<br/>User Intent"]
+            AppStore["AppStore<br/>Connection Facts"]
+            IdeStore["IdeStore<br/>IDE Mode"]
+            LocalStore["LocalTerminalStore<br/>Local PTYs"]
+            ReconnectStore["ReconnectOrchestratorStore"]
+            PluginStore["PluginStore<br/>Plugin Runtime"]
         end
-        
-        Terminal["xterm.js + WebGL"]
-        
-        UI --> RemoteStore
+
+        Terminal["xterm.js 6 + WebGL/Canvas"]
+        PluginRT["Plugin Runtime<br/>(ESM Loader + UIKit)"]
+
+        UI --> TreeStore
+        TreeStore -->|refreshConnections| AppStore
         UI --> IdeStore
         UI --> LocalStore
-        RemoteStore --> Terminal
+        AppStore --> Terminal
         LocalStore --> Terminal
+        PluginRT --> PluginStore
     end
 
     subgraph Backend ["Backend Layer (Rust / Tauri 2.0)"]
-        Router["IPC Command Router"]
-        
+        Router["IPC Command Router<br/>(src/commands/)"]
+
         subgraph Features ["Feature Gates"]
             LocalFeat["Feature: local-terminal"]
         end
 
         subgraph RemoteEngine ["Remote Engine (SSH)"]
-            WS["WebSocket Bridge"]
-            SSH["russh Client (Pure Rust)"]
-            Pool["Connection Pool"]
+            WS["WebSocket Bridge<br/>(Token Auth + Heartbeat)"]
+            SSH["russh 0.49<br/>(Pure Rust SSH)"]
+            Pool["Connection Registry<br/>(DashMap)"]
         end
 
         subgraph LocalEngine ["Local Engine (PTY)"]
             PtyMgr["PTY Manager"]
-            PtyHandle["Thread-Safe PtyHandle<br/>(Arc+Mutex Wrapper)"]
-            NativePTY["portable-pty (Native/ConPTY)"]
+            PtyHandle["Thread-Safe PtyHandle<br/>(Arc+Mutex)"]
+            NativePTY["portable-pty 0.8<br/>(Native/ConPTY)"]
+        end
+
+        subgraph Storage ["Persistence"]
+            Redb["redb 2.1"]
+            Keychain["OS Keychain<br/>(keyring)"]
         end
     end
 
     %% Data Flows
-    LocalStore <-->|Tauri IPC Binary| PtyMgr
+    LocalStore <-->|Tauri IPC| PtyMgr
     PtyMgr --> PtyHandle --> NativePTY
-    
-    RemoteStore <-->|Tauri IPC Control| Router
-    Terminal <-->|WebSocket Binary Stream| WS
+
+    AppStore <-->|Tauri IPC Control| Router
+    Terminal <-->|WebSocket Binary<br/>Wire Protocol v1| WS
     WS <--> SSH <--> Pool
-    
-    LocalFeat -.-> LocalEngine
-    
+
+    Router --> Storage
+    LocalFeat -.->|compile gate| LocalEngine
+
     style Frontend fill:#e1f5ff,stroke:#01579b
     style Backend fill:#fff3e0,stroke:#e65100
     style LocalEngine fill:#e8f5e9,stroke:#2e7d32
     style RemoteEngine fill:#fce4ec,stroke:#c2185b
+    style Storage fill:#f3e5f5,stroke:#7b1fa2
 ```
 
 ---
@@ -162,23 +178,25 @@ We've built a reference-counted `SshConnectionRegistry` implementing true SSH Mu
 
 ---
 
-## 🛠️ Tech Stack (v1.4.0)
+## 🛠️ Tech Stack (v1.6.2)
 
 | Layer | Key Technology | Description |
 |-------|---------------|-------------|
 | **Core** | **Tauri 2.0** | Next-gen cross-platform app framework |
-| **Runtime** | **Tokio** | Full async Rust runtime, paired with `parking_lot` for lock optimization |
+| **Runtime** | **Tokio** | Full async Rust runtime, paired with `dashmap` for concurrent maps |
 | **Local Kernel** | **portable-pty 0.8** | Cross-platform PTY abstraction implementing `Sync` + `Send` threading model |
 | **Remote Kernel** | **russh 0.49** | Pure Rust SSH implementation, no C dependencies, memory-safe |
 | **SFTP** | **russh-sftp 2.0** | SSH File Transfer Protocol |
 | **WebSocket** | **tokio-tungstenite 0.24** | Async WebSocket implementation |
-| **Frontend** | **React 19** | Type-safe UI development with TypeScript 5.3 |
-| **State** | **Zustand** | Multi-Store architecture (AppStore/IdeStore/LocalTerminalStore), separation of concerns |
-| **Rendering** | **xterm.js 5 + WebGL** | GPU-accelerated rendering, 60fps+ high framerate output |
-| **Protocol** | **WebSocket / IPC** | Remote via WS direct, local via Tauri IPC efficient channel |
-| **Encryption** | **ChaCha20-Poly1305 + Argon2** | AEAD authenticated encryption + memory-hard key derivation |
+| **Frontend** | **React 19** | Type-safe UI development with TypeScript 5.8 |
+| **State** | **Zustand 5** | Multi-Store architecture (10 specialized stores), separation of concerns |
+| **Rendering** | **xterm.js 6 + WebGL/Canvas** | GPU-accelerated rendering, 60fps+ high framerate output |
+| **Protocol** | **Wire Protocol v1** | Binary `[Type:1][Length:4][Payload:n]` over WebSocket, Tauri IPC for control |
+| **Editor** | **CodeMirror 6** | Remote file editing with 30+ language modes (14 native + legacy modes) |
+| **Encryption** | **ChaCha20-Poly1305 + Argon2id** | AEAD authenticated encryption + memory-hard key derivation |
 | **Persistence** | **redb 2.1** | Embedded database for config storage |
 | **Serialization** | **MessagePack (rmp-serde)** | Efficient binary serialization |
+| **Plugins** | **ESM Runtime** | Dynamic plugin loading with frozen PluginContext API |
 
 ---
 
@@ -220,7 +238,7 @@ Project-wide file content search with intelligent caching:
 - **Intelligent Preview**:
   - 🎨 Images (JPEG/PNG/GIF/WebP)
   - 🎬 Videos (MP4/WebM)
-- 💻 Code highlighting (30+ languages)
+  - 💻 Code highlighting (30+ languages)
   - 📄 PDF documents
   - 🔍 Hex viewer (binary files)
 - **Progress Tracking**: Real-time transfer speed, progress bars, ETA.
@@ -257,13 +275,13 @@ git clone https://github.com/AnalyseDeCircuit/OxideTerm.git
 cd OxideTerm
 
 # Install dependencies
-npm install
+pnpm install
 
 # Start full dev environment (with local PTY support)
-npm run tauri dev
+pnpm tauri dev
 
 # Build production version
-npm run tauri build
+pnpm tauri build
 
 # Build mobile-optimized kernel (strip PTY)
 cd src-tauri
@@ -286,49 +304,94 @@ OxideTerm/
 │   │   ├── ui/                 # Atomic components (Radix UI)
 │   │   ├── terminal/           # Terminal views
 │   │   ├── sftp/               # SFTP file browser
-│   │   ├── ide/                # IDE mode components
-│   │   ├── ai/                 # AI chat components
-│   │   ├── plugin/             # Plugin UI surfaces
+│   │   ├── ide/                # IDE mode (editor, file tree, dialogs)
+│   │   ├── ai/                 # AI chat (sidebar + inline)
+│   │   ├── plugin/             # Plugin manager UI
+│   │   ├── forwards/           # Port forwarding management
+│   │   ├── connections/        # Connection creation & management
+│   │   ├── sessions/           # Session tabs & switching
+│   │   ├── sessionManager/     # Session lifecycle UI
+│   │   ├── topology/           # Network topology visualization
+│   │   ├── settings/           # Settings UI (tab mode)
+│   │   ├── layout/             # Sidebar, header, split panes
+│   │   ├── local/              # Local terminal components
+│   │   ├── editor/             # Code editor components
+│   │   ├── fileManager/        # Local file browser
 │   │   └── modals/             # Modal dialogs
-│   ├── store/                  # Zustand state management
-│   │   ├── appStore.ts         # Remote session state
+│   ├── store/                  # Zustand state management (10 stores)
+│   │   ├── sessionTreeStore.ts # User intent (tree, connection flow)
+│   │   ├── appStore.ts         # Connection facts (synced from tree)
 │   │   ├── ideStore.ts         # IDE mode state
 │   │   ├── localTerminalStore.ts  # Local PTY state
+│   │   ├── reconnectOrchestratorStore.ts  # Auto-reconnect pipeline
+│   │   ├── transferStore.ts    # SFTP transfer queue
 │   │   ├── pluginStore.ts      # Plugin runtime state
-│   │   ├── settingsStore.ts    # Unified settings
+│   │   ├── profilerStore.ts    # Resource profiler metrics
+│   │   ├── settingsStore.ts    # Application settings
 │   │   └── aiChatStore.ts      # AI chat state
-│   └── lib/                    # API wrappers & utilities
-│       └── plugin/             # Plugin runtime & UI kit
+│   ├── lib/                    # API wrappers & utilities
+│   │   ├── api.ts              # Tauri IPC invoke layer
+│   │   ├── ai/                 # AI provider registry
+│   │   ├── plugin/             # Plugin runtime (loader, context, UIKit)
+│   │   ├── codemirror/         # CodeMirror language loader
+│   │   ├── terminalRegistry.ts # Terminal session registry
+│   │   └── themes.ts           # Terminal theme definitions
+│   ├── hooks/                  # Custom React hooks
+│   ├── types/                  # TypeScript type definitions
+│   └── locales/                # i18n (11 languages × 18 namespaces)
 │
 ├── src-tauri/                  # Backend (Rust)
 │   └── src/
-│       ├── ssh/                # SSH client implementation
-│       │   ├── client.rs       # Connection management
+│       ├── ssh/                # SSH client (12 modules)
+│       │   ├── connection_registry.rs  # Connection pool (DashMap)
+│       │   ├── client.rs       # SSH client wrapper
+│       │   ├── session.rs      # SSH session lifecycle
 │       │   ├── proxy.rs        # ProxyJump multi-hop
-│       │   └── handle_owner.rs # Handle controller
-│       ├── local/              # Local terminal module
-│       │   ├── pty.rs          # PTY wrapper
-│       │   └── shell.rs        # Shell scanner
+│       │   ├── preflight.rs    # Host key verification (TOFU)
+│       │   ├── known_hosts.rs  # Known hosts management
+│       │   ├── keyboard_interactive.rs  # 2FA/KBI auth
+│       │   └── handle_owner.rs # Handle ownership tracking
+│       ├── local/              # Local terminal (feature-gated)
+│       │   ├── pty.rs          # PTY wrapper (thread-safe)
+│       │   ├── session.rs      # Local terminal session
+│       │   ├── shell.rs        # Shell detection & config
+│       │   └── registry.rs     # Local terminal registry
 │       ├── bridge/             # WebSocket bridge
-│       ├── session/            # Session management
-│       │   ├── registry.rs     # Session registry
-│       │   ├── auto_reconnect.rs  # Auto-reconnect
-│       │   └── scroll_buffer.rs   # Scroll buffer
+│       │   ├── server.rs       # WS server (token auth, heartbeat)
+│       │   ├── protocol.rs     # Wire Protocol v1 (TLP frames)
+│       │   └── manager.rs      # Bridge lifecycle
+│       ├── session/            # Session management (16 modules)
+│       │   ├── registry.rs     # Session registry (DashMap)
+│       │   ├── tree.rs         # Session tree structure
+│       │   ├── auto_reconnect.rs  # Auto-reconnect logic
+│       │   ├── reconnect.rs    # Reconnect orchestration
+│       │   ├── scroll_buffer.rs   # Scroll buffer (100K lines)
+│       │   ├── health.rs       # Health monitoring
+│       │   ├── profiler.rs     # Resource profiling
+│       │   ├── env_detector.rs # Remote env detection
+│       │   └── topology_graph.rs  # Network topology
 │       ├── forwarding/         # Port forwarding
-│       │   ├── local.rs        # Local forward
-│       │   ├── remote.rs       # Remote forward
-│       │   └── dynamic.rs      # SOCKS5 proxy
+│       │   ├── manager.rs      # Forwarding orchestration
+│       │   ├── local.rs        # Local forward (-L)
+│       │   ├── remote.rs       # Remote forward (-R)
+│       │   └── dynamic.rs      # SOCKS5 proxy (-D)
 │       ├── sftp/               # SFTP implementation
+│       │   ├── session.rs      # SFTP session management
+│       │   ├── transfer.rs     # File transfer tracking
+│       │   ├── progress.rs     # Transfer progress
+│       │   └── retry.rs        # Transfer retry logic
+│       ├── config/             # Configuration
+│       │   ├── vault.rs        # Encrypted credential storage
+│       │   ├── keychain.rs     # OS keychain integration
+│       │   ├── ssh_config.rs   # SSH config parsing
+│       │   └── storage.rs      # Persistent storage (redb)
 │       ├── oxide_file/         # .oxide file format
-│       │   ├── crypto.rs       # Encryption/decryption
+│       │   ├── crypto.rs       # ChaCha20-Poly1305 encryption
 │       │   └── format.rs       # Format definition
-│       └── commands/           # Tauri commands
+│       ├── state/              # Global state management
+│       └── commands/           # Tauri IPC command handlers (18 files)
 │
-└── docs/                       # Documentation
-    ├── ARCHITECTURE.md         # Architecture design
-  ├── PLUGIN_DEVELOPMENT.md   # Plugin development guide
-  ├── PLUGIN_SYSTEM.md        # Plugin system design
-    └── PROTOCOL.md             # Protocol specs
+└── docs/                       # Architecture & feature documentation
 ```
 
 ---
@@ -351,6 +414,7 @@ OxideTerm/
 - [x] Runtime plugin system (PluginContext + UI kit)
 - [x] AI API keys in OS keychain
 - [x] Remote environment detection for AI
+- [x] Terminal splitting (split pane with keyboard shortcuts)
 
 ### 🚧 In Progress
 - [ ] Command palette (`⌘K`)
@@ -358,7 +422,6 @@ OxideTerm/
 
 ### 📋 Planned
 - [ ] SSH Agent forwarding (awaiting upstream russh implementation)
-- [ ] Terminal splitting
 - [ ] Session recording & playback
 - [ ] X11 forwarding
 - [ ] Mobile adaptation (iOS/Android)
@@ -408,5 +471,5 @@ Special thanks to these open-source projects:
 ---
 
 <p align="center">
-  <sub>Built with ❤️ using Rust and Tauri | 50,000+ Lines of Code</sub>
+  <sub>Built with ❤️ using Rust and Tauri | 90,000+ Lines of Code</sub>
 </p>

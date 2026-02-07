@@ -199,9 +199,9 @@ OxideTerm 使用以下逻辑自动检测 Shell：
 
 ```typescript
 // 通过 API
-await invoke('create_local_terminal', {
+await invoke('local_create_terminal', {
   request: {
-    shell_id: 'bash',
+    shellPath: '/bin/bash',
     cwd: '/Users/alice/projects/my-app'
   }
 });

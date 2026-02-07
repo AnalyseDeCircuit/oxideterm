@@ -26,7 +26,7 @@
 
 ## 📖 核心进化
 
-OxideTerm v1.4.0 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有超过 **65,000 行** 精心设计的 Rust + TypeScript 代码。
+OxideTerm v1.6.2 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有超过 **90,000 行** 精心设计的 Rust + TypeScript 代码。
 
 ### ⚙️ 后端突破：本地终端与并发模型
 我们引入了基于 `portable-pty` 的本地终端支持，彻底解决了 Rust 异步运行时中的并发难题：
@@ -41,71 +41,87 @@ OxideTerm v1.4.0 是一次彻底的架构重构。我们不再只是一个 SSH �
 
 ### ⚛️ 前端进化：多 Store 架构
 面对本地、远程和 IDE 会话截然不同的状态管理需求，前端采用了 **多 Store** 模式：
-- **AppStore**：专注于远程 SSH 连接、会话树、端口转发规则等复杂网络状态。
-- **IdeStore**：专用于 IDE 模式状态管理，包括远程文件编辑、Git 状态跟踪和多标签编辑器。
-- **LocalTerminalStore**：专用于本地 PTY 实例的生命周期管理、Shell 进程监控和独立的 I/O 管道。
+- **SessionTreeStore**：用户意图层——树结构、连接流程、会话组织。
+- **AppStore**：事实层——通过 `connections` Map 维护实际 SSH 连接状态，从 SessionTreeStore 同步。
+- **IdeStore**：IDE 模式状态管理，包括远程文件编辑、Git 状态跟踪和多标签编辑器。
+- **LocalTerminalStore**：本地 PTY 实例的生命周期管理、Shell 进程监控和独立的 I/O 管道。
+- **ReconnectOrchestratorStore**：自动重连管道编排（snapshot → ssh-connect → await-terminal → restore）。
+- **TransferStore / PluginStore / ProfilerStore / AiChatStore / SettingsStore**：SFTP 传输、插件运行时、资源分析、AI 聊天和设置的领域专用 Store。
 - **统一视图层**：尽管状态源不同，但在 UI 层通过 `TerminalView` 和 `IdeView` 组件实现了渲染逻辑的统一。
 
 ---
 
 ## 🏗️ 系统架构
 
-v1.4.0 采用了混合数据流架构，根据会话类型智能路由流量：
+v1.6.2 采用了混合数据流架构，根据会话类型智能路由流量：
 
 ```mermaid
 flowchart TB
-    subgraph Frontend ["Frontend Layer (React 19)"]
-        UI[User Interface]
-        
-        subgraph Stores ["多 Store 状态管理"]
-            RemoteStore["AppStore (Zustand)<br/>远程会话"]
-            IdeStore["IdeStore (Zustand)<br/>IDE 模式"]
-            LocalStore["LocalTerminalStore (Zustand)<br/>本地 PTY"]
+    subgraph Frontend ["前端层 (React 19)"]
+        UI[用户界面]
+
+        subgraph Stores ["多 Store 状态管理 (Zustand)"]
+            TreeStore["SessionTreeStore<br/>用户意图"]
+            AppStore["AppStore<br/>连接事实"]
+            IdeStore["IdeStore<br/>IDE 模式"]
+            LocalStore["LocalTerminalStore<br/>本地 PTY"]
+            ReconnectStore["ReconnectOrchestratorStore"]
+            PluginStore["PluginStore<br/>插件运行时"]
         end
-        
-        Terminal["xterm.js + WebGL"]
-        
-        UI --> RemoteStore
+
+        Terminal["xterm.js 6 + WebGL/Canvas"]
+        PluginRT["插件运行时<br/>(ESM Loader + UIKit)"]
+
+        UI --> TreeStore
+        TreeStore -->|refreshConnections| AppStore
         UI --> IdeStore
         UI --> LocalStore
-        RemoteStore --> Terminal
+        AppStore --> Terminal
         LocalStore --> Terminal
+        PluginRT --> PluginStore
     end
 
-    subgraph Backend ["Backend Layer (Rust / Tauri 2.0)"]
-        Router["IPC Command Router"]
-        
+    subgraph Backend ["后端层 (Rust / Tauri 2.0)"]
+        Router["IPC 命令路由<br/>(src/commands/)"]
+
         subgraph Features ["Feature Gates"]
             LocalFeat["Feature: local-terminal"]
         end
 
-        subgraph RemoteEngine ["Remote Engine (SSH)"]
-            WS["WebSocket Bridge"]
-            SSH["russh Client (Pure Rust)"]
-            Pool["Connection Pool"]
+        subgraph RemoteEngine ["远程引擎 (SSH)"]
+            WS["WebSocket 桥接<br/>(Token Auth + Heartbeat)"]
+            SSH["russh 0.49<br/>(纯 Rust SSH)"]
+            Pool["连接注册表<br/>(DashMap)"]
         end
 
-        subgraph LocalEngine ["Local Engine (PTY)"]
-            PtyMgr["PTY Manager"]
-            PtyHandle["Thread-Safe PtyHandle<br/>(Arc+Mutex Wrapper)"]
-            NativePTY["portable-pty (Native/ConPTY)"]
+        subgraph LocalEngine ["本地引擎 (PTY)"]
+            PtyMgr["PTY 管理器"]
+            PtyHandle["线程安全 PtyHandle<br/>(Arc+Mutex)"]
+            NativePTY["portable-pty 0.8<br/>(Native/ConPTY)"]
+        end
+
+        subgraph Storage ["持久化"]
+            Redb["redb 2.1"]
+            Keychain["系统钥匙串<br/>(keyring)"]
         end
     end
 
-    %% Data Flows
-    LocalStore <-->|Tauri IPC Binary| PtyMgr
+    %% 数据流
+    LocalStore <-->|Tauri IPC| PtyMgr
     PtyMgr --> PtyHandle --> NativePTY
-    
-    RemoteStore <-->|Tauri IPC Control| Router
-    Terminal <-->|WebSocket Binary Stream| WS
+
+    AppStore <-->|Tauri IPC Control| Router
+    Terminal <-->|WebSocket Binary<br/>Wire Protocol v1| WS
     WS <--> SSH <--> Pool
-    
-    LocalFeat -.-> LocalEngine
-    
+
+    Router --> Storage
+    LocalFeat -.->|编译门控| LocalEngine
+
     style Frontend fill:#e1f5ff,stroke:#01579b
     style Backend fill:#fff3e0,stroke:#e65100
     style LocalEngine fill:#e8f5e9,stroke:#2e7d32
     style RemoteEngine fill:#fce4ec,stroke:#c2185b
+    style Storage fill:#f3e5f5,stroke:#7b1fa2
 ```
 
 ---
@@ -160,23 +176,25 @@ OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使�
 
 ---
 
-## 🛠️ 技术栈 (v1.4.0)
+## 🛠️ 技术栈 (v1.6.2)
 
 | 层级 | 关键技术 | 说明 |
 |------|----------|------|
 | **Core** | **Tauri 2.0** | 下一代跨平台应用构建框架 |
-| **Runtime** | **Tokio** | 全异步 Rust 运行时，配合 `parking_lot` 优化锁竞争 |
+| **Runtime** | **Tokio** | 全异步 Rust 运行时，配合 `dashmap` 实现并发映射 |
 | **Local Kernel** | **portable-pty 0.8** | 跨平台伪终端抽象，实现 `Sync` + `Send` 线程模型 |
 | **Remote Kernel** | **russh 0.49** | 纯 Rust SSH 实现，无 C 依赖，内存安全 |
 | **SFTP** | **russh-sftp 2.0** | SSH 文件传输协议 |
 | **WebSocket** | **tokio-tungstenite 0.24** | 异步 WebSocket 实现 |
-| **Frontend** | **React 19** | 配合 TypeScript 5.3 实现类型安全的 UI 开发 |
-| **State** | **Zustand** | 多 Store 架构（AppStore/IdeStore/LocalTerminalStore），分离关注点 |
-| **Rendering** | **xterm.js 5 + WebGL** | GPU 加速渲染，支持 60fps+ 高帧率输出 |
-| **Protocol** | **WebSocket / IPC** | 远程走 WS 直连，本地走 Tauri IPC 高效通道 |
-| **Encryption** | **ChaCha20-Poly1305 + Argon2** | AEAD 认证加密 + 内存硬化密钥派生 |
+| **Frontend** | **React 19** | 配合 TypeScript 5.8 实现类型安全的 UI 开发 |
+| **State** | **Zustand 5** | 多 Store 架构（10 个专用 Store），分离关注点 |
+| **Rendering** | **xterm.js 6 + WebGL/Canvas** | GPU 加速渲染，支持 60fps+ 高帧率输出 |
+| **Protocol** | **Wire Protocol v1** | 二进制 `[Type:1][Length:4][Payload:n]` 走 WebSocket，控制走 Tauri IPC |
+| **Editor** | **CodeMirror 6** | 远程文件编辑，支持 30+ 语言模式（14 原生 + legacy modes） |
+| **Encryption** | **ChaCha20-Poly1305 + Argon2id** | AEAD 认证加密 + 内存硬化密钥派生 |
 | **Persistence** | **redb 2.1** | 嵌入式数据库，配置存储 |
 | **Serialization** | **MessagePack (rmp-serde)** | 高效二进制序列化 |
+| **Plugins** | **ESM Runtime** | 动态插件加载，冻结 PluginContext API |
 
 ---
 
@@ -255,13 +273,13 @@ git clone https://github.com/AnalyseDeCircuit/OxideTerm.git
 cd OxideTerm
 
 # 安装依赖
-npm install
+pnpm install
 
 # 启动完整开发环境 (开启本地 PTY 支持)
-npm run tauri dev
+pnpm tauri dev
 
 # 构建生产版本
-npm run tauri build
+pnpm tauri build
 
 # 构建移动端适配内核 (剥离 PTY)
 cd src-tauri
@@ -284,49 +302,94 @@ OxideTerm/
 │   │   ├── ui/                 # 原子组件 (Radix UI)
 │   │   ├── terminal/           # 终端视图
 │   │   ├── sftp/               # SFTP 文件浏览器
-│   │   ├── ide/                # IDE 模式组件
-│   │   ├── ai/                 # AI 聊天组件
-│   │   ├── plugin/             # 插件 UI 视图
+│   │   ├── ide/                # IDE 模式 (编辑器、文件树、对话框)
+│   │   ├── ai/                 # AI 聊天 (侧边栏 + 内联)
+│   │   ├── plugin/             # 插件管理 UI
+│   │   ├── forwards/           # 端口转发管理
+│   │   ├── connections/        # 连接创建与管理
+│   │   ├── sessions/           # 会话标签与切换
+│   │   ├── sessionManager/     # 会话生命周期 UI
+│   │   ├── topology/           # 网络拓扑可视化
+│   │   ├── settings/           # 设置 UI (标签模式)
+│   │   ├── layout/             # 侧边栏、头部、分屏
+│   │   ├── local/              # 本地终端组件
+│   │   ├── editor/             # 代码编辑器组件
+│   │   ├── fileManager/        # 本地文件浏览器
 │   │   └── modals/             # 弹窗组件
-│   ├── store/                  # Zustand 状态管理
-│   │   ├── appStore.ts         # 远程会话状态
+│   ├── store/                  # Zustand 状态管理 (10 个 Store)
+│   │   ├── sessionTreeStore.ts # 用户意图 (树结构、连接流程)
+│   │   ├── appStore.ts         # 连接事实 (从树同步)
 │   │   ├── ideStore.ts         # IDE 模式状态
 │   │   ├── localTerminalStore.ts  # 本地 PTY 状态
+│   │   ├── reconnectOrchestratorStore.ts  # 自动重连管道
+│   │   ├── transferStore.ts    # SFTP 传输队列
 │   │   ├── pluginStore.ts      # 插件运行时状态
-│   │   ├── settingsStore.ts    # 统一设置存储
+│   │   ├── profilerStore.ts    # 资源分析指标
+│   │   ├── settingsStore.ts    # 应用设置
 │   │   └── aiChatStore.ts      # AI 聊天状态
-│   └── lib/                    # API 封装与工具
-│       └── plugin/             # 插件运行时与 UI Kit
+│   ├── lib/                    # API 封装与工具
+│   │   ├── api.ts              # Tauri IPC 调用层
+│   │   ├── ai/                 # AI 提供者注册表
+│   │   ├── plugin/             # 插件运行时 (loader, context, UIKit)
+│   │   ├── codemirror/         # CodeMirror 语言加载器
+│   │   ├── terminalRegistry.ts # 终端会话注册表
+│   │   └── themes.ts           # 终端主题定义
+│   ├── hooks/                  # 自定义 React Hooks
+│   ├── types/                  # TypeScript 类型定义
+│   └── locales/                # i18n (11 种语言 × 18 命名空间)
 │
 ├── src-tauri/                  # 后端 (Rust)
 │   └── src/
-│       ├── ssh/                # SSH 客户端实现
-│       │   ├── client.rs       # 连接管理
+│       ├── ssh/                # SSH 客户端 (12 模块)
+│       │   ├── connection_registry.rs  # 连接池 (DashMap)
+│       │   ├── client.rs       # SSH 客户端封装
+│       │   ├── session.rs      # SSH 会话生命周期
 │       │   ├── proxy.rs        # ProxyJump 多跳
-│       │   └── handle_owner.rs # Handle 控制器
-│       ├── local/              # 本地终端模块
-│       │   ├── pty.rs          # PTY 封装
-│       │   └── shell.rs        # Shell 扫描
+│       │   ├── preflight.rs    # 主机密钥验证 (TOFU)
+│       │   ├── known_hosts.rs  # Known Hosts 管理
+│       │   ├── keyboard_interactive.rs  # 2FA/KBI 认证
+│       │   └── handle_owner.rs # Handle 所有权追踪
+│       ├── local/              # 本地终端 (feature-gated)
+│       │   ├── pty.rs          # PTY 封装 (线程安全)
+│       │   ├── session.rs      # 本地终端会话
+│       │   ├── shell.rs        # Shell 检测与配置
+│       │   └── registry.rs     # 本地终端注册表
 │       ├── bridge/             # WebSocket 桥接
-│       ├── session/            # 会话管理
-│       │   ├── registry.rs     # 会话注册表
-│       │   ├── auto_reconnect.rs  # 自动重连
-│       │   └── scroll_buffer.rs   # 滚动缓冲区
+│       │   ├── server.rs       # WS 服务器 (token auth, heartbeat)
+│       │   ├── protocol.rs     # Wire Protocol v1 (TLP 帧)
+│       │   └── manager.rs      # 桥接生命周期
+│       ├── session/            # 会话管理 (16 模块)
+│       │   ├── registry.rs     # 会话注册表 (DashMap)
+│       │   ├── tree.rs         # 会话树结构
+│       │   ├── auto_reconnect.rs  # 自动重连逻辑
+│       │   ├── reconnect.rs    # 重连编排
+│       │   ├── scroll_buffer.rs   # 滚动缓冲区 (100K 行)
+│       │   ├── health.rs       # 健康监控
+│       │   ├── profiler.rs     # 资源分析
+│       │   ├── env_detector.rs # 远程环境检测
+│       │   └── topology_graph.rs  # 网络拓扑
 │       ├── forwarding/         # 端口转发
-│       │   ├── local.rs        # 本地转发
-│       │   ├── remote.rs       # 远程转发
-│       │   └── dynamic.rs      # SOCKS5 代理
+│       │   ├── manager.rs      # 转发编排
+│       │   ├── local.rs        # 本地转发 (-L)
+│       │   ├── remote.rs       # 远程转发 (-R)
+│       │   └── dynamic.rs      # SOCKS5 代理 (-D)
 │       ├── sftp/               # SFTP 实现
+│       │   ├── session.rs      # SFTP 会话管理
+│       │   ├── transfer.rs     # 文件传输追踪
+│       │   ├── progress.rs     # 传输进度
+│       │   └── retry.rs        # 传输重试逻辑
+│       ├── config/             # 配置
+│       │   ├── vault.rs        # 加密凭据存储
+│       │   ├── keychain.rs     # 系统钥匙串集成
+│       │   ├── ssh_config.rs   # SSH Config 解析
+│       │   └── storage.rs      # 持久化存储 (redb)
 │       ├── oxide_file/         # .oxide 文件格式
-│       │   ├── crypto.rs       # 加密/解密
-│       │   └── format.rs       # 文件格式定义
-│       └── commands/           # Tauri 命令
+│       │   ├── crypto.rs       # ChaCha20-Poly1305 加密
+│       │   └── format.rs       # 格式定义
+│       ├── state/              # 全局状态管理
+│       └── commands/           # Tauri IPC 命令处理 (18 文件)
 │
-└── docs/                       # 文档
-    ├── ARCHITECTURE.md         # 架构设计
-  ├── PLUGIN_DEVELOPMENT.md   # 插件开发指南
-  ├── PLUGIN_SYSTEM.md        # 插件系统设计
-    └── PROTOCOL.md             # 协议规范
+└── docs/                       # 架构与功能文档
 ```
 
 ---
@@ -349,6 +412,7 @@ OxideTerm/
 - [x] 运行时插件系统（PluginContext + UI Kit）
 - [x] AI API Key 系统钥匙串存储
 - [x] AI 远程环境检测
+- [x] 终端分屏（分屏面板 + 快捷键）
 
 ### 🚧 进行中
 - [ ] 命令面板 (`⌘K`)
@@ -356,7 +420,6 @@ OxideTerm/
 
 ### 📋 计划中
 - [ ] SSH Agent 转发（等待上游russh库实现）
-- [ ] 终端分屏
 - [ ] 会话录制与回放
 - [ ] X11 转发
 - [ ] 移动端适配（iOS/Android）
@@ -406,5 +469,5 @@ OxideTerm/
 ---
 
 <p align="center">
-  <sub>Built with ❤️ using Rust and Tauri | 50,000+ Lines of Code</sub>
+  <sub>Built with ❤️ using Rust and Tauri | 90,000+ Lines of Code</sub>
 </p>

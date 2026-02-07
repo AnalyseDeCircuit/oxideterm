@@ -37,6 +37,11 @@
 | 0x02 | Heartbeat | seq: u32 BE | 双向 |
 | 0x03 | Error | UTF-8 错误消息 | Server→Client |
 
+### 帧限制
+
+- **最大 Payload 大小**: 16 MB (`MAX_PAYLOAD_SIZE = 16 * 1024 * 1024`)
+- **协议版本**: `PROTOCOL_VERSION = 1`
+
 ### 心跳机制
 
 - 服务端每 30s 发送心跳 (seq 递增)

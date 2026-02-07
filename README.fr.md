@@ -26,7 +26,7 @@
 
 ## 📖 Évolution Fondamentale
 
-OxideTerm v1.4.0 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec plus de **65 000 lignes** de code Rust + TypeScript méticuleusement conçu.
+OxideTerm v1.6.2 représente une refonte architecturale complète. Nous ne sommes plus seulement un client SSH, mais un **moteur de terminal** avec plus de **90 000 lignes** de code Rust + TypeScript méticuleusement conçu.
 
 ### ⚙️ Percée Backend : Terminal Local & Modèle de Concurrence
 Nous avons introduit un support de terminal local basé sur `portable-pty`, résolvant complètement les défis de concurrence dans le runtime async de Rust :
@@ -41,71 +41,87 @@ Pour supporter les futures constructions mobiles (iOS/Android ne supportent pas 
 
 ### ⚛️ Évolution Frontend : Architecture Multi-Store
 Face aux besoins de gestion d'état drastiquement différents entre sessions locales, distantes et IDE, le frontend adopte un modèle **Multi-Store** :
-- **AppStore** : Se concentre sur les connexions SSH distantes, les arbres de sessions, les règles de redirection de ports et autres états réseau complexes.
-- **IdeStore** : Dédié à la gestion d'état du mode IDE, incluant l'édition de fichiers distants, le suivi de statut Git et l'éditeur multi-onglets.
-- **LocalTerminalStore** : Dédié à la gestion du cycle de vie des instances PTY locales, la surveillance des processus Shell et les pipelines I/O indépendants.
+- **SessionTreeStore** : Couche d'intention utilisateur — structure arborescente, flux de connexion, organisation des sessions.
+- **AppStore** : Couche factuelle — état réel des connexions SSH via `connections` Map, synchronisé depuis SessionTreeStore.
+- **IdeStore** : Gestion d'état du mode IDE, incluant l'édition de fichiers distants, le suivi de statut Git et l'éditeur multi-onglets.
+- **LocalTerminalStore** : Gestion du cycle de vie des instances PTY locales, surveillance des processus Shell et pipelines I/O indépendants.
+- **ReconnectOrchestratorStore** : Orchestration du pipeline de reconnexion automatique (snapshot → ssh-connect → await-terminal → restore).
+- **TransferStore / PluginStore / ProfilerStore / AiChatStore / SettingsStore** : Stores spécialisés pour les transferts SFTP, le runtime de plugins, le profilage de ressources, le chat AI et les paramètres.
 - **Couche de Vue Unifiée** : Malgré différentes sources d'état, la logique de rendu est unifiée via les composants `TerminalView` et `IdeView` au niveau UI.
 
 ---
 
 ## 🏗️ Architecture Système
 
-v1.4.0 emploie une architecture de flux de données hybride qui route intelligemment le trafic selon le type de session :
+v1.6.2 emploie une architecture de flux de données hybride qui route intelligemment le trafic selon le type de session :
 
 ```mermaid
 flowchart TB
     subgraph Frontend ["Couche Frontend (React 19)"]
         UI[Interface Utilisateur]
-        
-        subgraph Stores ["Gestion d'État Multi-Store"]
-            RemoteStore["AppStore (Zustand)<br/>Sessions Distantes"]
-            IdeStore["IdeStore (Zustand)<br/>Mode IDE"]
-            LocalStore["LocalTerminalStore (Zustand)<br/>PTYs Locaux"]
+
+        subgraph Stores ["Gestion d'État Multi-Store (Zustand)"]
+            TreeStore["SessionTreeStore<br/>Intention Utilisateur"]
+            AppStore["AppStore<br/>Faits de Connexion"]
+            IdeStore["IdeStore<br/>Mode IDE"]
+            LocalStore["LocalTerminalStore<br/>PTYs Locaux"]
+            ReconnectStore["ReconnectOrchestratorStore"]
+            PluginStore["PluginStore<br/>Runtime Plugins"]
         end
-        
-        Terminal["xterm.js + WebGL"]
-        
-        UI --> RemoteStore
+
+        Terminal["xterm.js 6 + WebGL/Canvas"]
+        PluginRT["Runtime Plugins<br/>(ESM Loader + UIKit)"]
+
+        UI --> TreeStore
+        TreeStore -->|refreshConnections| AppStore
         UI --> IdeStore
         UI --> LocalStore
-        RemoteStore --> Terminal
+        AppStore --> Terminal
         LocalStore --> Terminal
+        PluginRT --> PluginStore
     end
 
     subgraph Backend ["Couche Backend (Rust / Tauri 2.0)"]
-        Router["Routeur de Commandes IPC"]
-        
+        Router["Routeur de Commandes IPC<br/>(src/commands/)"]
+
         subgraph Features ["Feature Gates"]
             LocalFeat["Feature: local-terminal"]
         end
 
         subgraph RemoteEngine ["Moteur Distant (SSH)"]
-            WS["Pont WebSocket"]
-            SSH["Client russh (Rust Pur)"]
-            Pool["Pool de Connexions"]
+            WS["Pont WebSocket<br/>(Token Auth + Heartbeat)"]
+            SSH["russh 0.49<br/>(Rust Pur SSH)"]
+            Pool["Registre de Connexions<br/>(DashMap)"]
         end
 
         subgraph LocalEngine ["Moteur Local (PTY)"]
             PtyMgr["Gestionnaire PTY"]
-            PtyHandle["PtyHandle Thread-Safe<br/>(Wrapper Arc+Mutex)"]
-            NativePTY["portable-pty (Natif/ConPTY)"]
+            PtyHandle["PtyHandle Thread-Safe<br/>(Arc+Mutex)"]
+            NativePTY["portable-pty 0.8<br/>(Natif/ConPTY)"]
+        end
+
+        subgraph Storage ["Persistance"]
+            Redb["redb 2.1"]
+            Keychain["Trousseau Système<br/>(keyring)"]
         end
     end
 
     %% Flux de Données
-    LocalStore <-->|Tauri IPC Binaire| PtyMgr
+    LocalStore <-->|Tauri IPC| PtyMgr
     PtyMgr --> PtyHandle --> NativePTY
-    
-    RemoteStore <-->|Tauri IPC Contrôle| Router
-    Terminal <-->|WebSocket Flux Binaire| WS
+
+    AppStore <-->|Tauri IPC Contrôle| Router
+    Terminal <-->|WebSocket Binaire<br/>Wire Protocol v1| WS
     WS <--> SSH <--> Pool
-    
-    LocalFeat -.-> LocalEngine
-    
+
+    Router --> Storage
+    LocalFeat -.->|porte de compilation| LocalEngine
+
     style Frontend fill:#e1f5ff,stroke:#01579b
     style Backend fill:#fff3e0,stroke:#e65100
     style LocalEngine fill:#e8f5e9,stroke:#2e7d32
     style RemoteEngine fill:#fce4ec,stroke:#c2185b
+    style Storage fill:#f3e5f5,stroke:#7b1fa2
 ```
 
 ---
@@ -162,23 +178,25 @@ Nous avons construit un `SshConnectionRegistry` basé sur le comptage de référ
 
 ---
 
-## 🛠️ Stack Technique (v1.4.0)
+## 🛠️ Stack Technique (v1.6.2)
 
 | Couche | Technologie Clé | Description |
 |--------|----------------|-------------|
 | **Core** | **Tauri 2.0** | Framework d'application multiplateforme nouvelle génération |
-| **Runtime** | **Tokio** | Runtime Rust async complet, associé à `parking_lot` pour l'optimisation de verrouillage |
+| **Runtime** | **Tokio** | Runtime Rust async complet, associé à `dashmap` pour les maps concurrentes |
 | **Noyau Local** | **portable-pty 0.8** | Abstraction PTY multiplateforme implémentant le modèle de threading `Sync` + `Send` |
 | **Noyau Distant** | **russh 0.49** | Implémentation SSH en Rust pur, sans dépendances C, sécurisé en mémoire |
 | **SFTP** | **russh-sftp 2.0** | Protocole de Transfert de Fichiers SSH |
 | **WebSocket** | **tokio-tungstenite 0.24** | Implémentation WebSocket async |
-| **Frontend** | **React 19** | Développement UI type-safe avec TypeScript 5.3 |
-| **État** | **Zustand** | Architecture Multi-Store (AppStore/IdeStore/LocalTerminalStore), séparation des préoccupations |
-| **Rendu** | **xterm.js 5 + WebGL** | Rendu accéléré GPU, sortie haute fréquence 60fps+ |
-| **Protocole** | **WebSocket / IPC** | Distant via WS direct, local via canal IPC Tauri efficace |
-| **Chiffrement** | **ChaCha20-Poly1305 + Argon2** | Chiffrement authentifié AEAD + dérivation de clé à dureté mémoire |
+| **Frontend** | **React 19** | Développement UI type-safe avec TypeScript 5.8 |
+| **État** | **Zustand 5** | Architecture Multi-Store (10 stores spécialisés), séparation des préoccupations |
+| **Rendu** | **xterm.js 6 + WebGL/Canvas** | Rendu accéléré GPU, sortie haute fréquence 60fps+ |
+| **Protocole** | **Wire Protocol v1** | Binaire `[Type:1][Longueur:4][Charge:n]` via WebSocket, Tauri IPC pour le contrôle |
+| **Éditeur** | **CodeMirror 6** | Édition de fichiers distants avec 30+ modes de langage (14 natifs + legacy modes) |
+| **Chiffrement** | **ChaCha20-Poly1305 + Argon2id** | Chiffrement authentifié AEAD + dérivation de clé à dureté mémoire |
 | **Persistance** | **redb 2.1** | Base de données embarquée pour le stockage de configuration |
 | **Sérialisation** | **MessagePack (rmp-serde)** | Sérialisation binaire efficace |
+| **Plugins** | **ESM Runtime** | Chargement dynamique de plugins avec API PluginContext gelée |
 
 ---
 
@@ -257,13 +275,13 @@ git clone https://github.com/AnalyseDeCircuit/OxideTerm.git
 cd OxideTerm
 
 # Installer les dépendances
-npm install
+pnpm install
 
 # Démarrer l'environnement de dev complet (avec support PTY local)
-npm run tauri dev
+pnpm tauri dev
 
 # Construire la version production
-npm run tauri build
+pnpm tauri build
 
 # Construire le noyau optimisé mobile (supprimer PTY)
 cd src-tauri
@@ -295,6 +313,7 @@ cargo build --no-default-features --release
 - [x] Système de plugins runtime (PluginContext + UI Kit)
 - [x] Clés API AI stockées dans le trousseau système
 - [x] Détection d'environnement distant pour l'IA
+- [x] Fractionnement de terminal (panneaux divisés avec raccourcis clavier)
 
 ### 🚧 En Cours
 - [ ] Palette de commandes (`⌘K`)
@@ -302,7 +321,6 @@ cargo build --no-default-features --release
 
 ### 📋 Planifié
 - [ ] Transfert SSH Agent (en attente de l'implémentation russh upstream)
-- [ ] Fractionnement de terminal
 - [ ] Enregistrement & lecture de sessions
 - [ ] Transfert X11
 - [ ] Adaptation mobile (iOS/Android)
@@ -352,5 +370,5 @@ Remerciements spéciaux à ces projets open-source :
 ---
 
 <p align="center">
-  <sub>Construit avec ❤️ en utilisant Rust et Tauri | 50 000+ Lignes de Code</sub>
+  <sub>Construit avec ❤️ en utilisant Rust et Tauri | 90 000+ Lignes de Code</sub>
 </p>
