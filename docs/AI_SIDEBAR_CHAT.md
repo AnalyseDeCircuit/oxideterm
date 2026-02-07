@@ -11,7 +11,7 @@ The AI Sidebar Chat provides an integrated AI assistant directly in the OxideTer
 | **Persistent History** | Conversations are saved to redb database and survive app restarts |
 | **Streaming Responses** | Real-time streaming responses with stop capability |
 | **Auto Context Injection** | Automatically captures environment, buffer, and selection context |
-| **Terminal Context** | Optionally include terminal buffer content for context-aware assistance |
+| **Terminal Context** | Automatically captures active pane context; optional "Include context" expands scope |
 | **Code Execution** | Insert AI-generated commands directly into active terminal |
 | **Multi-language** | Full i18n support across 11 languages |
 
@@ -24,7 +24,7 @@ The AI Sidebar Chat provides an integrated AI assistant directly in the OxideTer
 - **Quick Delete**: Remove individual conversations or clear all history
 - **Conversation Switching**: Seamlessly switch between past conversations
 
-### 🧠 Automatic Context Injection (NEW in v1.4.1)
+### 🧠 Automatic Context Injection
 
 The sidebar chat now automatically gathers deep context from your environment—similar to GitHub Copilot's awareness:
 
@@ -33,13 +33,15 @@ When you send a message, the AI automatically knows:
 - **Local OS**: macOS / Windows / Linux
 - **Terminal Type**: SSH or Local terminal
 - **Connection Details**: `user@host` for SSH sessions
-- **Remote OS Hint**: Guessed from hostname patterns
+- **Remote OS**: Uses detected SSH environment when available; falls back to hints while detecting
 
 #### 2. Dynamic Buffer Sync
-The last 50 lines of terminal output are automatically included as context, giving the AI visibility into:
+The last N lines of terminal output are automatically included (default: 120 lines), giving the AI visibility into:
 - Recent command outputs
 - Error messages
 - System responses
+
+Line count and character budget are controlled by `ai.contextVisibleLines` and `ai.contextMaxChars`.
 
 #### 3. Selection Priority
 If you have text selected in the terminal, it becomes the **primary focus**:
@@ -49,7 +51,8 @@ If you have text selected in the terminal, it becomes the **primary focus**:
 
 ### 🖥️ Terminal Integration
 
-- **Context Capture**: Click "Include context" to attach terminal buffer content to your message
+- **Context Capture**: Click "Include context" to attach the active pane buffer to your message (budget from `ai.contextVisibleLines`)
+- **All Panes (Split)**: When split panes are present, "Panes" includes context from all panes with a per-pane budget (total budget divided across panes)
 - **Command Insertion**: Click the ▶️ button on code blocks to insert commands into the active terminal
 - **Multiline Support**: Multi-line commands are inserted using bracketed paste mode for proper handling
 
@@ -75,31 +78,34 @@ AI Chat uses the same settings as the inline AI assistant. Configure in **Settin
 | Setting | Description |
 |---------|-------------|
 | `ai.enabled` | Enable/disable AI features |
-| `ai.apiEndpoint` | OpenAI-compatible API endpoint |
-| `ai.apiKey` | Your API key (stored in system keychain) |
-| `ai.model` | Model to use (e.g., `gpt-4o-mini`) |
-| `ai.contextVisibleLines` | Number of terminal lines to capture for context |
+| `ai.providers` | Provider list (base URL, default model, enabled flag) |
+| `ai.activeProviderId` | Active provider ID |
+| `ai.activeModel` | Active model (e.g., `gpt-4o-mini`) |
+| `ai.contextMaxChars` | Max buffer characters for auto context injection |
+| `ai.contextVisibleLines` | Max terminal lines to capture for context |
+
+API keys are stored per provider in the system keychain (Ollama does not require a key).
 
 ## Architecture
 
 ### Persistence Layer (redb Backend)
 
-AI conversations are persisted using a dedicated redb database (`chat_history.redb`) in the config directory:
+AI conversations are persisted using a dedicated redb database (`chat_history.redb`) under `config_dir()`:
 
 ```
-~/.config/oxideterm/
+<config_dir>/
 ├── state.redb            # Sessions, forwards, settings
-└── chat_history.redb     # AI conversations (NEW)
+└── chat_history.redb     # AI conversations
 ```
 
 **Database Schema:**
 
 | Table | Key | Value |
 |-------|-----|-------|
-| `conversations` | conversation_id (string) | ConversationMeta (msgpack) |
-| `messages` | message_id (string) | PersistedMessage (msgpack) |
-| `conversation_messages` | conversation_id | Vec<message_id> (msgpack) |
-| `ai_chat_metadata` | key | value |
+| `conversations` | conversation_id (string) | ConversationMeta (MessagePack) |
+| `messages` | message_id (string) | PersistedMessage (MessagePack) |
+| `conversation_messages` | conversation_id | Vec<message_id> (MessagePack) |
+| `ai_chat_metadata` | key | value (MessagePack) |
 
 **Data Types:**
 
@@ -109,25 +115,25 @@ struct PersistedMessage {
     conversation_id: String,
     role: MessageRole,        // "user" | "assistant"
     content: String,
-    timestamp: u64,           // Unix millis
+    timestamp: i64,           // Unix millis
     context_snapshot: Option<ContextSnapshot>,
 }
 
 struct ContextSnapshot {
-    session_id: Option<String>,
-    connection_name: Option<String>,
-    remote_os: Option<String>,
     cwd: Option<String>,
     selection: Option<String>,
     buffer_tail: Option<String>,  // zstd compressed if >4KB
     buffer_compressed: bool,
+    local_os: Option<String>,
+    connection_info: Option<String>,
+    terminal_type: Option<String>,
 }
 ```
 
 **Features:**
 - **zstd Compression**: Buffer snapshots >4KB are automatically compressed
 - **LRU Eviction**: Max 100 conversations, oldest auto-deleted
-- **Message Limits**: Max 200 messages per conversation
+- **Message Limits**: Backend stores up to 200 messages per conversation; UI keeps the most recent 100 in memory
 - **Lazy Loading**: Only conversation list loaded initially, messages loaded on demand
 
 ### State Management
@@ -152,9 +158,9 @@ The new `sidebarContextProvider.ts` module aggregates context automatically:
 ```typescript
 // Gather complete sidebar context for AI
 const context = gatherSidebarContext({
-  maxBufferLines: 50,      // Last 50 lines from terminal
-  maxBufferChars: 8000,    // Max 8KB of buffer content
-  maxSelectionChars: 2000, // Max 2KB of selection
+    maxBufferLines: 120,     // Default from ai.contextVisibleLines
+    maxBufferChars: 8000,    // Default from ai.contextMaxChars
+    maxSelectionChars: 2000, // Max 2KB of selection
 });
 
 // Context structure
@@ -189,6 +195,8 @@ Streaming response → ChatMessage render
     ↓
 Command insertion (optional) → Active terminal
 ```
+
+> 即使不手动勾选 "Include context"，`gatherSidebarContext()` 仍会注入环境与终端上下文；手动上下文会覆盖默认 context block。
 
 ### Components
 
@@ -230,17 +238,19 @@ The `terminalRegistry.ts` module provides robust mechanisms for AI context captu
 
 ```typescript
 interface TerminalEntry {
-  getter: BufferGetter;           // Get buffer content
-  selectionGetter?: SelectionGetter; // Get current selection (NEW)
-  registeredAt: number;
-  tabId: string;
-  sessionId: string;
-  terminalType: 'terminal' | 'local_terminal';
+    getter: BufferGetter;              // Get buffer content
+    selectionGetter?: SelectionGetter; // Get current selection
+    registeredAt: number;
+    tabId: string;
+    sessionId: string;
+    terminalType: 'terminal' | 'local_terminal';
 }
 
-// New selection APIs
+// Active pane + selection APIs
+export function getActivePaneId(): string | null;
 export function getActiveTerminalSelection(): string | null;
 export function getTerminalSelection(paneId: string): string | null;
+export function getCombinedPaneContext(tabId: string, maxCharsPerPane?: number): string;
 ```
 
 **Safety Features:**
@@ -248,6 +258,7 @@ export function getTerminalSelection(paneId: string): string | null;
 - **Expiration Check**: Entries older than 5 minutes are automatically invalidated
 - **Error Isolation**: Failed getter calls are caught and return null gracefully
 - **Selection Isolation**: Selection getters are optional and fail gracefully
+- **Split Pane Support**: Registry key is `paneId` (active pane tracked globally)
 
 ### Sidebar Context Provider
 
@@ -270,7 +281,7 @@ function guessRemoteOS(host, username): string | null;
 ## Environment
 - Local OS: macOS
 - Terminal: SSH to user@example.com
-- Remote OS: Linux (guessed)
+- Remote OS: Linux (detected) | [detecting...] (hint: Linux) | Unknown
 
 ## User Selection (Priority Focus)
 The user has selected specific text in the terminal...
@@ -281,7 +292,7 @@ The user has selected specific text in the terminal...
 === SELECTED TEXT (Focus Area) ===
 [selected text here]
 
-=== Terminal Output (last 50 lines) ===
+=== Terminal Output (last N lines) ===
 [buffer content here]
 ```
 
@@ -297,8 +308,8 @@ The system automatically filters out empty assistant messages when building API 
 
 Terminal context capture uses different methods depending on terminal type:
 
-- **SSH terminals**: Uses the `getScrollBuffer` Tauri command to retrieve scroll buffer from the Rust backend
-- **Local terminals**: Uses the Terminal Registry pattern with xterm.js buffer API for synchronous access
+- **Auto context**: Always uses the Terminal Registry (active pane buffer + selection)
+- **Manual context**: If registry is empty for SSH, falls back to `getScrollBuffer` Tauri command
 
 ## Troubleshooting
 
@@ -312,4 +323,4 @@ Terminal context capture uses different methods depending on terminal type:
 
 ---
 
-*Documentation version: v1.4.1 | Last updated: 2026-02-05*
+*Documentation version: v1.6.2 | Last updated: 2026-02-08*
