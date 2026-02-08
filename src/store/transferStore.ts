@@ -105,6 +105,24 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
         error,
         endTime: (newState === 'completed' || newState === 'error') ? Date.now() : transfer.endTime,
       });
+
+      // Auto-cleanup: remove completed/cancelled transfers older than 5 minutes
+      // or when there are more than 100 finished items
+      const AUTO_CLEANUP_MS = 5 * 60 * 1000;
+      const MAX_FINISHED = 100;
+      const now = Date.now();
+      let finishedCount = 0;
+      for (const [, t] of newTransfers) {
+        if ((t.state === 'completed' || t.state === 'cancelled') && t.endTime) finishedCount++;
+      }
+      if (finishedCount > MAX_FINISHED) {
+        for (const [tid, t] of newTransfers) {
+          if ((t.state === 'completed' || t.state === 'cancelled') && t.endTime && (now - t.endTime > AUTO_CLEANUP_MS)) {
+            newTransfers.delete(tid);
+          }
+        }
+      }
+
       return { transfers: newTransfers };
     });
   },

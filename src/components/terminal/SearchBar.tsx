@@ -60,9 +60,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   const resultsListRef = useRef<HTMLDivElement>(null);
   // Track IME composition state (for CJK input methods)
   const isComposingRef = useRef(false);
-  // Timestamp when composition ended - used to detect if Enter is for IME confirmation
-  // More reliable than boolean flag with timeout (no race condition)
-  const compositionEndTimeRef = useRef(0);
+  // Ignore the next Enter after IME composition end (prevents double-trigger)
+  const ignoreNextEnterRef = useRef(false);
+  // Skip the next debounced search after IME composition end (prevents double search)
+  const skipNextDebouncedSearchRef = useRef(false);
 
   // Focus input when opened
   useEffect(() => {
@@ -86,6 +87,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     searchTimeoutRef.current = setTimeout(() => {
       // Skip search if IME is composing (prevents jumping during CJK input)
       if (isComposingRef.current) return;
+      if (skipNextDebouncedSearchRef.current) {
+        skipNextDebouncedSearchRef.current = false;
+        return;
+      }
       onSearch(query, { caseSensitive, regex: useRegex, wholeWord });
     }, 150); // Faster debounce for better responsiveness
 
@@ -109,12 +114,16 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       }
 
       // Enter to go to next match, Shift+Enter for previous (active mode only)
-      // BUT skip if composition just ended (the Enter was to confirm IME, not to find next)
+      // BUT skip if composition just ended or IME is composing (the Enter was to confirm IME)
       if (e.key === 'Enter' && searchMode === 'active' && resultCount > 0) {
-        // Check if this Enter is within 100ms of compositionEnd - if so, it's for IME confirmation
-        const timeSinceCompositionEnd = Date.now() - compositionEndTimeRef.current;
-        if (timeSinceCompositionEnd < 100) {
-          // This Enter was to confirm IME input, not to navigate
+        const nativeEvent = e as KeyboardEvent;
+        const isNativeComposing =
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (nativeEvent as any)?.isComposing === true ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (nativeEvent as any)?.keyCode === 229;
+        if (isNativeComposing || ignoreNextEnterRef.current || isComposingRef.current) {
+          ignoreNextEnterRef.current = false;
           e.preventDefault();
           return;
         }
@@ -243,11 +252,15 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onCompositionStart={() => { isComposingRef.current = true; }}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
           onCompositionEnd={(e) => {
             isComposingRef.current = false;
-            // Record timestamp - Enter within 100ms of this is for IME confirmation, not findNext
-            compositionEndTimeRef.current = Date.now();
+            // Ignore the next Enter - it was used to confirm IME input
+            ignoreNextEnterRef.current = true;
+            // Skip the debounced search once - we'll trigger immediately here
+            skipNextDebouncedSearchRef.current = true;
             // Trigger search after IME composition ends
             if (searchMode === 'active') {
               onSearch(e.currentTarget.value, { caseSensitive, regex: useRegex, wholeWord });

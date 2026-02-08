@@ -2012,11 +2012,15 @@ impl SshConnectionRegistry {
                 debug!("Emitted connection_status_changed: {} -> {}", connection_id, status);
             }
         } else {
-            // AppHandle 未就绪，缓存事件
+            // AppHandle 未就绪，缓存事件（上限 1000 条防止无限堆积）
             warn!("AppHandle not ready, caching event: {} -> {}", connection_id, status);
             let mut pending = self.pending_events.lock().await;
-            pending.push((connection_id.to_string(), status.to_string()));
-            debug!("Event cached, total pending: {}", pending.len());
+            if pending.len() < 1000 {
+                pending.push((connection_id.to_string(), status.to_string()));
+                debug!("Event cached, total pending: {}", pending.len());
+            } else {
+                warn!("Pending events buffer full (1000), dropping event: {} -> {}", connection_id, status);
+            }
         }
     }
 

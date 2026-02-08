@@ -166,7 +166,7 @@ pub struct SessionEntry {
 impl SessionEntry {
     /// Create a new session entry
     pub fn new(id: String, config: SessionConfig, order: usize) -> Self {
-        let (output_tx, _) = broadcast::channel::<Vec<u8>>(1024);
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
         Self {
             id,
             config,
@@ -175,7 +175,7 @@ impl SessionEntry {
             ws_token: None,
             cmd_tx: None,
             handle_controller: None,
-            scroll_buffer: Arc::new(ScrollBuffer::new()), // Default 100k lines
+            scroll_buffer: Arc::new(ScrollBuffer::new()), // Default 10k lines
             output_tx,
             ws_detached: false,
             ws_detach_cancel: None,
@@ -192,7 +192,7 @@ impl SessionEntry {
         order: usize,
         max_lines: usize,
     ) -> Self {
-        let (output_tx, _) = broadcast::channel::<Vec<u8>>(1024);
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
         Self {
             id,
             config,

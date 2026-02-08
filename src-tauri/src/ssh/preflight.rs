@@ -63,6 +63,9 @@ struct CacheEntry {
     verified_at: SystemTime,
 }
 
+/// Maximum number of cached host keys to prevent unbounded growth
+const MAX_CACHE_ENTRIES: usize = 500;
+
 /// Global cache for verified host keys (memory only, not persisted)
 /// Key: "host:port", Value: (fingerprint, timestamp)
 pub struct HostKeyCache {
@@ -96,6 +99,22 @@ impl HostKeyCache {
 
     /// Mark host as verified
     pub fn set_verified(&self, host: &str, port: u16, fingerprint: String) {
+        // Evict expired entries if cache is getting large
+        if self.cache.len() >= MAX_CACHE_ENTRIES {
+            self.evict_expired();
+        }
+        // If still over limit after eviction, remove oldest entries
+        if self.cache.len() >= MAX_CACHE_ENTRIES {
+            // Remove ~25% of entries (oldest first by verified_at)
+            let mut entries: Vec<_> = self.cache.iter()
+                .map(|r| (r.key().clone(), r.value().verified_at))
+                .collect();
+            entries.sort_by_key(|(_, t)| *t);
+            let remove_count = entries.len() / 4;
+            for (key, _) in entries.into_iter().take(remove_count) {
+                self.cache.remove(&key);
+            }
+        }
         let key = format!("{}:{}", host.to_lowercase(), port);
         self.cache.insert(
             key,
@@ -104,6 +123,21 @@ impl HostKeyCache {
                 verified_at: SystemTime::now(),
             },
         );
+    }
+
+    /// Remove all expired entries from cache
+    fn evict_expired(&self) {
+        let expired_keys: Vec<String> = self.cache.iter()
+            .filter(|entry| {
+                entry.verified_at.elapsed()
+                    .map(|d| d.as_secs() >= CACHE_TTL_SECS)
+                    .unwrap_or(true)
+            })
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in expired_keys {
+            self.cache.remove(&key);
+        }
     }
 
     /// Clear a specific host from cache (e.g., when key changes)

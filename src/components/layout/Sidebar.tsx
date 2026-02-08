@@ -730,7 +730,7 @@ export const Sidebar = () => {
           </Button>
 
           {/* Top + middle: scrollable when plugins overflow */}
-          <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none">
+          <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none self-stretch">
             {topButtons.map(def => renderSidebarButton(def, true))}
           </div>
 
@@ -767,7 +767,7 @@ export const Sidebar = () => {
         </Button>
 
         {/* Top + middle: scrollable when plugins overflow */}
-        <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none">
+        <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none self-stretch">
           {topButtons.map(def => renderSidebarButton(def, false))}
         </div>
 
