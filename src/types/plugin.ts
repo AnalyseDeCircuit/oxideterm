@@ -1,8 +1,8 @@
 /**
- * OxideTerm Plugin System — Type Definitions
+ * OxideTerm Plugin System — Type Definitions (v2)
  *
  * All types for the runtime dynamic plugin system.
- * Plugins are ESM bundles loaded at runtime via Blob URL + dynamic import().
+ * Supports both single-file ESM bundles (v1) and multi-file packages (v2).
  */
 
 import type { SshConnectionState } from './index';
@@ -55,6 +55,22 @@ export type PluginManifest = {
   author?: string;
   main: string;                           // relative path to ESM entry
   engines?: { oxideterm?: string };
+
+  // ── v2 Package Fields ─────────────────────────────────────────────────
+  /** Manifest schema version (1 = legacy single-file, 2 = package) */
+  manifestVersion?: 1 | 2;
+  /** Plugin format: 'bundled' (single ESM, default) or 'package' (multi-file) */
+  format?: 'bundled' | 'package';
+  /** Static assets directory (relative path) */
+  assets?: string;
+  /** CSS files to auto-load on activation (relative paths) */
+  styles?: string[];
+  /** Shared dependencies the plugin expects from the host */
+  sharedDependencies?: Record<string, string>;
+  /** Plugin repository URL (for update checking) */
+  repository?: string;
+  /** SHA-256 checksum of the plugin package */
+  checksum?: string;
 
   contributes?: {
     tabs?: PluginTabDef[];
@@ -225,6 +241,16 @@ export type PluginBackendAPI = {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
 };
 
+/** ctx.assets — static asset loading (v2) */
+export type PluginAssetsAPI = {
+  /** Load a CSS file from the plugin directory. Returns a Disposable to remove it. */
+  loadCSS(relativePath: string): Promise<Disposable>;
+  /** Get a Blob URL for a binary asset (image, font, etc.) */
+  getAssetUrl(relativePath: string): Promise<string>;
+  /** Revoke a previously created asset URL */
+  revokeAssetUrl(url: string): void;
+};
+
 /** The full PluginContext passed to activate() */
 export type PluginContext = Readonly<{
   pluginId: string;
@@ -236,6 +262,7 @@ export type PluginContext = Readonly<{
   i18n: PluginI18nAPI;
   storage: PluginStorageAPI;
   api: PluginBackendAPI;
+  assets: PluginAssetsAPI;
 }>;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -250,7 +277,42 @@ export type PluginConfig = {
 /** Global plugin configuration (plugin-config.json) */
 export type PluginGlobalConfig = {
   plugins: Record<string, PluginConfig>;
+  /** Plugin registry URL */
+  registryUrl?: string;
+  /** Whether to check for updates on startup */
+  autoCheckUpdates?: boolean;
+  /** Last update check timestamp (ISO 8601) */
+  lastUpdateCheck?: string;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Plugin Registry (Remote Installation)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A plugin entry from the remote registry index */
+export type RegistryEntry = {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  version: string;
+  minOxidetermVersion?: string;
+  downloadUrl: string;
+  checksum?: string;
+  size?: number;
+  tags?: string[];
+  homepage?: string;
+  updatedAt?: string;
+};
+
+/** The registry index fetched from a remote URL */
+export type RegistryIndex = {
+  version: number;
+  plugins: RegistryEntry[];
+};
+
+/** Installation progress state */
+export type InstallState = 'idle' | 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Window augmentation for shared modules
@@ -264,6 +326,10 @@ declare global {
       zustand: { create: typeof import('zustand').create };
       lucideReact: typeof import('lucide-react');
       ui: import('../lib/plugin/pluginUIKit').PluginUIKit;
+      /** Host application version */
+      version: string;
+      /** Plugin API version (2 = current) */
+      pluginApiVersion: number;
     };
   }
 }

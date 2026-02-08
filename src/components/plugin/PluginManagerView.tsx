@@ -2,10 +2,11 @@
  * Plugin Manager View
  *
  * UI for managing installed plugins — view status, enable/disable, and inspect info.
+ * Also supports browsing and installing plugins from a remote registry.
  * Styled to match SettingsView panels (rounded-lg border border-theme-border bg-theme-bg-panel/50).
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Puzzle,
@@ -17,11 +18,18 @@ import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
+  Download,
+  Trash2,
+  Search,
+  Globe,
+  Loader2,
+  ArrowUpCircle,
 } from 'lucide-react';
 import { homeDir, join } from '@tauri-apps/api/path';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Separator } from '../ui/separator';
 import { usePluginStore } from '../../store/pluginStore';
+import { api } from '../../lib/api';
 import {
   loadPlugin,
   unloadPlugin,
@@ -29,7 +37,8 @@ import {
   loadPluginGlobalConfig,
   savePluginGlobalConfig,
 } from '../../lib/plugin/pluginLoader';
-import type { PluginState, PluginInfo } from '../../types/plugin';
+import { clearPluginStorage } from '../../lib/plugin/pluginStorage';
+import type { PluginState, PluginInfo, RegistryEntry } from '../../types/plugin';
 
 /** Status indicator dot + label */
 function StatusBadge({ state }: { state: PluginState }) {
@@ -209,14 +218,237 @@ function PluginRow({ info, onToggle, onReload }: {
   );
 }
 
+/** Registry plugin card for the Browse tab */
+function RegistryPluginCard({ entry, isInstalled, hasUpdate, onInstall, onUpdate }: {
+  entry: RegistryEntry;
+  isInstalled: boolean;
+  hasUpdate: boolean;
+  onInstall: (entry: RegistryEntry) => void;
+  onUpdate: (entry: RegistryEntry) => void;
+}) {
+  const { t } = useTranslation();
+  const installProgress = usePluginStore((s) => s.installProgress.get(entry.id));
+  const isInstalling = installProgress?.state === 'downloading' || installProgress?.state === 'extracting' || installProgress?.state === 'installing';
+  const hasError = installProgress?.state === 'error';
+
+  return (
+    <div className="p-4 rounded-lg border border-theme-border bg-theme-bg-panel/30 hover:bg-theme-bg-panel/50 transition-colors">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-theme-text truncate">{entry.name}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent font-medium">
+              v{entry.version}
+            </span>
+            {isInstalled && !hasUpdate && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 font-medium">
+                {t('plugin.installed')}
+              </span>
+            )}
+            {hasUpdate && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium flex items-center gap-1">
+                <ArrowUpCircle className="h-3 w-3" />
+                {t('plugin.update_available')}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-theme-text-muted line-clamp-2 mb-2">
+            {entry.description || entry.id}
+          </p>
+          <div className="flex items-center gap-3 text-[10px] text-theme-text-muted">
+            {entry.author && <span>{t('plugin.by_author', { author: entry.author })}</span>}
+            {entry.tags && entry.tags.length > 0 && (
+              <span className="flex items-center gap-1">
+                {entry.tags.slice(0, 3).map((tag) => (
+                  <span key={tag} className="px-1.5 py-0.5 rounded bg-theme-bg-panel text-theme-text-muted">
+                    {tag}
+                  </span>
+                ))}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-shrink-0">
+          {hasError ? (
+            <div className="text-xs text-red-400 flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {t('plugin.install_error')}
+            </div>
+          ) : isInstalling ? (
+            <button
+              disabled
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-theme-accent/20 text-theme-accent"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t('plugin.installing')}
+            </button>
+          ) : hasUpdate ? (
+            <button
+              onClick={() => onUpdate(entry)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors"
+            >
+              <ArrowUpCircle className="h-3.5 w-3.5" />
+              {t('plugin.update')}
+            </button>
+          ) : isInstalled ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-green-500/10 text-green-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {t('plugin.installed')}
+            </span>
+          ) : (
+            <button
+              onClick={() => onInstall(entry)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-theme-accent text-white hover:bg-theme-accent/80 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {t('plugin.install')}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Placeholder shown when no plugin registry URL is configured */
+function RegistryNotConfigured() {
+  const { t } = useTranslation();
+  return (
+    <div className="text-center py-16 text-theme-text-muted">
+      <Globe className="h-12 w-12 mx-auto mb-4 opacity-15" />
+      <p className="text-base font-medium text-theme-text/70 mb-2">
+        {t('plugin.registry_coming_soon')}
+      </p>
+      <p className="text-sm max-w-md mx-auto leading-relaxed">
+        {t('plugin.registry_coming_soon_desc')}
+      </p>
+    </div>
+  );
+}
+
 /** Plugin Manager main view — uses SettingsView panel style */
 export function PluginManagerView() {
   const { t } = useTranslation();
   const plugins = usePluginStore((s) => s.plugins);
+  const registryEntries = usePluginStore((s) => s.registryEntries);
+  const availableUpdates = usePluginStore((s) => s.availableUpdates);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'installed' | 'browse'>('installed');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [fetchingRegistry, setFetchingRegistry] = useState(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+  const [registryConfigured, setRegistryConfigured] = useState<boolean | null>(null);
 
   const pluginList = Array.from(plugins.values());
   const activeCount = pluginList.filter(p => p.state === 'active').length;
+  const installedIds = new Set(pluginList.map(p => p.manifest.id));
+  const updateIds = new Set(availableUpdates.map(u => u.id));
+
+  // Filter registry entries by search query
+  const filteredRegistry = registryEntries.filter((entry) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      entry.name.toLowerCase().includes(q) ||
+      entry.id.toLowerCase().includes(q) ||
+      entry.description?.toLowerCase().includes(q) ||
+      entry.tags?.some(tag => tag.toLowerCase().includes(q))
+    );
+  });
+
+  // Fetch registry on mount or when switching to browse tab
+  useEffect(() => {
+    if (activeTab === 'browse' && registryEntries.length === 0 && !fetchingRegistry) {
+      loadPluginGlobalConfig().then((config) => {
+        const hasUrl = !!config.registryUrl;
+        setRegistryConfigured(hasUrl);
+        if (hasUrl) {
+          handleFetchRegistry();
+        }
+      });
+    }
+  }, [activeTab]);
+
+  const handleFetchRegistry = useCallback(async () => {
+    setFetchingRegistry(true);
+    setRegistryError(null);
+    try {
+      const config = await loadPluginGlobalConfig();
+      const registryUrl = config.registryUrl;
+      if (!registryUrl) {
+        // No registry URL configured — nothing to fetch
+        return;
+      }
+      const registry = await api.pluginFetchRegistry(registryUrl);
+      usePluginStore.getState().setRegistryEntries(registry.plugins);
+
+      // Check for updates
+      const installed = pluginList.map(p => ({ id: p.manifest.id, version: p.manifest.version }));
+      if (installed.length > 0) {
+        const updates = await api.pluginCheckUpdates(registryUrl, installed);
+        usePluginStore.getState().setAvailableUpdates(updates);
+      }
+    } catch (err) {
+      setRegistryError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetchingRegistry(false);
+    }
+  }, [pluginList]);
+
+  const handleInstall = useCallback(async (entry: RegistryEntry) => {
+    const store = usePluginStore.getState();
+    store.setInstallProgress(entry.id, 'downloading');
+    try {
+      const manifest = await api.pluginInstall(entry.downloadUrl, entry.id, entry.checksum);
+      store.setInstallProgress(entry.id, 'installing');
+
+      // Register and load the plugin
+      store.registerPlugin(manifest);
+      await loadPlugin(manifest);
+
+      store.setInstallProgress(entry.id, 'done');
+      // Clear progress after a short delay
+      setTimeout(() => store.clearInstallProgress(entry.id), 2000);
+    } catch (err) {
+      store.setInstallProgress(entry.id, 'error', err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const handleUpdate = useCallback(async (entry: RegistryEntry) => {
+    const store = usePluginStore.getState();
+    const existingPlugin = store.getPlugin(entry.id);
+
+    // Unload existing plugin first
+    if (existingPlugin && (existingPlugin.state === 'active' || existingPlugin.state === 'loading')) {
+      await unloadPlugin(entry.id);
+    }
+
+    // Install the new version
+    await handleInstall(entry);
+
+    // Remove from available updates
+    store.setAvailableUpdates(store.availableUpdates.filter(u => u.id !== entry.id));
+  }, [handleInstall]);
+
+  const handleUninstall = useCallback(async (pluginId: string) => {
+    const store = usePluginStore.getState();
+    const info = store.getPlugin(pluginId);
+
+    // Unload if active
+    if (info && (info.state === 'active' || info.state === 'loading')) {
+      await unloadPlugin(pluginId);
+    }
+
+    // Remove from disk
+    await api.pluginUninstall(pluginId);
+
+    // Clear plugin localStorage data
+    clearPluginStorage(pluginId);
+
+    // Remove from store
+    store.removePlugin(pluginId);
+  }, []);
 
   const handleToggle = useCallback(async (pluginId: string, enable: boolean) => {
     const config = await loadPluginGlobalConfig();
@@ -338,34 +570,174 @@ export function PluginManagerView() {
             </div>
           </div>
 
-          {/* Installed plugins card */}
-          <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-            <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">
-              {t('plugin.empty_title')}
-            </h4>
-
-            {pluginList.length === 0 ? (
-              <div className="text-center py-10 text-theme-text-muted">
-                <Puzzle className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">{t('plugin.empty_description')}</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {pluginList.map((info, idx) => (
-                  <div key={info.manifest.id}>
-                    <PluginRow
-                      info={info}
-                      onToggle={handleToggle}
-                      onReload={handleReload}
-                    />
-                    {idx < pluginList.length - 1 && (
-                      <div className="border-b border-theme-border/40 mt-4" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Tab buttons */}
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-theme-bg-panel/30 border border-theme-border w-fit">
+            <button
+              onClick={() => setActiveTab('installed')}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md transition-colors ${
+                activeTab === 'installed'
+                  ? 'bg-theme-accent text-white'
+                  : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
+              }`}
+            >
+              <Puzzle className="h-4 w-4" />
+              {t('plugin.tab_installed')}
+              {pluginList.length > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  activeTab === 'installed' ? 'bg-white/20' : 'bg-theme-accent/20 text-theme-accent'
+                }`}>
+                  {pluginList.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('browse')}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md transition-colors ${
+                activeTab === 'browse'
+                  ? 'bg-theme-accent text-white'
+                  : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
+              }`}
+            >
+              <Globe className="h-4 w-4" />
+              {t('plugin.tab_browse')}
+              {availableUpdates.length > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  activeTab === 'browse' ? 'bg-yellow-400/30 text-yellow-200' : 'bg-yellow-500/20 text-yellow-400'
+                }`}>
+                  {availableUpdates.length} {t('plugin.updates')}
+                </span>
+              )}
+            </button>
           </div>
+
+          {/* Installed tab content */}
+          {activeTab === 'installed' && (
+            <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
+              <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">
+                {t('plugin.empty_title')}
+              </h4>
+
+              {pluginList.length === 0 ? (
+                <div className="text-center py-10 text-theme-text-muted">
+                  <Puzzle className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm">{t('plugin.empty_description')}</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {pluginList.map((info, idx) => (
+                    <div key={info.manifest.id}>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <PluginRow
+                            info={info}
+                            onToggle={handleToggle}
+                            onReload={handleReload}
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleUninstall(info.manifest.id)}
+                          className="ml-2 p-1.5 rounded text-theme-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          title={t('plugin.uninstall')}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {idx < pluginList.length - 1 && (
+                        <div className="border-b border-theme-border/40 mt-4" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Browse tab content */}
+          {activeTab === 'browse' && (
+            <div className="space-y-4">
+              {/* Registry URL not configured — show coming soon */}
+              {registryConfigured === false && (
+                <RegistryNotConfigured />
+              )}
+
+              {/* Registry is configured — show normal browse UI */}
+              {registryConfigured === true && (
+                <>
+              {/* Search and refresh */}
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-text-muted" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={t('plugin.search_placeholder')}
+                    className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-theme-border bg-theme-bg-panel/50 text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50"
+                  />
+                </div>
+                <button
+                  onClick={handleFetchRegistry}
+                  disabled={fetchingRegistry}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-theme-border text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-4 w-4 ${fetchingRegistry ? 'animate-spin' : ''}`} />
+                  {t('plugin.refresh')}
+                </button>
+              </div>
+
+              {/* Registry error */}
+              {registryError && (
+                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <p className="text-sm text-red-400 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    {t('plugin.registry_error')}: {registryError}
+                  </p>
+                </div>
+              )}
+
+              {/* Loading state */}
+              {fetchingRegistry && registryEntries.length === 0 && (
+                <div className="text-center py-16 text-theme-text-muted">
+                  <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin opacity-50" />
+                  <p className="text-sm">{t('plugin.loading_registry')}</p>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!fetchingRegistry && registryEntries.length === 0 && !registryError && (
+                <div className="text-center py-16 text-theme-text-muted">
+                  <Globe className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm">{t('plugin.registry_empty')}</p>
+                </div>
+              )}
+
+              {/* No search results */}
+              {!fetchingRegistry && registryEntries.length > 0 && filteredRegistry.length === 0 && (
+                <div className="text-center py-16 text-theme-text-muted">
+                  <Search className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm">{t('plugin.no_search_results')}</p>
+                </div>
+              )}
+
+              {/* Registry plugin cards */}
+              {filteredRegistry.length > 0 && (
+                <div className="grid gap-3">
+                  {filteredRegistry.map((entry) => (
+                    <RegistryPluginCard
+                      key={entry.id}
+                      entry={entry}
+                      isInstalled={installedIds.has(entry.id)}
+                      hasUpdate={updateIds.has(entry.id)}
+                      onInstall={handleInstall}
+                      onUpdate={handleUpdate}
+                    />
+                  ))}
+                </div>
+              )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

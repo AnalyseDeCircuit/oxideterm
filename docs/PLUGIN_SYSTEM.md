@@ -1,8 +1,8 @@
 # OxideTerm 运行时动态插件系统设计文档
 
-> **状态**: 已实施  
-> **版本**: v1.1  
-> **日期**: 2026-02-09  
+> **状态**: 已实施
+> **版本**: v2.0
+> **日期**: 2026-02-08
 > **前置依赖**: OxideTerm v1.6.2+
 
 ---
@@ -36,6 +36,8 @@ OxideTerm 当前所有功能模块（AI、IDE、SFTP、端口转发等）都是�
 
 ### 2.1 磁盘布局
 
+**v1 单文件 Bundle（默认）**：
+
 ```
 ~/.oxideterm/plugins/{plugin-id}/
   plugin.json          # 清单文件（必需）
@@ -46,11 +48,38 @@ OxideTerm 当前所有功能模块（AI、IDE、SFTP、端口转发等）都是�
     zh-CN.json
 ```
 
+**v2 多文件 Package**：
+
+```
+~/.oxideterm/plugins/{plugin-id}/
+  plugin.json          # 清单文件（必需，format: "package"）
+  src/
+    main.js            # ESM 入口（可导入同包其他模块）
+    components/
+      Dashboard.js     # 子模块（使用相对路径 import）
+      Charts.js
+    utils/
+      helpers.js
+  styles/
+    main.css           # 声明在 manifest.styles 中自动加载
+    charts.css
+  assets/
+    logo.png           # 通过 ctx.assets.getAssetUrl() 访问
+    config.json
+  locales/
+    en.json
+    zh-CN.json
+```
+
+**v2 多文件包** 通过内置的本地 HTTP 文件服务器加载（`http://127.0.0.1:{port}/plugins/{id}/...`），支持文件间的相对路径 `import`。详见 [8.5 插件文件服务器](#85-插件文件服务器)。
+
 路径由 Rust `config_dir()` 决定：
 - macOS/Linux: `~/.oxideterm/plugins/`
 - Windows: `%APPDATA%\OxideTerm\plugins\`
 
 ### 2.2 plugin.json 清单
+
+**v1 单文件 Bundle（默认）**：
 
 ```json
 {
@@ -93,10 +122,55 @@ OxideTerm 当前所有功能模块（AI、IDE、SFTP、端口转发等）都是�
 }
 ```
 
+**v2 多文件 Package**：
+
+```json
+{
+  "id": "com.example.advanced-dashboard",
+  "name": "Advanced Dashboard",
+  "version": "2.0.0",
+  "description": "Multi-file plugin with CSS and assets",
+  "author": "Example Author",
+  "main": "./src/main.js",
+  "engines": { "oxideterm": ">=1.6.2" },
+
+  "manifestVersion": 2,
+  "format": "package",
+  "assets": "./assets",
+  "styles": ["./styles/main.css", "./styles/charts.css"],
+  "sharedDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "zustand": "^4.0.0",
+    "lucide-react": "^0.300.0"
+  },
+  "repository": "https://github.com/example/advanced-dashboard",
+
+  "contributes": {
+    "tabs": [{ "id": "dashboard", "title": "Dashboard", "icon": "LayoutDashboard" }],
+    "terminalHooks": { "outputProcessor": true }
+  },
+
+  "locales": "./locales"
+}
+```
+
+**v2 新增字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `manifestVersion` | `1 \| 2` | 清单版本，默认 `1` |
+| `format` | `'bundled' \| 'package'` | `bundled`（默认）= 单文件 Blob URL 加载；`package` = HTTP 服务器加载 |
+| `assets` | `string` | 资源目录相对路径，配合 `ctx.assets.getAssetUrl()` 使用 |
+| `styles` | `string[]` | CSS 文件列表，加载时自动注入 `<style>` 到 `<head>` |
+| `sharedDependencies` | `Record<string, string>` | 声明共享依赖版本（当前支持 react, react-dom, zustand, lucide-react）|
+| `repository` | `string` | 源码仓库 URL |
+| `checksum` | `string` | SHA-256 校验和用于完整性验证 |
+
 ### 2.3 插件入口约定
 
 ```typescript
-// index.js (ESM, 所有依赖打包为单文件)
+// index.js（v1 单文件）或 src/main.js（v2 多文件）
 // React/ReactDOM/zustand 从 window.__OXIDE__ 引用，构建时标记 external
 
 export function activate(ctx: PluginContext): void | Promise<void> {
@@ -116,11 +190,34 @@ export function deactivate(): void | Promise<void> {
 }
 ```
 
+**v2 多文件示例**：
+
+```typescript
+// src/main.js — 可以使用相对路径导入
+import { Dashboard } from './components/Dashboard.js';
+import { formatBytes } from './utils/helpers.js';
+
+export async function activate(ctx) {
+  // 加载额外 CSS（除了 manifest.styles 自动加载的）
+  const cssDisposable = await ctx.assets.loadCSS('./styles/extra.css');
+
+  // 获取资源文件的 blob URL
+  const logoUrl = await ctx.assets.getAssetUrl('./assets/logo.png');
+
+  ctx.ui.registerTabView('dashboard', (props) => {
+    const { React } = window.__OXIDE__;
+    return React.createElement(Dashboard, { ...props, logoUrl });
+  });
+}
+```
+
 ---
 
-## 3. PluginContext API（8 个命名空间）
+## 3. PluginContext API（10 个命名空间）
 
 插件通过 `activate(ctx)` 接收的唯一 API 入口。整个对象通过 `Object.freeze()` 递归冻结。
+
+包含：`pluginId` + 9 个子 API（`connections`、`events`、`ui`、`terminal`、`settings`、`i18n`、`storage`、`api`、`assets`）
 
 ### 3.1 `ctx.connections`（只读连接状态）
 
@@ -180,7 +277,7 @@ interface PluginTerminalAPI {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
-  writeToTerminal(sessionId: string, text: string): void;  // ⚠️ 尚未实现 (no-op stub)，插件可使用 output processor 替代
+  writeToTerminal(sessionId: string, text: string): void;  // ✅ 已实现：通过 terminalRegistry 写入通道直接发送数据
   getBuffer(sessionId: string): string | null;              // 只读
   getSelection(sessionId: string): string | null;           // 只读
 }
@@ -239,6 +336,23 @@ interface PluginBackendAPI {
 
 - **白名单机制**：只代理 manifest `contributes.apiCommands` 中声明的 Tauri 命令
 - 默认白名单为空 — 插件必须显式声明需要哪些后端命令
+
+### 3.9 `ctx.assets`（资源文件访问）
+
+```typescript
+interface PluginAssetsAPI {
+  loadCSS(relativePath: string): Promise<Disposable>;
+  getAssetUrl(relativePath: string): Promise<string>;
+  revokeAssetUrl(url: string): void;
+}
+```
+
+- `loadCSS(path)` — 读取插件目录中的 CSS 文件，注入 `<style data-plugin="{id}">` 到 `<head>`
+- `getAssetUrl(path)` — 读取任意资源文件（图片、字体、JSON 等），返回 blob URL
+- `revokeAssetUrl(url)` — 手动释放不再需要的 blob URL
+- 卸载时自动清理所有注入的 `<style>` 和未释放的 blob URL
+- MIME 类型自动检测：支持 png/jpg/gif/svg/webp/woff/woff2/ttf/otf/ico/json/css/js 等
+- 配合 manifest `styles` 字段，加载时自动注入声明的 CSS 文件
 
 ---
 
@@ -392,7 +506,16 @@ Phase 0 将 Sidebar 按钮重构为 data-driven 数组后，插件面板通过 `
 
 ## 7. 插件加载机制
 
-### 7.1 加载流程
+### 7.1 双策略加载
+
+插件支持两种加载策略，由 manifest `format` 字段决定：
+
+| 策略 | format 值 | 适用场景 | 加载方式 |
+|------|-----------|----------|----------|
+| **Blob URL** | `bundled`（默认） | 单文件 ESM bundle | 读取字节 → Blob → `URL.createObjectURL` → `import()` |
+| **HTTP Server** | `package` | 多文件包（支持相对 import） | 启动本地 HTTP 服务 → `import(http://127.0.0.1:{port}/plugins/{id}/...)` |
+
+### 7.2 加载流程
 
 ```
 1. discoverPlugins()
@@ -401,16 +524,21 @@ Phase 0 将 Sidebar 按钮重构为 data-driven 数组后，插件面板通过 `
 2. validateManifest(manifest)
    ├─ 检查 id, name, version, main 必填字段
    ├─ 检查 engines.oxideterm 版本兼容
-   └─ 检查 contributes 中引用的 id 唯一性
+   └─ 检查 sharedDependencies 可用性（advisory warning）
 
 3. loadPlugin(manifest)
-   ├─ api.pluginReadFile(id, 'index.js') → Uint8Array
-   ├─ Blob(content, 'application/javascript') → URL.createObjectURL
-   ├─ await import(blobUrl) → 获取 { activate, deactivate }
+   ├─ 判断 format:
+   │   ├─ format === 'package' → loadPluginViaServer()
+   │   │   ├─ 启动/复用本地 HTTP Server（首次自动启动）
+   │   │   └─ import(`http://127.0.0.1:{port}/plugins/{id}/{main}`)
+   │   └─ 默认 → loadPluginViaBlobUrl()
+   │       ├─ api.pluginReadFile(id, main) → Uint8Array
+   │       ├─ Blob(content, 'application/javascript') → URL.createObjectURL
+   │       └─ import(blobUrl) → URL.revokeObjectURL(blobUrl)
+   ├─ loadPluginLocales(id, localesDir) → 加载翻译资源
+   ├─ 自动注入 manifest.styles 声明的 CSS 文件
    ├─ buildPluginContext(manifest) → 构建 membrane 层
-   ├─ loadPluginI18n(id, localesDir) → 加载翻译资源
    ├─ await activate(ctx) → 5 秒超时
-   ├─ URL.revokeObjectURL(blobUrl)
    └─ 状态 → 'active'
 
 4. 失败处理
@@ -431,6 +559,10 @@ Phase 0 将 Sidebar 按钮重构为 data-driven 数组后，插件面板通过 `
    │   ├─ 移除 shortcuts
    │   └─ 关闭该插件的所有打开 Tab
    ├─ removePluginI18n(pluginId)
+   ├─ cleanupPluginAssets(pluginId)
+   │   ├─ 移除所有注入的 <style data-plugin="{id}"> 标签
+   │   └─ 释放所有未释放的 blob URL
+   ├─ clearPluginStorage(pluginId)（卸载时清理 localStorage）
    └─ 状态 → 'inactive'
 ```
 
@@ -447,7 +579,7 @@ discoverPlugins()
 
 ## 8. 后端命令（Rust）
 
-### 8.1 新增 `src-tauri/src/commands/plugin.rs`
+### 8.1 基础命令 `src-tauri/src/commands/plugin.rs`
 
 ```rust
 #[tauri::command]
@@ -457,7 +589,7 @@ pub async fn list_plugins() -> Result<Vec<PluginManifest>, String>
 #[tauri::command]
 pub async fn read_plugin_file(plugin_id: String, relative_path: String) -> Result<Vec<u8>, String>
 // 读取指定插件的文件内容
-// 安全检查：relative_path 不能包含 ".."
+// 安全检查：per-component ".." 检测 + canonicalize 校验防止路径遍历
 
 #[tauri::command]
 pub async fn save_plugin_config(config: String) -> Result<(), String>
@@ -468,26 +600,304 @@ pub async fn load_plugin_config() -> Result<String, String>
 // 读取 config_dir()/plugin-config.json
 ```
 
-### 8.2 扩展 `config/storage.rs`
+**安全辅助函数**：
+
+- `validate_plugin_id(id)` — 拒绝空值、`..`、路径分隔符、控制字符
+- `validate_relative_path(path)` — 逐路径组件检查 `..`，拒绝绝对路径
+
+### 8.2 插件文件服务器 `src-tauri/src/commands/plugin_server.rs`
+
+为 v2 多文件包提供本地 HTTP 文件服务，使浏览器可以通过标准 `import()` 加载相互引用的 JS 模块。
 
 ```rust
-pub fn plugins_dir() -> Result<PathBuf, StorageError> {
-    Ok(config_dir()?.join("plugins"))
+/// 启动插件文件服务器。返回端口号。
+/// 如已运行，返回现有端口。
+#[tauri::command]
+pub async fn start_plugin_server(server: State<Arc<PluginFileServer>>) -> Result<u16, String>
+
+/// 获取插件服务器端口（如正在运行）
+#[tauri::command]
+pub async fn get_plugin_server_port(server: State<Arc<PluginFileServer>>) -> Result<Option<u16>, String>
+
+/// 优雅停止插件文件服务器
+#[tauri::command]
+pub async fn stop_plugin_server(server: State<Arc<PluginFileServer>>) -> Result<bool, String>
+```
+
+**服务器特性**：
+
+| 特性 | 实现 |
+|------|------|
+| 绑定地址 | `127.0.0.1:0`（仅回环，OS 分配端口） |
+| URL 格式 | `http://127.0.0.1:{port}/plugins/{plugin-id}/{path}` |
+| CORS | `Access-Control-Allow-Origin: *`（支持 OPTIONS 预检） |
+| MIME 检测 | 自动检测 js/json/css/html/svg/png/jpg/woff2/wasm 等 20+ 类型 |
+| 安全 | 复用 `validate_plugin_id()` + `validate_relative_path()` + canonicalize |
+| 禁止目录列表 | 目录请求返回 403 |
+| 缓存 | `Cache-Control: no-cache`（开发友好） |
+| 生命周期 | 首次加载 v2 插件时自动启动，支持 `tokio::sync::watch` 优雅停机 |
+
+### 8.3 远程安装命令 `src-tauri/src/commands/plugin_registry.rs`
+
+支持从远程仓库发现、下载、安装、更新、卸载插件。
+
+```rust
+/// 从远程 URL 获取插件注册表索引
+#[tauri::command]
+pub async fn fetch_plugin_registry(url: String) -> Result<RegistryIndex, String>
+
+/// 下载、验证并安装插件
+/// - SHA-256 校验和验证
+/// - zip-slip 防护（使用 enclosed_name()）
+/// - 插件 ID 匹配验证
+/// - 最大包大小限制 50MB
+#[tauri::command]
+pub async fn install_plugin(
+    download_url: String,
+    expected_id: String,
+    checksum: Option<String>,
+) -> Result<PluginManifest, String>
+
+/// 卸载插件（删除插件目录）
+#[tauri::command]
+pub async fn uninstall_plugin(plugin_id: String) -> Result<(), String>
+
+/// 检查已安装插件的可用更新
+#[tauri::command]
+pub async fn check_plugin_updates(
+    registry_url: String,
+    installed: Vec<InstalledPluginInfo>,
+) -> Result<Vec<RegistryEntry>, String>
+```
+
+**注册表索引格式**：
+
+```json
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "com.example.my-plugin",
+      "name": "My Plugin",
+      "version": "1.2.0",
+      "description": "Plugin description",
+      "author": "Author Name",
+      "downloadUrl": "https://example.com/plugins/my-plugin-1.2.0.zip",
+      "checksum": "sha256:abc123...",
+      "size": 12345,
+      "tags": ["utility", "terminal"],
+      "homepage": "https://github.com/example/my-plugin",
+      "updatedAt": "2026-02-08T12:00:00Z"
+    }
+  ]
 }
 ```
 
-### 8.3 注册命令
+**安全措施**：
 
-在 `commands/mod.rs` 添加 `pub mod plugin;`。
-在 `lib.rs` 两处 `invoke_handler!` 宏中注册 4 个命令。
+| 措施 | 说明 |
+|------|------|
+| SHA-256 校验 | 下载后验证校验和，支持 `sha256:` 前缀格式 |
+| zip-slip 防护 | 使用 `enclosed_name()` 拒绝包含 `..` 的路径 |
+| ID 匹配验证 | 解压后验证 `plugin.json` 中的 ID 与预期一致 |
+| 大小限制 | 最大包大小 50MB |
+| 原子安装 | 先解压到临时目录，验证后原子重命名 |
 
 ---
 
-## 9. 前置重构（Phase 0）
+## 9. 远程安装系统
+
+### 9.1 架构概述
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Plugin Manager UI                             │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  [已安装]  [浏览]                                            ││
+│  │                                                              ││
+│  │  ┌─────────────────────────────────────────────────────────┐││
+│  │  │  搜索插件...                              [刷新]         │││
+│  │  └─────────────────────────────────────────────────────────┘││
+│  │                                                              ││
+│  │  ┌─────────────────────────────────────────────────────────┐││
+│  │  │  Plugin Name          v1.2.0    [已安装] / [安装] / [更新]│││
+│  │  │  Plugin description...                                   │││
+│  │  │  by Author  |  utility, terminal                         │││
+│  │  └─────────────────────────────────────────────────────────┘││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      pluginStore (Zustand)                       │
+│  registryEntries: RegistryEntry[]                                │
+│  installProgress: Map<string, InstallProgress>                   │
+│  availableUpdates: RegistryEntry[]                               │
+└───────────────��─────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Frontend API (api.ts)                       │
+│  pluginFetchRegistry(url) → RegistryIndex                        │
+│  pluginInstall(downloadUrl, expectedId, checksum?) → Manifest    │
+│  pluginUninstall(pluginId) → void                                │
+│  pluginCheckUpdates(registryUrl, installed[]) → RegistryEntry[]  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Rust Backend (plugin_registry.rs)              │
+│  fetch_plugin_registry  →  reqwest GET → parse JSON              │
+│  install_plugin         →  download → verify → extract → install │
+│  uninstall_plugin       →  validate → remove directory           │
+│  check_plugin_updates   →  fetch registry → compare versions     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 安装流程
+
+```
+用户点击 [安装]
+    │
+    ▼
+setInstallProgress(id, 'downloading')
+    │
+    ▼
+api.pluginInstall(downloadUrl, expectedId, checksum)
+    │
+    ├─ Rust: reqwest GET downloadUrl
+    │
+    ├─ 验证大小 ≤ 50MB
+    │
+    ├─ 验证 SHA-256 校验和（如提供）
+    │
+    ├─ 解压到临时目录 .{id}-installing/
+    │
+    ├─ 读取并验证 plugin.json
+    │   └─ manifest.id === expectedId
+    │
+    ├─ 原子重命名: .{id}-installing/ → {id}/
+    │
+    └─ 返回 PluginManifest
+    │
+    ▼
+setInstallProgress(id, 'installing')
+    │
+    ▼
+pluginStore.registerPlugin(manifest)
+    │
+    ▼
+loadPlugin(manifest)  // 激活插件
+    │
+    ▼
+setInstallProgress(id, 'done')
+    │
+    ▼
+clearInstallProgress(id)  // 2秒后清除
+```
+
+### 9.3 更新流程
+
+```
+用户点击 [更新]
+    │
+    ▼
+unloadPlugin(pluginId)  // 先卸载旧版本
+    │
+    ▼
+install_plugin(...)     // 安装新版本（覆盖旧目录）
+    │
+    ▼
+loadPlugin(manifest)    // 激活新版本
+    │
+    ▼
+从 availableUpdates 中移除该插件
+```
+
+### 9.4 Store 状态
+
+```typescript
+// pluginStore.ts 新增状态
+interface PluginStore {
+  // ... 现有状态 ...
+
+  // 远程注册表
+  registryEntries: RegistryEntry[];
+  installProgress: Map<string, InstallProgress>;
+  availableUpdates: RegistryEntry[];
+
+  // 操作
+  setRegistryEntries(entries: RegistryEntry[]): void;
+  setInstallProgress(pluginId: string, state: InstallState, error?: string): void;
+  clearInstallProgress(pluginId: string): void;
+  setAvailableUpdates(updates: RegistryEntry[]): void;
+  hasUpdate(pluginId: string): boolean;
+}
+
+type InstallState = 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
+
+type InstallProgress = {
+  state: InstallState;
+  error?: string;
+};
+```
+
+### 9.5 类型定义
+
+```typescript
+// types/plugin.ts 新增类型
+
+/** 远程注册表中的插件条目 */
+export type RegistryEntry = {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  version: string;
+  minOxidetermVersion?: string;
+  downloadUrl: string;
+  checksum?: string;
+  size?: number;
+  tags?: string[];
+  homepage?: string;
+  updatedAt?: string;
+};
+
+/** 注册表索引 */
+export type RegistryIndex = {
+  version: number;
+  plugins: RegistryEntry[];
+};
+
+/** 安装状态 */
+export type InstallState = 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
+```
+
+### 9.6 配置
+
+插件全局配置 (`plugin-config.json`) 扩展：
+
+```json
+{
+  "plugins": {
+    "com.example.my-plugin": { "enabled": true }
+  },
+  "registryUrl": "",
+  "autoCheckUpdates": true,
+  "lastUpdateCheck": "2026-02-08T12:00:00Z"
+}
+```
+
+> **注意**：`registryUrl` 默认为空。当未配置时，浏览标签页将显示"即将推出"占位符。
+> 如需使用自定义插件仓库，请将 `registryUrl` 设置为有效的 registry JSON 地址。
+
+---
+
+## 10. 前置重构（Phase 0）
 
 在引入插件系统之前，需要两个独立的重构消除技术债：
 
-### 9.1 TerminalView `handleWsMessage` 提取
+### 10.1 TerminalView `handleWsMessage` 提取
 
 **问题**：`TerminalView.tsx` 有两处几乎相同的 `ws.onmessage` 处理器：
 - **L505**（重连路径）：完整实现，含 Windows IME `isComposingRef` 分支
@@ -515,7 +925,7 @@ ws.onmessage = (e) => handleWsMessage(e, ws);
 
 3. **验证**：现有终端行为不变；Windows IME 在重连后也能正确工作。
 
-### 9.2 Sidebar 按钮 data-driven 重构
+### 10.2 Sidebar 按钮 data-driven 重构
 
 **问题**：折叠态（L612-L760）和展开态（L786-L920）各有一套硬编码按钮列表，~200 行几乎完全重复。
 
@@ -550,47 +960,52 @@ Sidebar 按钮已重构为三区结构（`topButtons` + 分隔线 + `bottomButto
 
 ---
 
-## 10. 文件清单
+## 11. 文件清单
 
-### 10.1 需要创建的文件（15 个）
+### 11.1 需要创建的文件（19 个）
 
-| 文件 | Phase | 用途 | 预估行数 |
-|------|-------|------|---------|
-| `src/types/plugin.ts` | 1 | 全部插件 TypeScript 类型 | ~150 |
-| `src/store/pluginStore.ts` | 1 | 插件状态 + UI 组件注册表 | ~200 |
-| `src/lib/plugin/pluginLoader.ts` | 3 | 发现、校验、加载、卸载生命周期 | ~250 |
-| `src/lib/plugin/pluginContextFactory.ts` | 3 | 构建 Membrane 隔离的 PluginContext | ~300 |
-| `src/lib/plugin/pluginEventBridge.ts` | 4 | appStore → 插件事件派发 | ~120 |
-| `src/lib/plugin/pluginTerminalHooks.ts` | 5 | 输入/输出管道 + 快捷键查找 | ~100 |
-| `src/lib/plugin/pluginSettingsManager.ts` | 4 | 插件设置读写与持久化 | ~80 |
-| `src/lib/plugin/pluginI18nManager.ts` | 4 | 插件 i18n 命名空间注册 | ~60 |
-| `src/lib/plugin/pluginStorage.ts` | 3 | 插件作用域 localStorage 封装 | ~40 |
-| `src/lib/plugin/pluginUIKit.tsx` | 6 | 插件专用 React UI 组件库（24 个组件） | ~1072 |
-| `src/lib/plugin/pluginIconResolver.ts` | 6 | Lucide 图标名 → React 组件动态解析 | ~35 |
-| `src/components/plugin/PluginTabRenderer.tsx` | 6 | 插件 Tab 视图渲染器 | ~50 |
-| `src/components/plugin/PluginSidebarRenderer.tsx` | 6 | 插件侧边栏面板渲染器 | ~50 |
-| `src/components/plugin/PluginManagerView.tsx` | 7 | 插件管理 UI | ~300 |
-| `src-tauri/src/commands/plugin.rs` | 2 | 后端：扫描目录、读文件、配置读写 | ~120 |
+| 文件 | 用途 | 实际行数 |
+|------|------|---------|
+| `src/types/plugin.ts` | 全部插件 TypeScript 类型（v1 + v2 格式 + PluginAssetsAPI） | ~280 |
+| `src/store/pluginStore.ts` | 插件状态 + UI 组件注册表 + 远程注册表 | ~350 |
+| `src/lib/plugin/pluginLoader.ts` | 发现、校验、双策略加载、卸载生命周期 | ~417 |
+| `src/lib/plugin/pluginContextFactory.ts` | 构建 Membrane 隔离的 PluginContext（10 个子 API） | ~431 |
+| `src/lib/plugin/pluginEventBridge.ts` | appStore → 插件事件派发 | ~120 |
+| `src/lib/plugin/pluginTerminalHooks.ts` | 输入/输出管道 + 快捷键查找 | ~100 |
+| `src/lib/plugin/pluginSettingsManager.ts` | 插件设置读写与持久化 | ~80 |
+| `src/lib/plugin/pluginI18nManager.ts` | 插件 i18n 命名空间注册 | ~60 |
+| `src/lib/plugin/pluginStorage.ts` | 插件作用域 localStorage 封装 | ~40 |
+| `src/lib/plugin/pluginUIKit.tsx` | 插件专用 React UI 组件库（24 个组件） | ~1072 |
+| `src/lib/plugin/pluginIconResolver.ts` | Lucide 图标名 → React 组件动态解析 | ~35 |
+| `src/lib/plugin/pluginUtils.ts` | 共享工具函数（toSnapshot 等） | ~30 |
+| `src/components/plugin/PluginTabRenderer.tsx` | 插件 Tab 视图渲染器 | ~50 |
+| `src/components/plugin/PluginSidebarRenderer.tsx` | 插件侧边栏面板渲染器 | ~50 |
+| `src/components/plugin/PluginManagerView.tsx` | 插件管理 UI（已安装 + 浏览双标签页） | ~740 |
+| `src/components/plugin/PluginConfirmDialog.tsx` | 主题化确认对话框（Radix Dialog）| ~60 |
+| `src-tauri/src/commands/plugin.rs` | 后端：扫描目录、读文件、配置读写、路径安全 | ~290 |
+| `src-tauri/src/commands/plugin_server.rs` | 后端：多文件包本地 HTTP 服务器 + 优雅停机 | ~330 |
+| `src-tauri/src/commands/plugin_registry.rs` | 后端：远程安装、卸载、更新检查 | ~366 |
 
-### 10.2 需要修改的文件（11 个）
+### 11.2 需要修改的文件（12 个）
 
-| 文件 | Phase | 修改内容 |
-|------|-------|----------|
-| `src/components/terminal/TerminalView.tsx` | 0, 5 | 提取 `handleWsMessage`；注入输入/输出管道 |
-| `src/components/layout/Sidebar.tsx` | 0, 6 | 三区布局重构（topButtons/bottomButtons + 分隔线）；插件面板注入 |
-| `src/components/layout/TabBar.tsx` | 6 | 插件 Tab 图标渲染（`PluginTabIcon` + `resolvePluginIcon`） |
-| `src/types/index.ts` | 1 | `TabType` 添加 `'plugin'`，`Tab` 添加 `pluginTabId?` |
-| `src/store/appStore.ts` | 6 | `createTab` 添加 plugin 分支 |
-| `src/store/settingsStore.ts` | 6 | `SidebarSection` 扩展支持 plugin 格式 |
-| `src/components/layout/AppLayout.tsx` | 6 | Tab 渲染添加 plugin 分支 |
-| `src/hooks/useTerminalKeyboard.ts` | 5 | 添加插件快捷键查找 |
-| `src/main.tsx` | 3 | 暴露 `window.__OXIDE__`（含 `ui: pluginUIKit`） |
-| `src/App.tsx` | 7 | 启动时初始化插件系统 |
-| `src-tauri/src/commands/mod.rs` + `lib.rs` | 2 | 注册 plugin 命令模块 |
+| 文件 | 修改内容 |
+|------|----------|
+| `src/components/terminal/TerminalView.tsx` | 提取 `handleWsMessage`；注入输入/输出管道；注册 writer 回调 |
+| `src/components/terminal/LocalTerminalView.tsx` | 注册 writer 回调（本地终端写入通道） |
+| `src/components/layout/Sidebar.tsx` | 三区布局重构（topButtons/bottomButtons + 分隔线）；插件面板注入 |
+| `src/components/layout/TabBar.tsx` | 插件 Tab 图标渲染（`PluginTabIcon` + `resolvePluginIcon`） |
+| `src/types/index.ts` | `TabType` 添加 `'plugin'`，`Tab` 添加 `pluginTabId?` |
+| `src/store/appStore.ts` | `createTab` 添加 plugin 分支 |
+| `src/store/settingsStore.ts` | `SidebarSection` 扩展支持 plugin 格式 |
+| `src/components/layout/AppLayout.tsx` | Tab 渲染添加 plugin 分支 |
+| `src/hooks/useTerminalKeyboard.ts` | 添加插件快捷键查找 |
+| `src/main.tsx` | 暴露 `window.__OXIDE__`（含 `ui: pluginUIKit`） |
+| `src/App.tsx` | 启动时初始化插件系统；挂载 PluginConfirmDialog |
+| `src/lib/terminalRegistry.ts` | 添加 TerminalWriter 类型 + writeToTerminal 导出 |
 
 ---
 
-## 11. 实施顺序
+## 12. 实施顺序
 
 ```
 Phase 0 — 前置重构（无功能变更）
@@ -635,11 +1050,18 @@ Phase 6 — UI 集成
 Phase 7 — 管理界面与初始化
   ├─ 7.1 创建 PluginManagerView.tsx
   └─ 7.2 修改 App.tsx（启动初始化）
+
+Phase 8 — 远程安装系统 ✅
+  ├─ 8.1 创建 src-tauri/src/commands/plugin_registry.rs
+  ├─ 8.2 扩展 src/lib/api.ts（远程安装 API）
+  ├─ 8.3 扩展 src/store/pluginStore.ts（注册表状态）
+  ├─ 8.4 扩展 src/types/plugin.ts（RegistryEntry 等类型）
+  └─ 8.5 更新 PluginManagerView.tsx（双标签页 UI）
 ```
 
 ---
 
-## 12. 验证方式
+## 13. 验证方式
 
 1. `npx tsc --noEmit` — 0 类型错误
 2. `npx vite build` — 前端构建成功
@@ -649,10 +1071,12 @@ Phase 7 — 管理界面与初始化
 6. 测试终端输入拦截：插件修改输入后 WebSocket 发送修改后的数据
 7. 测试插件崩溃隔离：故意抛异常的插件不影响其他功能
 8. 测试插件卸载：所有 Disposable 被撤销，UI 注册被移除
+9. 测试远程安装：从注册表下载、校验、安装插件
+10. 测试更新检查：检测已安装插件的可用更新
 
 ---
 
-## 13. SYSTEM_INVARIANTS 兼容性声明
+## 14. SYSTEM_INVARIANTS 兼容性声明
 
 本插件系统设计**完全兼容** `docs/SYSTEM_INVARIANTS.md` 中定义的所有不变量：
 
@@ -668,4 +1092,4 @@ Phase 7 — 管理界面与初始化
 
 ---
 
-*文档版本: v1.1 | 最后更新: 2026-02-09*
+*文档版本: v2.0 | 最后更新: 2026-02-08*

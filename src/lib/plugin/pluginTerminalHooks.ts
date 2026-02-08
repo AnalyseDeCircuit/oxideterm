@@ -110,13 +110,21 @@ export function runOutputPipeline(data: Uint8Array, sessionId: string): Uint8Arr
 /**
  * Match a keyboard event against registered plugin shortcuts.
  *
+ * Platform normalization: on macOS, `Cmd` (metaKey) is treated as `Ctrl`
+ * because plugins declare shortcuts as `Ctrl+X` which should map to `⌘X`
+ * on macOS. This matches the convention used by VS Code, iTerm2, etc.
+ * Both `event.ctrlKey` and `event.metaKey` are normalized to "ctrl" in the
+ * key combo string, so `Ctrl+K` matches both `Cmd+K` on macOS and `Ctrl+K`
+ * on Windows/Linux.
+ *
  * @returns The handler function if matched, undefined otherwise
  */
 export function matchPluginShortcut(event: KeyboardEvent): (() => void) | undefined {
   const shortcuts = usePluginStore.getState().shortcuts;
   if (shortcuts.size === 0) return undefined;
 
-  // Build normalized key from event
+  // Build normalized key from event.
+  // Platform normalization: Ctrl and Cmd(⌘) are unified as "ctrl".
   const parts: string[] = [];
   if (event.ctrlKey || event.metaKey) parts.push('ctrl');
   if (event.shiftKey) parts.push('shift');

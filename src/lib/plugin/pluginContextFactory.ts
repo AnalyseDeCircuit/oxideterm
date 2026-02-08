@@ -17,43 +17,56 @@ import type {
   PluginI18nAPI,
   PluginStorageAPI,
   PluginBackendAPI,
+  PluginAssetsAPI,
   ConnectionSnapshot,
   Disposable,
   InputInterceptor,
   OutputProcessor,
   PluginTabProps,
 } from '../../types/plugin';
-import type { SshConnectionInfo, SshConnectionState } from '../../types';
+import type { SshConnectionState } from '../../types';
 import { useAppStore } from '../../store/appStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { createPluginStorage } from './pluginStorage';
 import { pluginEventBridge } from './pluginEventBridge';
 import { createPluginSettingsManager } from './pluginSettingsManager';
 import { createPluginI18nManager } from './pluginI18nManager';
+import { toSnapshot } from './pluginUtils';
 import {
   findPaneBySessionId,
   getTerminalBuffer,
   getTerminalSelection,
+  writeToTerminal as registryWriteToTerminal,
 } from '../terminalRegistry';
 import { invoke } from '@tauri-apps/api/core';
 
+// ── Module-level asset URL tracking for cleanup ──────────────────────────
+const activeAssetUrls = new Map<string, Set<string>>();
+
+/** MIME type map for common asset extensions */
+const MIME_MAP: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+  otf: 'font/otf', ico: 'image/x-icon', json: 'application/json',
+  css: 'text/css', js: 'application/javascript',
+};
+
 /**
- * Convert SshConnectionInfo to a frozen ConnectionSnapshot
+ * Clean up all asset URLs and injected styles for a plugin.
+ * Called from pluginLoader.ts during unloadPlugin().
  */
-function toSnapshot(conn: SshConnectionInfo): ConnectionSnapshot {
-  return Object.freeze({
-    id: conn.id,
-    host: conn.host,
-    port: conn.port,
-    username: conn.username,
-    state: conn.state,
-    refCount: conn.refCount,
-    keepAlive: conn.keepAlive,
-    createdAt: conn.createdAt,
-    lastActive: conn.lastActive,
-    terminalIds: Object.freeze([...conn.terminalIds]),
-    parentConnectionId: conn.parentConnectionId,
-  });
+export function cleanupPluginAssets(pluginId: string): void {
+  // Remove injected CSS
+  document.querySelectorAll(`style[data-plugin="${pluginId}"]`).forEach(el => el.remove());
+  // Revoke blob URLs
+  const urls = activeAssetUrls.get(pluginId);
+  if (urls) {
+    for (const url of urls) {
+      URL.revokeObjectURL(url);
+    }
+    activeAssetUrls.delete(pluginId);
+  }
 }
 
 /**
@@ -221,9 +234,13 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     },
     async showConfirm(opts) {
       return new Promise<boolean>((resolve) => {
-        // Simple confirm dialog
-        const result = window.confirm(`${opts.title}\n\n${opts.description}`);
-        resolve(result);
+        // Emit to PluginConfirmDialog via event bridge; the component
+        // renders a themed Radix dialog and resolves the promise.
+        pluginEventBridge.emit('plugin:confirm', {
+          title: opts.title,
+          description: opts.description,
+          resolve,
+        });
       });
     },
   });
@@ -269,11 +286,15 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         usePluginStore.setState({ shortcuts });
       });
     },
-    writeToTerminal(_sessionId: string, _text: string) {
-      // Writing directly to terminal requires xterm instance access.
-      // For now, this is a no-op — plugins can use the output processor instead.
-      // A future version may expose a write channel via the terminal registry.
-      console.warn('[PluginContext] writeToTerminal is not yet implemented');
+    writeToTerminal(sessionId: string, text: string) {
+      const paneId = findPaneBySessionId(sessionId);
+      if (!paneId) {
+        console.warn(`[PluginContext] writeToTerminal: no pane found for session "${sessionId}"`);
+        return;
+      }
+      if (!registryWriteToTerminal(paneId, text)) {
+        console.warn(`[PluginContext] writeToTerminal: no writer registered for pane "${paneId}"`);
+      }
     },
     getBuffer(sessionId: string): string | null {
       const paneId = findPaneBySessionId(sessionId);
@@ -352,6 +373,48 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     },
   });
 
+  // ── ctx.assets ──────────────────────────────────────────────────
+  const assets: PluginAssetsAPI = Object.freeze({
+    async loadCSS(relativePath: string): Promise<Disposable> {
+      const cssPath = relativePath.replace(/^\.\//, '');
+      const fileBytes: number[] = await invoke('read_plugin_file', {
+        pluginId, relativePath: cssPath,
+      });
+      const cssText = new TextDecoder().decode(new Uint8Array(fileBytes));
+
+      const styleEl = document.createElement('style');
+      styleEl.setAttribute('data-plugin', pluginId);
+      styleEl.setAttribute('data-path', cssPath);
+      styleEl.textContent = cssText;
+      document.head.appendChild(styleEl);
+
+      return createDisposable(pluginId, () => { styleEl.remove(); });
+    },
+
+    async getAssetUrl(relativePath: string): Promise<string> {
+      const assetPath = relativePath.replace(/^\.\//, '');
+      const fileBytes: number[] = await invoke('read_plugin_file', {
+        pluginId, relativePath: assetPath,
+      });
+
+      const ext = assetPath.split('.').pop()?.toLowerCase() ?? '';
+      const mime = MIME_MAP[ext] ?? 'application/octet-stream';
+      const blob = new Blob([new Uint8Array(fileBytes)], { type: mime });
+      const url = URL.createObjectURL(blob);
+
+      if (!activeAssetUrls.has(pluginId)) {
+        activeAssetUrls.set(pluginId, new Set());
+      }
+      activeAssetUrls.get(pluginId)!.add(url);
+      return url;
+    },
+
+    revokeAssetUrl(url: string): void {
+      URL.revokeObjectURL(url);
+      activeAssetUrls.get(pluginId)?.delete(url);
+    },
+  });
+
   // ── Build final frozen context ────────────────────────────────────
   return Object.freeze({
     pluginId,
@@ -363,5 +426,6 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     i18n,
     storage: storageApi,
     api,
+    assets,
   });
 }

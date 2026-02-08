@@ -1216,6 +1216,57 @@ export const api = {
     if (USE_MOCK) return '{}';
     return invoke('load_plugin_config');
   },
+
+  /** Start the plugin file server (for multi-file packages). Returns the port. */
+  pluginStartServer: async (): Promise<number> => {
+    if (USE_MOCK) return 0;
+    return invoke('start_plugin_server');
+  },
+
+  /** Get the plugin file server port, if running. */
+  pluginGetServerPort: async (): Promise<number | null> => {
+    if (USE_MOCK) return null;
+    return invoke('get_plugin_server_port');
+  },
+
+  /** Stop the plugin file server gracefully. Returns true if it was running. */
+  pluginStopServer: async (): Promise<boolean> => {
+    if (USE_MOCK) return false;
+    return invoke('stop_plugin_server');
+  },
+
+  // ============ Plugin Registry (Remote Installation) ============
+
+  /** Fetch the plugin registry index from a remote URL */
+  pluginFetchRegistry: async (url: string): Promise<import('../types/plugin').RegistryIndex> => {
+    if (USE_MOCK) return { version: 1, plugins: [] };
+    return invoke('fetch_plugin_registry', { url });
+  },
+
+  /** Download, verify, and install a plugin from a remote URL */
+  pluginInstall: async (
+    downloadUrl: string,
+    expectedId: string,
+    checksum?: string,
+  ): Promise<PluginManifest> => {
+    if (USE_MOCK) throw new Error('Mock mode does not support plugin installation');
+    return invoke('install_plugin', { downloadUrl, expectedId, checksum });
+  },
+
+  /** Uninstall a plugin by removing its directory */
+  pluginUninstall: async (pluginId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('uninstall_plugin', { pluginId });
+  },
+
+  /** Check for available plugin updates */
+  pluginCheckUpdates: async (
+    registryUrl: string,
+    installed: Array<{ id: string; version: string }>,
+  ): Promise<import('../types/plugin').RegistryEntry[]> => {
+    if (USE_MOCK) return [];
+    return invoke('check_plugin_updates', { registryUrl, installed });
+  },
 };
 
 

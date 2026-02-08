@@ -15,6 +15,8 @@ import type {
   InputInterceptor,
   OutputProcessor,
   PluginTabProps,
+  RegistryEntry,
+  InstallState,
 } from '../types/plugin';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -58,6 +60,12 @@ type ShortcutEntry = {
   handler: () => void;
 };
 
+/** Plugin install progress info */
+type InstallProgress = {
+  state: InstallState;
+  error?: string;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Store Interface
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,6 +86,14 @@ interface PluginStore {
   shortcuts: Map<string, ShortcutEntry>;
   /** Disposables per plugin: key = pluginId */
   disposables: Map<string, Disposable[]>;
+
+  // ── Registry State (Remote Installation) ───────────────────────────
+  /** Plugins available in the remote registry */
+  registryEntries: RegistryEntry[];
+  /** Installation progress per plugin: key = pluginId */
+  installProgress: Map<string, InstallProgress>;
+  /** Plugins with available updates */
+  availableUpdates: RegistryEntry[];
 
   // ── Plugin Lifecycle ────────────────────────────────────────────────
   /** Register a discovered plugin (initially inactive) */
@@ -107,7 +123,12 @@ interface PluginStore {
   registerInputInterceptor: (pluginId: string, handler: InputInterceptor) => void;
   /** Register an output processor */
   registerOutputProcessor: (pluginId: string, handler: OutputProcessor) => void;
-  /** Register a keyboard shortcut */
+  /**
+   * Register a keyboard shortcut.
+   * Keys are normalized: lowercased, sorted (e.g. "ctrl+shift+k").
+   * On macOS, Cmd(⌘) is treated as Ctrl — plugins declare "Ctrl+X" and
+   * it matches both Cmd+X on macOS and Ctrl+X on Windows/Linux.
+   */
   registerShortcut: (pluginId: string, command: string, key: string, handler: () => void) => void;
 
   // ── Disposable Tracking ─────────────────────────────────────────────
@@ -127,6 +148,18 @@ interface PluginStore {
   getTabView: (pluginTabId: string) => TabViewEntry | undefined;
   /** Find shortcut handler by normalized key combo */
   getShortcutHandler: (key: string) => (() => void) | undefined;
+
+  // ── Registry Actions ───────────────────────────────────────────────
+  /** Set registry entries from remote fetch */
+  setRegistryEntries: (entries: RegistryEntry[]) => void;
+  /** Set install progress for a plugin */
+  setInstallProgress: (pluginId: string, state: InstallState, error?: string) => void;
+  /** Clear install progress for a plugin */
+  clearInstallProgress: (pluginId: string) => void;
+  /** Set available updates */
+  setAvailableUpdates: (updates: RegistryEntry[]) => void;
+  /** Check if a plugin has an update available */
+  hasUpdate: (pluginId: string) => boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -142,6 +175,9 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   outputProcessors: [],
   shortcuts: new Map(),
   disposables: new Map(),
+  registryEntries: [],
+  installProgress: new Map(),
+  availableUpdates: [],
 
   // ── Plugin Lifecycle ────────────────────────────────────────────────
 
@@ -241,38 +277,38 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   cleanupPlugin: (pluginId) => {
     const state = get();
 
-    // 1. Dispose all tracked disposables
+    // 1. Dispose all tracked disposables.
+    //    Some disposables have real side effects beyond store removal (e.g. event
+    //    unsubscription from pluginEventBridge, DOM style element removal).
+    //    Their individual store-removal callbacks are redundant with the bulk
+    //    removal below, but harmless — we keep both for defense-in-depth.
     const pluginDisposables = state.disposables.get(pluginId) ?? [];
     for (const d of pluginDisposables) {
       try { d.dispose(); } catch { /* swallow */ }
     }
 
+    // 2. Bulk removal — single setState for efficiency.
+    //    This is the authoritative cleanup; the individual disposal above may
+    //    have already removed some entries, which is safe (idempotent).
     set((prev) => {
-      // 2. Remove tab views
       const tabViews = new Map(prev.tabViews);
       for (const [key, entry] of tabViews) {
         if (entry.pluginId === pluginId) tabViews.delete(key);
       }
 
-      // 3. Remove sidebar panels
       const sidebarPanels = new Map(prev.sidebarPanels);
       for (const [key, entry] of sidebarPanels) {
         if (entry.pluginId === pluginId) sidebarPanels.delete(key);
       }
 
-      // 4. Remove input interceptors
       const inputInterceptors = prev.inputInterceptors.filter((e) => e.pluginId !== pluginId);
-
-      // 5. Remove output processors
       const outputProcessors = prev.outputProcessors.filter((e) => e.pluginId !== pluginId);
 
-      // 6. Remove shortcuts
       const shortcuts = new Map(prev.shortcuts);
       for (const [key, entry] of shortcuts) {
         if (entry.pluginId === pluginId) shortcuts.delete(key);
       }
 
-      // 7. Remove disposables tracking
       const disposables = new Map(prev.disposables);
       disposables.delete(pluginId);
 
@@ -301,5 +337,35 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   getShortcutHandler: (key) => {
     const normalizedKey = key.toLowerCase().split('+').sort().join('+');
     return get().shortcuts.get(normalizedKey)?.handler;
+  },
+
+  // ── Registry Actions ───────────────────────────────────────────────
+
+  setRegistryEntries: (entries) => {
+    set({ registryEntries: entries });
+  },
+
+  setInstallProgress: (pluginId, state, error) => {
+    set((prev) => {
+      const installProgress = new Map(prev.installProgress);
+      installProgress.set(pluginId, { state, error });
+      return { installProgress };
+    });
+  },
+
+  clearInstallProgress: (pluginId) => {
+    set((prev) => {
+      const installProgress = new Map(prev.installProgress);
+      installProgress.delete(pluginId);
+      return { installProgress };
+    });
+  },
+
+  setAvailableUpdates: (updates) => {
+    set({ availableUpdates: updates });
+  },
+
+  hasUpdate: (pluginId) => {
+    return get().availableUpdates.some((u) => u.id === pluginId);
   },
 }));

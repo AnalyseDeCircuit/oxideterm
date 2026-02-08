@@ -13,10 +13,12 @@
 
 type BufferGetter = () => string;
 type SelectionGetter = () => string;
+type TerminalWriter = (data: string) => void;
 
 interface TerminalEntry {
   getter: BufferGetter;
   selectionGetter?: SelectionGetter;                // Optional: get current selection
+  writer?: TerminalWriter;                          // Optional: write data to terminal's transport
   registeredAt: number;
   tabId: string;
   sessionId: string;                                // Original session ID for reference
@@ -40,6 +42,7 @@ const MAX_AGE_MS = 5 * 60 * 1000;
  * @param terminalType - Whether this is SSH or Local terminal
  * @param getter - Function that returns the terminal buffer content
  * @param selectionGetter - Optional: Function that returns the current selection
+ * @param writer - Optional: Function that writes data to the terminal's transport (WebSocket/PTY)
  */
 export function registerTerminalBuffer(
   paneId: string, 
@@ -47,11 +50,13 @@ export function registerTerminalBuffer(
   sessionId: string,
   terminalType: 'terminal' | 'local_terminal',
   getter: BufferGetter,
-  selectionGetter?: SelectionGetter
+  selectionGetter?: SelectionGetter,
+  writer?: TerminalWriter,
 ): void {
   registry.set(paneId, {
     getter,
     selectionGetter,
+    writer,
     registeredAt: Date.now(),
     tabId,
     sessionId,
@@ -349,6 +354,26 @@ export function updateSelectionGetter(paneId: string, selectionGetter: Selection
   const entry = registry.get(paneId);
   if (entry) {
     entry.selectionGetter = selectionGetter;
+  }
+}
+
+/**
+ * Write data to a terminal's transport layer (WebSocket/PTY).
+ * Used by the plugin system's writeToTerminal API.
+ * @param paneId - The pane ID
+ * @param data - Text data to send to the terminal
+ * @returns true if write succeeded, false if no writer registered
+ */
+export function writeToTerminal(paneId: string, data: string): boolean {
+  const entry = registry.get(paneId);
+  if (!entry?.writer) return false;
+
+  try {
+    entry.writer(data);
+    return true;
+  } catch (e) {
+    console.error('[TerminalRegistry] Failed to write to terminal:', e);
+    return false;
   }
 }
 

@@ -74,6 +74,7 @@ use bridge::BridgeManager;
 use commands::config::ConfigState;
 use commands::session_tree::SessionTreeState;
 use commands::HealthRegistry;
+use commands::plugin_server::PluginFileServer;
 use session::{AutoReconnectService, SessionRegistry};
 use sftp::session::SftpRegistry;
 use sftp::{ProgressStore, RedbProgressStore, TransferManager};
@@ -289,7 +290,8 @@ pub fn run() {
         .manage(transfer_manager)
         .manage(progress_store)
         .manage(ssh_connection_registry.clone())
-        .manage(session_tree_state);
+        .manage(session_tree_state)
+        .manage(Arc::new(PluginFileServer::new()));
 
     // Conditionally add AI chat store (may be None if initialization failed)
     let builder = if let Some(ai_store) = ai_chat_store {
@@ -548,8 +550,16 @@ pub fn run() {
             commands::read_plugin_file,
             commands::save_plugin_config,
             commands::load_plugin_config,
+            // Plugin file server commands
+            commands::start_plugin_server,
+            commands::get_plugin_server_port,
+            commands::stop_plugin_server,
+            // Plugin registry commands (remote install)
+            commands::fetch_plugin_registry,
+            commands::install_plugin,
+            commands::uninstall_plugin,
+            commands::check_plugin_updates,
         ]);
-
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
             // Session commands (v2 with registry)
@@ -738,6 +748,15 @@ pub fn run() {
             commands::read_plugin_file,
             commands::save_plugin_config,
             commands::load_plugin_config,
+            // Plugin file server commands
+            commands::start_plugin_server,
+            commands::get_plugin_server_port,
+            commands::stop_plugin_server,
+            // Plugin registry commands (remote install)
+            commands::fetch_plugin_registry,
+            commands::install_plugin,
+            commands::uninstall_plugin,
+            commands::check_plugin_updates,
         ]);
 
     builder
