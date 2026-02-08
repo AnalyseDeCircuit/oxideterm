@@ -38,30 +38,35 @@ export async function waitForConnectionActive(
   timeoutMs = 15000
 ): Promise<void> {
   const current = useAppStore.getState().connections.get(connectionId);
-  if (!current) {
-    throw new Error(CONNECTION_NOT_FOUND);
-  }
+  if (current && isActiveState(current.state)) return;
+  if (current && !isBlockedState(current.state)) return;
 
-  if (isActiveState(current.state)) return;
-  if (!isBlockedState(current.state)) return;
+  if (!current) {
+    // Best effort refresh before waiting, covering map propagation lag.
+    useAppStore.getState().refreshConnections().catch(() => {
+      // Ignore refresh errors and rely on timeout/error signaling below.
+    });
+  }
 
   await new Promise<void>((resolve, reject) => {
     let finished = false;
+    let unsub: (() => void) | null = null;
     const timer = setTimeout(() => {
       if (finished) return;
       finished = true;
-      unsub();
+      if (unsub) unsub();
+      const latest = useAppStore.getState().connections.get(connectionId);
+      if (!latest) {
+        reject(new Error(CONNECTION_NOT_FOUND));
+        return;
+      }
       reject(new Error(CONNECTION_RECONNECTING));
     }, timeoutMs);
 
-    const unsub = useAppStore.subscribe((state) => {
+    unsub = useAppStore.subscribe((state) => {
         const next = state.connections.get(connectionId);
         if (!next) {
-          if (finished) return;
-          finished = true;
-          clearTimeout(timer);
-          unsub();
-          reject(new Error(CONNECTION_NOT_FOUND));
+          // Connection record may arrive with a small delay; keep waiting.
           return;
         }
 
@@ -69,7 +74,16 @@ export async function waitForConnectionActive(
           if (finished) return;
           finished = true;
           clearTimeout(timer);
-          unsub();
+          if (unsub) unsub();
+          resolve();
+          return;
+        }
+
+        if (!isBlockedState(next.state)) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          if (unsub) unsub();
           resolve();
           return;
         }
@@ -78,7 +92,7 @@ export async function waitForConnectionActive(
           if (finished) return;
           finished = true;
           clearTimeout(timer);
-          unsub();
+          if (unsub) unsub();
           reject(new Error(CONNECTION_DISCONNECTED));
         }
       });

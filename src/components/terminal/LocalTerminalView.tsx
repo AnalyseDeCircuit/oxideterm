@@ -25,6 +25,7 @@ import {
   touchTerminalEntry 
 } from '../../lib/terminalRegistry';
 import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
+import { api } from '../../lib/api';
 
 interface LocalTerminalViewProps {
   sessionId: string;
@@ -36,6 +37,8 @@ interface LocalTerminalViewProps {
   /** Callback when this pane receives focus */
   onFocus?: (paneId: string) => void;
 }
+
+const PREFILL_REPLAY_LINE_COUNT = 50; // Keep aligned with backend replay count
 
 export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ 
   sessionId, 
@@ -51,6 +54,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
+  const rendererSuspendedRef = useRef(false);
+  const rendererTransitionTokenRef = useRef(0);
   // xterm.js event listener disposables - must be explicitly disposed to prevent memory leaks
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const onBinaryDisposableRef = useRef<{ dispose: () => void } | null>(null);
@@ -91,6 +96,66 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   // This prevents the "1->2->3->1" cycling when buffer changes rapidly
   const searchPausedRef = useRef(false);
   const outputThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prefillHistoryRef = useRef(false);
+
+  const ensureSearchAddon = useCallback(() => {
+    const term = terminalRef.current;
+    if (!term) return null;
+    if (searchAddonRef.current) return searchAddonRef.current;
+    const addon = new SearchAddon();
+    addon.onDidChangeResults((e) => {
+      if (currentSearchQueryRef.current && !searchPausedRef.current) {
+        setSearchResults({ resultIndex: e.resultIndex, resultCount: e.resultCount });
+      }
+    });
+    term.loadAddon(addon);
+    searchAddonRef.current = addon;
+    return addon;
+  }, []);
+
+  const maybeLoadImageAddon = useCallback((payload: Uint8Array) => {
+    if (imageAddonRef.current || !terminalRef.current) return;
+    for (let i = 0; i < payload.length - 2; i++) {
+      if (payload[i] !== 0x1b) continue;
+      const next = payload[i + 1];
+      if (next === 0x5d) {
+        // ESC ] 1337 ;
+        if (
+          i + 6 < payload.length &&
+          payload[i + 2] === 0x31 &&
+          payload[i + 3] === 0x33 &&
+          payload[i + 4] === 0x33 &&
+          payload[i + 5] === 0x37 &&
+          payload[i + 6] === 0x3b
+        ) {
+          const addon = new ImageAddon({
+            enableSizeReports: true,
+            pixelLimit: 16777216,
+            storageLimit: 128,
+            showPlaceholder: true,
+            sixelSupport: true,
+            iipSupport: true,
+          });
+          terminalRef.current.loadAddon(addon);
+          imageAddonRef.current = addon;
+          return;
+        }
+      } else if (next === 0x50 && payload[i + 2] === 0x71) {
+        // ESC P q (SIXEL)
+        const addon = new ImageAddon({
+          enableSizeReports: true,
+          pixelLimit: 16777216,
+          storageLimit: 128,
+          showPlaceholder: true,
+          sixelSupport: true,
+          iipSupport: true,
+        });
+        terminalRef.current.loadAddon(addon);
+        imageAddonRef.current = addon;
+        return;
+      }
+    }
+  }, []);
 
   const { writeTerminal, resizeTerminal, getTerminal, updateTerminalState } = useLocalTerminalStore();
   const terminalInfo = getTerminal(sessionId);
@@ -208,6 +273,123 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     }
   }, [isActive, searchOpen, aiPanelOpen]);
 
+  // Suspend heavy renderer while tab is inactive, and restore on activation.
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+    const transitionToken = ++rendererTransitionTokenRef.current;
+    let fitRaf1: number | null = null;
+    let fitRaf2: number | null = null;
+    const isStale = () =>
+      transitionToken !== rendererTransitionTokenRef.current || !terminalRef.current;
+
+    term.options.cursorBlink = isActive ? terminalSettings.cursorBlink : false;
+
+    if (!isActive) {
+      if (rendererAddonRef.current) {
+        try {
+          rendererAddonRef.current.dispose();
+        } catch {
+          // Ignore renderer disposal errors during suspend.
+        }
+        rendererAddonRef.current = null;
+        rendererSuspendedRef.current = true;
+      }
+      return () => {
+        if (fitRaf1 !== null) cancelAnimationFrame(fitRaf1);
+        if (fitRaf2 !== null) cancelAnimationFrame(fitRaf2);
+      };
+    }
+
+    if (!rendererSuspendedRef.current || rendererAddonRef.current) {
+      return () => {
+        if (fitRaf1 !== null) cancelAnimationFrame(fitRaf1);
+        if (fitRaf2 !== null) cancelAnimationFrame(fitRaf2);
+      };
+    }
+
+    const restoreRenderer = async () => {
+      const currentTerm = terminalRef.current;
+      if (!currentTerm || isStale()) return;
+      const rendererSetting = terminalSettings.renderer || 'auto';
+
+      const loadCanvasAddon = async (): Promise<{ dispose: () => void } | null> => {
+        try {
+          const { CanvasAddon } = await import('@xterm/addon-canvas/lib/xterm-addon-canvas.mjs');
+          if (isStale()) return null;
+          const canvasAddon = new CanvasAddon();
+          currentTerm.loadAddon(canvasAddon);
+          if (isStale()) {
+            canvasAddon.dispose();
+            return null;
+          }
+          return canvasAddon;
+        } catch {
+          return null;
+        }
+      };
+
+      if (rendererSetting === 'canvas') {
+        rendererAddonRef.current = await loadCanvasAddon();
+      } else if (rendererSetting === 'webgl') {
+        try {
+          if (isStale()) return;
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => {
+            webglAddon.dispose();
+            if (!isStale()) {
+              rendererAddonRef.current = null;
+            }
+          });
+          currentTerm.loadAddon(webglAddon);
+          if (isStale()) {
+            webglAddon.dispose();
+            return;
+          }
+          rendererAddonRef.current = webglAddon;
+        } catch {
+          rendererAddonRef.current = await loadCanvasAddon();
+        }
+      } else {
+        try {
+          if (isStale()) return;
+          const webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(async () => {
+            webglAddon.dispose();
+            if (!isStale()) {
+              rendererAddonRef.current = await loadCanvasAddon();
+            }
+          });
+          currentTerm.loadAddon(webglAddon);
+          if (isStale()) {
+            webglAddon.dispose();
+            return;
+          }
+          rendererAddonRef.current = webglAddon;
+        } catch {
+          rendererAddonRef.current = await loadCanvasAddon();
+        }
+      }
+
+      if (isStale()) return;
+      rendererSuspendedRef.current = false;
+      fitRaf1 = requestAnimationFrame(() => {
+        fitRaf2 = requestAnimationFrame(() => {
+          if (!isStale()) {
+            fitAddonRef.current?.fit();
+          }
+        });
+      });
+    };
+
+    void restoreRenderer();
+
+    return () => {
+      if (fitRaf1 !== null) cancelAnimationFrame(fitRaf1);
+      if (fitRaf2 !== null) cancelAnimationFrame(fitRaf2);
+    };
+  }, [isActive, terminalSettings.cursorBlink, terminalSettings.renderer]);
+
   // Initialize terminal
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return;
@@ -228,20 +410,10 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const fitAddon = new FitAddon();
     // WebLinksAddon with secure URL handler - blocks dangerous protocols (file://, javascript:, etc.)
     const webLinksAddon = new WebLinksAddon(terminalLinkHandler);
-    const searchAddon = new SearchAddon();
-    const imageAddon = new ImageAddon({
-      enableSizeReports: true,
-      pixelLimit: 16777216,
-      storageLimit: 128,
-      showPlaceholder: true,
-      sixelSupport: true,
-      iipSupport: true,
-    });
     
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
-    term.loadAddon(searchAddon);
-    term.loadAddon(imageAddon);
+    // SearchAddon and ImageAddon are loaded lazily to reduce memory usage
     
     // Unicode11Addon for proper Nerd Font icons and CJK wide character rendering
     // Required for Oh My Posh, Starship, and other modern prompts
@@ -249,16 +421,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     term.loadAddon(unicode11Addon);
     term.unicode.activeVersion = '11';
     
-    searchAddon.onDidChangeResults((e) => {
-      // Only update if there's an active search query AND not paused due to high output
-      // searchPausedRef prevents the "1->2->3->1" cycling during rapid buffer changes
-      if (currentSearchQueryRef.current && !searchPausedRef.current) {
-        setSearchResults({ resultIndex: e.resultIndex, resultCount: e.resultCount });
-      }
-    });
     
-    searchAddonRef.current = searchAddon;
-    imageAddonRef.current = imageAddon;
     
     // Load renderer (WebGL or Canvas)
     const loadRenderer = async () => {
@@ -314,6 +477,44 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     term.open(containerRef.current);
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    const writeWelcomeMessage = () => {
+      term.writeln(`\x1b[32m${t('terminal.local.title')}\x1b[0m`);
+      term.writeln(t('terminal.local.shell', { shell: terminalInfo?.shell.label || t('terminal.local.shell_unknown') }));
+      term.writeln('');
+    };
+
+    const prefillHistory = async (): Promise<boolean> => {
+      if (prefillHistoryRef.current) return false;
+      prefillHistoryRef.current = true;
+      try {
+        const stats = await api.getBufferStats(sessionId);
+        const desired = Math.min(terminalSettings.scrollback || 5000, stats.current_lines);
+        const prefillCount = Math.max(desired - PREFILL_REPLAY_LINE_COUNT, 0);
+        if (prefillCount <= 0) {
+          return stats.current_lines > 0;
+        }
+        const startLine = Math.max(
+          stats.current_lines - PREFILL_REPLAY_LINE_COUNT - prefillCount,
+          0,
+        );
+        const lines = await api.getScrollBuffer(sessionId, startLine, prefillCount);
+        if (!isMountedRef.current || !terminalRef.current) return stats.current_lines > 0;
+        if (lines.length > 0) {
+          const text = lines.map((line) => line.text).join('\r\n') + '\r\n';
+          terminalRef.current.write(text);
+        }
+        return stats.current_lines > 0;
+      } catch {
+        return false;
+      }
+    };
+
+    void prefillHistory().then((hasHistory) => {
+      if (!hasHistory && isMountedRef.current && terminalRef.current) {
+        writeWelcomeMessage();
+      }
+    });
 
     // Buffer getter for AI context capture
     const getBufferContent = (): string => {
@@ -400,11 +601,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     if (termElement) {
       termElement.addEventListener('focusin', handleTerminalFocus);
     }
-
-    // Welcome message
-    term.writeln(`\x1b[32m${t('terminal.local.title')}\x1b[0m`);
-    term.writeln(t('terminal.local.shell', { shell: terminalInfo?.shell.label || t('terminal.local.shell_unknown') }));
-    term.writeln('');
 
     return () => {
       isMountedRef.current = false;
@@ -521,6 +717,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           }
           
           pendingDataRef.current = [];
+          maybeLoadImageAddon(combined);
           terminalRef.current.write(combined);
           
           // Pause search updates during high-frequency output
@@ -594,7 +791,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       unlistenDataFn?.();
       unlistenClosedFn?.();
     };
-  }, [sessionId, updateTerminalState]);
+  }, [sessionId, updateTerminalState, maybeLoadImageAddon]);
 
   // Listen for AI insert command events (only when this terminal is active)
   useEffect(() => {
@@ -678,6 +875,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     setSearchOpen(false);
     if (searchAddonRef.current) {
       searchAddonRef.current.clearDecorations();
+      searchAddonRef.current.dispose();
+      searchAddonRef.current = null;
     }
     // Clear search state and pause mechanism
     currentSearchQueryRef.current = '';
@@ -761,9 +960,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
   // Search handlers
   const handleSearch = useCallback((query: string, options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean }) => {
-    const searchAddon = searchAddonRef.current;
-    if (!searchAddon || !query) {
-      searchAddon?.clearDecorations();
+    if (!query) {
+      searchAddonRef.current?.clearDecorations();
+      setSearchResults({ resultIndex: -1, resultCount: 0 });
+      currentSearchQueryRef.current = '';
+      return;
+    }
+    const searchAddon = ensureSearchAddon();
+    if (!searchAddon) {
       setSearchResults({ resultIndex: -1, resultCount: 0 });
       currentSearchQueryRef.current = '';
       return;
@@ -788,17 +992,21 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     currentSearchOptionsRef.current = searchOptions;
     
     searchAddon.findNext(query, searchOptions);
-  }, []);
+  }, [ensureSearchAddon]);
 
   const handleSearchNext = useCallback(() => {
-    if (!searchAddonRef.current || !currentSearchQueryRef.current) return;
-    searchAddonRef.current.findNext(currentSearchQueryRef.current, currentSearchOptionsRef.current);
-  }, []);
+    if (!currentSearchQueryRef.current) return;
+    const searchAddon = ensureSearchAddon();
+    if (!searchAddon) return;
+    searchAddon.findNext(currentSearchQueryRef.current, currentSearchOptionsRef.current);
+  }, [ensureSearchAddon]);
 
   const handleSearchPrevious = useCallback(() => {
-    if (!searchAddonRef.current || !currentSearchQueryRef.current) return;
-    searchAddonRef.current.findPrevious(currentSearchQueryRef.current, currentSearchOptionsRef.current);
-  }, []);
+    if (!currentSearchQueryRef.current) return;
+    const searchAddon = ensureSearchAddon();
+    if (!searchAddon) return;
+    searchAddon.findPrevious(currentSearchQueryRef.current, currentSearchOptionsRef.current);
+  }, [ensureSearchAddon]);
 
   // Get terminal selection for AI context
   const getTerminalSelection = useCallback((): string => {

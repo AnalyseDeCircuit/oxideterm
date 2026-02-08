@@ -569,7 +569,7 @@ const FileList = ({
 
 export const SFTPView = ({ sessionId }: { sessionId: string }) => {
   const { t } = useTranslation();
-  const { getSession, connections } = useAppStore();
+  const { getSession } = useAppStore();
   const session = getSession(sessionId);
   const { error: toastError } = useToast();
   const [remoteFiles, setRemoteFiles] = useState<FileInfo[]>([]);
@@ -581,11 +581,9 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
 
   const [activePane, setActivePane] = useState<'local' | 'remote'>('remote');
   const [sftpInitialized, setSftpInitialized] = useState(false);
-  
-  // 连接状态门禁：只有当连接为 active/idle 时才允许 SFTP 操作
-  const connectionId = session?.connectionId;
-  const connectionState = connectionId ? connections.get(connectionId)?.state : undefined;
-  const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
+  const [initError, setInitError] = useState<string | null>(null);
+  const [initRetryTick, setInitRetryTick] = useState(0);
+  const guardErrorNotifiedRef = useRef(false);
 
   // Path input state for editable path bars
   const [localPathInput, setLocalPathInput] = useState('');
@@ -779,29 +777,18 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
   // 由于 AppLayout 使用 key={sessionId-connectionId}，connectionId 变更会触发组件重新挂载
   // 因此这里只需要处理单次初始化，无需追踪 prevConnectionId
   useEffect(() => {
-    // 🔍 调试日志
-    console.debug(`[SFTPView] Mount: sessionId=${sessionId}, connectionId=${connectionId}, connectionState=${connectionState}, isConnectionReady=${isConnectionReady}`);
+    const sessionConnectionId = session?.connectionId;
+    console.debug(`[SFTPView] Mount: sessionId=${sessionId}, connectionId=${sessionConnectionId}, retryTick=${initRetryTick}`);
 
     if (!session) {
       console.warn(`[SFTPView] Session ${sessionId} not found in store`);
-      return;
-    }
-    
-    // 🚦 状态门禁：必须等待连接 ready
-    if (!isConnectionReady) {
-      console.debug(`[SFTPView] Waiting for connection (current: ${connectionState})`);
-      return;
-    }
-
-    if (!connectionId) {
-      console.warn(`[SFTPView] No connectionId for session ${sessionId}`);
       return;
     }
 
     let cancelled = false;
     
     const init = async () => {
-      console.info(`[SFTPView] Initializing SFTP: session=${sessionId}, connection=${connectionId}`);
+      console.info(`[SFTPView] Initializing SFTP: session=${sessionId}, connection=${sessionConnectionId}`);
       
       try {
         await guardSessionConnection(sessionId);
@@ -812,6 +799,8 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
         if (cancelled) return;
 
         setSftpInitialized(true);
+        setInitError(null);
+        guardErrorNotifiedRef.current = false;
         
         // 🔴 路径继承：优先恢复记忆的路径，否则使用 SFTP 返回的 cwd
         const savedPath = sftpPathMemory.get(sessionId);
@@ -820,16 +809,29 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
         
         console.info(`[SFTPView] SFTP ready: cwd=${cwd}, restored=${savedPath}, using=${targetPath}`);
       } catch (err) {
-        if (!cancelled && !isConnectionGuardError(err)) {
-          console.error(`[SFTPView] Init failed:`, err);
+        if (cancelled) return;
+        if (isConnectionGuardError(err)) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(`[SFTPView] Connection not ready for SFTP init: ${message}`);
           setSftpInitialized(false);
+          setInitError(message);
+          if (!guardErrorNotifiedRef.current) {
+            guardErrorNotifiedRef.current = true;
+            toastError(
+              t('sftp.connection_not_ready', 'Connection not ready'),
+              t('sftp.retry_in_a_moment', 'Please retry in a moment.')
+            );
+          }
+          return;
         }
+        console.error(`[SFTPView] Init failed:`, err);
+        setSftpInitialized(false);
       }
     };
 
     init();
     return () => { cancelled = true; };
-  }, [sessionId, session, isConnectionReady, connectionState, connectionId]);
+  }, [sessionId, session, initRetryTick, t, toastError]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {
@@ -1631,6 +1633,19 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
 
   return (
     <div className="flex flex-col h-full w-full bg-theme-bg p-2 gap-2">
+      {initError && (
+        <div className="flex items-center justify-between rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-theme-text">
+          <span>SFTP waiting for connection sync: {initError}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => setInitRetryTick((v) => v + 1)}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
       <div className="flex-1 flex gap-2 min-h-0">
         {/* Local Pane */}
         <div className="flex-1 min-w-0">

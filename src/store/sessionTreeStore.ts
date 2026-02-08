@@ -92,6 +92,40 @@ function computeUnifiedStatus(
   }
 }
 
+async function waitForConnectionInStore(
+  connectionId: string,
+  timeoutMs = 15000
+): Promise<void> {
+  if (useAppStore.getState().connections.has(connectionId)) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let finished = false;
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      unsubscribe();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      finish(new Error(`CONNECTION_SYNC_TIMEOUT:${connectionId}`));
+    }, timeoutMs);
+
+    const unsubscribe = useAppStore.subscribe((state) => {
+      if (state.connections.has(connectionId)) {
+        finish();
+      }
+    });
+  });
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -1013,7 +1047,11 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       
       // 🔴 Phase 5.1: 同步 appStore.sessions 中关联终端的 connectionId
       // 重连后 connectionId 变化，必须更新 sessions 否则 SFTPView 的 guardSessionConnection 会失败
-      const terminalIds = get().nodeTerminalMap.get(nodeId) || [];
+      const terminalIdSet = new Set(get().nodeTerminalMap.get(nodeId) || []);
+      if (node.terminalSessionId) {
+        terminalIdSet.add(node.terminalSessionId);
+      }
+      const terminalIds = Array.from(terminalIdSet);
       if (terminalIds.length > 0) {
         useAppStore.setState((state) => {
           const newSessions = new Map(state.sessions);
@@ -1174,7 +1212,8 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     createTerminalForNode: async (nodeId: string, cols?: number, rows?: number) => {
       const node = get().getNode(nodeId);
       if (!node) throw new Error(`Node ${nodeId} not found`);
-      if (!node.runtime.connectionId) {
+      const connectionId = node.runtime.connectionId;
+      if (!connectionId) {
         throw new Error(`Node ${nodeId} is not connected`);
       }
       
@@ -1184,7 +1223,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       
       // 调用 API 创建终端
       const response = await api.createTerminal({
-        connectionId: node.runtime.connectionId,
+        connectionId,
         cols,
         rows,
         maxBufferLines: bufferSettings.maxLines,
@@ -1195,7 +1234,10 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       const { useAppStore } = await import('./appStore');
       useAppStore.setState((state) => {
         const newSessions = new Map(state.sessions);
-        newSessions.set(terminalId, response.session);
+        newSessions.set(terminalId, {
+          ...response.session,
+          connectionId,
+        });
         return { sessions: newSessions };
       });
       
@@ -1206,12 +1248,21 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       // 通知后端更新节点终端 (使用第一个终端作为主终端)
       // 先调用后端 API，成功后再更新本地映射
       try {
+        const appStore = useAppStore.getState();
+        if (!appStore.connections.has(connectionId)) {
+          const waitPromise = waitForConnectionInStore(connectionId, 15000);
+          appStore.refreshConnections().catch((error) => {
+            console.warn(`[createTerminalForNode] refreshConnections failed for ${connectionId}:`, error);
+          });
+          await waitPromise;
+        }
+
         if (existing.length === 0) {
           await api.setTreeNodeTerminal(nodeId, terminalId);
         }
       } catch (e) {
         // 后端 API 失败，回滚：关闭刚创建的终端和 session
-        console.error('Failed to set tree node terminal, rolling back:', e);
+        console.error(`[createTerminalForNode] Failed for node ${nodeId}, rolling back:`, e);
         try {
           await api.closeTerminal(terminalId);
           useAppStore.setState((state) => {
@@ -1775,7 +1826,11 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
                 if (!backendNode.sshConnectionId) continue;
                 
                 // 获取该节点关联的终端 ID
-                const terminalIds = newTerminalMap.get(backendNode.id) || [];
+                const terminalIdSet = new Set(newTerminalMap.get(backendNode.id) || []);
+                if (backendNode.terminalSessionId) {
+                  terminalIdSet.add(backendNode.terminalSessionId);
+                }
+                const terminalIds = Array.from(terminalIdSet);
                 for (const terminalId of terminalIds) {
                   const session = newSessions.get(terminalId);
                   if (session && session.connectionId !== backendNode.sshConnectionId) {

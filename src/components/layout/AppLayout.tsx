@@ -72,10 +72,12 @@ export const AppLayout = () => {
             </div>
           ) : (
             <>
-              {tabs.map(tab => (
+              {tabs.map(tab => {
+                const isActive = tab.id === activeTabId;
+                return (
                 <div
                   key={tab.id}
-                  className={`absolute inset-0 ${tab.id === activeTabId ? 'z-10 block' : 'z-0 hidden'}`}
+                  className={`absolute inset-0 ${isActive ? 'z-10 block' : 'z-0 hidden'}`}
                 >
                   {/* Terminal tabs: Support split panes via rootPane, fallback to single terminal */}
                   {(tab.type === 'terminal' || tab.type === 'local_terminal') && (
@@ -133,12 +135,16 @@ export const AppLayout = () => {
                   {tab.type === 'topology' && <TopologyPage />}
                   {tab.type === 'ide' && tab.sessionId && (
                     <Suspense fallback={<ViewLoader />}>
-                      <IdeWorkspace
-                        key={`ide-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`}
-                        connectionId={tab.sessionId}
-                        sftpSessionId={tab.sessionId}
-                        rootPath="~"
-                      />
+                      {getSession(tab.sessionId)?.connectionId ? (
+                        <IdeWorkspace
+                          key={`ide-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`}
+                          connectionId={getSession(tab.sessionId)?.connectionId ?? ''}
+                          sftpSessionId={tab.sessionId}
+                          rootPath="~"
+                        />
+                      ) : (
+                        <ViewLoader />
+                      )}
                     </Suspense>
                   )}
                   {tab.type === 'file_manager' && (
@@ -162,7 +168,8 @@ export const AppLayout = () => {
                     </Suspense>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </>
           )}
         </div>
