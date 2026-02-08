@@ -125,8 +125,8 @@ impl Default for HostKeyCache {
 }
 
 /// Global host key cache instance
-static HOST_KEY_CACHE: once_cell::sync::Lazy<HostKeyCache> =
-    once_cell::sync::Lazy::new(HostKeyCache::new);
+static HOST_KEY_CACHE: std::sync::LazyLock<HostKeyCache> =
+    std::sync::LazyLock::new(HostKeyCache::new);
 
 /// Get the global host key cache
 pub fn get_host_key_cache() -> &'static HostKeyCache {

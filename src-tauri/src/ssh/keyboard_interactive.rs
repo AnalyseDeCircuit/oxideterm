@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Keyboard-Interactive prompt from server
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,8 +125,8 @@ impl std::fmt::Display for KbiError {
 impl std::error::Error for KbiError {}
 
 /// Global registry of pending KBI requests awaiting frontend response
-static PENDING_REQUESTS: Lazy<Mutex<std::collections::HashMap<String, PendingRequest>>> =
-    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+static PENDING_REQUESTS: LazyLock<Mutex<std::collections::HashMap<String, PendingRequest>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Register a new pending request and return the receiver
 ///

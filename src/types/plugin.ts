@@ -324,6 +324,8 @@ declare global {
       React: typeof import('react');
       ReactDOM: { createRoot: typeof import('react-dom/client').createRoot };
       zustand: { create: typeof import('zustand').create };
+      lucideIcons: Record<string, import('react').ForwardRefExoticComponent<import('react').SVGProps<SVGSVGElement>>>;
+      /** @deprecated Use lucideIcons instead. Kept for backward compatibility with existing plugins. */
       lucideReact: typeof import('lucide-react');
       ui: import('../lib/plugin/pluginUIKit').PluginUIKit;
       /** Host application version */

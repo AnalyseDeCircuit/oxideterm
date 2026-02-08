@@ -6,8 +6,6 @@
  * All handlers are called via queueMicrotask() to avoid blocking state updates.
  */
 
-import type { SshConnectionInfo } from '../../types';
-import type { ConnectionSnapshot } from '../../types/plugin';
 import { toSnapshot } from './pluginUtils';
 
 type EventHandler = (data: unknown) => void;

@@ -43,6 +43,13 @@ export default defineConfig(async () => {
             '@radix-ui/react-tooltip',
             '@radix-ui/react-switch',
           ],
+          // Heavy dependencies — isolated chunks (dynamically imported)
+          'mermaid': ['mermaid'],
+          'katex': ['katex'],
+          'office': ['mammoth', 'xlsx'],
+          'prism': ['prismjs'],
+          // Icons (large due to plugin system requiring full icon registry)
+          'lucide': ['lucide-react'],
         },
       },
     },

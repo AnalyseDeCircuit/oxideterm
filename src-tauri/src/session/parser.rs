@@ -91,10 +91,8 @@ pub fn parse_terminal_output(data: &[u8]) -> Vec<TerminalLine> {
     let mut parser = Parser::new();
     let mut performer = TerminalParser::new();
 
-    // Feed data through VTE parser
-    for &byte in data {
-        parser.advance(&mut performer, byte);
-    }
+    // Feed data through VTE parser (vte 0.14: advance takes &[u8] slices)
+    parser.advance(&mut performer, data);
 
     // Get completed lines
     let lines = performer.finish();
@@ -140,9 +138,7 @@ impl BatchParser {
     /// Feed data to the parser
     pub fn feed(&mut self, data: &[u8]) {
         let mut performer = self.performer.lock();
-        for &byte in data {
-            self.parser.advance(&mut *performer, byte);
-        }
+        self.parser.advance(&mut *performer, data);
     }
 
     /// Get all completed lines and reset

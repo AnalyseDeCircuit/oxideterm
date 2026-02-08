@@ -58,7 +58,6 @@ Generated: 2026-02-05T13:38:06.080Z
 | @floating-ui/dom | 1.7.4 | MIT | https://floating-ui.com |
 | @floating-ui/react-dom | 2.1.6 | MIT | https://floating-ui.com/docs/react-dom |
 | @floating-ui/utils | 0.2.10 | MIT | https://floating-ui.com |
-| @heroicons/react | 2.2.0 | MIT | https://github.com/tailwindlabs/heroicons#readme |
 | @iconify/types | 2.0.0 | MIT | https://github.com/iconify/iconify |
 | @iconify/utils | 3.1.0 | MIT | https://iconify.design/docs/libraries/utils/ |
 | @lezer/common | 1.5.0 | MIT | https://github.com/lezer-parser/common#readme |
@@ -178,7 +177,6 @@ Generated: 2026-02-05T13:38:06.080Z
 | chevrotain-allstar | 0.3.1 | MIT | https://github.com/langium/chevrotain-allstar#readme |
 | class-variance-authority | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | clsx | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
-| cmdk | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |
 | codepage | 1.15.0 | Apache-2.0 | https://sheetjs.com/ |
 | commander | 7.2.0, 8.3.0 | MIT | https://github.com/tj/commander.js#readme |
 | confbox | 0.1.8 | MIT | https://github.com/unjs/confbox#readme |
@@ -233,7 +231,6 @@ Generated: 2026-02-05T13:38:06.080Z
 | dompurify | 3.3.1 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | duck | 0.1.12 | BSD | https://github.com/mwilliamson/duck.js#readme |
 | frac | 1.1.2 | Apache-2.0 | http://sheetjs.com/opensource |
-| framer-motion | 12.26.1 | MIT | https://github.com/motiondivision/motion#readme |
 | get-nonce | 1.0.1 | MIT | https://github.com/theKashey/get-nonce |
 | hachure-fill | 0.5.2 | MIT | https://github.com/pshihn/hachure-fill#readme |
 | html-parse-stringify | 3.0.1 | MIT | https://github.com/henrikjoreteg/html-parse-stringify |

@@ -172,66 +172,6 @@
   --theme-accent-hover: #c2410c;
 }
 
-/* Oxide Theme (Vibrant Rust Orange) */
-[data-theme="oxide"] {
-  --theme-bg: #331a0d;
-  --theme-bg-panel: #4d2414;
-  --theme-bg-hover: #663018;
-  --theme-border: #663018;
-  --theme-text: #fef3e2;
-  --theme-text-muted: #d4a574;
-  --theme-accent: #FF6B00;
-  --theme-accent-hover: #FF8533;
-}
-
-/* Dracula Theme */
-[data-theme="dracula"] {
-  --theme-bg: #282a36;
-  --theme-bg-panel: #34354a;
-  --theme-bg-hover: #44475a;
-  --theme-border: #44475a;
-  --theme-text: #f8f8f2;
-  --theme-text-muted: #6272a4;
-  --theme-accent: #bd93f9;
-  --theme-accent-hover: #9572d4;
-}
-
-/* Nord Theme */
-[data-theme="nord"] {
-  --theme-bg: #2e3440;
-  --theme-bg-panel: #3b4252;
-  --theme-bg-hover: #434c5e;
-  --theme-border: #3b4252;
-  --theme-text: #eceff4;
-  --theme-text-muted: #81a1c1;
-  --theme-accent: #88c0d0;
-  --theme-accent-hover: #5e81ac;
-}
-
-/* Solarized Dark Theme */
-[data-theme="solarized-dark"] {
-  --theme-bg: #002b36;
-  --theme-bg-panel: #073642;
-  --theme-bg-hover: #0a4a58;
-  --theme-border: #073642;
-  --theme-text: #fdf6e3;
-  --theme-text-muted: #93a1a1;
-  --theme-accent: #268bd2;
-  --theme-accent-hover: #2aa198;
-}
-
-/* Monokai Theme */
-[data-theme="monokai"] {
-  --theme-bg: #272822;
-  --theme-bg-panel: #34352a;
-  --theme-bg-hover: #49483e;
-  --theme-border: #49483e;
-  --theme-text: #f8f8f2;
-  --theme-text-muted: #75715e;
-  --theme-accent: #66d9ef;
-  --theme-accent-hover: #a6e22e;
-}
-
 /* GitHub Dark Theme */
 [data-theme="github-dark"] {
   --theme-bg: #0d1117;
@@ -557,6 +497,70 @@ html {
 
 .animate-pulse-subtle {
   animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Topology View Animations (replacing framer-motion)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Node enter animation — spring-like scale from 0 */
+@keyframes topo-enter {
+  0% { transform: scale(0); opacity: 0; }
+  70% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.topo-node-enter {
+  animation: topo-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Connecting state — pulsing glow on box-shadow */
+@keyframes topo-glow-pulse {
+  0%, 100% { box-shadow: 0 0 10px currentColor; }
+  50% { box-shadow: 0 0 25px currentColor; }
+}
+.topo-connecting-glow {
+  animation: topo-glow-pulse 1.5s ease-in-out infinite;
+}
+
+/* Status dot pulse (scale + opacity) */
+@keyframes topo-dot-pulse-kf {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.5; }
+}
+.topo-dot-pulse {
+  animation: topo-dot-pulse-kf infinite ease-in-out;
+  /* animation-duration set via inline style */
+}
+
+/* Error shake */
+@keyframes topo-shake-kf {
+  0%, 80%, 100% { transform: translateX(0); }
+  10% { transform: translateX(-2px); }
+  30% { transform: translateX(2px); }
+  50% { transform: translateX(-2px); }
+  70% { transform: translateX(0); }
+}
+.topo-shake {
+  animation: topo-shake-kf 2.5s ease-in-out infinite;
+}
+
+/* Success flash */
+@keyframes topo-flash-kf {
+  0% { opacity: 0; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+.topo-success-flash {
+  animation: topo-flash-kf 0.8s ease-out forwards;
+}
+
+/* Menu enter */
+@keyframes topo-menu-enter-kf {
+  0% { opacity: 0; transform: scale(0.9) translateY(-10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.topo-menu-enter {
+  animation: topo-menu-enter-kf 0.15s ease-out forwards;
 }
 
 /* AI Inline Panel Loading Animation */

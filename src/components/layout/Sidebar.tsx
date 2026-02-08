@@ -650,9 +650,6 @@ export const Sidebar = () => {
     { kind: 'tab', key: 'plugin_manager', icon: Puzzle, titleKey: 'sidebar.panels.plugins' },
   ];
 
-  // Flat list for legacy compat (handler lookup)
-  const sidebarButtons = [...topButtons, ...bottomButtons];
-
   const getButtonVariant = (def: SidebarButtonDef): 'secondary' | 'ghost' => {
     if (def.kind === 'section') {
       return sidebarActiveSection === def.key ? 'secondary' : 'ghost';

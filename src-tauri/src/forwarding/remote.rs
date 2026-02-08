@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -195,8 +195,8 @@ impl Default for RemoteForwardRegistry {
 }
 
 /// Global instance of the remote forward registry
-pub static REMOTE_FORWARD_REGISTRY: Lazy<RemoteForwardRegistry> =
-    Lazy::new(RemoteForwardRegistry::new);
+pub static REMOTE_FORWARD_REGISTRY: LazyLock<RemoteForwardRegistry> =
+    LazyLock::new(RemoteForwardRegistry::new);
 
 /// Handle to a running remote port forward
 pub struct RemoteForwardHandle {

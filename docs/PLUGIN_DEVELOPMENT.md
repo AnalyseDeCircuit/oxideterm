@@ -152,7 +152,7 @@ OxideTerm 插件系统遵循以下设计原则：
 │              │    ctx.storage     ctx.api      ctx.assets     │   │
 │              │                                                │   │
 │              │  window.__OXIDE__                              │   │
-│              │    React · ReactDOM · zustand · lucideReact    │   │
+│              │    React · ReactDOM · zustand · lucideIcons   │   │
 │              └────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -1462,7 +1462,7 @@ window.__OXIDE__ = {
   React: typeof import('react');
   ReactDOM: { createRoot: typeof import('react-dom/client').createRoot };
   zustand: { create: typeof import('zustand').create };
-  lucideReact: typeof import('lucide-react');
+  lucideIcons: Record<string, React.FC>;  // Lucide 图标名 → 组件映射
   ui: PluginUIKit;   // 插件 UI 组件库
 };
 ```
@@ -1519,8 +1519,10 @@ function ItemList() {
 ### 7.4 使用 Lucide React Icons
 
 ```javascript
-const { lucideReact } = window.__OXIDE__;
-const { Activity, Terminal, Wifi, Settings, ArrowRight } = lucideReact;
+const { lucideIcons } = window.__OXIDE__;
+// lucideIcons 是一个 { 名称: 组件 } 映射对象
+const Activity = lucideIcons['Activity'];
+const Terminal = lucideIcons['Terminal'];
 
 function MyIcon() {
   return h(Activity, { className: 'h-4 w-4 text-primary' });
@@ -1529,7 +1531,7 @@ function MyIcon() {
 
 完整图标列表见: https://lucide.dev/icons/
 
-> **Manifest 图标解析**：`plugin.json` 中 `contributes.tabs[].icon` 和 `contributes.sidebarPanels[].icon` 字段使用图标名称字符串（如 `"LayoutDashboard"`），系统会通过 `resolvePluginIcon()` 自动将其解析为对应的 Lucide React 组件，用于标签栏和侧边栏活动栏的图标渲染。插件组件内部仍然通过解构 `lucideReact` 直接使用图标组件。
+> **Manifest 图标解析**：`plugin.json` 中 `contributes.tabs[].icon` 和 `contributes.sidebarPanels[].icon` 字段使用图标名称字符串（如 `"LayoutDashboard"`），系统会通过 `resolvePluginIcon()` 自动将其解析为对应的 Lucide React 组件，用于标签栏和侧边栏活动栏的图标渲染。插件组件内部通过 `lucideIcons['IconName']` 获取图标组件。
 
 ### 7.5 使用 UI Kit（推荐）
 
@@ -1541,9 +1543,11 @@ OxideTerm 提供了一套轻量级 UI 组件库 `window.__OXIDE__.ui`，封装�
 - 🔄 主题系统升级时无需修改插件
 
 ```javascript
-const { React, lucideReact, ui } = window.__OXIDE__;
+const { React, lucideIcons, ui } = window.__OXIDE__;
 const { createElement: h, useState } = React;
-const { Activity, Settings, Terminal } = lucideReact;
+const Activity = lucideIcons['Activity'];
+const Settings = lucideIcons['Settings'];
+const Terminal = lucideIcons['Terminal'];
 ```
 
 **组件一览**：

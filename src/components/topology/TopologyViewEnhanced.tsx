@@ -10,7 +10,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'framer-motion';
 import * as d3Zoom from 'd3-zoom';
 import * as d3Selection from 'd3-selection';
 import { ExternalLink, Terminal, FolderOpen } from 'lucide-react';
@@ -179,13 +178,14 @@ const NodeCard: React.FC<{
   }, [node.status]);
 
   return (
-    <motion.g
-      initial={{ scale: 0, opacity: 0 }}
-      animate={{
-        scale: isDimmed ? 0.9 : 1,
-        opacity: isDimmed ? 0.3 : 1
+    <g
+      className="topo-node-enter"
+      style={{
+        transform: `scale(${isDimmed ? 0.9 : 1})`,
+        opacity: isDimmed ? 0.3 : 1,
+        transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease',
+        transformOrigin: `${node.x}px ${node.y}px`,
       }}
-      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
     >
       <foreignObject
         x={node.x - halfWidth}
@@ -194,30 +194,21 @@ const NodeCard: React.FC<{
         height={THEME.node.height}
         style={{ overflow: 'visible' }}
       >
-        <motion.div
+        <div
           className={cn(
             "w-full h-full rounded-lg transition-all duration-200 ease-out select-none cursor-pointer",
             // Glassmorphism Base
             "bg-theme-bg-panel/20 backdrop-blur-md border border-theme-border/50",
             // Hover State
-            isHovered && "border-theme-accent/50 shadow-[0_0_20px_color-mix(in srgb, var(--theme-accent) 15%, transparent)] scale-105",
+            isHovered && "border-theme-accent/50 shadow-[0_0_20px_color-mix(in_srgb,_var(--theme-accent)_15%,_transparent)] scale-105",
             // LinkDown State
             isDown && "grayscale-[0.6] border-red-500/40",
+            // Connecting pulse
+            isConnecting && "topo-connecting-glow",
           )}
-          animate={isConnecting ? {
-            boxShadow: [
-              `0 0 10px ${statusColor}40`,
-              `0 0 25px ${statusColor}60`,
-              `0 0 10px ${statusColor}40`,
-            ],
-          } : isConnected ? {
+          style={isConnected ? {
             boxShadow: `0 0 15px ${statusColor}30`,
-          } : {}}
-          transition={isConnecting ? {
-            repeat: Infinity,
-            duration: 1.5,
-            ease: 'easeInOut',
-          } : {}}
+          } : undefined}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
           onDoubleClick={onDoubleClick}
@@ -226,19 +217,15 @@ const NodeCard: React.FC<{
 
             {/* Status Indicator */}
             <div className="flex items-center gap-2 mb-0.5">
-              <motion.div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: statusColor }}
-                animate={isDown ? {
-                  scale: [1, 1.3, 1],
-                  opacity: [1, 0.5, 1],
-                } : isConnecting ? {
-                  scale: [1, 1.4, 1],
-                } : {}}
-                transition={isDown || isConnecting ? {
-                  repeat: Infinity,
-                  duration: isDown ? 0.8 : 1.2,
-                } : {}}
+              <div
+                className={cn(
+                  "w-2 h-2 rounded-full",
+                  (isDown || isConnecting) && "topo-dot-pulse",
+                )}
+                style={{
+                  backgroundColor: statusColor,
+                  animationDuration: isDown ? '0.8s' : '1.2s',
+                }}
               />
 
               {/* Node Name */}
@@ -254,36 +241,23 @@ const NodeCard: React.FC<{
 
             {/* Error shake animation */}
             {isDown && (
-              <motion.div
-                className="absolute inset-0 rounded-lg border border-red-500/30 pointer-events-none"
-                animate={{ x: [0, -2, 2, -2, 0] }}
-                transition={{ repeat: Infinity, duration: 0.5, repeatDelay: 2 }}
-              />
+              <div className="absolute inset-0 rounded-lg border border-red-500/30 pointer-events-none topo-shake" />
             )}
 
             {/* Success flash animation */}
-            <AnimatePresence>
-              {showSuccessFlash && (
-                <motion.div
-                  className="absolute inset-0 rounded-lg pointer-events-none"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{
-                    opacity: [0, 1, 0],
-                    scale: [0.8, 1.1, 1],
-                  }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                  style={{
-                    background: `radial-gradient(circle, ${THEME.colors.connected}40 0%, transparent 70%)`,
-                    boxShadow: `0 0 30px ${THEME.colors.connected}60`,
-                  }}
-                />
-              )}
-            </AnimatePresence>
+            {showSuccessFlash && (
+              <div
+                className="absolute inset-0 rounded-lg pointer-events-none topo-success-flash"
+                style={{
+                  background: `radial-gradient(circle, ${THEME.colors.connected}40 0%, transparent 70%)`,
+                  boxShadow: `0 0 30px ${THEME.colors.connected}60`,
+                }}
+              />
+            )}
           </div>
-        </motion.div>
+        </div>
       </foreignObject>
-    </motion.g>
+    </g>
   );
 };
 
@@ -317,13 +291,9 @@ const NodeActionMenu: React.FC<{
   const isConnected = node.status === 'connected';
 
   return (
-    <motion.div
+    <div
       ref={menuRef}
-      initial={{ opacity: 0, scale: 0.9, y: -10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.9, y: -10 }}
-      transition={{ duration: 0.15 }}
-      className="fixed z-50 bg-theme-bg-panel/95 backdrop-blur-lg border border-theme-border rounded-lg shadow-2xl overflow-hidden min-w-[180px]"
+      className="fixed z-50 bg-theme-bg-panel/95 backdrop-blur-lg border border-theme-border rounded-lg shadow-2xl overflow-hidden min-w-[180px] topo-menu-enter"
       style={{ left: x, top: y }}
     >
       {/* Header */}
@@ -367,7 +337,7 @@ const NodeActionMenu: React.FC<{
       <div className="px-3 py-1.5 border-t border-theme-border/50 bg-theme-bg/30">
         <div className="text-[10px] text-theme-text-muted text-center">{t('topology.menu.close_hint')}</div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -601,20 +571,18 @@ export const TopologyViewEnhanced: React.FC<TopologyViewEnhancedProps> = ({
       </svg>
 
       {/* Node Action Menu */}
-      <AnimatePresence>
-        {menu.isOpen && (
-          <NodeActionMenu
-            node={menu.nodeId ? nodeMap.get(menu.nodeId) || null : null}
-            x={menu.x}
-            y={menu.y}
-            onClose={closeMenu}
-            onNavigateToSession={handleNavigateToSession}
-            onCreateTerminal={handleCreateTerminal}
-            onOpenSftp={handleOpenSftp}
-            t={t}
-          />
-        )}
-      </AnimatePresence>
+      {menu.isOpen && (
+        <NodeActionMenu
+          node={menu.nodeId ? nodeMap.get(menu.nodeId) || null : null}
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          onNavigateToSession={handleNavigateToSession}
+          onCreateTerminal={handleCreateTerminal}
+          onOpenSftp={handleOpenSftp}
+          t={t}
+        />
+      )}
     </div>
   );
 };
