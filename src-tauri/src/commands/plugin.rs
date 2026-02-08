@@ -31,6 +31,29 @@ pub struct PluginManifest {
     pub contributes: Option<PluginContributes>,
     #[serde(default)]
     pub locales: Option<String>,
+
+    // ── v2 Package Fields ────────────────────────────────────────────────
+    /// Manifest schema version (1 = legacy single-file, 2 = package)
+    #[serde(default)]
+    pub manifest_version: Option<u8>,
+    /// Plugin format: "bundled" (single ESM) or "package" (multi-file)
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Static assets directory (relative path)
+    #[serde(default)]
+    pub assets: Option<String>,
+    /// CSS files to auto-load on activation (relative paths)
+    #[serde(default)]
+    pub styles: Option<Vec<String>>,
+    /// Shared dependencies the plugin expects from the host
+    #[serde(default)]
+    pub shared_dependencies: Option<std::collections::HashMap<String, String>>,
+    /// Plugin repository URL
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// SHA-256 checksum of the plugin package
+    #[serde(default)]
+    pub checksum: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,20 +154,22 @@ fn plugin_config_path() -> Result<PathBuf, String> {
 }
 
 /// Validate that a relative path does not escape the plugin directory
-fn validate_relative_path(relative_path: &str) -> Result<(), String> {
-    // Reject path traversal
-    if relative_path.contains("..") {
-        return Err("Path traversal (..) is not allowed".to_string());
-    }
+pub fn validate_relative_path(relative_path: &str) -> Result<(), String> {
     // Reject absolute paths
     if relative_path.starts_with('/') || relative_path.starts_with('\\') {
         return Err("Absolute paths are not allowed".to_string());
+    }
+    // Reject path traversal: check each component for ".."
+    for component in relative_path.split(['/', '\\']) {
+        if component == ".." {
+            return Err("Path traversal (..) is not allowed".to_string());
+        }
     }
     Ok(())
 }
 
 /// Validate that a plugin_id is a safe directory name (no traversal, no separators).
-fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
+pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     if plugin_id.is_empty() {
         return Err("Plugin ID cannot be empty".to_string());
     }
@@ -250,7 +275,8 @@ pub async fn read_plugin_file(
         }
     }
 
-    tokio::fs::read(&file_path)
+    // Read the canonicalized path to avoid TOCTOU (symlink swap between check and read)
+    tokio::fs::read(&canonical)
         .await
         .map_err(|e| format!("Failed to read plugin file '{}': {}", relative_path, e))
 }

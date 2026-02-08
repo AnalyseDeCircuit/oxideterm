@@ -8,28 +8,9 @@
 
 import type { SshConnectionInfo } from '../../types';
 import type { ConnectionSnapshot } from '../../types/plugin';
+import { toSnapshot } from './pluginUtils';
 
 type EventHandler = (data: unknown) => void;
-
-/**
- * Convert SshConnectionInfo to a frozen ConnectionSnapshot for plugin consumption.
- * Duplicated from pluginContextFactory to avoid circular imports.
- */
-function toSnapshot(conn: SshConnectionInfo): ConnectionSnapshot {
-  return Object.freeze({
-    id: conn.id,
-    host: conn.host,
-    port: conn.port,
-    username: conn.username,
-    state: conn.state,
-    refCount: conn.refCount,
-    keepAlive: conn.keepAlive,
-    createdAt: conn.createdAt,
-    lastActive: conn.lastActive,
-    terminalIds: Object.freeze([...conn.terminalIds]),
-    parentConnectionId: conn.parentConnectionId,
-  });
-}
 
 class PluginEventBridge {
   private handlers = new Map<string, Set<EventHandler>>();

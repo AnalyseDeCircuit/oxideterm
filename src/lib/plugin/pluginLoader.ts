@@ -11,7 +11,7 @@
 
 import { api } from '../api';
 import { usePluginStore } from '../../store/pluginStore';
-import { buildPluginContext } from './pluginContextFactory';
+import { buildPluginContext, cleanupPluginAssets } from './pluginContextFactory';
 import { loadPluginI18n, removePluginI18n } from './pluginI18nManager';
 import type { PluginManifest, PluginModule, PluginGlobalConfig } from '../../types/plugin';
 
@@ -126,6 +126,38 @@ export async function discoverPlugins(): Promise<PluginManifest[]> {
 }
 
 /**
+ * Load a plugin module via Blob URL (single-file bundles).
+ */
+async function loadPluginViaBlobUrl(pluginId: string, main: string): Promise<PluginModule> {
+  const mainPath = main.replace(/^\.\//, '');
+  const fileBytes = await api.pluginReadFile(pluginId, mainPath);
+  const blob = new Blob([new Uint8Array(fileBytes)], { type: 'application/javascript' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  try {
+    return await import(/* @vite-ignore */ blobUrl);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+/** Cached plugin server port */
+let pluginServerPort: number | null = null;
+
+/**
+ * Load a plugin module via the local HTTP file server (multi-file packages).
+ * This allows relative imports between plugin files to resolve correctly.
+ */
+async function loadPluginViaServer(pluginId: string, main: string): Promise<PluginModule> {
+  if (pluginServerPort === null) {
+    pluginServerPort = await api.pluginStartServer();
+  }
+  const mainPath = main.replace(/^\.\//, '');
+  const url = `http://127.0.0.1:${pluginServerPort}/plugins/${pluginId}/${mainPath}`;
+  return await import(/* @vite-ignore */ url);
+}
+
+/**
  * Load and activate a single plugin.
  */
 export async function loadPlugin(manifest: PluginManifest): Promise<void> {
@@ -142,20 +174,28 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
 
   store.setPluginState(id, 'loading');
 
-  try {
-    // 1. Read the plugin's entry file
-    const mainPath = manifest.main.replace(/^\.\//, '');
-    const fileBytes = await api.pluginReadFile(id, mainPath);
-    const blob = new Blob([new Uint8Array(fileBytes)], { type: 'application/javascript' });
-    const blobUrl = URL.createObjectURL(blob);
+  // Check shared dependencies (advisory — warn but don't block)
+  if (manifest.sharedDependencies) {
+    const available = window.__OXIDE__;
+    const knownShared = new Set(['react', 'react-dom', 'zustand', 'lucide-react']);
+    for (const dep of Object.keys(manifest.sharedDependencies)) {
+      if (!knownShared.has(dep) || !available) {
+        console.warn(
+          `[PluginLoader] Plugin "${id}" declares shared dependency "${dep}" which is not provided by the host.`,
+        );
+      }
+    }
+  }
 
+  try {
     let module: PluginModule;
-    try {
-      // 2. Dynamic import
-      module = await import(/* @vite-ignore */ blobUrl);
-    } finally {
-      // Always revoke blob URL
-      URL.revokeObjectURL(blobUrl);
+
+    if (manifest.format === 'package') {
+      // Multi-file package: load via local HTTP server (supports relative imports)
+      module = await loadPluginViaServer(id, manifest.main);
+    } else {
+      // Single-file bundle (default): load via Blob URL
+      module = await loadPluginViaBlobUrl(id, manifest.main);
     }
 
     // Validate module exports
@@ -174,10 +214,29 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
       }
     }
 
-    // 4. Build the membrane context
+    // 4. Auto-load CSS files declared in manifest.styles
+    if (manifest.styles && manifest.styles.length > 0) {
+      for (const cssPath of manifest.styles) {
+        try {
+          const normalizedPath = cssPath.replace(/^\.\//, '');
+          const fileBytes = await api.pluginReadFile(id, normalizedPath);
+          const cssText = new TextDecoder().decode(new Uint8Array(fileBytes));
+
+          const styleEl = document.createElement('style');
+          styleEl.setAttribute('data-plugin', id);
+          styleEl.setAttribute('data-path', normalizedPath);
+          styleEl.textContent = cssText;
+          document.head.appendChild(styleEl);
+        } catch (err) {
+          console.warn(`[PluginLoader] Failed to load CSS "${cssPath}" for plugin "${id}":`, err);
+        }
+      }
+    }
+
+    // 5. Build the membrane context
     const ctx = buildPluginContext(manifest);
 
-    // 5. Activate with timeout
+    // 6. Activate with timeout
     const activateResult = module.activate(ctx);
     if (activateResult instanceof Promise) {
       await withTimeout(activateResult, LIFECYCLE_TIMEOUT, `Plugin "${id}" activate()`);
@@ -190,6 +249,7 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
       console.warn(`[PluginLoader] Plugin "${id}" was removed/disabled during activation, skipping`);
       store.cleanupPlugin(id);
       removePluginI18n(id);
+      cleanupPluginAssets(id);
       return;
     }
 
@@ -201,9 +261,11 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
     // Clean up any partial state left by a failed activation:
     // - module reference (set before activate() was called)
     // - i18n resources (loaded before activate() was called)
+    // - CSS/asset URLs (loaded before activate() was called)
     // - any disposables registered during a partially-completed activate()
     store.cleanupPlugin(id);
     removePluginI18n(id);
+    cleanupPluginAssets(id);
 
     store.setPluginState(id, 'error', errorMsg);
     console.error(`[PluginLoader] Failed to load plugin "${id}":`, errorMsg);
@@ -239,6 +301,9 @@ export async function unloadPlugin(pluginId: string): Promise<void> {
 
   // Remove i18n resources
   removePluginI18n(pluginId);
+
+  // Clean up injected CSS and asset blob URLs
+  cleanupPluginAssets(pluginId);
 
   // Close any open tabs for this plugin
   const { useAppStore } = await import('../../store/appStore');

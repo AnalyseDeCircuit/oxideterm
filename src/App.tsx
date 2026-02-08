@@ -16,6 +16,7 @@ import { preloadTerminalFonts } from './lib/fontLoader';
 import { initializePluginSystem } from './lib/plugin/pluginLoader';
 import { setupConnectionBridge, pluginEventBridge } from './lib/plugin/pluginEventBridge';
 import { useToastStore } from './hooks/useToast';
+import { PluginConfirmDialog } from './components/plugin/PluginConfirmDialog';
 
 function App() {
   // Initialize global event listeners
@@ -180,6 +181,7 @@ function App() {
       <AppLayout />
       <Toaster />
       <AutoRouteModal />
+      <PluginConfirmDialog />
       <LocalShellLauncher 
         open={shellLauncherOpen} 
         onOpenChange={setShellLauncherOpen} 

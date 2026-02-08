@@ -16,6 +16,8 @@ window.__OXIDE__ = {
   zustand: { create },
   lucideReact,
   ui: pluginUIKit,
+  version: '1.6.2',
+  pluginApiVersion: 2,
 }
 
 // Initialize settings (including theme) before rendering

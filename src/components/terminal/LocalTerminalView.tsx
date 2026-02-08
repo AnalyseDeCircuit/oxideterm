@@ -344,7 +344,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       sessionId,
       'local_terminal',
       getBufferContent,
-      getSelectionContent  // Include selection getter
+      getSelectionContent,  // Include selection getter
+      // Writer function: send data to local PTY via Tauri command
+      (data: string) => {
+        const encoder = new TextEncoder();
+        writeTerminal(sessionId, encoder.encode(data)).catch((err: unknown) => {
+          console.error('[LocalTerminalView] Failed to write to PTY:', err);
+        });
+      },
     );
 
     // Initial fit

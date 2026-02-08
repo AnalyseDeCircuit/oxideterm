@@ -1,7 +1,7 @@
 # OxideTerm Plugin Development Guide
 
-> **版本**: 适用于 OxideTerm v1.6.2+  
-> **最后更新**: 2025年
+> **版本**: 适用于 OxideTerm v1.6.2+
+> **最后更新**: 2026-02-08
 
 ---
 
@@ -47,6 +47,7 @@
   - [6.7 ctx.i18n](#67-ctxi18n)
   - [6.8 ctx.storage](#68-ctxstorage)
   - [6.9 ctx.api](#69-ctxapi)
+  - [6.10 ctx.assets](#610-ctxassets)
 - [7. 共享模块 (window.\_\_OXIDE\_\_)](#7-共享模块-window__oxide__)
   - [7.1 可用模块](#71-可用模块)
   - [7.2 使用 React](#72-使用-react)
@@ -148,7 +149,7 @@ OxideTerm 插件系统遵循以下设计原则：
 │              │  activate(ctx) ←── PluginContext (frozen)      │   │
 │              │    ctx.connections  ctx.events  ctx.ui         │   │
 │              │    ctx.terminal    ctx.settings  ctx.i18n      │   │
-│              │    ctx.storage     ctx.api                     │   │
+│              │    ctx.storage     ctx.api      ctx.assets     │   │
 │              │                                                │   │
 │              │  window.__OXIDE__                              │   │
 │              │    React · ReactDOM · zustand · lucideReact    │   │
@@ -263,11 +264,33 @@ export function deactivate() {
 
 ### 2.3 安装与调试
 
+**方式一：手动安装（开发模式）**
+
 1. 确保插件文件放在 `~/.oxideterm/plugins/my-first-plugin/` 下
 2. 在 OxideTerm 中打开 **Plugin Manager**（侧边栏 🧩 图标 → Plugin Manager）
 3. 点击 **Refresh** 按钮扫描新插件
 4. 插件将自动加载并显示在列表中
 5. 在侧边栏中可以看到插件的 Tab 图标，点击打开 Tab
+
+**方式二：从注册表安装（推荐）**
+
+1. 在 Plugin Manager 中切换到 **浏览** 标签页
+2. 搜索或浏览可用插件
+3. 点击 **安装** 按钮
+4. 插件将自动下载、验证并安装
+5. 安装完成后插件自动激活
+
+**方式三：更新已安装插件**
+
+1. 在 **浏览** 标签页中，已安装插件如有更新会显示 **更新** 按钮
+2. 点击 **更新** 按钮
+3. 旧版本将被卸载，新版本自动安装并激活
+
+**卸载插件**
+
+1. 在 **已安装** 标签页中找到要卸载的插件
+2. 点击插件行右侧的 🗑️ 按钮
+3. 插件将被停用并从磁盘删除
 
 调试提示：
 
@@ -280,6 +303,8 @@ export function deactivate() {
 ## 3. 插件结构
 
 ### 3.1 目录布局
+
+**v1 单文件 Bundle（默认）**：
 
 ```
 ~/.oxideterm/plugins/
@@ -294,6 +319,32 @@ export function deactivate() {
     └── assets/              # 可选：其他资源文件
         └── ...
 ```
+
+**v2 多文件 Package**（`format: "package"`）：
+
+```
+~/.oxideterm/plugins/
+└── your-plugin-id/
+    ├── plugin.json          # 必需：manifestVersion: 2, format: "package"
+    ├── src/
+    │   ├── main.js          # ESM 入口（支持模块间相对 import）
+    │   ├── components/
+    │   │   ├── Dashboard.js
+    │   │   └── Charts.js
+    │   └── utils/
+    │       └── helpers.js
+    ├── styles/
+    │   ├── main.css         # 声明在 manifest.styles 中自动加载
+    │   └── charts.css
+    ├── assets/
+    │   ├── logo.png         # 通过 ctx.assets.getAssetUrl() 访问
+    │   └── config.json
+    └── locales/
+        ├── en.json
+        └── zh-CN.json
+```
+
+v2 多文件包通过内置的本地 HTTP 文件服务器（`127.0.0.1`，OS 分配端口）加载，支持文件间的标准 ES Module `import` 语法。
 
 **路径约束**：
 
@@ -355,7 +406,9 @@ export function deactivate() {
 
 两个函数均支持返回 `Promise`（异步激活/停用），但有 **5 秒超时限制**。
 
-**加载机制**：
+**加载机制（双策略）**：
+
+**v1 单文件 Bundle（默认 / `format: "bundled"`）**：
 
 ```
 Rust read_plugin_file(id, "main.js")
@@ -366,7 +419,47 @@ Rust read_plugin_file(id, "main.js")
           → module.activate(frozenContext)
 ```
 
-> **重要**：由于使用 Blob URL 加载，插件内部不能使用相对路径 `import`。如需多文件，请使用打包工具（esbuild/rollup）合并为单文件 ESM bundle。
+> 使用 Blob URL 加载时，插件内部**不能**使用相对路径 `import`。请使用打包工具（esbuild/rollup）合并为单文件 ESM bundle。
+
+**v2 多文件 Package（`format: "package"`）**：
+
+```
+前端调用 api.pluginStartServer()
+  → Rust 启动本地 HTTP Server (127.0.0.1:0)
+    → 返回 OS 分配的端口号
+
+import(`http://127.0.0.1:{port}/plugins/{id}/src/main.js`)
+  → 浏览器标准 ES Module 加载
+    → main.js 中的 import './components/Dashboard.js' 自动解析
+      → module.activate(frozenContext)
+```
+
+> v2 包**支持**文件间的相对路径 `import`，浏览器会自动通过 HTTP Server 解析。服务器首次使用时自动启动，支持优雅停机。
+
+**v2 多文件入口示例**：
+
+```javascript
+// src/main.js — import 同包的其他模块
+import { Dashboard } from './components/Dashboard.js';
+import { formatBytes } from './utils/helpers.js';
+
+export async function activate(ctx) {
+  // 动态加载额外 CSS
+  const cssDisposable = await ctx.assets.loadCSS('./styles/extra.css');
+
+  // 获取资源文件的 blob URL（用于 <img> src 等）
+  const logoUrl = await ctx.assets.getAssetUrl('./assets/logo.png');
+
+  ctx.ui.registerTabView('dashboard', (props) => {
+    const { React } = window.__OXIDE__;
+    return React.createElement(Dashboard, { ...props, logoUrl });
+  });
+}
+
+export function deactivate() {
+  // Disposable 会自动清理 CSS 和 blob URL
+}
+```
 
 ---
 
@@ -376,16 +469,51 @@ Rust read_plugin_file(id, "main.js")
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|------|------|
-| `id` | `string` | ✅ | 插件唯一标识符。只能包含字母、数字、连字符。不允许 `/`、`\`、`..`、控制字符。 |
+| `id` | `string` | ✅ | 插件唯一标识符。只能包含字母、数字、连字符、点号。不允许 `/`、`\`、`..`、控制字符。 |
 | `name` | `string` | ✅ | 人类可读的插件名称 |
 | `version` | `string` | ✅ | 语义化版本号 (如 `"1.0.0"`) |
 | `description` | `string` | ⬜ | 插件描述 |
 | `author` | `string` | ⬜ | 作者 |
-| `main` | `string` | ✅ | ESM 入口文件的相对路径 (如 `"./main.js"`) |
+| `main` | `string` | ✅ | ESM 入口文件的相对路径 (如 `"./main.js"` 或 `"./src/main.js"`) |
 | `engines` | `object` | ⬜ | 版本兼容性要求 |
 | `engines.oxideterm` | `string` | ⬜ | 所需最低 OxideTerm 版本 (如 `">=1.6.0"`)。支持 `>=x.y.z` 格式。 |
 | `contributes` | `object` | ⬜ | 插件贡献的能力声明 |
 | `locales` | `string` | ⬜ | i18n 翻译文件目录的相对路径 (如 `"./locales"`) |
+
+**v2 Package 扩展字段**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `manifestVersion` | `1 \| 2` | ⬜ | 清单版本，默认 `1` |
+| `format` | `'bundled' \| 'package'` | ⬜ | `bundled`（默认）= 单文件 Blob URL 加载；`package` = 本地 HTTP Server 加载（支持相对 import） |
+| `assets` | `string` | ⬜ | 资源目录相对路径（如 `"./assets"`），配合 `ctx.assets` API 使用 |
+| `styles` | `string[]` | ⬜ | CSS 文件列表（如 `["./styles/main.css"]`），加载时自动注入 `<style>` 到 `<head>` |
+| `sharedDependencies` | `Record<string, string>` | ⬜ | 声明从宿主共享的依赖版本。当前支持：`react`、`react-dom`、`zustand`、`lucide-react` |
+| `repository` | `string` | ⬜ | 源码仓库 URL |
+| `checksum` | `string` | ⬜ | SHA-256 校验和（用于完整性验证） |
+
+**v2 manifest 示例**：
+
+```json
+{
+  "id": "com.example.multi-file-plugin",
+  "name": "Multi-File Plugin",
+  "version": "2.0.0",
+  "main": "./src/main.js",
+  "engines": { "oxideterm": ">=1.6.2" },
+  "manifestVersion": 2,
+  "format": "package",
+  "styles": ["./styles/main.css"],
+  "sharedDependencies": {
+    "react": "^18.0.0",
+    "lucide-react": "^0.300.0"
+  },
+  "contributes": {
+    "tabs": [{ "id": "dashboard", "title": "Dashboard", "icon": "LayoutDashboard" }]
+  },
+  "locales": "./locales"
+}
+```
 
 ### 4.2 contributes.tabs
 
@@ -705,7 +833,7 @@ unloadPlugin(pluginId)
 
 ## 6. PluginContext API 完全参考
 
-`PluginContext` 是传递给 `activate(ctx)` 的唯一参数。它是一个深度冻结的对象，包含 8 个 API 命名空间。
+`PluginContext` 是传递给 `activate(ctx)` 的唯一参数。它是一个深度冻结的对象，包含 10 个命名空间（`pluginId` + 9 个子 API）。
 
 ```typescript
 type PluginContext = Readonly<{
@@ -718,6 +846,7 @@ type PluginContext = Readonly<{
   i18n: PluginI18nAPI;
   storage: PluginStorageAPI;
   api: PluginBackendAPI;
+  assets: PluginAssetsAPI;
 }>;
 ```
 
@@ -1038,7 +1167,17 @@ ctx.terminal.registerShortcut('openDashboard', () => {
 terminal.writeToTerminal(sessionId: string, text: string): void
 ```
 
-> ⚠️ **当前版本未实现** — 调用会输出 console.warn。未来版本可能通过 terminal registry 提供写入通道。
+向指定会话的终端写入文本数据。通过 `terminalRegistry` 查找对应的 writer 回调，直接写入终端的数据通道（SSH WebSocket 或本地 PTY）。
+
+```javascript
+// 向终端发送命令
+ctx.terminal.writeToTerminal(sessionId, 'ls -la\n');
+
+// 发送特殊控制字符（如 Ctrl+C）
+ctx.terminal.writeToTerminal(sessionId, '\x03');
+```
+
+> 如果找不到 sessionId 对应的终端或 writer 未注册，会输出 `console.warn` 但不会抛异常。
 
 #### `getBuffer(sessionId)`
 
@@ -1211,6 +1350,104 @@ const sessions = await ctx.api.invoke('list_sessions');
 **未声明的命令**：
 - 调用时 console 输出警告
 - 抛出 `Error: Command "xxx" not whitelisted in manifest contributes.apiCommands`
+
+---
+
+### 6.10 ctx.assets
+
+插件资源文件访问 API。用于加载 CSS 样式、获取图片/字体/数据文件的 URL。
+
+#### `loadCSS(relativePath)`
+
+```typescript
+assets.loadCSS(relativePath: string): Promise<Disposable>
+```
+
+读取插件目录中的 CSS 文件，注入 `<style data-plugin="{pluginId}">` 标签到 `<head>`。返回的 `Disposable` 调用 `dispose()` 后会移除该 `<style>` 标签。
+
+```javascript
+// 动态加载额外样式
+const cssDisposable = await ctx.assets.loadCSS('./styles/extra.css');
+
+// 不再需要时手动移除（也可在卸载时自动清理）
+cssDisposable.dispose();
+```
+
+> 注意：`manifest.styles` 中声明的 CSS 文件会在插件加载时**自动注入**，无需手动调用 `loadCSS()`。`loadCSS()` 适用于按需加载的额外样式。
+
+#### `getAssetUrl(relativePath)`
+
+```typescript
+assets.getAssetUrl(relativePath: string): Promise<string>
+```
+
+读取插件目录中的任意文件，返回 blob URL（可用于 `<img src>`、`new Image()` 等）。
+
+```javascript
+const logoUrl = await ctx.assets.getAssetUrl('./assets/logo.png');
+
+// 在 React 组件中使用
+return h('img', { src: logoUrl, alt: 'Logo' });
+```
+
+**MIME 类型自动检测**：
+
+| 扩展名 | MIME |
+|--------|------|
+| `png` | `image/png` |
+| `jpg`/`jpeg` | `image/jpeg` |
+| `gif` | `image/gif` |
+| `svg` | `image/svg+xml` |
+| `webp` | `image/webp` |
+| `woff`/`woff2` | `font/woff` / `font/woff2` |
+| `ttf`/`otf` | `font/ttf` / `font/otf` |
+| `json` | `application/json` |
+| `css` | `text/css` |
+| `js` | `application/javascript` |
+| 其他 | `application/octet-stream` |
+
+#### `revokeAssetUrl(url)`
+
+```typescript
+assets.revokeAssetUrl(url: string): void
+```
+
+手动释放通过 `getAssetUrl()` 创建的 blob URL，释放内存。
+
+```javascript
+const url = await ctx.assets.getAssetUrl('./assets/large-image.png');
+// 使用完毕后
+ctx.assets.revokeAssetUrl(url);
+```
+
+> 卸载插件时，所有未手动释放的 blob URL 和注入的 `<style>` 标签会**自动清理**。
+
+**完整示例**：
+
+```javascript
+export async function activate(ctx) {
+  // 1. 自动加载 manifest.styles 中的 CSS（无需代码）
+  // 2. 按需加载额外 CSS
+  const highlightCSS = await ctx.assets.loadCSS('./styles/highlight.css');
+
+  // 3. 获取图片 URL
+  const iconUrl = await ctx.assets.getAssetUrl('./assets/icon.svg');
+
+  // 4. 获取 JSON 配置
+  const configUrl = await ctx.assets.getAssetUrl('./assets/defaults.json');
+  const configResp = await fetch(configUrl);
+  const defaults = await configResp.json();
+  ctx.assets.revokeAssetUrl(configUrl); // JSON 已读取，释放 blob URL
+
+  ctx.ui.registerTabView('my-tab', (props) => {
+    const { React } = window.__OXIDE__;
+    return React.createElement('div', null,
+      React.createElement('img', { src: iconUrl, width: 32 }),
+      React.createElement('pre', null, JSON.stringify(defaults, null, 2)),
+    );
+  });
+}
+```
 
 ---
 
@@ -2802,6 +3039,63 @@ npx esbuild src/index.ts \
 | `localStorage: oxide-plugin-{id}-*` | 插件存储数据 |
 | `localStorage: oxide-plugin-{id}-setting-*` | 插件设置 |
 
+### Q: 如何发布插件到官方注册表？
+
+1. **打包插件**：将插件目录打包为 ZIP 文件
+   ```bash
+   cd ~/.oxideterm/plugins/my-plugin
+   zip -r my-plugin-1.0.0.zip .
+   ```
+
+2. **计算校验和**：
+   ```bash
+   shasum -a 256 my-plugin-1.0.0.zip
+   # 输出: abc123... my-plugin-1.0.0.zip
+   ```
+
+3. **托管 ZIP 文件**：上传到可公开访问的 URL（GitHub Releases、CDN 等）
+
+4. **提交到注册表**：
+   - 官方注册表：向 OxideTerm 仓库提交 PR，添加你的插件条目
+   - 自建注册表：在你的 `registry.json` 中添加条目
+
+**注册表条目格式**：
+```json
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "description": "Plugin description",
+  "author": "Your Name",
+  "downloadUrl": "https://example.com/my-plugin-1.0.0.zip",
+  "checksum": "sha256:abc123...",
+  "size": 12345,
+  "tags": ["utility"],
+  "homepage": "https://github.com/you/my-plugin"
+}
+```
+
+### Q: 如何使用自定义插件注册表？
+
+编辑 `~/.oxideterm/plugin-config.json`：
+
+```json
+{
+  "registryUrl": "https://your-server.com/registry.json",
+  "plugins": {}
+}
+```
+
+注册表 JSON 格式：
+```json
+{
+  "version": 1,
+  "plugins": [
+    { "id": "...", "name": "...", ... }
+  ]
+}
+```
+
 ---
 
 ## 20. 类型参考 (TypeScript)
@@ -2821,6 +3115,8 @@ export type Disposable = {
 
 // ── Plugin States ───────────────────────────────────────────
 export type PluginState = 'inactive' | 'loading' | 'active' | 'error' | 'disabled';
+
+export type InstallState = 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
 
 export type SshConnectionState =
   | 'idle'
@@ -2859,6 +3155,27 @@ export type OutputProcessor = (
   data: Uint8Array,
   context: TerminalHookContext,
 ) => Uint8Array;
+
+// ── Registry Types (Remote Installation) ────────────────────
+export type RegistryEntry = {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  version: string;
+  minOxidetermVersion?: string;
+  downloadUrl: string;
+  checksum?: string;
+  size?: number;
+  tags?: string[];
+  homepage?: string;
+  updatedAt?: string;
+};
+
+export type RegistryIndex = {
+  version: number;
+  plugins: RegistryEntry[];
+};
 
 // ── Plugin Tab Props ────────────────────────────────────────
 export type PluginTabProps = {
@@ -2927,6 +3244,12 @@ export type PluginBackendAPI = {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
 };
 
+export type PluginAssetsAPI = {
+  loadCSS(relativePath: string): Promise<Disposable>;
+  getAssetUrl(relativePath: string): Promise<string>;
+  revokeAssetUrl(url: string): void;
+};
+
 // ── Plugin Context ──────────────────────────────────────────
 export type PluginContext = Readonly<{
   pluginId: string;
@@ -2938,7 +3261,29 @@ export type PluginContext = Readonly<{
   i18n: PluginI18nAPI;
   storage: PluginStorageAPI;
   api: PluginBackendAPI;
+  assets: PluginAssetsAPI;
 }>;
+
+// ── Plugin Manifest (v2) ────────────────────────────────────
+export type PluginManifest = {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  main: string;
+  engines?: { oxideterm?: string };
+  // v2 Package fields
+  manifestVersion?: 1 | 2;
+  format?: 'bundled' | 'package';
+  assets?: string;
+  styles?: string[];
+  sharedDependencies?: Record<string, string>;
+  repository?: string;
+  checksum?: string;
+  contributes?: { /* ... */ };
+  locales?: string;
+};
 
 // ── Plugin Module ───────────────────────────────────────────
 export type PluginModule = {
@@ -2954,6 +3299,9 @@ declare global {
       ReactDOM: { createRoot: typeof import('react-dom/client').createRoot };
       zustand: { create: typeof import('zustand').create };
       lucideReact: typeof import('lucide-react');
+      ui: PluginUIKit;         // 24 个预置 UI 组件
+      version: string;         // OxideTerm 版本号
+      pluginApiVersion: number; // 插件 API 版本号
     };
   }
 }
@@ -2979,6 +3327,35 @@ declare global {
     "description": { "type": "string" },
     "author": { "type": "string" },
     "main": { "type": "string", "description": "Relative path to ESM entry file" },
+    "manifestVersion": {
+      "type": "integer", "enum": [1, 2], "default": 1,
+      "description": "Manifest schema version; set to 2 for v2 Package format"
+    },
+    "format": {
+      "type": "string", "enum": ["bundled", "package"], "default": "bundled",
+      "description": "bundled = single-file Blob URL; package = multi-file HTTP Server"
+    },
+    "assets": {
+      "type": "string",
+      "description": "Relative path to assets directory (v2 Package only)"
+    },
+    "styles": {
+      "type": "array", "items": { "type": "string" },
+      "description": "CSS files to auto-load on activation (v2 Package only)"
+    },
+    "sharedDependencies": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Dependencies provided by host via window.__OXIDE__"
+    },
+    "repository": {
+      "type": "string",
+      "description": "Repository URL for source code"
+    },
+    "checksum": {
+      "type": "string",
+      "description": "SHA-256 hash of the main entry file for integrity verification"
+    },
     "engines": {
       "type": "object",
       "properties": {
@@ -3086,10 +3463,15 @@ declare global {
 | `src/lib/plugin/pluginStorage.ts` | localStorage KV 存储封装 |
 | `src/lib/plugin/pluginSettingsManager.ts` | 设置管理（声明+持久化+change 通知） |
 | `src/lib/plugin/pluginI18nManager.ts` | 插件 i18n 封装（i18next 集成） |
+| `src/lib/plugin/pluginUtils.ts` | 共享工具函数（路径验证、安全检查） |
+| `src/lib/plugin/pluginUIKit.tsx` | 24 个预置 UI 组件（UIKit） |
 | `src-tauri/src/commands/plugin.rs` | Rust 后端（文件 I/O + 路径安全） |
+| `src-tauri/src/commands/plugin_server.rs` | Plugin File Server（多文件 HTTP 访问） |
+| `src-tauri/src/commands/plugin_registry.rs` | 插件仓库注册/搜索 |
 | `src/components/plugin/PluginManagerView.tsx` | Plugin Manager UI |
 | `src/components/plugin/PluginTabRenderer.tsx` | 插件 Tab 渲染器 |
 | `src/components/plugin/PluginSidebarRenderer.tsx` | 插件 Sidebar 渲染器 |
+| `src/components/plugin/PluginConfirmDialog.tsx` | 主题化确认对话框（Radix UI） |
 
 ---
 

@@ -847,7 +847,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       sessionId,
       'terminal', // SSH terminal type
       getBufferContent,
-      getSelectionContent  // Include selection getter
+      getSelectionContent,  // Include selection getter
+      // Writer function: encode and send via WebSocket
+      (data: string) => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const encoder = new TextEncoder();
+          const payload = encoder.encode(data);
+          const frame = encodeDataFrame(payload);
+          ws.send(frame);
+        }
+      },
     );
     
     // Font loading detection - ensure fonts are loaded before connecting
