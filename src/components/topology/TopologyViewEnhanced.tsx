@@ -459,8 +459,8 @@ export const TopologyViewEnhanced: React.FC<TopologyViewEnhancedProps> = ({
       const sftpId = await openSftpForNode(nodeId);
       if (!sftpId) return;
 
-      // Create SFTP tab (sessionId is second argument)
-      createTab('sftp', sftpId);
+      // Create SFTP tab (sessionId is second argument, nodeId in options)
+      createTab('sftp', sftpId, { nodeId });
     } catch (e) {
       console.error('Failed to open SFTP:', e);
     }

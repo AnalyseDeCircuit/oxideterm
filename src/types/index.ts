@@ -376,6 +376,10 @@ export interface Tab {
   // Legacy: Direct session binding (backward compatible, used when rootPane is undefined)
   sessionId?: string;
 
+  // Stable node anchor for SFTP/IDE tabs (virtual session proxy)
+  // Unlike sessionId which changes on reconnect, nodeId persists across reconnects
+  nodeId?: string;
+
   // Plugin tab identifier (for type === 'plugin')
   pluginTabId?: string;
 }

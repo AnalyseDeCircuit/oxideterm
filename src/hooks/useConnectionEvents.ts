@@ -17,6 +17,7 @@ import { useTransferStore } from '../store/transferStore';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
 import { useReconnectOrchestratorStore } from '../store/reconnectOrchestratorStore';
 import { topologyResolver } from '../lib/topologyResolver';
+import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
 import type { SshConnectionState } from '../types';
 
@@ -76,6 +77,15 @@ export function useConnectionEvents(): void {
           const { connection_id, status, affected_children } = event.payload;
           console.log(`[ConnectionEvents] ${connection_id} -> ${status}`, { affected_children });
 
+          // Structured log for diagnostics
+          slog({
+            component: 'ConnectionEvents',
+            event: 'status_changed',
+            connectionId: connection_id,
+            detail: status,
+            nodeId: topologyResolver.getNodeId(connection_id) ?? undefined,
+          });
+
           // Map backend status to frontend state
           let state: SshConnectionState;
           switch (status) {
@@ -106,6 +116,16 @@ export function useConnectionEvents(): void {
             
             // 1. 标记受影响的节点
             const affectedNodeIds = topologyResolver.handleLinkDown(connection_id, affected_children);
+
+            slog({
+              component: 'ConnectionEvents',
+              event: 'link_down',
+              connectionId: connection_id,
+              nodeId: topologyResolver.getNodeId(connection_id) ?? undefined,
+              outcome: 'ok',
+              detail: `affected=${affectedNodeIds.length} children=${affected_children.length}`,
+            });
+
             if (affectedNodeIds.length > 0) {
               getTreeStore().markLinkDownBatch(affectedNodeIds);
             }

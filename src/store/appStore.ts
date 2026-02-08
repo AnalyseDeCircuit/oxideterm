@@ -68,7 +68,7 @@ interface AppStore {
   setNetworkOnline: (online: boolean) => void;
   
   // Actions - Tabs
-  createTab: (type: TabType, sessionId?: string) => void;
+  createTab: (type: TabType, sessionId?: string, options?: { nodeId?: string }) => void;
   /**
    * 关闭标签页并执行完整的清理
    * 
@@ -435,10 +435,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
-  createTab: (type, sessionId) => {
+  createTab: (type, sessionId, options) => {
     // Plugin tabs are created via ctx.ui.openTab() — not through this path
     if (type === 'plugin') {
       return;
+    }
+
+    // nodeId is required for SFTP/IDE tabs — auto-migrate from sessionId if missing
+    if ((type === 'sftp' || type === 'ide') && !options?.nodeId && sessionId) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { useSessionTreeStore } = require('./sessionTreeStore');
+        const node = useSessionTreeStore.getState().getNodeByTerminalId(sessionId);
+        if (node) {
+          console.info(`[AppStore] Auto-migrated ${type} tab: sessionId=${sessionId} → nodeId=${node.id}`);
+          options = { ...options, nodeId: node.id };
+        } else {
+          console.warn(`[AppStore] Creating ${type} tab without nodeId (no node found for sessionId=${sessionId}). Tab may not survive reconnects.`);
+        }
+      } catch {
+        console.warn(`[AppStore] Creating ${type} tab without nodeId. Tab may not survive reconnects.`);
+      }
     }
 
     // Handle global/singleton tabs
@@ -530,8 +547,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (type === 'ide') {
       if (!sessionId) return;
 
-      // Check if an IDE tab with the same sessionId already exists
-      const existingTab = get().tabs.find(t => t.type === 'ide' && t.sessionId === sessionId);
+      const nodeId = options?.nodeId;
+
+      // Dedup IDE tab by nodeId (canonical) — sessionId fallback only for legacy tabs
+      const existingTab = get().tabs.find(t => {
+        if (t.type !== 'ide') return false;
+        if (nodeId) return t.nodeId === nodeId;
+        return !t.nodeId && t.sessionId === sessionId;
+      });
       if (existingTab) {
         set({ activeTabId: existingTab.id });
         return;
@@ -545,6 +568,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         id: crypto.randomUUID(),
         type: 'ide',
         sessionId,
+        ...(nodeId ? { nodeId } : {}),
         title: `${i18n.t('tabs.ide')}: ${sessionName}`,
         icon: '💻'
       };
@@ -562,8 +586,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const session = get().sessions.get(sessionId);
     if (!session) return;
 
-    // Check if a tab with the same type and sessionId already exists
-    const existingTab = get().tabs.find(t => t.type === type && t.sessionId === sessionId);
+    const nodeId = options?.nodeId;
+
+    // Dedup by nodeId (canonical for sftp) — sessionId fallback only for legacy tabs
+    const existingTab = get().tabs.find(t => {
+      if (t.type !== type) return false;
+      if (type === 'sftp' && nodeId) return t.nodeId === nodeId;
+      if (type === 'sftp') return !t.nodeId && t.sessionId === sessionId;
+      return t.sessionId === sessionId;
+    });
     if (existingTab) {
       // Switch to existing tab instead of creating a new one
       set({ activeTabId: existingTab.id });
@@ -574,6 +605,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       id: crypto.randomUUID(),
       type,
       sessionId,
+      ...(type === 'sftp' && nodeId ? { nodeId } : {}),
       title: type === 'terminal' ? session.name : `${type === 'sftp' ? i18n.t('tabs.sftp_prefix') : i18n.t('tabs.forwards_prefix')}: ${session.name}`,
       icon: type === 'terminal' ? '>_' : type === 'sftp' ? '📁' : '🔀'
     };

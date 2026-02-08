@@ -35,6 +35,14 @@ const ViewLoader = () => {
   );
 };
 
+// Shown for legacy sftp/ide tabs that have no nodeId binding
+const StaleTabBanner = ({ type }: { type: string }) => (
+  <div className="flex flex-col items-center justify-center h-full text-theme-text-muted gap-3">
+    <div className="text-4xl opacity-20">{type === 'sftp' ? '📁' : '💻'}</div>
+    <p className="text-sm">Session binding lost. Please close this tab and reopen from the sidebar.</p>
+  </div>
+);
+
 export const AppLayout = () => {
   const { t } = useTranslation();
   const { tabs, activeTabId, toggleModal, setActivePaneId, closePane } = useAppStore();
@@ -106,13 +114,17 @@ export const AppLayout = () => {
                       )}
                     </div>
                   )}
-                  {tab.type === 'sftp' && tab.sessionId && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <SFTPView 
-                        key={`sftp-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`} 
-                        sessionId={tab.sessionId} 
-                      />
-                    </Suspense>
+                  {tab.type === 'sftp' && (
+                    tab.nodeId ? (
+                      <Suspense fallback={<ViewLoader />}>
+                        <SFTPView 
+                          key={`sftp-${tab.nodeId}`}
+                          nodeId={tab.nodeId}
+                        />
+                      </Suspense>
+                    ) : (
+                      <StaleTabBanner type="sftp" />
+                    )
                   )}
                   {tab.type === 'forwards' && tab.sessionId && (
                     <Suspense fallback={<ViewLoader />}>
@@ -133,19 +145,18 @@ export const AppLayout = () => {
                   )}
                   {tab.type === 'connection_pool' && <ConnectionsPanel />}
                   {tab.type === 'topology' && <TopologyPage />}
-                  {tab.type === 'ide' && tab.sessionId && (
-                    <Suspense fallback={<ViewLoader />}>
-                      {getSession(tab.sessionId)?.connectionId ? (
+                  {tab.type === 'ide' && (
+                    tab.nodeId ? (
+                      <Suspense fallback={<ViewLoader />}>
                         <IdeWorkspace
-                          key={`ide-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`}
-                          connectionId={getSession(tab.sessionId)?.connectionId ?? ''}
-                          sftpSessionId={tab.sessionId}
+                          key={`ide-${tab.nodeId}`}
+                          nodeId={tab.nodeId}
                           rootPath="~"
                         />
-                      ) : (
-                        <ViewLoader />
-                      )}
-                    </Suspense>
+                      </Suspense>
+                    ) : (
+                      <StaleTabBanner type="ide" />
+                    )
                   )}
                   {tab.type === 'file_manager' && (
                     <Suspense fallback={<ViewLoader />}>

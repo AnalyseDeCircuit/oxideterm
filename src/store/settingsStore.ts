@@ -190,6 +190,16 @@ export interface PersistedSettingsV2 {
   ai: AiSettings;
   localTerminal?: LocalTerminalSettings;
   sftp?: SftpSettings;
+  experimental?: ExperimentalSettings;
+}
+
+/** Experimental feature flags */
+export interface ExperimentalSettings {
+  /**
+   * @deprecated Since Cycle 1 — nodeId-based proxy is now the only path.
+   * Kept for settings schema compatibility; value is ignored at runtime.
+   */
+  virtualSessionProxy: boolean;
 }
 
 // ============================================================================
@@ -292,6 +302,7 @@ function createDefaultSettings(): PersistedSettingsV2 {
     ai: { ...defaultAiSettings },
     localTerminal: { ...defaultLocalTerminalSettings },
     sftp: { ...defaultSftpSettings },
+    experimental: { virtualSessionProxy: false },
   };
 }
 

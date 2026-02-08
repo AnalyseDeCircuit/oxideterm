@@ -1,8 +1,11 @@
 // src/components/ide/IdeWorkspace.tsx
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
+import { useAppStore } from '../../store/appStore';
+import { useNodeSession } from '../../hooks/useNodeSession';
+import { softInvariant } from '../../lib/invariant';
 import { IdeTree } from './IdeTree';
 import { IdeEditorArea } from './IdeEditorArea';
 import { IdeTerminal } from './IdeTerminal';
@@ -10,14 +13,27 @@ import { IdeStatusBar } from './IdeStatusBar';
 import { IdeSearchPanel } from './IdeSearchPanel';
 
 interface IdeWorkspaceProps {
-  connectionId: string;
-  sftpSessionId: string;
+  nodeId: string;
   rootPath: string;
 }
 
-export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorkspaceProps) {
+export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   const { t } = useTranslation();
   const project = useIdeProject();
+
+  // ─── Virtual Session Proxy: resolve nodeId to active session ───
+  const { resolved, resolveTick } = useNodeSession(nodeId);
+  const isResolving = !resolved;
+  const activeConnectionId = resolved?.connectionId ?? '';
+  const activeSftpSessionId = resolved?.sessionId ?? '';
+
+  // Runtime invariant: resolved session's connection must be in the pool
+  softInvariant(
+    !resolved || useAppStore.getState().connections.has(resolved.connectionId),
+    'IDE resolved connectionId not in connections map',
+    { nodeId, connectionId: resolved?.connectionId },
+  );
+
   const { 
     openProject, 
     treeWidth, 
@@ -30,22 +46,32 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
   
   // 搜索面板状态
   const [searchOpen, setSearchOpen] = useState(false);
+  // 初始化错误状态
+  const [initError, setInitError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
   
   // 切换搜索面板
   const toggleSearch = useCallback(() => {
     setSearchOpen(prev => !prev);
   }, []);
   
-  // 初始化项目 - 只在首次加载或会话变更时执行
+  // 初始化项目 — resolveTick 变化触发重连后重建
   useEffect(() => {
-    // 只有当没有项目或 session ID 变更时才重新打开
+    if (isResolving || !activeSftpSessionId) return;
+
     const needsOpen = !project || 
-      (useIdeStore.getState().sftpSessionId !== sftpSessionId);
+      (useIdeStore.getState().sftpSessionId !== activeSftpSessionId);
     
     if (needsOpen) {
-      openProject(connectionId, sftpSessionId, rootPath).catch(console.error);
+      setInitError(null);
+      openProject(activeConnectionId, activeSftpSessionId, rootPath)
+        .then(() => setInitError(null))
+        .catch((err) => {
+          console.error('[IdeWorkspace] openProject failed:', err);
+          setInitError(err instanceof Error ? err.message : String(err));
+        });
     }
-  }, [connectionId, sftpSessionId, rootPath]); // 移除 project 和 openProject 依赖
+  }, [activeConnectionId, activeSftpSessionId, rootPath, resolveTick, isResolving, retryTick]);
   
   // 全局快捷键
   useEffect(() => {
@@ -67,12 +93,33 @@ export function IdeWorkspace({ connectionId, sftpSessionId, rootPath }: IdeWorks
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleTerminal, toggleSearch]);
   
-  // 加载中状态
-  if (!project) {
+  // 加载中状态（或重连中）
+  if (isResolving || (!project && !initError)) {
     return (
       <div className="flex items-center justify-center h-full bg-theme-bg">
         <Loader2 className="w-8 h-8 animate-spin text-theme-accent" />
-        <span className="ml-3 text-theme-text-muted">{t('ide.loading_project')}</span>
+        <span className="ml-3 text-theme-text-muted">
+          {isResolving ? t('ide.reconnecting', 'Reconnecting…') : t('ide.loading_project')}
+        </span>
+      </div>
+    );
+  }
+
+  // 初始化失败状态
+  if (initError && !project) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-theme-bg gap-4">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <span className="text-theme-text-muted text-sm max-w-md text-center">
+          {t('ide.open_failed', 'Failed to open project')}: {initError}
+        </span>
+        <button
+          onClick={() => setRetryTick((v) => v + 1)}
+          className="flex items-center gap-2 px-4 py-2 rounded bg-theme-accent text-white hover:bg-theme-accent/80 transition-colors text-sm"
+        >
+          <RefreshCw className="w-4 h-4" />
+          {t('ide.retry', 'Retry')}
+        </button>
       </div>
     );
   }

@@ -20,11 +20,11 @@ import {
   HardDrive,
   FolderOpen,
   CornerDownLeft,
-  GitCompare
+  GitCompare,
+  Loader2
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useTransferStore } from '../../store/transferStore';
-import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../hooks/useToast';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -37,15 +37,31 @@ import { RemoteFileEditor } from '../editor/RemoteFileEditor';
 import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
 import { api } from '../../lib/api';
-import { guardSessionConnection, isConnectionGuardError } from '../../lib/connectionGuard';
+import { guardNodeCapability, isConnectionGuardError } from '../../lib/connectionGuard';
+import { useNodeSession } from '../../hooks/useNodeSession';
+import { softInvariant } from '../../lib/invariant';
+import { useSettingsStore } from '../../store/settingsStore';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { FileInfo } from '../../types';
 import { listen } from '@tauri-apps/api/event';
 import { readDir, stat, remove, rename, mkdir } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
 
-// 🔴 Key-Driven: 全局路径记忆 Map，用于跨重连恢复用户位置
+// 🔴 Key-Driven: 全局路径记忆 Map
+// When virtualSessionProxy is enabled, keyed by nodeId (stable across reconnects)
+// Otherwise still keyed by sessionId (legacy)
 const sftpPathMemory = new Map<string, string>();
+
+function isRecoverableSftpChannelError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes('ConnectFailed') ||
+    message.includes('Channel error') ||
+    message.includes('InvalidSession') ||
+    message.includes('session not found')
+  );
+}
 
 import { 
   Dialog, 
@@ -567,10 +583,31 @@ const FileList = ({
   );
 }
 
-export const SFTPView = ({ sessionId }: { sessionId: string }) => {
+export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
   const { getSession } = useAppStore();
-  const session = getSession(sessionId);
+
+  // ─── Virtual Session Proxy: resolve nodeId to active session ───
+  const { resolved, resolveTick } = useNodeSession(nodeId);
+  const isResolving = !resolved;
+  const activeSessionId = resolved?.sessionId ?? '';
+
+  // Ref always holding the latest resolved sessionId — handlers read from this
+  // to avoid closure-captured staleness during session rotation.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
+  // Runtime invariant: resolved session's connection must be in the pool
+  softInvariant(
+    !resolved || useAppStore.getState().connections.has(resolved.connectionId),
+    'SFTP resolved connectionId not in connections map',
+    { nodeId, connectionId: resolved?.connectionId },
+  );
+
+  // Memory key: always nodeId for path persistence across reconnects
+  const memoryKey = nodeId;
+
+  const session = getSession(activeSessionId);
   const { error: toastError } = useToast();
   const [remoteFiles, setRemoteFiles] = useState<FileInfo[]>([]);
   const [remotePath, setRemotePath] = useState('/home/' + (session?.username || 'user'));
@@ -669,6 +706,13 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
   const [remoteSortField, setRemoteSortField] = useState<SortField>('name');
   const [remoteSortDirection, setRemoteSortDirection] = useState<SortDirection>('asc');
 
+  const recoverSftpSession = useCallback(async (): Promise<string> => {
+    // Build a fresh terminal session when the old one becomes a stale channel.
+    await useSessionTreeStore.getState().createTerminalForNode(nodeId);
+    const { sessionId } = await guardNodeCapability(nodeId, 'sftp');
+    return sessionId;
+  }, [nodeId]);
+
   // Sort handler
   const handleSortChange = (isLocal: boolean, field: SortField) => {
     if (isLocal) {
@@ -762,40 +806,53 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     }
   }, [remotePath, isRemotePathEditing]);
 
-  // 🔴 Key-Driven 路径记忆：卸载前保存当前路径
+  // 🔴 路径记忆：卸载前保存当前路径（使用 memoryKey 以支持 nodeId 代理）
   useEffect(() => {
     return () => {
       // 组件卸载时，保存当前路径到全局 Map（用于重连后恢复）
       if (remotePath && remotePath !== '/' && remotePath !== '/home') {
-        sftpPathMemory.set(sessionId, remotePath);
-        console.debug(`[SFTPView] Path saved for session ${sessionId}: ${remotePath}`);
+        sftpPathMemory.set(memoryKey, remotePath);
+        console.debug(`[SFTPView] Path saved for key ${memoryKey}: ${remotePath}`);
       }
     };
-  }, [sessionId, remotePath]);
+  }, [memoryKey, remotePath]);
 
-  // 🔴 Key-Driven 极简初始化模型
-  // 由于 AppLayout 使用 key={sessionId-connectionId}，connectionId 变更会触发组件重新挂载
-  // 因此这里只需要处理单次初始化，无需追踪 prevConnectionId
+  // 🔴 初始化模型（支持 virtualSessionProxy 模式）
+  // nodeId stays stable across reconnects; resolveTick bumps when session rotates
   useEffect(() => {
+    if (!activeSessionId || isResolving) return;
+
     const sessionConnectionId = session?.connectionId;
-    console.debug(`[SFTPView] Mount: sessionId=${sessionId}, connectionId=${sessionConnectionId}, retryTick=${initRetryTick}`);
+    console.debug(`[SFTPView] Mount/resolve: nodeId=${nodeId}, activeSessionId=${activeSessionId}, connectionId=${sessionConnectionId}, retryTick=${initRetryTick}, resolveTick=${resolveTick}`);
 
     if (!session) {
-      console.warn(`[SFTPView] Session ${sessionId} not found in store`);
+      console.warn(`[SFTPView] Session ${activeSessionId} not found in store`);
       return;
     }
 
     let cancelled = false;
     
     const init = async () => {
-      console.info(`[SFTPView] Initializing SFTP: session=${sessionId}, connection=${sessionConnectionId}`);
+      console.info(`[SFTPView] Initializing SFTP: nodeId=${nodeId}, session=${activeSessionId}, connection=${sessionConnectionId}`);
       
       try {
-        await guardSessionConnection(sessionId);
+        const { sessionId: guardedId } = await guardNodeCapability(nodeId, 'sftp');
         if (cancelled) return;
 
         // 初始化 SFTP（后端已幂等，重复调用安全）
-        const cwd = await api.sftpInit(sessionId);
+        let cwd: string;
+        try {
+          cwd = await api.sftpInit(guardedId);
+        } catch (initError) {
+          if (!isRecoverableSftpChannelError(initError)) {
+            throw initError;
+          }
+
+          console.warn('[SFTPView] Detected stale SFTP channel, attempting self-heal...');
+          const healedSessionId = await recoverSftpSession();
+          if (cancelled) return;
+          cwd = await api.sftpInit(healedSessionId);
+        }
         if (cancelled) return;
 
         setSftpInitialized(true);
@@ -803,7 +860,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
         guardErrorNotifiedRef.current = false;
         
         // 🔴 路径继承：优先恢复记忆的路径，否则使用 SFTP 返回的 cwd
-        const savedPath = sftpPathMemory.get(sessionId);
+        const savedPath = sftpPathMemory.get(memoryKey);
         const targetPath = savedPath || cwd || '/';
         setRemotePath(targetPath);
         
@@ -824,25 +881,27 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
           }
           return;
         }
+        const message = err instanceof Error ? err.message : String(err);
         console.error(`[SFTPView] Init failed:`, err);
         setSftpInitialized(false);
+        setInitError(message);
       }
     };
 
     init();
     return () => { cancelled = true; };
-  }, [sessionId, session, initRetryTick, t, toastError]);
+  }, [activeSessionId, session, initRetryTick, resolveTick, memoryKey, t, toastError, recoverSftpSession, nodeId]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {
-     if (!session || !sftpInitialized) return;
+     if (!session || !sftpInitialized || isResolving) return;
      let cancelled = false;
 
      const refresh = async () => {
         try {
-          await guardSessionConnection(sessionId);
+          const { sessionId: guardedId } = await guardNodeCapability(nodeId, 'sftp');
           if (cancelled) return;
-          const files = await api.sftpListDir(sessionId, remotePath);
+          const files = await api.sftpListDir(guardedId, remotePath);
           if (!cancelled) setRemoteFiles(files);
         } catch (err) {
           if (!cancelled && !isConnectionGuardError(err)) {
@@ -855,7 +914,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
      return () => {
        cancelled = true;
      };
-  }, [sessionId, remotePath, session, sftpInitialized]);
+  }, [activeSessionId, remotePath, session, sftpInitialized, nodeId, isResolving]);
 
   // Refresh local files using Tauri fs plugin
   const refreshLocalFiles = useCallback(async () => {
@@ -1045,7 +1104,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       let unlistenCompleteFn: (() => void) | null = null;
       
       // Setup progress listener
-      listen<TransferProgressEvent>(`sftp:progress:${sessionId}`, (event) => {
+      listen<TransferProgressEvent>(`sftp:progress:${activeSessionId}`, (event) => {
         if (!mounted) return; // 组件已卸载，忽略事件
         
         const { remote_path, local_path, transferred_bytes, total_bytes } = event.payload;
@@ -1077,7 +1136,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       });
       
       // Setup complete listener
-      listen<TransferCompleteEvent>(`sftp:complete:${sessionId}`, (event) => {
+      listen<TransferCompleteEvent>(`sftp:complete:${activeSessionId}`, (event) => {
         if (!mounted) return; // 组件已卸载，忽略事件
         
         const { transfer_id, success, error } = event.payload;
@@ -1085,7 +1144,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
             setTransferState(transfer_id, 'completed');
             // Refresh file lists
             refreshLocalFiles();
-            api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+            api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
         } else {
             setTransferState(transfer_id, 'error', error || 'Transfer failed');
         }
@@ -1102,7 +1161,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
           unlistenProgressFn?.();
           unlistenCompleteFn?.();
       };
-  }, [sessionId, updateProgress, setTransferState, refreshLocalFiles, remotePath, getAllTransfers]);
+  }, [activeSessionId, updateProgress, setTransferState, refreshLocalFiles, remotePath, getAllTransfers]);
 
   // Toast notifications
   const { success: toastSuccess } = useToast();
@@ -1144,9 +1203,10 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       ? `${remotePath}/${actualFileName}`
       : `${basePath}/${file}`;
     
+    const sid = activeSessionIdRef.current;
     const transferId = addTransfer({
-      id: `${sessionId}-${Date.now()}-${file}`,
-      sessionId,
+      id: `${sid}-${Date.now()}-${file}`,
+      sessionId: sid,
       name: isDirectory ? `${actualFileName}/` : actualFileName,
       localPath: localFilePath,
       remotePath: remoteFilePath,
@@ -1157,15 +1217,15 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     try {
       if (direction === 'upload') {
         if (isDirectory) {
-          await api.sftpUploadDir(sessionId, localFilePath, remoteFilePath);
+          await api.sftpUploadDir(sid, localFilePath, remoteFilePath);
         } else {
-          await api.sftpUpload(sessionId, localFilePath, remoteFilePath, transferId);
+          await api.sftpUpload(sid, localFilePath, remoteFilePath, transferId);
         }
       } else {
         if (isDirectory) {
-          await api.sftpDownloadDir(sessionId, remoteFilePath, localFilePath);
+          await api.sftpDownloadDir(sid, remoteFilePath, localFilePath);
         } else {
-          await api.sftpDownload(sessionId, remoteFilePath, localFilePath, transferId);
+          await api.sftpDownload(sid, remoteFilePath, localFilePath, transferId);
         }
       }
       setTransferState(transferId, 'completed');
@@ -1287,7 +1347,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     
     // Refresh file lists
     if (pendingTransfers[0]?.direction === 'upload') {
-      api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+      api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
     } else {
       refreshLocalFiles();
     }
@@ -1363,14 +1423,14 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
           // Check if it's a directory
           const fileInfo = remoteFiles.find(f => f.name === file);
           if (fileInfo?.file_type === 'Directory') {
-            const count = await api.sftpDeleteRecursive(sessionId, filePath);
+            const count = await api.sftpDeleteRecursive(activeSessionIdRef.current, filePath);
             totalDeleted += count;
           } else {
-            await api.sftpDelete(sessionId, filePath);
+            await api.sftpDelete(activeSessionIdRef.current, filePath);
             totalDeleted += 1;
           }
         }
-        api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+        api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
         setRemoteSelected(new Set());
         toastSuccess(t('sftp.toast.deleted'), t('sftp.toast.deleted_count', { count: totalDeleted }));
       } else {
@@ -1396,8 +1456,8 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     const { oldName, isRemote } = renameDialog;
     try {
       if (isRemote) {
-        await api.sftpRename(sessionId, `${remotePath}/${oldName}`, `${remotePath}/${inputValue}`);
-        api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+        await api.sftpRename(activeSessionIdRef.current, `${remotePath}/${oldName}`, `${remotePath}/${inputValue}`);
+        api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
         setRemoteSelected(new Set());
         toastSuccess(t('sftp.toast.renamed'), t('sftp.toast.renamed_detail', { old: oldName, new: inputValue }));
       } else {
@@ -1423,8 +1483,8 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
     const { isRemote } = newFolderDialog;
     try {
       if (isRemote) {
-        await api.sftpMkdir(sessionId, `${remotePath}/${inputValue}`);
-        api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+        await api.sftpMkdir(activeSessionIdRef.current, `${remotePath}/${inputValue}`);
+        api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
         toastSuccess(t('sftp.toast.folder_created'), inputValue);
       } else {
         // Local mkdir
@@ -1463,7 +1523,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       setPreviewLoading(true);
       try {
           const fullPath = `${remotePath}/${file.name}`;
-          const content = await api.sftpPreview(sessionId, fullPath);
+          const content = await api.sftpPreview(activeSessionIdRef.current, fullPath);
           
           // Handle all response types from backend
           if ('TooLarge' in content) {
@@ -1585,7 +1645,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       setHexLoadingMore(true);
       try {
           const newOffset = (previewFile.hexOffset || 0) + 16 * 1024; // 16KB chunks
-          const content = await api.sftpPreviewHex(sessionId, previewFile.path, newOffset);
+          const content = await api.sftpPreviewHex(activeSessionIdRef.current, previewFile.path, newOffset);
           
           if ('Hex' in content) {
               setPreviewFile({
@@ -1633,7 +1693,13 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
 
   return (
     <div className="flex flex-col h-full w-full bg-theme-bg p-2 gap-2">
-      {initError && (
+      {isResolving && (
+        <div className="flex items-center gap-2 rounded border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs text-theme-text">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <span>{t('sftp.reconnecting', 'Reconnecting to session…')}</span>
+        </div>
+      )}
+      {initError && !isResolving && (
         <div className="flex items-center justify-between rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-theme-text">
           <span>SFTP waiting for connection sync: {initError}</span>
           <Button
@@ -1691,7 +1757,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
              path={remotePath}
              files={displayRemoteFiles}
              onNavigate={handleRemoteNavigate}
-             onRefresh={() => api.sftpListDir(sessionId, remotePath).then(setRemoteFiles)}
+             onRefresh={() => api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles)}
              active={activePane === 'remote'}
              onActivate={() => setActivePane('remote')}
              onPreview={handlePreview}
@@ -1751,7 +1817,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
       </Dialog>
 
       {/* Transfer Queue Panel */}
-      <TransferQueue sessionId={sessionId} />
+      <TransferQueue sessionId={activeSessionId} />
 
       {/* Preview Dialog */}
       <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
@@ -1968,7 +2034,7 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
                         if (!previewFile) return;
                         try {
                             const localDest = `${localPath}/${previewFile.name}`;
-                            await api.sftpDownload(sessionId, previewFile.path, localDest);
+                            await api.sftpDownload(activeSessionIdRef.current, previewFile.path, localDest);
                             refreshLocalFiles();
                             setPreviewFile(null);
                         } catch (e) {
@@ -2065,14 +2131,15 @@ export const SFTPView = ({ sessionId }: { sessionId: string }) => {
         <RemoteFileEditor
           open={!!editorFile}
           onClose={() => setEditorFile(null)}
-          sessionId={sessionId}
+          sessionId={activeSessionId}
+          nodeId={nodeId}
           filePath={editorFile.path}
           initialContent={editorFile.content}
           language={editorFile.language}
           encoding={editorFile.encoding}
           onSaved={() => {
             // Refresh remote file list to update mtime
-            api.sftpListDir(sessionId, remotePath).then(setRemoteFiles);
+            api.sftpListDir(activeSessionIdRef.current, remotePath).then(setRemoteFiles);
           }}
         />
       )}

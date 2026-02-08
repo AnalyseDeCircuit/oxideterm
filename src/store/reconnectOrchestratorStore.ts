@@ -18,6 +18,7 @@ import { useSessionTreeStore } from './sessionTreeStore';
 import { useIdeStore } from './ideStore';
 import { useToastStore } from '../hooks/useToast';
 import { topologyResolver } from '../lib/topologyResolver';
+import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
 import type { ForwardRule, ForwardRequest, IncompleteTransferInfo } from '../types';
 
@@ -284,6 +285,13 @@ function enterPhase(nodeId: string, phase: ReconnectPhase) {
   if (!job) return;
   const history = [...job.phaseHistory, { phase, startedAt: Date.now(), result: 'running' as PhaseResult }];
   updateJob(nodeId, { status: phase, phaseHistory: history });
+
+  slog({
+    component: 'Orchestrator',
+    event: 'phase:enter',
+    nodeId,
+    phase,
+  });
 }
 
 /** Record exit from the current pipeline phase */
@@ -291,14 +299,27 @@ function exitPhase(nodeId: string, result: PhaseResult, detail?: string) {
   const job = getJob(nodeId);
   if (!job) return;
   const history = [...job.phaseHistory];
+  let elapsedMs: number | undefined;
   // Find the last 'running' entry and close it
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].result === 'running') {
-      history[i] = { ...history[i], endedAt: Date.now(), result, detail };
+      const endedAt = Date.now();
+      elapsedMs = endedAt - history[i].startedAt;
+      history[i] = { ...history[i], endedAt, result, detail };
       break;
     }
   }
   updateJob(nodeId, { phaseHistory: history });
+
+  slog({
+    component: 'Orchestrator',
+    event: 'phase:exit',
+    nodeId,
+    phase: job.status,
+    elapsedMs,
+    outcome: result === 'ok' ? 'ok' : result === 'skipped' ? 'skipped' : 'error',
+    detail,
+  });
 }
 
 /**

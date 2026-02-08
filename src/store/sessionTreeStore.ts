@@ -92,6 +92,11 @@ function computeUnifiedStatus(
   }
 }
 
+function isAlreadyConnectedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('already connected');
+}
+
 async function waitForConnectionInStore(
   connectionId: string,
   timeoutMs = 15000
@@ -1009,7 +1014,27 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       }));
       get().rebuildUnifiedNodes();
       
-      const response = await api.connectTreeNode({ nodeId });
+      let response: Awaited<ReturnType<typeof api.connectTreeNode>>;
+      try {
+        response = await api.connectTreeNode({ nodeId });
+      } catch (error) {
+        if (!isAlreadyConnectedError(error)) {
+          throw error;
+        }
+
+        // Backend may still think the node is connected while its channel is unusable.
+        // Force a backend-side disconnect once, then retry connect.
+        console.warn(`[connectNodeInternal] Node ${nodeId} reported already connected, forcing backend disconnect and retrying`);
+        try {
+          await api.disconnectTreeNode(nodeId);
+        } catch (disconnectError) {
+          console.warn(`[connectNodeInternal] Forced disconnect failed for ${nodeId}:`, disconnectError);
+        }
+
+        // Refresh tree snapshot before retry to reduce stale state drift.
+        await get().fetchTree();
+        response = await api.connectTreeNode({ nodeId });
+      }
       
       // 更新连接 ID
       await api.setTreeNodeConnection(nodeId, response.sshConnectionId);
@@ -1476,7 +1501,8 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       // 刷新树
       await get().fetchTree();
       
-      return sftpId;
+      // Return the terminal sessionId (not the cwd string from sftpInit)
+      return validTerminalId;
     },
     
     closeSftpForNode: async (nodeId: string) => {

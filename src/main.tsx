@@ -8,6 +8,9 @@ import './styles.css'
 import './i18n' // Import i18n configuration
 import { initializeSettings } from './store/settingsStore'
 
+// Dev-only: register fault injection API (window.__faultInjection)
+import './lib/faultInjection'
+
 // Expose shared modules so plugins can externalize react/zustand/lucide-react
 // and avoid dual-instance hooks crashes.
 // Note: `import *` is needed here because plugins rely on deprecated icon aliases

@@ -360,7 +360,7 @@ export const Sidebar = () => {
     // 如果已有终端会话，用第一个打开 SFTP 标签页
     if (terminalIds.length > 0) {
       const sessionId = terminalIds[0];
-      createTab('sftp', sessionId);
+      createTab('sftp', sessionId, { nodeId });
       return;
     }
 
@@ -368,7 +368,7 @@ export const Sidebar = () => {
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
       try {
         const terminalId = await createTerminalForNode(nodeId, 80, 24);
-        createTab('sftp', terminalId);
+        createTab('sftp', terminalId, { nodeId });
       } catch (err) {
         console.error('Failed to create session for SFTP:', err);
       }
@@ -386,7 +386,7 @@ export const Sidebar = () => {
     // 如果已有终端会话，用第一个打开 IDE 标签页
     if (terminalIds.length > 0) {
       const sessionId = terminalIds[0];
-      createTab('ide', sessionId);
+      createTab('ide', sessionId, { nodeId });
       return;
     }
 
@@ -394,7 +394,7 @@ export const Sidebar = () => {
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
       try {
         const terminalId = await createTerminalForNode(nodeId, 80, 24);
-        createTab('ide', terminalId);
+        createTab('ide', terminalId, { nodeId });
       } catch (err) {
         console.error('Failed to create session for IDE:', err);
       }
