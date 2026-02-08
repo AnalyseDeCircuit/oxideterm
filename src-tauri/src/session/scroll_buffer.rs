@@ -16,7 +16,9 @@ use tokio::sync::RwLock;
 use super::search::{search_lines, SearchOptions, SearchResult};
 
 /// Default maximum lines to keep in buffer
-pub const DEFAULT_MAX_LINES: usize = 100_000;
+/// 30K lines ≈ ~3.6 MB/session (vs 100K ≈ ~11 MB).
+/// Users can override via settings; 30K covers typical interactive work.
+pub const DEFAULT_MAX_LINES: usize = 30_000;
 
 /// Single line of terminal output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,12 +221,17 @@ impl ScrollBuffer {
     }
 
     /// Search buffer contents asynchronously
-    /// Uses spawn_blocking to avoid blocking the tokio runtime
+    /// Uses spawn_blocking to avoid blocking the tokio runtime.
+    /// Reads directly from the lock to avoid cloning all lines.
     pub async fn search(&self, options: SearchOptions) -> SearchResult {
-        let lines = self.get_all().await;
+        let lines = self.lines.read().await;
+        // Collect a Vec<TerminalLine> only of the current buffer snapshot
+        // so we can move it into spawn_blocking (RwLockReadGuard is !Send).
+        let snapshot: Vec<TerminalLine> = lines.iter().cloned().collect();
+        drop(lines); // release lock before blocking
 
         // Execute search in a blocking task to avoid blocking the async runtime
-        tokio::task::spawn_blocking(move || search_lines(&lines, options))
+        tokio::task::spawn_blocking(move || search_lines(&snapshot, options))
             .await
             .unwrap_or_else(|_| SearchResult {
                 matches: vec![],

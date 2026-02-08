@@ -696,7 +696,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const imageAddon = new ImageAddon({
       enableSizeReports: true,    // Enable CSI t reports for terminal metrics
       pixelLimit: 16777216,       // 4096x4096 pixels max per image
-      storageLimit: 128,          // 128MB FIFO cache for images
+      storageLimit: 64,           // 64MB FIFO cache for images (was 128)
       showPlaceholder: true,      // Show placeholder for evicted images
       sixelSupport: true,         // Enable SIXEL protocol
       iipSupport: true,           // Enable iTerm2 Inline Images Protocol

@@ -290,7 +290,17 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
   // Set active conversation (and load messages if needed)
   setActiveConversation: (id) => {
+    const prevId = get().activeConversationId;
     set({ activeConversationId: id, error: null });
+
+    // Unload messages from the previous conversation to free memory
+    if (prevId && prevId !== id) {
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === prevId ? { ...c, messages: [] } : c
+        ),
+      }));
+    }
 
     if (id) {
       const conv = get().conversations.find((c) => c.id === id);

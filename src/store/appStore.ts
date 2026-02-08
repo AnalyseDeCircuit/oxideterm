@@ -837,6 +837,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (tabIndex === -1) return state;
       
       const tab = state.tabs[tabIndex];
+      const paneToClose = tab.rootPane ? findPaneById(tab.rootPane, paneId) : null;
+      if (paneToClose?.terminalType === 'local_terminal') {
+        (async () => {
+          try {
+            const { useLocalTerminalStore } = await import('./localTerminalStore');
+            await useLocalTerminalStore.getState().closeTerminal(paneToClose.sessionId);
+          } catch (error) {
+            console.error('[closePane] Failed to close local terminal:', error);
+          }
+        })();
+      }
       
       // Single pane mode - close the entire tab
       if (!tab.rootPane) {
