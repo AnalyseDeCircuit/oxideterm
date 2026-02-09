@@ -15,10 +15,9 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use async_trait::async_trait;
 use dashmap::DashMap;
 use russh::client::{self, Config};
-use russh_keys::PublicKey;
+use russh::keys::PublicKey;
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
@@ -200,7 +199,6 @@ impl PreflightHandler {
     }
 }
 
-#[async_trait]
 impl client::Handler for PreflightHandler {
     type Error = SshError;
 

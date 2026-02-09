@@ -1,6 +1,6 @@
 //! Known hosts management for SSH host key verification
 //!
-//! Wraps russh_keys known_hosts functionality with additional features.
+//! Wraps russh::keys known_hosts functionality with additional features.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};

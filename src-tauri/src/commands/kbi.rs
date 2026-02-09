@@ -199,7 +199,7 @@ async fn run_kbi_flow(
                 info!("KBI flow {}: authentication successful", auth_flow_id);
                 break;
             }
-            KeyboardInteractiveAuthResponse::Failure => {
+            KeyboardInteractiveAuthResponse::Failure { .. } => {
                 return Err("Authentication rejected by server".to_string());
             }
             KeyboardInteractiveAuthResponse::InfoRequest {

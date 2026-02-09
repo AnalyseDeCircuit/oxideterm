@@ -338,42 +338,33 @@ pub fn spawn_handle_owner_task(
                         }
 
                         HandleCommand::Ping { reply_tx } => {
-                            // Use channel_open_session as keepalive probe, but MUST close the
-                            // channel properly. In russh 0.49, `drop(channel)` does NOT send
-                            // SSH CHANNEL_CLOSE, causing channel leaks on the server.
-                            // Without explicit close(), each 15s ping leaks a channel, exhausting
-                            // OpenSSH MaxSessions (default 10) in ~2.5 minutes.
-                            debug!("Ping probe starting for session {}", session_id);
+                            // Use send_keepalive(true) — sends SSH_MSG_GLOBAL_REQUEST
+                            // "keepalive@openssh.com" with want_reply=true.
+                            // This is the proper SSH heartbeat mechanism, avoiding the
+                            // channel_open_session hack which leaked channels on the server.
+                            debug!("Keepalive probe for session {}", session_id);
                             let result = match tokio::time::timeout(
                                 std::time::Duration::from_secs(5),
-                                handle.channel_open_session(),
+                                handle.send_keepalive(true),
                             )
                             .await
                             {
-                                Ok(Ok(channel)) => {
-                                    // Properly close the channel before dropping
-                                    let _ = channel.close().await;
-                                    drop(channel);
-                                    debug!("Ping OK for session {}", session_id);
+                                Ok(Ok(())) => {
+                                    debug!("Keepalive OK for session {}", session_id);
                                     PingResult::Ok
                                 }
                                 Ok(Err(e)) => {
                                     let error_str = format!("{:?}", e);
-                                    if error_str.contains("ChannelOpenFailure") {
-                                        // Server refused channel (MaxSessions, policy, etc.)
-                                        // SSH transport is still alive — server responded.
-                                        debug!("Ping channel refused for session {} (server policy, connection healthy): {:?}", session_id, e);
-                                        PingResult::Ok
-                                    } else if error_str.contains("Disconnect") || error_str.contains("disconnect") {
-                                        warn!("Ping SSH disconnect for session {}: {:?}", session_id, e);
+                                    if error_str.contains("Disconnect") || error_str.contains("disconnect") {
+                                        warn!("Keepalive SSH disconnect for session {}: {:?}", session_id, e);
                                         PingResult::IoError
                                     } else {
-                                        warn!("Ping SSH error for session {} (treating as soft failure): {:?}", session_id, e);
+                                        warn!("Keepalive SSH error for session {} (treating as soft failure): {:?}", session_id, e);
                                         PingResult::Timeout
                                     }
                                 }
                                 Err(_) => {
-                                    warn!("Ping timeout for session {} (5s)", session_id);
+                                    warn!("Keepalive timeout for session {} (5s)", session_id);
                                     PingResult::Timeout
                                 }
                             };

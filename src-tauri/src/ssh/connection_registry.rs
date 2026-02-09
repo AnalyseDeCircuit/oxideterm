@@ -1050,7 +1050,7 @@ impl SshConnectionRegistry {
                 key_path,
                 passphrase,
             } => {
-                let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+                let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
                     .map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
                             "Failed to load key: {}",
@@ -1059,13 +1059,7 @@ impl SshConnectionRegistry {
                     })?;
 
                 let key_with_hash =
-                    russh_keys::key::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None)
-                        .map_err(|e| {
-                            ConnectionRegistryError::ConnectionFailed(format!(
-                                "Failed to prepare key: {}",
-                                e
-                            ))
-                        })?;
+                    russh::keys::key::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), None);
 
                 handle
                     .authenticate_publickey(&target_config.username, key_with_hash)
@@ -1082,7 +1076,7 @@ impl SshConnectionRegistry {
                 cert_path,
                 passphrase,
             } => {
-                let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+                let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
                     .map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
                             "Failed to load key: {}",
@@ -1090,7 +1084,7 @@ impl SshConnectionRegistry {
                         ))
                     })?;
 
-                let cert = russh_keys::load_openssh_certificate(cert_path)
+                let cert = russh::keys::load_openssh_certificate(cert_path)
                     .map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
                             "Failed to load certificate: {}",
@@ -1123,7 +1117,7 @@ impl SshConnectionRegistry {
                         e
                     ))
                 })?;
-                true
+                russh::client::AuthResult::Success
             }
             AuthMethod::KeyboardInteractive => {
                 // KBI via proxy chain is not supported in MVP
@@ -1133,7 +1127,7 @@ impl SshConnectionRegistry {
             }
         };
 
-        if !authenticated {
+        if !authenticated.success() {
             return Err(ConnectionRegistryError::ConnectionFailed(format!(
                 "Authentication to {} rejected",
                 target_config.host
