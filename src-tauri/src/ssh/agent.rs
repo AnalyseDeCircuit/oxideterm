@@ -39,13 +39,13 @@ impl SshAgentClient {
     /// - `Err(SshError::AgentNotAvailable)` - Always, with helpful error message
     ///
     /// # TODO
-    /// Implement full agent connection using russh_keys::agent::client::AgentClient
+    /// Implement full agent connection using russh::keys::agent::client::AgentClient
     /// when library provides necessary signing APIs.
     pub async fn connect() -> Result<Self, SshError> {
         info!("SSH Agent authentication requested");
 
         // TODO: Implement full agent connection
-        // let stream = russh_keys::agent::client::AgentClient::connect_env().await?;
+        // let stream = russh::keys::agent::client::AgentClient::connect_env().await?;
 
         Err(SshError::AgentNotAvailable(format!(
             "SSH Agent authentication is not yet fully implemented.\n\n\
