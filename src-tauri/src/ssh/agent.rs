@@ -1,18 +1,44 @@
-//! SSH Agent Client - Cross-platform SSH Agent authentication
+//! SSH Agent Client — Cross-platform SSH Agent authentication
 //!
-//! Provides real SSH Agent integration via russh's `AgentClient`, supporting
+//! Provides real SSH Agent integration via russh's [`AgentClient`], supporting
 //! challenge-response authentication by delegating signing to the system agent.
 //!
+//! # Architecture
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────┐
+//!   │  SshAgentClient                                        │
+//!   │  ├── connect()          (platform dispatch)            │
+//!   │  │    ├── Unix:  AgentClient::connect_env()            │
+//!   │  │    └── Win:   AgentClient::connect_named_pipe()     │
+//!   │  │         └── .dynamic()  (type-erase stream)         │
+//!   │  └── authenticate()     (key iteration + signing)      │
+//!   │       └── AgentSigner   (Send-safe Signer wrapper)     │
+//!   └─────────────────────────────────────────────────────────┘
+//! ```
+//!
 //! # Platform Support
-//! - **Unix/Linux/macOS**: Connects via `SSH_AUTH_SOCK` Unix domain socket
-//! - **Windows**: Connects via `\\.\pipe\openssh-ssh-agent` named pipe (OpenSSH for Windows)
+//! - **Unix/Linux/macOS**: `SSH_AUTH_SOCK` Unix domain socket
+//! - **Windows**: `\\\\.\\pipe\\openssh-ssh-agent` named pipe (OpenSSH for Windows)
 //!
 //! # Authentication Flow
 //! 1. Connect to the system SSH Agent socket/pipe
-//! 2. Request identity list from agent (`request_identities`)
-//! 3. For each key, attempt `authenticate_publickey_with` on the SSH handle
-//! 4. The SSH server sends a challenge; russh forwards it to the agent for signing
-//! 5. Agent signs the challenge with the private key it holds; response completes auth
+//! 2. Request identity list from agent ([`AgentClient::request_identities`])
+//! 3. For each key, attempt [`Handle::authenticate_publickey_with`] with [`AgentSigner`]
+//! 4. Server sends `Reply::SignRequest { key, data }` → russh calls
+//!    [`Signer::auth_publickey_sign`] → agent signs → response completes auth
+//!
+//! # The `AgentSigner` Workaround (Send + RPITIT)
+//!
+//! russh 0.54's built-in `impl Signer for AgentClient` returns `impl Future + Send`
+//! via RPITIT. Inside [`Handle::authenticate_publickey_with`], the call
+//! `signer.auth_publickey_sign(&key, ...)` captures `&key` where `key` is a local
+//! `PublicKey` from `Reply::SignRequest`. The Rust compiler cannot prove `Send` for
+//! this borrow's lifetime through RPITIT (related: rust-lang/rust#100013).
+//!
+//! `AgentSigner` solves this by cloning `&PublicKey` → owned before the async block,
+//! eliminating the problematic cross-`.await` reference. This pattern is stable across
+//! russh versions because it depends only on the `Signer` trait shape, not internals.
 
 use std::future::Future;
 
@@ -24,20 +50,41 @@ use tracing::{debug, info, warn};
 
 use crate::ssh::error::SshError;
 
-/// Wrapper around `AgentClient` that implements `Signer` with Send-safe futures.
+/// Send-safe wrapper around [`AgentClient`] implementing the [`Signer`] trait.
 ///
-/// russh's built-in `impl Signer for AgentClient` captures `&PublicKey` (a borrow
-/// of a local variable inside `authenticate_publickey_with`'s state machine) in the
-/// future returned by `auth_publickey_sign`. Due to a Rust RPITIT limitation,
-/// the compiler cannot prove `Send` for this borrow's specific lifetime.
+/// # Why this exists
 ///
-/// This wrapper clones the `PublicKey` into the async block so the future holds
-/// an owned value instead of a reference, making it trivially `Send`.
-struct SendSigner<'a> {
+/// russh's built-in `impl Signer for AgentClient` uses RPITIT (`impl Future + Send`).
+/// Inside [`Handle::authenticate_publickey_with`], the generated state machine does:
+///
+/// ```ignore
+/// Some(Reply::SignRequest { key, data }) => {
+///     //  ↓ `key` is a local `PublicKey` from the `Reply` variant
+///     let result = signer.auth_publickey_sign(&key, hash_alg, data).await;
+///     //                                      ^^^^ borrow of local across .await
+/// }
+/// ```
+///
+/// The compiler cannot prove `Send` for `&key`'s specific lifetime through RPITIT
+/// (related: rust-lang/rust#100013). Tauri's `#[tauri::command]` macro requires the
+/// entire future to be `Send`, causing a hard compile error.
+///
+/// # Solution
+///
+/// Clone `&PublicKey` → owned **before** the async block. The future then captures
+/// only owned values, making it trivially `Send`. The clone is cheap (~64 bytes for
+/// Ed25519 keys).
+///
+/// # Stability
+///
+/// This wrapper depends only on the [`Signer`] trait shape and [`AgentClient::sign_request`],
+/// both of which are stable public API. It will survive minor russh version bumps without
+/// changes.
+struct AgentSigner<'a> {
     agent: &'a mut AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>,
 }
 
-impl Signer for SendSigner<'_> {
+impl Signer for AgentSigner<'_> {
     type Error = AgentAuthError;
 
     fn auth_publickey_sign(
@@ -46,7 +93,6 @@ impl Signer for SendSigner<'_> {
         hash_alg: Option<ssh_key::HashAlg>,
         to_sign: CryptoVec,
     ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send {
-        // Clone key to owned so the future doesn't capture &key across .await
         let key_owned = key.clone();
         async move {
             self.agent
@@ -154,7 +200,7 @@ impl SshAgentClient {
                     &username,
                     key.clone(),
                     None,
-                    &mut SendSigner { agent: &mut self.agent },
+                    &mut AgentSigner { agent: &mut self.agent },
                 )
                 .await
             {
