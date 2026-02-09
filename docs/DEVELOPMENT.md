@@ -110,8 +110,8 @@ OxideTerm/
 ├── .github/                # GitHub Actions 配置
 ├── docs/                   # 项目文档
 ├── public/                 # 静态资源
-│   ├── fonts/              # 字体文件
-│   └── icons/              # 应用图标
+│   ├── tauri.svg            # Tauri 入口页图标
+│   └── fonts/              # 字体文件
 ├── src/                    # 前端源码
 │   ├── components/         # React 组件
 │   │   └── plugin/          # 插件 UI 视图
@@ -120,7 +120,7 @@ OxideTerm/
 │   │   └── plugin/          # 插件运行时与 UI Kit
 │   ├── store/              # Zustand 状态
 │   │   └── pluginStore.ts   # 插件运行时状态
-│   ├── styles/             # CSS 样式
+│   ├── styles.css          # CSS 样式
 │   └── types/              # TypeScript 类型
 ├── src-tauri/              # 后端源码
 │   ├── capabilities/       # Tauri 权限配置
@@ -168,7 +168,7 @@ npm run dev
 cd src-tauri && cargo check
 
 # 格式化代码
-npm run lint          # 前端
+npm run lint          # 前端 (注意: lint 命令当前尚未配置)
 cd src-tauri && cargo fmt  # 后端
 
 # 构建生产版本
@@ -249,7 +249,7 @@ pub async fn my_command(
 
 | 类型 | 约定 | 示例 |
 |------|------|------|
-| 文件名 (TS) | PascalCase | `MyComponent.tsx` |
+| 文件名 (TS) | PascalCase (React 组件); camelCase (store/hooks/utils) | `MyComponent.tsx`, `useToast.ts` |
 | 文件名 (Rust) | snake_case | `my_module.rs` |
 | 组件名 | PascalCase | `TerminalView` |
 | 函数名 | camelCase (TS) / snake_case (Rust) | `handleClick` / `handle_click` |
@@ -261,6 +261,8 @@ pub async fn my_command(
 ## 测试
 
 ### 前端测试
+
+> **注意**: 前端测试框架尚未配置，以下命令暂不可用。
 
 ```bash
 # 运行测试
@@ -320,7 +322,7 @@ npm run test:e2e
    RUST_LOG=debug npm run tauri dev
    
    # 更细粒度的日志
-   RUST_LOG=oxideterm=trace,russh=debug npm run tauri dev
+   RUST_LOG=oxideterm_lib=trace,russh=debug npm run tauri dev
    ```
 
 2. **日志宏**
@@ -408,7 +410,7 @@ wireshark
 | 平台 | 产物位置 |
 |------|---------|
 | macOS | `src-tauri/target/release/bundle/dmg/` |
-| Windows | `src-tauri/target/release/bundle/msi/` |
+| Windows | `src-tauri/target/release/bundle/nsis/` |
 | Linux | `src-tauri/target/release/bundle/deb/` |
 
 ---

@@ -47,7 +47,7 @@
 - 服务端每 30s 发送心跳 (seq 递增)
 - 客户端收到后立即回显相同 seq
 - 90s 无响应则断开连接
-- **v1.4.0**: 心跳失败触发 `connection:update` 事件，前端进入 State Gating 模式
+- **v1.4.0**: 心跳失败触发 `connection_status_changed` 事件，前端进入 State Gating 模式
 
 ---
 
@@ -71,6 +71,8 @@ interface ConnectRequest {
   cols?: number;          // 默认 80
   rows?: number;          // 默认 24
   name?: string;          // 自定义会话名称
+  proxy_chain?: ProxyHop[];  // 跳板机链路
+  buffer_config?: BufferConfig;  // 缓冲区配置
 }
 ```
 
@@ -88,6 +90,8 @@ pub struct ConnectRequest {
     #[serde(default = "default_rows")]
     pub rows: u32,
     pub name: Option<String>,
+    pub proxy_chain: Option<Vec<ProxyHop>>,
+    pub buffer_config: Option<BufferConfig>,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +100,7 @@ pub enum AuthRequest {
     Password { password: String },
     Key { key_path: String, passphrase: Option<String> },
     DefaultKey { passphrase: Option<String> },
+    Agent,
 }
 ```
 
@@ -135,7 +140,7 @@ type ConnectionState =
   | 'error';
 ```
 
-**v1.4.0 Strong Sync**: 连接成功后，后端 emit `connection:update` 事件。
+**v1.4.0 Strong Sync**: 连接成功后，后端 emit `connection_status_changed` 事件。
 
 #### `disconnect_v2`
 
@@ -147,7 +152,7 @@ type ConnectionState =
 void (成功) 或 Error string
 ```
 
-**v1.4.0**: 断开后 emit `connection:update`，触发前端 `refreshConnections()`。
+**v1.4.0**: 断开后 emit `connection_status_changed`，触发前端 `refreshConnections()`。
 
 #### `list_sessions_v2`
 
@@ -159,7 +164,7 @@ void (成功) 或 Error string
 SessionInfo[]
 ```
 
-**v1.4.0**: 这是 **Strong Sync** 的核心拉取接口。前端收到 `connection:update` 事件后必须调用此命令获取最新状态快照。
+**v1.4.0**: 这是 **Strong Sync** 的核心拉取接口。前端收到 `connection_status_changed` 事件后必须调用此命令获取最新状态快照。
 
 #### `resize_session_v2`
 
@@ -309,7 +314,7 @@ interface SaveConnectionRequest {
 ConnectionInfo
 ```
 
-**v1.4.0**: 保存成功后 emit `connection:update`。
+**v1.4.0**: 保存成功后 emit `connection_status_changed`。
 
 #### `delete_connection`
 
@@ -323,7 +328,7 @@ ConnectionInfo
 void
 ```
 
-**v1.4.0**: 删除后 emit `connection:update`。
+**v1.4.0**: 删除后 emit `connection_status_changed`。
 
 #### `mark_connection_used`
 
@@ -379,7 +384,7 @@ interface SshHostInfo {
 ConnectionInfo
 ```
 
-**v1.4.0**: 导入后 emit `connection:update`。
+**v1.4.0**: 导入后 emit `connection_status_changed`。
 
 #### `get_ssh_config_path`
 
@@ -819,7 +824,7 @@ interface PacketStats {
   loss_rate: number;  // 0.0 - 1.0
 }
 
-type HealthStatus = 'excellent' | 'good' | 'fair' | 'poor' | 'critical' | 'unknown';
+type HealthStatus = 'Healthy' | 'Degraded' | 'Unresponsive' | 'Disconnected' | 'Unknown';
 ```
 
 #### `get_quick_health`
@@ -870,7 +875,7 @@ void
 
 ### 1. 连接状态变更 (Strong Sync 核心)
 
-**事件名:** `connection:update`
+**事件名:** `connection_status_changed`
 
 > **重要**: 这是 v1.4.0 Strong Sync 架构的核心事件。任何连接状态变更都会触发此事件，前端必须监听并调用 `list_sessions_v2` 完成同步。
 
@@ -904,7 +909,7 @@ type ConnectionTrigger =
 
 ### 2. SFTP 传输进度
 
-**事件名:** `sftp:progress:{sessionId}`
+**事件名:** `sftp:progress:{nodeId}`
 
 ```typescript
 interface TransferProgress {
@@ -920,7 +925,7 @@ interface TransferProgress {
 
 ### 3. 端口转发状态变更
 
-**事件名:** `forward:update:{sessionId}`
+**事件名:** `forward-event`
 
 ```typescript
 interface ForwardUpdateEvent {
@@ -930,7 +935,7 @@ interface ForwardUpdateEvent {
   trigger: 'user_action' | 'link_restored' | 'error';
 }
 
-type ForwardStatus = 'starting' | 'active' | 'stopped' | 'error';
+type ForwardStatus = 'starting' | 'active' | 'stopped' | 'error' | 'suspended';
 ```
 
 ---
@@ -950,7 +955,7 @@ sequenceDiagram
     Tree->>Back: connect_v2(request)
     Back->>Back: 建立 SSH 连接
     Back-->>Tree: ConnectResponseV2 (connection_id)
-    Back->>App: emit("connection:update")
+    Back->>App: emit("connection_status_changed")
     App->>Back: list_sessions_v2()
     Back-->>App: SessionInfo[] (最新快照)
     App->>UI: 更新 Observables
@@ -968,13 +973,13 @@ sequenceDiagram
 
     Note over HB: 心跳失败 × 2
     HB->>Reg: set_state(link_down)
-    Reg->>App: emit("connection:update", trigger: heartbeat_fail)
+    Reg->>App: emit("connection_status_changed", trigger: heartbeat_fail)
     App->>App: refreshConnections() [Strong Sync]
     App->>UI: 更新 state = link_down
     Note over UI: State Gating 激活，禁止 IO
 
     Reg->>Reg: 启动自动重连
-    Reg->>App: emit("connection:update", trigger: reconnect_success)
+    Reg->>App: emit("connection_status_changed", trigger: reconnect_success)
     Note over App: connection_id 可能变更
     App->>App: refreshConnections()
     App->>UI: 更新 state, connection_id

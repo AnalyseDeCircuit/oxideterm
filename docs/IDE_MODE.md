@@ -79,7 +79,7 @@ sequenceDiagram
     User->>IdeTree: 展开目录 / 保存文件
     IdeTree->>IdeStore: Action (e.g. readDir)
     
-    IdeStore->>AppStore: checkConnection(connectionId)
+    IdeStore->>TreeStore: assertNodeReady(nodeId)
     
     alt Connection Active
         AppStore-->>IdeStore: Status: Active
@@ -99,12 +99,7 @@ sequenceDiagram
 ```tsx
 // AppLayout.tsx
 // 当重连发生 (connectionId 改变)，整个 IDE 树被销毁并重建
-<IdeWorkspace
-  key={`ide-${sessionId}-${connectionId}`}
-  connectionId={sessionId}
-  sftpSessionId={sessionId}
-  rootPath="~"
-/>
+<IdeWorkspace nodeId={nodeId} rootPath={rootPath} />
 ```
 
 **生命周期��转**：
@@ -199,6 +194,20 @@ graph TD
 ```typescript
 // ideStore.ts - 使用 Zustand persist 中间件
 interface IdeState {
+  // Core state
+  nodeId: string;                     // 关联的会话树节点 ID
+  terminalSessionId: string | null;   // 集成终端的会话 ID
+  project: ProjectInfo | null;        // 当前项目信息
+  tabs: IdeTab[];                     // 打开的标签页列表
+  activeTabId: string | null;         // 当前激活的标签页 ID
+  treeWidth: number;                  // 文件树面板宽度
+  terminalHeight: number;             // 终端面板高度
+  terminalVisible: boolean;           // 终端面板是否可见
+  expandedPaths: Set<string>;         // 已展开的目录路径
+  treeRefreshSignal: number;          // 文件树刷新信号
+  conflictState: ConflictState | null; // 文件冲突状态
+
+  // Cached (persisted across reconnects)
   cachedProjectPath: string | null;   // 上次打开的项目路径
   cachedTabPaths: string[];           // 上次打开的文件路径列表
   cachedNodeId: string | null;        // 上次关联的节点 ID
@@ -216,7 +225,7 @@ set({
 
 | 限制 | 说明 |
 |------|------|
-| 文件大小 | 建议 < 1MB，大文件会切换到只读模式 |
+| 文件大小 | 建议 < 10MB，大文件会切换到只读模式 |
 | 二进制文件 | 不支持编辑，会提示打开 Hex 查看器 |
 | 实时协作 | 不支持多人同时编辑 |
 | LSP | 暂不支持语言服务器协议（自动补全基于本地 CodeMirror） |

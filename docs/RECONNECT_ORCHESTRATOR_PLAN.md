@@ -44,6 +44,7 @@ type ReconnectPhase =
   | 'restore-forwards'
   | 'resume-transfers'
   | 'restore-ide'
+  | 'verify'
   | 'done'
   | 'failed'
   | 'cancelled';
@@ -68,7 +69,7 @@ type ReconnectSnapshot = {
   snapshotAt: number;          // Timestamp for user intent detection
   // Forward rules captured BEFORE resetNodeState destroys them
   forwardRules: Array<{
-    sessionId: string;         // Old session ID
+    nodeId: string;            // Node ID
     rules: ForwardRule[];      // Only active/suspended rules, NOT stopped ones
   }>;
   // Old terminal session IDs for querying incomplete transfers

@@ -1,5 +1,11 @@
 # OxideTerm 图形转发施工参考文档 (Graphics Forwarding)
 
+> **⚠️ 设计文档 — 功能尚未实现**
+> 
+> 本文档描述的所有功能均为设计规划，代码库中不存在对应实现。
+> 后端无 `src-tauri/src/graphics/` 模块，前端无 `src/components/graphics/` 组件，
+> Cargo.toml 无 `graphics-forwarding` feature flag。
+
 > **版本**: v0.1.0 (Draft)
 > **日期**: 2026-02-06
 > **状态**: 设计文档，待实施

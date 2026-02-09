@@ -65,7 +65,7 @@ Map<paneId, TerminalEntry>
 let activePaneId: string | null = null;
 
 // API 变更
-registerTerminal(paneId, tabId, getter)
+registerTerminalBuffer(paneId, tabId, getter)
 getTerminalBuffer(paneId, tabId)  
 setActivePaneId(paneId)
 getActivePaneId() → string | null
@@ -144,7 +144,7 @@ SplitTerminalContainer.tsx        // 递归渲染布局树
 2. 支持离线上下文：SSH 断开但 Buffer 还在时，AI 仍能分析
 3. 简化双轨制带来的复杂性
 
-**实现**：在 `TerminalView.tsx` 的 xterm 初始化后，调用 `registerTerminal(paneId, tabId, () => getBufferContent())`
+**实现**：在 `TerminalView.tsx` 的 xterm 初始化后，调用 `registerTerminalBuffer(paneId, tabId, () => getBufferContent())`
 
 ### 4.2 聚焦视觉反馈
 
@@ -167,12 +167,12 @@ SplitTerminalContainer.tsx        // 递归渲染布局树
 
 ### 4.4 键盘快捷键规划
 
-| 快捷键 | 功能 |
-|--------|------|
-| `Cmd+\` | 垂直分割当前 Pane |
-| `Cmd+Shift+\` | 水平分割当前 Pane |
-| `Cmd+Option+←/→/↑/↓` | 切换 Pane 聚焦 |
-| `Cmd+W` | 关闭当前 Pane（最后一个时关闭 Tab） |
+| 快捷键 (Mac) | 快捷键 (Win/Linux) | 功能 |
+|-------------|-------------------|------|
+| `Cmd+Shift+D` | `Ctrl+Shift+D` | 垂直分割当前 Pane |
+| `Cmd+Shift+E` | `Ctrl+Shift+E` | 水平分割当前 Pane |
+| `Cmd+Option+←/→/↑/↓` | `Ctrl+Alt+Arrow` | 切换 Pane 聚焦 |
+| `Cmd+Shift+W` | `Ctrl+Shift+W` | 关闭当前 Pane（最后一个时关闭 Tab） |
 
 ## 5. 风险与缓解
 

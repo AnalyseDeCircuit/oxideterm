@@ -273,16 +273,16 @@ flowchart TD
 
 ```typescript
 // SFTPView.tsx
-const connectionState = appStore.connections.get(connectionId)?.state;
-const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
+const { state: nodeState } = useNodeState(nodeId);
+const isConnectionReady = nodeState.readiness === 'ready';
 
 useEffect(() => {
   if (!isConnectionReady) {
-    console.debug('[SFTPView] Waiting for connection:', connectionState);
+    console.debug('[SFTPView] Waiting for connection:', nodeState.readiness);
     return;  // 阻止所有 IO
   }
   // 初始化 SFTP 会话
-}, [connectionState, connectionId]);
+}, [nodeState.readiness, nodeId]);
 ```
 
 ### Key-Driven Reset (键驱动重置)
@@ -313,8 +313,8 @@ sequenceDiagram
 ```tsx
 // AppLayout.tsx
 <SFTPView 
-  key={`sftp-${sessionId}-${connectionId}`}  // 关键！
-  sessionId={sessionId} 
+  key={`sftp-${nodeId}`}  // 关键！
+  nodeId={nodeId} 
 />
 ```
 
@@ -371,8 +371,8 @@ flowchart LR
 
 ```typescript
 // TransferQueue.tsx
-const connectionState = connections.get(connectionId)?.state;
-const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
+const { state: nodeState } = useNodeState(nodeId);
+const isConnectionReady = nodeState.readiness === 'ready';
 
 useEffect(() => {
   if (!isConnectionReady) {
@@ -380,7 +380,7 @@ useEffect(() => {
     return;  // 暂停所有传输
   }
   // 恢复传输
-}, [connectionState]);
+}, [nodeState.readiness]);
 ```
 
 ---
@@ -451,8 +451,8 @@ const hexContent: PreviewContent = await nodeSftpPreviewHex(nodeId, "/path/to/fi
 
 ```typescript
 // 写入文件
-const result = await nodeSftpWrite(nodeId, "/path/to/file", content, createNew);
-// result: { bytesWritten: number }
+const result = await nodeSftpWrite(nodeId, "/path/to/file", content, encoding);
+// result: { mtime: number | null; size: number | null; encodingUsed: string }
 ```
 
 ### Transfer Control Commands (transferId-based)
@@ -468,10 +468,10 @@ await sftpPauseTransfer(transferId);
 await sftpResumeTransfer(transferId);
 
 // 查询传输统计
-const stats = await sftpTransferStats(transferId);
+const stats = await sftpTransferStats();
 
 // 更新传输设置
-await sftpUpdateSettings(transferId, settings);
+await sftpUpdateSettings(maxConcurrent?, speedLimitKbps?);
 ```
 
 ### PreviewContent 类型
@@ -494,7 +494,7 @@ type PreviewContent =
 import { listen } from '@tauri-apps/api/event';
 
 // 监听传输进度
-const unlisten = await listen(`sftp:progress:${sessionId}`, (event) => {
+const unlisten = await listen(`sftp:progress:${nodeId}`, (event) => {
   const progress: TransferProgress = event.payload;
   console.log(`${progress.id}: ${progress.transferred_bytes}/${progress.total_bytes}`);
 });
@@ -511,7 +511,7 @@ interface TransferProgress {
   remote_path: string;
   local_path: string;
   direction: 'download' | 'upload';
-  state: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  state: 'Pending' | 'InProgress' | 'Completed' | { Failed: string };
   total_bytes: number;
   transferred_bytes: number;
   speed: number;  // bytes/second

@@ -113,7 +113,7 @@ AI conversations are persisted using a dedicated redb database (`chat_history.re
 struct PersistedMessage {
     id: String,
     conversation_id: String,
-    role: MessageRole,        // "user" | "assistant"
+    role: String,              // "user" | "assistant" | "system"
     content: String,
     timestamp: i64,           // Unix millis
     context_snapshot: Option<ContextSnapshot>,
@@ -141,7 +141,7 @@ struct ContextSnapshot {
 The AI chat uses a Zustand store (`aiChatStore.ts`) for state management:
 
 ```typescript
-interface AiChatState {
+interface AiChatStore {
   conversations: AiConversation[];
   activeConversationId: string | null;
   isLoading: boolean;
@@ -158,7 +158,7 @@ The new `sidebarContextProvider.ts` module aggregates context automatically:
 ```typescript
 // Gather complete sidebar context for AI
 const context = gatherSidebarContext({
-    maxBufferLines: 120,     // Default from ai.contextVisibleLines
+    maxBufferLines: 50,      // Default from ai.contextVisibleLines
     maxBufferChars: 8000,    // Default from ai.contextMaxChars
     maxSelectionChars: 2000, // Max 2KB of selection
 });
@@ -189,7 +189,7 @@ gatherSidebarContext() ← Auto-inject environment snapshot
     ↓
 Enhanced System Prompt + Context Block
     ↓
-AiStreamProvider.stream() (Provider-specific API)
+AiStreamProvider.streamCompletion() (Provider-specific API)
     ↓
 Streaming response → ChatMessage render
     ↓
