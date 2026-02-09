@@ -194,6 +194,16 @@ pub async fn check_ssh_keys() -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Check if SSH Agent is available on the current platform
+///
+/// - Unix: returns `true` if `SSH_AUTH_SOCK` is set
+/// - Windows: always `true` (OpenSSH pipe exists when service is installed)
+/// - Other: `false`
+#[tauri::command]
+pub fn is_ssh_agent_available() -> bool {
+    crate::ssh::is_agent_available()
+}
+
 /// Restore persisted sessions (returns session metadata for selective restoration)
 #[tauri::command]
 pub async fn restore_sessions(
