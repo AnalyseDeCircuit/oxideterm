@@ -66,10 +66,11 @@ function buildNotices() {
 
   const fonts = [
     {
-      name: 'JetBrains Mono',
+      name: 'JetBrains Mono (Subset)',
       license: 'SIL Open Font License 1.1',
       licenseFile: 'public/fonts/JetBrainsMono/OFL.txt',
-      displayPath: '../public/fonts/JetBrainsMono/OFL.txt'
+      displayPath: '../public/fonts/JetBrainsMono/OFL.txt',
+      note: 'Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1'
     },
     {
       name: 'Meslo',
@@ -78,10 +79,11 @@ function buildNotices() {
       displayPath: '../public/fonts/Meslo/LICENSE.txt'
     },
     {
-      name: 'Tinos',
-      license: 'Apache License 2.0',
-      licenseFile: 'public/fonts/Tinos/Apache License.txt',
-      displayPath: '../public/fonts/Tinos/Apache License.txt'
+      name: 'Maple Mono (Subset)',
+      license: 'SIL Open Font License 1.1',
+      licenseFile: 'public/fonts/MapleMono/LICENSE.txt',
+      displayPath: '../public/fonts/MapleMono/LICENSE.txt',
+      note: 'Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1'
     }
   ];
 
@@ -105,6 +107,9 @@ function buildNotices() {
   for (const f of fonts) {
     out += `- ${f.name} — ${f.license} (see ${f.displayPath || f.licenseFile})\n`;
 
+    if (f.note) {
+      out += `  - **${f.note}**\n`;
+    }
     const licText = tryRead(f.licenseFile);
     if (licText) {
       const excerpt = firstNonEmptyLines(licText, 2);

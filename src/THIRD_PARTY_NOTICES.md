@@ -1,10 +1,10 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-05T13:38:06.080Z
+Generated: 2026-02-09T19:09:19.255Z
 
 ## Summary
-- MIT: 219
+- MIT: 214
 - ISC: 34
 - Apache-2.0: 17
 - BSD-3-Clause: 7
@@ -97,7 +97,7 @@ Generated: 2026-02-05T13:38:06.080Z
 | @radix-ui/react-popper | 1.2.8 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-portal | 1.1.9 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-presence | 1.1.5 | MIT | https://radix-ui.com/primitives |
-| @radix-ui/react-primitive | 2.1.3, 2.1.4 | MIT | https://radix-ui.com/primitives |
+| @radix-ui/react-primitive | 2.1.3 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-radio-group | 1.3.8 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-roving-focus | 1.1.11 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-select | 2.2.6 | MIT | https://radix-ui.com/primitives |
@@ -254,8 +254,6 @@ Generated: 2026-02-05T13:38:06.080Z
 | marked | 16.4.2, 17.0.1 | MIT | https://marked.js.org |
 | mermaid | 11.12.2 | MIT | https://github.com/mermaid-js/mermaid#readme |
 | mlly | 1.8.0 | MIT | https://github.com/unjs/mlly#readme |
-| motion-dom | 12.24.11 | MIT | https://github.com/motiondivision/motion#readme |
-| motion-utils | 12.24.10 | MIT | https://github.com/motiondivision/motion#readme |
 | nanoid | 5.1.6 | MIT | https://github.com/ai/nanoid#readme |
 | option | 0.2.4 | BSD-2-Clause | https://github.com/mwilliamson/node-options#readme |
 | package-manager-detector | 1.6.0 | MIT | https://github.com/antfu-collective/package-manager-detector#readme |
@@ -316,10 +314,14 @@ Generated: 2026-02-05T13:38:06.080Z
 
 ## Bundled Fonts / Assets
 
-- JetBrains Mono — SIL Open Font License 1.1 (see ../public/fonts/JetBrainsMono/OFL.txt)
+- JetBrains Mono (Subset) — SIL Open Font License 1.1 (see ../public/fonts/JetBrainsMono/OFL.txt)
+  - **Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1**
   - Excerpt: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) / This Font Software is licensed under the SIL Open Font License, Version 1.1.
 - Meslo — Apache License 2.0 (see ../public/fonts/Meslo/LICENSE.txt)
   - Excerpt: Copyright 2009, 2010, 2013 André Berg / Licensed under the Apache License, Version 2.0 (the "License");
+- Maple Mono (Subset) — SIL Open Font License 1.1 (see ../public/fonts/MapleMono/LICENSE.txt)
+  - **Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1**
+  - Excerpt: Copyright 2022 The Maple Mono Project Authors (https://github.com/subframe7536/maple-font) / This Font Software is licensed under the SIL Open Font License, Version 1.1.
 
 ## Notes
 
