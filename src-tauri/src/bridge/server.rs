@@ -625,7 +625,7 @@ impl WsBridge {
         let frame_tx_hb = frame_tx.clone();
 
         // Task: Frame sender - consolidates all outgoing frames
-        let sender_task = tokio::spawn(async move {
+        let mut sender_task = tokio::spawn(async move {
             while let Some(data) = frame_rx.recv().await {
                 // Use timeout to detect dead clients (prevents deadlock)
                 match tokio::time::timeout(
@@ -654,7 +654,7 @@ impl WsBridge {
 
         // Task: Forward SSH output to WebSocket as Data frames
         let buffer_clone = scroll_buffer.clone();
-        let ssh_out_task = tokio::spawn(async move {
+        let mut ssh_out_task = tokio::spawn(async move {
             while let Some(data) = stdout_rx.recv().await {
                 // Parse terminal output and append to scroll buffer
                 let lines = parse_terminal_output(&data);
@@ -675,7 +675,7 @@ impl WsBridge {
 
         // Task: Heartbeat sender
         let sid_hb = id.clone();
-        let heartbeat_task = tokio::spawn(async move {
+        let mut heartbeat_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
             loop {
                 interval.tick().await;
@@ -717,7 +717,7 @@ impl WsBridge {
 
         // Task: Process incoming WebSocket messages
         let sid_in = id.clone();
-        let input_task = tokio::spawn(async move {
+        let mut input_task = tokio::spawn(async move {
             let mut codec = FrameCodec::new();
             let start = Instant::now();
 
@@ -820,19 +820,25 @@ impl WsBridge {
 
         // Wait for any task to complete
         tokio::select! {
-            _ = sender_task => {
+            _ = &mut sender_task => {
                 debug!("Sender task completed for session {}", id);
             }
-            _ = ssh_out_task => {
+            _ = &mut ssh_out_task => {
                 debug!("SSH output task completed for session {}", id);
             }
-            _ = heartbeat_task => {
+            _ = &mut heartbeat_task => {
                 debug!("Heartbeat task completed for session {}", id);
             }
-            _ = input_task => {
+            _ = &mut input_task => {
                 debug!("Input task completed for session {}", id);
             }
         }
+
+        // Abort remaining tasks to prevent zombie tokio tasks
+        sender_task.abort();
+        ssh_out_task.abort();
+        heartbeat_task.abort();
+        input_task.abort();
 
         info!("WebSocket bridge terminated for session {}", id);
         Ok(())
@@ -1040,7 +1046,7 @@ impl WsBridge {
         let sid_out = id.clone();
 
         // Task: WebSocket sender (multiplexes frame_tx)
-        let sender_task = tokio::spawn(async move {
+        let mut sender_task = tokio::spawn(async move {
             while let Some(frame) = frame_rx.recv().await {
                 // Use timeout to detect dead clients (prevents deadlock)
                 match tokio::time::timeout(
@@ -1068,7 +1074,7 @@ impl WsBridge {
         });
 
         // Task: SSH stdout -> WebSocket
-        let ssh_out_task = tokio::spawn(async move {
+        let mut ssh_out_task = tokio::spawn(async move {
             while let Ok(data) = stdout_rx.recv().await {
                 state_out.touch();
 
@@ -1082,7 +1088,7 @@ impl WsBridge {
         });
 
         // Task: Heartbeat sender
-        let heartbeat_task = tokio::spawn(async move {
+        let mut heartbeat_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
             loop {
                 interval.tick().await;
@@ -1111,7 +1117,7 @@ impl WsBridge {
 
         // Task: WebSocket -> SSH (uses cmd_tx with SessionCommand)
         let cmd_tx_clone = cmd_tx.clone();
-        let input_task = tokio::spawn(async move {
+        let mut input_task = tokio::spawn(async move {
             let mut codec = FrameCodec::new();
             let start = Instant::now();
 
@@ -1202,19 +1208,25 @@ impl WsBridge {
 
         // Wait for any task to complete
         tokio::select! {
-            _ = sender_task => {
+            _ = &mut sender_task => {
                 debug!("Sender task completed for session {}", id);
             }
-            _ = ssh_out_task => {
+            _ = &mut ssh_out_task => {
                 debug!("SSH output task completed for session {}", id);
             }
-            _ = heartbeat_task => {
+            _ = &mut heartbeat_task => {
                 debug!("Heartbeat task completed for session {}", id);
             }
-            _ = input_task => {
+            _ = &mut input_task => {
                 debug!("Input task completed for session {}", id);
             }
         }
+
+        // Abort remaining tasks to prevent zombie tokio tasks
+        sender_task.abort();
+        ssh_out_task.abort();
+        heartbeat_task.abort();
+        input_task.abort();
 
         info!("WebSocket bridge (v2) terminated for session {}", id);
         Ok(())
@@ -1308,7 +1320,7 @@ impl WsBridge {
         let sid_out = id.clone();
 
         // Task: WebSocket sender
-        let sender_task = tokio::spawn(async move {
+        let mut sender_task = tokio::spawn(async move {
             while let Some(frame) = frame_rx.recv().await {
                 match tokio::time::timeout(
                     Duration::from_secs(5),
@@ -1331,7 +1343,7 @@ impl WsBridge {
         });
 
         // Task: SSH stdout -> WebSocket
-        let ssh_out_task = tokio::spawn(async move {
+        let mut ssh_out_task = tokio::spawn(async move {
             while let Ok(data) = stdout_rx.recv().await {
                 state_out.touch();
 
@@ -1346,7 +1358,7 @@ impl WsBridge {
         });
 
         // Task: Heartbeat sender - returns reason if timeout
-        let heartbeat_task = tokio::spawn(async move {
+        let mut heartbeat_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
             loop {
                 interval.tick().await;
@@ -1372,7 +1384,7 @@ impl WsBridge {
 
         // Task: WebSocket -> SSH
         let cmd_tx_clone = cmd_tx.clone();
-        let input_task = tokio::spawn(async move {
+        let mut input_task = tokio::spawn(async move {
             let mut codec = FrameCodec::new();
             let start = Instant::now();
 
@@ -1455,11 +1467,17 @@ impl WsBridge {
 
         // Wait for any task to complete and determine disconnect reason
         let reason_str = tokio::select! {
-            result = sender_task => result.unwrap_or("unknown"),
-            result = ssh_out_task => result.unwrap_or("ssh_closed"),
-            result = heartbeat_task => result.unwrap_or("heartbeat_timeout"),
-            result = input_task => result.unwrap_or("client_closed"),
+            result = &mut sender_task => result.unwrap_or("unknown"),
+            result = &mut ssh_out_task => result.unwrap_or("ssh_closed"),
+            result = &mut heartbeat_task => result.unwrap_or("heartbeat_timeout"),
+            result = &mut input_task => result.unwrap_or("client_closed"),
         };
+
+        // Abort remaining tasks to prevent zombie tokio tasks
+        sender_task.abort();
+        ssh_out_task.abort();
+        heartbeat_task.abort();
+        input_task.abort();
 
         let disconnect_reason = match reason_str {
             "heartbeat_timeout" => DisconnectReason::HeartbeatTimeout,

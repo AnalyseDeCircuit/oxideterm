@@ -220,6 +220,9 @@ export function useMermaid(
     const container = containerRef.current;
     if (!container) return;
     
+    // Track active modals and their escape listeners for cleanup on unmount
+    const activeModals: { modal: HTMLDivElement; handleEscape: (e: KeyboardEvent) => void }[] = [];
+    
     const handleClick = (e: Event) => {
       const target = e.target as HTMLElement;
       const zoomBtn = target.closest<HTMLButtonElement>('[data-action="zoom-mermaid"]');
@@ -250,8 +253,14 @@ export function useMermaid(
           </div>
         `;
         
-        // Close handlers
-        const closeModal = () => modal.remove();
+        // Close handlers — clean up both DOM and keydown listener
+        const closeModal = () => {
+          document.removeEventListener('keydown', handleEscape);
+          modal.remove();
+          // Remove from tracking array
+          const idx = activeModals.findIndex(m => m.modal === modal);
+          if (idx !== -1) activeModals.splice(idx, 1);
+        };
         modal.addEventListener('click', (e) => {
           if (e.target === modal) closeModal();
         });
@@ -261,17 +270,27 @@ export function useMermaid(
         const handleEscape = (e: KeyboardEvent) => {
           if (e.key === 'Escape') {
             closeModal();
-            document.removeEventListener('keydown', handleEscape);
           }
         };
         document.addEventListener('keydown', handleEscape);
+        
+        // Track for cleanup
+        activeModals.push({ modal, handleEscape });
         
         document.body.appendChild(modal);
       }
     };
     
     container.addEventListener('click', handleClick);
-    return () => container.removeEventListener('click', handleClick);
+    return () => {
+      container.removeEventListener('click', handleClick);
+      // Clean up any modals still open when component unmounts
+      for (const { modal, handleEscape } of activeModals) {
+        document.removeEventListener('keydown', handleEscape);
+        modal.remove();
+      }
+      activeModals.length = 0;
+    };
   }, [containerRef]);
 }
 

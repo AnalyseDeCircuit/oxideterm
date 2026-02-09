@@ -140,6 +140,8 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Pipeline execution lock */
 let isRunning = false;
+const MAX_REQUEUE = 30;
+const requeueCount = new Map<string, number>();
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -440,13 +442,20 @@ function flushPending() {
 /** Main pipeline runner with retry support */
 async function runPipeline(nodeId: string) {
   if (isRunning) {
-    console.log(`[Orchestrator] Pipeline busy, re-queuing ${nodeId}`);
-    // Re-queue with adaptive backoff delay
+    const count = (requeueCount.get(nodeId) ?? 0) + 1;
+    if (count > MAX_REQUEUE) {
+      console.warn(`[Orchestrator] Max re-queue (${MAX_REQUEUE}) reached for ${nodeId}, dropping`);
+      requeueCount.delete(nodeId);
+      return;
+    }
+    requeueCount.set(nodeId, count);
+    console.log(`[Orchestrator] Pipeline busy, re-queuing ${nodeId} (${count}/${MAX_REQUEUE})`);
     setTimeout(() => runPipeline(nodeId), calculateBackoff(1));
     return;
   }
 
   isRunning = true;
+  requeueCount.delete(nodeId);
 
   try {
     const job = getJob(nodeId);
@@ -701,43 +710,71 @@ async function phaseAwaitTerminal(nodeId: string) {
     }
   }
 
-  // Detect open terminal tabs using SNAPSHOT session IDs (not live terminalNodeMap,
-  // which was cleared by resetNodeState). This is the key fix: after resetNodeState
-  // clears all mappings, paneUsesNode() always returns false — causing the
-  // orchestrator to skip terminal recreation and leaving the pane stuck with a
-  // stale sessionId showing "此会话无可用的 WebSocket URL".
-  const oldSessionIds = new Set(snapshot.perNodeOldSessionIds.get(nodeId) || []);
   const { useAppStore } = await import('./appStore');
-  const { tabs } = useAppStore.getState();
-  const hasTerminalTab = oldSessionIds.size > 0 && tabs.some((tab) => {
-    // Legacy single-pane
-    if (tab.sessionId && oldSessionIds.has(tab.sessionId)) return true;
-    // Split pane tree
-    if (!tab.rootPane) return false;
-    return paneTreeHasAnySession(tab.rootPane, oldSessionIds);
-  });
 
-  if (hasTerminalTab) {
-    // Proactively create the terminal — don't rely on Key-Driven Reset, which
-    // cannot work because pane.sessionId still points to the deleted old session.
+  // Process ALL affected nodes (root + descendants), not just the root.
+  // For each node that had open terminal tab(s), create new terminal(s) and
+  // patch the pane tree so TerminalView remounts with a valid session.
+  const allNodes = [node, ...treeStore.getDescendants(nodeId)];
+  let terminalTabsFixed = 0;
+
+  for (const n of allNodes) {
+    if (job.abortController.signal.aborted) return;
+
+    const oldSessionIds = snapshot.perNodeOldSessionIds.get(n.id);
+    if (!oldSessionIds || oldSessionIds.length === 0) continue;
+
+    const oldSessionIdSet = new Set(oldSessionIds);
+    const { tabs } = useAppStore.getState();
+    const hasTerminalTab = tabs.some((tab) => {
+      if (tab.sessionId && oldSessionIdSet.has(tab.sessionId)) return true;
+      if (!tab.rootPane) return false;
+      return paneTreeHasAnySession(tab.rootPane, oldSessionIdSet);
+    });
+
+    if (!hasTerminalTab) continue;
+
+    // Check if this node has been reconnected (connectNodeWithAncestors should
+    // have connected the root; children may still be pending).
+    const currentNode = useSessionTreeStore.getState().getNode(n.id);
+    if (!currentNode?.runtime.connectionId) {
+      console.debug(`[Orchestrator] Node ${n.id} not yet connected, skipping terminal creation`);
+      continue;
+    }
+
     try {
-      const newSessionId = await useSessionTreeStore.getState().createTerminalForNode(nodeId);
-      console.log(`[Orchestrator] Created terminal for node ${nodeId}: ${newSessionId}`);
+      // For split-view: each distinct old sessionId needs its own new terminal
+      // to avoid merging two independent shells into one.
+      if (oldSessionIds.length > 1) {
+        // Multiple terminals — create one per old sessionId
+        for (const oldId of oldSessionIds) {
+          // Check if this specific old sessionId is still referenced by any pane
+          const { tabs: currentTabs } = useAppStore.getState();
+          const isReferenced = currentTabs.some((tab) => {
+            if (tab.sessionId === oldId) return true;
+            if (!tab.rootPane) return false;
+            return paneTreeHasAnySession(tab.rootPane, new Set([oldId]));
+          });
+          if (!isReferenced) continue;
 
-      // Patch all pane trees: replace stale old sessionId with new sessionId.
-      // This causes TerminalPane to recompute its key (includes ws_url),
-      // triggering a clean remount of TerminalView with a valid session.
-      for (const oldId of oldSessionIds) {
-        useAppStore.getState().updatePaneSessionId(oldId, newSessionId);
+          const newId = await useSessionTreeStore.getState().createTerminalForNode(n.id);
+          useAppStore.getState().updatePaneSessionId(oldId, newId);
+          console.log(`[Orchestrator] Created terminal for node ${n.id}: ${oldId} → ${newId}`);
+        }
+      } else {
+        // Single terminal — common case
+        const newSessionId = await useSessionTreeStore.getState().createTerminalForNode(n.id);
+        useAppStore.getState().updatePaneSessionId(oldSessionIds[0], newSessionId);
+        console.log(`[Orchestrator] Created terminal for node ${n.id}: ${newSessionId}`);
       }
+      terminalTabsFixed++;
     } catch (e) {
-      console.warn(`[Orchestrator] Failed to create terminal for node ${nodeId}:`, e);
+      console.warn(`[Orchestrator] Failed to create terminal for node ${n.id}:`, e);
     }
   }
 
   // For nodes that need a session for forward/transfer restore but have no terminal,
   // explicitly create a terminal session so there's a valid session to bind to.
-  const allNodes = [node, ...treeStore.getDescendants(nodeId)];
   for (const n of allNodes) {
     if (job.abortController.signal.aborted) return;
 
@@ -745,7 +782,6 @@ async function phaseAwaitTerminal(nodeId: string) {
     if (currentNode?.terminalSessionId) continue; // already has a session
     if (!nodesNeedingSession.has(n.id)) continue; // doesn't need one
 
-    // Node needs a session but doesn't have one — create explicitly
     try {
       console.log(`[Orchestrator] Creating terminal for node ${n.id} (needed for forward/transfer restore)`);
       await useSessionTreeStore.getState().createTerminalForNode(n.id);
@@ -753,7 +789,7 @@ async function phaseAwaitTerminal(nodeId: string) {
       console.warn(`[Orchestrator] Failed to create terminal for node ${n.id}:`, e);
     }
   }
-  exitPhase(nodeId, 'ok', `hasTerminalTab=${hasTerminalTab}, ${nodesNeedingSession.size} nodes needed sessions`);
+  exitPhase(nodeId, 'ok', `fixed ${terminalTabsFixed} terminal tab(s), ${nodesNeedingSession.size} nodes needed sessions`);
 }
 
 // ─── Phase 3: Restore Forwards ──────────────────────────────────────────────

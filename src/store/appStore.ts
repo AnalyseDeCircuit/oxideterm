@@ -913,13 +913,59 @@ export const useAppStore = create<AppStore>((set, get) => ({
       
       const tab = state.tabs[tabIndex];
       const paneToClose = tab.rootPane ? findPaneById(tab.rootPane, paneId) : null;
-      if (paneToClose?.terminalType === 'local_terminal') {
+      if (paneToClose) {
+        const closedSessionId = paneToClose.sessionId;
+        const closedType = paneToClose.terminalType;
         (async () => {
           try {
-            const { useLocalTerminalStore } = await import('./localTerminalStore');
-            await useLocalTerminalStore.getState().closeTerminal(paneToClose.sessionId);
+            if (closedType === 'local_terminal') {
+              const { useLocalTerminalStore } = await import('./localTerminalStore');
+              await useLocalTerminalStore.getState().closeTerminal(closedSessionId);
+            } else if (closedType === 'terminal') {
+              // Fix: SSH terminals in split panes must also release backend resources.
+              // Without this, SSH PTY channel, WsBridge, and connection ref_count leak.
+              const { useSessionTreeStore } = await import('./sessionTreeStore');
+              useSessionTreeStore.getState().purgeTerminalMapping(closedSessionId);
+
+              // Remove from sessions Map and collect connectionId
+              let connectionId: string | undefined;
+              useAppStore.setState((s) => {
+                const newSessions = new Map(s.sessions);
+                const session = newSessions.get(closedSessionId);
+                connectionId = session?.connectionId;
+                newSessions.delete(closedSessionId);
+                return { sessions: newSessions };
+              });
+
+              // Close backend terminal (PTY + WsBridge + refs)
+              try {
+                await api.closeTerminal(closedSessionId);
+                console.log(`[closePane] SSH terminal ${closedSessionId} closed`);
+              } catch (e) {
+                console.warn(`[closePane] Failed to close SSH terminal ${closedSessionId}:`, e);
+              }
+
+              // If no remaining terminals on this connection, disconnect SSH
+              if (connectionId) {
+                const remaining = Array.from(useAppStore.getState().sessions.values())
+                  .filter(s => s.connectionId === connectionId);
+                if (remaining.length === 0) {
+                  try {
+                    await api.sshDisconnect(connectionId);
+                    useAppStore.setState((s) => {
+                      const newConnections = new Map(s.connections);
+                      newConnections.delete(connectionId!);
+                      return { connections: newConnections };
+                    });
+                    console.log(`[closePane] SSH connection ${connectionId} disconnected (no remaining terminals)`);
+                  } catch (e) {
+                    console.warn(`[closePane] Failed to disconnect SSH ${connectionId}:`, e);
+                  }
+                }
+              }
+            }
           } catch (error) {
-            console.error('[closePane] Failed to close local terminal:', error);
+            console.error('[closePane] Failed to close pane terminal:', error);
           }
         })();
       }

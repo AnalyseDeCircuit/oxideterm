@@ -55,6 +55,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           <TerminalView
             key={`${pane.sessionId}-${getSession(pane.sessionId)?.ws_url ?? ''}`}
             sessionId={pane.sessionId}
+            isActive={isActive}
             paneId={pane.id}
             tabId={tabId}
             onFocus={handleFocus}

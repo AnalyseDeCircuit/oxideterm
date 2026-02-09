@@ -528,15 +528,33 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         set({ nodeTerminalMap: newTerminalMap, terminalNodeMap: newNodeMap });
         
         // 关闭关联的 Tab（异步导入 appStore 避免循环依赖）
+        const { useAppStore } = await import('./appStore');
+        const appState = useAppStore.getState();
+        
+        // 关闭终端 Tab（通过 sessionId 匹配）
         if (terminalIdsToClose.length > 0) {
-          const { useAppStore } = await import('./appStore');
-          const appState = useAppStore.getState();
           for (const termId of terminalIdsToClose) {
             const tab = appState.tabs.find(t => t.sessionId === termId);
             if (tab) {
               appState.closeTab(tab.id);
             }
           }
+        }
+        
+        // 关闭 SFTP/Forwards/IDE/FileManager 等 nodeId-based Tab
+        // removeNode 之前只关闭 terminal Tab，导致非终端 Tab 成为孤儿
+        const removedNodeIds = new Set(localRemovedIds);
+        const nodeIdTabs = useAppStore.getState().tabs.filter(
+          t => t.nodeId && removedNodeIds.has(t.nodeId)
+        );
+        for (const tab of nodeIdTabs) {
+          useAppStore.getState().closeTab(tab.id);
+        }
+        
+        // 中断被删除节点关联的 SFTP 传输（避免 transferStore 残留孤儿条目）
+        const { useTransferStore } = await import('./transferStore');
+        for (const removedId of localRemovedIds) {
+          useTransferStore.getState().interruptTransfersByNode(removedId, 'Node removed');
         }
         
         // 使用本地计算的 ID 清理 selectedNodeId（在 API 调用前，避免后端返回不完整）
@@ -743,8 +761,14 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         console.error('Failed to disconnect tree node:', e);
       }
       
-      // 8. 刷新树状态
+      // 8. 刷新树状态 + 连接状态 (Strong Consistency Sync)
       await get().fetchTree();
+      try {
+        const { useAppStore } = await import('./appStore');
+        await useAppStore.getState().refreshConnections();
+      } catch (e) {
+        console.warn('[disconnectNode] refreshConnections failed:', e);
+      }
     },
     
     /**

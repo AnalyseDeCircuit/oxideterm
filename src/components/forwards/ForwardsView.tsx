@@ -12,6 +12,7 @@ import { createTypeGuard } from '../../lib/utils';
 import { ForwardRule, ForwardType } from '../../types';
 import { useToast } from '../../hooks/useToast';
 import { useForwardEvents, ForwardStatus as EventForwardStatus } from '../../hooks/useForwardEvents';
+import { useNodeState } from '../../hooks/useNodeState';
 
 // Type guard for ForwardType using const type parameter (TS 5.0+)
 const FORWARD_TYPES = ['local', 'remote', 'dynamic'] as const;
@@ -35,6 +36,9 @@ const formatBytes = (bytes: number): string => {
 export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { state: nodeState } = useNodeState(nodeId);
+  // State Gating: only allow IO when node is ready
+  const nodeReady = nodeState.readiness === 'ready';
   const [forwards, setForwards] = useState<ForwardRule[]>([]);
   const [forwardStats, setForwardStats] = useState<Record<string, ForwardStats>>({});
   const [loading, setLoading] = useState(false);
@@ -59,6 +63,8 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const [editError, setEditError] = useState<string | null>(null);
 
   const fetchForwards = useCallback(async () => {
+    // State Gating: skip fetch when node is not ready (checked by caller too)
+    if (!nodeReady) return;
     try {
       setLoading(true);
       const list = await api.nodeListForwards(nodeId);
@@ -80,7 +86,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
     } finally {
       setLoading(false);
     }
-  }, [nodeId]);
+  }, [nodeId, nodeReady]);
 
   // Listen for forward events from backend (death reports, status changes)
   useForwardEvents({
@@ -135,12 +141,14 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
     }, [t, toast]),
   });
 
+  // State Gating: skip API calls when node is not ready
   useEffect(() => {
+    if (!nodeReady) return;
     fetchForwards();
     // Poll every 5 seconds for status updates
     const interval = setInterval(fetchForwards, 5000);
     return () => clearInterval(interval);
-  }, [nodeId, fetchForwards]);
+  }, [nodeId, nodeReady, fetchForwards]);
 
   const handleCreateQuick = async (type: 'jupyter' | 'tensorboard' | 'vscode') => {
       try {
@@ -211,13 +219,13 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
         <div className="space-y-2">
            <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-wide">{t('forwards.quick.title')}</h3>
            <div className="flex gap-2">
-             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('jupyter')}>
+             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('jupyter')} disabled={!nodeReady}>
                 <span className="w-2 h-2 rounded-full bg-orange-500" /> {t('forwards.quick.jupyter')}
              </Button>
-             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('tensorboard')}>
+             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('tensorboard')} disabled={!nodeReady}>
                 <span className="w-2 h-2 rounded-full bg-blue-500" /> {t('forwards.quick.tensorboard')}
              </Button>
-             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('vscode')}>
+             <Button variant="secondary" className="gap-2" onClick={() => handleCreateQuick('vscode')} disabled={!nodeReady}>
                 <span className="w-2 h-2 rounded-full bg-cyan-500" /> {t('forwards.quick.vscode')}
              </Button>
            </div>

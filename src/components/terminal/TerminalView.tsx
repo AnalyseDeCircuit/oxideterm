@@ -113,6 +113,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsRecoveryAttemptsRef = useRef(0);
   const wsRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsConnectAbortRef = useRef<AbortController | null>(null); // Cancel WS connect retries on unmount
+  const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
@@ -330,7 +331,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         break;
       }
     }
-  }, [maybeLoadImageAddon, sessionId]);
+  }, [maybeLoadImageAddon, sessionId, nodeId]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -1290,7 +1291,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             // 仅当 sessionId 以 'ide-terminal-' 开头时触发（区分普通终端和 IDE 终端）
             if (sessionId.startsWith('ide-terminal-') && (data === '\r' || data === '\n')) {
               // 延迟 500ms 触发，给 git 命令执行时间
-              setTimeout(() => {
+              if (gitRefreshTimerRef.current !== null) {
+                clearTimeout(gitRefreshTimerRef.current);
+              }
+              gitRefreshTimerRef.current = setTimeout(() => {
+                gitRefreshTimerRef.current = null;
                 triggerGitRefresh();
               }, 500);
             }
@@ -1357,12 +1362,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     window.addEventListener('resize', handleResize);
     
     // Initial fit with delay for layout stabilization
-    setTimeout(() => {
-        fitAddon.fit();
+    const initialFitTimer = setTimeout(() => {
+        if (isMountedRef.current && fitAddonRef.current) {
+          fitAddonRef.current.fit();
+        }
     }, 100);
 
     return () => {
       isMountedRef.current = false;
+      
+      // Cancel pending timers
+      clearTimeout(initialFitTimer);
+      if (gitRefreshTimerRef.current !== null) {
+        clearTimeout(gitRefreshTimerRef.current);
+        gitRefreshTimerRef.current = null;
+      }
       
       // Abort any pending WS connect retries immediately
       if (wsConnectAbortRef.current) {

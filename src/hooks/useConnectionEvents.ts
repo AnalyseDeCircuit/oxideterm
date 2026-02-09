@@ -16,6 +16,7 @@ import { useAppStore } from '../store/appStore';
 import { useTransferStore } from '../store/transferStore';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
 import { useReconnectOrchestratorStore } from '../store/reconnectOrchestratorStore';
+import { useProfilerStore } from '../store/profilerStore';
 import { topologyResolver } from '../lib/topologyResolver';
 import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
@@ -178,6 +179,14 @@ export function useConnectionEvents(): void {
             if (disconnNodeId) {
               interruptTransfersByNode(disconnNodeId, i18n.t('connections.events.connection_closed'));
             }
+            
+            // Strong Consistency Sync: 确保 appStore.connections 反映断开状态
+            useAppStore.getState().refreshConnections().catch((e) => {
+              console.warn('[ConnectionEvents] refreshConnections after disconnect failed:', e);
+            });
+            
+            // 清理 profiler 事件监听器（避免断开后残留 Tauri 事件订阅）
+            useProfilerStore.getState().removeConnection(connection_id);
           }
         });
         

@@ -193,6 +193,11 @@ pub async fn start_dynamic_forward_with_disconnect(
     let stats = Arc::new(parking_lot::RwLock::new(ForwardStats::default()));
     let stats_clone = stats.clone();
 
+    // Create a broadcast channel for notifying child tasks of shutdown
+    // This propagates disconnect/stop signals to all spawned SOCKS5 connection handlers
+    let (child_shutdown_tx, _) = broadcast::channel::<()>(16);
+    let child_shutdown_tx_clone = child_shutdown_tx.clone();
+
     // Spawn the proxy task
     tokio::spawn(async move {
         // Track exit reason for event emission
@@ -241,10 +246,17 @@ pub async fn start_dynamic_forward_with_disconnect(
 
                             let controller = handle_controller.clone();
                             let stats_for_conn = stats_clone.clone();
+                            // Subscribe to shutdown signal for this child task
+                            let mut child_shutdown_rx = child_shutdown_tx_clone.subscribe();
 
                             // Spawn a task to handle this SOCKS5 connection
                             tokio::spawn(async move {
-                                let result = handle_socks5_connection(controller, stream, stats_for_conn.clone()).await;
+                                let result = handle_socks5_connection(
+                                    controller,
+                                    stream,
+                                    stats_for_conn.clone(),
+                                    &mut child_shutdown_rx,
+                                ).await;
 
                                 // Decrement active connections when done
                                 {
@@ -267,6 +279,10 @@ pub async fn start_dynamic_forward_with_disconnect(
         };
 
         running_clone.store(false, Ordering::SeqCst);
+        
+        // Signal all child tasks to shutdown
+        // Ignore error if no receivers (all connections already closed)
+        let _ = child_shutdown_tx.send(());
         
         // Emit status event based on exit reason
         if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
@@ -308,6 +324,7 @@ async fn handle_socks5_connection(
     handle_controller: HandleController,
     mut stream: TcpStream,
     stats: Arc<parking_lot::RwLock<ForwardStats>>,
+    shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), SshError> {
     // Phase 1: Authentication negotiation
     let mut buf = [0u8; 258];
@@ -453,7 +470,7 @@ async fn handle_socks5_connection(
     debug!("SOCKS5: Tunnel established to {}:{}", dest_host, dest_port);
 
     // Bridge the connection
-    bridge_socks5_connection(stream, channel, stats).await
+    bridge_socks5_connection(stream, channel, stats, shutdown_rx).await
 }
 
 /// Send a SOCKS5 reply
@@ -492,6 +509,7 @@ async fn bridge_socks5_connection(
     mut local_stream: TcpStream,
     mut channel: russh::Channel<russh::client::Msg>,
     stats: Arc<parking_lot::RwLock<ForwardStats>>,
+    shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
     
@@ -635,11 +653,17 @@ async fn bridge_socks5_connection(
         let _ = channel.close().await;
     };
 
-    // Run all tasks concurrently, exit when any completes
+    // Resubscribe to get a fresh receiver for this select
+    let mut shutdown_rx_clone = shutdown_rx.resubscribe();
+    
+    // Run all tasks concurrently, exit when any completes (including parent shutdown)
     tokio::select! {
         _ = local_reader => {}
         _ = local_writer => {}
         _ = ssh_io => {}
+        _ = shutdown_rx_clone.recv() => {
+            debug!("SOCKS5 bridge: received shutdown signal from parent");
+        }
     }
     
     // Signal all tasks to close

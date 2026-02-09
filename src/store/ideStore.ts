@@ -22,6 +22,28 @@ import {
 } from '../lib/pathUtils';
 
 // ═══════════════════════════════════════════════════════════════════════════
+// State Gating: IO 操作前校验节点连接状态
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 断言节点处于可用状态（connected 或 active），否则抛出错误。
+ * 使用 sessionTreeStore 的 getNode() 避免 IPC 开销。
+ */
+function assertNodeReady(nodeId: string): void {
+  // 延迟导入避免循环依赖（ideStore ← sessionTreeStore ← appStore 链）
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { useSessionTreeStore } = require('./sessionTreeStore');
+  const node = useSessionTreeStore.getState().getNode(nodeId);
+  if (!node) {
+    throw new Error('Node not found in session tree');
+  }
+  const status = node.runtime?.status;
+  if (status !== 'active' && status !== 'connected') {
+    throw new Error(`Node is not connected (status: ${status ?? 'unknown'})`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 搜索缓存清除回调（由 IdeSearchPanel 注册）
 // ═══════════════════════════════════════════════════════════════════════════
 let onSearchCacheClear: (() => void) | null = null;
@@ -201,6 +223,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             return;
           }
           
+          // State Gating: 确认节点处于可用状态
+          assertNodeReady(nodeId);
+          
           // node-first: nodeSftpInit 是幂等的，总是安全调用
           await nodeSftpInit(nodeId);
           
@@ -254,6 +279,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             throw new Error('No active session');
           }
           
+          // State Gating
+          assertNodeReady(nodeId);
+          
           // 检查是否有未保存的文件
           const hasDirty = tabs.some(t => t.isDirty);
           if (hasDirty) {
@@ -284,6 +312,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!nodeId) {
             throw new Error('No active node');
           }
+          
+          // State Gating
+          assertNodeReady(nodeId);
           
           // 检查是否已打开
           const existingTab = _findTabByPath(path);
@@ -433,6 +464,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!tab || !nodeId || tab.content === null) {
             throw new Error('Cannot save: invalid state');
           }
+          
+          // State Gating
+          assertNodeReady(nodeId);
           
           // 检查冲突
           const stat = await nodeSftpStat(nodeId, tab.path);
@@ -603,6 +637,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             throw new Error('No active node');
           }
 
+          // State Gating
+          assertNodeReady(nodeId);
+
           const validationError = validateFileName(name);
           if (validationError) {
             throw new Error(validationError);
@@ -648,6 +685,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!nodeId) {
             throw new Error('No active node');
           }
+
+          // State Gating
+          assertNodeReady(nodeId);
 
           const validationError = validateFileName(name);
           if (validationError) {
@@ -698,6 +738,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!nodeId) {
             throw new Error('No active node');
           }
+
+          // State Gating
+          assertNodeReady(nodeId);
           
           // 1. 检查受影响的标签
           const { affected, unsaved } = getAffectedTabs(path);
@@ -735,6 +778,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           if (!nodeId) {
             throw new Error('No active node');
           }
+          
+          // State Gating
+          assertNodeReady(nodeId);
           
           // 1. 验证新名称
           const validationError = validateFileName(newName);
