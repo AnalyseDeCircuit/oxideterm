@@ -29,6 +29,7 @@ import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { resolvePluginIcon } from '../../lib/plugin/pluginIconResolver';
 import { useToast } from '../../hooks/useToast';
+import { useConfirm } from '../../hooks/useConfirm';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { EditConnectionModal } from '../modals/EditConnectionModal';
@@ -118,6 +119,7 @@ export const Sidebar = () => {
 
   // Toast hook (需要在所有使用 toast 的 useCallback 之前声明)
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   // Handle creating a new local terminal
   const handleNewLocalTerminal = useCallback(async () => {
@@ -330,8 +332,11 @@ export const Sidebar = () => {
     const node = getNode(nodeId);
     const displayName = node?.displayName || `${node?.username}@${node?.host}`;
 
-    // Confirm disconnect
-    if (!window.confirm(t('common.confirm.disconnect_node', { name: displayName }))) {
+    // Confirm disconnect via async dialog (window.confirm is unreliable in Tauri WebView)
+    if (!await confirm({
+      title: t('common.confirm.disconnect_node', { name: displayName }),
+      variant: 'danger',
+    })) {
       return;
     }
 
@@ -347,7 +352,7 @@ export const Sidebar = () => {
     } catch (err) {
       console.error('Failed to disconnect tree node:', err);
     }
-  }, [getNode, disconnectNode, refreshConnections]);
+  }, [getNode, disconnectNode, refreshConnections, confirm]);
 
   const handleTreeOpenSftp = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
@@ -429,14 +434,17 @@ export const Sidebar = () => {
   const handleTreeRemove = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
     const displayName = node?.displayName || `${node?.username}@${node?.host}`;
-    if (window.confirm(t('common.confirm.remove_node', { name: displayName }))) {
+    if (await confirm({
+      title: t('common.confirm.remove_node', { name: displayName }),
+      variant: 'danger',
+    })) {
       try {
         await removeNode(nodeId);
       } catch (err) {
         console.error('Failed to remove tree node:', err);
       }
     }
-  }, [getNode, removeNode]);
+  }, [getNode, removeNode, confirm]);
 
   const handleTreeSaveAsPreset = useCallback((nodeId: string) => {
     setSavePresetDialog({ open: true, nodeId });
@@ -1036,6 +1044,7 @@ export const Sidebar = () => {
         )}
         onMouseDown={handleMouseDown}
       />
+      {ConfirmDialog}
     </div>
   );
 };
