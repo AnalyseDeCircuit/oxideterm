@@ -740,9 +740,9 @@ export const SettingsView = () => {
                                                 <SelectValue placeholder={t('settings_view.terminal.select_font')} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="jetbrains">JetBrains Mono NF ✓</SelectItem>
-                                                <SelectItem value="meslo">MesloLGM NF ✓</SelectItem>
-                                                <SelectItem value="maple">Maple Mono NF CN ✓</SelectItem>
+                                                <SelectItem value="jetbrains">JetBrains Mono NF (Subset) ✓</SelectItem>
+                                                <SelectItem value="meslo">MesloLGM NF (Subset) ✓</SelectItem>
+                                                <SelectItem value="maple">Maple Mono NF CN (Subset) ✓</SelectItem>
                                                 <SelectItem value="cascadia">Cascadia Code</SelectItem>
                                                 <SelectItem value="consolas">Consolas</SelectItem>
                                                 <SelectItem value="menlo">Menlo</SelectItem>
@@ -776,15 +776,15 @@ export const SettingsView = () => {
                                             style={{ 
                                                 fontFamily: terminal.fontFamily === 'custom' && terminal.customFontFamily 
                                                     ? (terminal.customFontFamily.toLowerCase().includes('monospace') 
-                                                        ? terminal.customFontFamily.replace(/,?\s*monospace\s*$/, ', "Maple Mono NF CN", monospace')
-                                                        : `${terminal.customFontFamily}, "Maple Mono NF CN", monospace`)
-                                                    : terminal.fontFamily === 'jetbrains' ? '"JetBrainsMono Nerd Font", "JetBrains Mono NF", "Maple Mono NF CN", monospace'
-                                                    : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF", "Maple Mono NF CN", monospace'
-                                                    : terminal.fontFamily === 'maple' ? '"Maple Mono NF CN", "Maple Mono NF", monospace'
-                                                    : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", "Maple Mono NF CN", monospace'
-                                                    : terminal.fontFamily === 'consolas' ? 'Consolas, "Maple Mono NF CN", monospace'
-                                                    : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, "Maple Mono NF CN", monospace'
-                                                    : '"Maple Mono NF CN", monospace',
+                                                        ? terminal.customFontFamily.replace(/,?\s*monospace\s*$/, ', "Maple Mono NF CN (Subset)", monospace')
+                                                        : `${terminal.customFontFamily}, "Maple Mono NF CN (Subset)", monospace`)
+                                                    : terminal.fontFamily === 'jetbrains' ? '"JetBrainsMono Nerd Font", "JetBrains Mono NF (Subset)", "Maple Mono NF CN (Subset)", monospace'
+                                                    : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF (Subset)", "Maple Mono NF CN (Subset)", monospace'
+                                                    : terminal.fontFamily === 'maple' ? '"Maple Mono NF CN (Subset)", "Maple Mono NF", monospace'
+                                                    : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", "Maple Mono NF CN (Subset)", monospace'
+                                                    : terminal.fontFamily === 'consolas' ? 'Consolas, "Maple Mono NF CN (Subset)", monospace'
+                                                    : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, "Maple Mono NF CN (Subset)", monospace'
+                                                    : '"Maple Mono NF CN (Subset)", monospace',
                                                 fontSize: `${terminal.fontSize}px`,
                                                 lineHeight: terminal.lineHeight,
                                             }}

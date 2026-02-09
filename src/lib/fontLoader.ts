@@ -6,7 +6,7 @@
  * 
  * Strategy (v1.4.1+):
  * - JetBrains Mono / Meslo: Loaded eagerly (small, ~4MB each)
- * - Maple Mono NF CN: Tiered loading
+ * - Maple Mono NF CN (Subset): Tiered loading
  *   - Priority 1: Regular weight (~6MB) - loaded first, triggers terminal refresh
  *   - Priority 2: Bold/Italic/BoldItalic (~19MB) - loaded via requestIdleCallback
  */
@@ -75,7 +75,7 @@ export async function preloadMapleMonoRegular(): Promise<boolean> {
     return true;
   }
   
-  const result = await preloadFont('Maple Mono NF CN', [400], ['normal']);
+  const result = await preloadFont('Maple Mono NF CN (Subset)', [400], ['normal']);
   
   if (result && !mapleRegularLoaded) {
     mapleRegularLoaded = true;
@@ -99,11 +99,11 @@ export async function preloadMapleMonoRegular(): Promise<boolean> {
 export function preloadMapleMonoSecondary(): void {
   const loadSecondary = async () => {
     // Bold
-    await preloadFont('Maple Mono NF CN', [700], ['normal']);
+    await preloadFont('Maple Mono NF CN (Subset)', [700], ['normal']);
     // Italic
-    await preloadFont('Maple Mono NF CN', [400], ['italic']);
+    await preloadFont('Maple Mono NF CN (Subset)', [400], ['italic']);
     // BoldItalic
-    await preloadFont('Maple Mono NF CN', [700], ['italic']);
+    await preloadFont('Maple Mono NF CN (Subset)', [700], ['italic']);
     
     if (import.meta.env.DEV) {
       console.log('[FontLoader] Maple Mono secondary weights loaded');
@@ -142,10 +142,10 @@ export async function preloadTerminalFonts(fontFamily: string): Promise<void> {
   
   switch (fontFamily) {
     case 'jetbrains':
-      tasks.push(preloadFont('JetBrains Mono NF'));
+      tasks.push(preloadFont('JetBrains Mono NF (Subset)'));
       break;
     case 'meslo':
-      tasks.push(preloadFont('MesloLGM NF'));
+      tasks.push(preloadFont('MesloLGM NF (Subset)'));
       break;
     case 'maple':
       // Maple is both primary and CJK, preload it with tiered strategy
@@ -233,7 +233,7 @@ let cjkPreloadPromise: Promise<boolean> | null = null;
 export function ensureCJKFallback(): Promise<boolean> {
   if (!cjkPreloadPromise) {
     // Check if already loaded (e.g., user selected maple font)
-    if (isFontLoaded('Maple Mono NF CN')) {
+    if (isFontLoaded('Maple Mono NF CN (Subset)')) {
       cjkPreloadPromise = Promise.resolve(true);
       mapleRegularLoaded = true;
     } else {

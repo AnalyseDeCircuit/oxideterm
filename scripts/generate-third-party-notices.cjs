@@ -73,10 +73,11 @@ function buildNotices() {
       note: 'Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1'
     },
     {
-      name: 'Meslo',
+      name: 'Meslo (Subset)',
       license: 'Apache License 2.0',
       licenseFile: 'public/fonts/Meslo/LICENSE.txt',
-      displayPath: '../public/fonts/Meslo/LICENSE.txt'
+      displayPath: '../public/fonts/Meslo/LICENSE.txt',
+      note: 'Modified Version (Subset) — character set reduced for CJK terminal use per Apache 2.0'
     },
     {
       name: 'Maple Mono (Subset)',
@@ -121,6 +122,7 @@ function buildNotices() {
   out += '\n';
 
   out += '## Notes\n\n';
+  out += '- **Multi-license policy**: Where a dependency offers multiple licenses (e.g. `MIT OR Apache-2.0`), OxideTerm always exercises the most permissive option available.\n';
   out += '- Licenses are taken from package metadata reported by pnpm at generation time.\n';
   out += '- This list is intended for notice/compliance purposes and does not replace the full license texts included by upstream projects.\n';
 

@@ -49,9 +49,9 @@ export type RendererType = 'auto' | 'webgl' | 'canvas';
  * v1.4.0+: Extended with dual-track font system
  * 
  * 预设轨道 (Preset Track):
- * - jetbrains: JetBrains Mono NF (bundled woff2 fallback)
- * - meslo: MesloLGM NF (bundled woff2 fallback)
- * - maple: Maple Mono NF CN (bundled, CJK optimized)
+ * - jetbrains: JetBrains Mono NF (Subset) (bundled woff2 fallback)
+ * - meslo: MesloLGM NF (Subset) (bundled woff2 fallback)
+ * - maple: Maple Mono NF CN (Subset) (bundled, CJK optimized)
  * - cascadia: Cascadia Code (system, Windows)
  * - consolas: Consolas (system, Windows)
  * - menlo: Menlo (system, macOS)

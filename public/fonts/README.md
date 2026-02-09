@@ -10,9 +10,9 @@ OxideTerm 使用 **"双轨制"** 字体系统，提供开箱即用的保底方�
 
 | 字体 | 说明 | 图标支持 |
 |------|------|----------|
-| **JetBrains Mono NF ✓** | 内置 woff2，绝对不乱码 | ✅ Nerd Font |
-| **MesloLGM NF ✓** | 内置 woff2，Apple Menlo 风格 | ✅ Nerd Font |
-| **Maple Mono NF CN ✓** | 内置 woff2，CJK 优化，圆润风格 | ✅ Nerd Font + 中文 |
+| **JetBrains Mono NF (Subset) ✓** | 内置 woff2，绝对不乱码 | ✅ Nerd Font |
+| **MesloLGM NF (Subset) ✓** | 内置 woff2，Apple Menlo 风格 | ✅ Nerd Font |
+| **Maple Mono NF CN (Subset) ✓** | 内置 woff2，CJK 优化，圆润风格 | ✅ Nerd Font + 中文 |
 | Cascadia Code | Windows 系统字体（如有） | ⚠️ 需安装 NF 版 |
 | Consolas | Windows 系统字体 | ❌ |
 | Menlo | macOS 系统字体 | ❌ |
@@ -39,7 +39,7 @@ OxideTerm 使用 **"双轨制"** 字体系统，提供开箱即用的保底方�
 所有字体都自动 fallback 到 **Maple Mono NF CN** 的 CJK 部分：
 
 ```
-用户选择 "JetBrains Mono NF"
+用户选择 "JetBrains Mono NF (Subset)"
     ↓
 浏览器渲染时：
   - 拉丁字母 (A-Z, 0-9) → JetBrains Mono (保持原有风格)
@@ -60,9 +60,9 @@ OxideTerm 使用 **"双轨制"** 字体系统，提供开箱即用的保底方�
 font-family: 
   "JetBrainsMono Nerd Font",     /* 系统 NF */
   "JetBrainsMono Nerd Font Mono",/* 系统 NF Mono */
-  "JetBrains Mono NF",           /* 内置 woff2 */
+  "JetBrains Mono NF (Subset)",           /* 内置 woff2 */
   "JetBrains Mono",              /* 系统原版 */
-  "Maple Mono NF CN",            /* CJK fallback */
+  "Maple Mono NF CN (Subset)",            /* CJK fallback */
   monospace;                     /* 最终兜底 */
 ```
 
@@ -96,7 +96,7 @@ import { ensureCJKFallback, onFontLoaded } from './lib/fontLoader';
 ensureCJKFallback();
 
 // 监听字体加载完成，刷新终端布局
-onFontLoaded('Maple Mono NF CN', () => {
+onFontLoaded('Maple Mono NF CN (Subset)', () => {
   terminal.refresh(0, terminal.rows - 1);
   fitAddon.fit();
 });

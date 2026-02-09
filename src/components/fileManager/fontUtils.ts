@@ -24,15 +24,15 @@ export const getFontFamilyCSS = (val: string): string => {
   switch (val) {
     case 'jetbrains':
       // JetBrains Mono: system → bundled fallback → generic
-      return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
+      return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF (Subset)", "JetBrains Mono", monospace';
     
     case 'meslo':
       // Meslo: system → bundled fallback → generic
-      return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", monospace';
+      return '"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF (Subset)", "Meslo LG M", monospace';
     
     case 'maple':
-      // Maple Mono NF CN: bundled CJK-optimized font
-      return '"Maple Mono NF CN", "Maple Mono NF", "Maple Mono", monospace';
+      // Maple Mono NF CN (Subset): bundled CJK-optimized font
+      return '"Maple Mono NF CN (Subset)", "Maple Mono NF", "Maple Mono", monospace';
     
     case 'cascadia':
       // Cascadia Code: Windows Terminal default, system only
@@ -58,7 +58,7 @@ export const getFontFamilyCSS = (val: string): string => {
     
     default:
       // Default: JetBrains Mono with full fallback chain
-      return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace';
+      return '"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF (Subset)", "JetBrains Mono", monospace';
   }
 };
 

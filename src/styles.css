@@ -8,100 +8,100 @@
  * 3. This reduces bundle size while ensuring icon compatibility
  */
 
-/* JetBrains Mono Nerd Font (Bundled Fallback) */
+/* JetBrains Mono Nerd Font (Bundled Subset) */
 @font-face {
-  font-family: 'JetBrains Mono NF';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
+  font-family: 'JetBrains Mono NF (Subset)';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-Regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono NF';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
+  font-family: 'JetBrains Mono NF (Subset)';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono NF';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Italic.woff2') format('woff2');
+  font-family: 'JetBrains Mono NF (Subset)';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-Italic.woff2') format('woff2');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono NF';
-  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-BoldItalic.woff2') format('woff2');
+  font-family: 'JetBrains Mono NF (Subset)';
+  src: url('/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-BoldItalic.woff2') format('woff2');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
 }
 
-/* Meslo Nerd Font (Bundled Fallback) */
+/* Meslo Nerd Font (Bundled Subset) */
 @font-face {
-  font-family: 'MesloLGM NF';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Regular.woff2') format('woff2');
+  font-family: 'MesloLGM NF (Subset)';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Subset-Regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM NF';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Bold.woff2') format('woff2');
+  font-family: 'MesloLGM NF (Subset)';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Subset-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM NF';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Italic.woff2') format('woff2');
+  font-family: 'MesloLGM NF (Subset)';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Subset-Italic.woff2') format('woff2');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'MesloLGM NF';
-  src: url('/fonts/Meslo/MesloLGMNerdFontMono-BoldItalic.woff2') format('woff2');
+  font-family: 'MesloLGM NF (Subset)';
+  src: url('/fonts/Meslo/MesloLGMNerdFontMono-Subset-BoldItalic.woff2') format('woff2');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
 }
 
-/* Maple Mono NF CN (Bundled - CJK optimized) */
+/* Maple Mono NF CN (Bundled Subset - CJK optimized) */
 @font-face {
-  font-family: 'Maple Mono NF CN';
-  src: url('/fonts/MapleMono/MapleMono-NF-CN-Regular.woff2') format('woff2');
+  font-family: 'Maple Mono NF CN (Subset)';
+  src: url('/fonts/MapleMono/MapleMono-NF-CN-Subset-Regular.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'Maple Mono NF CN';
-  src: url('/fonts/MapleMono/MapleMono-NF-CN-Bold.woff2') format('woff2');
+  font-family: 'Maple Mono NF CN (Subset)';
+  src: url('/fonts/MapleMono/MapleMono-NF-CN-Subset-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'Maple Mono NF CN';
-  src: url('/fonts/MapleMono/MapleMono-NF-CN-Italic.woff2') format('woff2');
+  font-family: 'Maple Mono NF CN (Subset)';
+  src: url('/fonts/MapleMono/MapleMono-NF-CN-Subset-Italic.woff2') format('woff2');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'Maple Mono NF CN';
-  src: url('/fonts/MapleMono/MapleMono-NF-CN-BoldItalic.woff2') format('woff2');
+  font-family: 'Maple Mono NF CN (Subset)';
+  src: url('/fonts/MapleMono/MapleMono-NF-CN-Subset-BoldItalic.woff2') format('woff2');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -147,7 +147,7 @@
   --foreground: var(--color-oxide-text);
   
   /* Terminal font - default, updated by settingsStore */
-  --terminal-font-family: "JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", monospace;
+  --terminal-font-family: "JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF (Subset)", "JetBrains Mono", monospace;
 
   /* Theme Variables - Default Theme (Neutral) */
   --theme-bg: #09090b;

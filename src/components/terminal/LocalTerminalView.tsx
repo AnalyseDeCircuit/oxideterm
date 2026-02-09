@@ -175,7 +175,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
    */
   const getFontFamily = (fontFamily: string, customFontFamily?: string): string => {
     // CJK fallback: Maple Mono NF CN 提供完美的中日韩字符支持
-    const CJK_FALLBACK = '"Maple Mono NF CN"';
+    const CJK_FALLBACK = '"Maple Mono NF CN (Subset)"';
     
     // 自定义轨道: 用户输入优先，添加 CJK fallback
     if (fontFamily === 'custom' && customFontFamily?.trim()) {
@@ -190,11 +190,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     // 预设轨道: 拉丁字符用选定字体，CJK 字符 fallback 到 Maple Mono
     switch(fontFamily) {
       case 'jetbrains':
-        return `"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", ${CJK_FALLBACK}, monospace`;
+        return `"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF (Subset)", "JetBrains Mono", ${CJK_FALLBACK}, monospace`;
       case 'meslo':
-        return `"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF", "Meslo LG M", ${CJK_FALLBACK}, monospace`;
+        return `"MesloLGM Nerd Font", "MesloLGM Nerd Font Mono", "MesloLGM NF (Subset)", "Meslo LG M", ${CJK_FALLBACK}, monospace`;
       case 'maple':
-        return '"Maple Mono NF CN", "Maple Mono NF", "Maple Mono", monospace';
+        return '"Maple Mono NF CN (Subset)", "Maple Mono NF", "Maple Mono", monospace';
       case 'cascadia':
         return `"Cascadia Code NF", "Cascadia Mono NF", "Cascadia Code", "Cascadia Mono", ${CJK_FALLBACK}, monospace`;
       case 'consolas':
@@ -202,7 +202,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       case 'menlo':
         return `Menlo, Monaco, "Courier New", ${CJK_FALLBACK}, monospace`;
       default:
-        return `"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF", "JetBrains Mono", ${CJK_FALLBACK}, monospace`;
+        return `"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrains Mono NF (Subset)", "JetBrains Mono", ${CJK_FALLBACK}, monospace`;
     }
   };
 

@@ -1,7 +1,7 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-09T19:09:19.255Z
+Generated: 2026-02-09T19:40:36.224Z
 
 ## Summary
 - MIT: 214
@@ -317,7 +317,8 @@ Generated: 2026-02-09T19:09:19.255Z
 - JetBrains Mono (Subset) — SIL Open Font License 1.1 (see ../public/fonts/JetBrainsMono/OFL.txt)
   - **Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1**
   - Excerpt: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) / This Font Software is licensed under the SIL Open Font License, Version 1.1.
-- Meslo — Apache License 2.0 (see ../public/fonts/Meslo/LICENSE.txt)
+- Meslo (Subset) — Apache License 2.0 (see ../public/fonts/Meslo/LICENSE.txt)
+  - **Modified Version (Subset) — character set reduced for CJK terminal use per Apache 2.0**
   - Excerpt: Copyright 2009, 2010, 2013 André Berg / Licensed under the Apache License, Version 2.0 (the "License");
 - Maple Mono (Subset) — SIL Open Font License 1.1 (see ../public/fonts/MapleMono/LICENSE.txt)
   - **Modified Version (Subset) — character set reduced for CJK terminal use per OFL §1**
@@ -325,5 +326,6 @@ Generated: 2026-02-09T19:09:19.255Z
 
 ## Notes
 
+- **Multi-license policy**: Where a dependency offers multiple licenses (e.g. `MIT OR Apache-2.0`), OxideTerm always exercises the most permissive option available.
 - Licenses are taken from package metadata reported by pnpm at generation time.
 - This list is intended for notice/compliance purposes and does not replace the full license texts included by upstream projects.
