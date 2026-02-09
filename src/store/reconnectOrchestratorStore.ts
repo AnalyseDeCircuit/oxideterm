@@ -3,7 +3,7 @@
  *
  * 统一的前端重连状态机。替代 useConnectionEvents 中分散的防抖/重试逻辑。
  *
- * 管道阶段: snapshot → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → done
+ * 管道阶段: snapshot → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done
  *
  * 关键不变量:
  *   1. 每个 nodeId 只有一个活跃 job（幂等）
@@ -13,7 +13,7 @@
  */
 
 import { create } from 'zustand';
-import { api, nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer } from '../lib/api';
+import { api, nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer, nodeGetState } from '../lib/api';
 import { useSessionTreeStore } from './sessionTreeStore';
 import { useIdeStore } from './ideStore';
 import { useToastStore } from '../hooks/useToast';
@@ -34,6 +34,7 @@ export type ReconnectPhase =
   | 'restore-forwards'
   | 'resume-transfers'
   | 'restore-ide'
+  | 'verify'
   | 'done'
   | 'failed'
   | 'cancelled';
@@ -464,6 +465,10 @@ async function runPipeline(nodeId: string) {
     // Phase 5: Restore IDE
     if (signal.aborted) return markCancelled(nodeId);
     await phaseRestoreIde(nodeId);
+
+    // Phase 6: Verify Consistency
+    if (signal.aborted) return markCancelled(nodeId);
+    await phaseVerifyConsistency(nodeId);
 
     // Done!
     const finalJob = getJob(nodeId);
@@ -970,6 +975,95 @@ async function phaseRestoreIde(nodeId: string) {
   } catch (e) {
     console.warn(`[Orchestrator] Failed to restore IDE project:`, e);
     exitPhase(nodeId, 'failed', e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ─── Phase 6: Verify Consistency ────────────────────────────────────────────
+
+/**
+ * Post-pipeline consistency verification.
+ *
+ * After all restore phases complete, query the backend for the *actual* state
+ * and compare it against what the frontend believes.  Mismatches are logged as
+ * structured warnings (slog) so they surface in dev-tools and future telemetry
+ * without blocking the user.
+ *
+ * Checks performed:
+ *   1. Node readiness — backend vs SessionTreeStore
+ *   2. Forward count — backend vs snapshot restore expectation
+ *   3. SFTP readiness — backend vs SessionTreeStore
+ */
+async function phaseVerifyConsistency(nodeId: string) {
+  enterPhase(nodeId, 'verify');
+  const job = getJob(nodeId);
+  if (!job) {
+    exitPhase(nodeId, 'skipped', 'job missing');
+    return;
+  }
+
+  const drifts: string[] = [];
+
+  try {
+    // 1. Node readiness check
+    const backendState = await nodeGetState(nodeId);
+    const treeStore = useSessionTreeStore.getState();
+    const treeNode = treeStore.getNode(nodeId);
+
+    if (backendState.state.readiness !== 'ready') {
+      drifts.push(`readiness: backend=${backendState.state.readiness}, expected=ready`);
+    }
+
+    // 2. Forward count consistency
+    try {
+      const liveForwards = await api.nodeListForwards(nodeId);
+      const snapshotForwardEntry = job.snapshot.forwardRules.find(e => e.nodeId === nodeId);
+      const expectedActive = snapshotForwardEntry
+        ? snapshotForwardEntry.rules.length
+        : 0;
+
+      // Allow live >= expected (user may have added more during restore)
+      const liveActive = liveForwards.filter(f => f.status === 'active').length;
+      if (expectedActive > 0 && liveActive < expectedActive) {
+        drifts.push(`forwards: live=${liveActive}, snapshotExpected=${expectedActive}`);
+      }
+    } catch {
+      // Node may not have forwarding — not a drift
+    }
+
+    // 3. SFTP readiness (if it was ready before disconnect)
+    if (backendState.state.sftpReady !== (treeNode?.sftpSessionId != null)) {
+      drifts.push(`sftp: backend=${backendState.state.sftpReady}, tree=${treeNode?.sftpSessionId != null}`);
+    }
+
+    // 4. Terminal session existence
+    if (!treeNode?.terminalSessionId) {
+      drifts.push('terminal: no terminalSessionId in tree');
+    }
+
+  } catch (e) {
+    // nodeGetState failed — backend may still be settling
+    drifts.push(`verify-error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  if (drifts.length > 0) {
+    slog({
+      component: 'Orchestrator',
+      event: 'consistency-drift',
+      nodeId,
+      outcome: 'error',
+      detail: drifts.join('; '),
+      drifts,
+    });
+    console.warn(`[Orchestrator] Consistency drift for ${nodeId}:`, drifts);
+    exitPhase(nodeId, 'ok', `${drifts.length} drift(s) detected`);
+  } else {
+    slog({
+      component: 'Orchestrator',
+      event: 'consistency-ok',
+      nodeId,
+      outcome: 'ok',
+    });
+    exitPhase(nodeId, 'ok', 'all checks passed');
   }
 }
 
