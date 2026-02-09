@@ -226,6 +226,8 @@ interface PluginConnectionsAPI {
   getAll(): ReadonlyArray<ConnectionSnapshot>;  // 冻结快照
   get(connectionId: string): ConnectionSnapshot | null;
   getState(connectionId: string): SshConnectionState | null;
+  /** Phase 4.5: resolve node to connection snapshot */
+  getByNode(nodeId: string): ConnectionSnapshot | null;
 }
 ```
 
@@ -241,8 +243,10 @@ interface PluginEventsAPI {
   onLinkDown(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onReconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onIdle(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
-  onSessionCreated(handler: (info: { sessionId: string; connectionId: string }) => void): Disposable;
-  onSessionClosed(handler: (info: { sessionId: string }) => void): Disposable;
+  /** Phase 4.5: Node becomes ready (connected + capabilities available) */
+  onNodeReady(handler: (info: { nodeId: string; connectionId: string }) => void): Disposable;
+  /** Phase 4.5: Node disconnected */
+  onNodeDisconnected(handler: (info: { nodeId: string }) => void): Disposable;
   // 插件间通信（命名空间自动隔离为 plugin:{pluginId}:{name}）
   on(name: string, handler: (data: unknown) => void): Disposable;
   emit(name: string, data: unknown): void;
@@ -270,16 +274,22 @@ interface PluginUIAPI {
 ### 3.4 `ctx.terminal`（终端钩子）
 
 ```typescript
-type InputInterceptor = (data: string, context: { sessionId: string }) => string | null;
-type OutputProcessor = (data: Uint8Array, context: { sessionId: string }) => Uint8Array;
+type TerminalHookContext = {
+  /** @deprecated Use nodeId instead */
+  sessionId: string;
+  /** Stable node identifier, survives reconnect */
+  nodeId: string;
+};
+type InputInterceptor = (data: string, context: TerminalHookContext) => string | null;
+type OutputProcessor = (data: Uint8Array, context: TerminalHookContext) => Uint8Array;
 
 interface PluginTerminalAPI {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
-  writeToTerminal(sessionId: string, text: string): void;  // ✅ 已实现：通过 terminalRegistry 写入通道直接发送数据
-  getBuffer(sessionId: string): string | null;              // 只读
-  getSelection(sessionId: string): string | null;           // 只读
+  writeToNode(nodeId: string, text: string): void;    // ✅ 通过 terminalRegistry 写入通道直接发送数据
+  getNodeBuffer(nodeId: string): string | null;        // 只读
+  getNodeSelection(nodeId: string): string | null;     // 只读
 }
 ```
 
@@ -870,7 +880,7 @@ export type RegistryIndex = {
 };
 
 /** 安装状态 */
-export type InstallState = 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
+export type InstallState = 'idle' | 'downloading' | 'extracting' | 'installing' | 'done' | 'error';
 ```
 
 ### 9.6 配置
