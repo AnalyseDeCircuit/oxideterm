@@ -4,10 +4,9 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use russh::*;
-use russh_keys::key::PrivateKeyWithHashAlg;
-use russh_keys::PublicKey;
+use russh::keys::key::PrivateKeyWithHashAlg;
+use russh::keys::PublicKey;
 use tracing::{debug, info, warn};
 
 use super::config::{AuthMethod, SshConfig};
@@ -38,11 +37,14 @@ impl SshClient {
             .next()
             .ok_or_else(|| SshError::ConnectionFailed("No address found".to_string()))?;
 
-        // Configure SSH client with keepalive
+        // SSH keepalive config (defense-in-depth):
+        // Layer 1 (here): russh native keepalive — safety net in case app heartbeat stalls
+        // Layer 2: App-level heartbeat (15s) in connection_registry — provides granular
+        //          LinkDown events, smart probe confirmation, and frontend state updates
         let ssh_config = client::Config {
-            inactivity_timeout: None, // Disabled: app-level heartbeat (15s) handles liveness
-            keepalive_interval: Some(Duration::from_secs(30)),  // Send keepalive every 30s
-            keepalive_max: 3, // Disconnect after 3 missed keepalives (90s total)
+            inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
+            keepalive_interval: Some(Duration::from_secs(30)),
+            keepalive_max: 3,
             ..Default::default()
         };
 
@@ -76,15 +78,14 @@ impl SshClient {
                 passphrase,
             } => {
                 let key = if let Some(pass) = passphrase {
-                    russh_keys::load_secret_key(key_path, Some(pass))
+                    russh::keys::load_secret_key(key_path, Some(pass))
                         .map_err(|e| SshError::KeyError(e.to_string()))?
                 } else {
-                    russh_keys::load_secret_key(key_path, None)
+                    russh::keys::load_secret_key(key_path, None)
                         .map_err(|e| SshError::KeyError(e.to_string()))?
                 };
 
-                let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None)
-                    .map_err(|e| SshError::KeyError(e.to_string()))?;
+                let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None);
 
                 handle
                     .authenticate_publickey(&self.config.username, key_with_hash)
@@ -93,23 +94,9 @@ impl SshClient {
             }
             AuthMethod::Agent => {
                 // Connect to SSH Agent and authenticate
-                let mut agent =
-                    crate::ssh::agent::SshAgentClient::connect()
-                        .await
-                        .map_err(|e| {
-                            SshError::AuthenticationFailed(format!(
-                                "Failed to connect to SSH agent: {}",
-                                e
-                            ))
-                        })?;
-
-                agent
-                    .authenticate(&handle, &self.config.username)
-                    .await
-                    .map_err(|e| SshError::AuthenticationFailed(e.to_string()))?;
-
-                // Agent authentication returns () on success, set flag manually
-                true
+                let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
+                agent.authenticate(&mut handle, self.config.username.clone()).await?;
+                client::AuthResult::Success
             }
             AuthMethod::Certificate {
                 key_path,
@@ -118,15 +105,15 @@ impl SshClient {
             } => {
                 // Load private key
                 let key = if let Some(pass) = passphrase {
-                    russh_keys::load_secret_key(key_path, Some(pass))
+                    russh::keys::load_secret_key(key_path, Some(pass))
                         .map_err(|e| SshError::KeyError(e.to_string()))?
                 } else {
-                    russh_keys::load_secret_key(key_path, None)
+                    russh::keys::load_secret_key(key_path, None)
                         .map_err(|e| SshError::KeyError(e.to_string()))?
                 };
 
                 // Load and parse OpenSSH certificate
-                let cert = russh_keys::load_openssh_certificate(cert_path)
+                let cert = russh::keys::load_openssh_certificate(cert_path)
                     .map_err(|e| SshError::CertificateParseError(format!("Failed to load certificate: {}", e)))?;
 
                 // Authenticate with certificate
@@ -144,7 +131,7 @@ impl SshClient {
             }
         };
 
-        if !authenticated {
+        if !authenticated.success() {
             return Err(SshError::AuthenticationFailed(
                 "Authentication rejected by server".to_string(),
             ));
@@ -188,7 +175,6 @@ impl ClientHandler {
     }
 }
 
-#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = SshError;
 

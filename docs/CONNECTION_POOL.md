@@ -109,10 +109,10 @@ sequenceDiagram
 
     Note over Back: 检测到心跳丢失 (LinkDown)
     Back->>Back: Update State: LinkDown
-    Back->>Event: emit("connection_update")
+    Back->>Event: emit("connection_status_changed")
     
     Event->>Store: 触发 refreshConnections() [Strong Sync]
-    Store->>Back: get_connections()
+    Store->>Back: ssh_list_connections()
     Back-->>Store: 返回最新快照 (State: LinkDown)
     
     Store->>UI: Update Observables

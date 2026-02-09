@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::{self, Handle};
-use russh_keys::key::PrivateKeyWithHashAlg;
+use russh::keys::key::PrivateKeyWithHashAlg;
 use tracing::{debug, info};
 
 use super::client::ClientHandler;
@@ -35,7 +35,7 @@ use super::config::AuthMethod;
 use super::error::SshError;
 
 /// Expand ~ to home directory for path normalization
-/// This ensures paths like ~/... work correctly with russh_keys
+/// This ensures paths like ~/... work correctly with russh::keys
 fn expand_tilde(path: &str) -> String {
     if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -228,11 +228,10 @@ async fn direct_connect(
             passphrase,
         } => {
             info!("Authenticating to jump host with key: {}", key_path);
-            let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+            let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None)
-                .map_err(|e| SshError::KeyError(e.to_string()))?;
+            let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None);
 
             handle
                 .authenticate_publickey(&hop.username, key_with_hash)
@@ -244,14 +243,14 @@ async fn direct_connect(
             cert_path,
             passphrase,
         } => {
-            // Expand ~ in paths before loading (russh_keys doesn't handle tilde)
+            // Expand ~ in paths before loading (russh::keys doesn't handle tilde)
             let expanded_key_path = expand_tilde(key_path);
             let expanded_cert_path = expand_tilde(cert_path);
             info!("Authenticating to jump host with certificate: {}", expanded_cert_path);
-            let key = russh_keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
+            let key = russh::keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let cert = russh_keys::load_openssh_certificate(&expanded_cert_path)
+            let cert = russh::keys::load_openssh_certificate(&expanded_cert_path)
                 .map_err(|e| SshError::CertificateParseError(e.to_string()))?;
 
             handle
@@ -262,9 +261,8 @@ async fn direct_connect(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&handle, &hop.username).await?;
-            // Agent authentication returns () on success, set flag manually
-            true
+            agent.authenticate(&mut handle, hop.username.clone()).await?;
+            client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {
             // KBI not supported for proxy chain hops in MVP
@@ -274,7 +272,7 @@ async fn direct_connect(
         }
     };
 
-    if !authenticated {
+    if !authenticated.success() {
         return Err(SshError::AuthenticationFailed(format!(
             "Authentication to {} rejected",
             hop.host
@@ -359,11 +357,10 @@ async fn connect_via_stream(
             passphrase,
         } => {
             info!("Authenticating via stream with key: {}", key_path);
-            let key = russh_keys::load_secret_key(key_path, passphrase.as_deref())
+            let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None)
-                .map_err(|e| SshError::KeyError(e.to_string()))?;
+            let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), None);
 
             handle
                 .authenticate_publickey(&hop.username, key_with_hash)
@@ -375,14 +372,14 @@ async fn connect_via_stream(
             cert_path,
             passphrase,
         } => {
-            // Expand ~ in paths before loading (russh_keys doesn't handle tilde)
+            // Expand ~ in paths before loading (russh::keys doesn't handle tilde)
             let expanded_key_path = expand_tilde(key_path);
             let expanded_cert_path = expand_tilde(cert_path);
             info!("Authenticating via stream with certificate: {}", expanded_cert_path);
-            let key = russh_keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
+            let key = russh::keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
-            let cert = russh_keys::load_openssh_certificate(&expanded_cert_path)
+            let cert = russh::keys::load_openssh_certificate(&expanded_cert_path)
                 .map_err(|e| SshError::CertificateParseError(e.to_string()))?;
 
             handle
@@ -393,9 +390,8 @@ async fn connect_via_stream(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&handle, &hop.username).await?;
-            // Agent authentication returns () on success, set flag manually
-            true
+            agent.authenticate(&mut handle, hop.username.clone()).await?;
+            client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {
             // KBI not supported for proxy chain hops in MVP
@@ -405,7 +401,7 @@ async fn connect_via_stream(
         }
     };
 
-    if !authenticated {
+    if !authenticated.success() {
         return Err(SshError::AuthenticationFailed(format!(
             "Authentication to {} rejected",
             hop.host

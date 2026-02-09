@@ -39,7 +39,7 @@ API Key:  sk-...                      (存储在系统钥匙串)
 
 **支持的服务提供商**：
 - **OpenAI** - `https://api.openai.com/v1`
-- **Ollama** - `http://localhost:11434/v1`
+- **Ollama** - `http://localhost:11434`
 - **DeepSeek** - `https://api.deepseek.com/v1`
 - **OneAPI** - 您的自定义网关地址
 
@@ -155,7 +155,7 @@ Module not found: Error: Can't resolve 'react-dom/client'
 │  │ ```                                              │ │
 │  └──────────────────────────────────────────────────┘ │
 │                                                        │
-│  [Insert]  [Execute]  [Copy]  [Retry]               │
+│  [Insert]  [Execute]  [Copy]  [Regenerate]           │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -254,7 +254,7 @@ AI 可以识别具体问题并提供精准建议。
 ### 使用自托管 Ollama
 
 ```
-Base URL: http://localhost:11434/v1
+Base URL: http://localhost:11434
 Model:    llama3.2
 API Key:  (留空，Ollama 不需要)
 ```
@@ -334,7 +334,7 @@ A: 可以！推荐使用 Ollama：
 
 1. 安装 Ollama：`brew install ollama` (macOS)
 2. 拉取模型：`ollama pull llama3.2`
-3. 配置 Base URL：`http://localhost:11434/v1`
+3. 配置 Base URL：`http://localhost:11434`
 4. Model：`llama3.2`
 5. API Key：留空
 

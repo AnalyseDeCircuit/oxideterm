@@ -136,7 +136,7 @@ use crate::session::{SessionRegistry, tree::SessionTree};
 /// `acquire_sftp()` 委托给 `ConnectionEntry.acquire_sftp()`，
 /// 不存在第二条创建/查找路径。
 pub struct NodeRouter {
-    session_tree: Arc<SessionTree>,
+    session_tree: Arc<SessionTreeState>,
     connection_registry: Arc<SshConnectionRegistry>,
     session_registry: Arc<SessionRegistry>,
     // ❌ 不再持有 sftp_registry — SFTP 唯一真源在 ConnectionEntry.sftp
@@ -152,6 +152,10 @@ pub enum RouteError {
     ConnectionError(String),
     #[error("Capability unavailable: {0}")]
     CapabilityUnavailable(String),
+    #[error("SFTP operation error: {0}")]
+    SftpOperationError(String),
+    #[error("Connection timeout: {0}")]
+    ConnectionTimeout(String),
 }
 
 impl NodeRouter {
@@ -443,8 +447,8 @@ pub enum NodeReadiness {
     Ready,
     /// 正在连接/重连中
     Connecting,
-    /// 连接错误（附错误信息）
-    Error(String),
+    /// 连接错误（详情见 NodeState.error 字段）
+    Error,
     /// 已断开
     Disconnected,
 }
@@ -556,7 +560,7 @@ export const nodeSftpPreview = (nodeId: string, path: string) =>
   invoke<PreviewContent>('node_sftp_preview', { nodeId, path });
 
 export const nodeTerminalUrl = (nodeId: string) =>
-  invoke<{ wsPort: number; wsToken: string }>('node_terminal_url', { nodeId });
+  invoke<{ wsPort: number; wsToken: string; sessionId: string }>('node_terminal_url', { nodeId });
 ```
 
 ### 4.2 Store 简化
@@ -596,9 +600,9 @@ interface NodeStateSnapshot {
  * 没有轮询，没有 refreshConnections()，没有闭包过期。
  * 后端是唯一的 source of truth。
  */
-export function useNodeState(nodeId: string): NodeState {
+export function useNodeState(nodeId: string): { state: NodeState; generation: number; ready: boolean } {
   const [state, setState] = useState<NodeState>({
-    readiness: 'connecting',
+    readiness: 'disconnected',
     sftpReady: false,
   });
 
@@ -621,7 +625,7 @@ export function useNodeState(nodeId: string): NodeState {
     const unlisten = listen<NodeStateEvent>('node:state', (event) => {
       if (cancelled) return;
       const { payload } = event;
-      if (payload.node_id !== nodeId) return;
+      if (payload.nodeId !== nodeId) return;
 
       // 有序性保护：丢弃 generation <= 已见最大值的事件
       if (payload.generation <= maxGen) return;
@@ -629,19 +633,19 @@ export function useNodeState(nodeId: string): NodeState {
 
       setState((prev) => {
         switch (payload.type) {
-          case 'ConnectionStateChanged':
+          case 'connectionStateChanged':
             return {
               ...prev,
               readiness: payload.state as NodeReadiness,
               error: payload.state === 'error' ? payload.reason : undefined,
             };
-          case 'SftpReady':
+          case 'sftpReady':
             return {
               ...prev,
               sftpReady: payload.ready,
               sftpCwd: payload.cwd ?? prev.sftpCwd,
             };
-          case 'TerminalEndpointChanged':  // v1.2：不再忽略
+          case 'terminalEndpointChanged':  // v1.2：不再忽略
             return {
               ...prev,
               wsEndpoint: {

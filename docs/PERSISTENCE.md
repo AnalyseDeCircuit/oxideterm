@@ -127,7 +127,7 @@ const isWindows = navigator.platform.toLowerCase().includes('win');
 /** 终端设置 */
 interface TerminalSettings {
   theme: string;
-  fontFamily: 'jetbrains' | 'meslo' | 'tinos' | 'menlo' | 'courier' | 'monospace';
+  fontFamily: 'jetbrains' | 'meslo' | 'maple' | 'cascadia' | 'consolas' | 'menlo' | 'custom';
   fontSize: number;        // 8-32
   lineHeight: number;      // 0.8-3.0
   cursorStyle: 'block' | 'underline' | 'bar';
@@ -792,7 +792,7 @@ pub struct SessionNode {
 
 2. **保存的连接已包含跳板链**
    ```json
-   // saved_connections.json
+   // connections.json
    {
      "id": "uuid",
      "name": "Internal DB",
@@ -854,7 +854,7 @@ api.drillDown() → 添加子节点
 
 | 文件 | 内容 | 说明 |
 |------|------|------|
-| `~/.oxideterm/saved_connections.json` | 保存的连接 + proxy_chain | 已有实现 |
+| `~/.oxideterm/connections.json` | 保存的连接 + proxy_chain | 已有实现 |
 | `~/.oxideterm/groups.json` | 连接分组 | 已有实现 |
 
 ### 14.4 不持久化（运行时状态）
@@ -900,7 +900,7 @@ api.drillDown() → 添加子节点
 │  │  └──────────────────────┘                                       │   │
 │  │                                                                  │   │
 │  │  ┌──────────────────────┐  ┌──────────────────────────────┐    │   │
-│  │  │saved_connections.json│  │  groups.json                  │    │   │
+│  │  │connections.json      │  │  groups.json                  │    │   │
 │  │  │  ├── id, name, host  │  │  └── ["Production", "Dev"]    │    │   │
 │  │  │  ├── proxy_chain[]   │  └──────────────────────────────┘    │   │
 │  │  │  └── auth_type, ...  │                                       │   │

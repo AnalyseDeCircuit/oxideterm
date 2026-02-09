@@ -29,7 +29,7 @@ SSH 连接 Active
          ▼
   ConnectionEntry.remote_env  ← 缓存
          │
-         ├──→ Tauri Event "env:detected:{id}"
+         ├──→ Tauri Event "env:detected"
          │         ↓
          │    appStore.connections[id].remoteEnv
          │
@@ -73,19 +73,19 @@ pub struct RemoteEnvInfo {
 ### TypeScript (`types/index.ts`)
 
 ```typescript
-export type RemoteEnvironment = {
+export type RemoteEnvInfo = {
   osType: string;
-  osVersion: string | null;
-  kernel: string | null;
-  arch: string | null;
-  shell: string | null;
+  osVersion?: string;
+  kernel?: string;
+  arch?: string;
+  shell?: string;
   detectedAt: number;
 };
 
 // 扩展已有类型
 export type SshConnectionInfo = {
   // ...existing fields...
-  remoteEnv?: RemoteEnvironment | null;
+  remoteEnv?: RemoteEnvInfo | null;
 };
 ```
 
@@ -127,7 +127,7 @@ AI Prompt 注入示例：`"Remote environment: Windows (MinGW/Git Bash) — path
 
 在 `SshConnectionRegistry` 中，`ConnectionEntry` 创建并插入 `connections` DashMap 后：
 
-1. **`establish_connection()`** (直连) — line ~778
+1. **`connect()`** (直连) — line ~778
 2. **`establish_tunneled_connection()`** (隧道连接) — line ~1032
 
 ```rust
@@ -139,7 +139,7 @@ self.spawn_env_detection(&connection_id, &entry, app_handle.clone());
 - Clone `entry.handle_controller`
 - `tokio::spawn` 异步执行 `detect_remote_env()`
 - 结果写入 `entry.remote_env`
-- Emit `env:detected:{connection_id}` 事件
+- Emit `env:detected` 事件（payload 中包含 connectionId）
 
 ## 6. 超时与失败
 
@@ -164,7 +164,7 @@ self.spawn_env_detection(&connection_id, &entry, app_handle.clone());
 `SshConnectionInfo.remoteEnv` 有三种状态：
 - `undefined` — 探测尚未开始/进行中
 - `null` — 无 SSH 连接（本地终端）
-- `RemoteEnvironment` — 探测完成
+- `RemoteEnvInfo` — 探测完成
 
 **AiInlinePanel** 和 **sidebarContextProvider** 注入逻辑：
 
@@ -192,7 +192,7 @@ if (remoteEnv === undefined) {
 
 ### `sidebarContextProvider.ts`
 
-1. `EnvironmentSnapshot` 增加 `remoteEnv?: RemoteEnvironment`（替代 `remoteOSHint: string | null`）
+1. `EnvironmentSnapshot` 增加 `remoteEnv?: RemoteEnvInfo`（替代 `remoteOSHint: string | null`）
 2. `gatherSidebarContext()` 从 `appStore.connections[id]` 读取 `remoteEnv`
 3. `formatSystemPromptSegment()` 输出详细环境信息
 4. 保留 `guessRemoteOS()` 作为 `remoteEnv === undefined` 时的 fallback
@@ -214,15 +214,15 @@ if (remoteEnv === undefined) {
 
 ### `useConnectionEvents.ts`
 
-新增监听 `env:detected:*` 事件，更新 `appStore.connections[id].remoteEnv`。
+新增监听 `env:detected` 事件，更新 `appStore.connections[id].remoteEnv`。
 
 ### `api.ts`
 
-新增 `getRemoteEnv(connectionId: string): Promise<RemoteEnvironment | null>`。
+新增 `getRemoteEnv(connectionId: string): Promise<RemoteEnvInfo | null>`。
 
 ### `types/index.ts`
 
-新增 `RemoteEnvironment` 类型，扩展 `SshConnectionInfo`。
+新增 `RemoteEnvInfo` 类型，扩展 `SshConnectionInfo`。
 
 ## 9. 文件清单
 
@@ -233,13 +233,13 @@ if (remoteEnv === undefined) {
 | `src-tauri/src/ssh/connection_registry.rs` | 修改 | 新字段 + `spawn_env_detection()` + `to_info()` 扩展 |
 | `src-tauri/src/commands/ssh.rs` | 修改 | 新增 `get_remote_env` 命令 |
 | `src-tauri/src/lib.rs` | 修改 | 注册新命令 |
-| `src/types/index.ts` | 修改 | `RemoteEnvironment` + `SshConnectionInfo` 扩展 |
+| `src/types/index.ts` | 修改 | `RemoteEnvInfo` + `SshConnectionInfo` 扩展 |
 | `src/lib/api.ts` | 修改 | `getRemoteEnv()` wrapper |
 | `src/lib/sidebarContextProvider.ts` | 修改 | 替换 `guessRemoteOS()`，增强 prompt |
 | `src/components/terminal/AiInlinePanel.tsx` | 修改 | 新增 `sessionId` prop，OS 感知 |
 | `src/components/terminal/TerminalView.tsx` | 修改 | 传 `sessionId` |
 | `src/components/terminal/LocalTerminalView.tsx` | 修改 | 传标记 |
-| `src/hooks/useConnectionEvents.ts` | 修改 | 监听 `env:detected:*` |
+| `src/hooks/useConnectionEvents.ts` | 修改 | 监听 `env:detected` |
 
 ## 10. 测试矩阵
 

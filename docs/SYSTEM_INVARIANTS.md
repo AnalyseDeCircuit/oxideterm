@@ -46,7 +46,7 @@ flowchart LR
 **定义**：利用 React `key` 机制，当连接 ID 变化时物理销毁旧组件。
 
 **不变量**：
-- **所有依赖连接状态的组件必须使用 `key={sessionId-connectionId}`**
+- **所有依赖连接状态的组件必须使用包含 `nodeId` 的 `key`**
 - **组件销毁时必须清理所有句柄和订阅**
 - **组件重建时必须从全局 Memory Map 恢复上下文**
 
@@ -55,31 +55,25 @@ flowchart LR
 | 组件 | Key 格式 | Memory Map |
 |------|---------|------------|
 | `TerminalView` | `{sessionId}-{ws_url}` | N/A |
-| `SFTPView` | `sftp-{sessionId}-{connectionId}` | `sftpPathMemory` |
-| `ForwardsView` | `forwards-{sessionId}-{connectionId}` | N/A (后端持久化) |
+| `SFTPView` | `sftp-{nodeId}` | 按 `nodeId` 键存储路径 |
+| `ForwardsView` | `forwards-{nodeId}` | N/A (后端持久化) |
 
 ### 0.3 State Gating（状态门禁）
 
 **定义**：所有 IO 操作必须在 `connectionState === 'active'` 时才能执行。
 
 **不变量**：
-- **前端 API 调用前必须检查 `appStore.connections.get(id)?.state`**
-- **状态非 `active` 时必须显示等待 UI，禁止发送请求**
+- **前端 API 调用前必须通过 `useNodeState(nodeId)` 检查 `nodeState.readiness === 'ready'`**
+- **readiness 非 `ready` 时必须显示等待 UI，禁止发送请求**
 - **后端同样执行门禁检查，双重保护**
 
 ```typescript
-// 前端门禁实现
-function checkGate(connectionId: string): boolean {
-  const state = appStore.connections.get(connectionId)?.state;
-  if (state !== 'active') {
-    console.warn(`[StateGating] Blocked: state=${state}`);
-    return false;
-  }
-  return true;
-}
+// 前端门禁实现 (Node-first 模式)
+const { state: nodeState } = useNodeState(nodeId);
+const isReady = nodeState.readiness === 'ready';
 
 // 使用示例
-if (!checkGate(connectionId)) {
+if (!isReady) {
   showToast('连接不稳定，请稍候...');
   return;
 }
@@ -295,7 +289,7 @@ fn good_example() {
 - **可恢复错误必须触发自动重连**（指数退避）
 - **不可恢复错误必须立即清理 Session**（不得重连）
 - **错误消息必须区分这两类**（前端需要显示不同的 UI）
-- **v1.4.0**: 可恢复错误必须 emit `connection:update` (trigger: `heartbeat_fail`)
+- **v1.4.0**: 可恢复错误必须 emit `connection_status_changed` (status: `link_down`)
 
 ### 3.2 错误传播路径（不可跳过）
 
@@ -373,10 +367,11 @@ Disconnected 是终态，必须移除 Session
 
 | 转换 | 必须触发 | trigger 值 |
 |------|---------|-----------|
-| `* → Connected` | `connection:update` | `user_action` / `reconnect_success` |
-| `Connected → LinkDown` | `connection:update` | `heartbeat_fail` |
-| `* → Disconnected` | `connection:update` | `user_action` / `idle_timeout` |
-| `* → Error` | `connection:update` | `reconnect_fail` |
+| `* → Active` | `connection_status_changed` | `connected` |
+| `Active → LinkDown` | `connection_status_changed` | `link_down` |
+| `Active → Idle` | `connection_status_changed` | `idle` |
+| `* → Disconnected` | `connection_status_changed` | `disconnected` |
+| `* → Error` | `connection_status_changed` | `error` |
 
 ---
 
@@ -476,9 +471,9 @@ Disconnected 是终态，必须移除 Session
 - [ ] 日志中没有敏感信息（密码、密钥、token）
 - [ ] 所有 `unwrap()` 和 `expect()` 都有合理理由
 - [ ] 单元测试覆盖并发场景
-- [ ] **v1.4.0**: 状态变更触发 `connection:update` 事件
+- [ ] **v1.4.0**: 状态变更触发 `connection_status_changed` 事件
 - [ ] **v1.4.0**: `sessionTreeStore` 修改后调用 `refreshConnections()`
-- [ ] **v1.4.0**: 依赖连接的组件使用 `key={sessionId-connectionId}`
+- [ ] **v1.4.0**: 依赖连接的组件使用包含 `nodeId` 的 key
 - [ ] **v1.4.0**: IO 操作前检查 State Gating
 
 ---

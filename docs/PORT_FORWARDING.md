@@ -19,7 +19,7 @@ OxideTerm 提供企业级的 SSH 端口转发功能，不仅支持标准的本�
 | **Suspended 状态** | v1.4.1 | 新增 `ForwardStatus::Suspended` 表示 SSH 断连导致的挂起 |
 | **无锁 Channel I/O** | v1.4.2 | 移除 `Arc<Mutex<Channel>>`，采用消息传递模式消除锁竞争 |
 | **子任务信号传播** | v1.4.2 | 子连接任务接收 shutdown 广播信号，SSH 断开时主动退出 |
-| **全链路超时保护** | v1.4.2 | 所有 I/O 路径都有 `IDLE_TIMEOUT` (300s) 保护，防止僵尸连接 |
+| **全链路超时保护** | v1.4.2 | 所有 I/O 路径都有 `FORWARD_IDLE_TIMEOUT` (300s) 保护，防止僵尸连接 |
 
 ---
 
@@ -30,7 +30,7 @@ OxideTerm 提供企业级的 SSH 端口转发功能，不仅支持标准的本�
 ```mermaid
 graph TD
     subgraph UI ["Frontend (ForwardsView)"]
-        View["Forwards List<br/>key={sessionId-connectionId}"]
+        View["Forwards List<br/>key={nodeId}"]
         Action["Add Rule Action"]
     end
 
@@ -50,7 +50,7 @@ graph TD
     AppStore -.->|Active| Action
     AppStore -.->|Down| View
     
-    Action -->|3. IPC: forward_add| Backend
+    Action -->|3. IPC: node_create_forward| Backend
     Backend -->|4. Start Listener| ForwardMgr
     
     Backend -->|5. Success| Action
@@ -67,13 +67,14 @@ graph TD
 
 ```tsx
 // ForwardsView.tsx
-// 当重连发生 (connectionId 改变)，组件自动重置
+// 当重连发生 (nodeId 改变)，组件自动重置
 // 触发 useEffect 重新拉取当前活跃的转发规则
+const nodeState = useNodeState(nodeId);
 useEffect(() => {
-  if (connectionId && status === 'active') {
+  if (nodeId && nodeState.readiness === 'ready') {
     refreshRules();
   }
-}, [connectionId, status]);
+}, [nodeId, nodeState.readiness]);
 ```
 
 ---
@@ -172,7 +173,7 @@ v1.4.0 引入了精确的流量统计和状态反馈：
 // 创建端口转发
 const response = await api.createPortForward({
   session_id: sessionId,
-  forward_type: 'Local',
+  forward_type: 'local',
   bind_address: '127.0.0.1',
   bind_port: 8080,
   target_host: 'localhost',
@@ -188,19 +189,13 @@ const rules = await api.listPortForwards(sessionId);
 ```typescript
 interface ForwardRule {
   id: string;               // UUID
-  forward_type: 'Local' | 'Remote' | 'Dynamic';
+  forward_type: 'local' | 'remote' | 'dynamic';
   bind_address: string;
   bind_port: number;
   target_host: string;      // Dynamic 类型为空字符串
   target_port: number;      // Dynamic 类型为 0
   status: 'starting' | 'active' | 'stopped' | 'error' | 'suspended';
   description?: string;
-  error_msg?: string;
-  stats?: {
-    connections: number;
-    bytes_sent: number;
-    bytes_received: number;
-  }
 }
 ```
 
@@ -281,7 +276,7 @@ v1.4.2 重构了转发连接的数据桥接逻辑，从 `Arc<Mutex<Channel>>` �
 - **Channel 单所有权**: SSH Channel 由 `ssh_io` 任务独占持有，无需 Mutex
 - **mpsc 解耦**: 读写任务通过 `mpsc::channel` 与 SSH I/O 任务通信
 - **信号传播**: 子连接任务订阅 `shutdown_rx`，SSH 断开时主动退出
-- **全链路超时**: 所有 I/O 操作都有 `IDLE_TIMEOUT` (300s) 保护
+- **全链路超时**: 所有 I/O 操作都有 `FORWARD_IDLE_TIMEOUT` (300s) 保护
 
 ### 4. 常见错误处理
 

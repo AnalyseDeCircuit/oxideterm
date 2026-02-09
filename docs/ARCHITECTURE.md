@@ -1,7 +1,7 @@
-# OxideTerm 架构设计 (v1.6.2)
+# OxideTerm 架构设计 (v1.8.0)
 
-> **版本**: v1.6.2 (2026-02-09)
-> **上次更新**: 2026-02-09
+> **版本**: v1.8.0 (2026-02-10)
+> **上次更新**: 2026-02-10
 > 本文档描述 OxideTerm 的系统架构、设计决策和核心组件。
 
 ## 目录
@@ -246,6 +246,7 @@ src-tauri/src/
 │   ├── manager.rs          # 转发规则管理
 │   ├── local.rs            # 本地转发 (-L)
 │   ├── remote.rs           # 远程转发 (-R)
+│   ├── events.rs           # 转发事件发射器
 │   └── dynamic.rs          # 动态转发 (-D, SOCKS5)
 │
 ├── config/                 # 配置管理
@@ -269,6 +270,12 @@ src-tauri/src/
 │   ├── forwarding.rs       # 转发状态
 │   └── ai_chat.rs          # AI 聊天状态持久化
 │
+├── router/                 # Oxide-Next 节点路由器
+│   ├── mod.rs
+│   ├── emitter.rs          # NodeEventEmitter
+│   ├── sequencer.rs        # NodeEventSequencer
+│   └── types.rs            # 路由类型
+│
 └── commands/               # Tauri 命令
     ├── mod.rs
     ├── connect_v2.rs       # 连接命令 (主要连接流程)
@@ -287,7 +294,11 @@ src-tauri/src/
     ├── session_tree.rs     # 会话树命令
     ├── ai_chat.rs          # AI 聊天命令
     ├── archive.rs          # 归档操作命令
-    └── plugin.rs           # 插件管理命令
+    ├── plugin.rs           # 插件管理命令
+    ├── node_forwarding.rs  # Node 转发命令
+    ├── node_sftp.rs        # Node SFTP 命令
+    ├── plugin_registry.rs  # 插件注册表命令
+    └── plugin_server.rs    # 插件服务端
 ```
 
 ### 核心组件关系图
@@ -990,10 +1001,27 @@ src/
 │   │   ├── ModelSelector.tsx    # AI 模型选择器
 │   │   └── ThinkingBlock.tsx    # 思考过程展示块
 │   │
+│   ├── connections/        # 连接管理组件
+│   │
+│   ├── editor/             # 编辑器组件
+│   │
+│   ├── fileManager/        # 文件管理组件
+│   │
+│   ├── sessionManager/     # 会话管理组件
+│   │
+│   ├── sessions/           # 会话组件
+│   │
+│   ├── settings/           # 设置组件
+│   │
+│   ├── topology/           # 拓扑图组件
+│   │
+│   ├── local/              # 本地终端组件
+│   │
 │   ├── plugin/             # 插件 UI 组件 (v1.6.2)
 │   │   ├── PluginManagerView.tsx
 │   │   ├── PluginTabRenderer.tsx
-│   │   └── PluginSidebarRenderer.tsx
+│   │   ├── PluginSidebarRenderer.tsx
+│   │   └── PluginConfirmDialog.tsx
 │   │
 │   └── modals/             # 弹窗组件
 │       ├── NewConnectionModal.tsx
@@ -1016,6 +1044,12 @@ src/
 │   ├── terminalRegistry.ts # 终端缓冲区注册表 (v1.3.0)
 │   ├── ai/                 # AI 提供商注册表
 │   ├── plugin/             # 插件运行时与 UI Kit (v1.6.2)
+│   │   ├── pluginEventBridge.ts      # 事件桥接
+│   │   ├── pluginI18nManager.ts      # 插件国际化管理
+│   │   ├── pluginSettingsManager.ts  # 插件设置管理
+│   │   ├── pluginStorage.ts          # 插件存储
+│   │   ├── pluginTerminalHooks.ts    # 终端钩子
+│   │   └── pluginUtils.ts            # 插件工具函数
 │   ├── codemirror/         # CodeMirror 语言加载器
 │   ├── themes.ts           # 终端主题定义
 │   ├── themeManager.ts     # 主题管理器
@@ -1031,10 +1065,13 @@ src/
 │   ├── useSplitPaneShortcuts.ts # 分屏快捷键
 │   ├── useTauriListener.ts     # Tauri 事件监听
 │   ├── useMermaid.ts           # Mermaid 图表渲染
-│   └── useToast.ts             # 提示消息
+│   ├── useToast.ts             # 提示消息
+│   ├── useConfirm.tsx          # 确认对话框 Hook
+│   └── useNodeState.ts         # 节点状态 Hook
 │
 └── types/                  # TypeScript 类型
-    └── index.ts
+    ├── index.ts
+    └── plugin.ts           # 插件类型定义
 ```
 
 ### 状态管理

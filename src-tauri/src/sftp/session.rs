@@ -1180,6 +1180,11 @@ impl SftpSession {
             canonical_path, transferred
         );
 
+        // Unregister transfer control to prevent DashMap entry leak
+        if let Some(tm) = &transfer_manager {
+            tm.unregister(&transfer_id);
+        }
+
         Ok(transferred)
     }
 
@@ -1502,6 +1507,11 @@ impl SftpSession {
                     "Upload complete: {} -> {} ({} bytes)",
                     local_path, canonical_path, transferred
                 );
+
+                // Unregister transfer control to prevent DashMap entry leak
+                if let Some(tm) = &transfer_manager {
+                    tm.unregister(&transfer_id);
+                }
 
                 Ok(transferred)
             }

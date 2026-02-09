@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tauri::State;
 use tracing::{info, warn};
 
-use super::ForwardingRegistry;
+use super::{ForwardingRegistry, HealthRegistry, ProfilerRegistry};
 use crate::bridge::BridgeManager;
 use crate::session::{
     AuthMethod, KeyAuth, SessionConfig, SessionInfo, SessionRegistry, SessionStats,
@@ -99,6 +99,8 @@ pub async fn disconnect_v2(
     sftp_registry: State<'_, Arc<SftpRegistry>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+    health_registry: State<'_, HealthRegistry>,
+    profiler_registry: State<'_, ProfilerRegistry>,
 ) -> Result<bool, String> {
     info!("Disconnecting session: {}", session_id);
 
@@ -122,6 +124,10 @@ pub async fn disconnect_v2(
 
     // Drop any cached SFTP handle tied to this session
     sftp_registry.remove(&session_id);
+
+    // Clean up health tracker and resource profiler
+    health_registry.remove(&session_id);
+    profiler_registry.remove(&session_id);
 
     // Release connection from pool (using session_id as connection_id)
     // This will decrement ref_count and potentially start idle timer
@@ -192,6 +198,16 @@ pub async fn check_ssh_keys() -> Result<Vec<String>, String> {
         .into_iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect())
+}
+
+/// Check if SSH Agent is available on the current platform
+///
+/// - Unix: returns `true` if `SSH_AUTH_SOCK` is set
+/// - Windows: always `true` (OpenSSH pipe exists when service is installed)
+/// - Other: `false`
+#[tauri::command]
+pub fn is_ssh_agent_available() -> bool {
+    crate::ssh::is_agent_available()
 }
 
 /// Restore persisted sessions (returns session metadata for selective restoration)
@@ -298,9 +314,7 @@ pub async fn establish_connection(
                 passphrase,
             }
         }
-        AuthRequest::Agent => {
-            return Err("SSH Agent not yet supported".to_string());
-        }
+        AuthRequest::Agent => AuthMethod::Agent,
     };
 
     let config = SessionConfig {

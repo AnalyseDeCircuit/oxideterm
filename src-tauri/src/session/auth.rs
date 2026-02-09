@@ -6,7 +6,7 @@
 //! - ECDSA keys (id_ecdsa)
 //! - Encrypted keys with passphrase
 
-use russh_keys::PrivateKey as KeyPair;
+use russh::keys::PrivateKey as KeyPair;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{debug, info};
@@ -120,14 +120,14 @@ fn load_private_key_sync(path: &Path, passphrase: Option<&str>) -> Result<KeyPai
 
     // Try to decode the key
     match passphrase {
-        Some(pass) => russh_keys::decode_secret_key(&key_data, Some(pass)).map_err(|e| {
+        Some(pass) => russh::keys::decode_secret_key(&key_data, Some(pass)).map_err(|e| {
             if e.to_string().contains("decrypt") || e.to_string().contains("password") {
                 KeyError::InvalidPassphrase
             } else {
                 KeyError::ParseError(e.to_string())
             }
         }),
-        None => russh_keys::decode_secret_key(&key_data, None)
+        None => russh::keys::decode_secret_key(&key_data, None)
             .map_err(|e| KeyError::ParseError(e.to_string())),
     }
 }

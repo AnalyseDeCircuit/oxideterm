@@ -1069,7 +1069,7 @@ ui.showConfirm(opts: {
 }): Promise<boolean>
 ```
 
-显示确认对话框，返回用户选择。当前实现使用 `window.confirm()`。
+显示确认对话框，返回用户选择。通过 `PluginConfirmDialog`（Radix Dialog）实现，样式与宿主应用一致。
 
 ```javascript
 const ok = await ctx.ui.showConfirm({
@@ -2963,7 +2963,10 @@ npx tsc --module esnext --target esnext --outDir .
 
 ### Q: 插件可以有多个文件吗？
 
-由于加载机制使用 Blob URL，插件内部的相对 `import` 不生效。解决方案：
+- **v1 单文件插件**（`format: "single"`）：使用 Blob URL 加载，内部 `import` 不生效。需用打包工具（esbuild/rollup）合并为单文件。
+- **v2 包插件**（`format: "package"`）：支持多文件结构，通过本地 HTTP 服务器加载，可使用 `import` map。
+
+对 v1 插件的解决方案：
 
 1. **推荐**：使用打包工具（esbuild/rollup）合并为单文件
 2. **备选**：将所有代码写在 `main.js` 一个文件中
@@ -3030,8 +3033,9 @@ npx esbuild src/index.ts \
 
 不能：
 - 修改现有 UI 组件
-- 注入自定义 CSS
 - 修改菜单/工具栏
+
+> **注意**：插件可通过 `ctx.assets.loadCSS()` 或 manifest `styles` 字段注入自定义 CSS。
 
 ### Q: 插件配置文件在哪里？
 
@@ -3148,7 +3152,12 @@ export type ConnectionSnapshot = Readonly<{
 }>;
 
 // ── Terminal Hook Types ─────────────────────────────────────
-export type TerminalHookContext = { sessionId: string };
+export type TerminalHookContext = {
+  /** @deprecated Use nodeId instead. Will be removed in next major version. */
+  sessionId: string;
+  /** Stable node identifier, survives reconnect. */
+  nodeId: string;
+};
 
 export type InputInterceptor = (
   data: string,
@@ -3192,6 +3201,8 @@ export type PluginConnectionsAPI = {
   getAll(): ReadonlyArray<ConnectionSnapshot>;
   get(connectionId: string): ConnectionSnapshot | null;
   getState(connectionId: string): SshConnectionState | null;
+  /** Phase 4.5: resolve node to connection snapshot */
+  getByNode(nodeId: string): ConnectionSnapshot | null;
 };
 
 export type PluginEventsAPI = {
@@ -3199,8 +3210,11 @@ export type PluginEventsAPI = {
   onDisconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onLinkDown(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onReconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
-  onSessionCreated(handler: (info: { sessionId: string; connectionId: string }) => void): Disposable;
-  onSessionClosed(handler: (info: { sessionId: string }) => void): Disposable;
+  onIdle(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
+  /** Phase 4.5: Node becomes ready (connected + capabilities available) */
+  onNodeReady(handler: (info: { nodeId: string; connectionId: string }) => void): Disposable;
+  /** Phase 4.5: Node disconnected */
+  onNodeDisconnected(handler: (info: { nodeId: string }) => void): Disposable;
   on(name: string, handler: (data: unknown) => void): Disposable;
   emit(name: string, data: unknown): void;
 };
@@ -3221,9 +3235,12 @@ export type PluginTerminalAPI = {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
-  writeToTerminal(sessionId: string, text: string): void;
-  getBuffer(sessionId: string): string | null;
-  getSelection(sessionId: string): string | null;
+  /** Write to terminal by nodeId (stable across reconnects) */
+  writeToNode(nodeId: string, text: string): void;
+  /** Get terminal buffer by nodeId */
+  getNodeBuffer(nodeId: string): string | null;
+  /** Get terminal selection by nodeId */
+  getNodeSelection(nodeId: string): string | null;
 };
 
 export type PluginSettingsAPI = {
@@ -3302,10 +3319,12 @@ declare global {
       React: typeof import('react');
       ReactDOM: { createRoot: typeof import('react-dom/client').createRoot };
       zustand: { create: typeof import('zustand').create };
+      lucideIcons: Record<string, React.ForwardRefExoticComponent<React.SVGProps<SVGSVGElement>>>;
+      /** @deprecated Use lucideIcons instead. Kept for backward compatibility. */
       lucideReact: typeof import('lucide-react');
       ui: PluginUIKit;         // 24 个预置 UI 组件
       version: string;         // OxideTerm 版本号
-      pluginApiVersion: number; // 插件 API 版本号
+      pluginApiVersion: number; // 插件 API 版本号 (2 = current)
     };
   }
 }

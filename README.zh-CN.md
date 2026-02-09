@@ -5,13 +5,13 @@
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
-  <strong>基于 Rust 的全能终端引擎</strong>
+  <strong>Rust 驱动的终端引擎 — 不止于 SSH</strong>
   <br>
-  <em>从远程连接器进化为全平台终端解决方案</em>
+  <em>95,000+ 行 Rust &amp; TypeScript 代码。零 Electron。SSH 栈零 C 依赖。</em>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.6.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.8.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -24,446 +24,439 @@
 
 ---
 
-## 📖 核心进化
+## OxideTerm 是什么？
 
-OxideTerm v1.6.2 是一次彻底的架构重构。我们不再只是一个 SSH 客户端，而是一个**终端引擎**，拥有超过 **90,000 行** 精心设计的 Rust + TypeScript 代码。
+OxideTerm 是一款**跨平台终端应用**，将本地 Shell、远程 SSH 会话、文件管理、代码编辑和 AI 助手整合进一个 Rust 原生二进制文件中。它**不是** Electron 套壳——后端完全由 Rust 编写，通过 Tauri 2.0 打包为约 15 MB 的原生可执行文件。
 
-### ⚙️ 后端突破：本地终端与并发模型
-我们引入了基于 `portable-pty` 的本地终端支持，彻底解决了 Rust 异步运行时中的并发难题：
-- **线程安全封装**：通过 `std::sync::Mutex` 包装非 `Sync` 的 `MasterPty`，并手动实现 `unsafe impl Sync` trait，构建了线程安全的 `PtyHandle`。
-- **专用 I/O 线程**：为每个 PTY 会话分配独立的读写句柄（`Arc<Mutex<Box<dyn Read + Send>>>`），确保在高并发 I/O 下即便发生阻塞也不会影响 Tokio 主事件循环。
-- **跨平台一致性**：统一了 macOS/Linux (PTY) 和 Windows (ConPTY) 的底层差异，对外暴露标准化的流式接口。
+### 为什么需要 OxideTerm？
 
-### 🧩 内核架构：Feature Gating
-为了适配未来的移动端构建（iOS/Android 不支持原生 PTY），我们重构了构建系统：
-- **模块化构建**：核心 PTY 功能被封装在 `local-terminal` feature 中。
-- **按需编译**：通过 `cargo build --no-default-features` 即可完全剥离 `portable-pty` 依赖，生成仅包含 SSH/SFTP 功能的轻量级内核（为移动端移植扫清障碍）。
-
-### ⚛️ 前端进化：多 Store 架构
-面对本地、远程和 IDE 会话截然不同的状态管理需求，前端采用了 **多 Store** 模式：
-- **SessionTreeStore**：用户意图层——树结构、连接流程、会话组织。
-- **AppStore**：事实层——通过 `connections` Map 维护实际 SSH 连接状态，从 SessionTreeStore 同步。
-- **IdeStore**：IDE 模式状态管理，包括远程文件编辑、Git 状态跟踪和多标签编辑器。
-- **LocalTerminalStore**：本地 PTY 实例的生命周期管理、Shell 进程监控和独立的 I/O 管道。
-- **ReconnectOrchestratorStore**：自动重连管道编排（snapshot → ssh-connect → await-terminal → restore）。
-- **TransferStore / PluginStore / ProfilerStore / AiChatStore / SettingsStore**：SFTP 传输、插件运行时、资源分析、AI 聊天和设置的领域专用 Store。
-- **统一视图层**：尽管状态源不同，但在 UI 层通过 `TerminalView` 和 `IdeView` 组件实现了渲染逻辑的统一。
+| 痛点 | OxideTerm 的解答 |
+|---|---|
+| SSH 客户端不支持本地 Shell | 混合引擎：本地 PTY + 远程 SSH 在同一窗口 |
+| 断线重连 = 丢失一切 | **Node-first 架构**：自动重连恢复转发、传输、IDE 状态 |
+| 远程编辑需要 VS Code Remote | **内置 IDE 模式**：CodeMirror 6 基于 SFTP，服务器零安装 |
+| SSH 连接不可复用 | **SSH 多路复用**：终端、SFTP、转发共享一条连接 |
+| SSH 库依赖 OpenSSL | **russh 0.54**：纯 Rust SSH，`ring` 密码学后端，无 C 依赖 |
 
 ---
 
-## 🏗️ 系统架构
+## 架构概览
 
-v1.6.2 采用了混合数据流架构，根据会话类型智能路由流量：
-
-```mermaid
-flowchart TB
-    subgraph Frontend ["前端层 (React 19)"]
-        UI[用户界面]
-
-        subgraph Stores ["Multi-Store Sync System (v1.6.2)"]
-            TreeStore["SessionTreeStore (Logic)<br/>用户意图"]
-            RemoteStore["AppStore (Fact)<br/>连接状态"]
-            IdeStore["IdeStore (Context)<br/>项目状态"]
-            LocalStore["LocalTerminalStore<br/>本地 PTY"]
-            ReconnectStore["ReconnectOrchestratorStore<br/>自动重连 Pipeline"]
-            PluginStore["PluginStore<br/>UI Registry"]
-        end
-
-        Terminal["xterm.js + WebGL"]
-
-        UI --> TreeStore
-        UI --> RemoteStore
-        UI --> PluginStore
-
-        TreeStore -- "Sync (refreshConnections)" --> RemoteStore
-        RemoteStore --> Terminal
-        LocalStore --> Terminal
-        ReconnectStore -- "Orchestrate" --> TreeStore
-    end
-
-    subgraph Backend ["后端层 (Rust / Tauri 2.0)"]
-        Router["IPC Command Router"]
-
-        subgraph Features ["Feature Gates"]
-            LocalFeat["Feature: local-terminal"]
-        end
-
-        subgraph RemoteEngine ["远程引擎 (SSH)"]
-            WS["WebSocket Bridge"]
-            SSH["russh Client (Pure Rust)"]
-            Pool["Connection Pool"]
-        end
-
-        subgraph LocalEngine ["本地引擎 (PTY)"]
-            LocalReg["LocalTerminalRegistry"]
-            PtyHandle["Thread-Safe PtyHandle"]
-            NativePTY["portable-pty (Native/ConPTY)"]
-        end
-    end
-
-    %% 数据流
-    LocalStore <-->|Tauri IPC| LocalReg
-    LocalReg --> PtyHandle --> NativePTY
-
-    TreeStore -->|Connect/Retry| Router
-    RemoteStore <-->|Events/Fetch| Router
-
-    Terminal <-->|WebSocket Binary| WS
-    WS <--> SSH <--> Pool
-
-    LocalFeat -.-> LocalEngine
-
-    style Frontend fill:#e1f5ff,stroke:#01579b
-    style Backend fill:#fff3e0,stroke:#e65100
-    style TreeStore fill:#fff3cd,stroke:#fbc02d
-    style RemoteStore fill:#fce4ec,stroke:#c2185b
-    style ReconnectStore fill:#e8f5e9,stroke:#388e3c
+```
+┌─────────────────────────────────────┐
+│        前端 (React 19)              │
+│                                     │
+│  SessionTreeStore ──► AppStore      │    10 个 Zustand Store
+│  IdeStore    LocalTerminalStore     │    17 个组件目录
+│  ReconnectOrchestratorStore         │    11 种语言 × 18 命名空间
+│  PluginStore  AiChatStore  ...      │
+│                                     │
+│        xterm.js 6 + WebGL           │
+└──────────┬──────────────┬───────────┘
+           │ Tauri IPC    │ WebSocket (二进制)
+┌──────────▼──────────────▼───────────┐
+│         后端 (Rust)                 │
+│                                     │
+│  NodeRouter ── resolve(nodeId) ──►  │    22 个 IPC 命令模块
+│  ├─ SshConnectionRegistry          │    DashMap 并发状态
+│  ├─ SessionRegistry                │    Feature-gated 本地 PTY
+│  ├─ ForwardingManager              │    ChaCha20-Poly1305 保险库
+│  ├─ SftpSession (连接级)            │    russh 0.54 (ring 后端)
+│  └─ LocalTerminalRegistry          │    SSH Agent (AgentSigner)
+│                                     │
+│  Wire Protocol v1                   │
+│  [Type:1][Length:4][Payload:n]       │
+└─────────────────────────────────────┘
 ```
 
+**双平面通信**：WebSocket 二进制帧承载终端 I/O（零序列化开销），Tauri IPC 承载结构化命令和事件。前端从不接触 `sessionId` 或 `connectionId`——一切通过 `nodeId` 寻址，由后端 `NodeRouter` 解析。
+
 ---
 
-## 🔥 差异化核心能力
+## 核心技术亮点
 
-OxideTerm 在底层细节的打磨上毫不妥协，为您提供工业级的使用体验。
+### 🔩 纯 Rust SSH — russh 0.54
 
-### 🛡️ 智能连接池 (Connection Pool)
-我们构建了基于引用计数的 `SshConnectionRegistry`，实现了真正的 SSH Multiplexing：
-- **连接复用**：多个终端窗口、SFTP 传输任务、端口转发规则共享同一条物理 SSH 连接，握手只需一次。
-- **资源隔离**：每个物理连接拥有独立的状态机和任务调度器，互不干扰。
-- **智能生命周期**：自动管理空闲超时 (Idle Timeout 30 分钟) 和心跳保活 (Keep-Alive 15 秒间隔)。网络波动时，自动进入输入锁定模式并尝试无缝重连，最大程度保护现场。
+OxideTerm 搭载 **russh 0.54**，编译使用 `ring` 密码学后端：
+- SSH 路径中**零 C/OpenSSL 依赖**——整个密码学栈纯 Rust 实现
+- 完整 SSH2 协议：密钥交换、通道、SFTP 子系统、端口转发
+- ChaCha20-Poly1305 和 AES-GCM 密码套件，Ed25519/RSA/ECDSA 密钥
 
-### 📡 拓扑感知跳板机 (Topology-Aware ProxyJump)
-- **无限链式跳转**：支持 `Client -> Jump A -> Jump B -> Target` 的任意深度级联。
-- **智能路由图**：自动解析 SSH Config，构建连接拓扑图，自动计算最优路径。
-- **逻辑节点复用**：跳板机节点本身也可作为独立会话操作，且被下游连接复用，极大减少重复握手开销。
+### 🔑 SSH Agent 认证 (AgentSigner)
 
-### 🪟 Windows 深度优化
-- **ConPTY 原生集成**：抛弃过时的 WinPTY，直接调用 Windows Pseudo Console (ConPTY) API，完美支持真彩色 (TrueColor) 和 ANSI 转义序列。
-- **Shell 智能探测**：内置扫描引擎，自动通过注册表和 PATH 识别 **PowerShell 7 (pwsh)**、**Git Bash**、**WSL2** 及传统的 CMD。
-- **原生体验**：针对 Windows 窗口管理器特性做了专门适配，由 Rust 直接处理窗口事件，响应速度远超 Electron 应用。
+自研 `AgentSigner` 封装系统 SSH Agent，满足 russh 的 `Signer` trait：
 
-### 🔐 军事级加密体系
-- **.oxide 文件格式**：
-  - **ChaCha20-Poly1305 AEAD**：认证加密，防篡改防重放。
-  - **Argon2id KDF**：密钥派生函数（256MB 内存成本，4 迭代），抵抗 GPU 暴力破解。
-  - **SHA-256 校验和**：双重完整性验证，检测任何数据损坏。  - **[v1.4.4+] 私钥内嵌**：可选的私钥嵌入功能，实现完全可移植备份。
-  - **[v1.4.4+] 智能体检**：导出前自动分析连接，提供认证类型统计和缺失密钥检测。  - **Git 友好设计**：元数据明文存储，支持离线解密。
+```rust
+// 通过将 &PublicKey 克隆为 owned 值，解决 russh 0.54 中
+// RPITIT Send bound 跨 .await 借用问题
+pub struct AgentSigner { /* ... */ }
+impl Signer for AgentSigner { /* 通过 Agent IPC 完成挑战-响应签名 */ }
+```
 
-### 📊 后端滚动缓冲区 (Scroll Buffer)
-- **大容量持久化**：默认保存 **100,000 行**终端输出，支持序列化到磁盘（MessagePack 格式）。
-- **高性能搜索**：通过 `spawn_blocking` 隔离正则搜索任务，避免阻塞 Tokio 运行时。
-- **内存高效**：循环缓冲区设计，自动淘汰最旧数据，保持内存占用可控。
+- **平台支持**：Unix (`SSH_AUTH_SOCK`)、Windows (`\\.\pipe\openssh-ssh-agent`)
+- **代理链支持**：每一跳可独立使用 Agent 认证
+- **重连韧性**：重连时自动重放 `AuthMethod::Agent`
 
-### 🔀 全功能端口转发
-- **本地转发 (-L)**：将远程服务映射到本地端口（例如：数据库调试）。
-- **远程转发 (-R)**：将本地服务暴露给远程网络（例如：内网穿透）。
-- **动态代理 (-D)**：完整实现 SOCKS5 协议，支持 IPv4/IPv6/域名解析，配合 `direct-tcpip` 通道实现透明代理。
-- **健康监控**：实时统计连接数、吞吐量、活跃会话数。
-- **死亡报告**：转发任务在 SSH 断开时主动上报状态变更，保持一致性。
-- **无锁 I/O**：采用消息传递架构替代 `Arc<Mutex<Channel>>`，消除锁竞争。
+### 🧭 Node-First 架构 (NodeRouter)
+
+**Oxide-Next 节点抽象**消灭了一整类竞态条件：
+
+```
+前端: useNodeState(nodeId) → { readiness, sftpReady, error }
+后端: NodeRouter.resolve(nodeId) → ConnectionEntry → SftpSession
+```
+
+- 前端 SFTP/IDE 操作只传 `nodeId`——不传 `sessionId`，不传 `connectionId`
+- 后端原子解析 `nodeId → ConnectionEntry`
+- SSH 重连导致 `connectionId` 变化——SFTP/IDE **无感知**
+- `NodeEventEmitter` 推送带 generation 计数器的类型化事件，保证有序性
+
+### ⚙️ 本地终端 — 线程安全 PTY
+
+基于 `portable-pty 0.8` 的跨平台本地 Shell，通过 `local-terminal` Feature Gate 控制：
+
+- **线程安全**：`std::sync::Mutex` 封装 `MasterPty` + `unsafe impl Sync`
+- **专用 I/O 线程**：阻塞式 PTY 读取不干扰 Tokio 事件循环
+- **Shell 探测**：自动识别 `zsh`、`bash`、`fish`、`pwsh`、Git Bash、WSL2
+- **Feature Gate**：`cargo build --no-default-features` 可剥离 PTY，为移动端铺路
+
+### 🔌 运行时插件系统 (v1.6.2+)
+
+动态插件加载，冻结 API，安全加固：
+
+- **PluginContext API**：8 个命名空间（terminal, ui, commands, settings, lifecycle, events, storage, system）
+- **24 个 UI Kit 组件**：预构建 React 组件注入插件沙箱
+- **安全模型**：`Object.freeze` + Proxy 访问控制、熔断器机制、IPC 白名单
+- **Membrane 架构**：插件在隔离 ESM 上下文中运行，通过受控桥接访问宿主
+
+### 🛡️ SSH 智能连接池
+
+基于引用计数的 `SshConnectionRegistry`，底层 DashMap：
+
+- 多终端、SFTP、端口转发共享**同一条物理 SSH 连接**
+- 每连接独立状态机（connecting → active → idle → link_down → reconnecting）
+- 空闲超时 (30 分钟)、心跳保活 (15 秒)、心跳驱动的故障检测
+- 级联传播：跳板机断连 → 所有下游节点标记 `link_down`
+
+### 🔀 端口转发 — 无锁 I/O
+
+完整的本地 (-L)、远程 (-R) 和动态 SOCKS5 (-D) 转发：
+
+- **消息传递架构**：SSH Channel 由单一 `ssh_io` 任务持有，无 `Arc<Mutex<Channel>>`
+- **死亡报告**：转发任务在 SSH 断开时主动上报退出原因
+- **自动恢复**：`Suspended` 状态的转发规则在重连后自动恢复
+- **空闲超时**：`FORWARD_IDLE_TIMEOUT` (300 秒) 防止僵尸连接
 
 ### 🤖 AI 终端助手
-- **双模式交互**：内联快捷面板 (`⌘I`) + 侧边栏持久化聊天（支持对话历史）。
-- **OpenAI 兼容 API**：支持 OpenAI、Ollama、DeepSeek、OneAPI 等任意兼容端点。
-- **智能上下文捕获**：通过 Terminal Registry 模式自动获取终端缓冲区内容。
-- **命令一键插入**：点击即可将 AI 生成的命令插入活动终端（多行命令通过 Bracketed Paste 模式支持）。
-- **流式响应**：通过 Server-Sent Events (SSE) 实时显示生成内容。
-- **隐私优先**：API Key 存储于系统钥匙串（macOS Keychain / Windows Credential Manager），绝不经过第三方中转。
+
+双模式 AI，隐私优先：
+
+- **内联面板** (`⌘I`)：快速命令，通过 Bracketed Paste 注入终端
+- **侧边栏聊天**：持久化对话，支持历史记录
+- **上下文捕获**：Terminal Registry 从活动或全部分屏面板采集缓冲区
+- **广泛兼容**：OpenAI、Ollama、DeepSeek、OneAPI，任意 `/v1/chat/completions` 端点
+- **安全存储**：API Key 存于系统钥匙串（macOS Keychain / Windows Credential Manager）
+
+### 💻 IDE 模式 — 零安装远程编辑
+
+CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任何安装：
+
+- **文件树**：SFTP 懒加载 + Git 状态指示器
+- **30+ 语言模式**：16 个原生 CodeMirror 语言包 + legacy modes
+- **冲突解决**：基于 `mtime` 的乐观锁
+- **事件驱动 Git**：保存/创建/删除/重命名/终端回车后自动刷新状态
+- **状态门禁**：`readiness !== 'ready'` 时阻断所有 IO，重连时 Key-Driven Reset
+
+### 🔐 .oxide 加密导出
+
+可移植的连接备份格式：
+
+- **ChaCha20-Poly1305 AEAD** 认证加密
+- **Argon2id KDF**（256 MB 内存成本，4 迭代）——抗 GPU 暴力破解
+- **SHA-256** 完整性校验
+- **可选密钥内嵌**：私钥以 base64 编码嵌入加密载荷
+- **导出前体检**：认证类型统计、缺失密钥检测
+
+### 📡 ProxyJump — 拓扑感知的多跳连接
+
+- 无限链式深度：`Client → Jump A → Jump B → … → Target`
+- 自动解析 SSH Config，构建拓扑图，Dijkstra 最优路径计算
+- 跳板机节点可复用为独立会话
+- 级联故障传播，下游节点状态自动同步
+
+### 📊 资源监控器
+
+通过持久化 SSH Shell 通道实时采集远程主机指标：
+
+- 读取 `/proc/stat`、`/proc/meminfo`、`/proc/loadavg`、`/proc/net/dev`
+- 基于 Delta 的 CPU% 和网络吞吐量计算
+- 单通道设计——不触发 MaxSessions 限制
+- 非 Linux 主机或连续失败时自动降级为 RTT-Only 模式
+### 🪟 Windows 深度优化
+
+- **原生 ConPTY 集成**：直接调用 Windows Pseudo Console (ConPTY) API，完美支持 TrueColor 和 ANSI 转义序列——告别过时的 WinPTY。
+- **智能 Shell 探测**：内置扫描引擎自动检测 **PowerShell 7 (pwsh)**、**Git Bash**、**WSL2** 和传统 CMD，通过注册表和 PATH 扫描。
+- **原生体验**：Rust 直接处理窗口事件——响应速度远超 Electron 应用。
+
+### 📊 后端滚动缓冲区
+
+- **大容量持久化**：默认 **100,000 行**终端输出，可序列化到磁盘（MessagePack 格式）。
+- **高性能搜索**：`spawn_blocking` 隔离正则搜索任务，避免阻塞 Tokio 运行时。
+- **内存高效**：环形缓冲区设计自动淘汰最旧数据，内存用量可控。
+
+### ⚛️ 多 Store 状态架构
+
+前端采用 **Multi-Store** 模式（10 个 Store）应对差异化的状态管理需求：
+
+| Store | 职责 |
+|---|---|
+| **SessionTreeStore** | 用户意图层 — 树形结构、连接流、会话组织 |
+| **AppStore** | 事实层 — 通过 `connections` Map 管理实际 SSH 连接状态，从 SessionTreeStore 同步 |
+| **IdeStore** | IDE 模式 — 远程文件编辑、Git 状态跟踪、多标签编辑器 |
+| **LocalTerminalStore** | 本地 PTY 生命周期、Shell 进程监控、独立 I/O |
+| **ReconnectOrchestratorStore** | 自动重连管道（snapshot → ssh-connect → await-terminal → restore） |
+| **TransferStore** | SFTP 传输队列与进度 |
+| **PluginStore** | 插件运行时状态和 UI 注册表 |
+| **ProfilerStore** | 资源监控指标 |
+| **AiChatStore** | AI 对话状态 |
+| **SettingsStore** | 应用设置 |
+
+尽管状态来源不同，渲染逻辑通过 `TerminalView` 和 `IdeView` 统一视图层。
+---
+
+## 技术栈
+
+| 层级 | 技术 | 说明 |
+|---|---|---|
+| **框架** | Tauri 2.0 | 原生二进制，~15 MB，零 Electron |
+| **运行时** | Tokio + DashMap 6 | 全异步 + 无锁并发映射 |
+| **SSH** | russh 0.54 (`ring`) | 纯 Rust，零 C 依赖，SSH Agent |
+| **本地 PTY** | portable-pty 0.8 | Feature-gated，Windows ConPTY |
+| **前端** | React 19.1 + TypeScript 5.8 | Vite 7，Tailwind CSS 4 |
+| **状态管理** | Zustand 5 | 10 个专用 Store，事件驱动同步 |
+| **终端渲染** | xterm.js 6 + WebGL | GPU 加速，60fps+ |
+| **编辑器** | CodeMirror 6 | 16 语言包 + legacy modes |
+| **加密** | ChaCha20-Poly1305 + Argon2id | AEAD 认证加密 + 内存硬化 KDF |
+| **存储** | redb 2.1 | 嵌入式数据库（会话、转发、传输） |
+| **序列化** | MessagePack (rmp-serde) | 二进制缓冲区/状态持久化 |
+| **国际化** | i18next 25 | 11 种语言 × 18 命名空间 |
+| **SFTP** | russh-sftp 2.0 | SSH 文件传输协议 |
+| **WebSocket** | tokio-tungstenite 0.24 | 异步 WebSocket，终端数据平面 |
+| **协议** | Wire Protocol v1 | 二进制 `[Type:1][Length:4][Payload:n]` 基于 WebSocket |
+| **插件** | ESM Runtime | 冻结 PluginContext + 24 UI Kit 组件 |
 
 ---
 
-## 🛠️ 技术栈 (v1.6.2)
+## 功能矩阵
 
-| 层级 | 关键技术 | 说明 |
-|------|----------|------|
-| **Core** | **Tauri 2.0** | 下一代跨平台应用构建框架 |
-| **Runtime** | **Tokio** | 全异步 Rust 运行时，配合 `dashmap` 实现并发映射 |
-| **Local Kernel** | **portable-pty 0.8** | 跨平台伪终端抽象，实现 `Sync` + `Send` 线程模型 |
-| **Remote Kernel** | **russh 0.49** | 纯 Rust SSH 实现，无 C 依赖，内存安全 |
-| **SFTP** | **russh-sftp 2.0** | SSH 文件传输协议 |
-| **WebSocket** | **tokio-tungstenite 0.24** | 异步 WebSocket 实现 |
-| **Frontend** | **React 19** | 配合 TypeScript 5.8 实现类型安全的 UI 开发 |
-| **State** | **Zustand 5** | 多 Store 架构（10 个专用 Store），分离关注点 |
-| **Rendering** | **xterm.js 6 + WebGL/Canvas** | GPU 加速渲染，支持 60fps+ 高帧率输出 |
-| **Protocol** | **Wire Protocol v1** | 二进制 `[Type:1][Length:4][Payload:n]` 走 WebSocket，控制走 Tauri IPC |
-| **Editor** | **CodeMirror 6** | 远程文件编辑，支持 30+ 语言模式（14 原生 + legacy modes） |
-| **Encryption** | **ChaCha20-Poly1305 + Argon2id** | AEAD 认证加密 + 内存硬化密钥派生 |
-| **Persistence** | **redb 2.1** | 嵌入式数据库，配置存储 |
-| **Serialization** | **MessagePack (rmp-serde)** | 高效二进制序列化 |
-| **Plugins** | **ESM Runtime** | 动态插件加载，冻结 PluginContext API |
+| 分类 | 功能 |
+|---|---|
+| **终端** | 本地 PTY、SSH 远程、分屏 (水平/垂直)、跨分屏 AI 上下文、WebGL 渲染 |
+| **SSH** | 连接池、多路复用、ProxyJump (∞ 跳)、拓扑图、自动重连管道 |
+| **认证** | 密码、SSH 密钥 (RSA/Ed25519/ECDSA)、SSH Agent、证书、Keyboard-Interactive (2FA)、Known Hosts |
+| **文件** | 双面板 SFTP 浏览器、拖放传输、预览 (图片/视频/音频/PDF/代码/Hex)、传输队列 |
+| **IDE** | 文件树、CodeMirror 编辑器、多标签、Git 状态、冲突解决、集成终端 |
+| **转发** | 本地 (-L)、远程 (-R)、动态 SOCKS5 (-D)、自动恢复、死亡报告、无锁 I/O |
+| **AI** | 内联面板 + 侧边栏聊天、流式 SSE、命令插入、OpenAI/Ollama/DeepSeek |
+| **插件** | ESM 运行时加载、8 API 命名空间、24 UI Kit、沙箱执行、熔断器 |
+| **安全** | .oxide 加密导出、系统钥匙串、`zeroize` 内存擦除、主机密钥 TOFU |
+| **国际化** | EN, 简体中文, 繁體中文, 日本語, FR, DE, ES, IT, 한국어, PT-BR, VI |
 
 ---
 
-## ✨ 功能特性
+## 功能特性介绍
 
 ### 🚀 混合终端体验
-- **零延迟本地 Shell**：通过 IPC 直接与本地 Shell 进程交互，几乎无延迟。
-- **高性能远程 SSH**：基于 WebSocket 的二进制流传输，绕过传统 HTTP 开销。
-- **智能环境感知**：自动检测 `zsh`, `bash`, `fish`, `powershell` 等已安装 Shell。
-- **完整环境继承**：继承用户 PATH、HOME 等环境变量，与系统终端体验一致。
+- **零延迟本地 Shell**：直接 IPC 与本地进程交互，近零延迟。
+- **高性能远程 SSH**：WebSocket 二进制流传输，跃过传统 HTTP 开销。
+- **完整环境继承**：继承 PATH、HOME 等全部环境变量，与系统终端体验一致。
 
-### 🔐 多样化认证方式
+### 🔐 多元化认证方式
 - **密码认证**：安全存储于系统钥匙串。
-- **密钥认证**：支持 RSA / Ed25519 / ECDSA。
-- **默认密钥检测**：自动扫描 `~/.ssh/id_*`。
-- **证书认证**：OpenSSH Certificates（实验性）。
-- **2FA/MFA**：Keyboard-Interactive 交互式认证（实验性）。
-- **Known Hosts**：主机密钥验证与管理。
-
-### 💻 IDE 模式 (v1.3.0)
-零服务器端依赖的远程代码编辑：
-- **文件树浏览器**：基于 SFTP 的懒加载，带 Git 状态指示。
-- **代码编辑器**：基于 CodeMirror 6，支持 30+ 语言语法高亮。
-- **多标签管理**：LRU 缓存策略、脏状态检测、冲突解决。
-- **集成终端**：底部面板终端，与会话共享连接。
-- **事件驱动 Git 状态**：文件保存/创建/删除/重命名/终端命令后自动刷新。
+- **密钥认证**：支持 RSA / Ed25519 / ECDSA，自动扫描 `~/.ssh/id_*`。
+- **SSH Agent**：通过 `AgentSigner` 访问系统 Agent（macOS/Linux/Windows）。
+- **证书认证**：OpenSSH Certificates。
+- **2FA/MFA**：Keyboard-Interactive 认证。
+- **Known Hosts**：主机密钥 TOFU 验证 + `~/.ssh/known_hosts`。
 
 ### 🔍 全文搜索
-项目级文件内容搜索，带智能缓存：
-- **实时搜索**：300ms 防抖输入，即时结果。
+项目级文件内容搜索，智能缓存：
+- **实时搜索**：300ms 防抖输入，即时返回结果。
 - **结果缓存**：60 秒 TTL 缓存，避免重复扫描。
-- **结果分组**：按文件分组，带行号定位。
-- **高亮匹配**：预览片段中高亮搜索词。
-- **自动清除**：文件变更时自动清除搜索缓存。
+- **分组展示**：按文件分组，带行号定位。
+- **高亮匹配**：搜索词在预览中高亮显示。
+- **自动失效**：文件变更时自动清除缓存。
 
 ### 📦 高级文件管理
-- **SFTP v3 协议**：完整的双面板文件管理器。
-- **拖拽上传下载**：支持多文件、文件夹批量操作。
+- **SFTP v3 协议**：完整双面板文件管理器。
+- **拖放传输**：支持多文件和文件夹批量操作。
 - **智能预览**：
-  - 🎨 图片（JPEG/PNG/GIF/WebP）
-  - 🎬 视频（MP4/WebM）
-  - 💻 代码高亮（30+ 语言）
+  - 🎨 图片 (JPEG/PNG/GIF/WebP)
+  - 🎬 视频 (MP4/WebM)
+  - 💻 代码高亮 (30+ 语言)
   - 📄 PDF 文档
   - 🔍 Hex 查看器（二进制文件）
-- **进度追踪**：实时传输速度、进度条、ETA。
+- **进度跟踪**：实时速度、进度条、预计完成时间。
 
 ### 🌍 国际化 (i18n)
-完整的 UI 国际化支持，涵盖 11 种语言：
-- **语言**：English, 简体中文, 繁體中文, 日本語, Français, Deutsch, Español, Italiano, 한국어, Português, Tiếng Việt。
+- **11 种语言**：English、简体中文、繁體中文、日本語、Français、Deutsch、Español、Italiano、한국어、Português、Tiếng Việt。
 - **动态加载**：通过 i18next 按需加载语言包。
-- **类型安全**：所有翻译键的 TypeScript 类型定义。
+- **类型安全**：所有翻译键均有 TypeScript 类型定义。
 
 ### 🌐 网络优化
 - **双平面架构**：数据平面（WebSocket 直连）与控制平面（Tauri IPC）分离。
 - **自定义二进制协议**：`[Type:1][Length:4][Payload:n]`，无 JSON 序列化开销。
-- **背压控制**：防止内存溢出。
-- **自动重连**：指数退避重试，最多 5 次尝试。
+- **背压控制**：突发流量时防止内存溢出。
+- **自动重连**：指数退避重试，最多 5 次。
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
-### 环境需求
-- **Rust**: 1.75+ (必须)
-- **Node.js**: 18+
-- **构建工具**: 
-  - macOS: XCode Command Line Tools
+### 前置要求
+
+- **Rust** 1.75+
+- **Node.js** 18+（推荐 pnpm）
+- **平台工具**：
+  - macOS: Xcode Command Line Tools
   - Windows: Visual Studio C++ Build Tools
-  - Linux: build-essential
+  - Linux: `build-essential`、`libwebkit2gtk-4.1-dev`、`libssl-dev`
 
 ### 开发构建
 
 ```bash
-# 克隆仓库
 git clone https://github.com/AnalyseDeCircuit/OxideTerm.git
-cd OxideTerm
+cd OxideTerm && pnpm install
 
-# 安装依赖
-pnpm install
-
-# 启动完整开发环境 (开启本地 PTY 支持)
+# 完整应用（前端 + Rust 后端 + 本地 PTY）
 pnpm tauri dev
 
-# 构建生产版本
+# 仅前端（端口 1420 热更新）
+pnpm dev
+
+# 生产构建
 pnpm tauri build
 
-# 构建移动端适配内核 (剥离 PTY)
-cd src-tauri
-cargo build --no-default-features --release
+# 轻量内核——剥离本地 PTY，适配移动端
+cd src-tauri && cargo build --no-default-features --release
 ```
-
-### 系统要求
-- **内存**: 建议 4GB+ 可用内存
-- **存储**: 至少 500MB 可用空间
-- **网络**: 支持 WebSocket 连接
 
 ---
 
-## 📁 项目结构
+## 项目结构
 
 ```
 OxideTerm/
-├── src/                        # 前端 (React/TypeScript)
-│   ├── components/             # UI 组件
-│   │   ├── ui/                 # 原子组件 (Radix UI)
-│   │   ├── terminal/           # 终端视图
-│   │   ├── sftp/               # SFTP 文件浏览器
-│   │   ├── ide/                # IDE 模式 (编辑器、文件树、对话框)
-│   │   ├── ai/                 # AI 聊天 (侧边栏 + 内联)
-│   │   ├── plugin/             # 插件管理 UI
-│   │   ├── forwards/           # 端口转发管理
-│   │   ├── connections/        # 连接创建与管理
-│   │   ├── sessions/           # 会话标签与切换
-│   │   ├── sessionManager/     # 会话生命周期 UI
-│   │   ├── topology/           # 网络拓扑可视化
-│   │   ├── settings/           # 设置 UI (标签模式)
-│   │   ├── layout/             # 侧边栏、头部、分屏
-│   │   ├── local/              # 本地终端组件
-│   │   ├── editor/             # 代码编辑器组件
-│   │   ├── fileManager/        # 本地文件浏览器
-│   │   └── modals/             # 弹窗组件
-│   ├── store/                  # Zustand 状态管理 (10 个 Store)
-│   │   ├── sessionTreeStore.ts # 用户意图 (树结构、连接流程)
-│   │   ├── appStore.ts         # 连接事实 (从树同步)
-│   │   ├── ideStore.ts         # IDE 模式状态
-│   │   ├── localTerminalStore.ts  # 本地 PTY 状态
-│   │   ├── reconnectOrchestratorStore.ts  # 自动重连管道
-│   │   ├── transferStore.ts    # SFTP 传输队列
-│   │   ├── pluginStore.ts      # 插件运行时状态
-│   │   ├── profilerStore.ts    # 资源分析指标
-│   │   ├── settingsStore.ts    # 应用设置
-│   │   └── aiChatStore.ts      # AI 聊天状态
-│   ├── lib/                    # API 封装与工具
-│   │   ├── api.ts              # Tauri IPC 调用层
-│   │   ├── ai/                 # AI 提供者注册表
-│   │   ├── plugin/             # 插件运行时 (loader, context, UIKit)
-│   │   ├── codemirror/         # CodeMirror 语言加载器
-│   │   ├── terminalRegistry.ts # 终端会话注册表
-│   │   └── themes.ts           # 终端主题定义
-│   ├── hooks/                  # 自定义 React Hooks
-│   ├── types/                  # TypeScript 类型定义
-│   └── locales/                # i18n (11 种语言 × 18 命名空间)
+├── src/                            # 前端 — 56K 行 TypeScript
+│   ├── components/                 # 17 个目录
+│   │   ├── terminal/               #   终端视图、分屏、搜索
+│   │   ├── sftp/                   #   双面板文件浏览器
+│   │   ├── ide/                    #   编辑器、文件树、Git 对话框
+│   │   ├── ai/                     #   内联 + 侧边栏聊天
+│   │   ├── plugin/                 #   插件管理 & 运行时 UI
+│   │   ├── forwards/               #   端口转发管理
+│   │   ├── connections/            #   连接增删改查 & 导入
+│   │   ├── topology/               #   网络拓扑图
+│   │   ├── layout/                 #   侧边栏、头部、分屏布局
+│   │   └── ...                     #   sessions, settings, modals 等
+│   ├── store/                      # 10 个 Zustand Store
+│   ├── lib/                        # API 层、AI 提供者、插件运行时
+│   ├── hooks/                      # React Hooks (事件、键盘、Toast)
+│   ├── types/                      # TypeScript 类型定义
+│   └── locales/                    # 11 种语言 × 18 命名空间
 │
-├── src-tauri/                  # 后端 (Rust)
+├── src-tauri/                      # 后端 — 39K 行 Rust
 │   └── src/
-│       ├── ssh/                # SSH 客户端 (12 模块)
-│       │   ├── connection_registry.rs  # 连接池 (DashMap)
-│       │   ├── client.rs       # SSH 客户端封装
-│       │   ├── session.rs      # SSH 会话生命周期
-│       │   ├── proxy.rs        # ProxyJump 多跳
-│       │   ├── preflight.rs    # 主机密钥验证 (TOFU)
-│       │   ├── known_hosts.rs  # Known Hosts 管理
-│       │   ├── keyboard_interactive.rs  # 2FA/KBI 认证
-│       │   └── handle_owner.rs # Handle 所有权追踪
-│       ├── local/              # 本地终端 (feature-gated)
-│       │   ├── pty.rs          # PTY 封装 (线程安全)
-│       │   ├── session.rs      # 本地终端会话
-│       │   ├── shell.rs        # Shell 检测与配置
-│       │   └── registry.rs     # 本地终端注册表
-│       ├── bridge/             # WebSocket 桥接
-│       │   ├── server.rs       # WS 服务器 (token auth, heartbeat)
-│       │   ├── protocol.rs     # Wire Protocol v1 (TLP 帧)
-│       │   └── manager.rs      # 桥接生命周期
-│       ├── session/            # 会话管理 (16 模块)
-│       │   ├── registry.rs     # 会话注册表 (DashMap)
-│       │   ├── tree.rs         # 会话树结构
-│       │   ├── auto_reconnect.rs  # 自动重连逻辑
-│       │   ├── reconnect.rs    # 重连编排
-│       │   ├── scroll_buffer.rs   # 滚动缓冲区 (100K 行)
-│       │   ├── health.rs       # 健康监控
-│       │   ├── profiler.rs     # 资源分析
-│       │   ├── env_detector.rs # 远程环境检测
-│       │   └── topology_graph.rs  # 网络拓扑
-│       ├── forwarding/         # 端口转发
-│       │   ├── manager.rs      # 转发编排
-│       │   ├── local.rs        # 本地转发 (-L)
-│       │   ├── remote.rs       # 远程转发 (-R)
-│       │   └── dynamic.rs      # SOCKS5 代理 (-D)
-│       ├── sftp/               # SFTP 实现
-│       │   ├── session.rs      # SFTP 会话管理
-│       │   ├── transfer.rs     # 文件传输追踪
-│       │   ├── progress.rs     # 传输进度
-│       │   └── retry.rs        # 传输重试逻辑
-│       ├── config/             # 配置
-│       │   ├── vault.rs        # 加密凭据存储
-│       │   ├── keychain.rs     # 系统钥匙串集成
-│       │   ├── ssh_config.rs   # SSH Config 解析
-│       │   └── storage.rs      # 持久化存储 (redb)
-│       ├── oxide_file/         # .oxide 文件格式
-│       │   ├── crypto.rs       # ChaCha20-Poly1305 加密
-│       │   └── format.rs       # 格式定义
-│       ├── state/              # 全局状态管理
-│       └── commands/           # Tauri IPC 命令处理 (18 文件)
+│       ├── router/                 #   NodeRouter (nodeId → 资源)
+│       ├── ssh/                    #   SSH 客户端 (12 模块含 Agent)
+│       ├── local/                  #   本地 PTY (feature-gated)
+│       ├── bridge/                 #   WebSocket 桥接 & Wire Protocol v1
+│       ├── session/                #   会话管理 (16 模块)
+│       ├── forwarding/             #   端口转发 (6 模块)
+│       ├── sftp/                   #   SFTP 实现
+│       ├── config/                 #   保险库、钥匙串、SSH Config
+│       ├── oxide_file/             #   .oxide 加密 (ChaCha20)
+│       ├── commands/               #   22 个 Tauri IPC 命令模块
+│       └── state/                  #   全局状态类型
 │
-└── docs/                       # 架构与功能文档
+└── docs/                           # 28+ 架构与功能文档
 ```
 
 ---
 
-## 🗺️ 路线图
+## 路线图
 
-### ✅ 已完成（v1.6.2）
-- [x] 本地终端支持（PTY）
-- [x] SSH 连接池与多路复用
-- [x] 自动重连机制
-- [x] ProxyJump 无限跳板
-- [x] 端口转发（本地/远程/动态）
-- [x] SFTP 文件管理与预览
-- [x] .oxide 加密导出
-- [x] 后端滚动缓冲区
-- [x] AI 终端助手（内联 + 侧边栏聊天）
-- [x] Keyboard-Interactive 认证（实验性）
-- [x] 终端上下文捕获（AI 集成）
-- [x] 国际化支持（11 种语言）
-- [x] 运行时插件系统（PluginContext + UI Kit）
-- [x] AI API Key 系统钥匙串存储
-- [x] AI 远程环境检测
-- [x] 终端分屏（分屏面板 + 快捷键）
+### ✅ 已发布 (v1.8.0)
+
+- [x] 本地终端 (PTY) + Feature Gating
+- [x] SSH 连接池 & 多路复用
+- [x] SSH Agent 认证 (AgentSigner)
+- [x] Node-first 架构 (NodeRouter + 事件)
+- [x] 自动重连编排器 (6 阶段管道)
+- [x] ProxyJump 无限跳板机链
+- [x] 端口转发 — 本地 / 远程 / 动态 SOCKS5
+- [x] SFTP 双面板文件管理 + 预览
+- [x] IDE 模式 (CodeMirror 6 + Git 状态)
+- [x] .oxide 加密导出 + 密钥内嵌
+- [x] AI 终端助手 (内联 + 侧边栏)
+- [x] 运行时插件系统 (PluginContext + UI Kit)
+- [x] 终端分屏 + 快捷键
+- [x] 资源监控器 (CPU / 内存 / 网络)
+- [x] 国际化 — 11 种语言 × 18 命名空间
+- [x] Keyboard-Interactive 认证 (2FA/MFA)
+- [x] 深度历史搜索 (30K 行，Rust Regex)
 
 ### 🚧 进行中
+
 - [ ] 命令面板 (`⌘K`)
-- [ ] 会话搜索与过滤
+- [ ] 会话搜索 & 快速切换
 
 ### 📋 计划中
-- [ ] SSH Agent 转发（等待上游russh库实现）
+
+- [ ] SSH Agent 转发
 - [ ] 会话录制与回放
 - [ ] X11 转发
-- [ ] 移动端适配（iOS/Android）
+- [ ] 移动端适配 (iOS / Android)
 
 ---
 
-## 🔒 安全考虑
+## 安全设计
 
-### 凭据存储
-- **配置文件本地存储**：连接配置保存在 `~/.oxideterm/connections.json`（Windows: `%APPDATA%\OxideTerm`）
-- **密码分离存储**：配置文件中仅保存 keychain 引用 ID（如 `oxideterm-{uuid}`），真实密码存储在系统钥匙串（macOS Keychain / Windows Credential Manager / Linux libsecret）
-- **AI API Key**：存储在系统钥匙串 `com.oxideterm.ai` 服务下，与 SSH 密码享有同等 OS 级别保护（v1.6.0 起）
-- **双重保护**：即使配置文件泄露，攻击者也无法获取真实密码或 API Key
-
-### SSH 主机密钥
-- 首次连接验证主机指纹
-- 存储于 `~/.ssh/known_hosts`
-
-### 内存安全
-- 使用 `zeroize` crate 安全清除敏感数据
-- Rust 编译器保证内存安全，杜绝缓冲区溢出
+| 关注点 | 实现 |
+|---|---|
+| **密码** | 系统钥匙串 (macOS Keychain / Windows Credential Manager / Linux libsecret) |
+| **AI API Key** | 系统钥匙串 `com.oxideterm.ai` 服务 |
+| **配置文件** | `~/.oxideterm/connections.json` — 仅存储钥匙串引用 ID |
+| **导出** | .oxide: ChaCha20-Poly1305 + Argon2id，可选密钥内嵌 |
+| **内存** | `zeroize` 擦除敏感数据；Rust 编译器保证内存安全 |
+| **主机密钥** | TOFU 模式 + `~/.ssh/known_hosts` |
+| **插件** | Object.freeze + Proxy ACL、熔断器、IPC 白名单 |
 
 ---
 
-## 📝 许可证
+## 许可证
 
-本项目采用 **PolyForm Noncommercial 1.0.0** 协议。
+**PolyForm Noncommercial 1.0.0**
 
-- ✅ **个人/非营利使用**：完全免费。
-- 🚫 **商业使用**：需获取商业授权。
-- ⚖️ **专利防御**：包含专利报复条款（Nuclear Clause），保障开源生态安全。
+- ✅ 个人 / 非营利使用：免费
+- 🚫 商业使用：需获取商业授权
+- ⚖️ 专利防御条款 (Nuclear Clause)
 
-完整协议文本：https://polyformproject.org/licenses/noncommercial/1.0.0/
+完整协议：https://polyformproject.org/licenses/noncommercial/1.0.0/
 
 ---
 
-## 🙏 致谢
+## 致谢
 
-特别感谢以下开源项目：
-
-- [russh](https://github.com/warp-tech/russh) - 纯 Rust SSH 实现
-- [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - 跨平台 PTY 抽象
-- [Tauri](https://tauri.app/) - 跨平台应用框架
-- [xterm.js](https://xtermjs.org/) - Web 终端模拟器
-- [Radix UI](https://www.radix-ui.com/) - 无障碍 UI 组件
+- [russh](https://github.com/warp-tech/russh) — 纯 Rust SSH 实现
+- [portable-pty](https://github.com/wez/wezterm/tree/main/pty) — 跨平台 PTY 抽象
+- [Tauri](https://tauri.app/) — 原生应用框架
+- [xterm.js](https://xtermjs.org/) — 终端模拟器
+- [CodeMirror](https://codemirror.net/) — 代码编辑器
+- [Radix UI](https://www.radix-ui.com/) — 无障碍 UI 基元
 
 ---
 
 <p align="center">
-  <sub>Built with ❤️ using Rust and Tauri | 90,000+ Lines of Code</sub>
+  <sub>以 Rust 和 Tauri 构建 — 95,000+ 行代码</sub>
 </p>

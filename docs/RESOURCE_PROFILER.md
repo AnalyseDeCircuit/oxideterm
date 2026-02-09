@@ -55,7 +55,7 @@
 ### ResourceMetrics 数据结构
 
 ```typescript
-interface ResourceMetrics {
+type ResourceMetrics = {
   timestampMs: number;         // 采样时间戳 (ms since epoch)
   cpuPercent: number | null;   // CPU 使用率 (0-100)，首次无数据
   memoryUsed: number | null;   // 已用内存 (bytes)
@@ -99,7 +99,7 @@ type MetricsSource = 'full' | 'partial' | 'rtt_only' | 'failed';
 │  shell_channel (1 个, 存活全程)   │
 │                                   │
 │  1. request_shell(false)          │
-│  2. init: PS1=''; stty -echo      │
+│  2. init: export PS1=''; export PS2=''; stty -echo 2>/dev/null; export LANG=C │
 │  3. 循环:                         │
 │     → 写入 SAMPLE_COMMAND (stdin) │
 │     ← 读取输出直到 ===END===     │

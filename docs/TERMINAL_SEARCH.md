@@ -9,7 +9,7 @@ OxideTerm 提供两种搜索模式：
 | 模式 | 搜索范围 | 速度 | 用途 |
 |------|---------|------|------|
 | **Visible Buffer** | 当前屏幕可见内容 | 极快（实时） | 快速定位最近输出 |
-| **Deep History** | 完整会话历史（100,000 行） | 快速（异步） | 查找历史命令和输出 |
+| **Deep History** | 完整会话历史（30,000 行） | 快速（异步） | 查找历史命令和输出 |
 
 ---
 
@@ -342,7 +342,7 @@ A: 可能的原因：
 - **大小写问题**：关闭 "Aa" 选项
 - **超出可见范围**：切换到 Deep History 模式
 - **正则语法错误**：检查正则表达式是否正确
-- **已经滚出缓冲区**：如果历史超过 100,000 行，早期内容可能被丢弃
+- **已经滚出缓冲区**：如果历史超过 30,000 行，早期内容可能被丢弃
 
 ### Q: Deep History 搜索很慢？
 
@@ -458,7 +458,7 @@ terminal.loadAddon(searchAddon);
 searchAddon.findNext(query, { ...options });
 
 // Deep History: Tauri Command
-await invoke('search_session_buffer', { sessionId, options });
+await invoke('search_terminal', { sessionId, options });
 ```
 
 ---

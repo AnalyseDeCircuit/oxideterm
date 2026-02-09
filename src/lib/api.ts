@@ -392,6 +392,12 @@ export const api = {
     });
   },
 
+  /** Check if SSH Agent is available on the current platform */
+  isAgentAvailable: async (): Promise<boolean> => {
+    if (USE_MOCK) return false;
+    return invoke('is_ssh_agent_available');
+  },
+
   // ============ SFTP Transfer Control ============
   sftpCancelTransfer: async (transferId: string): Promise<void> => {
     if (USE_MOCK) return;

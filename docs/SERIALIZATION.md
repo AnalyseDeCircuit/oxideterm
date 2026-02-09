@@ -239,25 +239,19 @@ pub enum EncryptedAuth {
     Key { 
         key_path: String, 
         passphrase: Option<String>,
-        embedded_key: Option<EmbeddedKeyData>,  // v1.4.1+ 内嵌私钥
+        embedded_key: Option<String>,  // v1.4.1+ base64 编码的内嵌私钥
     },
     Certificate { 
         key_path: String, 
         cert_path: String, 
         passphrase: Option<String>,
-        embedded_key: Option<EmbeddedKeyData>,  // v1.4.1+ 内嵌私钥
+        embedded_key: Option<String>,  // v1.4.1+ base64 编码的内嵌私钥
     },
     Agent,
 }
 
-// v1.4.1+: 私钥内嵌数据结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddedKeyData {
-    pub content: Vec<u8>,         // 密钥文件原始内容
-    pub original_path: String,    // 原始路径（用于导入时恢复）
-    pub file_name: String,        // 文件名
-    pub size_bytes: u64,          // 文件大小
-}
+// v1.4.1+: embedded_key 为 Option<String>，存储 base64 编码的私钥内容
+// 导入时解码并写入 ~/.ssh/imported/ 目录
 ```
 
 **设计决策**:  
@@ -393,7 +387,7 @@ pub struct OxideMetadata {
 | `EncryptedAuth` | `oxide_file/format.rs` | password, key, certificate, agent | .oxide 导出格式 |
 | `SavedAuth` | `config/types.rs` | Password, Key, Certificate, Agent | 本地配置中的认证（keychain引用） |
 | `ForwardType` | `forwarding/mod.rs` | Local, Remote, Dynamic | 端口转发类型 |
-| `ConnectionState` | `state/types.rs` | connecting, connected, link_down, reconnecting, idle, disconnected, error | **v1.4.0 新增**: 连接生命周期状态 |
+| `ConnectionState` | `state/types.rs` | Connecting, Active, Idle, LinkDown, Reconnecting, Disconnecting, Disconnected, Error(String) | **v1.4.0 新增**: 连接生命周期状态 |
 
 **示例**: MessagePack 序列化的内部标签格式
 

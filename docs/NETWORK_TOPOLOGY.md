@@ -340,7 +340,8 @@ OxideTerm 使用 **Dijkstra 算法**计算从 `local` 到目标节点的最短�
 #### 配置文件位置
 
 ```
-~/.config/oxideterm/topology_edges.json  (macOS/Linux)
+~/Library/Application Support/oxideterm/topology_edges.json (macOS)
+~/.config/oxideterm/topology_edges.json (Linux)
 %APPDATA%\OxideTerm\topology_edges.json  (Windows)
 ```
 
@@ -528,7 +529,7 @@ interface RouteResult {
 
 ```typescript
 // 请求路由到 "prod-db"
-const route = await invoke('compute_route', { targetId: 'prod-db' });
+const route = await invoke('expand_auto_route', { targetId: 'prod-db' });
 
 // 返回
 {

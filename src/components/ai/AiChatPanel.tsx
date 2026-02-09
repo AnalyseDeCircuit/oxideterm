@@ -4,6 +4,7 @@ import { Plus, Trash2, MessageSquare, MoreVertical, Settings, Terminal, HelpCirc
 import { useAiChatStore } from '../../store/aiChatStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAppStore } from '../../store/appStore';
+import { useConfirm } from '../../hooks/useConfirm';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ModelSelector } from './ModelSelector';
@@ -30,6 +31,7 @@ export function AiChatPanel() {
 
   const aiEnabled = useSettingsStore((state) => state.settings.ai.enabled);
   const createTab = useAppStore((state) => state.createTab);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showConversations, setShowConversations] = useState(false);
@@ -85,12 +87,12 @@ export function AiChatPanel() {
     [deleteConversation]
   );
 
-  const handleClearAll = useCallback(() => {
-    if (window.confirm(t('ai.chat.clear_all_confirm'))) {
+  const handleClearAll = useCallback(async () => {
+    if (await confirm({ title: t('ai.chat.clear_all_confirm') })) {
       clearAllConversations();
     }
     setShowMenu(false);
-  }, [clearAllConversations, t]);
+  }, [clearAllConversations, t, confirm]);
 
   const handleOpenSettings = useCallback(() => {
     createTab('settings');
@@ -290,6 +292,7 @@ export function AiChatPanel() {
         externalValue={inputValue}
         onExternalValueChange={setInputValue}
       />
+      {ConfirmDialog}
     </div>
   );
 }
