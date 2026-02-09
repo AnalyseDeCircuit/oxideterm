@@ -2,6 +2,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { api } from '../../../lib/api';
 import { useIdeStore } from '../../../store/ideStore';
+import { useSessionTreeStore } from '../../../store/sessionTreeStore';
 import { CreateTerminalResponse } from '../../../types';
 
 export type TerminalStatus = 'idle' | 'creating' | 'connected' | 'error' | 'closed';
@@ -26,7 +27,7 @@ interface UseIdeTerminalResult {
 }
 
 export function useIdeTerminal(): UseIdeTerminalResult {
-  const { connectionId, terminalSessionId, setTerminalSession } = useIdeStore();
+  const { nodeId, terminalSessionId, setTerminalSession } = useIdeStore();
   
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [wsToken, setWsToken] = useState<string | null>(null);
@@ -38,8 +39,17 @@ export function useIdeTerminal(): UseIdeTerminalResult {
   
   // 创建终端
   const createTerminal = useCallback(async () => {
+    if (!nodeId) {
+      setError('No node ID');
+      setStatus('error');
+      return;
+    }
+    
+    // Phase 4 bridge: resolve nodeId → connectionId via sessionTreeStore
+    const treeNode = useSessionTreeStore.getState().getNode(nodeId);
+    const connectionId = treeNode?.runtime.connectionId;
     if (!connectionId) {
-      setError('No connection ID');
+      setError('Node not connected');
       setStatus('error');
       return;
     }
@@ -73,7 +83,7 @@ export function useIdeTerminal(): UseIdeTerminalResult {
     } finally {
       creatingRef.current = false;
     }
-  }, [connectionId, setTerminalSession]);
+  }, [nodeId, setTerminalSession]);
   
   // 关闭终端
   const closeTerminal = useCallback(async () => {

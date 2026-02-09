@@ -13,8 +13,7 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { Save, X, AlertCircle, Check, Loader2, WifiOff, RefreshCw } from 'lucide-react';
-import { api } from '../../lib/api';
-import { guardSessionConnection, guardNodeCapability, isConnectionGuardError } from '../../lib/connectionGuard';
+import { nodeSftpWrite } from '../../lib/api';
 import {
   loadLanguage,
   normalizeLanguage,
@@ -48,10 +47,8 @@ interface RemoteFileEditorProps {
   open: boolean;
   /** 关闭回调 */
   onClose: () => void;
-  /** SSH Session ID (resolved, may rotate on reconnect) */
-  sessionId: string;
-  /** Stable node ID for connection guard */
-  nodeId?: string;
+  /** Stable node ID */
+  nodeId: string;
   /** 远程文件路径 */
   filePath: string;
   /** 初始内容 */
@@ -69,7 +66,6 @@ interface RemoteFileEditorProps {
 export function RemoteFileEditor({
   open,
   onClose,
-  sessionId,
   nodeId,
   filePath,
   initialContent,
@@ -126,26 +122,9 @@ export function RemoteFileEditor({
     setIsNetworkErr(false);
 
     try {
-      let effectiveSessionId = sessionId;
-      try {
-        if (nodeId) {
-          const resolved = await guardNodeCapability(nodeId, 'sftp');
-          effectiveSessionId = resolved.sessionId;
-          if (resolved.sessionId !== sessionId) {
-            console.info(`[RemoteFileEditor] Session rotated: ${sessionId} → ${resolved.sessionId}`);
-          }
-        } else {
-          await guardSessionConnection(sessionId);
-        }
-      } catch (err) {
-        if (isConnectionGuardError(err)) {
-          return;
-        }
-        throw err;
-      }
       const currentContent = viewRef.current?.state.doc.toString() || content;
-      // 传递当前编码，保存时转回原编码
-      const result = await api.sftpWriteContent(effectiveSessionId, filePath, currentContent, currentEncoding);
+      // node-first: 直接通过 nodeId 保存
+      const result = await nodeSftpWrite(nodeId, filePath, currentContent);
       setLastSavedMtime(result.mtime);
       setIsDirty(false);
       initialContentRef.current = currentContent;
@@ -170,7 +149,7 @@ export function RemoteFileEditor({
     } finally {
       setIsSaving(false);
     }
-  }, [sessionId, nodeId, filePath, content, currentEncoding, isDirty, isSaving, onSaved, t]);
+  }, [nodeId, filePath, content, currentEncoding, isDirty, isSaving, onSaved, t]);
 
   // 重试保存
   const handleRetry = useCallback(async () => {

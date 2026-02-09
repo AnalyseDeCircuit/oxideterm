@@ -1,0 +1,629 @@
+//! Node-first SFTP commands — Phase 0 of Oxide-Next
+//!
+//! 所有命令接受 nodeId 而非 sessionId。
+//! 内部通过 NodeRouter 解析到具体资源。
+//!
+//! 参考: docs/OXIDE_NEXT_ARCHITECTURE.md §3.2
+
+use std::sync::Arc;
+
+use tauri::{AppHandle, Emitter, State};
+use tracing::info;
+
+use crate::router::{NodeRouter, NodeStateSnapshot, RouteError, TerminalEndpoint};
+use crate::sftp::types::*;
+use crate::ssh::SshConnectionRegistry;
+
+/// 获取节点状态快照（含 generation，用于前端初始对齐）
+#[tauri::command]
+pub async fn node_get_state(
+    node_id: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<NodeStateSnapshot, RouteError> {
+    router.get_node_state(&node_id).await
+}
+
+/// 初始化节点的 SFTP，返回 cwd
+#[tauri::command]
+pub async fn node_sftp_init(
+    node_id: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<String, RouteError> {
+    info!("node_sftp_init: nodeId={}", node_id);
+
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    Ok(sftp.cwd().to_string())
+}
+
+/// 列目录
+#[tauri::command]
+pub async fn node_sftp_list_dir(
+    node_id: String,
+    path: String,
+    filter: Option<ListFilter>,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<Vec<FileInfo>, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.list_dir(&path, filter)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 文件信息
+#[tauri::command]
+pub async fn node_sftp_stat(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<FileInfo, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.stat(&path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 预览文件内容
+#[tauri::command]
+pub async fn node_sftp_preview(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<PreviewContent, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.preview(&path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 写入文件内容（IDE 编辑器用）
+#[tauri::command]
+pub async fn node_sftp_write(
+    node_id: String,
+    path: String,
+    content: String,
+    encoding: Option<String>,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<NodeWriteResult, RouteError> {
+    let target_encoding = encoding.as_deref().unwrap_or("UTF-8");
+    info!(
+        "node_sftp_write: nodeId={}, path={}, encoding={}",
+        node_id, path, target_encoding
+    );
+
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+
+    // 编码转换
+    let encoded_bytes = crate::sftp::types::encode_to_encoding(&content, target_encoding);
+
+    // 写入
+    sftp.write_content(&path, &encoded_bytes)
+        .await
+        .map_err(RouteError::from)?;
+
+    // 获取写入后的元数据
+    let file_info = sftp
+        .stat(&path)
+        .await
+        .map_err(RouteError::from)?;
+
+    info!(
+        "node_sftp_write: wrote {} bytes to {} (encoding: {})",
+        file_info.size, path, target_encoding
+    );
+
+    Ok(NodeWriteResult {
+        mtime: if file_info.modified > 0 {
+            Some(file_info.modified as u64)
+        } else {
+            None
+        },
+        size: Some(file_info.size),
+        encoding_used: target_encoding.to_string(),
+    })
+}
+
+/// 下载文件
+#[tauri::command]
+pub async fn node_sftp_download(
+    node_id: String,
+    remote_path: String,
+    local_path: String,
+    transfer_id: Option<String>,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+    progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
+) -> Result<(), RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    // 进度通道
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+
+    // 进度事件推送（使用 node_id 前缀）
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let sftp = sftp.lock().await;
+    sftp.download_with_resume(
+        &remote_path,
+        &local_path,
+        (*progress_store).clone(),
+        Some(tx),
+        Some((*transfer_manager).clone()),
+        transfer_id,
+    )
+    .await
+    .map(|_| ())
+    .map_err(RouteError::from)
+}
+
+/// 上传文件
+#[tauri::command]
+pub async fn node_sftp_upload(
+    node_id: String,
+    local_path: String,
+    remote_path: String,
+    transfer_id: Option<String>,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+    progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
+) -> Result<(), RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    // 进度通道
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let sftp = sftp.lock().await;
+    sftp.upload_with_resume(
+        &local_path,
+        &remote_path,
+        (*progress_store).clone(),
+        Some(tx),
+        Some((*transfer_manager).clone()),
+        transfer_id,
+    )
+    .await
+    .map(|_| ())
+    .map_err(RouteError::from)
+}
+
+/// 删除文件或目录
+#[tauri::command]
+pub async fn node_sftp_delete(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<(), RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.delete(&path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 创建目录
+#[tauri::command]
+pub async fn node_sftp_mkdir(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<(), RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.mkdir(&path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 重命名/移动文件
+#[tauri::command]
+pub async fn node_sftp_rename(
+    node_id: String,
+    old_path: String,
+    new_path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<(), RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.rename(&old_path, &new_path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 获取终端 WebSocket URL
+#[tauri::command]
+pub async fn node_terminal_url(
+    node_id: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<TerminalEndpoint, RouteError> {
+    router.terminal_url(&node_id).await
+}
+
+// ============================================================================
+// Node-specific types (避免与旧命令冲突)
+// ============================================================================
+
+/// 写入结果（node_sftp_write 返回值）
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeWriteResult {
+    pub mtime: Option<u64>,
+    pub size: Option<u64>,
+    pub encoding_used: String,
+}
+
+// ============================================================================
+// Phase 4: 补全缺失的 node_* 命令
+// ============================================================================
+
+/// 递归删除目录
+#[tauri::command]
+pub async fn node_sftp_delete_recursive(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<u64, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.delete_recursive(&path)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 递归下载目录
+#[tauri::command]
+pub async fn node_sftp_download_dir(
+    node_id: String,
+    remote_path: String,
+    local_path: String,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<u64, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let sftp = sftp.lock().await;
+    sftp.download_dir(&remote_path, &local_path, Some(tx))
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 递归上传目录
+#[tauri::command]
+pub async fn node_sftp_upload_dir(
+    node_id: String,
+    local_path: String,
+    remote_path: String,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<u64, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let sftp = sftp.lock().await;
+    sftp.upload_dir(&local_path, &remote_path, Some(tx))
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 十六进制预览
+#[tauri::command]
+pub async fn node_sftp_preview_hex(
+    node_id: String,
+    path: String,
+    offset: u64,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<PreviewContent, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+    sftp.preview_with_offset(&path, offset)
+        .await
+        .map_err(RouteError::from)
+}
+
+/// 列出未完成的传输
+#[tauri::command]
+pub async fn node_sftp_list_incomplete_transfers(
+    node_id: String,
+    progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
+) -> Result<Vec<crate::commands::sftp::IncompleteTransferInfo>, RouteError> {
+    use crate::sftp::progress::{TransferStatus, TransferType};
+
+    // 使用 node_id 作为 key 查询（后端进度存储以 node_id 为前缀）
+    // 注意：传输进度可能以旧 session_id 或新 node_id 为 key 存储
+    let transfers = progress_store
+        .list_incomplete(&node_id)
+        .await
+        .map_err(RouteError::from)?;
+
+    let result: Vec<crate::commands::sftp::IncompleteTransferInfo> = transfers
+        .into_iter()
+        .map(|t| {
+            let progress_percent = if t.total_bytes > 0 {
+                (t.transferred_bytes as f64 / t.total_bytes as f64) * 100.0
+            } else {
+                0.0
+            };
+            let can_resume = matches!(t.status, TransferStatus::Paused | TransferStatus::Failed);
+            crate::commands::sftp::IncompleteTransferInfo {
+                transfer_id: t.transfer_id,
+                transfer_type: match t.transfer_type {
+                    TransferType::Upload => "Upload",
+                    TransferType::Download => "Download",
+                },
+                source_path: t.source_path.to_string_lossy().to_string(),
+                destination_path: t.destination_path.to_string_lossy().to_string(),
+                transferred_bytes: t.transferred_bytes,
+                total_bytes: t.total_bytes,
+                status: match t.status {
+                    TransferStatus::Active => "Active",
+                    TransferStatus::Paused => "Paused",
+                    TransferStatus::Failed => "Failed",
+                    TransferStatus::Completed => "Completed",
+                    TransferStatus::Cancelled => "Cancelled",
+                },
+                session_id: t.session_id,
+                error: t.error,
+                progress_percent,
+                can_resume,
+            }
+        })
+        .collect();
+
+    Ok(result)
+}
+
+/// 恢复传输（带重试）
+#[tauri::command]
+pub async fn node_sftp_resume_transfer(
+    node_id: String,
+    transfer_id: String,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+    progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
+) -> Result<(), RouteError> {
+    use crate::sftp::progress::TransferType;
+
+    let stored_progress = progress_store
+        .load(&transfer_id)
+        .await
+        .map_err(RouteError::from)?
+        .ok_or_else(|| {
+            RouteError::SftpOperationError("Transfer not found in progress store".to_string())
+        })?;
+
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let sftp = sftp.lock().await;
+    let progress_store_arc = (*progress_store).clone();
+    let transfer_manager_arc = (*transfer_manager).clone();
+
+    match stored_progress.transfer_type {
+        TransferType::Download => {
+            sftp.download_with_resume(
+                &stored_progress.source_path.to_string_lossy(),
+                &stored_progress.destination_path.to_string_lossy(),
+                progress_store_arc,
+                Some(tx),
+                Some(transfer_manager_arc),
+                Some(transfer_id.clone()),
+            )
+            .await
+            .map(|_| ())
+            .map_err(RouteError::from)?;
+        }
+        TransferType::Upload => {
+            sftp.upload_with_resume(
+                &stored_progress.source_path.to_string_lossy(),
+                &stored_progress.destination_path.to_string_lossy(),
+                progress_store_arc,
+                Some(tx),
+                Some(transfer_manager_arc),
+                Some(transfer_id.clone()),
+            )
+            .await
+            .map(|_| ())
+            .map_err(RouteError::from)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// IDE: 打开项目（通过 nodeId 路由到 SFTP）
+#[tauri::command]
+pub async fn node_ide_open_project(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<crate::commands::ide::ProjectInfo, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+
+    let info = sftp
+        .stat(&path)
+        .await
+        .map_err(|e| RouteError::SftpOperationError(format!("Path not found: {}", e)))?;
+
+    use crate::sftp::types::FileType;
+    if info.file_type != FileType::Directory {
+        return Err(RouteError::SftpOperationError(
+            "Path is not a directory".to_string(),
+        ));
+    }
+
+    let git_path = format!("{}/.git", path);
+    let is_git_repo = sftp.stat(&git_path).await.is_ok();
+
+    let git_branch = if is_git_repo {
+        crate::commands::ide::get_git_branch_inner(&sftp, &path)
+            .await
+            .ok()
+    } else {
+        None
+    };
+
+    let name = path
+        .rsplit('/')
+        .next()
+        .unwrap_or("project")
+        .to_string();
+
+    Ok(crate::commands::ide::ProjectInfo {
+        root_path: path,
+        name,
+        is_git_repo,
+        git_branch,
+        file_count: 0,
+    })
+}
+
+/// IDE: 通过 nodeId 执行远程命令
+#[tauri::command]
+pub async fn node_ide_exec_command(
+    node_id: String,
+    command: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+    router: State<'_, Arc<NodeRouter>>,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+) -> Result<crate::commands::ide::ExecResult, RouteError> {
+    // 通过 NodeRouter 解析连接
+    let resolved = router.resolve_connection(&node_id).await?;
+
+    // 委托给现有的 ide_exec_command 逻辑
+    let controller = connection_registry
+        .get_handle_controller(&resolved.connection_id)
+        .ok_or_else(|| {
+            RouteError::NotConnected(format!(
+                "Connection {} not found",
+                resolved.connection_id
+            ))
+        })?;
+
+    crate::commands::ide::exec_command_inner(controller, command, cwd, timeout_secs)
+        .await
+        .map_err(|e| RouteError::SftpOperationError(e))
+}
+
+/// Check if a file is editable (node-first)
+#[tauri::command]
+pub async fn node_ide_check_file(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<crate::commands::ide::FileCheckResult, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+
+    let info = sftp
+        .stat(&path)
+        .await
+        .map_err(RouteError::from)?;
+
+    if info.file_type == FileType::Directory {
+        return Ok(crate::commands::ide::FileCheckResult::NotEditable {
+            reason: "Is a directory".to_string(),
+        });
+    }
+
+    const MAX_EDITABLE: u64 = 10 * 1024 * 1024;
+    if info.size > MAX_EDITABLE {
+        return Ok(crate::commands::ide::FileCheckResult::TooLarge {
+            size: info.size,
+            limit: MAX_EDITABLE,
+        });
+    }
+
+    let preview = sftp
+        .preview(&path)
+        .await
+        .map_err(RouteError::from)?;
+
+    match preview {
+        PreviewContent::Text { .. } => Ok(crate::commands::ide::FileCheckResult::Editable {
+            size: info.size,
+            mtime: info.modified as u64,
+        }),
+        PreviewContent::TooLarge { size, max_size, .. } => {
+            Ok(crate::commands::ide::FileCheckResult::TooLarge {
+                size,
+                limit: max_size,
+            })
+        }
+        PreviewContent::Hex { .. } => Ok(crate::commands::ide::FileCheckResult::Binary),
+        _ => Ok(crate::commands::ide::FileCheckResult::NotEditable {
+            reason: "Unsupported file type".to_string(),
+        }),
+    }
+}
+
+/// Batch stat multiple paths (node-first)
+#[tauri::command]
+pub async fn node_ide_batch_stat(
+    node_id: String,
+    paths: Vec<String>,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<Vec<Option<crate::commands::ide::FileStatInfo>>, RouteError> {
+    let sftp = router.acquire_sftp(&node_id).await?;
+    let sftp = sftp.lock().await;
+
+    let mut results = Vec::with_capacity(paths.len());
+    for path in paths {
+        let stat = sftp.stat(&path).await.ok().map(|info| {
+            crate::commands::ide::FileStatInfo {
+                size: info.size,
+                mtime: info.modified as u64,
+                is_dir: info.file_type == FileType::Directory,
+            }
+        });
+        results.push(stat);
+    }
+
+    Ok(results)
+}

@@ -31,6 +31,7 @@ import {
 } from '../../lib/terminalRegistry';
 import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 
 const PREFILL_REPLAY_LINE_COUNT = 50; // Keep aligned with backend replay count
 
@@ -120,6 +121,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Effective pane ID: use provided paneId or fall back to sessionId
   const effectivePaneId = paneId || sessionId;
   const effectiveTabId = tabId || '';
+  
+  // Derive stable nodeId from sessionTreeStore (for plugin hooks etc.)
+  const nodeId = useSessionTreeStore(s => s.terminalNodeMap.get(sessionId));
   
   // Paste protection state
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
@@ -259,7 +263,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         let payloadCopy = data.slice(HEADER_SIZE, HEADER_SIZE + length);
 
         // Plugin output pipeline (fail-open: exceptions pass original data through)
-        payloadCopy = runOutputPipeline(payloadCopy, sessionId);
+        payloadCopy = runOutputPipeline(payloadCopy, sessionId, nodeId);
         maybeLoadImageAddon(payloadCopy);
 
         if (platform.isWindows) {
@@ -1271,7 +1275,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         }
         
         // Plugin input pipeline (fail-open, null = suppress)
-        const processed = runInputPipeline(data, sessionId);
+        const processed = runInputPipeline(data, sessionId, nodeId);
         if (processed === null) return;
 
         const ws = wsRef.current;

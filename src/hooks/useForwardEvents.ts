@@ -33,9 +33,10 @@ export interface ForwardEvent {
 
 export interface UseForwardEventsOptions {
   /**
-   * Session ID to filter events for (only events for this session will be handled)
+   * Session ID to filter events for (only events for this session will be handled).
+   * If not provided, all events will be handled (useful for node-first components).
    */
-  sessionId: string;
+  sessionId?: string;
   /**
    * Callback when a forward's status changes
    */
@@ -78,8 +79,8 @@ export function useForwardEvents({
 }: UseForwardEventsOptions): void {
   const handleEvent = useCallback(
     (event: ForwardEvent) => {
-      // Filter by session ID
-      if (event.session_id !== sessionId) {
+      // Filter by session ID if provided
+      if (sessionId && event.session_id !== sessionId) {
         return;
       }
 

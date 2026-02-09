@@ -7,6 +7,9 @@
  */
 
 import { toSnapshot } from './pluginUtils';
+import { listen } from '@tauri-apps/api/event';
+import type { NodeStateEvent } from '../../types';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 
 type EventHandler = (data: unknown) => void;
 
@@ -106,23 +109,15 @@ export function setupConnectionBridge(
         }
       }
 
-      // Detect session (terminal) changes
+      // Detect session (terminal) changes (tracked for internal use)
       if (prev) {
         const prevTerminals = new Set(prev.terminalIds);
         const currTerminals = new Set(conn.terminalIds);
 
-        // New sessions
-        for (const tid of currTerminals) {
-          if (!prevTerminals.has(tid)) {
-            pluginEventBridge.emit('session:created', { sessionId: tid, connectionId: id });
-          }
-        }
-        // Removed sessions
-        for (const tid of prevTerminals) {
-          if (!currTerminals.has(tid)) {
-            pluginEventBridge.emit('session:closed', { sessionId: tid });
-          }
-        }
+        // New sessions — no longer emitted as plugin events (use node:ready)
+        // Removed sessions — no longer emitted as plugin events (use node:disconnected)
+        void prevTerminals;
+        void currTerminals;
       }
     }
 
@@ -141,4 +136,38 @@ export function setupConnectionBridge(
   });
 
   return unsubscribe;
+}
+
+/**
+ * Phase 4.5: Wire backend "node:state" Tauri events → plugin node lifecycle events.
+ * Emits 'node:ready' and 'node:disconnected' to the plugin event bridge.
+ *
+ * Call once at app startup. Returns a cleanup function.
+ */
+export async function setupNodeStateBridge(): Promise<() => void> {
+  // Track per-node readiness to detect transitions
+  const nodeReadiness = new Map<string, string>();
+
+  const unlisten = await listen<NodeStateEvent>('node:state', (event) => {
+    const payload = event.payload;
+    if (payload.type !== 'connectionStateChanged') return;
+
+    const { nodeId, state: newState } = payload;
+    const prevState = nodeReadiness.get(nodeId);
+    nodeReadiness.set(nodeId, newState);
+
+    // ready transition → emit node:ready
+    if (newState === 'ready' && prevState !== 'ready') {
+      const node = useSessionTreeStore.getState().getNode(nodeId);
+      const connectionId = node?.runtime.connectionId ?? '';
+      pluginEventBridge.emit('node:ready', { nodeId, connectionId });
+    }
+
+    // disconnected/error → emit node:disconnected
+    if ((newState === 'disconnected' || newState === 'error') && prevState === 'ready') {
+      pluginEventBridge.emit('node:disconnected', { nodeId });
+    }
+  });
+
+  return unlisten;
 }

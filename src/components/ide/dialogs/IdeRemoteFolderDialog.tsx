@@ -10,7 +10,7 @@ import {
   AlertCircle,
   Home,
 } from 'lucide-react';
-import { api } from '../../../lib/api';
+import { nodeSftpListDir } from '../../../lib/api';
 import { cn } from '../../../lib/utils';
 import { FileInfo } from '../../../types';
 import { Button } from '../../ui/button';
@@ -39,7 +39,7 @@ export function IdeRemoteFolderDialog({
   onSelect,
 }: IdeRemoteFolderDialogProps) {
   const { t } = useTranslation();
-  const { sftpSessionId } = useIdeStore();
+  const { nodeId } = useIdeStore();
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [pathInput, setPathInput] = useState(initialPath);
   const [folders, setFolders] = useState<FileInfo[]>([]);
@@ -49,14 +49,14 @@ export function IdeRemoteFolderDialog({
 
   // 加载目录内容
   const loadFolder = useCallback(async (path: string) => {
-    if (!sftpSessionId) return;
+    if (!nodeId) return;
     
     setIsLoading(true);
     setError(null);
     setSelectedFolder(null);
     
     try {
-      const result = await api.sftpListDir(sftpSessionId, path);
+      const result = await nodeSftpListDir(nodeId, path);
       // 只保留目录
       const dirs = result
         .filter(f => f.file_type === 'Directory')
@@ -69,14 +69,14 @@ export function IdeRemoteFolderDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [sftpSessionId]);
+  }, [nodeId]);
 
   // 初始加载
   useEffect(() => {
-    if (open && sftpSessionId) {
+    if (open && nodeId) {
       loadFolder(initialPath);
     }
-  }, [open, initialPath, loadFolder, sftpSessionId]);
+  }, [open, initialPath, loadFolder, nodeId]);
 
   // 进入子目录
   const handleEnterFolder = useCallback((folderName: string) => {

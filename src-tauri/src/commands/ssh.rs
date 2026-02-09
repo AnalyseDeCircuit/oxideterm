@@ -261,6 +261,7 @@ pub async fn create_terminal(
                 // 连接已断开，标记为 LinkDown
                 // 🛑 后端禁止自动重连：只广播事件，等待前端指令
                 warn!("Channel open failed, connection {} may be dead: {}", conn_id, e);
+                let node_emitter = conn_reg.node_emitter(); // Oxide-Next Phase 2
                 tokio::spawn(async move {
                     // 先释放引用
                     let _ = conn_reg.release(&conn_id).await;
@@ -272,6 +273,16 @@ pub async fn create_terminal(
                             entry.set_state(ConnectionState::LinkDown).await;
                             // 发送状态变更事件
                             conn_reg.emit_connection_status_changed(&conn_id, "link_down").await;
+
+                            // Oxide-Next Phase 2: node:state 事件
+                            if let Some(ref emitter) = node_emitter {
+                                emitter.emit_state_from_connection(
+                                    &conn_id,
+                                    &ConnectionState::LinkDown,
+                                    "channel open failed",
+                                );
+                            }
+
                             // ❌ 已删除: conn_reg.start_reconnect(&conn_id).await;
                             // 后端只广播，前端决定是否重连
                         }
@@ -429,6 +440,7 @@ pub async fn create_terminal(
     let registry_clone = session_registry.inner().clone();
     let conn_registry_clone = connection_registry.inner().clone();
     let conn_id_clone = request.connection_id.clone();
+    let node_emitter_ct = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
@@ -458,6 +470,16 @@ pub async fn create_terminal(
                     // 🔴 关键修复：发送 disconnected 事件通知前端
                     // 这样前端可以清理掉对这个已失效 session 的引用
                     conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
+
+                    // Oxide-Next Phase 2: node:state 事件
+                    if let Some(ref emitter) = node_emitter_ct {
+                        emitter.emit_state_from_connection(
+                            &conn_id_clone,
+                            &crate::ssh::ConnectionState::Disconnected,
+                            "WS accept timeout",
+                        );
+                    }
+
                     // 从连接的终端列表中移除
                     let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
                     // 释放连接引用
@@ -771,6 +793,7 @@ pub async fn recreate_terminal_pty(
     let registry_clone = session_registry.inner().clone();
     let conn_registry_clone = connection_registry.inner().clone();
     let conn_id_clone = connection_id.clone();
+    let node_emitter_clone = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!("Recreated session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
@@ -797,6 +820,14 @@ pub async fn recreate_terminal_pty(
                     warn!("Recreated session {} WS accept timeout, removing from registries", session_id_clone);
                     // 🔴 关键修复：发送 disconnected 事件通知前端
                     conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
+                    // Oxide-Next Phase 2: node:state 事件
+                    if let Some(ref emitter) = node_emitter_clone {
+                        emitter.emit_state_from_connection(
+                            &conn_id_clone,
+                            &crate::ssh::ConnectionState::Disconnected,
+                            "WS accept timeout (recreate)",
+                        );
+                    }
                     let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
                     let _ = conn_registry_clone.release(&conn_id_clone).await;
                     let _ = registry_clone.disconnect_complete(&session_id_clone, true);

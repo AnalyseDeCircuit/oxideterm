@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core';
-import { guardSessionConnection } from './connectionGuard';
 import {
   SessionInfo,
   ConnectRequest,
@@ -19,7 +18,6 @@ import {
   BufferStats,
   SearchOptions,
   SearchResult,
-  ListFilter,
   SessionStats,
   QuickHealthCheck,
   IncompleteTransferInfo,
@@ -37,6 +35,8 @@ import {
   ResourceMetrics,
   // Remote environment detection
   RemoteEnvInfo,
+  // Oxide-Next Node State types
+  NodeStateSnapshot,
 } from '../types';
 import type { PluginManifest } from '../types/plugin';
 
@@ -392,126 +392,7 @@ export const api = {
     });
   },
 
-  // ============ SFTP ============
-  sftpInit: async (sessionId: string): Promise<string> => {
-    if (USE_MOCK) return '/home/mock';
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_init', { sessionId });
-  },
-
-  sftpIsInitialized: async (sessionId: string): Promise<boolean> => {
-    if (USE_MOCK) return true;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_is_initialized', { sessionId });
-  },
-
-  sftpListDir: async (sessionId: string, path: string, filter?: ListFilter): Promise<FileInfo[]> => {
-    if (USE_MOCK) return mockFiles;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_list_dir', { sessionId, path, filter: filter || null });
-  },
-
-  sftpStat: async (sessionId: string, path: string): Promise<FileInfo> => {
-    if (USE_MOCK) return mockFiles[0];
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_stat', { sessionId, path });
-  },
-
-  sftpPreview: async (sessionId: string, path: string): Promise<PreviewContent> => {
-    if (USE_MOCK) return { Text: { data: 'Mock preview', mime_type: 'text/plain', language: null, encoding: 'UTF-8' } };
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_preview', { sessionId, path });
-  },
-
-  sftpPreviewHex: async (sessionId: string, path: string, offset: number): Promise<PreviewContent> => {
-    if (USE_MOCK) return { Hex: { data: '00000000  00 00 00 00 |....|', total_size: 16, offset: 0, chunk_size: 16, has_more: false } };
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_preview_hex', { sessionId, path, offset });
-  },
-
-  /**
-   * Write content to a remote file (IDE Mode)
-   * @param encoding Optional target encoding (defaults to "UTF-8")
-   * @returns WriteResult containing the new mtime for sync confirmation and file size
-   */
-  sftpWriteContent: async (
-    sessionId: string,
-    path: string,
-    content: string,
-    encoding?: string
-  ): Promise<{ mtime: number | null; size: number | null; encoding_used: string }> => {
-    if (USE_MOCK) return { mtime: Date.now() / 1000, size: content.length, encoding_used: encoding || 'UTF-8' };
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_write_content', { sessionId, path, content, encoding });
-  },
-
-  sftpDownload: async (sessionId: string, remotePath: string, localPath: string, transferId?: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_download', { sessionId, remotePath, localPath, transferId });
-  },
-
-  sftpUpload: async (sessionId: string, localPath: string, remotePath: string, transferId?: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_upload', { sessionId, localPath, remotePath, transferId });
-  },
-
-  sftpDelete: async (sessionId: string, path: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_delete', { sessionId, path });
-  },
-
-  sftpDeleteRecursive: async (sessionId: string, path: string): Promise<number> => {
-    if (USE_MOCK) return 1;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_delete_recursive', { sessionId, path });
-  },
-
-  sftpDownloadDir: async (sessionId: string, remotePath: string, localPath: string): Promise<number> => {
-    if (USE_MOCK) return 0;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_download_dir', { sessionId, remotePath, localPath });
-  },
-
-  sftpUploadDir: async (sessionId: string, localPath: string, remotePath: string): Promise<number> => {
-    if (USE_MOCK) return 0;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_upload_dir', { sessionId, localPath, remotePath });
-  },
-
-  sftpMkdir: async (sessionId: string, path: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_mkdir', { sessionId, path });
-  },
-
-  sftpRename: async (sessionId: string, oldPath: string, newPath: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_rename', { sessionId, oldPath, newPath });
-  },
-
-  sftpPwd: async (sessionId: string): Promise<string> => {
-    if (USE_MOCK) return '/home/mock';
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_pwd', { sessionId });
-  },
-
-  sftpCd: async (sessionId: string, path: string): Promise<string> => {
-    if (USE_MOCK) return path;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_cd', { sessionId, path });
-  },
-
-  sftpClose: async (sessionId: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_close', { sessionId });
-  },
-
-  // Transfer Control
+  // ============ SFTP Transfer Control ============
   sftpCancelTransfer: async (transferId: string): Promise<void> => {
     if (USE_MOCK) return;
     return invoke('sftp_cancel_transfer', { transferId });
@@ -536,20 +417,6 @@ export const api = {
   sftpUpdateSettings: async (maxConcurrent?: number, speedLimitKbps?: number): Promise<void> => {
     if (USE_MOCK) return;
     return invoke('sftp_update_settings', { maxConcurrent, speedLimitKbps });
-  },
-
-  // SFTP Resume Transfer - List incomplete transfers
-  sftpListIncompleteTransfers: async (sessionId: string): Promise<IncompleteTransferInfo[]> => {
-    if (USE_MOCK) return [];
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_list_incomplete_transfers', { sessionId });
-  },
-
-  // SFTP Resume Transfer - Resume a specific transfer with retry support
-  sftpResumeTransferWithRetry: async (sessionId: string, transferId: string): Promise<void> => {
-    if (USE_MOCK) return;
-    await guardSessionConnection(sessionId);
-    return invoke('sftp_resume_transfer_with_retry', { sessionId, transferId });
   },
 
   // ============ Port Forwarding ============
@@ -636,6 +503,106 @@ export const api = {
   deleteSavedForward: async (forwardId: string): Promise<void> => {
     if (USE_MOCK) return;
     return invoke('delete_saved_forward', { forwardId });
+  },
+
+  // ============ Node-first Port Forwarding (Oxide-Next) ============
+  nodeListForwards: async (nodeId: string): Promise<ForwardRule[]> => {
+    if (USE_MOCK) return [];
+    return invoke('node_list_forwards', { nodeId });
+  },
+
+  nodeCreateForward: async (request: {
+    node_id: string;
+    forward_type: string;
+    bind_address: string;
+    bind_port: number;
+    target_host: string;
+    target_port: number;
+    description?: string;
+    check_health?: boolean;
+  }): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true, forward: { id: 'mock-fwd', forward_type: 'local', bind_address: '127.0.0.1', bind_port: 8080, target_host: 'localhost', target_port: 80, status: 'active' } };
+    return invoke('node_create_forward', {
+      nodeId: request.node_id,
+      forwardType: request.forward_type,
+      bindAddress: request.bind_address,
+      bindPort: request.bind_port,
+      targetHost: request.target_host,
+      targetPort: request.target_port,
+      description: request.description,
+      checkHealth: request.check_health,
+    });
+  },
+
+  nodeStopForward: async (nodeId: string, forwardId: string): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true };
+    return invoke('node_stop_forward', { nodeId, forwardId });
+  },
+
+  nodeDeleteForward: async (nodeId: string, forwardId: string): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true };
+    return invoke('node_delete_forward', { nodeId, forwardId });
+  },
+
+  nodeRestartForward: async (nodeId: string, forwardId: string): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true };
+    return invoke('node_restart_forward', { nodeId, forwardId });
+  },
+
+  nodeUpdateForward: async (request: {
+    node_id: string;
+    forward_id: string;
+    bind_address?: string;
+    bind_port?: number;
+    target_host?: string;
+    target_port?: number;
+    description?: string;
+  }): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true };
+    return invoke('node_update_forward', {
+      nodeId: request.node_id,
+      forwardId: request.forward_id,
+      bindAddress: request.bind_address,
+      bindPort: request.bind_port,
+      targetHost: request.target_host,
+      targetPort: request.target_port,
+      description: request.description,
+    });
+  },
+
+  nodeGetForwardStats: async (nodeId: string, forwardId: string): Promise<{
+    connection_count: number;
+    active_connections: number;
+    bytes_sent: number;
+    bytes_received: number;
+  } | null> => {
+    if (USE_MOCK) return null;
+    return invoke('node_get_forward_stats', { nodeId, forwardId });
+  },
+
+  nodeStopAllForwards: async (nodeId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('node_stop_all_forwards', { nodeId });
+  },
+
+  nodeForwardJupyter: async (nodeId: string, localPort: number, remotePort: number): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true, forward: { id: 'mock-jupyter', forward_type: 'local', bind_address: '127.0.0.1', bind_port: localPort, target_host: 'localhost', target_port: remotePort, status: 'active' } };
+    return invoke('node_forward_jupyter', { nodeId, localPort, remotePort });
+  },
+
+  nodeForwardTensorboard: async (nodeId: string, localPort: number, remotePort: number): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true, forward: { id: 'mock-tensorboard', forward_type: 'local', bind_address: '127.0.0.1', bind_port: localPort, target_host: 'localhost', target_port: remotePort, status: 'active' } };
+    return invoke('node_forward_tensorboard', { nodeId, localPort, remotePort });
+  },
+
+  nodeForwardVscode: async (nodeId: string, localPort: number, remotePort: number): Promise<ForwardResponse> => {
+    if (USE_MOCK) return { success: true, forward: { id: 'mock-vscode', forward_type: 'local', bind_address: '127.0.0.1', bind_port: localPort, target_host: 'localhost', target_port: remotePort, status: 'active' } };
+    return invoke('node_forward_vscode', { nodeId, localPort, remotePort });
+  },
+
+  nodeListSavedForwards: async (nodeId: string): Promise<PersistedForwardInfo[]> => {
+    if (USE_MOCK) return [];
+    return invoke('node_list_saved_forwards', { nodeId });
   },
 
   // ============ Health Check ============
@@ -1269,6 +1236,112 @@ export const api = {
   },
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Oxide-Next Node-First API (Phase 3)
+//
+// 所有函数接受 nodeId 而非 sessionId，后端 NodeRouter 完成 ID 解析。
+// 这些是独立的顶级导出，不属于旧 `api` 对象。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 获取节点状态快照（含 generation，用于初始对齐） */
+export const nodeGetState = (nodeId: string): Promise<NodeStateSnapshot> =>
+  invoke('node_get_state', { nodeId });
+
+/** 初始化节点 SFTP（首次调用时创建 SFTP 通道） */
+export const nodeSftpInit = (nodeId: string): Promise<string> =>
+  invoke('node_sftp_init', { nodeId });
+
+/** 列出远程目录 */
+export const nodeSftpListDir = (nodeId: string, path: string): Promise<FileInfo[]> =>
+  invoke('node_sftp_list_dir', { nodeId, path });
+
+/** 获取远程文件/目录信息 */
+export const nodeSftpStat = (nodeId: string, path: string): Promise<FileInfo> =>
+  invoke('node_sftp_stat', { nodeId, path });
+
+/** 预览远程文件内容 */
+export const nodeSftpPreview = (nodeId: string, path: string, maxSize?: number): Promise<PreviewContent> =>
+  invoke('node_sftp_preview', { nodeId, path, maxSize });
+
+/** 写入远程文件内容 */
+export const nodeSftpWrite = (nodeId: string, path: string, content: string, encoding?: string): Promise<{ mtime: number | null; size: number | null; encodingUsed: string }> =>
+  invoke('node_sftp_write', { nodeId, path, content, encoding });
+
+/** 下载远程文件到本地 */
+export const nodeSftpDownload = (nodeId: string, remotePath: string, localPath: string, transferId?: string): Promise<void> =>
+  invoke('node_sftp_download', { nodeId, remotePath, localPath, transferId });
+
+/** 上传本地文件到远程 */
+export const nodeSftpUpload = (nodeId: string, localPath: string, remotePath: string, transferId?: string): Promise<void> =>
+  invoke('node_sftp_upload', { nodeId, localPath, remotePath, transferId });
+
+/** 删除远程文件 */
+export const nodeSftpDelete = (nodeId: string, path: string): Promise<void> =>
+  invoke('node_sftp_delete', { nodeId, path });
+
+/** 递归删除目录 */
+export const nodeSftpDeleteRecursive = (nodeId: string, path: string): Promise<number> =>
+  invoke('node_sftp_delete_recursive', { nodeId, path });
+
+/** 创建远程目录 */
+export const nodeSftpMkdir = (nodeId: string, path: string): Promise<void> =>
+  invoke('node_sftp_mkdir', { nodeId, path });
+
+/** 重命名远程文件或目录 */
+export const nodeSftpRename = (nodeId: string, oldPath: string, newPath: string): Promise<void> =>
+  invoke('node_sftp_rename', { nodeId, oldPath, newPath });
+
+/** 递归下载目录 */
+export const nodeSftpDownloadDir = (nodeId: string, remotePath: string, localPath: string): Promise<number> =>
+  invoke('node_sftp_download_dir', { nodeId, remotePath, localPath });
+
+/** 递归上传目录 */
+export const nodeSftpUploadDir = (nodeId: string, localPath: string, remotePath: string): Promise<number> =>
+  invoke('node_sftp_upload_dir', { nodeId, localPath, remotePath });
+
+/** 十六进制预览 */
+export const nodeSftpPreviewHex = (nodeId: string, path: string, offset: number): Promise<PreviewContent> =>
+  invoke('node_sftp_preview_hex', { nodeId, path, offset });
+
+/** 列出未完成的传输 */
+export const nodeSftpListIncompleteTransfers = (nodeId: string): Promise<IncompleteTransferInfo[]> =>
+  invoke('node_sftp_list_incomplete_transfers', { nodeId });
+
+/** 恢复传输（带重试） */
+export const nodeSftpResumeTransfer = (nodeId: string, transferId: string): Promise<void> =>
+  invoke('node_sftp_resume_transfer', { nodeId, transferId });
+
+/** IDE: 打开项目 */
+export const nodeIdeOpenProject = (nodeId: string, path: string): Promise<{
+  rootPath: string; name: string; isGitRepo: boolean; gitBranch: string | null; fileCount: number;
+}> =>
+  invoke('node_ide_open_project', { nodeId, path });
+
+/** IDE: 执行远程命令 */
+export const nodeIdeExecCommand = (nodeId: string, command: string, cwd?: string, timeoutSecs?: number): Promise<{
+  stdout: string; stderr: string; exitCode: number | null;
+}> =>
+  invoke('node_ide_exec_command', { nodeId, command, cwd, timeoutSecs });
+
+/** IDE: 检查文件是否可编辑 */
+export const nodeIdeCheckFile = (nodeId: string, path: string): Promise<
+  | { type: 'editable'; size: number; mtime: number }
+  | { type: 'too_large'; size: number; limit: number }
+  | { type: 'binary' }
+  | { type: 'not_editable'; reason: string }
+> =>
+  invoke('node_ide_check_file', { nodeId, path });
+
+/** IDE: 批量 stat 多个路径 */
+export const nodeIdeBatchStat = (nodeId: string, paths: string[]): Promise<
+  Array<{ size: number; mtime: number; isDir: boolean } | null>
+> =>
+  invoke('node_ide_batch_stat', { nodeId, paths });
+
+/** 获取节点终端 WebSocket 端点 */
+export const nodeTerminalUrl = (nodeId: string): Promise<{ wsPort: number; wsToken: string; sessionId: string }> =>
+  invoke('node_terminal_url', { nodeId });
+
 
 // --- Mock Data Helpers ---
 
@@ -1297,12 +1370,6 @@ const mockConnections: ConnectionInfo[] = [
 const mockSshKeys: SshKeyInfo[] = [
   { name: 'id_rsa', path: '/Users/mock/.ssh/id_rsa', key_type: 'RSA', has_passphrase: true },
   { name: 'id_ed25519', path: '/Users/mock/.ssh/id_ed25519', key_type: 'ED25519', has_passphrase: false },
-];
-
-const mockFiles: FileInfo[] = [
-    { name: 'Documents', path: '/home/user/Documents', file_type: 'Directory', size: 0, modified: Date.now(), permissions: 'drwxr-xr-x' },
-    { name: 'Downloads', path: '/home/user/Downloads', file_type: 'Directory', size: 0, modified: Date.now(), permissions: 'drwxr-xr-x' },
-    { name: 'project.rs', path: '/home/user/project.rs', file_type: 'File', size: 1024, modified: Date.now(), permissions: '-rw-r--r--' },
 ];
 
 const mockHealthMetrics: HealthMetrics = {

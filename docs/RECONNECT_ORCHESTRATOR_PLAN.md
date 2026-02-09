@@ -26,7 +26,7 @@ Introduce a frontend-only reconnect orchestrator to replace the current debounce
 ## Constraints (From Code Verification)
 1. `resetNodeState` closes terminals via `api.closeTerminal()`, which triggers `forwarding_registry.remove()` on the backend, **permanently destroying forwarding rules and persisted data**. Snapshots MUST be captured before `reconnectCascade` is called.
 2. `recreate_terminal_pty` reuses the existing session on the same connection — but since reconnect always creates a new connectionId, old sessions become orphaned and new ones must be created fresh.
-3. `sftp_list_incomplete_transfers` queries by old session_id. Progress data survives `close_terminal` (separate storage). Can resume on a new session by passing new session_id.
+3. `node_sftp_list_incomplete_transfers` queries by nodeId. Progress data survives `close_terminal` (separate storage). Can resume on the same node after reconnection.
 4. Backend `pause_forwards`/`restore_forwards` exist but are not exposed to frontend API layer. Use `listPortForwards` + `createPortForward` instead.
 5. `connectNodeWithAncestors` calls `resetNodeState` internally — no hook between them. Snapshot must happen BEFORE entering `reconnectCascade`.
 
@@ -116,11 +116,11 @@ Core methods:
 3. For each old session ID:
    a. Call `api.listPortForwards(sessionId)` to snapshot forward rules.
    b. Filter: keep only rules with `status !== 'stopped'` (respect user intent).
-4. Snapshot incomplete SFTP transfers (`api.sftpListIncompleteTransfers`) BEFORE `resetNodeState` destroys old sessions. This is critical because `guardSessionConnection` will fail for old sessions after reset.
+4. Snapshot incomplete SFTP transfers (`nodeSftpListIncompleteTransfers`) BEFORE `resetNodeState` destroys old sessions.
 5. Check `ideStore`: if current project's nodeId matches, save `{ projectPath, tabPaths, connectionId }`.
 6. Store snapshot in job with `snapshotAt` timestamp (used for user intent detection in Phase 5).
 
-**Why this works**: `listPortForwards` and `sftpListIncompleteTransfers` query the backend which still exists at this point. `resetNodeState` hasn't been called yet.
+**Why this works**: `listPortForwards` and `nodeSftpListIncompleteTransfers` query the backend which still exists at this point. `resetNodeState` hasn't been called yet.
 
 ### Phase 1: `ssh-connect`
 
@@ -163,9 +163,9 @@ Orchestrator waits for the new `terminalSessionId` to appear:
 1. Use pre-captured incomplete transfers from `snapshot.incompleteTransfers` (captured in Phase 0 before `resetNodeState` destroyed old sessions).
 2. Ensure SFTP sessions are initialized for all affected nodes before resuming (call `openSftpForNode` if needed).
 3. For each incomplete transfer entry:
-   a. Look up new sessionId from mapping.
+   a. The nodeId is already known from the snapshot.
    b. For each incomplete transfer:
-      - Call `api.sftpResumeTransferWithRetry(newSessionId, transferId)`.
+      - Call `nodeSftpResumeTransfer(nodeId, transferId)`.
       - On failure: log warning, continue.
       - On success: update `transferStore`, increment `restoredCount`.
 4. Check `abortController.signal` between each transfer.
@@ -174,12 +174,12 @@ Orchestrator waits for the new `terminalSessionId` to appear:
 
 1. If `snapshot.ideSnapshot` exists:
    a. Use `topologyResolver.getNodeId(ideSnapshot.connectionId)` to find the target node.
-   b. Look up new `connectionId` and `sftpSessionId` from current node state.
+   b. Look up new `connectionId` from current node state (SFTP is managed by ConnectionEntry, no separate sftpSessionId needed).
    c. **User intent detection**: Skip if user changed project or closed IDE after snapshot:
       - If `ideStore.project` exists with a different `rootPath`, skip (user changed project).
       - If `ideStore.project` exists with the same `rootPath`, skip (already open).
       - If `ideStore.lastClosedAt > snapshot.snapshotAt`, skip (user intentionally closed IDE).
-   d. Call `ideStore.openProject(connectionId, sftpSessionId, projectPath)`.
+   d. Call `ideStore.openProject(nodeId, projectPath)`.
    e. For each cached tab path: call `ideStore.openFile(path)`.
    f. Do NOT restore `content`/`originalContent` (files will be re-fetched from remote).
 2. To enable this, enhance `ideStore.partialize` to persist `cachedProjectPath` and `cachedTabPaths`.

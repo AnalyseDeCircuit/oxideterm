@@ -195,7 +195,7 @@ pub async fn ide_batch_stat(
 // Internal Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-async fn get_git_branch_inner(
+pub(crate) async fn get_git_branch_inner(
     sftp: &tokio::sync::MutexGuard<'_, crate::sftp::session::SftpSession>,
     project_path: &str,
 ) -> Result<String, String> {
@@ -229,13 +229,22 @@ pub async fn ide_exec_command(
     timeout_secs: Option<u64>,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
 ) -> Result<ExecResult, String> {
-    use tokio::time::{timeout, Duration};
-    use tracing::{debug, warn};
-
-    // Get the HandleController for this connection
     let controller = connection_registry
         .get_handle_controller(&connection_id)
         .ok_or_else(|| format!("Connection not found: {}", connection_id))?;
+
+    exec_command_inner(controller, command, cwd, timeout_secs).await
+}
+
+/// 执行远程命令的内部实现（供 node_ide_exec_command 复用）
+pub(crate) async fn exec_command_inner(
+    controller: crate::ssh::HandleController,
+    command: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<ExecResult, String> {
+    use tokio::time::{timeout, Duration};
+    use tracing::{debug, warn};
 
     // Open a new session channel
     let mut channel = controller

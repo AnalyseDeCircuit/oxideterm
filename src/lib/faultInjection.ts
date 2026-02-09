@@ -7,8 +7,10 @@
  * Usage (browser console):
  *   window.__faultInjection.enable('linkDown', { delayMs: 2000 })
  *   window.__faultInjection.enable('sessionRotation')
- *   window.__faultInjection.enable('refreshDelay', { delayMs: 5000 })
  *   window.__faultInjection.enable('tabStorm', { count: 20 })
+ *   window.__faultInjection.enable('nodeDisconnect', { delayMs: 5000 })
+ *   window.__faultInjection.enable('sftpInitFail', { probability: 0.5 })
+ *   window.__faultInjection.enable('forwardCreateFail')
  *   window.__faultInjection.disable('linkDown')
  *   window.__faultInjection.status()
  *
@@ -18,8 +20,10 @@
 export type FaultType =
   | 'linkDown'          // Simulate link_down event
   | 'sessionRotation'   // Simulate sessionId rotation (new PTY)
-  | 'refreshDelay'      // Delay refreshConnections response
-  | 'tabStorm';         // Rapid tab switch/create storm
+  | 'tabStorm'          // Rapid tab switch/create storm
+  | 'nodeDisconnect'    // Simulate node disconnection (tests reconnect orchestrator)
+  | 'sftpInitFail'      // Simulate SFTP init failure (tests auto-retry in SFTPView)
+  | 'forwardCreateFail'; // Simulate forward creation failure (tests ForwardsView error handling)
 
 interface FaultConfig {
   enabled: boolean;

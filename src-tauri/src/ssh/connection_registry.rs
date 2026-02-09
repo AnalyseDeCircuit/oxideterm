@@ -47,6 +47,8 @@ use tracing::{debug, error, info, warn};
 use super::handle_owner::HandleController;
 use super::{AuthMethod as SshAuthMethod, SshClient, SshConfig};
 use crate::session::{AuthMethod, RemoteEnvInfo, SessionConfig};
+use crate::sftp::error::SftpError;
+use crate::sftp::session::SftpSession;
 
 /// 默认空闲超时时间（30 分钟）
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -188,11 +190,12 @@ pub struct ConnectionPoolStats {
 /// 2. `keep_alive` (RwLock)
 /// 3. `terminal_ids` (RwLock)
 /// 4. `sftp_session_id` (RwLock)
-/// 5. `forward_ids` (RwLock)
-/// 6. `last_emitted_status` (RwLock)
-/// 7. `idle_timer` (Mutex)
-/// 8. `heartbeat_task` (Mutex)
-/// 9. `reconnect_task` (Mutex)
+/// 5. `sftp` (tokio::sync::Mutex) — Oxide-Next Phase 1.5
+/// 6. `forward_ids` (RwLock)
+/// 7. `last_emitted_status` (RwLock)
+/// 8. `idle_timer` (Mutex)
+/// 9. `heartbeat_task` (Mutex)
+/// 10. `reconnect_task` (Mutex)
 ///
 /// 注意：大多数方法只获取单个锁，无需担心顺序。此约定仅在需要
 /// 同时持有多个锁时适用（目前代码中几乎不存在这种情况）。
@@ -229,6 +232,17 @@ pub struct ConnectionEntry {
 
     /// 关联的 SFTP session ID
     sftp_session_id: RwLock<Option<String>>,
+
+    /// SFTP session 实例 — Oxide-Next Phase 1.5 唯一真源
+    ///
+    /// SFTP session 的生命周期与连接绑定：
+    /// - 连接断开时自动 drop（`clear_sftp()`）
+    /// - 连接重连后按需重建（`acquire_sftp()`）
+    /// - 终端重建不影响 SFTP
+    ///
+    /// 使用 `tokio::sync::Mutex` 包裹 Option，确保 acquire_sftp()
+    /// 的双重检查锁在 await 点安全。
+    sftp: tokio::sync::Mutex<Option<Arc<tokio::sync::Mutex<SftpSession>>>>,
 
     /// 关联的 forward IDs
     forward_ids: RwLock<Vec<String>>,
@@ -371,6 +385,74 @@ impl ConnectionEntry {
     /// 获取关联的 SFTP session ID
     pub async fn sftp_session_id(&self) -> Option<String> {
         self.sftp_session_id.read().await.clone()
+    }
+
+    // ========================================================================
+    // Oxide-Next Phase 1.5: SFTP 连接级生命周期管理
+    // ========================================================================
+
+    /// 获取或创建 SFTP session（双重检查锁）。
+    ///
+    /// 这是 **全系统唯一** 的 SFTP 创建入口：
+    /// - `NodeRouter.acquire_sftp(nodeId)` → `conn.acquire_sftp()`
+    /// 所有 SFTP 操作通过 NodeRouter 路由到此方法。
+    ///
+    /// 参考: docs/OXIDE_NEXT_ARCHITECTURE.md §3.3
+    pub async fn acquire_sftp(&self) -> Result<Arc<tokio::sync::Mutex<SftpSession>>, SftpError> {
+        // 快速路径：检查是否已有 SFTP session
+        {
+            let guard = self.sftp.lock().await;
+            if let Some(ref sftp) = *guard {
+                return Ok(Arc::clone(sftp));
+            }
+        }
+
+        // 慢路径：创建新的 SFTP session
+        // 注意：在持有 Mutex 之外创建 SftpSession（创建过程需要 await）
+        let new_sftp = SftpSession::new(
+            self.handle_controller.clone(),
+            self.id.clone(),
+        ).await?;
+
+        let arc = Arc::new(tokio::sync::Mutex::new(new_sftp));
+
+        // 二次检查（另一个 task 可能已抢先创建）
+        let mut guard = self.sftp.lock().await;
+        if let Some(ref existing) = *guard {
+            // 另一个 task 已经创建了，丢弃我们的，返回已有的
+            return Ok(Arc::clone(existing));
+        }
+
+        *guard = Some(Arc::clone(&arc));
+        info!("Created SFTP session for connection {}", self.id);
+        Ok(arc)
+    }
+
+    /// 清除 SFTP session（连接断开时调用）。
+    ///
+    /// SFTP session 随连接自动释放，无僵尸通道。
+    pub async fn clear_sftp(&self) {
+        let mut guard = self.sftp.lock().await;
+        if guard.is_some() {
+            *guard = None;
+            info!("Cleared SFTP session for connection {}", self.id);
+        }
+    }
+
+    /// 检查是否有活跃的 SFTP session
+    pub async fn has_sftp(&self) -> bool {
+        self.sftp.lock().await.is_some()
+    }
+
+    /// 获取 SFTP session 的 cwd（如果存在）
+    pub async fn sftp_cwd(&self) -> Option<String> {
+        let guard = self.sftp.lock().await;
+        if let Some(ref sftp_arc) = *guard {
+            let sftp = sftp_arc.lock().await;
+            Some(sftp.cwd().to_string())
+        } else {
+            None
+        }
     }
 
     /// 添加关联的 forward ID
@@ -543,6 +625,9 @@ pub struct SshConnectionRegistry {
 
     /// 待发送的事件（AppHandle 未就绪时缓存）
     pending_events: Mutex<Vec<(String, String)>>,
+
+    /// Oxide-Next Phase 2: 节点事件发射器
+    node_event_emitter: parking_lot::RwLock<Option<Arc<crate::router::NodeEventEmitter>>>,
 }
 
 impl Default for SshConnectionRegistry {
@@ -559,6 +644,7 @@ impl SshConnectionRegistry {
             config: RwLock::new(ConnectionPoolConfig::default()),
             app_handle: RwLock::new(None),
             pending_events: Mutex::new(Vec::new()),
+            node_event_emitter: parking_lot::RwLock::new(None),
         }
     }
 
@@ -569,6 +655,7 @@ impl SshConnectionRegistry {
             config: RwLock::new(config),
             app_handle: RwLock::new(None),
             pending_events: Mutex::new(Vec::new()),
+            node_event_emitter: parking_lot::RwLock::new(None),
         }
     }
 
@@ -611,6 +698,19 @@ impl SshConnectionRegistry {
         // 设置 AppHandle
         *self.app_handle.write().await = Some(handle);
         info!("AppHandle registered and ready");
+    }
+
+    /// 设置 NodeEventEmitter（Phase 2 事件推送）
+    ///
+    /// 在 Tauri setup 阶段调用，NodeRouter 创建之后。
+    pub fn set_node_event_emitter(&self, emitter: Arc<crate::router::NodeEventEmitter>) {
+        *self.node_event_emitter.write() = Some(emitter);
+        info!("NodeEventEmitter injected into SshConnectionRegistry");
+    }
+
+    /// 获取 NodeEventEmitter 引用（内部使用）
+    pub(crate) fn node_emitter(&self) -> Option<Arc<crate::router::NodeEventEmitter>> {
+        self.node_event_emitter.read().clone()
     }
 
     /// 获取配置
@@ -776,6 +876,7 @@ impl SshConnectionRegistry {
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
             sftp_session_id: RwLock::new(None),
+            sftp: tokio::sync::Mutex::new(None),
             forward_ids: RwLock::new(Vec::new()),
             heartbeat_task: Mutex::new(None),
             heartbeat_failures: AtomicU32::new(0),
@@ -795,6 +896,18 @@ impl SshConnectionRegistry {
 
         // 启动远程环境检测（异步，不阻塞）
         self.spawn_env_detection(&connection_id);
+
+        // Oxide-Next Phase 2: 发射连接就绪事件
+        // 注：初次连接时 conn_to_node 映射通常尚未注册（前端在 connect 返回后才调用
+        // set_tree_node_connection），因此此处 emit 通常是 no-op。
+        // 但对重连场景（映射已存在），此处 emit 有效。
+        if let Some(emitter) = self.node_emitter() {
+            emitter.emit_state_from_connection(
+                &connection_id,
+                &ConnectionState::Active,
+                "connected",
+            );
+        }
 
         Ok(connection_id)
     }
@@ -1032,6 +1145,7 @@ impl SshConnectionRegistry {
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
             sftp_session_id: RwLock::new(None),
+            sftp: tokio::sync::Mutex::new(None),
             forward_ids: RwLock::new(Vec::new()),
             heartbeat_task: Mutex::new(None),
             heartbeat_failures: AtomicU32::new(0),
@@ -1058,6 +1172,15 @@ impl SshConnectionRegistry {
 
         // 启动远程环境检测（异步，不阻塞）
         self.spawn_env_detection(&connection_id);
+
+        // Oxide-Next Phase 2: 发射隧道连接就绪事件（同 connect，通常 no-op）
+        if let Some(emitter) = self.node_emitter() {
+            emitter.emit_state_from_connection(
+                &connection_id,
+                &ConnectionState::Active,
+                "tunnel connected",
+            );
+        }
 
         Ok(connection_id)
     }
@@ -1248,6 +1371,15 @@ impl SshConnectionRegistry {
                 "Connection {} reactivated (ref_count: 0 -> 1)",
                 connection_id
             );
+
+            // Oxide-Next Phase 2: Idle → Active 事件
+            if let Some(emitter) = self.node_emitter() {
+                emitter.emit_state_from_connection(
+                    connection_id,
+                    &ConnectionState::Active,
+                    "reactivated",
+                );
+            }
         }
 
         Ok(conn.handle_controller.clone())
@@ -1277,6 +1409,15 @@ impl SshConnectionRegistry {
                     connection_id
                 );
                 conn.set_state(ConnectionState::Idle).await;
+
+                // Oxide-Next Phase 2: Active → Idle 事件
+                if let Some(emitter) = self.node_emitter() {
+                    emitter.emit_state_from_connection(
+                        connection_id,
+                        &ConnectionState::Idle,
+                        "idle (keep_alive)",
+                    );
+                }
             } else {
                 self.start_idle_timer(&conn).await;
             }
@@ -1298,8 +1439,18 @@ impl SshConnectionRegistry {
 
         conn.set_state(ConnectionState::Idle).await;
 
+        // Oxide-Next Phase 2: Active → Idle 事件
+        if let Some(emitter) = self.node_emitter() {
+            emitter.emit_state_from_connection(
+                &connection_id,
+                &ConnectionState::Idle,
+                "idle (timer started)",
+            );
+        }
+
         let conn_clone = conn.clone();
         let connections = self.connections.clone();
+        let node_emitter = self.node_emitter();
 
         let handle = tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
@@ -1312,8 +1463,21 @@ impl SshConnectionRegistry {
                 );
 
                 // 断开连接
+                conn_clone.clear_sftp().await; // Oxide-Next Phase 1.5: 清理 SFTP
                 conn_clone.handle_controller.disconnect().await;
                 conn_clone.set_state(ConnectionState::Disconnected).await;
+
+                // Oxide-Next Phase 2: 空闲超时 → Disconnected 事件
+                if let Some(ref emitter) = node_emitter {
+                    emitter.emit_sftp_ready(&connection_id, false, None);
+                    emitter.emit_state_from_connection(
+                        &connection_id,
+                        &ConnectionState::Disconnected,
+                        "idle timeout",
+                    );
+                    // 注销映射
+                    emitter.unregister(&connection_id);
+                }
 
                 // 从注册表移除
                 connections.remove(&connection_id);
@@ -1404,6 +1568,9 @@ impl SshConnectionRegistry {
         // 取消重连任务（如果有）
         conn.cancel_reconnect().await;
 
+        // Oxide-Next Phase 1.5: 清理 SFTP session
+        conn.clear_sftp().await;
+
         // 设置状态为断开中
         conn.set_state(ConnectionState::Disconnecting).await;
 
@@ -1412,6 +1579,17 @@ impl SshConnectionRegistry {
 
         // 设置状态为已断开
         conn.set_state(ConnectionState::Disconnected).await;
+
+        // Oxide-Next Phase 2: 发射断开事件 + SFTP 销毁 + 注销映射
+        if let Some(emitter) = self.node_emitter() {
+            emitter.emit_sftp_ready(connection_id, false, None);
+            emitter.emit_state_from_connection(
+                connection_id,
+                &ConnectionState::Disconnected,
+                "force disconnect",
+            );
+            emitter.unregister(connection_id);
+        }
 
         // 从注册表移除
         self.connections.remove(connection_id);
@@ -1475,9 +1653,22 @@ impl SshConnectionRegistry {
         conn.cancel_idle_timer().await;
         conn.cancel_heartbeat().await;
         conn.cancel_reconnect().await;
+        conn.clear_sftp().await; // Oxide-Next Phase 1.5
         conn.set_state(ConnectionState::Disconnecting).await;
         conn.handle_controller.disconnect().await;
         conn.set_state(ConnectionState::Disconnected).await;
+
+        // Oxide-Next Phase 2: 发射断开事件 + SFTP 销毁 + 注销映射
+        if let Some(emitter) = self.node_emitter() {
+            emitter.emit_sftp_ready(connection_id, false, None);
+            emitter.emit_state_from_connection(
+                connection_id,
+                &ConnectionState::Disconnected,
+                "cascade disconnect",
+            );
+            emitter.unregister(connection_id);
+        }
+
         self.connections.remove(connection_id);
 
         info!("Connection {} disconnected and removed (no parent release)", connection_id);
@@ -1563,6 +1754,7 @@ impl SshConnectionRegistry {
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(vec![session_id]),
             sftp_session_id: RwLock::new(None),
+            sftp: tokio::sync::Mutex::new(None),
             forward_ids: RwLock::new(Vec::new()),
             heartbeat_task: Mutex::new(None),
             heartbeat_failures: AtomicU32::new(0),
@@ -1730,6 +1922,7 @@ impl SshConnectionRegistry {
         let conn = entry.value().clone();
         let registry = Arc::clone(self);
         let connection_id = connection_id.to_string();
+        let node_emitter = self.node_emitter(); // Oxide-Next Phase 2
 
         let task = tokio::spawn(async move {
             info!("Heartbeat task started for connection {} (interval={}s, threshold={})", 
@@ -1764,6 +1957,16 @@ impl SshConnectionRegistry {
                         error!("Connection {} IO error detected, link_down broadcast only", connection_id);
                         conn.set_state(ConnectionState::LinkDown).await;
                         registry.emit_connection_status_changed(&connection_id, "link_down").await;
+
+                        // Oxide-Next Phase 2: node:state 事件
+                        if let Some(ref emitter) = node_emitter {
+                            emitter.emit_state_from_connection(
+                                &connection_id,
+                                &ConnectionState::LinkDown,
+                                "heartbeat IO error",
+                            );
+                        }
+
                         // ❌ 已删除: registry.start_reconnect(&connection_id).await;
                         break;
                     }
@@ -1784,6 +1987,15 @@ impl SshConnectionRegistry {
 
                             // 广播状态变更事件
                             registry.emit_connection_status_changed(&connection_id, "link_down").await;
+
+                            // Oxide-Next Phase 2: node:state 事件
+                            if let Some(ref emitter) = node_emitter {
+                                emitter.emit_state_from_connection(
+                                    &connection_id,
+                                    &ConnectionState::LinkDown,
+                                    "heartbeat timeout threshold",
+                                );
+                            }
 
                             // ❌ 已删除: registry.start_reconnect(&connection_id).await;
                             // 后端只广播，前端决定是否重连
@@ -2104,6 +2316,7 @@ mod tests {
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
             sftp_session_id: RwLock::new(None),
+            sftp: tokio::sync::Mutex::new(None),
             forward_ids: RwLock::new(Vec::new()),
             heartbeat_task: Mutex::new(None),
             heartbeat_failures: AtomicU32::new(0),

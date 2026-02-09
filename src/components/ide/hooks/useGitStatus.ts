@@ -1,7 +1,7 @@
 // src/components/ide/hooks/useGitStatus.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIdeStore, registerGitRefreshCallback } from '../../../store/ideStore';
-import { api } from '../../../lib/api';
+import { nodeIdeExecCommand } from '../../../lib/api';
 
 // 防抖函数
 function debounce<T extends (...args: unknown[]) => unknown>(
@@ -176,7 +176,7 @@ const DEBOUNCE_DELAY_MS = 1000;
  * ```
  */
 export function useGitStatus(): UseGitStatusResult {
-  const { project, connectionId } = useIdeStore();
+  const { project, nodeId } = useIdeStore();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,7 +187,7 @@ export function useGitStatus(): UseGitStatusResult {
    * 执行 git status --porcelain=v1 --branch 并解析输出
    */
   const refresh = useCallback(async () => {
-    if (!project?.isGitRepo || !connectionId) {
+    if (!project?.isGitRepo || !nodeId) {
       setStatus(null);
       return;
     }
@@ -197,8 +197,8 @@ export function useGitStatus(): UseGitStatusResult {
     
     try {
       // 执行 git status 命令
-      const result = await api.ideExecCommand(
-        connectionId,
+      const result = await nodeIdeExecCommand(
+        nodeId,
         'git status --porcelain=v1 --branch 2>/dev/null',
         project.rootPath,
         10 // 10秒超时
@@ -238,7 +238,7 @@ export function useGitStatus(): UseGitStatusResult {
     } finally {
       setIsLoading(false);
     }
-  }, [project, connectionId]);
+  }, [project, nodeId]);
   
   /**
    * 获取特定文件的 Git 状态

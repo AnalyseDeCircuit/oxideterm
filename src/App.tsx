@@ -14,7 +14,7 @@ import { useAppShortcuts, ShortcutDefinition, isTerminalReservedKey } from './ho
 import { useSplitPaneShortcuts } from './hooks/useSplitPaneShortcuts';
 import { preloadTerminalFonts } from './lib/fontLoader';
 import { initializePluginSystem } from './lib/plugin/pluginLoader';
-import { setupConnectionBridge, pluginEventBridge } from './lib/plugin/pluginEventBridge';
+import { setupConnectionBridge, setupNodeStateBridge, pluginEventBridge } from './lib/plugin/pluginEventBridge';
 import { useToastStore } from './hooks/useToast';
 import { PluginConfirmDialog } from './components/plugin/PluginConfirmDialog';
 
@@ -57,6 +57,8 @@ function App() {
   // Initialize plugin system (discover + load enabled plugins)
   useEffect(() => {
     const bridgeCleanup = setupConnectionBridge(useAppStore);
+    let nodeStateBridgeCleanup: (() => void) | undefined;
+    setupNodeStateBridge().then(cleanup => { nodeStateBridgeCleanup = cleanup; });
 
     // Wire plugin toast events → app toast system
     const toastCleanup = pluginEventBridge.on('plugin:toast', (data) => {
@@ -74,6 +76,7 @@ function App() {
     });
     return () => {
       bridgeCleanup();
+      nodeStateBridgeCleanup?.();
       toastCleanup();
     };
   }, []);
