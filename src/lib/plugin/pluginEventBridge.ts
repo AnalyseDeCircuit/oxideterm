@@ -142,17 +142,32 @@ export function setupConnectionBridge(
  * Phase 4.5: Wire backend "node:state" Tauri events → plugin node lifecycle events.
  * Emits 'node:ready' and 'node:disconnected' to the plugin event bridge.
  *
+ * Generation-based ordering: per-node generation tracking ensures out-of-order
+ * events (rare but possible under high load) are dropped before they trigger
+ * spurious lifecycle transitions in plugins.
+ *
  * Call once at app startup. Returns a cleanup function.
  */
 export async function setupNodeStateBridge(): Promise<() => void> {
   // Track per-node readiness to detect transitions
   const nodeReadiness = new Map<string, string>();
+  // Track per-node generation to drop out-of-order events
+  const nodeGeneration = new Map<string, number>();
 
   const unlisten = await listen<NodeStateEvent>('node:state', (event) => {
     const payload = event.payload;
     if (payload.type !== 'connectionStateChanged') return;
 
-    const { nodeId, state: newState } = payload;
+    const { nodeId, generation, state: newState } = payload;
+
+    // Generation guard: drop stale/out-of-order events
+    const prevGen = nodeGeneration.get(nodeId) ?? 0;
+    if (generation <= prevGen) {
+      console.debug(`[PluginEventBridge] Dropping stale node:state for ${nodeId} (gen ${generation} <= ${prevGen})`);
+      return;
+    }
+    nodeGeneration.set(nodeId, generation);
+
     const prevState = nodeReadiness.get(nodeId);
     nodeReadiness.set(nodeId, newState);
 
