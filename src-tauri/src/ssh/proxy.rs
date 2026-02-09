@@ -261,8 +261,7 @@ async fn direct_connect(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&handle, &hop.username).await?;
-            // Agent authentication returns () on success, set flag manually
+            agent.authenticate(&mut handle, hop.username.clone()).await?;
             client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {
@@ -391,8 +390,7 @@ async fn connect_via_stream(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&handle, &hop.username).await?;
-            // Agent authentication returns () on success, set flag manually
+            agent.authenticate(&mut handle, hop.username.clone()).await?;
             client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {

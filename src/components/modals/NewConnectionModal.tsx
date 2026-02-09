@@ -448,11 +448,6 @@ export const NewConnectionModal = () => {
                   <p className="text-xs text-zinc-500">
                     {t('modals.new_connection.agent_hint')}
                   </p>
-                  <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
-                    <p className="text-xs text-yellow-400">
-                      ⚠️ {t('modals.new_connection.agent_not_supported')}
-                    </p>
-                  </div>
                   </div>
                 </TabsContent>
                 

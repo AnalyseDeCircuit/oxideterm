@@ -1111,7 +1111,7 @@ impl SshConnectionRegistry {
                             e
                         ))
                     })?;
-                agent.authenticate(&handle, &target_config.username).await.map_err(|e| {
+                agent.authenticate(&mut handle, target_config.username.clone()).await.map_err(|e| {
                     ConnectionRegistryError::ConnectionFailed(format!(
                         "Agent authentication failed: {}",
                         e

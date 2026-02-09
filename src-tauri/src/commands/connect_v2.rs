@@ -298,9 +298,7 @@ pub async fn establish_connection(
                 passphrase,
             }
         }
-        AuthRequest::Agent => {
-            return Err("SSH Agent not yet supported".to_string());
-        }
+        AuthRequest::Agent => AuthMethod::Agent,
     };
 
     let config = SessionConfig {

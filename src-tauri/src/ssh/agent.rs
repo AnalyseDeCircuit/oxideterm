@@ -1,93 +1,195 @@
 //! SSH Agent Client - Cross-platform SSH Agent authentication
 //!
-//! This module provides SSH Agent detection and user-friendly error messages.
-//!
-//! # Current Status
-//!
-//! **⚠️ TODO: Full SSH Agent signing implementation pending**
-//!
-//! SSH Agent authentication requires low-level protocol implementation to:
-//! 1. Request challenge from SSH server
-//! 2. Forward challenge to agent for signing
-//! 3. Return signed response to server
-//!
-//! Current russh library (0.48) does not expose sufficient low-level APIs
-//! for agent signing integration. Waiting for library updates or will implement
-//! custom signing flow in future versions.
+//! Provides real SSH Agent integration via russh's `AgentClient`, supporting
+//! challenge-response authentication by delegating signing to the system agent.
 //!
 //! # Platform Support
-//! - **Unix/Linux/macOS**: Uses `SSH_AUTH_SOCK` environment variable
-//! - **Windows**: Uses `\\.\pipe\openssh-ssh-agent` named pipe
+//! - **Unix/Linux/macOS**: Connects via `SSH_AUTH_SOCK` Unix domain socket
+//! - **Windows**: Connects via `\\.\pipe\openssh-ssh-agent` named pipe (OpenSSH for Windows)
 //!
-//! # Workaround
-//! Users can use SSH key files with the agent keys exported, or configure
-//! OpenSSH config with ProxyCommand for agent forwarding.
+//! # Authentication Flow
+//! 1. Connect to the system SSH Agent socket/pipe
+//! 2. Request identity list from agent (`request_identities`)
+//! 3. For each key, attempt `authenticate_publickey_with` on the SSH handle
+//! 4. The SSH server sends a challenge; russh forwards it to the agent for signing
+//! 5. Agent signs the challenge with the private key it holds; response completes auth
+
+use std::future::Future;
+
+use russh::client::Handle;
+use russh::keys::agent::client::{AgentClient, AgentStream};
+use russh::keys::ssh_key;
+use russh::{AgentAuthError, CryptoVec, Signer};
+use tracing::{debug, info, warn};
 
 use crate::ssh::error::SshError;
-use russh::client::Handle;
-use tracing::info;
 
-/// SSH Agent client wrapper (placeholder for future implementation)
+/// Wrapper around `AgentClient` that implements `Signer` with Send-safe futures.
 ///
-/// Currently returns user-friendly error messages directing users to alternatives.
-pub struct SshAgentClient;
+/// russh's built-in `impl Signer for AgentClient` captures `&PublicKey` (a borrow
+/// of a local variable inside `authenticate_publickey_with`'s state machine) in the
+/// future returned by `auth_publickey_sign`. Due to a Rust RPITIT limitation,
+/// the compiler cannot prove `Send` for this borrow's specific lifetime.
+///
+/// This wrapper clones the `PublicKey` into the async block so the future holds
+/// an owned value instead of a reference, making it trivially `Send`.
+struct SendSigner<'a> {
+    agent: &'a mut AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>,
+}
+
+impl Signer for SendSigner<'_> {
+    type Error = AgentAuthError;
+
+    fn auth_publickey_sign(
+        &mut self,
+        key: &ssh_key::PublicKey,
+        hash_alg: Option<ssh_key::HashAlg>,
+        to_sign: CryptoVec,
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send {
+        // Clone key to owned so the future doesn't capture &key across .await
+        let key_owned = key.clone();
+        async move {
+            self.agent
+                .sign_request(&key_owned, hash_alg, to_sign)
+                .await
+                .map_err(Into::into)
+        }
+    }
+}
+
+/// SSH Agent client wrapper
+///
+/// Wraps russh's `AgentClient` with a type-erased stream for cross-platform support.
+pub struct SshAgentClient {
+    agent: AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>,
+}
 
 impl SshAgentClient {
     /// Connect to the system SSH Agent
     ///
-    /// # Returns
-    /// - `Err(SshError::AgentNotAvailable)` - Always, with helpful error message
-    ///
-    /// # TODO
-    /// Implement full agent connection using russh::keys::agent::client::AgentClient
-    /// when library provides necessary signing APIs.
+    /// On Unix, reads `SSH_AUTH_SOCK` and connects to the Unix domain socket.
+    /// On Windows, connects to the OpenSSH named pipe `\\.\pipe\openssh-ssh-agent`.
     pub async fn connect() -> Result<Self, SshError> {
-        info!("SSH Agent authentication requested");
+        info!("Connecting to system SSH Agent");
 
-        // TODO: Implement full agent connection
-        // let stream = russh::keys::agent::client::AgentClient::connect_env().await?;
+        #[cfg(unix)]
+        {
+            let agent = AgentClient::connect_env().await.map_err(|e| {
+                SshError::AgentNotAvailable(format!(
+                    "Failed to connect to SSH Agent: {}. \
+                     Make sure SSH_AUTH_SOCK is set and ssh-agent is running.",
+                    e
+                ))
+            })?;
+            info!("Connected to SSH Agent via SSH_AUTH_SOCK");
+            Ok(Self {
+                agent: agent.dynamic(),
+            })
+        }
 
-        Err(SshError::AgentNotAvailable(format!(
-            "SSH Agent authentication is not yet fully implemented.\n\n\
-             This feature requires deep integration with SSH agent protocol for challenge signing.\n\
-             We're waiting for russh library updates to provide the necessary low-level APIs.\n\n\
-             Workarounds:\n\
-             1. Use SSH key file authentication instead (recommended)\n\
-             2. Export your agent key: ssh-add -L > ~/.ssh/id_agent.pub\n\
-             3. Use the corresponding private key file for connection\n\n\
-             {}",
-            get_platform_help()
-        )))
+        #[cfg(windows)]
+        {
+            let agent = AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
+                .await
+                .map_err(|e| {
+                    SshError::AgentNotAvailable(format!(
+                        "Failed to connect to SSH Agent via named pipe: {}. \
+                         Make sure the OpenSSH Authentication Agent service is running.",
+                        e
+                    ))
+                })?;
+            info!("Connected to SSH Agent via named pipe");
+            Ok(Self {
+                agent: agent.dynamic(),
+            })
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(SshError::AgentNotAvailable(
+                "SSH Agent is not supported on this platform".to_string(),
+            ))
+        }
     }
 
-    /// Authenticate using SSH Agent (not yet implemented)
+    /// Authenticate with the SSH server using agent-held keys
     ///
-    /// # TODO
-    /// Implement challenge-response flow:
-    /// 1. Get agent identities
-    /// 2. Try each key with server
-    /// 3. Use agent.sign_request() for challenge signing
-    /// 4. Complete authentication
+    /// Iterates through all keys registered in the agent and tries each one
+    /// against the server via `authenticate_publickey_with`. The agent handles
+    /// the actual signing of the server challenge.
     pub async fn authenticate(
         &mut self,
-        _handle: &Handle<crate::ssh::ClientHandler>,
-        _username: &str,
+        handle: &mut Handle<crate::ssh::ClientHandler>,
+        username: String,
     ) -> Result<(), SshError> {
-        // This should never be called since connect() always fails
-        Err(SshError::AgentError(
-            "SSH Agent authentication not yet implemented".to_string(),
-        ))
+        // 1. List keys held by the agent
+        let keys = self
+            .agent
+            .request_identities()
+            .await
+            .map_err(|e| SshError::AgentError(format!("Failed to list agent keys: {}", e)))?;
+
+        if keys.is_empty() {
+            return Err(SshError::AgentError(
+                "SSH Agent has no keys loaded. Add keys with: ssh-add".to_string(),
+            ));
+        }
+
+        info!(
+            "SSH Agent reports {} key(s), attempting authentication",
+            keys.len()
+        );
+
+        // 2. Try each key until one succeeds
+        let mut last_error: Option<String> = None;
+        for key in &keys {
+            debug!(
+                "Trying agent key: {} ({})",
+                key.algorithm(),
+                key.comment()
+            );
+
+            match handle
+                .authenticate_publickey_with(
+                    &username,
+                    key.clone(),
+                    None,
+                    &mut SendSigner { agent: &mut self.agent },
+                )
+                .await
+            {
+                Ok(result) if result.success() => {
+                    info!(
+                        "SSH Agent authentication succeeded with key: {}",
+                        key.comment()
+                    );
+                    return Ok(());
+                }
+                Ok(_failure) => {
+                    debug!("Key rejected by server: {}", key.comment());
+                }
+                Err(e) => {
+                    warn!("Agent signing error for key {}: {}", key.comment(), e);
+                    last_error = Some(format!("{}", e));
+                }
+            }
+        }
+
+        // All keys exhausted
+        Err(SshError::AgentError(format!(
+            "No agent key was accepted by the server (tried {} key(s)){}",
+            keys.len(),
+            last_error
+                .map(|e| format!(". Last error: {}", e))
+                .unwrap_or_default()
+        )))
     }
 }
 
 /// Check if SSH Agent is available on the system
 ///
-/// # Returns
-/// - `true` if agent socket/pipe appears to be accessible
-/// - `false` otherwise
-///
-/// Note: Even if this returns true, actual authentication will fail with
-/// a helpful error message directing users to alternatives.
+/// Returns `true` if the agent socket/pipe appears to be accessible.
+/// This is a quick pre-check; actual connection may still fail.
 pub fn is_agent_available() -> bool {
     #[cfg(unix)]
     {
@@ -96,8 +198,8 @@ pub fn is_agent_available() -> bool {
 
     #[cfg(windows)]
     {
-        // On Windows, check if the named pipe exists
-        // Basic check - actual connection might still fail
+        // OpenSSH for Windows agent uses a named pipe that is always "present"
+        // as long as the service is installed; actual availability checked on connect.
         true
     }
 
@@ -107,82 +209,25 @@ pub fn is_agent_available() -> bool {
     }
 }
 
-/// Get platform-specific help message for SSH Agent setup and alternatives
-fn get_platform_help() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "Platform: macOS\n\
-         \n\
-         To use SSH keys with OxideTerm:\n\
-         1. Use key file authentication (Select 'SSH Key' in connection dialog)\n\
-         2. Point to your key file: ~/.ssh/id_rsa or ~/.ssh/id_ed25519\n\
-         \n\
-         If you need agent forwarding:\n\
-         - This will be supported in a future version\n\
-         - For now, use key files directly"
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        "Platform: Windows\n\
-         \n\
-         To use SSH keys with OxideTerm:\n\
-         1. Use key file authentication (Select 'SSH Key' in connection dialog)\n\
-         2. Point to your key file: %USERPROFILE%\\.ssh\\id_rsa\n\
-         \n\
-         If you need agent forwarding:\n\
-         - This will be supported in a future version\n\
-         - For now, use key files directly"
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        "Platform: Linux\n\
-         \n\
-         To use SSH keys with OxideTerm:\n\
-         1. Use key file authentication (Select 'SSH Key' in connection dialog)\n\
-         2. Point to your key file: ~/.ssh/id_rsa or ~/.ssh/id_ed25519\n\
-         \n\
-         If you need agent forwarding:\n\
-         - This will be supported in a future version\n\
-         - For now, use key files directly"
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        "Please use SSH key file authentication instead of agent authentication."
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_agent_availability_check() {
-        // This test just ensures the function doesn't panic
         let available = is_agent_available();
         println!("Agent appears available: {}", available);
     }
 
-    #[test]
-    fn test_platform_help_message() {
-        let help = get_platform_help();
-        assert!(!help.is_empty());
-        println!("Platform help:\n{}", help);
-    }
-
     #[tokio::test]
-    async fn test_agent_connection_returns_helpful_error() {
-        // Verify that we get a helpful error message
+    async fn test_agent_connect_requires_agent() {
+        // If SSH_AUTH_SOCK is not set, connect should fail with AgentNotAvailable
         match SshAgentClient::connect().await {
-            Ok(_) => panic!("Expected error, got Ok"),
+            Ok(_) => println!("Agent connected (agent is running)"),
             Err(SshError::AgentNotAvailable(msg)) => {
-                println!("Error message:\n{}", msg);
-                assert!(msg.contains("not yet fully implemented"));
-                assert!(msg.contains("Workarounds"));
+                println!("Expected in CI: {}", msg);
             }
-            Err(e) => panic!("Expected AgentNotAvailable, got: {:?}", e),
+            Err(e) => panic!("Unexpected error type: {:?}", e),
         }
     }
 }

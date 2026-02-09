@@ -102,11 +102,10 @@ impl SshClient {
                         })?;
 
                 agent
-                    .authenticate(&handle, &self.config.username)
+                    .authenticate(&mut handle, self.config.username.clone())
                     .await
                     .map_err(|e| SshError::AuthenticationFailed(e.to_string()))?;
 
-                // Agent authentication returns () on success, set flag manually
                 client::AuthResult::Success
             }
             AuthMethod::Certificate {
