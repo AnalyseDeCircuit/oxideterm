@@ -1133,7 +1133,8 @@ fn topology_auth_to_session_auth(
                 passphrase: None,
             })
         }
-        "agent" | _ => Ok(AuthMethod::Agent),
+        "agent" => Ok(AuthMethod::Agent),
+        other => Err(format!("Unsupported auth type for topology drill-down: {}", other)),
     }
 }
 
