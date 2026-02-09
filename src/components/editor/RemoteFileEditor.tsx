@@ -14,6 +14,7 @@ import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { Save, X, AlertCircle, Check, Loader2, WifiOff, RefreshCw } from 'lucide-react';
 import { nodeSftpWrite } from '../../lib/api';
+import { useConfirm } from '../../hooks/useConfirm';
 import {
   loadLanguage,
   normalizeLanguage,
@@ -500,15 +501,18 @@ export function RemoteFileEditor({
   }, [open, editorContainer, initialContent, normalizedLang]);
 
   // 关闭前检查
-  const handleClose = useCallback(() => {
+  const { confirm, ConfirmDialog } = useConfirm();
+  const handleClose = useCallback(async () => {
     if (isDirty) {
-      const confirmed = window.confirm(t('editor.unsaved_changes_confirm'));
+      const confirmed = await confirm({
+        title: t('editor.unsaved_changes_confirm'),
+      });
       if (!confirmed) {
         return;
       }
     }
     onClose();
-  }, [isDirty, onClose, t]);
+  }, [isDirty, onClose, t, confirm]);
 
   // 处理 Escape 键
   useEffect(() => {
@@ -640,6 +644,7 @@ export function RemoteFileEditor({
           </div>
         </div>
       </DialogContent>
+      {ConfirmDialog}
     </Dialog>
   );
 }

@@ -10,12 +10,14 @@ import { EditConnectionPropertiesModal } from '../modals/EditConnectionPropertie
 import { connectToSaved } from '../../lib/connectToSaved';
 import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
+import { useConfirm } from '../../hooks/useConfirm';
 import { api } from '../../lib/api';
 import type { ConnectionInfo } from '../../types';
 
 export const SessionManagerPanel = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const createTab = useAppStore(s => s.createTab);
 
   const {
@@ -87,7 +89,10 @@ export const SessionManagerPanel = () => {
 
   // Delete action
   const handleDelete = useCallback(async (conn: ConnectionInfo) => {
-    if (!window.confirm(t('sessionManager.actions.confirm_delete', { name: conn.name }))) {
+    if (!await confirm({
+      title: t('sessionManager.actions.confirm_delete', { name: conn.name }),
+      variant: 'danger',
+    })) {
       return;
     }
     try {
@@ -183,6 +188,7 @@ export const SessionManagerPanel = () => {
         isOpen={showImport}
         onClose={handleImportClose}
       />
+      {ConfirmDialog}
     </div>
   );
 };

@@ -12,6 +12,7 @@ import {
 } from '../ui/dropdown-menu';
 import { api } from '../../lib/api';
 import { useToast } from '../../hooks/useToast';
+import { useConfirm } from '../../hooks/useConfirm';
 import type { ConnectionInfo } from '../../types';
 
 type BatchActionsMenuProps = {
@@ -31,10 +32,14 @@ export const BatchActionsMenu = ({
 }: BatchActionsMenuProps) => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
 
   const handleBatchDelete = async () => {
-    if (!window.confirm(t('sessionManager.actions.confirm_batch_delete', { count: selectedIds.size }))) {
+    if (!await confirm({
+      title: t('sessionManager.actions.confirm_batch_delete', { count: selectedIds.size }),
+      variant: 'danger',
+    })) {
       return;
     }
     try {
@@ -113,6 +118,7 @@ export const BatchActionsMenu = ({
         <Trash2 className="h-3.5 w-3.5" />
         {t('sessionManager.batch.delete')}
       </Button>
+      {ConfirmDialog}
     </div>
   );
 };
