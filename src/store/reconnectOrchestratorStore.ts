@@ -110,10 +110,23 @@ interface OrchestratorActions {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const DEBOUNCE_MS = 500;
-const MAX_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 2000;
-const AWAIT_TERMINAL_POLL_MS = 500;
-const AWAIT_TERMINAL_TIMEOUT_MS = 10_000;
+const MAX_ATTEMPTS = 5;
+const BASE_RETRY_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 15_000;
+const BACKOFF_MULTIPLIER = 1.5;
+
+/**
+ * Adaptive backoff with ±20% jitter.
+ * delay = min(BASE × MULTIPLIER^(attempt-1), MAX) × (0.8 ~ 1.2)
+ */
+function calculateBackoff(attempt: number): number {
+  const base = Math.min(
+    BASE_RETRY_DELAY_MS * Math.pow(BACKOFF_MULTIPLIER, Math.max(0, attempt - 1)),
+    MAX_RETRY_DELAY_MS,
+  );
+  const jitter = 0.8 + Math.random() * 0.4; // ±20%
+  return Math.round(base * jitter);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Module-level state (not reactive — internal bookkeeping)
@@ -428,8 +441,8 @@ function flushPending() {
 async function runPipeline(nodeId: string) {
   if (isRunning) {
     console.log(`[Orchestrator] Pipeline busy, re-queuing ${nodeId}`);
-    // Re-queue with short delay
-    setTimeout(() => runPipeline(nodeId), RETRY_DELAY_MS);
+    // Re-queue with adaptive backoff delay
+    setTimeout(() => runPipeline(nodeId), calculateBackoff(1));
     return;
   }
 
@@ -611,11 +624,16 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
     return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const isRetryable = msg.includes('CHAIN_LOCK_BUSY') || msg.includes('NODE_LOCK_BUSY');
+    const isRetryable =
+      msg.includes('CHAIN_LOCK_BUSY') ||
+      msg.includes('NODE_LOCK_BUSY') ||
+      msg.includes('ConnectionTimeout') ||
+      msg.includes('Timeout');
 
     if (isRetryable && (job.attempt + 1) < job.maxAttempts) {
-      console.log(`[Orchestrator] Retryable error, will retry in ${RETRY_DELAY_MS}ms`);
-      await sleep(RETRY_DELAY_MS);
+      const delay = calculateBackoff(job.attempt + 1);
+      console.log(`[Orchestrator] Retryable error, will retry in ${delay}ms (attempt ${job.attempt + 1}/${job.maxAttempts})`);
+      await sleep(delay);
 
       // Check if cancelled during sleep
       if (job.abortController.signal.aborted) {
@@ -673,7 +691,6 @@ async function phaseAwaitTerminal(nodeId: string) {
   // (nodes that had forwards or incomplete transfers in the snapshot)
   const nodesNeedingSession = new Set<string>();
   for (const entry of snapshot.forwardRules) {
-    // Node-first: entry.nodeId directly identifies the node
     nodesNeedingSession.add(entry.nodeId);
   }
   for (const entry of snapshot.incompleteTransfers) {
@@ -684,27 +701,37 @@ async function phaseAwaitTerminal(nodeId: string) {
     }
   }
 
-  // Check if a terminal tab is open for this node
-  const { tabs } = await import('./appStore').then((m) => m.useAppStore.getState());
-  const hasTerminalTab = tabs.some((tab) => {
+  // Detect open terminal tabs using SNAPSHOT session IDs (not live terminalNodeMap,
+  // which was cleared by resetNodeState). This is the key fix: after resetNodeState
+  // clears all mappings, paneUsesNode() always returns false — causing the
+  // orchestrator to skip terminal recreation and leaving the pane stuck with a
+  // stale sessionId showing "此会话无可用的 WebSocket URL".
+  const oldSessionIds = new Set(snapshot.perNodeOldSessionIds.get(nodeId) || []);
+  const { useAppStore } = await import('./appStore');
+  const { tabs } = useAppStore.getState();
+  const hasTerminalTab = oldSessionIds.size > 0 && tabs.some((tab) => {
+    // Legacy single-pane
+    if (tab.sessionId && oldSessionIds.has(tab.sessionId)) return true;
+    // Split pane tree
     if (!tab.rootPane) return false;
-    return paneUsesNode(tab.rootPane, nodeId, treeStore);
+    return paneTreeHasAnySession(tab.rootPane, oldSessionIds);
   });
 
   if (hasTerminalTab) {
-    // Poll until new terminalSessionId appears (Key-Driven Reset will create it)
-    const deadline = Date.now() + AWAIT_TERMINAL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const current = useSessionTreeStore.getState().getNode(nodeId);
-      if (current?.terminalSessionId) {
-        console.log(`[Orchestrator] Terminal ready: ${current.terminalSessionId}`);
-        break;
+    // Proactively create the terminal — don't rely on Key-Driven Reset, which
+    // cannot work because pane.sessionId still points to the deleted old session.
+    try {
+      const newSessionId = await useSessionTreeStore.getState().createTerminalForNode(nodeId);
+      console.log(`[Orchestrator] Created terminal for node ${nodeId}: ${newSessionId}`);
+
+      // Patch all pane trees: replace stale old sessionId with new sessionId.
+      // This causes TerminalPane to recompute its key (includes ws_url),
+      // triggering a clean remount of TerminalView with a valid session.
+      for (const oldId of oldSessionIds) {
+        useAppStore.getState().updatePaneSessionId(oldId, newSessionId);
       }
-
-      const j = getJob(nodeId);
-      if (!j || j.abortController.signal.aborted) return;
-
-      await sleep(AWAIT_TERMINAL_POLL_MS);
+    } catch (e) {
+      console.warn(`[Orchestrator] Failed to create terminal for node ${nodeId}:`, e);
     }
   }
 
@@ -726,7 +753,7 @@ async function phaseAwaitTerminal(nodeId: string) {
       console.warn(`[Orchestrator] Failed to create terminal for node ${n.id}:`, e);
     }
   }
-  exitPhase(nodeId, 'ok', `${nodesNeedingSession.size} nodes needed sessions`);
+  exitPhase(nodeId, 'ok', `hasTerminalTab=${hasTerminalTab}, ${nodesNeedingSession.size} nodes needed sessions`);
 }
 
 // ─── Phase 3: Restore Forwards ──────────────────────────────────────────────
@@ -1035,9 +1062,19 @@ async function phaseVerifyConsistency(nodeId: string) {
       drifts.push(`sftp: backend=${backendState.state.sftpReady}, tree=${treeNode?.sftpSessionId != null}`);
     }
 
-    // 4. Terminal session existence
-    if (!treeNode?.terminalSessionId) {
-      drifts.push('terminal: no terminalSessionId in tree');
+    // 4. Terminal session existence (only if the node had a terminal before disconnect)
+    if (job.snapshot.oldTerminalSessionIds.length > 0 && !treeNode?.terminalSessionId) {
+      // Check if there's actually a terminal tab open for this node
+      const { tabs } = await import('./appStore').then((m) => m.useAppStore.getState());
+      const treeStore2 = useSessionTreeStore.getState();
+      const hasOpenTab = tabs.some((tab) => {
+        if (!tab.rootPane) return false;
+        return paneUsesNode(tab.rootPane, nodeId, treeStore2);
+      });
+      if (hasOpenTab) {
+        drifts.push('terminal: no terminalSessionId in tree (tab still open)');
+      }
+      // If no terminal tab is open, the terminalSessionId being null is expected
     }
 
   } catch (e) {
@@ -1090,6 +1127,23 @@ function paneUsesNode(
   }
   if (pane.children) {
     return pane.children.some((child) => paneUsesNode(child, nodeId, treeStore));
+  }
+  return false;
+}
+
+/**
+ * Check if a pane tree contains any sessionId from the given set.
+ * Used for snapshot-based tab detection when terminalNodeMap has been cleared.
+ */
+function paneTreeHasAnySession(
+  pane: { type: string; sessionId?: string; children?: Array<typeof pane> },
+  sessionIds: Set<string>,
+): boolean {
+  if (pane.type === 'leaf' && pane.sessionId) {
+    return sessionIds.has(pane.sessionId);
+  }
+  if (pane.children) {
+    return pane.children.some((child) => paneTreeHasAnySession(child, sessionIds));
   }
   return false;
 }

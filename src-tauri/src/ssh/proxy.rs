@@ -194,7 +194,7 @@ async fn direct_connect(
 
     // Create SSH config with keepalive
     let ssh_config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(300)),
+        inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
         ..Default::default()
@@ -313,7 +313,7 @@ async fn connect_via_stream(
 
     // Create SSH config with keepalive
     let ssh_config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(300)),
+        inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
         ..Default::default()

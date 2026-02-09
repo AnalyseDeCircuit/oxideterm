@@ -589,7 +589,8 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const session = treeNode ? getSession(treeNode.runtime.connectionId || '') : undefined;
   const { error: toastError } = useToast();
   const [remoteFiles, setRemoteFiles] = useState<FileInfo[]>([]);
-  const [remotePath, setRemotePath] = useState('/home/' + (session?.username || 'user'));
+  const [remotePath, setRemotePath] = useState('');
+  const [remoteHome, setRemoteHome] = useState('');
   
   const [localFiles, setLocalFiles] = useState<FileInfo[]>([]);
   const [localPath, setLocalPath] = useState('');
@@ -599,6 +600,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const [sftpInitialized, setSftpInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [initRetryTick, setInitRetryTick] = useState(0);
+  const initializingRef = useRef(false);
   const guardErrorNotifiedRef = useRef(false);
 
   // Path input state for editable path bars
@@ -686,9 +688,9 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const [remoteSortDirection, setRemoteSortDirection] = useState<SortDirection>('asc');
 
   const recoverSftpSession = useCallback(async (): Promise<void> => {
-    // node-first: backend handles SFTP session recovery via NodeRouter
+    // node-first: backend handles SFTP session recovery via NodeRouter.
+    // Only recreates the terminal — caller is responsible for re-calling nodeSftpInit.
     await useSessionTreeStore.getState().createTerminalForNode(nodeId);
-    await nodeSftpInit(nodeId);
   }, [nodeId]);
 
   // Sort handler
@@ -796,8 +798,18 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   }, [memoryKey, remotePath]);
 
   // 🔴 初始化模型（node-first 模式）
+  // Max auto-retries: connection errors get 1 retry, channel errors get 2
+  const MAX_INIT_AUTO_RETRIES = 3;
   useEffect(() => {
     let cancelled = false;
+
+    // Dedup guard: prevent concurrent init calls from React double-render or
+    // rapid retryTick updates (e.g. ideStore + SFTPView both calling init).
+    if (initializingRef.current) {
+      console.debug(`[SFTPView] Init already in progress, skipping (retryTick=${initRetryTick})`);
+      return;
+    }
+    initializingRef.current = true;
     
     const init = async () => {
       console.info(`[SFTPView] Initializing SFTP: nodeId=${nodeId}, retryTick=${initRetryTick}`);
@@ -812,6 +824,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
             throw initError;
           }
 
+          // Channel error (ConnectFailed / stale session) — attempt self-heal ONCE
           console.warn('[SFTPView] Detected stale SFTP channel, attempting self-heal...');
           await recoverSftpSession();
           if (cancelled) return;
@@ -822,6 +835,9 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
         setSftpInitialized(true);
         setInitError(null);
         guardErrorNotifiedRef.current = false;
+        
+        // 记住 SFTP 返回的真实 home 目录（用于 ~ 导航）
+        if (cwd) setRemoteHome(cwd);
         
         // 🔴 路径继承：优先恢复记忆的路径，否则使用 SFTP 返回的 cwd
         const savedPath = sftpPathMemory.get(memoryKey);
@@ -834,31 +850,41 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[SFTPView] Init failed:`, err);
         
-        // Auto-retry once for connection-level errors (e.g. idle connection not yet ready)
-        const isConnectionError = message.includes('Not connected') || 
-                                  message.includes('NotConnected') ||
-                                  message.includes('Connection timeout') ||
-                                  message.includes('ConnectionTimeout');
-        if (isConnectionError && initRetryTick === 0) {
-          console.info('[SFTPView] Connection not ready, scheduling auto-retry in 2s...');
-          const timer = setTimeout(() => {
-            if (!cancelled) setInitRetryTick(t => t + 1);
-          }, 2000);
-          return () => clearTimeout(timer);
+        // Auto-retry for transient errors, with a hard cap
+        if (initRetryTick < MAX_INIT_AUTO_RETRIES) {
+          const isConnectionError = message.includes('Not connected') || 
+                                    message.includes('NotConnected') ||
+                                    message.includes('Connection timeout') ||
+                                    message.includes('ConnectionTimeout');
+          const isChannelError = isRecoverableSftpChannelError(err);
+          if (isConnectionError || isChannelError) {
+            // Exponential backoff: 2s, 4s, 8s...
+            const delay = 2000 * Math.pow(2, initRetryTick);
+            console.info(`[SFTPView] Transient error, scheduling auto-retry #${initRetryTick + 1} in ${delay}ms...`);
+            const timer = setTimeout(() => {
+              if (!cancelled) setInitRetryTick(t => t + 1);
+            }, delay);
+            return () => clearTimeout(timer);
+          }
         }
         
         setSftpInitialized(false);
         setInitError(message);
+      } finally {
+        initializingRef.current = false;
       }
     };
 
     init();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      initializingRef.current = false;
+    };
   }, [nodeId, initRetryTick, memoryKey, recoverSftpSession]);
 
   // Refresh remote (only after initialization)
   useEffect(() => {
-     if (!sftpInitialized) return;
+     if (!sftpInitialized || !remotePath) return;
      let cancelled = false;
 
      const refresh = async () => {
@@ -1040,12 +1066,12 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
     if (target === '..') {
       setRemotePath(getParentPath(remotePath, true));
     } else if (target === '~') {
-      setRemotePath('/home/' + session?.username);
+      setRemotePath(remoteHome || '/');
     } else {
       setRemotePath(target);
     }
     setIsRemotePathEditing(false);
-  }, [remotePath, session?.username, getParentPath]);
+  }, [remotePath, remoteHome, getParentPath]);
 
   // Handle path input submission
   const handleLocalPathSubmit = useCallback(() => {
@@ -1668,7 +1694,12 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
             variant="ghost"
             size="sm"
             className="h-7 px-2"
-            onClick={() => setInitRetryTick((v) => v + 1)}
+            onClick={() => {
+              // Reset retry tick to 0 to allow the full auto-retry chain again
+              setInitRetryTick(0);
+              // Use a microtask to trigger a fresh init cycle
+              queueMicrotask(() => setInitRetryTick(1));
+            }}
           >
             Retry
           </Button>

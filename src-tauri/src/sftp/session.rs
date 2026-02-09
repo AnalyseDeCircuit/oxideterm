@@ -3,7 +3,7 @@
 //! Provides SFTP file operations over an existing SSH connection.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
@@ -1091,6 +1091,60 @@ impl SftpSession {
         let info = self.stat(&canonical_path).await?;
         let total_bytes = info.size;
 
+        // ── Smart Butler: Transfer Integrity Check ──
+        // If resuming, verify the remote file hasn't changed since the transfer was paused.
+        // Compare current remote size with what we previously recorded as total_bytes.
+        // Also sanity-check that our offset doesn't exceed the current remote size.
+        let resume_context = if resume_context.is_resume {
+            // Try to load previously stored progress for this transfer
+            let stored = progress_store.load(&resume_context.transfer_id).await.ok().flatten();
+            let needs_restart = if let Some(ref sp) = stored {
+                if sp.total_bytes != total_bytes {
+                    warn!(
+                        "Download integrity check: remote file size changed ({} -> {}), restarting from scratch",
+                        sp.total_bytes, total_bytes
+                    );
+                    true
+                } else if resume_context.offset > total_bytes {
+                    warn!(
+                        "Download integrity check: local offset ({}) exceeds remote size ({}), restarting from scratch",
+                        resume_context.offset, total_bytes
+                    );
+                    true
+                } else {
+                    false
+                }
+            } else if resume_context.offset > total_bytes {
+                warn!(
+                    "Download integrity check: local offset ({}) exceeds remote size ({}), restarting from scratch",
+                    resume_context.offset, total_bytes
+                );
+                true
+            } else {
+                false
+            };
+
+            if needs_restart {
+                // Delete stale progress record
+                if stored.is_some() {
+                    let _ = progress_store.delete(&resume_context.transfer_id).await;
+                }
+                // Truncate the local file to restart
+                if let Err(e) = tokio::fs::File::create(local_path).await {
+                    warn!("Failed to truncate local file for restart: {}", e);
+                }
+                ResumeContext {
+                    offset: 0,
+                    transfer_id: resume_context.transfer_id.clone(),
+                    is_resume: false,
+                }
+            } else {
+                resume_context
+            }
+        } else {
+            resume_context
+        };
+
         // Create stored progress
         let mut stored_progress = StoredTransferProgress::new(
             transfer_id.clone(),
@@ -1300,39 +1354,81 @@ impl SftpSession {
             .map_err(SftpError::IoError)?;
         let total_bytes = metadata.len();
 
-        // Check if this is a resume (temp file exists)
-        let resume_context = match self.stat(&temp_path).await {
-            Ok(remote_info) => {
-                let remote_size = remote_info.size;
-
-                if remote_size < total_bytes {
-                    // Resume from temp file size
-                    info!(
-                        "Resuming upload from offset: {} (temp file has {} bytes)",
-                        remote_size, remote_size
+        // ── Smart Butler: Transfer Integrity Check (Upload) ──
+        // Before resuming, check if the local source file size matches what was
+        // previously stored as total_bytes. If it changed, the source file was
+        // modified and we must restart to avoid uploading a corrupt mix.
+        let force_restart = {
+            // Look up stored progress by listing incomplete transfers and matching paths
+            let stored_list = progress_store.list_incomplete(&self.session_id).await.unwrap_or_default();
+            let stored = stored_list.iter().find(|sp| {
+                sp.transfer_type == super::progress::TransferType::Upload
+                    && sp.source_path == PathBuf::from(local_path)
+                    && sp.destination_path == PathBuf::from(&canonical_path)
+            });
+            if let Some(sp) = stored {
+                if sp.total_bytes != total_bytes {
+                    warn!(
+                        "Upload integrity check: local source file size changed ({} -> {}), will restart from scratch",
+                        sp.total_bytes, total_bytes
                     );
-
-                    ResumeContext {
-                        offset: remote_size,
-                        transfer_id: transfer_id.clone(),
-                        is_resume: true,
-                    }
+                    // Delete stale progress
+                    let _ = progress_store.delete(&sp.transfer_id).await;
+                    true
                 } else {
-                    // Temp file already complete, rename to final
-                    info!("Temp file already complete ({} bytes), renaming", remote_size);
-
-                    // Rename temp file to final
-                    self.rename(&temp_path, &canonical_path).await?;
-
-                    return Ok(total_bytes);
+                    false
                 }
+            } else {
+                false
             }
-            Err(_) => {
-                // Temp file doesn't exist, fresh upload
-                ResumeContext {
-                    offset: 0,
-                    transfer_id: transfer_id.clone(),
-                    is_resume: false,
+        };
+
+        // Check if this is a resume (temp file exists)
+        let resume_context = if force_restart {
+            // Source file changed — delete remote temp if it exists and start fresh
+            if let Ok(_) = self.stat(&temp_path).await {
+                info!("Deleting stale remote temp file {} due to source file change", temp_path);
+                let _ = self.delete(&temp_path).await;
+            }
+            ResumeContext {
+                offset: 0,
+                transfer_id: transfer_id.clone(),
+                is_resume: false,
+            }
+        } else {
+            match self.stat(&temp_path).await {
+                Ok(remote_info) => {
+                    let remote_size = remote_info.size;
+
+                    if remote_size < total_bytes {
+                        // Resume from temp file size
+                        info!(
+                            "Resuming upload from offset: {} (temp file has {} bytes)",
+                            remote_size, remote_size
+                        );
+
+                        ResumeContext {
+                            offset: remote_size,
+                            transfer_id: transfer_id.clone(),
+                            is_resume: true,
+                        }
+                    } else {
+                        // Temp file already complete, rename to final
+                        info!("Temp file already complete ({} bytes), renaming", remote_size);
+
+                        // Rename temp file to final
+                        self.rename(&temp_path, &canonical_path).await?;
+
+                        return Ok(total_bytes);
+                    }
+                }
+                Err(_) => {
+                    // Temp file doesn't exist, fresh upload
+                    ResumeContext {
+                        offset: 0,
+                        transfer_id: transfer_id.clone(),
+                        is_resume: false,
+                    }
                 }
             }
         };

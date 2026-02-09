@@ -91,6 +91,12 @@ interface AppStore {
   setActivePaneId: (tabId: string, paneId: string) => void;
   getPaneCount: (tabId: string) => number;
   
+  /**
+   * Replace old sessionId with new sessionId across ALL pane trees.
+   * Used by reconnect orchestrator after creating a new terminal session.
+   */
+  updatePaneSessionId: (oldSessionId: string, newSessionId: string) => void;
+  
   // Actions - UI
   toggleSidebar: () => void;
   setSidebarSection: (section: SidebarSection) => void;
@@ -788,6 +794,39 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   /**
+   * Replace old sessionId with new sessionId across ALL tab pane trees.
+   * Used by reconnect orchestrator after creating a new terminal session,
+   * so TerminalPane key-driven reset can remount with the correct session.
+   */
+  updatePaneSessionId: (oldSessionId, newSessionId) => {
+    set((state) => {
+      let changed = false;
+      const newTabs = state.tabs.map(tab => {
+        // Legacy single-pane mode
+        if (tab.sessionId === oldSessionId) {
+          changed = true;
+          return { ...tab, sessionId: newSessionId };
+        }
+
+        // Split pane tree
+        if (tab.rootPane) {
+          const updatedRoot = replacePaneSessionId(tab.rootPane, oldSessionId, newSessionId);
+          if (updatedRoot !== tab.rootPane) {
+            changed = true;
+            return { ...tab, rootPane: updatedRoot };
+          }
+        }
+
+        return tab;
+      });
+
+      if (!changed) return state;
+      console.log(`[AppStore] updatePaneSessionId: ${oldSessionId} → ${newSessionId}`);
+      return { tabs: newTabs };
+    });
+  },
+
+  /**
    * Split the current active pane in the specified direction
    */
   splitPane: (tabId, direction, newSessionId, newTerminalType) => {
@@ -1328,6 +1367,32 @@ function removePaneFromTree(
     },
     newActivePaneId,
   };
+}
+
+/**
+ * Recursively replace sessionId inside a pane tree.
+ * Returns the same node reference if no replacement was made (structural sharing).
+ */
+function replacePaneSessionId(
+  node: PaneNode,
+  oldSessionId: string,
+  newSessionId: string,
+): PaneNode {
+  if (node.type === 'leaf') {
+    if (node.sessionId === oldSessionId) {
+      return { ...node, sessionId: newSessionId };
+    }
+    return node;
+  }
+  // Group node — recurse into children
+  const newChildren = node.children.map(child =>
+    replacePaneSessionId(child, oldSessionId, newSessionId),
+  );
+  // Only create new object if something changed (structural sharing)
+  if (newChildren.every((c, i) => c === node.children[i])) {
+    return node;
+  }
+  return { ...node, children: newChildren };
 }
 
 /**

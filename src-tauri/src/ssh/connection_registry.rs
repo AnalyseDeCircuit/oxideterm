@@ -391,7 +391,7 @@ impl ConnectionEntry {
     // Oxide-Next Phase 1.5: SFTP 连接级生命周期管理
     // ========================================================================
 
-    /// 获取或创建 SFTP session（双重检查锁）。
+    /// 获取或创建 SFTP session（单锁保护）。
     ///
     /// 这是 **全系统唯一** 的 SFTP 创建入口：
     /// - `NodeRouter.acquire_sftp(nodeId)` → `conn.acquire_sftp()`
@@ -399,30 +399,22 @@ impl ConnectionEntry {
     ///
     /// 参考: docs/OXIDE_NEXT_ARCHITECTURE.md §3.3
     pub async fn acquire_sftp(&self) -> Result<Arc<tokio::sync::Mutex<SftpSession>>, SftpError> {
-        // 快速路径：检查是否已有 SFTP session
-        {
-            let guard = self.sftp.lock().await;
-            if let Some(ref sftp) = *guard {
-                return Ok(Arc::clone(sftp));
-            }
+        // 持有外层锁贯穿整个创建过程，防止并发创建多个 SSH channel。
+        // tokio::sync::Mutex 允许跨 await 点持有。
+        let mut guard = self.sftp.lock().await;
+
+        // 快速路径：已有 SFTP session
+        if let Some(ref sftp) = *guard {
+            return Ok(Arc::clone(sftp));
         }
 
-        // 慢路径：创建新的 SFTP session
-        // 注意：在持有 Mutex 之外创建 SftpSession（创建过程需要 await）
+        // 慢路径：在锁内创建新 SFTP session，确保同连接只创建一次
         let new_sftp = SftpSession::new(
             self.handle_controller.clone(),
             self.id.clone(),
         ).await?;
 
         let arc = Arc::new(tokio::sync::Mutex::new(new_sftp));
-
-        // 二次检查（另一个 task 可能已抢先创建）
-        let mut guard = self.sftp.lock().await;
-        if let Some(ref existing) = *guard {
-            // 另一个 task 已经创建了，丢弃我们的，返回已有的
-            return Ok(Arc::clone(existing));
-        }
-
         *guard = Some(Arc::clone(&arc));
         info!("Created SFTP session for connection {}", self.id);
         Ok(arc)
@@ -983,7 +975,7 @@ impl SshConnectionRegistry {
 
         // 创建 SSH 配置（非严格主机密钥检查，因为是隧道连接）
         let ssh_config = russh::client::Config {
-            inactivity_timeout: Some(std::time::Duration::from_secs(300)),
+            inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
             keepalive_interval: Some(std::time::Duration::from_secs(30)),
             keepalive_max: 3,
             ..Default::default()
@@ -1952,23 +1944,46 @@ impl SshConnectionRegistry {
                         debug!("Connection {} heartbeat OK", connection_id);
                     }
                     crate::ssh::handle_owner::PingResult::IoError => {
-                        // IO 错误，物理连接已断
-                        // 🛑 后端禁止自动重连：只广播事件，等待前端指令
-                        error!("Connection {} IO error detected, link_down broadcast only", connection_id);
-                        conn.set_state(ConnectionState::LinkDown).await;
-                        registry.emit_connection_status_changed(&connection_id, "link_down").await;
+                        // IO 错误检测到 — 执行 quick probe 确认（Smart Butler 模式）
+                        // 延迟 1.5s 后二次探测，避免瞬态网络抖动导致误判
+                        warn!("Connection {} IO error detected, initiating quick probe confirmation", connection_id);
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
-                        // Oxide-Next Phase 2: node:state 事件
-                        if let Some(ref emitter) = node_emitter {
-                            emitter.emit_state_from_connection(
-                                &connection_id,
-                                &ConnectionState::LinkDown,
-                                "heartbeat IO error",
-                            );
+                        // 检查连接是否已被其他路径处理（如用户主动断开）
+                        let state_after_delay = conn.state().await;
+                        if matches!(state_after_delay, ConnectionState::Disconnecting | ConnectionState::Disconnected) {
+                            info!("Connection {} already disconnecting/disconnected during probe delay, stopping heartbeat", connection_id);
+                            break;
                         }
 
-                        // ❌ 已删除: registry.start_reconnect(&connection_id).await;
-                        break;
+                        // 二次探测 — 如果成功则证明是瞬态抖动，恢复正常心跳
+                        let probe_result = conn.handle_controller.ping().await;
+                        match probe_result {
+                            crate::ssh::handle_owner::PingResult::Ok => {
+                                info!("Connection {} quick probe succeeded — transient glitch, resuming heartbeat", connection_id);
+                                conn.reset_heartbeat_failures();
+                                conn.update_activity();
+                                continue;
+                            }
+                            _ => {
+                                // 二次探测也失败，确认链路断开
+                                // 🛑 后端禁止自动重连：只广播事件，等待前端指令
+                                error!("Connection {} quick probe also failed ({:?}), confirmed link_down", connection_id, probe_result);
+                                conn.set_state(ConnectionState::LinkDown).await;
+                                registry.emit_connection_status_changed(&connection_id, "link_down").await;
+
+                                // Oxide-Next Phase 2: node:state 事件
+                                if let Some(ref emitter) = node_emitter {
+                                    emitter.emit_state_from_connection(
+                                        &connection_id,
+                                        &ConnectionState::LinkDown,
+                                        "heartbeat IO error (confirmed after probe)",
+                                    );
+                                }
+
+                                break;
+                            }
+                        }
                     }
                     crate::ssh::handle_owner::PingResult::Timeout => {
                         // 超时，累计失败次数

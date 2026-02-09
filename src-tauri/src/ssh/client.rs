@@ -40,7 +40,7 @@ impl SshClient {
 
         // Configure SSH client with keepalive
         let ssh_config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(300)), // 5 min inactivity timeout
+            inactivity_timeout: None, // Disabled: app-level heartbeat (15s) handles liveness
             keepalive_interval: Some(Duration::from_secs(30)),  // Send keepalive every 30s
             keepalive_max: 3, // Disconnect after 3 missed keepalives (90s total)
             ..Default::default()
