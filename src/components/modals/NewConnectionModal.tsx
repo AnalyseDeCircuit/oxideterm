@@ -65,6 +65,7 @@ export const NewConnectionModal = () => {
   const [proxyServers, setProxyServers] = useState<ProxyHopConfig[]>([]);
   const [showAddJumpDialog, setShowAddJumpDialog] = useState(false);
   const [proxyChainExpanded, setProxyChainExpanded] = useState(false);
+  const [agentAvailable, setAgentAvailable] = useState<boolean | null>(null);
 
   // Type-safe auth type handler
   const handleAuthTypeChange = (value: string) => {
@@ -73,10 +74,11 @@ export const NewConnectionModal = () => {
     }
   };
 
-  // Load groups when modal opens
+  // Load groups and check agent availability when modal opens
   useEffect(() => {
     if (modals.newConnection) {
       api.getGroups().then(setGroups).catch(() => setGroups([]));
+      api.isAgentAvailable().then(setAgentAvailable).catch(() => setAgentAvailable(false));
     }
   }, [modals.newConnection]);
 
@@ -445,6 +447,12 @@ export const NewConnectionModal = () => {
                 <TabsContent value="agent">
                   <div className="text-sm text-zinc-400 pt-2 space-y-2">
                   <p>{t('modals.new_connection.agent_desc')}</p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className={`inline-block w-2 h-2 rounded-full ${agentAvailable === true ? 'bg-green-500' : agentAvailable === false ? 'bg-red-500' : 'bg-zinc-500 animate-pulse'}`} />
+                    <span className={agentAvailable === true ? 'text-green-400' : agentAvailable === false ? 'text-red-400' : 'text-zinc-500'}>
+                      {agentAvailable === true ? t('modals.new_connection.agent_detected') : agentAvailable === false ? t('modals.new_connection.agent_not_detected') : '...'}
+                    </span>
+                  </div>
                   <p className="text-xs text-zinc-500">
                     {t('modals.new_connection.agent_hint')}
                   </p>
