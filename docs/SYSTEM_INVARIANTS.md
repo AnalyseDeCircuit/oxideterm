@@ -83,7 +83,7 @@ if (!checkGate(connectionId)) {
   showToast('连接不稳定，请稍候...');
   return;
 }
-await api.sftpListDir(sessionId, path);
+await nodeSftpListDir(nodeId, path);
 ```
 
 ### 0.4 双 Store 同步约束

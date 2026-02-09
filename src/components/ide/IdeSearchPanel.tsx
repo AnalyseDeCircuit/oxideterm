@@ -12,7 +12,7 @@ import {
 import { useIdeStore, useIdeProject, registerSearchCacheClearCallback } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
-import { api } from '../../lib/api';
+import { nodeIdeExecCommand } from '../../lib/api';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 搜索缓存（模块级别，组件卸载不会丢失）
@@ -95,7 +95,7 @@ interface IdeSearchPanelProps {
 export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
   const { t } = useTranslation();
   const project = useIdeProject();
-  const { connectionId, openFile } = useIdeStore();
+  const { nodeId, openFile } = useIdeStore();
   
   // 搜索状态
   const [query, setQuery] = useState('');
@@ -134,7 +134,7 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
    * 使用 grep 命令搜索文件内容（带缓存）
    */
   const doSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim() || !connectionId || !project) {
+    if (!searchQuery.trim() || !nodeId || !project) {
       setResults([]);
       return;
     }
@@ -171,8 +171,8 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
       
       const command = `grep -rn -I ${includePatterns} '${escapedQuery}' . 2>/dev/null | head -200`;
       
-      const result = await api.ideExecCommand(
-        connectionId,
+      const result = await nodeIdeExecCommand(
+        nodeId,
         command,
         project.rootPath,
         30 // 30秒超时
@@ -249,7 +249,7 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
     } finally {
       setIsSearching(false);
     }
-  }, [connectionId, project]);
+  }, [nodeId, project]);
   
   /**
    * 处理输入变化（带防抖）

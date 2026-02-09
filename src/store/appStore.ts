@@ -61,6 +61,9 @@ interface AppStore {
    * Used when backend no longer recognizes the session.
    */
   purgeTerminalSession: (sessionId: string) => void;
+  /**
+   * @deprecated Phase 5: 使用 node:state 事件驱动替代轮询。仅保留用于初始加载和兼容。
+   */
   refreshConnections: () => Promise<void>;
   setConnectionKeepAlive: (connectionId: string, keepAlive: boolean) => Promise<void>;
   
@@ -378,6 +381,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
   },
 
+  /** @deprecated Phase 5: 使用 node:state 事件驱动替代轮询 */
   refreshConnections: async () => {
     try {
       const connectionsList = await api.sshListConnections();

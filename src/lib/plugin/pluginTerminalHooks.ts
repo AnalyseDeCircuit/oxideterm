@@ -24,20 +24,22 @@ const HOOK_BUDGET_MS = 5;
  *
  * @param data - Raw input string from term.onData
  * @param sessionId - Terminal session ID
+ * @param nodeId - Stable node ID for plugin context
  * @returns Modified string, or null if a plugin suppresses input
  */
-export function runInputPipeline(data: string, sessionId: string): string | null {
+export function runInputPipeline(data: string, sessionId: string, nodeId?: string): string | null {
   const interceptors = usePluginStore.getState().inputInterceptors;
   if (interceptors.length === 0) return data;
 
   let current: string | null = data;
+  const context = { sessionId, nodeId: nodeId ?? sessionId };
 
   for (const entry of interceptors) {
     if (current === null) return null;
 
     try {
       const t0 = performance.now();
-      current = entry.handler(current, { sessionId });
+      current = entry.handler(current, context);
       const elapsed = performance.now() - t0;
 
       if (elapsed > HOOK_BUDGET_MS) {
@@ -70,18 +72,20 @@ export function runInputPipeline(data: string, sessionId: string): string | null
  *
  * @param data - Raw output bytes (copy of MSG_TYPE_DATA payload)
  * @param sessionId - Terminal session ID
+ * @param nodeId - Stable node ID for plugin context
  * @returns Modified Uint8Array
  */
-export function runOutputPipeline(data: Uint8Array, sessionId: string): Uint8Array {
+export function runOutputPipeline(data: Uint8Array, sessionId: string, nodeId?: string): Uint8Array {
   const processors = usePluginStore.getState().outputProcessors;
   if (processors.length === 0) return data;
 
   let current = data;
+  const context = { sessionId, nodeId: nodeId ?? sessionId };
 
   for (const entry of processors) {
     try {
       const t0 = performance.now();
-      current = entry.handler(current, { sessionId });
+      current = entry.handler(current, context);
       const elapsed = performance.now() - t0;
 
       if (elapsed > HOOK_BUDGET_MS) {

@@ -3,9 +3,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
-import { useAppStore } from '../../store/appStore';
-import { useNodeSession } from '../../hooks/useNodeSession';
-import { softInvariant } from '../../lib/invariant';
 import { IdeTree } from './IdeTree';
 import { IdeEditorArea } from './IdeEditorArea';
 import { IdeTerminal } from './IdeTerminal';
@@ -20,19 +17,6 @@ interface IdeWorkspaceProps {
 export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   const { t } = useTranslation();
   const project = useIdeProject();
-
-  // ─── Virtual Session Proxy: resolve nodeId to active session ───
-  const { resolved, resolveTick } = useNodeSession(nodeId);
-  const isResolving = !resolved;
-  const activeConnectionId = resolved?.connectionId ?? '';
-  const activeSftpSessionId = resolved?.sessionId ?? '';
-
-  // Runtime invariant: resolved session's connection must be in the pool
-  softInvariant(
-    !resolved || useAppStore.getState().connections.has(resolved.connectionId),
-    'IDE resolved connectionId not in connections map',
-    { nodeId, connectionId: resolved?.connectionId },
-  );
 
   const { 
     openProject, 
@@ -55,23 +39,21 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
     setSearchOpen(prev => !prev);
   }, []);
   
-  // 初始化项目 — resolveTick 变化触发重连后重建
+  // 初始化项目 — nodeId 变化触发重连后重建
   useEffect(() => {
-    if (isResolving || !activeSftpSessionId) return;
-
     const needsOpen = !project || 
-      (useIdeStore.getState().sftpSessionId !== activeSftpSessionId);
+      (useIdeStore.getState().nodeId !== nodeId);
     
     if (needsOpen) {
       setInitError(null);
-      openProject(activeConnectionId, activeSftpSessionId, rootPath)
+      openProject(nodeId, rootPath)
         .then(() => setInitError(null))
         .catch((err) => {
           console.error('[IdeWorkspace] openProject failed:', err);
           setInitError(err instanceof Error ? err.message : String(err));
         });
     }
-  }, [activeConnectionId, activeSftpSessionId, rootPath, resolveTick, isResolving, retryTick]);
+  }, [nodeId, rootPath, retryTick]);
   
   // 全局快捷键
   useEffect(() => {
@@ -93,13 +75,13 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleTerminal, toggleSearch]);
   
-  // 加载中状态（或重连中）
-  if (isResolving || (!project && !initError)) {
+  // 加载中状态
+  if (!project && !initError) {
     return (
       <div className="flex items-center justify-center h-full bg-theme-bg">
         <Loader2 className="w-8 h-8 animate-spin text-theme-accent" />
         <span className="ml-3 text-theme-text-muted">
-          {isResolving ? t('ide.reconnecting', 'Reconnecting…') : t('ide.loading_project')}
+          {t('ide.loading_project')}
         </span>
       </div>
     );

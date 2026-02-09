@@ -19,6 +19,76 @@ export type SshConnectionState =
   | 'disconnected' 
   | { error: string };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Oxide-Next Node State Types (Phase 3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 节点就绪状态 — 前端唯一需要关心的连接状态。
+ * 与 Rust NodeReadiness 一一对应 (snake_case 字符串枚举)。
+ */
+export type NodeReadiness = 'ready' | 'connecting' | 'error' | 'disconnected';
+
+/**
+ * 终端 WebSocket 端点信息。
+ * 对应 Rust TerminalEndpoint (camelCase)。
+ */
+export type TerminalEndpoint = {
+  wsPort: number;
+  wsToken: string;
+  sessionId: string;
+};
+
+/**
+ * 节点完整状态 — useNodeState 消费。
+ * 对应 Rust NodeState (camelCase)。
+ */
+export type NodeState = {
+  readiness: NodeReadiness;
+  error?: string;
+  sftpReady: boolean;
+  sftpCwd?: string;
+  wsEndpoint?: TerminalEndpoint;
+};
+
+/**
+ * node_get_state 返回值：状态快照 + 单调递增 generation。
+ * 对应 Rust NodeStateSnapshot (camelCase)。
+ */
+export type NodeStateSnapshot = {
+  state: NodeState;
+  generation: number;
+};
+
+/**
+ * 后端推送的节点状态变更事件 (discriminated union on `type`)。
+ * 对应 Rust NodeStateEvent (tag = "type", camelCase)。
+ *
+ * 前端必须丢弃 generation <= 已见最大值的事件 (乱序保护)。
+ */
+export type NodeStateEvent =
+  | {
+      type: 'connectionStateChanged';
+      nodeId: string;
+      generation: number;
+      state: NodeReadiness;
+      reason: string;
+    }
+  | {
+      type: 'sftpReady';
+      nodeId: string;
+      generation: number;
+      ready: boolean;
+      cwd?: string;
+    }
+  | {
+      type: 'terminalEndpointChanged';
+      nodeId: string;
+      generation: number;
+      wsPort: number;
+      wsToken: string;
+    };
+
 /**
  * Remote environment information detected after SSH connection
  * 

@@ -1,8 +1,18 @@
 // src/store/ideStore.ts
 import { create } from 'zustand';
 import { subscribeWithSelector, persist } from 'zustand/middleware';
-import { api } from '../lib/api';
-import { guardSessionConnection, isConnectionGuardError } from '../lib/connectionGuard';
+import {
+  nodeSftpInit,
+  nodeSftpPreview,
+  nodeSftpStat,
+  nodeSftpWrite,
+  nodeSftpMkdir,
+  nodeSftpDelete,
+  nodeSftpDeleteRecursive,
+  nodeSftpRename,
+  nodeIdeOpenProject,
+  nodeIdeCheckFile,
+} from '../lib/api';
 import {
   normalizePath,
   joinPath,
@@ -69,8 +79,7 @@ export interface IdeProject {
 
 interface IdeState {
   // ─── 会话关联 ───
-  connectionId: string | null;    // SSH 连接 ID（复用连接池）
-  sftpSessionId: string | null;   // SFTP 会话 ID
+  nodeId: string | null;            // Node ID（node-first 唯一标识）
   terminalSessionId: string | null; // 终端会话 ID（可选）
   
   // ─── 项目状态 ───
@@ -108,7 +117,7 @@ interface IdeState {
 
 interface IdeActions {
   // 项目操作
-  openProject: (connectionId: string, sftpSessionId: string, rootPath: string) => Promise<void>;
+  openProject: (nodeId: string, rootPath: string) => Promise<void>;
   closeProject: () => void;
   changeRootPath: (newRootPath: string) => Promise<void>;
   
@@ -166,8 +175,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
     persist(
       (set, get) => ({
         // ─── Initial State ───
-        connectionId: null,
-        sftpSessionId: null,
+        nodeId: null,
         terminalSessionId: null,
         project: null,
         tabs: [],
@@ -184,35 +192,23 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         lastClosedAt: null,
 
         // ─── Project Actions ───
-        openProject: async (connectionId, sftpSessionId, rootPath) => {
+        openProject: async (nodeId, rootPath) => {
           const currentState = get();
           
           // 如果已经打开了相同的项目，不要重置状态
           if (currentState.project?.rootPath === rootPath && 
-              currentState.sftpSessionId === sftpSessionId) {
+              currentState.nodeId === nodeId) {
             return;
           }
           
-          // 先初始化 SFTP 会话（如果尚未初始化）
-          // sftpInit 会在 SFTP 已初始化时返回当前工作目录，不会重复初始化
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
-          }
-
-          const isInitialized = await api.sftpIsInitialized(sftpSessionId);
-          if (!isInitialized) {
-            await api.sftpInit(sftpSessionId);
-          }
+          // node-first: nodeSftpInit 是幂等的，总是安全调用
+          await nodeSftpInit(nodeId);
           
           // 调用后端获取项目信息
-          const projectInfo = await api.ideOpenProject(sftpSessionId, rootPath);
+          const projectInfo = await nodeIdeOpenProject(nodeId, rootPath);
           
           set({
-            connectionId,
-            sftpSessionId,
+            nodeId,
             project: {
               rootPath: projectInfo.rootPath,
               name: projectInfo.name,
@@ -237,8 +233,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           set({
-            connectionId: null,
-            sftpSessionId: null,
+            nodeId: null,
             terminalSessionId: null,
             project: null,
             tabs: [],
@@ -253,9 +248,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         },
 
         changeRootPath: async (newRootPath: string) => {
-          const { connectionId, sftpSessionId, tabs } = get();
+          const { nodeId, tabs } = get();
           
-          if (!connectionId || !sftpSessionId) {
+          if (!nodeId) {
             throw new Error('No active session');
           }
           
@@ -266,14 +261,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 调用后端获取新项目信息
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
-          }
-
-          const projectInfo = await api.ideOpenProject(sftpSessionId, newRootPath);
+          const projectInfo = await nodeIdeOpenProject(nodeId, newRootPath);
           
           // 更新状态，关闭所有标签
           set({
@@ -291,17 +279,10 @@ export const useIdeStore = create<IdeState & IdeActions>()(
 
         // ─── File Actions ───
         openFile: async (path) => {
-          const { tabs, sftpSessionId, _findTabByPath } = get();
+          const { tabs, nodeId, _findTabByPath } = get();
           
-          if (!sftpSessionId) {
-            throw new Error('No SFTP session');
-          }
-
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
+          if (!nodeId) {
+            throw new Error('No active node');
           }
           
           // 检查是否已打开
@@ -341,7 +322,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           try {
             // 先检查文件是否可编辑
-            const checkResult = await api.ideCheckFile(sftpSessionId, path);
+            const checkResult = await nodeIdeCheckFile(nodeId, path);
             
             if (checkResult.type === 'too_large') {
               // 文件太大
@@ -372,7 +353,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             }
             
             // 文件可编辑，使用 preview API 加载内容
-            const preview = await api.sftpPreview(sftpSessionId, path);
+            const preview = await nodeSftpPreview(nodeId, path);
             
             if ('Text' in preview) {
               set(state => ({
@@ -446,23 +427,15 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         },
 
         saveFile: async (tabId) => {
-          const { tabs, sftpSessionId } = get();
+          const { tabs, nodeId } = get();
           const tab = tabs.find(t => t.id === tabId);
           
-          if (!tab || !sftpSessionId || tab.content === null) {
+          if (!tab || !nodeId || tab.content === null) {
             throw new Error('Cannot save: invalid state');
           }
           
-          // 连接状态守卫
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
-          }
-
           // 检查冲突
-          const stat = await api.sftpStat(sftpSessionId, tab.path);
+          const stat = await nodeSftpStat(nodeId, tab.path);
           if (tab.serverMtime && stat.modified && stat.modified !== tab.serverMtime) {
             // 设置冲突状态，由 UI 层处理
             set({
@@ -476,7 +449,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 保存文件
-          const result = await api.sftpWriteContent(sftpSessionId, tab.path, tab.content);
+          const result = await nodeSftpWrite(nodeId, tab.path, tab.content);
           
           // 清除搜索缓存（文件内容已变化）
           triggerSearchCacheClear();
@@ -567,22 +540,15 @@ export const useIdeStore = create<IdeState & IdeActions>()(
 
         // ─── Conflict Actions ───
         resolveConflict: async (resolution) => {
-          const { conflictState, tabs, sftpSessionId } = get();
-          if (!conflictState || !sftpSessionId) return;
-
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
-          }
+          const { conflictState, tabs, nodeId } = get();
+          if (!conflictState || !nodeId) return;
           
           const tab = tabs.find(t => t.id === conflictState.tabId);
           if (!tab || tab.content === null) return;
           
           if (resolution === 'overwrite') {
             // 强制保存（忽略冲突）
-            const result = await api.sftpWriteContent(sftpSessionId, tab.path, tab.content);
+            const result = await nodeSftpWrite(nodeId, tab.path, tab.content);
             
             set(state => ({
               tabs: state.tabs.map(t =>
@@ -599,10 +565,10 @@ export const useIdeStore = create<IdeState & IdeActions>()(
             }));
           } else if (resolution === 'reload') {
             // 重新加载远程内容
-            const preview = await api.sftpPreview(sftpSessionId, tab.path);
+            const preview = await nodeSftpPreview(nodeId, tab.path);
             
             if ('Text' in preview) {
-              const stat = await api.sftpStat(sftpSessionId, tab.path);
+              const stat = await nodeSftpStat(nodeId, tab.path);
               
               set(state => ({
                 tabs: state.tabs.map(t =>
@@ -630,19 +596,13 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         // ─── File System Operations (CRUD) ───
         
         createFile: async (parentPath, name) => {
-          const { sftpSessionId, _findTabByPath, refreshTreeNode } = get();
+          const { nodeId, _findTabByPath, refreshTreeNode } = get();
           
           // 1. 基础验证
-          if (!sftpSessionId) {
-            throw new Error('No SFTP session');
+          if (!nodeId) {
+            throw new Error('No active node');
           }
 
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return '';
-          }
           const validationError = validateFileName(name);
           if (validationError) {
             throw new Error(validationError);
@@ -659,7 +619,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 4. 竞态检查：远程是否已存在同名文件
           try {
-            await api.sftpStat(sftpSessionId, fullPath);
+            await nodeSftpStat(nodeId, fullPath);
             // 如果能获取到 stat，说明文件已存在
             throw new Error('ide.error.alreadyExists');
           } catch (e) {
@@ -671,7 +631,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 5. 创建空文件（通过写入空内容）
-          await api.sftpWriteContent(sftpSessionId, fullPath, '');
+          await nodeSftpWrite(nodeId, fullPath, '');
           
           // 6. 触发树刷新
           refreshTreeNode(parentPath);
@@ -683,18 +643,12 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         },
 
         createFolder: async (parentPath, name) => {
-          const { sftpSessionId, refreshTreeNode } = get();
+          const { nodeId, refreshTreeNode } = get();
           
-          if (!sftpSessionId) {
-            throw new Error('No SFTP session');
+          if (!nodeId) {
+            throw new Error('No active node');
           }
 
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return '';
-          }
           const validationError = validateFileName(name);
           if (validationError) {
             throw new Error(validationError);
@@ -704,7 +658,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 检查是否已存在
           try {
-            await api.sftpStat(sftpSessionId, fullPath);
+            await nodeSftpStat(nodeId, fullPath);
             throw new Error('ide.error.alreadyExists');
           } catch (e) {
             if (e instanceof Error && e.message.includes('ide.error.')) {
@@ -713,7 +667,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 创建目录
-          await api.sftpMkdir(sftpSessionId, fullPath);
+          await nodeSftpMkdir(nodeId, fullPath);
           
           // 刷新
           refreshTreeNode(parentPath);
@@ -739,17 +693,10 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         },
 
         deleteItem: async (path, isDirectory) => {
-          const { sftpSessionId, closeTab, getAffectedTabs, refreshTreeNode } = get();
+          const { nodeId, closeTab, getAffectedTabs, refreshTreeNode } = get();
           
-          if (!sftpSessionId) {
-            throw new Error('No SFTP session');
-          }
-
-          try {
-            await guardSessionConnection(sftpSessionId);
-          } catch (err) {
-            if (!isConnectionGuardError(err)) throw err;
-            return;
+          if (!nodeId) {
+            throw new Error('No active node');
           }
           
           // 1. 检查受影响的标签
@@ -768,9 +715,9 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 4. 执行删除操作
           if (isDirectory) {
-            await api.sftpDeleteRecursive(sftpSessionId, path);
+            await nodeSftpDeleteRecursive(nodeId, path);
           } else {
-            await api.sftpDelete(sftpSessionId, path);
+            await nodeSftpDelete(nodeId, path);
           }
           
           // 5. 刷新父目录
@@ -783,10 +730,10 @@ export const useIdeStore = create<IdeState & IdeActions>()(
         },
 
         renameItem: async (oldPath, newName) => {
-          const { sftpSessionId, refreshTreeNode } = get();
+          const { nodeId, refreshTreeNode } = get();
           
-          if (!sftpSessionId) {
-            throw new Error('No SFTP session');
+          if (!nodeId) {
+            throw new Error('No active node');
           }
           
           // 1. 验证新名称
@@ -808,7 +755,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           
           // 4. 检查新路径是否已存在
           try {
-            await api.sftpStat(sftpSessionId, newPath);
+            await nodeSftpStat(nodeId, newPath);
             throw new Error('ide.error.alreadyExists');
           } catch (e) {
             if (e instanceof Error && e.message.includes('ide.error.')) {
@@ -817,7 +764,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
           }
           
           // 5. 执行重命名
-          await api.sftpRename(sftpSessionId, oldPath, newPath);
+          await nodeSftpRename(nodeId, oldPath, newPath);
           
           // 6. 更新所有受影响的标签路径
           set(state => ({

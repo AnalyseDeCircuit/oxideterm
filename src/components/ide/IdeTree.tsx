@@ -11,7 +11,7 @@ import {
   Folder,
   FolderInput,
 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { nodeSftpListDir } from '../../lib/api';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
 import { cn } from '../../lib/utils';
 import { FileIcon, FolderIcon } from '../../lib/fileIcons';
@@ -65,7 +65,7 @@ function sortFiles(files: FileInfo[]): FileInfo[] {
 interface TreeNodeProps {
   file: FileInfo;
   depth: number;
-  sftpSessionId: string;
+  nodeId: string;
   parentPath: string;
   onContextMenu: (e: React.MouseEvent, path: string, isDir: boolean, name: string) => void;
   inlineInput: InlineInputState | null;
@@ -84,7 +84,7 @@ interface InlineInputState {
 function TreeNode({ 
   file, 
   depth, 
-  sftpSessionId, 
+  nodeId, 
   parentPath: _parentPath,
   onContextMenu,
   inlineInput,
@@ -140,7 +140,7 @@ function TreeNode({
     setError(null);
     
     try {
-      const result = await api.sftpListDir(sftpSessionId, fullPath);
+      const result = await nodeSftpListDir(nodeId, fullPath);
       setChildren(sortFiles(result));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -148,7 +148,7 @@ function TreeNode({
       setIsLoading(false);
       loadingRef.current = false;
     }
-  }, [isDir, fullPath, sftpSessionId]);
+  }, [isDir, fullPath, nodeId]);
   
   // 展开时加载子目录
   useEffect(() => {
@@ -302,7 +302,7 @@ function TreeNode({
               key={child.name}
               file={child}
               depth={depth + 1}
-              sftpSessionId={sftpSessionId}
+              nodeId={nodeId}
               parentPath={fullPath}
               onContextMenu={onContextMenu}
               inlineInput={inlineInput}
@@ -322,7 +322,7 @@ export function IdeTree() {
   const project = useIdeProject();
   
   // 精细化 selector：只订阅需要的状态
-  const sftpSessionId = useIdeStore(state => state.sftpSessionId);
+  const nodeId = useIdeStore(state => state.nodeId);
   const expandedPaths = useIdeStore(state => state.expandedPaths);
   const changeRootPath = useIdeStore(state => state.changeRootPath);
   const hasDirtyFiles = useIdeStore(state => state.tabs.some(t => t.isDirty));
@@ -366,20 +366,20 @@ export function IdeTree() {
   
   // 加载根目录
   const loadRoot = useCallback(async () => {
-    if (!project || !sftpSessionId) return;
+    if (!project || !nodeId) return;
     
     setIsLoading(true);
     setError(null);
     
     try {
-      const result = await api.sftpListDir(sftpSessionId, project.rootPath);
+      const result = await nodeSftpListDir(nodeId, project.rootPath);
       setRootFiles(sortFiles(result));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [project, sftpSessionId]);
+  }, [project, nodeId]);
   
   // 订阅根目录刷新信号
   const rootRefreshSignal = useIdeStore(
@@ -388,17 +388,17 @@ export function IdeTree() {
   
   // 当根目录刷新信号变化时，重新加载
   useEffect(() => {
-    if (project && sftpSessionId && rootRefreshSignal > 0) {
+    if (project && nodeId && rootRefreshSignal > 0) {
       loadRoot();
     }
-  }, [rootRefreshSignal, project, sftpSessionId, loadRoot]);
+  }, [rootRefreshSignal, project, nodeId, loadRoot]);
   
   // 初始加载
   useEffect(() => {
-    if (project && sftpSessionId && expandedPaths.has(project.rootPath)) {
+    if (project && nodeId && expandedPaths.has(project.rootPath)) {
       loadRoot();
     }
-  }, [project, sftpSessionId, expandedPaths, loadRoot]);
+  }, [project, nodeId, expandedPaths, loadRoot]);
   
   // 刷新（同时刷新文件列表和 Git 状态）
   const handleRefresh = useCallback(() => {
@@ -697,7 +697,7 @@ export function IdeTree() {
               key={file.name}
               file={file}
               depth={0}
-              sftpSessionId={sftpSessionId!}
+              nodeId={nodeId!}
               parentPath={project.rootPath}
               onContextMenu={handleContextMenu}
               inlineInput={inlineInput}

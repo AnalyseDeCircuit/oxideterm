@@ -14,6 +14,7 @@ pub mod forwarding;
 #[cfg(feature = "local-terminal")]
 pub mod local;
 pub mod oxide_file;
+pub mod router;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
@@ -252,6 +253,21 @@ pub fn run() {
     // Create session tree state for dynamic jump host support
     let session_tree_state = Arc::new(SessionTreeState::new());
 
+    // Oxide-Next Phase 2: 创建 NodeEventEmitter（共享实例）
+    let node_event_emitter = Arc::new(router::NodeEventEmitter::new());
+
+    // 注入 emitter 到 SshConnectionRegistry
+    ssh_connection_registry.set_node_event_emitter(node_event_emitter.clone());
+
+    // Create NodeRouter — Oxide-Next Phase 2
+    // 节点路由器：nodeId → 后端资源解析 + 共享 emitter
+    let node_router = Arc::new(router::NodeRouter::new(
+        session_tree_state.clone(),
+        ssh_connection_registry.clone(),
+        registry.clone(),
+        node_event_emitter.clone(),
+    ));
+
     // Create local terminal state (only when feature enabled)
     #[cfg(feature = "local-terminal")]
     let local_terminal_state = Arc::new(commands::local::LocalTerminalState::new());
@@ -291,6 +307,8 @@ pub fn run() {
         .manage(progress_store)
         .manage(ssh_connection_registry.clone())
         .manage(session_tree_state)
+        .manage(node_router)
+        .manage(node_event_emitter.clone())
         .manage(Arc::new(PluginFileServer::new()));
 
     // Conditionally add AI chat store (may be None if initialization failed)
@@ -333,6 +351,9 @@ pub fn run() {
                     tracing::info!("SSH connection registry app handle set");
                 });
             }
+
+            // Oxide-Next Phase 2: Set AppHandle for NodeEventEmitter
+            node_event_emitter.set_app_handle(app.handle().clone());
 
             // Initialize auto reconnect service
             let reconnect_service = Arc::new(AutoReconnectService::new(
@@ -494,34 +515,12 @@ pub fn run() {
             commands::ide_check_file,
             commands::ide_batch_stat,
             commands::ide_exec_command,
-            // SFTP commands
-            commands::sftp_init,
-            commands::sftp_list_dir,
-            commands::sftp_stat,
-            commands::sftp_preview,
-            commands::sftp_preview_hex,
-            commands::sftp_write_content,
-            commands::sftp_download,
-            commands::sftp_upload,
-            commands::sftp_delete,
-            commands::sftp_delete_recursive,
-            commands::sftp_download_dir,
-            commands::sftp_upload_dir,
-            commands::sftp_mkdir,
-            commands::sftp_rename,
-            commands::sftp_pwd,
-            commands::sftp_cd,
-            commands::sftp_close,
-            commands::sftp_is_initialized,
-            // Transfer control commands
+            // SFTP transfer control commands (node-independent)
             commands::sftp_cancel_transfer,
             commands::sftp_pause_transfer,
             commands::sftp_resume_transfer,
             commands::sftp_transfer_stats,
             commands::sftp_update_settings,
-            // Resume transfer commands
-            commands::sftp_list_incomplete_transfers,
-            commands::sftp_resume_transfer_with_retry,
             // Network and reconnect commands
             commands::network_status_changed,
             commands::cancel_reconnect,
@@ -559,6 +558,43 @@ pub fn run() {
             commands::install_plugin,
             commands::uninstall_plugin,
             commands::check_plugin_updates,
+            // Oxide-Next: node-first commands (Phase 0)
+            commands::node_get_state,
+            commands::node_sftp_init,
+            commands::node_sftp_list_dir,
+            commands::node_sftp_stat,
+            commands::node_sftp_preview,
+            commands::node_sftp_write,
+            commands::node_sftp_download,
+            commands::node_sftp_upload,
+            commands::node_sftp_delete,
+            commands::node_sftp_mkdir,
+            commands::node_sftp_rename,
+            commands::node_terminal_url,
+            // Oxide-Next: Phase 4 补全命令
+            commands::node_sftp_delete_recursive,
+            commands::node_sftp_download_dir,
+            commands::node_sftp_upload_dir,
+            commands::node_sftp_preview_hex,
+            commands::node_sftp_list_incomplete_transfers,
+            commands::node_sftp_resume_transfer,
+            commands::node_ide_open_project,
+            commands::node_ide_exec_command,
+            commands::node_ide_check_file,
+            commands::node_ide_batch_stat,
+            // Oxide-Next: node-first forwarding commands
+            commands::node_list_forwards,
+            commands::node_create_forward,
+            commands::node_stop_forward,
+            commands::node_delete_forward,
+            commands::node_restart_forward,
+            commands::node_update_forward,
+            commands::node_get_forward_stats,
+            commands::node_stop_all_forwards,
+            commands::node_forward_jupyter,
+            commands::node_forward_tensorboard,
+            commands::node_forward_vscode,
+            commands::node_list_saved_forwards,
         ]);
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -692,34 +728,12 @@ pub fn run() {
             commands::ide_open_project,
             commands::ide_check_file,
             commands::ide_batch_stat,
-            // SFTP commands
-            commands::sftp_init,
-            commands::sftp_list_dir,
-            commands::sftp_stat,
-            commands::sftp_preview,
-            commands::sftp_preview_hex,
-            commands::sftp_write_content,
-            commands::sftp_download,
-            commands::sftp_upload,
-            commands::sftp_delete,
-            commands::sftp_delete_recursive,
-            commands::sftp_download_dir,
-            commands::sftp_upload_dir,
-            commands::sftp_mkdir,
-            commands::sftp_rename,
-            commands::sftp_pwd,
-            commands::sftp_cd,
-            commands::sftp_close,
-            commands::sftp_is_initialized,
-            // Transfer control commands
+            // SFTP transfer control commands (node-independent)
             commands::sftp_cancel_transfer,
             commands::sftp_pause_transfer,
             commands::sftp_resume_transfer,
             commands::sftp_transfer_stats,
             commands::sftp_update_settings,
-            // Resume transfer commands
-            commands::sftp_list_incomplete_transfers,
-            commands::sftp_resume_transfer_with_retry,
             // Network and reconnect commands
             commands::network_status_changed,
             commands::cancel_reconnect,
@@ -757,6 +771,43 @@ pub fn run() {
             commands::install_plugin,
             commands::uninstall_plugin,
             commands::check_plugin_updates,
+            // Oxide-Next: node-first commands (Phase 0)
+            commands::node_get_state,
+            commands::node_sftp_init,
+            commands::node_sftp_list_dir,
+            commands::node_sftp_stat,
+            commands::node_sftp_preview,
+            commands::node_sftp_write,
+            commands::node_sftp_download,
+            commands::node_sftp_upload,
+            commands::node_sftp_delete,
+            commands::node_sftp_mkdir,
+            commands::node_sftp_rename,
+            commands::node_terminal_url,
+            // Oxide-Next: Phase 4 补全命令
+            commands::node_sftp_delete_recursive,
+            commands::node_sftp_download_dir,
+            commands::node_sftp_upload_dir,
+            commands::node_sftp_preview_hex,
+            commands::node_sftp_list_incomplete_transfers,
+            commands::node_sftp_resume_transfer,
+            commands::node_ide_open_project,
+            commands::node_ide_exec_command,
+            commands::node_ide_check_file,
+            commands::node_ide_batch_stat,
+            // Oxide-Next: node-first forwarding commands
+            commands::node_list_forwards,
+            commands::node_create_forward,
+            commands::node_stop_forward,
+            commands::node_delete_forward,
+            commands::node_restart_forward,
+            commands::node_update_forward,
+            commands::node_get_forward_stats,
+            commands::node_stop_all_forwards,
+            commands::node_forward_jupyter,
+            commands::node_forward_tensorboard,
+            commands::node_forward_vscode,
+            commands::node_list_saved_forwards,
         ]);
 
     builder

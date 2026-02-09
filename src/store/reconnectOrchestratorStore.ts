@@ -13,14 +13,14 @@
  */
 
 import { create } from 'zustand';
-import { api } from '../lib/api';
+import { api, nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer } from '../lib/api';
 import { useSessionTreeStore } from './sessionTreeStore';
 import { useIdeStore } from './ideStore';
 import { useToastStore } from '../hooks/useToast';
 import { topologyResolver } from '../lib/topologyResolver';
 import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
-import type { ForwardRule, ForwardRequest, IncompleteTransferInfo } from '../types';
+import type { ForwardRule, IncompleteTransferInfo } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -42,9 +42,9 @@ export type ReconnectSnapshot = {
   nodeId: string;
   /** Timestamp when the snapshot was taken — used to detect user actions after snapshot */
   snapshotAt: number;
-  /** Forward rules per old session, captured BEFORE resetNodeState destroys them */
+  /** Forward rules per node, captured BEFORE resetNodeState destroys them */
   forwardRules: Array<{
-    sessionId: string;
+    nodeId: string;
     rules: ForwardRule[];
   }>;
   /** Old terminal session IDs (for querying incomplete SFTP transfers) */
@@ -520,49 +520,51 @@ async function phaseSnapshot(nodeId: string) {
   }
 
   // Snapshot forward rules (BEFORE resetNodeState destroys them)
+  // Node-first: query forwards by nodeId via NodeRouter
   const forwardRules: ReconnectSnapshot['forwardRules'] = [];
-  for (const sessionId of oldTerminalSessionIds) {
+  for (const n of allNodes) {
     try {
-      const rules = await api.listPortForwards(sessionId);
+      const rules = await api.nodeListForwards(n.id);
       // Only keep rules that user intended to be running (exclude user-stopped)
       const activeRules = rules.filter((r) => r.status !== 'stopped');
       if (activeRules.length > 0) {
-        forwardRules.push({ sessionId, rules: activeRules });
+        forwardRules.push({ nodeId: n.id, rules: activeRules });
       }
     } catch (e) {
-      // Session might be invalid already — that's ok, skip
-      console.warn(`[Orchestrator] Failed to snapshot forwards for session ${sessionId}:`, e);
+      // Node may not have forwarding initialized — that's ok, skip
+      console.warn(`[Orchestrator] Failed to snapshot forwards for node ${n.id}:`, e);
     }
   }
 
   // Snapshot incomplete SFTP transfers BEFORE resetNodeState destroys old sessions
-  // guardSessionConnection will fail for old sessions after reset, so we must capture now
+  // Node-first: use nodeId to query transfers via node router
   const incompleteTransfers: ReconnectSnapshot['incompleteTransfers'] = [];
-  for (const sessionId of oldTerminalSessionIds) {
+  for (const n of allNodes) {
     try {
-      const transfers = await api.sftpListIncompleteTransfers(sessionId);
+      const transfers = await nodeSftpListIncompleteTransfers(n.id);
       const resumable = transfers.filter((t) => t.can_resume);
       if (resumable.length > 0) {
-        incompleteTransfers.push({ oldSessionId: sessionId, transfers: resumable });
+        // Store nodeId as oldSessionId for backward compatibility with ReconnectSnapshot type
+        incompleteTransfers.push({ oldSessionId: n.id, transfers: resumable });
       }
     } catch (e) {
-      // Session SFTP may not be initialized — that's ok
-      console.warn(`[Orchestrator] Failed to snapshot incomplete transfers for session ${sessionId}:`, e);
+      // Node SFTP may not be initialized — that's ok
+      console.warn(`[Orchestrator] Failed to snapshot incomplete transfers for node ${n.id}:`, e);
     }
   }
 
   // Snapshot IDE state
   let ideSnapshot: ReconnectSnapshot['ideSnapshot'] | undefined;
   const ideState = useIdeStore.getState();
-  if (ideState.connectionId && ideState.project) {
+  if (ideState.nodeId && ideState.project) {
     // Check if IDE's connection belongs to one of the affected nodes
-    const ideNodeId = topologyResolver.getNodeId(ideState.connectionId);
-    const isAffected = ideNodeId && allNodes.some((n) => n.id === ideNodeId);
+    const ideNodeId = ideState.nodeId;
+    const isAffected = allNodes.some((n) => n.id === ideNodeId);
     if (isAffected) {
       ideSnapshot = {
         projectPath: ideState.project.rootPath,
         tabPaths: ideState.tabs.map((t) => t.path),
-        connectionId: ideState.connectionId,
+        connectionId: ideState.nodeId,
       };
       console.log(`[Orchestrator] IDE snapshot: project=${ideSnapshot.projectPath}, tabs=${ideSnapshot.tabPaths.length}`);
     }
@@ -666,12 +668,8 @@ async function phaseAwaitTerminal(nodeId: string) {
   // (nodes that had forwards or incomplete transfers in the snapshot)
   const nodesNeedingSession = new Set<string>();
   for (const entry of snapshot.forwardRules) {
-    // Find which node owned this old session
-    for (const [nId, oldIds] of snapshot.perNodeOldSessionIds) {
-      if (oldIds.includes(entry.sessionId)) {
-        nodesNeedingSession.add(nId);
-      }
-    }
+    // Node-first: entry.nodeId directly identifies the node
+    nodesNeedingSession.add(entry.nodeId);
   }
   for (const entry of snapshot.incompleteTransfers) {
     for (const [nId, oldIds] of snapshot.perNodeOldSessionIds) {
@@ -742,31 +740,19 @@ async function phaseRestoreForwards(nodeId: string) {
 
   console.log(`[Orchestrator] Phase: restore-forwards for ${nodeId}`);
 
-  // Build old→new session mapping
-  const sessionMap = buildSessionMapping(snapshot, nodeId);
+  // Node-first: no session mapping needed — nodeId resolves to new terminal session via NodeRouter
+  let restored = 0;
 
-  // Collect existing live forwards to avoid duplicating or resurrecting user-stopped rules.
-  // If a user manually stopped or removed a forward while reconnect was in progress,
-  // we should not recreate it.
-  const liveForwardKeys = new Set<string>();
-  for (const [, newSid] of sessionMap) {
+  for (const entry of snapshot.forwardRules) {
+    // Collect existing live forwards to avoid duplicating or resurrecting user-stopped rules
+    const liveForwardKeys = new Set<string>();
     try {
-      const live = await api.listPortForwards(newSid);
+      const live = await api.nodeListForwards(entry.nodeId);
       for (const f of live) {
         liveForwardKeys.add(`${f.forward_type}:${f.bind_address}:${f.bind_port}`);
       }
     } catch {
-      // New session may not have any forwards yet — that's fine
-    }
-  }
-
-  let restored = 0;
-
-  for (const entry of snapshot.forwardRules) {
-    const newSessionId = sessionMap.get(entry.sessionId);
-    if (!newSessionId) {
-      console.warn(`[Orchestrator] No new session found for old session ${entry.sessionId}, skipping forwards`);
-      continue;
+      // Node may not have forwarding initialized yet — that's fine
     }
 
     for (const rule of entry.rules) {
@@ -776,7 +762,7 @@ async function phaseRestoreForwards(nodeId: string) {
 
       // Re-check live forwards right before creation to catch user actions during the loop
       try {
-        const freshLive = await api.listPortForwards(newSessionId);
+        const freshLive = await api.nodeListForwards(entry.nodeId);
         for (const f of freshLive) {
           liveForwardKeys.add(`${f.forward_type}:${f.bind_address}:${f.bind_port}`);
         }
@@ -790,16 +776,15 @@ async function phaseRestoreForwards(nodeId: string) {
       }
 
       try {
-        const request: ForwardRequest = {
-          session_id: newSessionId,
+        await api.nodeCreateForward({
+          node_id: entry.nodeId,
           forward_type: rule.forward_type,
           bind_address: rule.bind_address,
           bind_port: rule.bind_port,
           target_host: rule.target_host,
           target_port: rule.target_port,
           description: rule.description,
-        };
-        await api.createPortForward(request);
+        });
         restored++;
         liveForwardKeys.add(key); // track so we don't duplicate within the same batch
         console.log(`[Orchestrator] Restored forward: ${rule.bind_address}:${rule.bind_port} -> ${rule.target_host}:${rule.target_port}`);
@@ -834,15 +819,11 @@ async function phaseResumeTransfers(nodeId: string) {
   console.log(`[Orchestrator] Phase: resume-transfers for ${nodeId}`);
 
   // Use pre-snapshotted incomplete transfers (captured before resetNodeState destroyed old sessions)
-  // This avoids calling guardSessionConnection on dead old sessions.
   if (snapshot.incompleteTransfers.length === 0) {
     console.log(`[Orchestrator] No incomplete transfers in snapshot`);
     exitPhase(nodeId, 'skipped', 'no incomplete transfers in snapshot');
     return;
   }
-
-  // Build session mapping
-  const sessionMap = buildSessionMapping(snapshot, nodeId);
 
   // Ensure SFTP sessions are initialized for all affected nodes before resuming
   const treeStore = useSessionTreeStore.getState();
@@ -868,12 +849,8 @@ async function phaseResumeTransfers(nodeId: string) {
   for (const entry of snapshot.incompleteTransfers) {
     if (job.abortController.signal.aborted) return;
 
-    // Find the new session for this old session's node
-    const newSessionId = sessionMap.get(entry.oldSessionId);
-    if (!newSessionId) {
-      console.warn(`[Orchestrator] No new session for old ${entry.oldSessionId}, skipping ${entry.transfers.length} transfers`);
-      continue;
-    }
+    // entry.oldSessionId is actually nodeId (set in snapshot phase)
+    const entryNodeId = entry.oldSessionId;
 
     for (const transfer of entry.transfers) {
       if (job.abortController.signal.aborted) return;
@@ -881,7 +858,7 @@ async function phaseResumeTransfers(nodeId: string) {
       // Re-check this specific transfer's status right before resume
       // to catch user cancellations that happened during the restore loop
       try {
-        const freshTransfers = await api.sftpListIncompleteTransfers(newSessionId);
+        const freshTransfers = await nodeSftpListIncompleteTransfers(entryNodeId);
         const stillExists = freshTransfers.some(
           (t) => t.transfer_id === transfer.transfer_id && t.can_resume,
         );
@@ -894,7 +871,7 @@ async function phaseResumeTransfers(nodeId: string) {
       }
 
       try {
-        await api.sftpResumeTransferWithRetry(newSessionId, transfer.transfer_id);
+        await nodeSftpResumeTransfer(entryNodeId, transfer.transfer_id);
         resumed++;
         console.log(`[Orchestrator] Resumed transfer ${transfer.transfer_id}`);
       } catch (e) {
@@ -970,8 +947,8 @@ async function phaseRestoreIde(nodeId: string) {
   }
 
   try {
-    // Re-open project
-    await ideStore.openProject(newConnectionId, newSftpSessionId, ideSnapshot.projectPath);
+    // Re-open project using nodeId (node-first)
+    await ideStore.openProject(targetNodeId, ideSnapshot.projectPath);
 
     // Re-open file tabs
     let openedTabs = 0;
@@ -1002,53 +979,6 @@ async function phaseRestoreIde(nodeId: string) {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Build a mapping from old session IDs → new session IDs.
- *
- * Strategy: use the per-node old session IDs captured in the snapshot and correlate
- * each node's old sessions to the node's current (new) terminal session ID.
- * This is deterministic because we know exactly which old sessions belonged to which node.
- */
-function buildSessionMapping(
-  snapshot: ReconnectSnapshot,
-  _rootNodeId: string,
-): Map<string, string> {
-  const mapping = new Map<string, string>();
-  const treeStore = useSessionTreeStore.getState();
-
-  const rootNode = treeStore.getNode(snapshot.nodeId);
-  if (!rootNode) return mapping;
-
-  const descendants = treeStore.getDescendants(snapshot.nodeId);
-  const allNodes = [rootNode, ...descendants];
-
-  for (const node of allNodes) {
-    const newTerminalSessionId = node.terminalSessionId;
-    const oldSessionIds = snapshot.perNodeOldSessionIds.get(node.id);
-
-    if (!oldSessionIds || oldSessionIds.length === 0) continue;
-
-    // Map ALL old session IDs for this node to the new terminal session
-    if (newTerminalSessionId) {
-      for (const oldId of oldSessionIds) {
-        mapping.set(oldId, newTerminalSessionId);
-      }
-    }
-
-    // Also map old sessions to new SFTP session ID (for transfer resume)
-    const newSftpId = node.sftpSessionId;
-    if (newSftpId) {
-      for (const oldId of oldSessionIds) {
-        if (!mapping.has(oldId)) {
-          mapping.set(oldId, newSftpId);
-        }
-      }
-    }
-  }
-
-  return mapping;
 }
 
 /**

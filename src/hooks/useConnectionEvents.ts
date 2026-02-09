@@ -47,7 +47,7 @@ export function useConnectionEvents(): void {
   // Use selectors to get stable function references
   const updateConnectionState = useAppStore((state) => state.updateConnectionState);
   const updateConnectionRemoteEnv = useAppStore((state) => state.updateConnectionRemoteEnv);
-  const interruptTransfersBySession = useTransferStore((state) => state.interruptTransfersBySession);
+  const interruptTransfersByNode = useTransferStore((state) => state.interruptTransfersByNode);
   
   // Use ref for sessions to avoid re-subscribing on every session change
   const sessionsRef = useRef(useAppStore.getState().sessions);
@@ -139,12 +139,9 @@ export function useConnectionEvents(): void {
             }
             
             // 3. 中断 SFTP 传输
-            const sessions = sessionsRef.current;
-            sessions.forEach((session, sessionId) => {
-              if (session.connectionId === connection_id) {
-                interruptTransfersBySession(sessionId, i18n.t('connections.events.connection_lost_reconnecting'));
-              }
-            });
+            if (nodeId) {
+              interruptTransfersByNode(nodeId, i18n.t('connections.events.connection_lost_reconnecting'));
+            }
           }
 
           // ========== connected 处理：清除 link-down 标记 ==========
@@ -177,11 +174,10 @@ export function useConnectionEvents(): void {
             }
             
             // 中断 SFTP 传输
-            sessions.forEach((session, sessionId) => {
-              if (session.connectionId === connection_id) {
-                interruptTransfersBySession(sessionId, i18n.t('connections.events.connection_closed'));
-              }
-            });
+            const disconnNodeId = topologyResolver.getNodeId(connection_id);
+            if (disconnNodeId) {
+              interruptTransfersByNode(disconnNodeId, i18n.t('connections.events.connection_closed'));
+            }
           }
         });
         
@@ -240,7 +236,7 @@ export function useConnectionEvents(): void {
       mounted = false;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  // Dependencies are stable: updateConnectionState, updateConnectionRemoteEnv, and interruptTransfersBySession are selectors
+  // Dependencies are stable: updateConnectionState, updateConnectionRemoteEnv, and interruptTransfersByNode are selectors
   // sessionsRef is updated via subscription, not as a dependency
-  }, [updateConnectionState, updateConnectionRemoteEnv, interruptTransfersBySession]);
+  }, [updateConnectionState, updateConnectionRemoteEnv, interruptTransfersByNode]);
 }

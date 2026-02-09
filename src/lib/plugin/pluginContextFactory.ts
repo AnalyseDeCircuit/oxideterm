@@ -26,6 +26,7 @@ import type {
 } from '../../types/plugin';
 import type { SshConnectionState } from '../../types';
 import { useAppStore } from '../../store/appStore';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { createPluginStorage } from './pluginStorage';
 import { pluginEventBridge } from './pluginEventBridge';
@@ -86,6 +87,18 @@ function createDisposable(pluginId: string, fn: () => void): Disposable {
 }
 
 /**
+ * Resolve a nodeId to its first terminal sessionId via sessionTreeStore.
+ * Returns null if the node has no terminals.
+ * Phase 4.5 bridge: used by nodeId-based plugin terminal API.
+ */
+function resolveNodeToFirstSession(nodeId: string): string | null {
+  const node = useSessionTreeStore.getState().getNode(nodeId);
+  if (!node) return null;
+  const terminalIds = node.runtime.terminalIds;
+  return terminalIds.length > 0 ? terminalIds[0] : null;
+}
+
+/**
  * Build the full PluginContext for a given plugin manifest.
  * Every object in the returned value is deeply frozen.
  */
@@ -109,6 +122,13 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     getState(connectionId: string): SshConnectionState | null {
       const conn = useAppStore.getState().connections.get(connectionId);
       return conn ? conn.state : null;
+    },
+    getByNode(nodeId: string): ConnectionSnapshot | null {
+      const node = useSessionTreeStore.getState().getNode(nodeId);
+      const connectionId = node?.runtime.connectionId;
+      if (!connectionId) return null;
+      const conn = useAppStore.getState().connections.get(connectionId);
+      return conn ? toSnapshot(conn) : null;
     },
   });
 
@@ -144,15 +164,15 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
       });
       return createDisposable(pluginId, unsub);
     },
-    onSessionCreated(handler) {
-      const unsub = pluginEventBridge.on('session:created', (info) => {
-        try { handler(info as { sessionId: string; connectionId: string }); } catch { /* swallow */ }
+    onNodeReady(handler) {
+      const unsub = pluginEventBridge.on('node:ready', (info) => {
+        try { handler(info as { nodeId: string; connectionId: string }); } catch { /* swallow */ }
       });
       return createDisposable(pluginId, unsub);
     },
-    onSessionClosed(handler) {
-      const unsub = pluginEventBridge.on('session:closed', (info) => {
-        try { handler(info as { sessionId: string }); } catch { /* swallow */ }
+    onNodeDisconnected(handler) {
+      const unsub = pluginEventBridge.on('node:disconnected', (info) => {
+        try { handler(info as { nodeId: string }); } catch { /* swallow */ }
       });
       return createDisposable(pluginId, unsub);
     },
@@ -286,22 +306,31 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         usePluginStore.setState({ shortcuts });
       });
     },
-    writeToTerminal(sessionId: string, text: string) {
+    writeToNode(nodeId: string, text: string) {
+      const sessionId = resolveNodeToFirstSession(nodeId);
+      if (!sessionId) {
+        console.warn(`[PluginContext] writeToNode: no terminal session found for node "${nodeId}"`);
+        return;
+      }
       const paneId = findPaneBySessionId(sessionId);
       if (!paneId) {
-        console.warn(`[PluginContext] writeToTerminal: no pane found for session "${sessionId}"`);
+        console.warn(`[PluginContext] writeToNode: no pane found for session "${sessionId}"`);
         return;
       }
       if (!registryWriteToTerminal(paneId, text)) {
-        console.warn(`[PluginContext] writeToTerminal: no writer registered for pane "${paneId}"`);
+        console.warn(`[PluginContext] writeToNode: no writer registered for pane "${paneId}"`);
       }
     },
-    getBuffer(sessionId: string): string | null {
+    getNodeBuffer(nodeId: string): string | null {
+      const sessionId = resolveNodeToFirstSession(nodeId);
+      if (!sessionId) return null;
       const paneId = findPaneBySessionId(sessionId);
       if (!paneId) return null;
       return getTerminalBuffer(paneId) ?? null;
     },
-    getSelection(sessionId: string): string | null {
+    getNodeSelection(nodeId: string): string | null {
+      const sessionId = resolveNodeToFirstSession(nodeId);
+      if (!sessionId) return null;
       const paneId = findPaneBySessionId(sessionId);
       if (!paneId) return null;
       return getTerminalSelection(paneId) ?? null;

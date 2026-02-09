@@ -4,20 +4,17 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Progress } from '../ui/progress';
 import { useTransferStore, formatBytes, formatSpeed, calculateSpeed, TransferItem } from '../../store/transferStore';
-import { useAppStore } from '../../store/appStore';
-import { api } from '../../lib/api';
+import { nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer } from '../../lib/api';
+import { useNodeState } from '../../hooks/useNodeState';
 import { IncompleteTransferInfo } from '../../types';
 
-export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
+export const TransferQueue = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
   const { getAllTransfers, clearCompleted, cancelTransfer, removeTransfer, addTransfer, pauseTransfer, resumeTransfer } = useTransferStore();
   
-  // 🔴 前端熔断：获取连接状态
-  const { getSession, connections } = useAppStore();
-  const session = getSession(sessionId);
-  const connectionId = session?.connectionId;
-  const connectionState = connectionId ? connections.get(connectionId)?.state : undefined;
-  const isConnectionReady = connectionState === 'active' || connectionState === 'idle';
+  // 🔴 Phase 4: use node readiness instead of connection state
+  const { state: nodeState } = useNodeState(nodeId);
+  const isConnectionReady = nodeState.readiness === 'ready';
 
   const items = getAllTransfers();
   const [incompleteTransfers, setIncompleteTransfers] = useState<IncompleteTransferInfo[]>([]);
@@ -31,18 +28,18 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
   // Load incomplete transfers on mount and when session changes
   // 🔴 前端熔断：只有当连接真正 ready 时才加载
   useEffect(() => {
-    if (!sessionId) return;
+    if (!nodeId) return;
     
-    // 🚦 状态门禁：必须等待连接 active 才能请求后端
+    // 🚦 状态门禁：必须等待 node ready 才能请求后端
     if (!isConnectionReady) {
-      console.debug(`[TransferQueue] Waiting for connection to be ready (current: ${connectionState})`);
+      console.debug(`[TransferQueue] Waiting for node to be ready (current: ${nodeState.readiness})`);
       return;
     }
 
     const loadIncomplete = async () => {
       setLoadingIncomplete(true);
       try {
-        const transfers = await api.sftpListIncompleteTransfers(sessionId);
+        const transfers = await nodeSftpListIncompleteTransfers(nodeId);
         setIncompleteTransfers(transfers);
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e);
@@ -54,7 +51,7 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
         }
         // CONNECTION_NOT_FOUND 应该不会发生了（有状态门禁），但保留兜底
         else if (errorMsg.includes('CONNECTION_NOT_FOUND') || errorMsg.includes('NotFound')) {
-          console.debug(`[TransferQueue] Connection ${sessionId} not found, skipping.`);
+          console.debug(`[TransferQueue] Node ${nodeId} not found, skipping.`);
           setIncompleteTransfers([]);
         }
         else {
@@ -67,7 +64,7 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
     };
 
     loadIncomplete();
-  }, [sessionId, isConnectionReady, connectionState]);
+  }, [nodeId, isConnectionReady, nodeState.readiness]);
 
   const getProgress = (item: TransferItem): number => {
     if (item.size === 0) return 0;
@@ -90,13 +87,13 @@ export const TransferQueue = ({ sessionId }: { sessionId: string }) => {
     if (!transfer.can_resume) return;
 
     try {
-      await api.sftpResumeTransferWithRetry(sessionId, transfer.transfer_id);
+      await nodeSftpResumeTransfer(nodeId, transfer.transfer_id);
 
       // Add to active transfer queue
       const fileName = transfer.source_path.split('/').pop() || transfer.source_path;
       addTransfer({
         id: transfer.transfer_id,
-        sessionId: transfer.session_id,
+        nodeId: transfer.session_id,
         name: fileName,
         localPath: transfer.transfer_type === 'Download' ? transfer.destination_path : transfer.source_path,
         remotePath: transfer.transfer_type === 'Upload' ? transfer.destination_path : transfer.source_path,

@@ -140,7 +140,10 @@ export type ConnectionSnapshot = Readonly<{
 
 /** Context passed to terminal hooks */
 export type TerminalHookContext = {
+  /** @deprecated Use nodeId instead. Will be removed in next major version. */
   sessionId: string;
+  /** Stable node identifier, survives reconnect. */
+  nodeId: string;
 };
 
 /**
@@ -170,6 +173,8 @@ export type PluginConnectionsAPI = {
   getAll(): ReadonlyArray<ConnectionSnapshot>;
   get(connectionId: string): ConnectionSnapshot | null;
   getState(connectionId: string): SshConnectionState | null;
+  /** Phase 4.5: resolve node to connection snapshot */
+  getByNode(nodeId: string): ConnectionSnapshot | null;
 };
 
 /** ctx.events — lifecycle events + inter-plugin communication */
@@ -179,8 +184,10 @@ export type PluginEventsAPI = {
   onLinkDown(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onReconnect(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
   onIdle(handler: (snapshot: ConnectionSnapshot) => void): Disposable;
-  onSessionCreated(handler: (info: { sessionId: string; connectionId: string }) => void): Disposable;
-  onSessionClosed(handler: (info: { sessionId: string }) => void): Disposable;
+  /** Phase 4.5: Node becomes ready (connected + capabilities available) */
+  onNodeReady(handler: (info: { nodeId: string; connectionId: string }) => void): Disposable;
+  /** Phase 4.5: Node disconnected */
+  onNodeDisconnected(handler: (info: { nodeId: string }) => void): Disposable;
   /** Inter-plugin events (namespaced automatically as plugin:{pluginId}:{name}) */
   on(name: string, handler: (data: unknown) => void): Disposable;
   emit(name: string, data: unknown): void;
@@ -210,9 +217,12 @@ export type PluginTerminalAPI = {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
-  writeToTerminal(sessionId: string, text: string): void;
-  getBuffer(sessionId: string): string | null;
-  getSelection(sessionId: string): string | null;
+  /** Write to terminal by nodeId (stable across reconnects) */
+  writeToNode(nodeId: string, text: string): void;
+  /** Get terminal buffer by nodeId */
+  getNodeBuffer(nodeId: string): string | null;
+  /** Get terminal selection by nodeId */
+  getNodeSelection(nodeId: string): string | null;
 };
 
 /** ctx.settings — plugin-scoped settings */

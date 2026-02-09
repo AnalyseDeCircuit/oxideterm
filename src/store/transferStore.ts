@@ -7,7 +7,7 @@ export type TransferDirection = 'upload' | 'download';
 
 export interface TransferItem {
   id: string;
-  sessionId: string;
+  nodeId: string;
   name: string;
   localPath: string;
   remotePath: string;
@@ -35,10 +35,10 @@ interface TransferStore {
   pauseTransfer: (id: string) => Promise<void>;
   resumeTransfer: (id: string) => Promise<void>;
   cancelTransfer: (id: string) => Promise<void>;
-  interruptTransfersBySession: (sessionId: string, errorMessage?: string) => void;
+  interruptTransfersByNode: (nodeId: string, errorMessage?: string) => void;
   
   // Computed helpers
-  getTransfersBySession: (sessionId: string) => TransferItem[];
+  getTransfersByNode: (nodeId: string) => TransferItem[];
   getActiveTransfers: () => TransferItem[];
   getAllTransfers: () => TransferItem[];
 }
@@ -238,9 +238,9 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
     });
   },
   
-  // Mark all active/pending transfers for a session as interrupted (error state)
+  // Mark all active/pending transfers for a node as interrupted (error state)
   // Used when connection is lost - preserves transferred bytes for resume
-  interruptTransfersBySession: (sessionId, errorMessage) => {
+  interruptTransfersByNode: (nodeId, errorMessage) => {
     // Use i18n.t() for default message (lazy translation)
     const message = errorMessage ?? i18n.t('sftp.errors.connection_lost');
     set((state) => {
@@ -248,7 +248,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       let interrupted = 0;
       
       for (const [id, transfer] of newTransfers) {
-        if (transfer.sessionId === sessionId && 
+        if (transfer.nodeId === nodeId && 
             (transfer.state === 'active' || transfer.state === 'pending')) {
           newTransfers.set(id, {
             ...transfer,
@@ -261,15 +261,15 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       }
       
       if (interrupted > 0) {
-        console.log(`[TransferStore] Interrupted ${interrupted} transfers for session ${sessionId}`);
+        console.log(`[TransferStore] Interrupted ${interrupted} transfers for node ${nodeId}`);
       }
       
       return { transfers: newTransfers };
     });
   },
   
-  getTransfersBySession: (sessionId) => {
-    return Array.from(get().transfers.values()).filter(t => t.sessionId === sessionId);
+  getTransfersByNode: (nodeId) => {
+    return Array.from(get().transfers.values()).filter(t => t.nodeId === nodeId);
   },
   
   getActiveTransfers: () => {

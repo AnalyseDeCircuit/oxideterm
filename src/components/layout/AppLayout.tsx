@@ -126,11 +126,11 @@ export const AppLayout = () => {
                       <StaleTabBanner type="sftp" />
                     )
                   )}
-                  {tab.type === 'forwards' && tab.sessionId && (
+                  {tab.type === 'forwards' && tab.nodeId && (
                     <Suspense fallback={<ViewLoader />}>
                       <ForwardsView 
-                        key={`forwards-${tab.sessionId}-${getSession(tab.sessionId)?.connectionId ?? ''}`} 
-                        sessionId={tab.sessionId} 
+                        key={`forwards-${tab.nodeId}`} 
+                        nodeId={tab.nodeId} 
                       />
                     </Suspense>
                   )}

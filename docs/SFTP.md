@@ -329,15 +329,16 @@ const sftpPathMemory = new Map<string, string>();
 // 保存路径
 useEffect(() => {
   if (remotePath) {
-    sftpPathMemory.set(sessionId, remotePath);
+    sftpPathMemory.set(nodeId, remotePath);
   }
-}, [remotePath, sessionId]);
+}, [remotePath, nodeId]);
 
 // 恢复路径
 const initializeSftp = async () => {
-  const savedPath = sftpPathMemory.get(sessionId);
+  const savedPath = sftpPathMemory.get(nodeId);
   if (savedPath) {
-    await api.sftpCd(sessionId, savedPath);
+    // 路径通过 node_sftp_list_dir 自动切换
+    await nodeSftpListDir(nodeId, savedPath);
   }
 };
 ```
@@ -386,62 +387,91 @@ useEffect(() => {
 
 ## API 参考
 
+> **Oxide-Next**: 所有 SFTP API 已迁移至 `nodeId` 路由，通过 NodeRouter 自动获取连接和 SFTP session。
+
 ### 初始化 SFTP
 
 ```typescript
-// 为会话初始化 SFTP
-const cwd = await api.sftpInit(sessionId);
+// 为节点初始化 SFTP
+const cwd = await nodeSftpInit(nodeId);
 // 返回当前工作目录，如 "/home/user"
 ```
 
-**v1.4.0 注意**: 调用前必须确保 `connectionState === 'active' || connectionState === 'idle'`。
+**注意**: 调用前确保节点状态为 `connected`。
 
 ### 目录操作
 
 ```typescript
 // 列出目录内容
-const files: FileInfo[] = await api.sftpListDir(sessionId, "/path/to/dir");
+const files: FileInfo[] = await nodeSftpListDir(nodeId, "/path/to/dir");
 
 // 获取文件/目录信息
-const info: FileInfo = await api.sftpStat(sessionId, "/path/to/file");
+const info: FileInfo = await nodeSftpStat(nodeId, "/path/to/file");
 
 // 创建目录
-await api.sftpMkdir(sessionId, "/path/to/new/dir");
+await nodeSftpMkdir(nodeId, "/path/to/new/dir");
 
 // 删除文件
-await api.sftpDelete(sessionId, "/path/to/file");
+await nodeSftpDelete(nodeId, "/path/to/file");
 
 // 递归删除目录
-const deletedCount = await api.sftpDeleteRecursive(sessionId, "/path/to/dir");
+const deletedCount = await nodeSftpDeleteRecursive(nodeId, "/path/to/dir");
 
 // 重命名/移动
-await api.sftpRename(sessionId, "/old/path", "/new/path");
+await nodeSftpRename(nodeId, "/old/path", "/new/path");
 ```
 
 ### 文件传输
 
 ```typescript
 // 下载文件
-await api.sftpDownload(sessionId, "/remote/path", "/local/path");
+await nodeSftpDownload(nodeId, "/remote/path", "/local/path");
 
 // 上传文件
-await api.sftpUpload(sessionId, "/local/path", "/remote/path");
+await nodeSftpUpload(nodeId, "/local/path", "/remote/path");
 
 // 下载目录
-const fileCount = await api.sftpDownloadDir(sessionId, "/remote/dir", "/local/dir");
+const fileCount = await nodeSftpDownloadDir(nodeId, "/remote/dir", "/local/dir");
 
 // 上传目录
-const fileCount = await api.sftpUploadDir(sessionId, "/local/dir", "/remote/dir");
+const fileCount = await nodeSftpUploadDir(nodeId, "/local/dir", "/remote/dir");
 ```
 
 ### 文件预览
 
 ```typescript
 // 预览文件内容
-const content: PreviewContent = await api.sftpPreview(sessionId, "/path/to/file");
+const content: PreviewContent = await nodeSftpPreview(nodeId, "/path/to/file");
 
 // 增量加载 Hex 数据
-const hexContent: PreviewContent = await api.sftpPreviewHex(sessionId, "/path/to/file", offset);
+const hexContent: PreviewContent = await nodeSftpPreviewHex(nodeId, "/path/to/file", offset);
+```
+
+### 文件写入
+
+```typescript
+// 写入文件
+const result = await nodeSftpWrite(nodeId, "/path/to/file", content, createNew);
+// result: { bytesWritten: number }
+```
+
+### Transfer Control Commands (transferId-based)
+
+```typescript
+// 取消传输
+await sftpCancelTransfer(transferId);
+
+// 暂停传输
+await sftpPauseTransfer(transferId);
+
+// 恢复传输
+await sftpResumeTransfer(transferId);
+
+// 查询传输统计
+const stats = await sftpTransferStats(transferId);
+
+// 更新传输设置
+await sftpUpdateSettings(transferId, settings);
 ```
 
 ### PreviewContent 类型

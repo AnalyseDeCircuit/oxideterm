@@ -440,190 +440,216 @@ interface ConnectionInfo {
 
 ### SFTP Commands
 
-所有 SFTP 命令需要先调用 `sftp_init` 初始化会话。
+> **Oxide-Next**: 所有 SFTP 命令已迁移至 `node_sftp_*` 前缀，使用 `nodeId` 路由，不再需要 `sessionId`。
+> 后端通过 `NodeRouter` 自动查找对应的 `ConnectionEntry` 并获取 SFTP session。
 
-**v1.4.0 State Gating**: 所有 SFTP 命令执行前，前端必须检查 `connectionState === 'connected'`。
+**State Gating**: 所有 SFTP 命令执行前，前端检查节点状态 `status === 'connected'`。
 
-#### `sftp_init`
+#### `node_sftp_init`
 
-初始化 SFTP 子系统（复用已连接的 SSH 会话）。
+初始化 SFTP 子系统（通过 NodeRouter 自动获取 SSH 连接）。
 
 ```typescript
 // 请求
-{ sessionId: string }
+{ nodeId: string }
 
 // 响应
 string  // 当前工作目录路径
 ```
 
-#### `sftp_list_dir`
+#### `node_sftp_list_dir`
 
 列出目录内容。
 
 ```typescript
 // 请求
 {
-  sessionId: string;
+  nodeId: string;
   path: string;
   filter?: ListFilter;
 }
 
 interface ListFilter {
   show_hidden?: boolean;
-  file_types?: FileType[];
-  name_pattern?: string;
+  pattern?: string | null;
+  sort?: SortOrder;
 }
 
 // 响应
 FileInfo[]
 ```
 
-#### `sftp_stat`
+#### `node_sftp_stat`
 
 获取文件/目录信息。
 
 ```typescript
 // 请求
-{ sessionId: string; path: string }
+{ nodeId: string; path: string }
 
 // 响应
 FileInfo
 ```
 
-#### `sftp_preview`
+#### `node_sftp_preview`
 
-预览文件内容（仅限文本/图片等可预览类型）。
+预览文件内容（文本/图片/视频/音频/PDF等）。
 
 ```typescript
 // 请求
-{ sessionId: string; path: string }
+{ nodeId: string; path: string }
 
 // 响应
-interface PreviewContent {
-  content_type: 'text' | 'image' | 'binary' | 'unsupported';
-  text?: string;         // 文本内容
-  base64?: string;       // Base64 编码的二进制
-  mime_type?: string;
-  truncated?: boolean;   // 是否被截断
-}
+PreviewContent
 ```
 
-#### `sftp_download`
+#### `node_sftp_preview_hex`
+
+增量加载 Hex 数据。
+
+```typescript
+// 请求
+{ nodeId: string; path: string; offset: number }
+
+// 响应
+PreviewContent
+```
+
+#### `node_sftp_download`
 
 下载文件（支持进度事件）。
 
 ```typescript
 // 请求
 {
-  sessionId: string;
+  nodeId: string;
   remotePath: string;
   localPath: string;
 }
 
 // 响应
-void  // 通过 sftp:progress:{sessionId} 事件推送进度
+void  // 通过事件推送进度
 ```
 
-#### `sftp_upload`
+#### `node_sftp_upload`
 
 上传文件（支持进度事件）。
 
 ```typescript
 // 请求
 {
-  sessionId: string;
+  nodeId: string;
   localPath: string;
   remotePath: string;
 }
 
 // 响应
-void  // 通过 sftp:progress:{sessionId} 事件推送进度
+void  // 通过事件推送进度
 ```
 
-#### `sftp_delete`
+#### `node_sftp_delete`
 
-删除文件或目录。
+删除文件。
 
 ```typescript
 // 请求
-{ sessionId: string; path: string }
+{ nodeId: string; path: string }
 
 // 响应
 void
 ```
 
-#### `sftp_mkdir`
+#### `node_sftp_delete_recursive`
+
+递归删除目录。
+
+```typescript
+// 请求
+{ nodeId: string; path: string }
+
+// 响应
+number  // 已删除的文件/目录数量
+```
+
+#### `node_sftp_mkdir`
 
 创建目录。
 
 ```typescript
 // 请求
-{ sessionId: string; path: string }
+{ nodeId: string; path: string }
 
 // 响应
 void
 ```
 
-#### `sftp_rename`
+#### `node_sftp_rename`
 
 重命名/移动文件或目录。
 
 ```typescript
 // 请求
-{ sessionId: string; oldPath: string; newPath: string }
+{ nodeId: string; oldPath: string; newPath: string }
 
 // 响应
 void
 ```
 
-#### `sftp_pwd`
+#### `node_sftp_download_dir`
 
-获取当前工作目录。
+下载目录。
 
 ```typescript
 // 请求
-{ sessionId: string }
+{ nodeId: string; remotePath: string; localPath: string }
 
 // 响应
-string
+number  // 已下载的文件数量
 ```
 
-#### `sftp_cd`
+#### `node_sftp_upload_dir`
 
-切换工作目录。
+上传目录。
 
 ```typescript
 // 请求
-{ sessionId: string; path: string }
+{ nodeId: string; localPath: string; remotePath: string }
 
 // 响应
-string  // 新的工作目录绝对路径
+number  // 已上传的文件数量
 ```
 
-**v1.4.0 Path Memory**: 前端应将成功切换的路径存入 `PathMemoryMap[sessionId]`，以便 Key-Driven 重建后恢复。
+#### `node_sftp_write`
 
-#### `sftp_close`
-
-关闭 SFTP 会话。
+写入文件内容。
 
 ```typescript
 // 请求
-{ sessionId: string }
+{ nodeId: string; path: string; content: string; createNew: boolean }
 
 // 响应
-void
+{ bytesWritten: number }
 ```
 
-#### `sftp_is_initialized`
+#### Transfer Control Commands
 
-检查 SFTP 是否已初始化。
+以下命令基于 `transferId`，不依赖 nodeId：
 
 ```typescript
-// 请求
-{ sessionId: string }
+// 取消传输
+sftp_cancel_transfer({ transferId: string })
 
-// 响应
-boolean
+// 暂停传输
+sftp_pause_transfer({ transferId: string })
+
+// 恢复传输
+sftp_resume_transfer({ transferId: string })
+
+// 查询传输统计
+sftp_transfer_stats({ transferId: string }) → TransferStats
+
+// 更新传输设置
+sftp_update_settings({ transferId: string, settings: TransferSettings })
 ```
 
 #### SFTP 共享类型

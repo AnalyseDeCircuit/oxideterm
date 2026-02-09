@@ -348,12 +348,17 @@ pub async fn update_tree_node_state(
 #[tauri::command]
 pub async fn set_tree_node_connection(
     state: State<'_, Arc<SessionTreeState>>,
+    emitter: State<'_, Arc<crate::router::NodeEventEmitter>>,
     node_id: String,
     connection_id: String,
 ) -> Result<(), String> {
     let mut tree = state.tree.write().await;
-    tree.set_ssh_connection_id(&node_id, connection_id)
+    tree.set_ssh_connection_id(&node_id, connection_id.clone())
         .map_err(|e| e.to_string())?;
+
+    // Oxide-Next Phase 2: 注册 connectionId → nodeId 映射
+    emitter.register(&connection_id, &node_id);
+
     Ok(())
 }
 

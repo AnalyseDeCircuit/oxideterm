@@ -40,7 +40,6 @@ import { SavePathAsPresetDialog } from '../modals/SavePathAsPresetDialog';
 import { AddRootNodeDialog } from '../modals/AddRootNodeDialog';
 import { api } from '../../lib/api';
 import { connectToSaved } from '../../lib/connectToSaved';
-import { waitForConnectionActive, isConnectionGuardError } from '../../lib/connectionGuard';
 import { SystemHealthPanel } from './SystemHealthPanel';
 import { PluginSidebarRenderer } from '../plugin/PluginSidebarRenderer';
 
@@ -516,14 +515,21 @@ export const Sidebar = () => {
       const connectionId = node?.runtime?.connectionId || node?.sshConnectionId;
 
       if (connectionId) {
-        try {
-          // 等待连接状态变为 active（最多 20 秒）
-          await waitForConnectionActive(connectionId, 20000);
-        } catch (waitErr) {
-          // 如果等待超时但节点状态显示已连接，仍然继续尝试创建终端
+        // Node-first: 轮询节点状态等待连接稳定（最多 20 秒）
+        const deadline = Date.now() + 20000;
+        let stable = false;
+        while (Date.now() < deadline) {
+          const freshNode = getNode(nodeId);
+          if (freshNode?.runtime?.status === 'connected') {
+            stable = true;
+            break;
+          }
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!stable) {
           const freshNode = getNode(nodeId);
           if (freshNode?.runtime?.status !== 'connected') {
-            console.error('Connection not stable after wait:', waitErr);
+            console.error('Connection not stable after wait');
             toast({
               title: t('connections.status.reconnect_unstable'),
               description: t('connections.status.try_again_later'),
@@ -531,7 +537,6 @@ export const Sidebar = () => {
             });
             return;
           }
-          console.warn('Connection wait failed but node shows connected, continuing:', waitErr);
         }
       } else {
         console.error('[Reconnect] No connectionId found for node after connectNode');
@@ -559,7 +564,8 @@ export const Sidebar = () => {
             terminalId = await createTerminalForNode(nodeId, 80, 24);
           } catch (termErr) {
             lastErr = termErr;
-            if (isConnectionGuardError(termErr)) {
+            const errMsg = String(termErr);
+            if (errMsg.includes('CONNECTION_') || errMsg.includes('RECONNECTING') || errMsg.includes('SESSION_NOT_FOUND')) {
               // 连接还在重连中，等待后重试
               console.log(`Terminal ${i + 1} creation blocked by reconnecting, retry ${attempt + 1}/3`);
               await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));

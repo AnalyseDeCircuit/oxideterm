@@ -10,7 +10,6 @@ import { Checkbox } from '../ui/checkbox';
 import { api } from '../../lib/api';
 import { createTypeGuard } from '../../lib/utils';
 import { ForwardRule, ForwardType } from '../../types';
-import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
 import { useForwardEvents, ForwardStatus as EventForwardStatus } from '../../hooks/useForwardEvents';
 
@@ -33,9 +32,8 @@ const formatBytes = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
+export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
-  const session = useAppStore((state) => state.sessions.get(sessionId));
   const { toast } = useToast();
   const [forwards, setForwards] = useState<ForwardRule[]>([]);
   const [forwardStats, setForwardStats] = useState<Record<string, ForwardStats>>({});
@@ -63,14 +61,14 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
   const fetchForwards = useCallback(async () => {
     try {
       setLoading(true);
-      const list = await api.listPortForwards(sessionId);
+      const list = await api.nodeListForwards(nodeId);
       setForwards(list);
       
       // Fetch stats for active forwards
       const statsMap: Record<string, ForwardStats> = {};
       for (const fw of list) {
         if (fw.status === 'active') {
-          const stats = await api.getPortForwardStats(sessionId, fw.id);
+          const stats = await api.nodeGetForwardStats(nodeId, fw.id);
           if (stats) {
             statsMap[fw.id] = stats;
           }
@@ -82,11 +80,11 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [nodeId]);
 
   // Listen for forward events from backend (death reports, status changes)
   useForwardEvents({
-    sessionId,
+    // No sessionId filter — events are accepted for all sessions and matched by forward ID
     onStatusChanged: useCallback((forwardId: string, status: EventForwardStatus, error?: string) => {
       console.log(`[ForwardsView] Forward ${forwardId} status changed to ${status}`, error);
       
@@ -117,13 +115,13 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
     onStatsUpdated: useCallback((forwardId: string, stats: ForwardStats) => {
       setForwardStats((prev) => ({ ...prev, [forwardId]: stats }));
     }, []),
-    onSessionSuspended: useCallback((forwardIds: string[]) => {
-      console.log(`[ForwardsView] Session suspended, forwards affected:`, forwardIds);
+    onSessionSuspended: useCallback((suspendedIds: string[]) => {
+      console.log(`[ForwardsView] Session suspended, forwards affected:`, suspendedIds);
       
       // Mark all affected forwards as suspended
       setForwards((prev) =>
         prev.map((fw) =>
-          forwardIds.includes(fw.id)
+          suspendedIds.includes(fw.id)
             ? { ...fw, status: 'suspended' as ForwardRule['status'] }
             : fw
         )
@@ -131,34 +129,29 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
 
       toast({
         title: t('forwards.toast.session_suspended_title'),
-        description: t('forwards.toast.session_suspended_desc', { count: forwardIds.length }),
+        description: t('forwards.toast.session_suspended_desc', { count: suspendedIds.length }),
         variant: 'warning',
       });
     }, [t, toast]),
   });
 
   useEffect(() => {
-    // Only poll when session exists and connection state is connected
-    if (!session || session.state !== 'connected') {
-      return;
-    }
-    
     fetchForwards();
     // Poll every 5 seconds for status updates
     const interval = setInterval(fetchForwards, 5000);
     return () => clearInterval(interval);
-  }, [sessionId, session?.state, fetchForwards]);
+  }, [nodeId, fetchForwards]);
 
   const handleCreateQuick = async (type: 'jupyter' | 'tensorboard' | 'vscode') => {
       try {
           if (type === 'jupyter') {
-            await api.forwardJupyter(sessionId, 8888, 8888);
+            await api.nodeForwardJupyter(nodeId, 8888, 8888);
             toast({ title: t('forwards.toast.jupyter_created'), description: t('forwards.toast.jupyter_desc') });
           } else if (type === 'tensorboard') {
-            await api.forwardTensorboard(sessionId, 6006, 6006);
+            await api.nodeForwardTensorboard(nodeId, 6006, 6006);
             toast({ title: t('forwards.toast.tensorboard_created'), description: t('forwards.toast.tensorboard_desc') });
           } else if (type === 'vscode') {
-            await api.forwardVscode(sessionId, 8080, 8080);
+            await api.nodeForwardVscode(nodeId, 8080, 8080);
             toast({ title: t('forwards.toast.vscode_created'), description: t('forwards.toast.vscode_desc') });
           }
           fetchForwards();
@@ -181,8 +174,8 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
 
       setIsCreating(true);
       try {
-          const response = await api.createPortForward({
-              session_id: sessionId,
+          const response = await api.nodeCreateForward({
+              node_id: nodeId,
               forward_type: forwardType,
               bind_address: bindAddress,
               bind_port: parseInt(bindPort),
@@ -322,7 +315,7 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                             variant="ghost" 
                             className="h-7 w-7 text-zinc-400 hover:text-yellow-400"
                             title={t('forwards.actions.stop')}
-                            onClick={() => api.stopPortForward(sessionId, fw.id).then(fetchForwards)}
+                            onClick={() => api.nodeStopForward(nodeId, fw.id).then(fetchForwards)}
                           >
                             <Square className="h-3 w-3 fill-current" />
                           </Button>
@@ -339,7 +332,7 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                               variant="ghost" 
                               className="h-7 w-7 text-zinc-400 hover:text-green-400"
                               title={t('forwards.actions.restart')}
-                              onClick={() => api.restartPortForward(sessionId, fw.id).then(fetchForwards)}
+                              onClick={() => api.nodeRestartForward(nodeId, fw.id).then(fetchForwards)}
                             >
                               <Play className="h-3 w-3 fill-current" />
                             </Button>
@@ -368,7 +361,7 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                           variant="ghost" 
                           className="h-7 w-7 text-zinc-400 hover:text-red-400"
                           title={t('forwards.actions.delete')}
-                          onClick={() => api.deletePortForward(sessionId, fw.id).then(fetchForwards)}
+                          onClick={() => api.nodeDeleteForward(nodeId, fw.id).then(fetchForwards)}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -572,8 +565,8 @@ export const ForwardsView = ({ sessionId }: { sessionId: string }) => {
                         <Button onClick={async () => {
                             setEditError(null);
                             try {
-                                await api.updatePortForward({
-                                    session_id: sessionId,
+                                await api.nodeUpdateForward({
+                                    node_id: nodeId,
                                     forward_id: editingForward.id,
                                     bind_address: editBindAddress,
                                     bind_port: parseInt(editBindPort),

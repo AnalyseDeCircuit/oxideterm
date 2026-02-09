@@ -11,8 +11,7 @@
 
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { api } from '../lib/api';
-import { guardSessionConnection, isConnectionGuardError } from '../lib/connectionGuard';
+import { api, nodeSftpInit } from '../lib/api';
 import { useReconnectOrchestratorStore } from './reconnectOrchestratorStore';
 import { topologyResolver } from '../lib/topologyResolver';
 import { useSettingsStore } from './settingsStore';
@@ -1070,8 +1069,8 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         console.warn(`[connectNodeInternal] Failed to refresh AppStore connections:`, e);
       }
       
-      // 🔴 Phase 5.1: 同步 appStore.sessions 中关联终端的 connectionId
-      // 重连后 connectionId 变化，必须更新 sessions 否则 SFTPView 的 guardSessionConnection 会失败
+      // 同步 appStore.sessions 中关联终端的 connectionId
+      // 重连后 connectionId 变化，必须更新 sessions 以保持一致性
       const terminalIdSet = new Set(get().nodeTerminalMap.get(nodeId) || []);
       if (node.terminalSessionId) {
         terminalIdSet.add(node.terminalSessionId);
@@ -1138,19 +1137,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         }
       }
       
-      // 1b. 关闭 SFTP 会话（如果有）
-      if (node.sftpSessionId) {
-        try {
-          // 使用第一个终端 ID 来关闭 SFTP（SFTP 依赖终端会话）
-          const anyTerminalId = terminalIds[0];
-          if (anyTerminalId) {
-            await api.sftpClose(anyTerminalId);
-            console.debug(`[resetNodeState] Closed SFTP for node ${nodeId}`);
-          }
-        } catch (e) {
-          console.warn(`[resetNodeState] Failed to close SFTP:`, e);
-        }
-      }
+      // 1b. SFTP 会话由 ConnectionEntry 管理，节点断开时自动清理
       
       // 1c. 短暂等待确保后端资源释放
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -1467,59 +1454,35 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         throw new Error('Cannot open SFTP on a link-down node');
       }
       
-      // 调用 API 初始化 SFTP (使用终端会话 ID)
-      // 注意: SFTP 需要一个关联的终端会话
+      // Node-first: 通过 nodeId 直接初始化 SFTP，后端自动路由到正确的 ConnectionEntry
       const terminalIds = get().getTerminalsForNode(nodeId);
       if (terminalIds.length === 0) {
         throw new Error('No terminal session found for SFTP initialization');
       }
       
-      // 验证终端会话是否在 appStore 中存在（避免使用已关闭的会话）
-      const { useAppStore } = await import('./appStore');
-      const validTerminalId = terminalIds.find(id => 
-        useAppStore.getState().sessions.has(id)
-      );
-      
-      if (!validTerminalId) {
-        throw new Error('No valid terminal session found. Please create a new terminal first.');
-      }
-      
       try {
-        await guardSessionConnection(validTerminalId);
+        const sftpCwd = await nodeSftpInit(nodeId);
+        
+        // 更新后端节点状态
+        await api.setTreeNodeSftp(nodeId, sftpCwd);
+        
+        // 刷新树
+        await get().fetchTree();
+        
+        // Return the first terminal sessionId for tab creation compatibility
+        return terminalIds[0];
       } catch (err) {
-        if (!isConnectionGuardError(err)) {
-          throw err;
-        }
+        console.error(`[openSftpForNode] Failed for node ${nodeId}:`, err);
         return null;
       }
-
-      const sftpId = await api.sftpInit(validTerminalId);
-      
-      // 更新后端节点状态
-      await api.setTreeNodeSftp(nodeId, sftpId);
-      
-      // 刷新树
-      await get().fetchTree();
-      
-      // Return the terminal sessionId (not the cwd string from sftpInit)
-      return validTerminalId;
     },
     
     closeSftpForNode: async (nodeId: string) => {
       const node = get().getNode(nodeId);
       if (!node || !node.runtime.sftpSessionId) return;
       
-      // 显式关闭 SFTP 会话
-      const terminalIds = node.runtime.terminalIds || [];
-      if (terminalIds.length > 0) {
-        try {
-          await api.sftpClose(terminalIds[0]);
-        } catch (e) {
-          console.error('Failed to close SFTP session:', e);
-        }
-      }
-      
-      // 刷新树
+      // SFTP 生命周期由 ConnectionEntry 管理，节点断开时自动清理
+      // 这里只刷新树状态以更新 UI
       await get().fetchTree();
     },
     
