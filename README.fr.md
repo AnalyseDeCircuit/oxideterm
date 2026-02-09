@@ -26,7 +26,7 @@
 
 ## Qu'est-ce qu'OxideTerm ?
 
-OxideTerm est une **application terminal multiplateforme** qui unifie shells locaux, sessions SSH distantes, gestion de fichiers, édition de code et assistance IA dans un seul binaire natif Rust. Ce n'est **pas** un wrapper Electron — le backend entier est écrit en Rust, livré sous forme d'exécutable natif d'environ 15 Mo via Tauri 2.0.
+OxideTerm est une **application terminal multiplateforme** qui unifie shells locaux, sessions SSH distantes, gestion de fichiers, édition de code et assistance IA dans un seul binaire natif Rust. Ce n'est **pas** un wrapper Electron — le backend entier est écrit en Rust, livré sous forme d'exécutable natif d'environ 20-35 Mo via Tauri 2.0.
 
 ### Pourquoi un autre terminal ?
 
