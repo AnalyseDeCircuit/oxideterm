@@ -16,7 +16,7 @@ use std::time::Duration;
 use tauri::{AppHandle, State};
 use tracing::{info, warn};
 
-use super::ForwardingRegistry;
+use super::{ForwardingRegistry, HealthRegistry, ProfilerRegistry};
 use crate::bridge::{BridgeManager, WsBridge};
 use crate::forwarding::ForwardingManager;
 use crate::session::{
@@ -37,6 +37,8 @@ pub async fn ssh_disconnect(
     _forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     session_registry: State<'_, Arc<SessionRegistry>>,
     bridge_manager: State<'_, BridgeManager>,
+    health_registry: State<'_, HealthRegistry>,
+    profiler_registry: State<'_, ProfilerRegistry>,
 ) -> Result<(), String> {
     info!("SSH disconnect request: {}", connection_id);
 
@@ -52,7 +54,12 @@ pub async fn ssh_disconnect(
         bridge_manager.unregister(session_id);
         // 从 session registry 移除
         session_registry.remove(session_id);
+        // 清理 health tracker
+        health_registry.remove(session_id);
     }
+
+    // 停止并清理 resource profiler
+    profiler_registry.remove(&connection_id);
 
     // 关闭关联的 SFTP
     if let Some(sftp_session_id) = &connection_info.sftp_session_id {
@@ -558,6 +565,8 @@ pub async fn close_terminal(
     bridge_manager: State<'_, BridgeManager>,
     sftp_registry: State<'_, Arc<SftpRegistry>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
+    health_registry: State<'_, HealthRegistry>,
+    profiler_registry: State<'_, ProfilerRegistry>,
 ) -> Result<(), String> {
     info!("Close terminal request: {}", session_id);
 
@@ -585,6 +594,10 @@ pub async fn close_terminal(
 
     // 移除 SFTP
     sftp_registry.remove(&session_id);
+
+    // 清理 health tracker 和 resource profiler
+    health_registry.remove(&session_id);
+    profiler_registry.remove(&session_id);
 
     // 释放连接引用
     if let Some(connection_id) = connection_id {

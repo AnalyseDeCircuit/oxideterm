@@ -215,6 +215,13 @@ impl ProfilerRegistry {
             }
         }
     }
+
+    /// Stop and remove a single profiler (for disconnect cleanup)
+    pub fn remove(&self, connection_id: &str) {
+        if let Some((_, mut profiler)) = self.profilers.remove(connection_id) {
+            profiler.stop();
+        }
+    }
 }
 
 impl Default for ProfilerRegistry {
