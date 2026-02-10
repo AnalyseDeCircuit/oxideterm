@@ -91,7 +91,7 @@ mod types {
     /// Errors specific to WSL Graphics operations
     #[derive(Debug, Error)]
     pub enum GraphicsError {
-        #[error("No VNC server found in WSL distro '{0}'. Install one: sudo apt install x11vnc")]
+        #[error("No VNC server found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install tigervnc-scraping-server -y")]
         NoVncServer(String),
 
         #[error("Unsupported VNC server: {0}")]

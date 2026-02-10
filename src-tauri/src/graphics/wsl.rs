@@ -58,19 +58,35 @@ pub async fn list_distros() -> Result<Vec<WslDistro>, GraphicsError> {
     Ok(distros)
 }
 
-/// Decode WSL output, handling UTF-16LE BOM if present.
+/// Decode WSL output, handling UTF-16LE with or without BOM.
+///
+/// `wsl.exe --list --verbose` outputs UTF-16LE on most Windows versions.
+/// Some include the BOM (FF FE), others don't. We use a heuristic:
+/// if every other byte is 0x00, treat as UTF-16LE regardless of BOM.
 fn decode_wsl_output(raw: &[u8]) -> String {
     // Check for UTF-16LE BOM: FF FE
     if raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
-        let u16_iter = raw[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
-        char::decode_utf16(u16_iter)
-            .filter_map(|r| r.ok())
-            .collect()
-    } else {
-        String::from_utf8_lossy(raw).to_string()
+        return decode_utf16le(&raw[2..]);
     }
+
+    // Heuristic: UTF-16LE without BOM — check if null bytes are interleaved
+    // (ASCII text encoded as UTF-16LE has 0x00 after every ASCII byte)
+    if raw.len() >= 4 && raw[1] == 0x00 && raw[3] == 0x00 {
+        return decode_utf16le(raw);
+    }
+
+    String::from_utf8_lossy(raw).to_string()
+}
+
+/// Decode a UTF-16LE byte slice (without BOM) into a String.
+fn decode_utf16le(data: &[u8]) -> String {
+    let u16_iter = data
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+    char::decode_utf16(u16_iter)
+        .filter_map(|r| r.ok())
+        .filter(|c| *c != '\0') // strip null chars
+        .collect()
 }
 
 /// Detect available VNC server in a WSL distro.
@@ -222,5 +238,46 @@ mod tests {
         let input = vec![0xFF, 0xFE, b'H', 0x00, b'i', 0x00];
         let result = decode_wsl_output(&input);
         assert_eq!(result, "Hi");
+    }
+
+    #[test]
+    fn test_decode_utf16le_no_bom_output() {
+        // UTF-16LE WITHOUT BOM — common on many Windows versions
+        // "* Ubuntu    Running         2\n"
+        let text = "  NAME      STATE           VERSION\n* Ubuntu    Running         2\n";
+        let input: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let result = decode_wsl_output(&input);
+        assert!(result.contains("Ubuntu"));
+        assert!(result.contains("Running"));
+        assert!(!result.contains('\0'));
+    }
+
+    #[test]
+    fn test_parse_distros_utf16le_no_bom() {
+        // Simulate full wsl.exe output as UTF-16LE without BOM
+        let text = "  NAME      STATE           VERSION\r\n* Ubuntu    Running         2\r\n  Debian    Stopped         2\r\n";
+        let raw: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let decoded = decode_wsl_output(&raw);
+
+        // Parse lines like list_distros does
+        let mut distros = Vec::new();
+        for line in decoded.lines().skip(1) {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            let is_default = line.starts_with('*');
+            let line = line.trim_start_matches('*').trim();
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                distros.push((parts[0].to_string(), is_default, parts[1].to_string()));
+            }
+        }
+
+        assert_eq!(distros.len(), 2);
+        assert_eq!(distros[0].0, "Ubuntu");
+        assert!(distros[0].1); // is_default
+        assert_eq!(distros[0].2, "Running");
+        assert_eq!(distros[1].0, "Debian");
+        assert!(!distros[1].1);
+        assert_eq!(distros[1].2, "Stopped");
     }
 }
