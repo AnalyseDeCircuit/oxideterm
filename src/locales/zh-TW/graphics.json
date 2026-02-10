@@ -12,7 +12,7 @@
     "stop": "停止",
     "distro_running": "執行中",
     "distro_stopped": "已停止",
-    "no_vnc_server": "未安裝 VNC 伺服器。請執行: sudo apt install x11vnc",
+    "no_vnc_server": "未安裝 VNC 伺服器。請執行: sudo apt update && sudo apt install tigervnc-scraping-server -y",
     "not_available": "WSL 圖形轉發僅在 Windows 平台且啟用 wsl-graphics 特性時可用。"
   }
 }

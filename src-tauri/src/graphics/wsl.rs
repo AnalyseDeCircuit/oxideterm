@@ -74,9 +74,9 @@ fn decode_wsl_output(raw: &[u8]) -> String {
 }
 
 /// Detect available VNC server in a WSL distro.
-/// Priority: wayvnc > x11vnc > Xtigervnc
+/// Priority: x0vncserver (tigervnc-scraping-server) > wayvnc > Xtigervnc
 pub async fn detect_vnc(distro: &str) -> Result<String, GraphicsError> {
-    let candidates = ["wayvnc", "x11vnc", "Xtigervnc"];
+    let candidates = ["x0vncserver", "wayvnc", "Xtigervnc"];
     for binary in &candidates {
         let output = Command::new("wsl.exe")
             .args(["-d", distro, "--", "which", binary])
@@ -94,25 +94,28 @@ pub async fn detect_vnc(distro: &str) -> Result<String, GraphicsError> {
 /// Start a VNC server inside WSL.
 ///
 /// Returns (vnc_port, child_process).
-/// ⚠️ Never hardcode 5900/5901 — always use find_free_port().
+/// Uses ephemeral port allocation to avoid collisions with WSLg or other services.
 pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), GraphicsError> {
     let port = find_free_port().await?;
 
     let child = match vnc_binary {
-        "x11vnc" => Command::new("wsl.exe")
+        "x0vncserver" => Command::new("wsl.exe")
             .args([
                 "-d",
                 distro,
                 "--",
-                "x11vnc",
+                "x0vncserver",
                 "-display",
                 ":0",
                 "-rfbport",
                 &port.to_string(),
-                "-nopw",
-                "-forever",
-                "-shared",
+                "-SecurityTypes",
+                "None",
+                "-localhost",
+                "no",
+                "--I-KNOW-THIS-IS-INSECURE",
             ])
+            .env_remove("WAYLAND_DISPLAY")
             .kill_on_drop(true)
             .spawn()?,
         "wayvnc" => Command::new("wsl.exe")
@@ -125,6 +128,7 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
                 "0.0.0.0",
                 &port.to_string(),
             ])
+            .env_remove("WAYLAND_DISPLAY")
             .kill_on_drop(true)
             .spawn()?,
         "Xtigervnc" => Command::new("wsl.exe")
@@ -139,6 +143,7 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
                 "-SecurityTypes",
                 "None",
             ])
+            .env_remove("WAYLAND_DISPLAY")
             .kill_on_drop(true)
             .spawn()?,
         _ => return Err(GraphicsError::UnsupportedVnc(vnc_binary.to_string())),
@@ -153,7 +158,7 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
 /// Find an available port by binding to :0, reading the assigned port, then releasing.
 ///
 /// ⚠️ TOCTOU risk — the port may be taken between release and VNC bind.
-/// Mitigated by wait_for_vnc_ready() timeout + retry at the caller level.
+/// Mitigated by wait_for_vnc_ready() timeout which will detect bind failures.
 async fn find_free_port() -> Result<u16, GraphicsError> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
