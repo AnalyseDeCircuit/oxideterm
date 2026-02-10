@@ -13,7 +13,7 @@ name = "oxideterm_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["local-terminal"]
+default = ["local-terminal", "wsl-graphics"]
 # Local terminal support (PTY) - disable for mobile builds
 local-terminal = ["dep:portable-pty"]
 # WSL Graphics forwarding (Windows only) - VNC-based WSLg display
