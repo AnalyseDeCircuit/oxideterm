@@ -89,10 +89,44 @@ fn decode_utf16le(data: &[u8]) -> String {
         .collect()
 }
 
+/// Desktop session commands in order of preference.
+const DESKTOP_CANDIDATES: &[&str] = &[
+    "xfce4-session",
+    "mate-session",
+    "startlxde",
+    "openbox-session",
+    "fluxbox",
+    "icewm-session",
+];
+
+/// Check whether at least one desktop session command is installed in the distro.
+async fn has_desktop(distro: &str) -> bool {
+    for de in DESKTOP_CANDIDATES {
+        let output = Command::new("wsl.exe")
+            .args(["-d", distro, "--", "which", de])
+            .output()
+            .await;
+        if let Ok(out) = output {
+            if out.status.success() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Detect available VNC server in a WSL distro.
-/// Priority: x0vncserver (tigervnc-scraping-server) > wayvnc > Xtigervnc
+///
+/// Priority: Xtigervnc (standalone X+VNC, avoids Weston/WSLg conflict)
+///         > x0vncserver (screen scraper, only useful if a separate X server is running)
+///         > wayvnc (Wayland-native, needs a running Wayland compositor)
+///
+/// For Xtigervnc, also validates that a desktop environment is installed,
+/// since a standalone X server shows a black screen without one.
 pub async fn detect_vnc(distro: &str) -> Result<String, GraphicsError> {
-    let candidates = ["x0vncserver", "wayvnc", "Xtigervnc"];
+    let candidates = ["Xtigervnc", "x0vncserver", "wayvnc"];
+    let mut found_xtigervnc = false;
+
     for binary in &candidates {
         let output = Command::new("wsl.exe")
             .args(["-d", distro, "--", "which", binary])
@@ -100,21 +134,71 @@ pub async fn detect_vnc(distro: &str) -> Result<String, GraphicsError> {
             .await;
         if let Ok(out) = output {
             if out.status.success() {
+                if *binary == "Xtigervnc" {
+                    // Xtigervnc requires a desktop session to avoid black screen
+                    if has_desktop(distro).await {
+                        return Ok(binary.to_string());
+                    }
+                    found_xtigervnc = true;
+                    tracing::warn!(
+                        "WSL Graphics: Xtigervnc found in '{}' but no desktop environment installed, skipping",
+                        distro
+                    );
+                    continue;
+                }
                 return Ok(binary.to_string());
             }
         }
     }
+
+    // Xtigervnc exists but no desktop → give specific error
+    if found_xtigervnc {
+        return Err(GraphicsError::NoDesktop(distro.to_string()));
+    }
+
     Err(GraphicsError::NoVncServer(distro.to_string()))
 }
+
+/// The X display number used by our standalone Xtigervnc server.
+/// `:99` avoids collision with WSLg's Weston on `:0`.
+const TIGERVNC_DISPLAY: &str = ":99";
 
 /// Start a VNC server inside WSL.
 ///
 /// Returns (vnc_port, child_process).
-/// Uses ephemeral port allocation to avoid collisions with WSLg or other services.
+///
+/// For **Xtigervnc** (preferred): creates a standalone X server on `:99` with its own
+/// framebuffer, completely independent of WSLg's Weston on `:0`.
+/// After VNC is ready, a desktop session (xfce4 etc.) is auto-launched on that display.
+///
+/// For **x0vncserver**: scrapes an existing X display — only useful when a separate
+/// X server is already running (not WSLg's Weston-controlled `:0`).
 pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), GraphicsError> {
     let port = find_free_port().await?;
 
     let child = match vnc_binary {
+        "Xtigervnc" => Command::new("wsl.exe")
+            .args([
+                "-d",
+                distro,
+                "--",
+                "Xtigervnc",
+                TIGERVNC_DISPLAY,
+                "-rfbport",
+                &port.to_string(),
+                "-SecurityTypes",
+                "None",
+                "-localhost",
+                "no",
+                "--I-KNOW-THIS-IS-INSECURE",
+                "-geometry",
+                "1280x720",
+                "-depth",
+                "24",
+            ])
+            .env_remove("WAYLAND_DISPLAY")
+            .kill_on_drop(true)
+            .spawn()?,
         "x0vncserver" => Command::new("wsl.exe")
             .args([
                 "-d",
@@ -147,28 +231,65 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
             .env_remove("WAYLAND_DISPLAY")
             .kill_on_drop(true)
             .spawn()?,
-        "Xtigervnc" => Command::new("wsl.exe")
-            .args([
-                "-d",
-                distro,
-                "--",
-                "Xtigervnc",
-                ":99",
-                "-rfbport",
-                &port.to_string(),
-                "-SecurityTypes",
-                "None",
-            ])
-            .env_remove("WAYLAND_DISPLAY")
-            .kill_on_drop(true)
-            .spawn()?,
         _ => return Err(GraphicsError::UnsupportedVnc(vnc_binary.to_string())),
     };
 
     // Wait for VNC to be ready (poll for RFB handshake)
     wait_for_vnc_ready(port, Duration::from_secs(10)).await?;
 
+    // For standalone X server (Xtigervnc), launch a desktop session on the new display
+    if vnc_binary == "Xtigervnc" {
+        start_desktop_session(distro, TIGERVNC_DISPLAY).await;
+    }
+
     Ok((port, child))
+}
+
+/// Detect and start a desktop session on the given X display.
+///
+/// Tries common lightweight desktops in order of preference.
+/// Fire-and-forget: runs in the background inside WSL.
+async fn start_desktop_session(distro: &str, display: &str) {
+    // Find which desktop is installed
+    let mut desktop: Option<&str> = None;
+    for de in DESKTOP_CANDIDATES {
+        let output = Command::new("wsl.exe")
+            .args(["-d", distro, "--", "which", de])
+            .output()
+            .await;
+        if let Ok(out) = output {
+            if out.status.success() {
+                desktop = Some(de);
+                break;
+            }
+        }
+    }
+
+    match desktop {
+        Some(de) => {
+            let cmd = format!(
+                "export DISPLAY={} && {} >/dev/null 2>&1 &",
+                display, de
+            );
+            let _ = Command::new("wsl.exe")
+                .args(["-d", distro, "--", "bash", "-c", &cmd])
+                .env_remove("WAYLAND_DISPLAY")
+                .spawn();
+            tracing::info!(
+                "WSL Graphics: launched desktop '{}' on display {}",
+                de,
+                display
+            );
+        }
+        None => {
+            tracing::warn!(
+                "WSL Graphics: no desktop environment found in '{}'. \
+                 VNC will show an empty screen. Install one: \
+                 sudo apt install xfce4",
+                distro
+            );
+        }
+    }
 }
 
 /// Find an available port by binding to :0, reading the assigned port, then releasing.

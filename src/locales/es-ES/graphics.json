@@ -12,7 +12,7 @@
     "stop": "Detener",
     "distro_running": "En ejecución",
     "distro_stopped": "Detenida",
-    "no_vnc_server": "No hay servidor VNC instalado. Ejecute: sudo apt update && sudo apt install tigervnc-scraping-server -y",
+    "no_vnc_server": "No hay servidor VNC instalado. Ejecute: sudo apt update && sudo apt install tigervnc-standalone-server xfce4 -y",
     "not_available": "WSL Gráficos solo está disponible en Windows con la función wsl-graphics habilitada."
   }
 }

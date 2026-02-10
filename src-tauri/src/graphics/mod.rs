@@ -91,8 +91,11 @@ mod types {
     /// Errors specific to WSL Graphics operations
     #[derive(Debug, Error)]
     pub enum GraphicsError {
-        #[error("No VNC server found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install tigervnc-scraping-server -y")]
+        #[error("No VNC server found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install tigervnc-standalone-server xfce4 -y")]
         NoVncServer(String),
+
+        #[error("No desktop environment found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install xfce4 -y")]
+        NoDesktop(String),
 
         #[error("Unsupported VNC server: {0}")]
         UnsupportedVnc(String),

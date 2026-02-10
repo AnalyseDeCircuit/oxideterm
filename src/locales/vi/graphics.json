@@ -12,7 +12,7 @@
     "stop": "Dừng",
     "distro_running": "Đang chạy",
     "distro_stopped": "Đã dừng",
-    "no_vnc_server": "Chưa cài đặt máy chủ VNC. Chạy: sudo apt update && sudo apt install tigervnc-scraping-server -y",
+    "no_vnc_server": "Chưa cài đặt máy chủ VNC. Chạy: sudo apt update && sudo apt install tigervnc-standalone-server xfce4 -y",
     "not_available": "WSL Đồ họa chỉ khả dụng trên Windows khi tính năng wsl-graphics được bật."
   }
 }
