@@ -249,7 +249,7 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
 ///
 /// Tries common lightweight desktops in order of preference.
 /// Fire-and-forget: runs in the background inside WSL.
-async fn start_desktop_session(distro: &str, display: &str) {
+async fn start_desktop_session(distro: &str, x_display: &str) {
     // Find which desktop is installed
     let mut desktop: Option<&str> = None;
     for de in DESKTOP_CANDIDATES {
@@ -269,7 +269,7 @@ async fn start_desktop_session(distro: &str, display: &str) {
         Some(de) => {
             let cmd = format!(
                 "export DISPLAY={} && {} >/dev/null 2>&1 &",
-                display, de
+                x_display, de
             );
             let _ = Command::new("wsl.exe")
                 .args(["-d", distro, "--", "bash", "-c", &cmd])
@@ -278,7 +278,7 @@ async fn start_desktop_session(distro: &str, display: &str) {
             tracing::info!(
                 "WSL Graphics: launched desktop '{}' on display {}",
                 de,
-                display
+                x_display
             );
         }
         None => {
