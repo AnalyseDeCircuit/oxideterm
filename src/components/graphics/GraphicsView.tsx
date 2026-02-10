@@ -23,7 +23,6 @@ interface WslGraphicsSession {
   wsPort: number;
   wsToken: string;
   distro: string;
-  vncServer: string;
 }
 
 const STATUS = {
@@ -150,7 +149,7 @@ function Toolbar({
     <div className="absolute top-2 right-2 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/80 backdrop-blur-sm border border-border shadow-sm">
       {sessionInfo && (
         <span className="text-xs text-muted-foreground mr-2">
-          {sessionInfo.distro} ({sessionInfo.vncServer})
+          {sessionInfo.distro}
         </span>
       )}
 
@@ -355,17 +354,31 @@ export function GraphicsView() {
     setError(null);
   }, [session]);
 
-  // ── Reconnect ───────────────────────────────────────────────────
+  // ── Reconnect (bridge-only, VNC/desktop stay alive) ─────────────
   const reconnect = useCallback(async () => {
     if (!session) return;
-    const { distro } = session;
-    await stopSession();
-    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      startSession(distro);
-    }, 300);
-  }, [session, stopSession, startSession]);
+
+    // Disconnect noVNC before rebuilding bridge
+    if (rfbRef.current) {
+      try { rfbRef.current.disconnect(); } catch { /* ignore */ }
+      rfbRef.current = null;
+    }
+
+    setStatus(STATUS.STARTING);
+    setError(null);
+
+    try {
+      const newSess = await invoke<WslGraphicsSession>('wsl_graphics_reconnect', {
+        sessionId: session.id,
+      });
+      sessionRef.current = newSess;
+      setSession(newSess);
+      // noVNC will auto-connect via the session useEffect
+    } catch (e) {
+      setError(String(e));
+      setStatus(STATUS.ERROR);
+    }
+  }, [session]);
 
   // ── Fullscreen toggle ───────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {

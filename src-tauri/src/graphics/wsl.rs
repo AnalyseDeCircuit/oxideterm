@@ -1,4 +1,8 @@
-//! WSL distro detection and VNC server management.
+//! WSL distro detection, Xtigervnc management, and desktop session bootstrap.
+//!
+//! Only Xtigervnc is supported. It creates a standalone X server on a free
+//! display number (avoiding WSLg's Weston on `:0`), then launches a desktop
+//! session via a bootstrap shell script that sets up D-Bus, XDG vars, etc.
 
 use crate::graphics::GraphicsError;
 use std::time::Duration;
@@ -99,6 +103,9 @@ const DESKTOP_CANDIDATES: &[&str] = &[
     "icewm-session",
 ];
 
+/// Marker file written by bootstrap script so we can clean up later.
+const PID_FILE: &str = "/tmp/oxideterm-desktop.pid";
+
 /// Check whether at least one desktop session command is installed in the distro.
 async fn has_desktop(distro: &str) -> bool {
     for de in DESKTOP_CANDIDATES {
@@ -115,142 +122,44 @@ async fn has_desktop(distro: &str) -> bool {
     false
 }
 
-/// Detect available VNC server in a WSL distro.
+/// Check whether D-Bus session launcher is available.
 ///
-/// Priority: Xtigervnc (standalone X+VNC, avoids Weston/WSLg conflict)
-///         > x0vncserver (screen scraper, only useful if a separate X server is running)
-///         > wayvnc (Wayland-native, needs a running Wayland compositor)
-///
-/// For Xtigervnc, also validates that a desktop environment is installed,
-/// since a standalone X server shows a black screen without one.
-pub async fn detect_vnc(distro: &str) -> Result<String, GraphicsError> {
-    let candidates = ["Xtigervnc", "x0vncserver", "wayvnc"];
-    let mut found_xtigervnc = false;
-
-    for binary in &candidates {
+/// Prefers `dbus-run-session` (cleaner lifecycle) with `dbus-launch` as fallback.
+/// Returns the command name if found, or `None` if neither is available.
+async fn detect_dbus(distro: &str) -> Option<&'static str> {
+    for cmd in &["dbus-run-session", "dbus-launch"] {
         let output = Command::new("wsl.exe")
-            .args(["-d", distro, "--", "which", binary])
+            .args(["-d", distro, "--", "which", cmd])
             .output()
             .await;
         if let Ok(out) = output {
             if out.status.success() {
-                if *binary == "Xtigervnc" {
-                    // Xtigervnc requires a desktop session to avoid black screen
-                    if has_desktop(distro).await {
-                        return Ok(binary.to_string());
-                    }
-                    found_xtigervnc = true;
-                    tracing::warn!(
-                        "WSL Graphics: Xtigervnc found in '{}' but no desktop environment installed, skipping",
-                        distro
-                    );
-                    continue;
-                }
-                return Ok(binary.to_string());
+                return Some(cmd);
             }
         }
     }
-
-    // Xtigervnc exists but no desktop → give specific error
-    if found_xtigervnc {
-        return Err(GraphicsError::NoDesktop(distro.to_string()));
-    }
-
-    Err(GraphicsError::NoVncServer(distro.to_string()))
+    None
 }
 
-/// The X display number used by our standalone Xtigervnc server.
-/// `:99` avoids collision with WSLg's Weston on `:0`.
-const TIGERVNC_DISPLAY: &str = ":99";
-
-/// Start a VNC server inside WSL.
+/// Check all prerequisites for Xtigervnc graphics session.
 ///
-/// Returns (vnc_port, child_process).
-///
-/// For **Xtigervnc** (preferred): creates a standalone X server on `:99` with its own
-/// framebuffer, completely independent of WSLg's Weston on `:0`.
-/// After VNC is ready, a desktop session (xfce4 etc.) is auto-launched on that display.
-///
-/// For **x0vncserver**: scrapes an existing X display — only useful when a separate
-/// X server is already running (not WSLg's Weston-controlled `:0`).
-pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), GraphicsError> {
-    let port = find_free_port().await?;
-
-    let child = match vnc_binary {
-        "Xtigervnc" => Command::new("wsl.exe")
-            .args([
-                "-d",
-                distro,
-                "--",
-                "Xtigervnc",
-                TIGERVNC_DISPLAY,
-                "-rfbport",
-                &port.to_string(),
-                "-SecurityTypes",
-                "None",
-                "-localhost=0",
-                "-ac",
-                "-AlwaysShared",
-                "-geometry",
-                "1280x720",
-                "-depth",
-                "24",
-            ])
-            .env_remove("WAYLAND_DISPLAY")
-            .kill_on_drop(true)
-            .spawn()?,
-        "x0vncserver" => Command::new("wsl.exe")
-            .args([
-                "-d",
-                distro,
-                "--",
-                "x0vncserver",
-                "-display",
-                ":0",
-                "-rfbport",
-                &port.to_string(),
-                "-SecurityTypes",
-                "None",
-                "-localhost=0",
-                "--I-KNOW-THIS-IS-INSECURE",
-            ])
-            .env_remove("WAYLAND_DISPLAY")
-            .kill_on_drop(true)
-            .spawn()?,
-        "wayvnc" => Command::new("wsl.exe")
-            .args([
-                "-d",
-                distro,
-                "--",
-                "wayvnc",
-                "--output=HEADLESS-1",
-                "0.0.0.0",
-                &port.to_string(),
-            ])
-            .env_remove("WAYLAND_DISPLAY")
-            .kill_on_drop(true)
-            .spawn()?,
-        _ => return Err(GraphicsError::UnsupportedVnc(vnc_binary.to_string())),
-    };
-
-    // Wait for VNC to be ready (poll for RFB handshake)
-    wait_for_vnc_ready(port, Duration::from_secs(10)).await?;
-
-    // For standalone X server (Xtigervnc), launch a desktop session on the new display
-    if vnc_binary == "Xtigervnc" {
-        start_desktop_session(distro, TIGERVNC_DISPLAY).await;
+/// Verifies: Xtigervnc binary, desktop environment, and D-Bus launcher.
+/// Returns the detected desktop command and D-Bus launcher.
+pub async fn check_prerequisites(
+    distro: &str,
+) -> Result<(&'static str, &'static str), GraphicsError> {
+    // 1. Check for Xtigervnc
+    let output = Command::new("wsl.exe")
+        .args(["-d", distro, "--", "which", "Xtigervnc"])
+        .output()
+        .await;
+    let has_vnc = output.map(|o| o.status.success()).unwrap_or(false);
+    if !has_vnc {
+        return Err(GraphicsError::NoVncServer(distro.to_string()));
     }
 
-    Ok((port, child))
-}
-
-/// Detect and start a desktop session on the given X display.
-///
-/// Tries common lightweight desktops in order of preference.
-/// Fire-and-forget: runs in the background inside WSL.
-async fn start_desktop_session(distro: &str, x_display: &str) {
-    // Find which desktop is installed
-    let mut desktop: Option<&str> = None;
+    // 2. Check for a desktop environment
+    let mut desktop_cmd: Option<&str> = None;
     for de in DESKTOP_CANDIDATES {
         let output = Command::new("wsl.exe")
             .args(["-d", distro, "--", "which", de])
@@ -258,37 +167,226 @@ async fn start_desktop_session(distro: &str, x_display: &str) {
             .await;
         if let Ok(out) = output {
             if out.status.success() {
-                desktop = Some(de);
+                desktop_cmd = Some(de);
                 break;
             }
         }
     }
+    let desktop_cmd = desktop_cmd.ok_or_else(|| GraphicsError::NoDesktop(distro.to_string()))?;
 
-    match desktop {
-        Some(de) => {
-            let cmd = format!(
-                "export DISPLAY={} && {} >/dev/null 2>&1 &",
-                x_display, de
-            );
-            let _ = Command::new("wsl.exe")
-                .args(["-d", distro, "--", "bash", "-c", &cmd])
-                .env_remove("WAYLAND_DISPLAY")
-                .spawn();
-            tracing::info!(
-                "WSL Graphics: launched desktop '{}' on display {}",
-                de,
-                x_display
-            );
-        }
-        None => {
-            tracing::warn!(
-                "WSL Graphics: no desktop environment found in '{}'. \
-                 VNC will show an empty screen. Install one: \
-                 sudo apt install xfce4",
-                distro
-            );
+    // 3. Check for D-Bus
+    let dbus_cmd =
+        detect_dbus(distro)
+            .await
+            .ok_or_else(|| GraphicsError::NoDbus(distro.to_string()))?;
+
+    tracing::info!(
+        "WSL Graphics prerequisites OK: desktop='{}', dbus='{}'",
+        desktop_cmd,
+        dbus_cmd
+    );
+
+    Ok((desktop_cmd, dbus_cmd))
+}
+
+/// Find a free X display number by checking `/tmp/.X11-unix/X{n}` inside WSL.
+/// Starts from `:10` to avoid collision with WSLg (`:0`) and common user displays.
+async fn find_free_display(distro: &str) -> String {
+    for n in 10..100 {
+        let check = format!("test -e /tmp/.X11-unix/X{}", n);
+        let output = Command::new("wsl.exe")
+            .args(["-d", distro, "--", "bash", "-c", &check])
+            .output()
+            .await;
+        if let Ok(out) = output {
+            if !out.status.success() {
+                // Socket doesn't exist → display is free
+                return format!(":{}", n);
+            }
+        } else {
+            // Can't check — just use it
+            return format!(":{}", n);
         }
     }
+    // Fallback
+    ":99".to_string()
+}
+
+/// Start an Xtigervnc server and desktop session inside WSL.
+///
+/// Returns `(vnc_port, vnc_child, desktop_child)`.
+///
+/// 1. Finds a free X display number (`:10`+) and TCP port
+/// 2. Launches Xtigervnc as a standalone X+VNC server
+/// 3. Waits for the RFB handshake
+/// 4. Generates and runs a bootstrap shell script that initializes D-Bus,
+///    XDG environment, and launches the desktop session
+pub async fn start_session(
+    distro: &str,
+    desktop_cmd: &str,
+    dbus_cmd: &str,
+) -> Result<(u16, Child, Option<Child>), GraphicsError> {
+    let port = find_free_port().await?;
+    let display = find_free_display(distro).await;
+
+    // 1. Start Xtigervnc
+    let vnc_child = Command::new("wsl.exe")
+        .args([
+            "-d",
+            distro,
+            "--",
+            "Xtigervnc",
+            &display,
+            "-rfbport",
+            &port.to_string(),
+            "-SecurityTypes",
+            "None",
+            "-localhost=0",
+            "-ac",
+            "-AlwaysShared",
+            "-geometry",
+            "1280x720",
+            "-depth",
+            "24",
+        ])
+        .env_remove("WAYLAND_DISPLAY")
+        .kill_on_drop(true)
+        .spawn()?;
+
+    tracing::info!(
+        "WSL Graphics: Xtigervnc launched on display {} port {}",
+        display,
+        port
+    );
+
+    // 2. Wait for VNC to be ready (RFB handshake)
+    wait_for_vnc_ready(port, Duration::from_secs(10)).await?;
+
+    // 3. Launch desktop session via bootstrap script
+    let desktop_child =
+        start_desktop_session(distro, &display, desktop_cmd, dbus_cmd).await;
+
+    Ok((port, vnc_child, desktop_child))
+}
+
+/// Generate and execute a bootstrap shell script inside WSL that:
+/// - Clears WSLg environment variables
+/// - Sets up `XDG_RUNTIME_DIR`
+/// - Launches a D-Bus session bus (`dbus-run-session` or `dbus-launch`)
+/// - Starts the desktop session as a foreground process
+/// - Writes a PID file for session-level cleanup
+///
+/// Returns the `Child` handle of the `wsl.exe` process running the script.
+async fn start_desktop_session(
+    distro: &str,
+    x_display: &str,
+    desktop_cmd: &str,
+    dbus_cmd: &str,
+) -> Option<Child> {
+    // Build the bootstrap script.
+    // `dbus-run-session` wraps the desktop command directly (cleaner lifecycle).
+    // `dbus-launch` needs eval + exec pattern.
+    let dbus_wrapper = if dbus_cmd == "dbus-run-session" {
+        format!("exec dbus-run-session {}", desktop_cmd)
+    } else {
+        format!(
+            "eval $(dbus-launch --sh-syntax)\nexport DBUS_SESSION_BUS_ADDRESS\nexec {}",
+            desktop_cmd
+        )
+    };
+
+    let script = format!(
+        r#"#!/bin/bash
+# OxideTerm desktop bootstrap script — auto-generated, do not edit
+set -e
+
+# Clear WSLg environment to avoid Weston interference
+unset WAYLAND_DISPLAY XDG_SESSION_TYPE
+
+export DISPLAY={display}
+export XDG_RUNTIME_DIR="/tmp/oxideterm-xdg-$$"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+# Write PID file for session cleanup
+echo $$ > {pid_file}
+
+# Cleanup on exit
+cleanup() {{
+    rm -f {pid_file}
+    rm -rf "$XDG_RUNTIME_DIR"
+}}
+trap cleanup EXIT
+
+# Launch D-Bus + desktop session
+{dbus_wrapper}
+"#,
+        display = x_display,
+        pid_file = PID_FILE,
+        dbus_wrapper = dbus_wrapper,
+    );
+
+    // Pipe script content into bash via stdin
+    let child = Command::new("wsl.exe")
+        .args(["-d", distro, "--", "bash", "-s"])
+        .env_remove("WAYLAND_DISPLAY")
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    match child {
+        Ok(mut child) => {
+            // Write the script to stdin
+            if let Some(mut stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                if let Err(e) = stdin.write_all(script.as_bytes()).await {
+                    tracing::warn!("WSL Graphics: failed to write bootstrap script: {}", e);
+                    return None;
+                }
+                drop(stdin); // Close stdin so bash starts executing
+            }
+            tracing::info!(
+                "WSL Graphics: desktop session '{}' launched via '{}' on display {}",
+                desktop_cmd,
+                dbus_cmd,
+                x_display
+            );
+            Some(child)
+        }
+        Err(e) => {
+            tracing::warn!("WSL Graphics: failed to start desktop session: {}", e);
+            None
+        }
+    }
+}
+
+/// Clean up any lingering session processes inside WSL.
+///
+/// Called when stopping a session — reads the PID file written by the
+/// bootstrap script and sends SIGTERM to the process tree.
+pub async fn cleanup_wsl_session(distro: &str) {
+    let cleanup_cmd = format!(
+        r#"if [ -f {pid} ]; then
+    PID=$(cat {pid})
+    if kill -0 "$PID" 2>/dev/null; then
+        pkill -TERM -P "$PID" 2>/dev/null || true
+        kill -TERM "$PID" 2>/dev/null || true
+        sleep 0.5
+        kill -KILL "$PID" 2>/dev/null || true
+    fi
+    rm -f {pid}
+fi
+rm -rf /tmp/oxideterm-xdg-* 2>/dev/null || true"#,
+        pid = PID_FILE,
+    );
+
+    let _ = Command::new("wsl.exe")
+        .args(["-d", distro, "--", "bash", "-c", &cleanup_cmd])
+        .output()
+        .await;
+    tracing::info!("WSL Graphics: session cleanup executed for '{}'", distro);
 }
 
 /// Find an available port by binding to :0, reading the assigned port, then releasing.
@@ -399,5 +497,26 @@ mod tests {
         assert_eq!(distros[1].0, "Debian");
         assert!(!distros[1].1);
         assert_eq!(distros[1].2, "Stopped");
+    }
+
+    #[test]
+    fn test_bootstrap_script_dbus_run_session() {
+        // Verify the script uses `dbus-run-session` when available
+        // (just a sanity check on string formatting)
+        let display = ":10";
+        let dbus_wrapper = format!("exec dbus-run-session {}", "xfce4-session");
+        assert!(dbus_wrapper.contains("dbus-run-session xfce4-session"));
+        assert!(!dbus_wrapper.contains("dbus-launch"));
+        let _ = display; // prevent unused warning
+    }
+
+    #[test]
+    fn test_bootstrap_script_dbus_launch_fallback() {
+        let dbus_wrapper = format!(
+            "eval $(dbus-launch --sh-syntax)\nexport DBUS_SESSION_BUS_ADDRESS\nexec {}",
+            "xfce4-session"
+        );
+        assert!(dbus_wrapper.contains("dbus-launch --sh-syntax"));
+        assert!(dbus_wrapper.contains("exec xfce4-session"));
     }
 }

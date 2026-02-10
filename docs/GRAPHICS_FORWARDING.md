@@ -1,14 +1,15 @@
 # OxideTerm WSLg 图形回传 (WSL Graphics)
 
-> **⚠️ 设计文档 — 功能尚未实现**
+> **✅ 已实现** — 内置组件，非插件
 >
-> 本文档描述的所有功能均为设计规划，代码库中不存在对应实现。
-> 后端无 `src-tauri/src/graphics/` 模块，Cargo.toml 无 `wsl-graphics` feature flag。
+> 后端: `src-tauri/src/graphics/` (mod.rs, wsl.rs, bridge.rs, commands.rs)
+> 前端: `src/components/graphics/GraphicsView.tsx` (内置 Tab 组件)
+> Feature gate: `wsl-graphics` (Cargo.toml default features)
 
-> **版本**: v0.2.0
-> **日期**: 2026-02-10
-> **状态**: 设计文档，待实施
-> **前置依赖**: SYSTEM_INVARIANTS.md v1.4.0, PLUGIN_SYSTEM.md v2.0
+> **版本**: v0.3.0
+> **日期**: 2026-02
+> **状态**: 已实现
+> **前置依赖**: SYSTEM_INVARIANTS.md v1.4.0
 
 ---
 
@@ -34,10 +35,8 @@
 
 | 层 | 形态 | 说明 |
 |----|------|------|
-| 后端 | Feature-gated Rust 模块 | `#[cfg(all(feature = "wsl-graphics", target_os = "windows"))]`，提供 Tauri 命令 |
-| 前端 | OxideTerm 运行时插件 (ESM) | `com.oxideterm.wsl-graphics`，通过 `ctx.api.invoke()` 调用后端，注册 Tab 视图 |
-
-用户需同时启用 feature 编译和安装前端插件方可使用。
+| 后端 | Feature-gated Rust 模块 | `#[cfg(all(feature = "wsl-graphics", target_os = "windows"))]`，提供 5 个 Tauri 命令 |
+| 前端 | 内置 React 组件 | `GraphicsView.tsx`，通过 `invoke()` 调用后端，注册为 Tab 视图 |
 
 ---
 
@@ -69,33 +68,35 @@ Windows Host
 │                                                             │
 │  Rust Backend [feature: wsl-graphics]                       │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │ commands.rs: 4 个 Tauri 命令                         │    │
-│  │ wsl.rs: WSL 发行版检测 + VNC 服务管理                 │    │
-│  │ bridge.rs: WebSocket ↔ VNC TCP 透传代理 (~80 行)     │    │
-│  └────────────────────┬────────────────────────────────┘    │
+│  │ commands.rs: 5 个 Tauri 命令 (list/start/stop/reconnect/ls)│    │
+│  │ wsl.rs: WSL 发行版检测 + Xtigervnc + 桌面启动 + 会话清理  │    │
+│  │ bridge.rs: WebSocket ↔ VNC TCP 透传代理 (支持重连)      │    │
+│  └──────────────────────┬──────────────────────────────┘    │
 │                       │ ws://127.0.0.1:{port}?token=xxx     │
-│  Frontend Plugin      │                                     │
+│  Built-in Component  │                                     │
 │  ┌────────────────────▼────────────────────────────────┐    │
-│  │ com.oxideterm.wsl-graphics (ESM)                     │    │
+│  │ GraphicsView.tsx (内置 Tab 组件)                      │    │
 │  │ ┌─────────────────────┐ ┌─────────────────────────┐ │    │
-│  │ │ GraphicsTab (noVNC)  │ │ Toolbar (全屏/重连)     │ │    │
+│  │ │ noVNC (RFB Canvas)  │ │ Toolbar (全屏/重连/停止) │ │    │
 │  │ └─────────────────────┘ └─────────────────────────┘ │    │
 │  └──────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
-        │ wsl.exe -d {distro} -- x11vnc ...
+        │ Xtigervnc on :10+ (standalone X server)
+        │ Desktop via bootstrap script (D-Bus + XDG)
         ▼
 ┌─────────────────────┐
 │ WSL (Ubuntu)        │
-│  x11vnc → :59371    │
-│  (捕获 WSLg 显示)    │
+│  Xtigervnc :10      │
+│  └─ xfce4-session   │
+│     (D-Bus session) │
 └─────────────────────┘
 ```
 
-**数据流极简**：
+**数据流**：
 
 ```
-WSL x11vnc ─TCP─▶ Rust Bridge ─WebSocket─▶ noVNC(plugin Tab) ─Canvas─▶ 用户看到 GUI
-                  (localhost)              (localhost)
+WSL Xtigervnc :10 ─TCP─▶ Rust Bridge ─WebSocket─▶ noVNC (GraphicsView) ─Canvas─▶ 用户看到 GUI
+                   (localhost)              (localhost)
 ```
 
 **与现有系统零耦合**：
@@ -113,10 +114,10 @@ WSL x11vnc ─TCP─▶ Rust Bridge ─WebSocket─▶ noVNC(plugin Tab) ─Canv
 ```
 src-tauri/src/
 ├── graphics/                    # feature: wsl-graphics
-│   ├── mod.rs                   # 模块导出
-│   ├── bridge.rs                # WebSocket ↔ VNC TCP 透传 (~80 行)
-│   ├── wsl.rs                   # WSL 检测 + VNC 管理 (~120 行)
-│   └── commands.rs              # 4 个 Tauri 命令 (~80 行)
+│   ├── mod.rs                   # 类型定义 + 状态 + 条件编译 + stub 命令
+│   ├── bridge.rs                # WebSocket ↔ VNC TCP 透传 (支持 reconnect)
+│   ├── wsl.rs                   # WSL 检测 + Xtigervnc + D-Bus + 桌面启动脚本 + 会话清理
+│   └── commands.rs              # 5 个 Tauri 命令 (list/start/stop/reconnect/ls)
 ```
 
 ### 3.2 Feature Gate

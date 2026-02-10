@@ -1,18 +1,20 @@
 //! WebSocket ↔ VNC TCP transparent proxy (bridge).
 //!
-//! Accepts a single WebSocket connection (from noVNC in the frontend plugin),
+//! Accepts a single WebSocket connection (from noVNC in the frontend),
 //! validates the one-time token, and bidirectionally proxies raw bytes to/from
 //! the VNC TCP server running inside WSL.
 //!
 //! Key: Must respond with `Sec-WebSocket-Protocol: binary` header —
 //! noVNC silently disconnects without it.
+//!
+//! Design: The bridge is one-shot — it accepts one WS connection, proxies
+//! until either side disconnects, then exits. For reconnect, a new bridge
+//! is spawned via `wsl_graphics_reconnect` without restarting VNC/desktop.
 
 use crate::graphics::GraphicsError;
-use crate::graphics::WslGraphicsState;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use rand::RngCore;
-use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -26,11 +28,11 @@ use tokio_tungstenite::tungstenite::Message;
 /// The proxy accepts exactly one WebSocket connection, validates the token,
 /// then transparently relays data between VNC and WebSocket.
 ///
-/// When the proxy task ends (VNC crash, frontend disconnect, etc.),
-/// it auto-removes the session from state and kills the VNC child process.
+/// The bridge never auto-cleans VNC/desktop on disconnect — session
+/// lifecycle is managed exclusively by `wsl_graphics_stop` and app
+/// shutdown. This ensures the reconnect flow always finds a live session.
 pub async fn start_proxy(
     vnc_addr: String,
-    state: Arc<WslGraphicsState>,
     session_id: String,
 ) -> Result<(u16, String, JoinHandle<()>), GraphicsError> {
     let token = generate_token();
@@ -46,20 +48,18 @@ pub async fn start_proxy(
                 if let Err(e) = proxy_connection(stream, &vnc_addr, &expected_token).await {
                     tracing::warn!("Graphics proxy error: {}", e);
                 }
-                tracing::info!("Graphics proxy: session ended");
             }
             Err(e) => {
                 tracing::error!("Graphics proxy: failed to accept connection: {}", e);
             }
         }
 
-        // Auto-cleanup: remove session from state and kill VNC child
-        let mut sessions = state.sessions.write().await;
-        if let Some(mut handle) = sessions.remove(&session_id) {
-            tracing::info!("Graphics proxy: auto-cleaning session {}", session_id);
-            let _ = handle.vnc_child.kill().await;
-            // bridge_handle is ourselves — no need to abort
-        }
+        // Bridge ended — VNC/desktop stay alive for potential reconnect.
+        // Full cleanup only happens via wsl_graphics_stop or app shutdown.
+        tracing::info!(
+            "Graphics proxy: bridge ended for session {} (VNC stays alive)",
+            session_id
+        );
     });
 
     Ok((ws_port, token, handle))

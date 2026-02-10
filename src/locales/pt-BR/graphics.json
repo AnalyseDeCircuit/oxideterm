@@ -12,7 +12,8 @@
     "stop": "Parar",
     "distro_running": "Em execução",
     "distro_stopped": "Parada",
-    "no_vnc_server": "Nenhum servidor VNC instalado. Execute: sudo apt update && sudo apt install tigervnc-standalone-server xfce4 -y",
+    "no_vnc_server": "Nenhum servidor VNC instalado. Execute: sudo apt update && sudo apt install tigervnc-standalone-server xfce4 dbus-x11 -y",
+    "no_dbus": "D-Bus não está disponível. Execute: sudo apt update && sudo apt install dbus-x11 -y",
     "not_available": "WSL Gráficos está disponível apenas no Windows com o recurso wsl-graphics habilitado."
   }
 }

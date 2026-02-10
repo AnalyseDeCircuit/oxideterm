@@ -3,9 +3,13 @@
 //! Provides VNC-based graphics forwarding for Windows WSL (WSLg) environments.
 //!
 //! Architecture:
-//! - `wsl.rs`: WSL distro detection + VNC server management
-//! - `bridge.rs`: WebSocket ↔ VNC TCP transparent proxy
-//! - `commands.rs`: 4 Tauri IPC commands exposed to the frontend plugin
+//! - `wsl.rs`: WSL distro detection + Xtigervnc server + desktop session management
+//! - `bridge.rs`: WebSocket ↔ VNC TCP transparent proxy (supports reconnect)
+//! - `commands.rs`: 5 Tauri IPC commands exposed to the frontend
+//!
+//! Only Xtigervnc is supported — it creates a standalone X server on a free
+//! display (avoiding WSLg's Weston on `:0`), then launches a desktop session
+//! via a bootstrap script that initializes D-Bus, XDG env vars, etc.
 //!
 //! On non-Windows platforms or without the `wsl-graphics` feature,
 //! stub commands are provided that return informative errors.
@@ -40,7 +44,6 @@ pub mod commands {
         pub ws_port: u16,
         pub ws_token: String,
         pub distro: String,
-        pub vnc_server: String,
     }
 
     #[tauri::command]
@@ -70,6 +73,17 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn wsl_graphics_reconnect(
+        session_id: String,
+    ) -> Result<WslGraphicsSession, String> {
+        let _ = session_id;
+        Err(
+            "WSL Graphics is only available on Windows with the wsl-graphics feature enabled"
+                .into(),
+        )
+    }
+
+    #[tauri::command]
     pub async fn wsl_graphics_list_sessions() -> Result<Vec<WslGraphicsSession>, String> {
         Err(
             "WSL Graphics is only available on Windows with the wsl-graphics feature enabled"
@@ -91,14 +105,14 @@ mod types {
     /// Errors specific to WSL Graphics operations
     #[derive(Debug, Error)]
     pub enum GraphicsError {
-        #[error("No VNC server found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install tigervnc-standalone-server xfce4 -y")]
+        #[error("No VNC server found in WSL distro '{0}'. Install prerequisites:\nsudo apt update && sudo apt install tigervnc-standalone-server xfce4 dbus-x11 -y")]
         NoVncServer(String),
 
         #[error("No desktop environment found in WSL distro '{0}'. Install one:\nsudo apt update && sudo apt install xfce4 -y")]
         NoDesktop(String),
 
-        #[error("Unsupported VNC server: {0}")]
-        UnsupportedVnc(String),
+        #[error("D-Bus is not available in WSL distro '{0}'. Install it:\nsudo apt update && sudo apt install dbus-x11 -y")]
+        NoDbus(String),
 
         #[error("VNC server failed to start within timeout")]
         VncStartTimeout,
@@ -139,14 +153,24 @@ mod types {
         pub ws_port: u16,
         pub ws_token: String,
         pub distro: String,
-        pub vnc_server: String,
     }
 
-    /// Internal handle for an active graphics session
+    /// Internal handle for an active graphics session.
+    ///
+    /// Tracks VNC server, desktop session, and WebSocket bridge processes.
+    /// On stop/shutdown, all three are cleaned up.
     pub(crate) struct WslGraphicsHandle {
         pub info: WslGraphicsSession,
+        /// The Xtigervnc process
         pub vnc_child: Child,
+        /// The desktop bootstrap script process (dbus + desktop session)
+        pub desktop_child: Option<Child>,
+        /// The WSL distro name (needed for session-level cleanup)
+        pub distro: String,
+        /// WebSocket ↔ VNC bridge task
         pub bridge_handle: JoinHandle<()>,
+        /// The VNC port on localhost (needed for reconnect bridge rebuilds)
+        pub vnc_port: u16,
     }
 
     /// Global state for WSL Graphics, managed by Tauri
@@ -168,6 +192,11 @@ mod types {
                 tracing::info!("Shutting down graphics session: {}", id);
                 handle.bridge_handle.abort();
                 let _ = handle.vnc_child.kill().await;
+                if let Some(ref mut desktop) = handle.desktop_child {
+                    let _ = desktop.kill().await;
+                }
+                // Session-level cleanup inside WSL (kill orphaned processes)
+                crate::graphics::wsl::cleanup_wsl_session(&handle.distro).await;
             }
         }
     }

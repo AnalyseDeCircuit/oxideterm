@@ -621,6 +621,7 @@ pub fn run() {
         graphics::commands::wsl_graphics_list_distros,
         graphics::commands::wsl_graphics_start,
         graphics::commands::wsl_graphics_stop,
+        graphics::commands::wsl_graphics_reconnect,
         graphics::commands::wsl_graphics_list_sessions,
     ]);
     #[cfg(not(feature = "local-terminal"))]
@@ -840,6 +841,7 @@ pub fn run() {
         graphics::commands::wsl_graphics_list_distros,
         graphics::commands::wsl_graphics_start,
         graphics::commands::wsl_graphics_stop,
+        graphics::commands::wsl_graphics_reconnect,
         graphics::commands::wsl_graphics_list_sessions,
     ]);
 
