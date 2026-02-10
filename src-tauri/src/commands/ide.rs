@@ -99,11 +99,7 @@ pub async fn ide_open_project(
     };
 
     // Extract project name from path
-    let name = path
-        .rsplit('/')
-        .next()
-        .unwrap_or("project")
-        .to_string();
+    let name = path.rsplit('/').next().unwrap_or("project").to_string();
 
     Ok(ProjectInfo {
         root_path: path,
@@ -304,10 +300,16 @@ pub(crate) async fn exec_command_inner(
 
     // Handle timeout
     if result.is_err() {
-        warn!("IDE exec timed out after {:?}: {}", timeout_duration, command);
+        warn!(
+            "IDE exec timed out after {:?}: {}",
+            timeout_duration, command
+        );
         // Close the channel to clean up
         let _ = channel.close().await;
-        return Err(format!("Command timed out after {} seconds", timeout_duration.as_secs()));
+        return Err(format!(
+            "Command timed out after {} seconds",
+            timeout_duration.as_secs()
+        ));
     }
 
     // Convert output to strings

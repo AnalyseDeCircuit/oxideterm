@@ -16,6 +16,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = ["local-terminal"]
 # Local terminal support (PTY) - disable for mobile builds
 local-terminal = ["dep:portable-pty"]
+# WSL Graphics forwarding (Windows only) - VNC-based WSLg display
+wsl-graphics = []
 
 [[bench]]
 name = "buffer_benchmark"

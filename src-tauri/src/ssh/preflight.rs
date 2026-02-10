@@ -50,9 +50,7 @@ pub enum HostKeyStatus {
         key_type: String,
     },
     /// Connection error during preflight
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Cache entry for verified hosts
@@ -105,7 +103,9 @@ impl HostKeyCache {
         // If still over limit after eviction, remove oldest entries
         if self.cache.len() >= MAX_CACHE_ENTRIES {
             // Remove ~25% of entries (oldest first by verified_at)
-            let mut entries: Vec<_> = self.cache.iter()
+            let mut entries: Vec<_> = self
+                .cache
+                .iter()
                 .map(|r| (r.key().clone(), r.value().verified_at))
                 .collect();
             entries.sort_by_key(|(_, t)| *t);
@@ -126,9 +126,13 @@ impl HostKeyCache {
 
     /// Remove all expired entries from cache
     fn evict_expired(&self) {
-        let expired_keys: Vec<String> = self.cache.iter()
+        let expired_keys: Vec<String> = self
+            .cache
+            .iter()
             .filter(|entry| {
-                entry.verified_at.elapsed()
+                entry
+                    .verified_at
+                    .elapsed()
                     .map(|d| d.as_secs() >= CACHE_TTL_SECS)
                     .unwrap_or(true)
             })
@@ -202,14 +206,20 @@ impl PreflightHandler {
 impl client::Handler for PreflightHandler {
     type Error = SshError;
 
-    async fn check_server_key(&mut self, server_public_key: &PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &PublicKey,
+    ) -> Result<bool, Self::Error> {
         let known_hosts = get_known_hosts();
         let verification = known_hosts.verify(&self.host, self.port, server_public_key);
         let key_type = Self::key_type_name(server_public_key).to_string();
 
         let status = match verification {
             HostKeyVerification::Verified => {
-                info!("Preflight: Host key verified for {}:{}", self.host, self.port);
+                info!(
+                    "Preflight: Host key verified for {}:{}",
+                    self.host, self.port
+                );
                 // Update cache
                 let fingerprint = KnownHostsStore::fingerprint(server_public_key);
                 get_host_key_cache().set_verified(&self.host, self.port, fingerprint);
@@ -248,7 +258,9 @@ impl client::Handler for PreflightHandler {
 
         // For Verified status, we still abort - preflight is just for checking
         // Return false to reject the connection (we don't want to complete it)
-        Err(SshError::ConnectionFailed("Preflight check complete".to_string()))
+        Err(SshError::ConnectionFailed(
+            "Preflight check complete".to_string(),
+        ))
     }
 }
 
@@ -333,15 +345,15 @@ pub fn accept_host_key(host: &str, port: u16, fingerprint: &str) -> Result<(), S
     // Note: We can't directly add from fingerprint alone - we need the full public key.
     // This function is a placeholder for the flow where user trusts the host.
     // The actual key addition happens during the real connection with trust_host_key=true.
-    
+
     // Update cache to mark as trusted for this session
     get_host_key_cache().set_verified(host, port, fingerprint.to_string());
-    
+
     info!(
         "Host key accepted for {}:{} (fingerprint: {})",
         host, port, fingerprint
     );
-    
+
     Ok(())
 }
 
@@ -352,26 +364,26 @@ mod tests {
     #[test]
     fn test_cache_operations() {
         let cache = HostKeyCache::new();
-        
+
         // Initially empty
         assert!(cache.get_verified("test.example.com", 22).is_none());
-        
+
         // Set and get
         cache.set_verified("test.example.com", 22, "SHA256:abc123".to_string());
         assert_eq!(
             cache.get_verified("test.example.com", 22),
             Some("SHA256:abc123".to_string())
         );
-        
+
         // Case insensitive
         assert_eq!(
             cache.get_verified("TEST.EXAMPLE.COM", 22),
             Some("SHA256:abc123".to_string())
         );
-        
+
         // Different port
         assert!(cache.get_verified("test.example.com", 2222).is_none());
-        
+
         // Invalidate
         cache.invalidate("test.example.com", 22);
         assert!(cache.get_verified("test.example.com", 22).is_none());

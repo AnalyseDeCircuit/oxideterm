@@ -4,9 +4,9 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use russh::*;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::PublicKey;
+use russh::*;
 use tracing::{debug, info, warn};
 
 use super::config::{AuthMethod, SshConfig};
@@ -95,7 +95,9 @@ impl SshClient {
             AuthMethod::Agent => {
                 // Connect to SSH Agent and authenticate
                 let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-                agent.authenticate(&mut handle, self.config.username.clone()).await?;
+                agent
+                    .authenticate(&mut handle, self.config.username.clone())
+                    .await?;
                 client::AuthResult::Success
             }
             AuthMethod::Certificate {
@@ -113,14 +115,20 @@ impl SshClient {
                 };
 
                 // Load and parse OpenSSH certificate
-                let cert = russh::keys::load_openssh_certificate(cert_path)
-                    .map_err(|e| SshError::CertificateParseError(format!("Failed to load certificate: {}", e)))?;
+                let cert = russh::keys::load_openssh_certificate(cert_path).map_err(|e| {
+                    SshError::CertificateParseError(format!("Failed to load certificate: {}", e))
+                })?;
 
                 // Authenticate with certificate
                 handle
                     .authenticate_openssh_cert(&self.config.username, Arc::new(key), cert)
                     .await
-                    .map_err(|e| SshError::AuthenticationFailed(format!("Certificate authentication failed: {}", e)))?
+                    .map_err(|e| {
+                        SshError::AuthenticationFailed(format!(
+                            "Certificate authentication failed: {}",
+                            e
+                        ))
+                    })?
             }
             AuthMethod::KeyboardInteractive => {
                 // KeyboardInteractive is handled by the separate KBI flow (commands/kbi.rs)
@@ -167,11 +175,21 @@ pub struct ClientHandler {
 
 impl ClientHandler {
     pub fn new(host: String, port: u16, strict: bool) -> Self {
-        Self { host, port, strict, trust_host_key: None }
+        Self {
+            host,
+            port,
+            strict,
+            trust_host_key: None,
+        }
     }
 
     pub fn with_trust(host: String, port: u16, strict: bool, trust_host_key: Option<bool>) -> Self {
-        Self { host, port, strict, trust_host_key }
+        Self {
+            host,
+            port,
+            strict,
+            trust_host_key,
+        }
     }
 }
 
@@ -199,7 +217,9 @@ impl client::Handler for ClientHandler {
                             "TOFU: Trusting and saving host key for {}:{} (fingerprint: {})",
                             self.host, self.port, fingerprint
                         );
-                        if let Err(e) = known_hosts.add_host(&self.host, self.port, server_public_key) {
+                        if let Err(e) =
+                            known_hosts.add_host(&self.host, self.port, server_public_key)
+                        {
                             warn!("Failed to save host key: {}", e);
                         }
                     } else {

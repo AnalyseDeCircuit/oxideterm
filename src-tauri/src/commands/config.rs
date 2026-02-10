@@ -112,7 +112,9 @@ fn auth_to_info(auth: &SavedAuth) -> (String, Option<String>) {
     match auth {
         SavedAuth::Password { .. } => ("password".to_string(), None),
         SavedAuth::Key { key_path, .. } => ("key".to_string(), Some(key_path.clone())),
-        SavedAuth::Certificate { key_path, .. } => ("certificate".to_string(), Some(key_path.clone())),
+        SavedAuth::Certificate { key_path, .. } => {
+            ("certificate".to_string(), Some(key_path.clone()))
+        }
         SavedAuth::Agent => ("agent".to_string(), None),
     }
 }
@@ -764,7 +766,13 @@ pub async fn get_saved_connection_for_connect(
             } else {
                 None
             };
-            ("key".to_string(), None, Some(key_path.clone()), None, passphrase)
+            (
+                "key".to_string(),
+                None,
+                Some(key_path.clone()),
+                None,
+                passphrase,
+            )
         }
         SavedAuth::Certificate {
             key_path,
@@ -779,7 +787,13 @@ pub async fn get_saved_connection_for_connect(
             } else {
                 None
             };
-            ("certificate".to_string(), None, Some(key_path.clone()), Some(cert_path.clone()), passphrase)
+            (
+                "certificate".to_string(),
+                None,
+                Some(key_path.clone()),
+                Some(cert_path.clone()),
+                passphrase,
+            )
         }
         SavedAuth::Agent => ("agent".to_string(), None, None, None, None),
     };
@@ -789,34 +803,47 @@ pub async fn get_saved_connection_for_connect(
         .proxy_chain
         .iter()
         .map(|hop| {
-            let (hop_auth_type, hop_password, hop_key_path, hop_cert_path, hop_passphrase) = match &hop.auth {
-                SavedAuth::Password { keychain_id } => {
-                    let pwd = state.keychain.get(keychain_id).ok();
-                    ("password".to_string(), pwd, None, None, None)
-                }
-                SavedAuth::Key {
-                    key_path,
-                    passphrase_keychain_id,
-                    ..
-                } => {
-                    let passphrase = passphrase_keychain_id
-                        .as_ref()
-                        .and_then(|kc_id| state.keychain.get(kc_id).ok());
-                    ("key".to_string(), None, Some(key_path.clone()), None, passphrase)
-                }
-                SavedAuth::Certificate {
-                    key_path,
-                    cert_path,
-                    passphrase_keychain_id,
-                    ..
-                } => {
-                    let passphrase = passphrase_keychain_id
-                        .as_ref()
-                        .and_then(|kc_id| state.keychain.get(kc_id).ok());
-                    ("certificate".to_string(), None, Some(key_path.clone()), Some(cert_path.clone()), passphrase)
-                }
-                SavedAuth::Agent => ("agent".to_string(), None, None, None, None),
-            };
+            let (hop_auth_type, hop_password, hop_key_path, hop_cert_path, hop_passphrase) =
+                match &hop.auth {
+                    SavedAuth::Password { keychain_id } => {
+                        let pwd = state.keychain.get(keychain_id).ok();
+                        ("password".to_string(), pwd, None, None, None)
+                    }
+                    SavedAuth::Key {
+                        key_path,
+                        passphrase_keychain_id,
+                        ..
+                    } => {
+                        let passphrase = passphrase_keychain_id
+                            .as_ref()
+                            .and_then(|kc_id| state.keychain.get(kc_id).ok());
+                        (
+                            "key".to_string(),
+                            None,
+                            Some(key_path.clone()),
+                            None,
+                            passphrase,
+                        )
+                    }
+                    SavedAuth::Certificate {
+                        key_path,
+                        cert_path,
+                        passphrase_keychain_id,
+                        ..
+                    } => {
+                        let passphrase = passphrase_keychain_id
+                            .as_ref()
+                            .and_then(|kc_id| state.keychain.get(kc_id).ok());
+                        (
+                            "certificate".to_string(),
+                            None,
+                            Some(key_path.clone()),
+                            Some(cert_path.clone()),
+                            passphrase,
+                        )
+                    }
+                    SavedAuth::Agent => ("agent".to_string(), None, None, None, None),
+                };
 
             ProxyHopForConnect {
                 host: hop.host.clone(),
@@ -862,8 +889,14 @@ pub async fn set_ai_api_key(
             tracing::debug!("[legacy] Keychain delete (may not exist): {}", e);
         }
     } else {
-        tracing::info!("[legacy] Storing AI API key in keychain for {} (length: {})", LEGACY_PROVIDER_ID, api_key.len());
-        state.ai_keychain.store(LEGACY_PROVIDER_ID, &api_key)
+        tracing::info!(
+            "[legacy] Storing AI API key in keychain for {} (length: {})",
+            LEGACY_PROVIDER_ID,
+            api_key.len()
+        );
+        state
+            .ai_keychain
+            .store(LEGACY_PROVIDER_ID, &api_key)
             .map_err(|e| format!("Failed to store API key: {}", e))?;
     }
     Ok(())
@@ -871,9 +904,7 @@ pub async fn set_ai_api_key(
 
 /// Get AI API key — legacy compat, reads from OS keychain under `builtin-openai`.
 #[tauri::command]
-pub async fn get_ai_api_key(
-    state: State<'_, Arc<ConfigState>>,
-) -> Result<Option<String>, String> {
+pub async fn get_ai_api_key(state: State<'_, Arc<ConfigState>>) -> Result<Option<String>, String> {
     match state.ai_keychain.get(LEGACY_PROVIDER_ID) {
         Ok(key) => Ok(Some(key)),
         Err(_) => Ok(None),
@@ -882,17 +913,16 @@ pub async fn get_ai_api_key(
 
 /// Check if AI API key exists — legacy compat.
 #[tauri::command]
-pub async fn has_ai_api_key(
-    state: State<'_, Arc<ConfigState>>,
-) -> Result<bool, String> {
-    Ok(state.ai_keychain.exists(LEGACY_PROVIDER_ID).unwrap_or(false))
+pub async fn has_ai_api_key(state: State<'_, Arc<ConfigState>>) -> Result<bool, String> {
+    Ok(state
+        .ai_keychain
+        .exists(LEGACY_PROVIDER_ID)
+        .unwrap_or(false))
 }
 
 /// Delete AI API key — legacy compat.
 #[tauri::command]
-pub async fn delete_ai_api_key(
-    state: State<'_, Arc<ConfigState>>,
-) -> Result<(), String> {
+pub async fn delete_ai_api_key(state: State<'_, Arc<ConfigState>>) -> Result<(), String> {
     if let Err(e) = state.ai_keychain.delete(LEGACY_PROVIDER_ID) {
         tracing::debug!("[legacy] Keychain delete (may not exist): {}", e);
     }
@@ -921,26 +951,44 @@ fn try_migrate_vault_to_keychain(
 
     match vault.load(provider_id) {
         Ok(key) => {
-            tracing::info!("Migrating AI key for provider {} from vault to keychain", provider_id);
+            tracing::info!(
+                "Migrating AI key for provider {} from vault to keychain",
+                provider_id
+            );
             // Store in keychain
             match ai_keychain.store(provider_id, &key) {
                 Ok(()) => {
                     // Delete vault file after successful migration
                     if let Err(e) = vault.delete(provider_id) {
-                        tracing::warn!("Failed to delete vault file after migration for {}: {}", provider_id, e);
+                        tracing::warn!(
+                            "Failed to delete vault file after migration for {}: {}",
+                            provider_id,
+                            e
+                        );
                     }
-                    tracing::info!("Successfully migrated AI key for provider {} to keychain", provider_id);
+                    tracing::info!(
+                        "Successfully migrated AI key for provider {} to keychain",
+                        provider_id
+                    );
                     Some(key)
                 }
                 Err(e) => {
-                    tracing::error!("Failed to store provider {} key in keychain: {}", provider_id, e);
+                    tracing::error!(
+                        "Failed to store provider {} key in keychain: {}",
+                        provider_id,
+                        e
+                    );
                     // Return the key anyway so the user isn't blocked
                     Some(key)
                 }
             }
         }
         Err(e) => {
-            tracing::warn!("Failed to read vault for provider {} during migration: {}", provider_id, e);
+            tracing::warn!(
+                "Failed to read vault for provider {} during migration: {}",
+                provider_id,
+                e
+            );
             None
         }
     }
@@ -954,12 +1002,20 @@ pub async fn set_ai_provider_api_key(
     api_key: String,
 ) -> Result<(), String> {
     if api_key.is_empty() {
-        state.ai_keychain.delete(&provider_id).map_err(|e| format!("Failed to delete provider key: {}", e))?;
+        state
+            .ai_keychain
+            .delete(&provider_id)
+            .map_err(|e| format!("Failed to delete provider key: {}", e))?;
     } else {
-        state.ai_keychain.store(&provider_id, &api_key)
+        state
+            .ai_keychain
+            .store(&provider_id, &api_key)
             .map_err(|e| format!("Failed to save provider key to keychain: {}", e))?;
     }
-    tracing::info!("AI provider key for {} saved to system keychain", provider_id);
+    tracing::info!(
+        "AI provider key for {} saved to system keychain",
+        provider_id
+    );
     Ok(())
 }
 
@@ -973,7 +1029,11 @@ pub async fn get_ai_provider_api_key(
     // Step 1: Try keychain first
     match state.ai_keychain.get(&provider_id) {
         Ok(key) => {
-            tracing::debug!("AI provider key for {} found in keychain (len={})", provider_id, key.len());
+            tracing::debug!(
+                "AI provider key for {} found in keychain (len={})",
+                provider_id,
+                key.len()
+            );
             return Ok(Some(key));
         }
         Err(e) => {
@@ -987,7 +1047,8 @@ pub async fn get_ai_provider_api_key(
     }
 
     // Step 2: Try lazy migration from vault
-    if let Some(key) = try_migrate_vault_to_keychain(&app_handle, &state.ai_keychain, &provider_id) {
+    if let Some(key) = try_migrate_vault_to_keychain(&app_handle, &state.ai_keychain, &provider_id)
+    {
         return Ok(Some(key));
     }
 
@@ -1025,7 +1086,11 @@ pub async fn delete_ai_provider_api_key(
 ) -> Result<(), String> {
     // Delete from keychain
     if let Err(e) = state.ai_keychain.delete(&provider_id) {
-        tracing::debug!("Keychain delete for provider {} (may not exist): {}", provider_id, e);
+        tracing::debug!(
+            "Keychain delete for provider {} (may not exist): {}",
+            provider_id,
+            e
+        );
     }
 
     // Also clean up any remaining vault file
@@ -1035,10 +1100,17 @@ pub async fn delete_ai_provider_api_key(
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
     let vault = AiProviderVault::new(app_data_dir);
     if let Err(e) = vault.delete(&provider_id) {
-        tracing::debug!("Vault delete for provider {} (may not exist): {}", provider_id, e);
+        tracing::debug!(
+            "Vault delete for provider {} (may not exist): {}",
+            provider_id,
+            e
+        );
     }
 
-    tracing::info!("AI provider key for {} deleted from all storage locations", provider_id);
+    tracing::info!(
+        "AI provider key for {} deleted from all storage locations",
+        provider_id
+    );
     Ok(())
 }
 
@@ -1065,7 +1137,12 @@ pub async fn list_ai_provider_keys(
 
     // Check known provider IDs in keychain
     // Since keychain doesn't support enumeration, we probe known provider IDs
-    let known_ids = ["builtin-openai", "builtin-anthropic", "builtin-gemini", "builtin-ollama"];
+    let known_ids = [
+        "builtin-openai",
+        "builtin-anthropic",
+        "builtin-gemini",
+        "builtin-ollama",
+    ];
     for id in &known_ids {
         if state.ai_keychain.get(id).is_ok() {
             providers.insert(id.to_string());

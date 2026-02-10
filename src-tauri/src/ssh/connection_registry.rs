@@ -43,7 +43,6 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-
 use super::handle_owner::HandleController;
 use super::{AuthMethod as SshAuthMethod, SshClient, SshConfig};
 use crate::session::{AuthMethod, RemoteEnvInfo, SessionConfig};
@@ -71,7 +70,7 @@ const HEARTBEAT_FAIL_THRESHOLD: u32 = 2;
 // ═══════════════════════════════════════════════════════════════════════════════
 // 以下常量已被移除（自动重连引擎已被物理删除）：
 // - RECONNECT_INITIAL_DELAY
-// - RECONNECT_FIRST_DELAY  
+// - RECONNECT_FIRST_DELAY
 // - RECONNECT_MAX_DELAY
 // - RECONNECT_MAX_ATTEMPTS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -288,10 +287,16 @@ impl ConnectionEntry {
         let current = self.ref_count.load(Ordering::SeqCst);
         // 防止溢出
         if current >= u32::MAX - 1 {
-            warn!("Connection {} ref count at maximum, not incrementing", self.id);
+            warn!(
+                "Connection {} ref count at maximum, not incrementing",
+                self.id
+            );
             return current;
         }
-        let count = self.ref_count.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+        let count = self
+            .ref_count
+            .fetch_add(1, Ordering::SeqCst)
+            .saturating_add(1);
         debug!("Connection {} ref count increased to {}", self.id, count);
         self.update_activity();
         count
@@ -302,7 +307,10 @@ impl ConnectionEntry {
         let current = self.ref_count.load(Ordering::SeqCst);
         // 防止下溢
         if current == 0 {
-            warn!("Connection {} ref count already 0, not decrementing", self.id);
+            warn!(
+                "Connection {} ref count already 0, not decrementing",
+                self.id
+            );
             return 0;
         }
         let prev = self.ref_count.fetch_sub(1, Ordering::SeqCst);
@@ -374,7 +382,10 @@ impl ConnectionEntry {
 
     /// 移除关联的 terminal session ID
     pub async fn remove_terminal(&self, session_id: &str) {
-        self.terminal_ids.write().await.retain(|id| id != session_id);
+        self.terminal_ids
+            .write()
+            .await
+            .retain(|id| id != session_id);
     }
 
     /// 获取关联的 terminal session IDs
@@ -414,10 +425,7 @@ impl ConnectionEntry {
         }
 
         // 慢路径：在锁内创建新 SFTP session，确保同连接只创建一次
-        let new_sftp = SftpSession::new(
-            self.handle_controller.clone(),
-            self.id.clone(),
-        ).await?;
+        let new_sftp = SftpSession::new(self.handle_controller.clone(), self.id.clone()).await?;
 
         let arc = Arc::new(tokio::sync::Mutex::new(new_sftp));
         *guard = Some(Arc::clone(&arc));
@@ -682,33 +690,33 @@ impl SshConnectionRegistry {
     }
 
     /// 设置 AppHandle（用于发送事件）
-    /// 
+    ///
     /// 设置后会立即处理所有缓存的事件
     pub async fn set_app_handle(&self, handle: AppHandle) {
         use tauri::Emitter;
-        
+
         // 先取出所有缓存的事件
         let pending = {
             let mut events = self.pending_events.lock().await;
             std::mem::take(&mut *events)
         };
-        
+
         // 发送所有缓存的事件
         if !pending.is_empty() {
             info!("AppHandle ready, flushing {} cached events", pending.len());
-            
+
             #[derive(Clone, serde::Serialize)]
             struct ConnectionStatusEvent {
                 connection_id: String,
                 status: String,
             }
-            
+
             for (connection_id, status) in pending {
                 let event = ConnectionStatusEvent {
                     connection_id: connection_id.clone(),
                     status: status.clone(),
                 };
-                
+
                 if let Err(e) = handle.emit("connection_status_changed", event) {
                     error!("Failed to emit cached event: {}", e);
                 } else {
@@ -716,7 +724,7 @@ impl SshConnectionRegistry {
                 }
             }
         }
-        
+
         // 设置 AppHandle
         *self.app_handle.write().await = Some(handle);
         info!("AppHandle registered and ready");
@@ -817,8 +825,7 @@ impl SshConnectionRegistry {
     ) -> Result<String, ConnectionRegistryError> {
         // 检查连接数限制
         let pool_config = self.config.read().await;
-        if pool_config.max_connections > 0
-            && self.connections.len() >= pool_config.max_connections
+        if pool_config.max_connections > 0 && self.connections.len() >= pool_config.max_connections
         {
             return Err(ConnectionRegistryError::LimitReached {
                 current: self.connections.len(),
@@ -840,7 +847,9 @@ impl SshConnectionRegistry {
             port: config.port,
             username: config.username.clone(),
             auth: match &config.auth {
-                AuthMethod::Password { password } => SshAuthMethod::Password { password: password.clone() },
+                AuthMethod::Password { password } => SshAuthMethod::Password {
+                    password: password.clone(),
+                },
                 AuthMethod::Key {
                     key_path,
                     passphrase,
@@ -907,7 +916,7 @@ impl SshConnectionRegistry {
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
-            parent_connection_id: None, // 直连，无父连接
+            parent_connection_id: None,    // 直连，无父连接
             remote_env: RwLock::new(None), // 待异步检测
         });
 
@@ -995,7 +1004,10 @@ impl SshConnectionRegistry {
                 ))
             })?;
 
-        debug!("Direct-tcpip channel opened to {}:{}", target_config.host, target_config.port);
+        debug!(
+            "Direct-tcpip channel opened to {}:{}",
+            target_config.host, target_config.port
+        );
 
         // 3. 将 channel 转换为 stream 用于 SSH-over-SSH
         let stream = channel.into_stream();
@@ -1041,23 +1053,21 @@ impl SshConnectionRegistry {
 
         // 5. 认证
         let authenticated = match &target_config.auth {
-            AuthMethod::Password { password } => {
-                handle
-                    .authenticate_password(&target_config.username, password)
-                    .await
-                    .map_err(|e| {
-                        ConnectionRegistryError::ConnectionFailed(format!(
-                            "Authentication failed: {}",
-                            e
-                        ))
-                    })?
-            }
+            AuthMethod::Password { password } => handle
+                .authenticate_password(&target_config.username, password)
+                .await
+                .map_err(|e| {
+                    ConnectionRegistryError::ConnectionFailed(format!(
+                        "Authentication failed: {}",
+                        e
+                    ))
+                })?,
             AuthMethod::Key {
                 key_path,
                 passphrase,
             } => {
-                let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
-                    .map_err(|e| {
+                let key =
+                    russh::keys::load_secret_key(key_path, passphrase.as_deref()).map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
                             "Failed to load key: {}",
                             e
@@ -1082,24 +1092,27 @@ impl SshConnectionRegistry {
                 cert_path,
                 passphrase,
             } => {
-                let key = russh::keys::load_secret_key(key_path, passphrase.as_deref())
-                    .map_err(|e| {
+                let key =
+                    russh::keys::load_secret_key(key_path, passphrase.as_deref()).map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
                             "Failed to load key: {}",
                             e
                         ))
                     })?;
 
-                let cert = russh::keys::load_openssh_certificate(cert_path)
-                    .map_err(|e| {
-                        ConnectionRegistryError::ConnectionFailed(format!(
-                            "Failed to load certificate: {}",
-                            e
-                        ))
-                    })?;
+                let cert = russh::keys::load_openssh_certificate(cert_path).map_err(|e| {
+                    ConnectionRegistryError::ConnectionFailed(format!(
+                        "Failed to load certificate: {}",
+                        e
+                    ))
+                })?;
 
                 handle
-                    .authenticate_openssh_cert(&target_config.username, std::sync::Arc::new(key), cert)
+                    .authenticate_openssh_cert(
+                        &target_config.username,
+                        std::sync::Arc::new(key),
+                        cert,
+                    )
                     .await
                     .map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
@@ -1109,20 +1122,24 @@ impl SshConnectionRegistry {
                     })?
             }
             AuthMethod::Agent => {
-                let mut agent = crate::ssh::agent::SshAgentClient::connect()
+                let mut agent =
+                    crate::ssh::agent::SshAgentClient::connect()
+                        .await
+                        .map_err(|e| {
+                            ConnectionRegistryError::ConnectionFailed(format!(
+                                "Failed to connect to SSH agent: {}",
+                                e
+                            ))
+                        })?;
+                agent
+                    .authenticate(&mut handle, target_config.username.clone())
                     .await
                     .map_err(|e| {
                         ConnectionRegistryError::ConnectionFailed(format!(
-                            "Failed to connect to SSH agent: {}",
+                            "Agent authentication failed: {}",
                             e
                         ))
                     })?;
-                agent.authenticate(&mut handle, target_config.username.clone()).await.map_err(|e| {
-                    ConnectionRegistryError::ConnectionFailed(format!(
-                        "Agent authentication failed: {}",
-                        e
-                    ))
-                })?;
                 russh::client::AuthResult::Success
             }
             AuthMethod::KeyboardInteractive => {
@@ -1146,7 +1163,8 @@ impl SshConnectionRegistry {
         );
 
         // 6. 创建 SshSession 并启动 Handle Owner Task
-        let session = super::session::SshSession::new(handle, target_config.cols, target_config.rows);
+        let session =
+            super::session::SshSession::new(handle, target_config.cols, target_config.rows);
         let handle_controller = session.start(connection_id.clone());
 
         // 7. 创建连接条目（带父连接 ID）
@@ -1172,7 +1190,7 @@ impl SshConnectionRegistry {
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
             parent_connection_id: Some(parent_connection_id.to_string()), // 隧道连接，记录父连接
-            remote_env: RwLock::new(None), // 待异步检测
+            remote_env: RwLock::new(None),                                // 待异步检测
         });
 
         self.connections.insert(connection_id.clone(), entry);
@@ -1248,10 +1266,7 @@ impl SshConnectionRegistry {
 
             // 2. 认证方式兼容性检查
             if !Self::auth_compatible(&conn.config.auth, &config.auth) {
-                debug!(
-                    "Connection {} auth not compatible, skipping reuse",
-                    conn_id
-                );
+                debug!("Connection {} auth not compatible, skipping reuse", conn_id);
                 continue;
             }
 
@@ -1291,10 +1306,7 @@ impl SshConnectionRegistry {
         }
 
         if let Some((ref id, quality)) = best_match {
-            info!(
-                "Found reusable connection {} with quality {}",
-                id, quality
-            );
+            info!("Found reusable connection {} with quality {}", id, quality);
         }
 
         best_match
@@ -1304,20 +1316,18 @@ impl SshConnectionRegistry {
     fn auth_compatible(a: &AuthMethod, b: &AuthMethod) -> bool {
         match (a, b) {
             // 密码认证：必须完全相同
-            (
-                AuthMethod::Password { password: p1 },
-                AuthMethod::Password { password: p2 },
-            ) => p1 == p2,
-            
+            (AuthMethod::Password { password: p1 }, AuthMethod::Password { password: p2 }) => {
+                p1 == p2
+            }
+
             // 密钥认证：路径必须相同（passphrase 不比较，因为密钥已加载）
-            (
-                AuthMethod::Key { key_path: k1, .. },
-                AuthMethod::Key { key_path: k2, .. },
-            ) => k1 == k2,
-            
+            (AuthMethod::Key { key_path: k1, .. }, AuthMethod::Key { key_path: k2, .. }) => {
+                k1 == k2
+            }
+
             // Agent 认证：总是兼容
             (AuthMethod::Agent, AuthMethod::Agent) => true,
-            
+
             // 不同类型不兼容
             _ => false,
         }
@@ -1512,13 +1522,10 @@ impl SshConnectionRegistry {
     }
 
     /// 强制断开连接
-    /// 
+    ///
     /// 如果此连接有子连接（隧道连接），会先断开所有子连接。
     /// 如果此连接是子连接，会减少父连接的引用计数。
-    pub async fn disconnect(
-        &self,
-        connection_id: &str,
-    ) -> Result<(), ConnectionRegistryError> {
+    pub async fn disconnect(&self, connection_id: &str) -> Result<(), ConnectionRegistryError> {
         // 1. 收集所有依赖此连接的子连接
         let child_ids: Vec<String> = self
             .connections
@@ -1560,10 +1567,7 @@ impl SshConnectionRegistry {
     }
 
     /// 断开单个连接（内部方法，处理引用计数）
-    async fn disconnect_single(
-        &self,
-        connection_id: &str,
-    ) -> Result<(), ConnectionRegistryError> {
+    async fn disconnect_single(&self, connection_id: &str) -> Result<(), ConnectionRegistryError> {
         // 获取当前连接
         let entry = self
             .connections
@@ -1688,7 +1692,10 @@ impl SshConnectionRegistry {
 
         self.connections.remove(connection_id);
 
-        info!("Connection {} disconnected and removed (no parent release)", connection_id);
+        info!(
+            "Connection {} disconnected and removed (no parent release)",
+            connection_id
+        );
         Ok(())
     }
 
@@ -1696,7 +1703,8 @@ impl SshConnectionRegistry {
     pub async fn disconnect_all(&self) {
         info!("Disconnecting all SSH connections...");
 
-        let connection_ids: Vec<String> = self.connections.iter().map(|e| e.key().clone()).collect();
+        let connection_ids: Vec<String> =
+            self.connections.iter().map(|e| e.key().clone()).collect();
 
         for connection_id in connection_ids {
             if let Err(e) = self.disconnect(&connection_id).await {
@@ -1716,10 +1724,7 @@ impl SshConnectionRegistry {
     }
 
     /// 获取连接信息
-    pub async fn get_info(
-        &self,
-        connection_id: &str,
-    ) -> Option<ConnectionInfo> {
+    pub async fn get_info(&self, connection_id: &str) -> Option<ConnectionInfo> {
         let entry = self.connections.get(connection_id)?;
         Some(entry.value().to_info().await)
     }
@@ -1780,11 +1785,12 @@ impl SshConnectionRegistry {
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
-            parent_connection_id: None, // 从旧连接注册，无父连接
+            parent_connection_id: None,    // 从旧连接注册，无父连接
             remote_env: RwLock::new(None), // 待异步检测
         });
 
-        self.connections.insert(connection_id.clone(), entry.clone());
+        self.connections
+            .insert(connection_id.clone(), entry.clone());
 
         info!(
             "Connection {} registered, total connections: {}",
@@ -1932,7 +1938,10 @@ impl SshConnectionRegistry {
     /// 每 15 秒发送一次心跳，连续 2 次失败后标记为 LinkDown 并启动重连
     pub fn start_heartbeat(self: &Arc<Self>, connection_id: &str) {
         let Some(entry) = self.connections.get(connection_id) else {
-            warn!("Cannot start heartbeat for non-existent connection {}", connection_id);
+            warn!(
+                "Cannot start heartbeat for non-existent connection {}",
+                connection_id
+            );
             return;
         };
 
@@ -1942,8 +1951,12 @@ impl SshConnectionRegistry {
         let node_emitter = self.node_emitter(); // Oxide-Next Phase 2
 
         let task = tokio::spawn(async move {
-            info!("Heartbeat task started for connection {} (interval={}s, threshold={})", 
-                  connection_id, HEARTBEAT_INTERVAL.as_secs(), HEARTBEAT_FAIL_THRESHOLD);
+            info!(
+                "Heartbeat task started for connection {} (interval={}s, threshold={})",
+                connection_id,
+                HEARTBEAT_INTERVAL.as_secs(),
+                HEARTBEAT_FAIL_THRESHOLD
+            );
             let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
 
             loop {
@@ -1952,14 +1965,25 @@ impl SshConnectionRegistry {
 
                 // 检查连接状态，如果正在重连或已断开，停止心跳
                 let state = conn.state().await;
-                if matches!(state, ConnectionState::Reconnecting | ConnectionState::Disconnecting | ConnectionState::Disconnected) {
-                    debug!("Connection {} state is {:?}, stopping heartbeat", connection_id, state);
+                if matches!(
+                    state,
+                    ConnectionState::Reconnecting
+                        | ConnectionState::Disconnecting
+                        | ConnectionState::Disconnected
+                ) {
+                    debug!(
+                        "Connection {} state is {:?}, stopping heartbeat",
+                        connection_id, state
+                    );
                     break;
                 }
 
                 // 发送心跳 ping
                 let ping_result = conn.handle_controller.ping().await;
-                debug!("Connection {} ping result: {:?}", connection_id, ping_result);
+                debug!(
+                    "Connection {} ping result: {:?}",
+                    connection_id, ping_result
+                );
 
                 match ping_result {
                     crate::ssh::handle_owner::PingResult::Ok => {
@@ -1971,12 +1995,18 @@ impl SshConnectionRegistry {
                     crate::ssh::handle_owner::PingResult::IoError => {
                         // IO 错误检测到 — 执行 quick probe 确认（Smart Butler 模式）
                         // 延迟 1.5s 后二次探测，避免瞬态网络抖动导致误判
-                        warn!("Connection {} IO error detected, initiating quick probe confirmation", connection_id);
+                        warn!(
+                            "Connection {} IO error detected, initiating quick probe confirmation",
+                            connection_id
+                        );
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
                         // 检查连接是否已被其他路径处理（如用户主动断开）
                         let state_after_delay = conn.state().await;
-                        if matches!(state_after_delay, ConnectionState::Disconnecting | ConnectionState::Disconnected) {
+                        if matches!(
+                            state_after_delay,
+                            ConnectionState::Disconnecting | ConnectionState::Disconnected
+                        ) {
                             info!("Connection {} already disconnecting/disconnected during probe delay, stopping heartbeat", connection_id);
                             break;
                         }
@@ -1995,7 +2025,9 @@ impl SshConnectionRegistry {
                                 // 🛑 后端禁止自动重连：只广播事件，等待前端指令
                                 error!("Connection {} quick probe also failed ({:?}), confirmed link_down", connection_id, probe_result);
                                 conn.set_state(ConnectionState::LinkDown).await;
-                                registry.emit_connection_status_changed(&connection_id, "link_down").await;
+                                registry
+                                    .emit_connection_status_changed(&connection_id, "link_down")
+                                    .await;
 
                                 // Oxide-Next Phase 2: node:state 事件
                                 if let Some(ref emitter) = node_emitter {
@@ -2021,12 +2053,16 @@ impl SshConnectionRegistry {
                         if failures >= HEARTBEAT_FAIL_THRESHOLD {
                             // 达到失败阈值，标记为 LinkDown
                             // 🛑 后端禁止自动重连：只广播事件，等待前端指令
-                            error!("Connection {} marked as LinkDown after {} heartbeat failures", 
-                                   connection_id, failures);
+                            error!(
+                                "Connection {} marked as LinkDown after {} heartbeat failures",
+                                connection_id, failures
+                            );
                             conn.set_state(ConnectionState::LinkDown).await;
 
                             // 广播状态变更事件
-                            registry.emit_connection_status_changed(&connection_id, "link_down").await;
+                            registry
+                                .emit_connection_status_changed(&connection_id, "link_down")
+                                .await;
 
                             // Oxide-Next Phase 2: node:state 事件
                             if let Some(ref emitter) = node_emitter {
@@ -2065,7 +2101,10 @@ impl SshConnectionRegistry {
         use tauri::Emitter;
 
         let Some(entry) = self.connections.get(connection_id) else {
-            warn!("Cannot spawn env detection for non-existent connection {}", connection_id);
+            warn!(
+                "Cannot spawn env detection for non-existent connection {}",
+                connection_id
+            );
             return;
         };
 
@@ -2075,7 +2114,10 @@ impl SshConnectionRegistry {
         let controller = conn.handle_controller.clone();
 
         tokio::spawn(async move {
-            info!("[EnvDetector] Starting detection for connection {}", connection_id);
+            info!(
+                "[EnvDetector] Starting detection for connection {}",
+                connection_id
+            );
 
             // Run detection
             let env_info = detect_remote_env(&controller, &connection_id).await;
@@ -2098,19 +2140,28 @@ impl SshConnectionRegistry {
                     #[serde(flatten)]
                     env: RemoteEnvInfo,
                 }
-                
+
                 let event = EnvDetectedEvent {
                     connection_id: connection_id.clone(),
                     env: env_info,
                 };
-                
+
                 if let Err(e) = handle.emit("env:detected", &event) {
-                    error!("[EnvDetector] Failed to emit env:detected for {}: {}", connection_id, e);
+                    error!(
+                        "[EnvDetector] Failed to emit env:detected for {}: {}",
+                        connection_id, e
+                    );
                 } else {
-                    debug!("[EnvDetector] Emitted env:detected event for {}", connection_id);
+                    debug!(
+                        "[EnvDetector] Emitted env:detected event for {}",
+                        connection_id
+                    );
                 }
             } else {
-                warn!("[EnvDetector] AppHandle not available, event not emitted for {}", connection_id);
+                warn!(
+                    "[EnvDetector] AppHandle not available, event not emitted for {}",
+                    connection_id
+                );
             }
         });
     }
@@ -2129,7 +2180,10 @@ impl SshConnectionRegistry {
         let controller = conn.handle_controller.clone();
 
         tokio::spawn(async move {
-            info!("[EnvDetector] Starting detection for connection {}", connection_id);
+            info!(
+                "[EnvDetector] Starting detection for connection {}",
+                connection_id
+            );
 
             let env_info = detect_remote_env(&controller, &connection_id).await;
 
@@ -2148,19 +2202,28 @@ impl SshConnectionRegistry {
                     #[serde(flatten)]
                     env: RemoteEnvInfo,
                 }
-                
+
                 let event = EnvDetectedEvent {
                     connection_id: connection_id.clone(),
                     env: env_info,
                 };
-                
+
                 if let Err(e) = handle.emit("env:detected", &event) {
-                    error!("[EnvDetector] Failed to emit env:detected for {}: {}", connection_id, e);
+                    error!(
+                        "[EnvDetector] Failed to emit env:detected for {}: {}",
+                        connection_id, e
+                    );
                 } else {
-                    debug!("[EnvDetector] Emitted env:detected event for {}", connection_id);
+                    debug!(
+                        "[EnvDetector] Emitted env:detected event for {}",
+                        connection_id
+                    );
                 }
             } else {
-                warn!("[EnvDetector] AppHandle not available, event not emitted for {}", connection_id);
+                warn!(
+                    "[EnvDetector] AppHandle not available, event not emitted for {}",
+                    connection_id
+                );
             }
         });
     }
@@ -2180,7 +2243,7 @@ impl SshConnectionRegistry {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// 🛑 REMOVED: start_reconnect
-    /// 
+    ///
     /// 此函数已被物理删除。后端禁止自主启动重连任务。
     /// 前端应通过 connect_tree_node 命令发起重连。
     #[allow(dead_code)]
@@ -2190,31 +2253,37 @@ impl SshConnectionRegistry {
     }
 
     /// 广播连接状态变更事件
-    /// 
+    ///
     /// # 状态守卫
     /// 只有当状态真正变化时才发送事件，避免重复发送相同状态导致前端性能问题
-    /// 
+    ///
     /// # AppHandle 生命周期
     /// 如果 AppHandle 未就绪，事件会被缓存，待 AppHandle 设置后立即发送
     pub async fn emit_connection_status_changed(&self, connection_id: &str, status: &str) {
         // 对于 link_down 状态，使用带子连接的版本
         if status == "link_down" {
             let affected_children = self.collect_all_children(connection_id);
-            self.emit_connection_status_changed_with_children(connection_id, status, affected_children).await;
+            self.emit_connection_status_changed_with_children(
+                connection_id,
+                status,
+                affected_children,
+            )
+            .await;
             return;
         }
-        
+
         // 其他状态使用空的 affected_children
-        self.emit_connection_status_changed_with_children(connection_id, status, vec![]).await;
+        self.emit_connection_status_changed_with_children(connection_id, status, vec![])
+            .await;
     }
 
     /// 广播连接状态变更事件（带受影响的子连接列表）
-    /// 
+    ///
     /// # 状态守卫
     /// 只有当状态真正变化时才发送事件，避免重复发送相同状态导致前端性能问题
     async fn emit_connection_status_changed_with_children(
-        &self, 
-        connection_id: &str, 
+        &self,
+        connection_id: &str,
         status: &str,
         affected_children: Vec<String>,
     ) {
@@ -2222,24 +2291,27 @@ impl SshConnectionRegistry {
         if let Some(entry) = self.connections.get(connection_id) {
             let conn = entry.value();
             let mut last_status = conn.last_emitted_status.write().await;
-            
+
             // 如果状态未变化，跳过发送
             if let Some(ref prev) = *last_status {
                 if prev == status {
-                    debug!("Status unchanged for connection {}: {}, skipping emit", connection_id, status);
+                    debug!(
+                        "Status unchanged for connection {}: {}, skipping emit",
+                        connection_id, status
+                    );
                     return;
                 }
             }
-            
+
             // 更新最后发送的状态
             *last_status = Some(status.to_string());
         }
-        
+
         // === 尝试发送事件 ===
         let app_handle = self.app_handle.read().await;
         if let Some(handle) = app_handle.as_ref() {
             use tauri::Emitter;
-            
+
             #[derive(Clone, serde::Serialize)]
             struct ConnectionStatusEvent {
                 connection_id: String,
@@ -2261,17 +2333,26 @@ impl SshConnectionRegistry {
             if let Err(e) = handle.emit("connection_status_changed", event) {
                 error!("Failed to emit connection_status_changed: {}", e);
             } else {
-                debug!("Emitted connection_status_changed: {} -> {}", connection_id, status);
+                debug!(
+                    "Emitted connection_status_changed: {} -> {}",
+                    connection_id, status
+                );
             }
         } else {
             // AppHandle 未就绪，缓存事件（上限 1000 条防止无限堆积）
-            warn!("AppHandle not ready, caching event: {} -> {}", connection_id, status);
+            warn!(
+                "AppHandle not ready, caching event: {} -> {}",
+                connection_id, status
+            );
             let mut pending = self.pending_events.lock().await;
             if pending.len() < 1000 {
                 pending.push((connection_id.to_string(), status.to_string()));
                 debug!("Event cached, total pending: {}", pending.len());
             } else {
-                warn!("Pending events buffer full (1000), dropping event: {} -> {}", connection_id, status);
+                warn!(
+                    "Pending events buffer full (1000), dropping event: {} -> {}",
+                    connection_id, status
+                );
             }
         }
     }
@@ -2291,7 +2372,7 @@ impl SshConnectionRegistry {
     fn collect_all_children(&self, connection_id: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut stack = vec![connection_id.to_string()];
-        
+
         while let Some(current_id) = stack.pop() {
             for entry in self.connections.iter() {
                 if entry.value().parent_connection_id.as_deref() == Some(&current_id) {
@@ -2301,7 +2382,7 @@ impl SshConnectionRegistry {
                 }
             }
         }
-        
+
         result
     }
 
@@ -2311,7 +2392,9 @@ impl SshConnectionRegistry {
 
     /// 获取连接条目（用于外部访问）
     pub fn get_connection(&self, connection_id: &str) -> Option<Arc<ConnectionEntry>> {
-        self.connections.get(connection_id).map(|e| e.value().clone())
+        self.connections
+            .get(connection_id)
+            .map(|e| e.value().clone())
     }
 }
 

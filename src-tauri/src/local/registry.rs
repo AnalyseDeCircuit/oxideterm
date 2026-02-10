@@ -35,9 +35,10 @@ impl LocalTerminalRegistry {
         cwd: Option<std::path::PathBuf>,
     ) -> Result<(String, mpsc::Receiver<SessionEvent>), SessionError> {
         // Use defaults: load profile, no OMP
-        self.create_session_with_options(shell, cols, rows, cwd, true, false, None).await
+        self.create_session_with_options(shell, cols, rows, cwd, true, false, None)
+            .await
     }
-    
+
     /// Create a new local terminal session with extended options
     pub async fn create_session_with_options(
         &self,
@@ -62,7 +63,15 @@ impl LocalTerminalRegistry {
         }
 
         // Start the session with options
-        session.start_with_options(cwd, event_tx, load_profile, oh_my_posh_enabled, oh_my_posh_theme).await?;
+        session
+            .start_with_options(
+                cwd,
+                event_tx,
+                load_profile,
+                oh_my_posh_enabled,
+                oh_my_posh_theme,
+            )
+            .await?;
 
         // Store session
         {
@@ -92,7 +101,11 @@ impl LocalTerminalRegistry {
     }
 
     /// Write data to a session
-    pub async fn write_to_session(&self, session_id: &str, data: &[u8]) -> Result<(), SessionError> {
+    pub async fn write_to_session(
+        &self,
+        session_id: &str,
+        data: &[u8],
+    ) -> Result<(), SessionError> {
         let sessions = self.sessions.read().await;
         match sessions.get(session_id) {
             Some(session) => session.write(data).await,

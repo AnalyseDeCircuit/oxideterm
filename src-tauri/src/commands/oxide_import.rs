@@ -75,24 +75,24 @@ fn resolve_name_conflict(name: &str, existing_names: &HashSet<String>) -> String
 /// Returns the new path where the key was saved
 fn extract_embedded_key(original_path: &str, base64_data: &str) -> Result<String, String> {
     // Decode base64 data
-    let key_data = BASE64.decode(base64_data)
+    let key_data = BASE64
+        .decode(base64_data)
         .map_err(|e| format!("Failed to decode embedded key: {}", e))?;
-    
+
     // Create ~/.ssh/imported/ directory
-    let home = dirs::home_dir()
-        .ok_or_else(|| "Cannot determine home directory".to_string())?;
-    
+    let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
+
     let imported_dir = home.join(".ssh").join("imported");
     fs::create_dir_all(&imported_dir)
         .map_err(|e| format!("Failed to create import directory: {}", e))?;
-    
+
     // Extract filename from original path
     let original_filename = PathBuf::from(original_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("imported_key")
         .to_string();
-    
+
     // Generate unique filename if it exists
     let mut target_path = imported_dir.join(&original_filename);
     let mut counter = 1;
@@ -113,11 +113,10 @@ fn extract_embedded_key(original_path: &str, base64_data: &str) -> Result<String
             return Err("Too many files with same name".to_string());
         }
     }
-    
+
     // Write key file
-    fs::write(&target_path, &key_data)
-        .map_err(|e| format!("Failed to write key file: {}", e))?;
-    
+    fs::write(&target_path, &key_data).map_err(|e| format!("Failed to write key file: {}", e))?;
+
     // Set permissions to 600 (owner read/write only) for SSH key
     #[cfg(unix)]
     {
@@ -128,10 +127,10 @@ fn extract_embedded_key(original_path: &str, base64_data: &str) -> Result<String
         fs::set_permissions(&target_path, permissions)
             .map_err(|e| format!("Failed to set file permissions: {}", e))?;
     }
-    
+
     let final_path = target_path.to_string_lossy().to_string();
     info!("Extracted embedded key to: {}", final_path);
-    
+
     Ok(final_path)
 }
 
@@ -170,7 +169,10 @@ pub async fn preview_oxide_import(
     password: String,
     config_state: State<'_, Arc<ConfigState>>,
 ) -> Result<ImportPreview, String> {
-    info!("Previewing import from .oxide file ({} bytes)", file_data.len());
+    info!(
+        "Previewing import from .oxide file ({} bytes)",
+        file_data.len()
+    );
 
     // 1. Parse file
     let oxide_file = crate::oxide_file::OxideFile::from_bytes(&file_data)
@@ -205,7 +207,12 @@ pub async fn preview_oxide_import(
                 has_embedded_keys = true;
             }
         }
-        if let crate::oxide_file::EncryptedAuth::Certificate { embedded_key, embedded_cert, .. } = &conn.auth {
+        if let crate::oxide_file::EncryptedAuth::Certificate {
+            embedded_key,
+            embedded_cert,
+            ..
+        } = &conn.auth
+        {
             if embedded_key.is_some() || embedded_cert.is_some() {
                 has_embedded_keys = true;
             }
@@ -300,7 +307,7 @@ pub async fn import_from_oxide(
                 } else {
                     None
                 };
-                
+
                 // If key is embedded, extract it to ~/.ssh/imported/
                 let final_key_path = if let Some(key_data) = embedded_key {
                     match extract_embedded_key(&key_path, &key_data) {
@@ -310,7 +317,7 @@ pub async fn import_from_oxide(
                 } else {
                     key_path
                 };
-                
+
                 SavedAuth::Key {
                     key_path: final_key_path,
                     has_passphrase: passphrase_keychain_id.is_some(),
@@ -334,7 +341,7 @@ pub async fn import_from_oxide(
                 } else {
                     None
                 };
-                
+
                 // Extract embedded key and cert if present
                 let final_key_path = if let Some(key_data) = embedded_key {
                     match extract_embedded_key(&key_path, &key_data) {
@@ -344,7 +351,7 @@ pub async fn import_from_oxide(
                 } else {
                     key_path
                 };
-                
+
                 let final_cert_path = if let Some(cert_data) = embedded_cert {
                     match extract_embedded_key(&cert_path, &cert_data) {
                         Ok(path) => path,
@@ -353,7 +360,7 @@ pub async fn import_from_oxide(
                 } else {
                     cert_path
                 };
-                
+
                 SavedAuth::Certificate {
                     key_path: final_key_path,
                     cert_path: final_cert_path,
@@ -393,14 +400,11 @@ pub async fn import_from_oxide(
     for enc_conn in payload.connections {
         let new_id = Uuid::new_v4().to_string();
         let original_name = enc_conn.name.clone();
-        
+
         // Resolve name conflicts
         let resolved_name = resolve_name_conflict(&original_name, &existing_names);
         if resolved_name != original_name {
-            info!(
-                "Name conflict: '{}' -> '{}'",
-                original_name, resolved_name
-            );
+            info!("Name conflict: '{}' -> '{}'", original_name, resolved_name);
             renames.push((original_name, resolved_name.clone()));
         }
         // Add to existing names to prevent duplicates within the same import batch

@@ -164,13 +164,14 @@ pub async fn get_session_tree_summary(
 ) -> Result<SessionTreeSummary, String> {
     let tree = state.tree.read().await;
     let flat = tree.flatten();
-    
-    let connected_count = flat.iter().filter(|n| {
-        matches!(n.state, crate::session::tree::FlatNodeState::Connected)
-    }).count();
-    
+
+    let connected_count = flat
+        .iter()
+        .filter(|n| matches!(n.state, crate::session::tree::FlatNodeState::Connected))
+        .count();
+
     let max_depth = flat.iter().map(|n| n.depth).max().unwrap_or(0);
-    
+
     Ok(SessionTreeSummary {
         total_nodes: tree.len(),
         root_count: tree.root_nodes().len(),
@@ -180,7 +181,7 @@ pub async fn get_session_tree_summary(
 }
 
 /// 添加直连节点（depth=0）
-/// 
+///
 /// 注意：此命令仅在树中添加节点，不建立实际 SSH 连接。
 /// 实际连接由 `connect_tree_node` 命令完成。
 #[tauri::command]
@@ -194,7 +195,7 @@ pub async fn add_root_node(
         request.key_path,
         request.passphrase,
     )?;
-    
+
     let connection = build_connection(
         request.host,
         request.port,
@@ -202,16 +203,16 @@ pub async fn add_root_node(
         auth,
         request.display_name,
     );
-    
+
     let mut tree = state.tree.write().await;
     let node_id = tree.add_root_node(connection, NodeOrigin::Direct);
-    
+
     tracing::info!("Added root node: {}", node_id);
     Ok(node_id)
 }
 
 /// 从已连接节点钻入新服务器（模式3: 动态钻入）
-/// 
+///
 /// 注意：此命令仅在树中添加子节点，不建立实际 SSH 连接。
 /// 实际连接由 `connect_tree_node` 命令完成。
 #[tauri::command]
@@ -225,7 +226,7 @@ pub async fn tree_drill_down(
         request.key_path,
         request.passphrase,
     )?;
-    
+
     let connection = build_connection(
         request.host,
         request.port,
@@ -233,12 +234,17 @@ pub async fn tree_drill_down(
         auth,
         request.display_name,
     );
-    
+
     let mut tree = state.tree.write().await;
-    let node_id = tree.drill_down(&request.parent_node_id, connection)
+    let node_id = tree
+        .drill_down(&request.parent_node_id, connection)
         .map_err(|e| e.to_string())?;
-    
-    tracing::info!("Drilled down from {} to new node {}", request.parent_node_id, node_id);
+
+    tracing::info!(
+        "Drilled down from {} to new node {}",
+        request.parent_node_id,
+        node_id
+    );
     Ok(node_id)
 }
 
@@ -255,7 +261,7 @@ pub struct ExpandManualPresetResponse {
 }
 
 /// 展开静态手工预设链（模式1，Phase 2.2 升级版）
-/// 
+///
 /// 将 proxy_chain 配置展开为树节点，返回完整路径信息。
 /// 前端使用 pathNodeIds 进行线性连接。
 #[tauri::command]
@@ -267,13 +273,24 @@ pub async fn expand_manual_preset(
         "[expand_manual_preset] Expanding preset chain for saved_connection: {}",
         request.saved_connection_id
     );
-    
+
     let mut hops = Vec::new();
     for hop in &request.hops {
-        let auth = build_auth(&hop.auth_type, hop.password.clone(), hop.key_path.clone(), hop.passphrase.clone())?;
-        hops.push(build_connection(hop.host.clone(), hop.port, hop.username.clone(), auth, None));
+        let auth = build_auth(
+            &hop.auth_type,
+            hop.password.clone(),
+            hop.key_path.clone(),
+            hop.passphrase.clone(),
+        )?;
+        hops.push(build_connection(
+            hop.host.clone(),
+            hop.port,
+            hop.username.clone(),
+            auth,
+            None,
+        ));
     }
-    
+
     let target_auth = build_auth(
         &request.target.auth_type,
         request.target.password.clone(),
@@ -287,14 +304,14 @@ pub async fn expand_manual_preset(
         target_auth,
         None,
     );
-    
+
     // 展开为树节点
     let target_node_id = {
         let mut tree = state.tree.write().await;
         tree.expand_manual_preset(&request.saved_connection_id, hops, target)
             .map_err(|e| e.to_string())?
     };
-    
+
     // 收集从根到目标的路径
     let path_node_ids: Vec<String> = {
         let tree = state.tree.read().await;
@@ -303,14 +320,17 @@ pub async fn expand_manual_preset(
             .map(|n| n.id.clone())
             .collect()
     };
-    
+
     let chain_depth = path_node_ids.len() as u32;
-    
+
     tracing::info!(
         "[expand_manual_preset] Expanded chain '{}': target={}, path={:?}, depth={}",
-        request.saved_connection_id, target_node_id, path_node_ids, chain_depth
+        request.saved_connection_id,
+        target_node_id,
+        path_node_ids,
+        chain_depth
     );
-    
+
     Ok(ExpandManualPresetResponse {
         target_node_id,
         path_node_ids,
@@ -336,11 +356,11 @@ pub async fn update_tree_node_state(
         },
         _ => return Err(format!("Unknown state: {}", new_state)),
     };
-    
+
     let mut tree = state.tree.write().await;
     tree.update_state(&node_id, node_state)
         .map_err(|e| e.to_string())?;
-    
+
     Ok(())
 }
 
@@ -389,12 +409,12 @@ pub async fn set_tree_node_sftp(
 }
 
 /// 移除节点（递归移除所有子节点）
-/// 
+///
 /// 此命令会：
 /// 1. 收集要移除的节点及其关联的 SSH 连接 ID
 /// 2. 断开所有关联的 SSH 连接（从 ConnectionRegistry 中移除）
 /// 3. 从会话树中移除节点
-/// 
+///
 /// 这确保了节点删除后不会有残留的连接在 Registry 中继续运行心跳/重连
 #[tauri::command]
 pub async fn remove_tree_node(
@@ -406,11 +426,11 @@ pub async fn remove_tree_node(
     // 1. 收集要移除的节点及其 connection_id（先不从树中移除）
     let nodes_to_remove: Vec<(String, Option<String>)> = {
         let tree = state.tree.read().await;
-        
+
         fn collect_subtree(
-            tree: &SessionTree, 
-            node_id: &str, 
-            result: &mut Vec<(String, Option<String>)>
+            tree: &SessionTree,
+            node_id: &str,
+            result: &mut Vec<(String, Option<String>)>,
         ) {
             if let Some(node) = tree.get_node(node_id) {
                 // 先处理子节点（自底向上的顺序收集）
@@ -421,50 +441,49 @@ pub async fn remove_tree_node(
                 result.push((node_id.to_string(), node.ssh_connection_id.clone()));
             }
         }
-        
+
         let mut nodes = Vec::new();
         collect_subtree(&tree, &node_id, &mut nodes);
         nodes
     };
-    
+
     if nodes_to_remove.is_empty() {
         return Err(format!("Node not found: {}", node_id));
     }
-    
+
     // 2. 断开所有关联的 SSH 连接（自底向上，先断子连接再断父连接）
     for (nid, ssh_id) in &nodes_to_remove {
         if let Some(ssh_connection_id) = ssh_id {
             tracing::info!(
-                "Disconnecting SSH connection {} for node {} before removal", 
-                ssh_connection_id, 
+                "Disconnecting SSH connection {} for node {} before removal",
+                ssh_connection_id,
                 nid
             );
             if let Err(e) = connection_registry.disconnect(ssh_connection_id).await {
                 // 只记录警告，不中断删除流程（连接可能已经断开）
                 tracing::warn!(
-                    "Failed to disconnect SSH connection {} for node {}: {}", 
-                    ssh_connection_id, 
-                    nid, 
+                    "Failed to disconnect SSH connection {} for node {}: {}",
+                    ssh_connection_id,
+                    nid,
                     e
                 );
             }
         }
     }
-    
+
     // 3. 从树中移除节点
     let mut tree = state.tree.write().await;
-    let removed = tree.remove_node(&node_id)
-        .map_err(|e| e.to_string())?;
-    
+    let removed = tree.remove_node(&node_id).map_err(|e| e.to_string())?;
+
     // 4. 清理 sequencer 中对应节点的 generation 计数器（防止 DashMap 泄漏）
     let sequencer = emitter.sequencer();
     for removed_id in &removed {
         sequencer.remove(removed_id);
     }
-    
+
     tracing::info!(
-        "Removed {} nodes starting from {} (connections + sequencer cleaned up)", 
-        removed.len(), 
+        "Removed {} nodes starting from {} (connections + sequencer cleaned up)",
+        removed.len(),
         node_id
     );
     Ok(removed)
@@ -477,7 +496,7 @@ pub async fn get_tree_node(
     node_id: String,
 ) -> Result<Option<FlatNode>, String> {
     let tree = state.tree.read().await;
-    
+
     if let Some(node) = tree.get_node(&node_id) {
         // 判断是否是最后一个子节点
         let is_last = if let Some(ref parent_id) = node.parent_id {
@@ -487,7 +506,7 @@ pub async fn get_tree_node(
         } else {
             true
         };
-        
+
         Ok(Some(FlatNode::from_node(node, is_last)))
     } else {
         Ok(None)
@@ -501,14 +520,18 @@ pub async fn get_tree_node_path(
     node_id: String,
 ) -> Result<Vec<FlatNode>, String> {
     let tree = state.tree.read().await;
-    
+
     let path = tree.get_path_to_node(&node_id);
     let path_len = path.len();
-    let flat_path: Vec<FlatNode> = path.into_iter().enumerate().map(|(i, node)| {
-        // 最后一个节点（目标节点）标记为 is_last_child
-        FlatNode::from_node(node, i == path_len - 1)
-    }).collect();
-    
+    let flat_path: Vec<FlatNode> = path
+        .into_iter()
+        .enumerate()
+        .map(|(i, node)| {
+            // 最后一个节点（目标节点）标记为 is_last_child
+            FlatNode::from_node(node, i == path_len - 1)
+        })
+        .collect();
+
     Ok(flat_path)
 }
 
@@ -524,31 +547,32 @@ pub async fn clear_session_tree(
         let tree = state.tree.read().await;
         tree.node_ids()
             .map(|id| {
-                let ssh_id = tree.get_node(&id)
-                    .and_then(|n| n.ssh_connection_id.clone());
+                let ssh_id = tree.get_node(&id).and_then(|n| n.ssh_connection_id.clone());
                 (id, ssh_id)
             })
             .collect()
     };
-    
+
     // 2. 断开所有活跃 SSH 连接（自底向上顺序不重要，disconnect 本身是幂等的）
     for (nid, ssh_id) in &nodes_to_cleanup {
         if let Some(ssh_connection_id) = ssh_id {
             if let Err(e) = connection_registry.disconnect(ssh_connection_id).await {
                 tracing::warn!(
                     "Failed to disconnect SSH connection {} for node {} during tree clear: {}",
-                    ssh_connection_id, nid, e
+                    ssh_connection_id,
+                    nid,
+                    e
                 );
             }
         }
     }
-    
+
     // 3. 清理 sequencer
     let sequencer = emitter.sequencer();
     for (node_id, _) in &nodes_to_cleanup {
         sequencer.remove(node_id);
     }
-    
+
     // 4. 清空树
     let mut tree = state.tree.write().await;
     *tree = SessionTree::new();
@@ -572,8 +596,12 @@ pub struct ConnectTreeNodeRequest {
     pub rows: u32,
 }
 
-fn default_cols() -> u32 { 80 }
-fn default_rows() -> u32 { 24 }
+fn default_cols() -> u32 {
+    80
+}
+fn default_rows() -> u32 {
+    24
+}
 
 /// 连接会话树节点响应
 #[derive(Debug, Clone, Serialize)]
@@ -585,7 +613,7 @@ pub struct ConnectTreeNodeResponse {
 }
 
 /// 连接会话树中的节点
-/// 
+///
 /// 此命令负责建立实际的 SSH 连接：
 /// - 对于根节点（depth=0），直接建立 SSH 连接
 /// - 对于子节点（depth>0），通过父节点的隧道建立连接
@@ -596,13 +624,14 @@ pub async fn connect_tree_node(
     request: ConnectTreeNodeRequest,
 ) -> Result<ConnectTreeNodeResponse, String> {
     let node_id = request.node_id.clone();
-    
+
     // 1. 获取节点信息并构建 SessionConfig
     let (session_config, parent_node_id) = {
         let tree = state.tree.read().await;
-        let node = tree.get_node(&node_id)
+        let node = tree
+            .get_node(&node_id)
             .ok_or_else(|| format!("Node not found: {}", node_id))?;
-        
+
         // 确保节点状态允许连接
         match &node.state {
             NodeState::Pending | NodeState::Disconnected => {}
@@ -614,7 +643,7 @@ pub async fn connect_tree_node(
                 return Err(format!("Node {} is already connected", node_id));
             }
         }
-        
+
         // 构建 SessionConfig
         let config = SessionConfig {
             host: node.connection.host.clone(),
@@ -626,35 +655,40 @@ pub async fn connect_tree_node(
             cols: request.cols,
             rows: request.rows,
         };
-        
+
         (config, node.parent_id.clone())
     };
-    
+
     // 2. 更新节点状态为 Connecting
     {
         let mut tree = state.tree.write().await;
         tree.update_state(&node_id, NodeState::Connecting)
             .map_err(|e| e.to_string())?;
     }
-    
+
     // 3. 根据是否有父节点决定连接方式
     let connect_result = if let Some(ref parent_id) = parent_node_id {
         // 有父节点 - 先获取父节点的 SSH 连接 ID
         let parent_ssh_id = {
             let tree = state.tree.read().await;
-            let parent_node = tree.get_node(parent_id)
+            let parent_node = tree
+                .get_node(parent_id)
                 .ok_or_else(|| format!("Parent node not found: {}", parent_id))?;
-            
-            parent_node.ssh_connection_id.clone()
+
+            parent_node
+                .ssh_connection_id
+                .clone()
                 .ok_or_else(|| format!("Parent node {} has no SSH connection", parent_id))?
         };
-        
+
         // 通过父连接建立隧道连接
         tracing::info!(
             "Connecting node {} via tunnel from parent {} (ssh_id: {})",
-            node_id, parent_id, parent_ssh_id
+            node_id,
+            parent_id,
+            parent_ssh_id
         );
-        
+
         connection_registry
             .establish_tunneled_connection(&parent_ssh_id, session_config)
             .await
@@ -663,32 +697,34 @@ pub async fn connect_tree_node(
     } else {
         // 无父节点 - 直接连接
         tracing::info!("Connecting root node {} directly", node_id);
-        
+
         connection_registry
             .connect(session_config)
             .await
             .map(|id| (id, None))
             .map_err(|e| e.to_string())
     };
-    
+
     // 4. 根据连接结果更新节点状态
     match connect_result {
         Ok((ssh_connection_id, parent_connection_id)) => {
             let mut tree = state.tree.write().await;
-            
+
             // 更新状态为已连接
             tree.update_state(&node_id, NodeState::Connected)
                 .map_err(|e| e.to_string())?;
-            
+
             // 关联 SSH 连接 ID
             tree.set_ssh_connection_id(&node_id, ssh_connection_id.clone())
                 .map_err(|e| e.to_string())?;
-            
+
             tracing::info!(
                 "Node {} connected with ssh_id: {}, parent_ssh_id: {:?}",
-                node_id, ssh_connection_id, parent_connection_id
+                node_id,
+                ssh_connection_id,
+                parent_connection_id
             );
-            
+
             Ok(ConnectTreeNodeResponse {
                 node_id,
                 ssh_connection_id,
@@ -697,11 +733,11 @@ pub async fn connect_tree_node(
         }
         Err(e) => {
             let mut tree = state.tree.write().await;
-            
+
             // 更新状态为失败
             tree.update_state(&node_id, NodeState::Failed { error: e.clone() })
                 .map_err(|err| err.to_string())?;
-            
+
             tracing::error!("Failed to connect node {}: {}", node_id, e);
             Err(e)
         }
@@ -709,7 +745,7 @@ pub async fn connect_tree_node(
 }
 
 /// 断开会话树节点
-/// 
+///
 /// 断开节点的 SSH 连接，并递归断开所有子节点
 #[tauri::command]
 pub async fn disconnect_tree_node(
@@ -720,9 +756,13 @@ pub async fn disconnect_tree_node(
     // 1. 收集需要断开的节点（自底向上的顺序）
     let nodes_to_disconnect: Vec<(String, Option<String>)> = {
         let tree = state.tree.read().await;
-        
+
         // 获取从此节点开始的所有子树节点
-        fn collect_subtree(tree: &SessionTree, node_id: &str, result: &mut Vec<(String, Option<String>)>) {
+        fn collect_subtree(
+            tree: &SessionTree,
+            node_id: &str,
+            result: &mut Vec<(String, Option<String>)>,
+        ) {
             if let Some(node) = tree.get_node(node_id) {
                 // 先处理所有子节点
                 for child_id in &node.children_ids {
@@ -732,49 +772,57 @@ pub async fn disconnect_tree_node(
                 result.push((node_id.to_string(), node.ssh_connection_id.clone()));
             }
         }
-        
+
         let mut nodes = Vec::new();
         collect_subtree(&tree, &node_id, &mut nodes);
         nodes
     };
-    
+
     if nodes_to_disconnect.is_empty() {
         return Err(format!("Node not found: {}", node_id));
     }
-    
+
     let mut disconnected_ids = Vec::new();
-    
+
     // 2. 按顺序断开连接（先子节点，后父节点）
     for (nid, ssh_id) in nodes_to_disconnect {
         if let Some(ssh_connection_id) = ssh_id {
             // 断开 SSH 连接
             if let Err(e) = connection_registry.disconnect(&ssh_connection_id).await {
-                tracing::warn!("Failed to disconnect SSH connection {}: {}", ssh_connection_id, e);
+                tracing::warn!(
+                    "Failed to disconnect SSH connection {}: {}",
+                    ssh_connection_id,
+                    e
+                );
             }
         }
-        
+
         // 更新节点状态和清除所有会话元数据
         let mut tree = state.tree.write().await;
         if let Err(e) = tree.update_state(&nid, NodeState::Disconnected) {
             tracing::warn!("Failed to update node {} state: {}", nid, e);
         }
-        
+
         // 清除所有关联的会话 ID
         if let Some(node) = tree.get_node_mut(&nid) {
             node.ssh_connection_id = None;
             node.terminal_session_id = None;
             node.sftp_session_id = None;
         }
-        
+
         disconnected_ids.push(nid);
     }
-    
-    tracing::info!("Disconnected {} nodes starting from {}", disconnected_ids.len(), node_id);
+
+    tracing::info!(
+        "Disconnected {} nodes starting from {}",
+        disconnected_ids.len(),
+        node_id
+    );
     Ok(disconnected_ids)
 }
 
 /// 连接预设的手工跳板链（模式1: 静态全手工）
-/// 
+///
 /// 此命令会：
 /// 1. 展开 proxy_chain 为树节点
 /// 2. 按顺序从根到叶建立 SSH 连接
@@ -789,14 +837,25 @@ pub async fn connect_manual_preset(
 ) -> Result<ConnectManualPresetResponse, String> {
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
-    
+
     // 1. 构建连接信息
     let mut hops = Vec::new();
     for hop in &request.hops {
-        let auth = build_auth(&hop.auth_type, hop.password.clone(), hop.key_path.clone(), hop.passphrase.clone())?;
-        hops.push(build_connection(hop.host.clone(), hop.port, hop.username.clone(), auth, None));
+        let auth = build_auth(
+            &hop.auth_type,
+            hop.password.clone(),
+            hop.key_path.clone(),
+            hop.passphrase.clone(),
+        )?;
+        hops.push(build_connection(
+            hop.host.clone(),
+            hop.port,
+            hop.username.clone(),
+            auth,
+            None,
+        ));
     }
-    
+
     let target_auth = build_auth(
         &request.target.auth_type,
         request.target.password.clone(),
@@ -810,20 +869,20 @@ pub async fn connect_manual_preset(
         target_auth,
         None,
     );
-    
+
     // 2. 展开为树节点
     let target_node_id = {
         let mut tree = state.tree.write().await;
         tree.expand_manual_preset(&request.saved_connection_id, hops, target)
             .map_err(|e| e.to_string())?
     };
-    
+
     tracing::info!(
         "Expanded manual preset chain '{}', target node: {}",
         request.saved_connection_id,
         target_node_id
     );
-    
+
     // 3. 收集从根到目标的路径
     let path_node_ids: Vec<String> = {
         let tree = state.tree.read().await;
@@ -832,28 +891,29 @@ pub async fn connect_manual_preset(
             .map(|n| n.id.clone())
             .collect()
     };
-    
+
     if path_node_ids.is_empty() {
         return Err("Failed to get path to target node".to_string());
     }
-    
+
     tracing::info!(
         "Connecting {} nodes in chain: {:?}",
         path_node_ids.len(),
         path_node_ids
     );
-    
+
     // 4. 按顺序连接每个节点
     let mut connected_node_ids = Vec::new();
     let mut last_error: Option<String> = None;
-    
+
     for node_id in &path_node_ids {
         // 获取节点信息并构建 SessionConfig
         let (session_config, parent_ssh_id) = {
             let tree = state.tree.read().await;
-            let node = tree.get_node(node_id)
+            let node = tree
+                .get_node(node_id)
                 .ok_or_else(|| format!("Node not found: {}", node_id))?;
-            
+
             let config = SessionConfig {
                 host: node.connection.host.clone(),
                 port: node.connection.port,
@@ -864,7 +924,7 @@ pub async fn connect_manual_preset(
                 cols,
                 rows,
             };
-            
+
             // 获取父节点的 SSH 连接 ID（如果有）
             let parent_ssh_id = if let Some(ref parent_id) = node.parent_id {
                 tree.get_node(parent_id)
@@ -872,21 +932,25 @@ pub async fn connect_manual_preset(
             } else {
                 None
             };
-            
+
             (config, parent_ssh_id)
         };
-        
+
         // 更新节点状态为 Connecting
         {
             let mut tree = state.tree.write().await;
             tree.update_state(node_id, NodeState::Connecting)
                 .map_err(|e| e.to_string())?;
         }
-        
+
         // 建立连接
         let connect_result = if let Some(parent_ssh_id) = parent_ssh_id {
             // 通过父连接隧道
-            tracing::info!("Connecting node {} via tunnel from {}", node_id, parent_ssh_id);
+            tracing::info!(
+                "Connecting node {} via tunnel from {}",
+                node_id,
+                parent_ssh_id
+            );
             connection_registry
                 .establish_tunneled_connection(&parent_ssh_id, session_config)
                 .await
@@ -899,7 +963,7 @@ pub async fn connect_manual_preset(
                 .await
                 .map_err(|e| e.to_string())
         };
-        
+
         match connect_result {
             Ok(ssh_connection_id) => {
                 let mut tree = state.tree.write().await;
@@ -907,22 +971,26 @@ pub async fn connect_manual_preset(
                     .map_err(|e| e.to_string())?;
                 tree.set_ssh_connection_id(node_id, ssh_connection_id.clone())
                     .map_err(|e| e.to_string())?;
-                
+
                 connected_node_ids.push(node_id.clone());
-                tracing::info!("Node {} connected with ssh_id: {}", node_id, ssh_connection_id);
+                tracing::info!(
+                    "Node {} connected with ssh_id: {}",
+                    node_id,
+                    ssh_connection_id
+                );
             }
             Err(e) => {
                 let mut tree = state.tree.write().await;
                 tree.update_state(node_id, NodeState::Failed { error: e.clone() })
                     .map_err(|err| err.to_string())?;
-                
+
                 tracing::error!("Failed to connect node {}: {}", node_id, e);
                 last_error = Some(e);
                 break; // 链中任何一环失败则停止
             }
         }
     }
-    
+
     // 5. 检查是否全部连接成功
     if let Some(error) = last_error {
         // 回滚：断开已连接的节点（逆序）
@@ -932,23 +1000,23 @@ pub async fn connect_manual_preset(
                 tree.get_node(node_id)
                     .and_then(|n| n.ssh_connection_id.clone())
             };
-            
+
             if let Some(ssh_connection_id) = ssh_id {
                 if let Err(e) = connection_registry.disconnect(&ssh_connection_id).await {
                     tracing::warn!("Failed to rollback connection {}: {}", ssh_connection_id, e);
                 }
             }
-            
+
             let mut tree = state.tree.write().await;
             let _ = tree.update_state(node_id, NodeState::Disconnected);
             if let Some(node) = tree.get_node_mut(node_id) {
                 node.ssh_connection_id = None;
             }
         }
-        
+
         return Err(format!("Chain connection failed: {}", error));
     }
-    
+
     // 6. 获取目标节点的最终信息
     let target_ssh_id = {
         let tree = state.tree.read().await;
@@ -956,14 +1024,14 @@ pub async fn connect_manual_preset(
             .and_then(|n| n.ssh_connection_id.clone())
             .ok_or_else(|| "Target node has no SSH connection".to_string())?
     };
-    
+
     tracing::info!(
         "Manual preset chain '{}' connected successfully. Target: {} (ssh_id: {})",
         request.saved_connection_id,
         target_node_id,
         target_ssh_id
     );
-    
+
     Ok(ConnectManualPresetResponse {
         target_node_id,
         target_ssh_connection_id: target_ssh_id,
@@ -990,8 +1058,10 @@ pub struct ConnectManualPresetResponse {
 // Auto-Route Commands (Mode 2: Static Auto-Route)
 // ============================================================================
 
-use crate::session::topology_graph::{NetworkTopology, TopologyNodeInfo, TopologyEdge, TopologyEdgesConfig};
 use super::config::ConfigState;
+use crate::session::topology_graph::{
+    NetworkTopology, TopologyEdge, TopologyEdgesConfig, TopologyNodeInfo,
+};
 
 /// Get topology nodes (auto-generated from saved connections)
 #[tauri::command]
@@ -1001,10 +1071,10 @@ pub async fn get_topology_nodes(
     // Load saved connections from config snapshot
     let config = config_state.get_config_snapshot();
     let connections = &config.connections;
-    
+
     // Build topology from connections
     let topology = NetworkTopology::build_from_connections(connections);
-    
+
     Ok(topology.get_all_nodes())
 }
 
@@ -1070,7 +1140,7 @@ pub struct ExpandAutoRouteResponse {
 /// Expand auto-route node chain (Mode 2: Static Auto-Route)
 ///
 /// Auto-computes optimal path to target node and expands SessionTree nodes.
-/// 
+///
 /// # Workflow
 /// 1. Build topology from saved connections
 /// 2. Use Dijkstra to compute shortest path
@@ -1086,7 +1156,7 @@ pub async fn expand_auto_route(
     let config = config_state.get_config_snapshot();
     let connections = &config.connections;
     let topology = NetworkTopology::build_from_connections(connections);
-    
+
     // 2. Compute route
     let route_result = topology.compute_route(&request.target_id)?;
     tracing::info!(
@@ -1095,17 +1165,19 @@ pub async fn expand_auto_route(
         request.target_id,
         route_result.total_cost
     );
-    
+
     // 3. Get target node config
-    let target_config = topology.get_node(&request.target_id)
+    let target_config = topology
+        .get_node(&request.target_id)
         .ok_or_else(|| format!("Target node '{}' not found", request.target_id))?;
-    
+
     // 4. Build NodeConnection list for path nodes
     let mut hop_connections = Vec::new();
     for hop_id in &route_result.path {
-        let hop_config = topology.get_node(hop_id)
+        let hop_config = topology
+            .get_node(hop_id)
             .ok_or_else(|| format!("Hop node '{}' not found", hop_id))?;
-        
+
         let auth = topology_auth_to_session_auth(&hop_config.auth_type, &hop_config.key_path)?;
         let mut conn = NodeConnection::new(
             hop_config.host.clone(),
@@ -1116,9 +1188,10 @@ pub async fn expand_auto_route(
         conn.display_name = hop_config.display_name.clone();
         hop_connections.push(conn);
     }
-    
+
     // 5. Build target NodeConnection
-    let target_auth = topology_auth_to_session_auth(&target_config.auth_type, &target_config.key_path)?;
+    let target_auth =
+        topology_auth_to_session_auth(&target_config.auth_type, &target_config.key_path)?;
     let mut target_conn = NodeConnection::new(
         target_config.host.clone(),
         target_config.port,
@@ -1126,19 +1199,16 @@ pub async fn expand_auto_route(
     );
     target_conn.auth = target_auth;
     target_conn.display_name = request.display_name.or(target_config.display_name.clone());
-    
+
     // 6. Generate route_id
     let route_id = uuid::Uuid::new_v4().to_string();
-    
+
     // 7. Expand to SessionTree
     let mut tree = state.tree.write().await;
-    let target_node_id = tree.expand_auto_route(
-        &target_config.host,
-        &route_id,
-        hop_connections,
-        target_conn,
-    ).map_err(|e| e.to_string())?;
-    
+    let target_node_id = tree
+        .expand_auto_route(&target_config.host, &route_id, hop_connections, target_conn)
+        .map_err(|e| e.to_string())?;
+
     // 8. Collect all node IDs (backtrack from target to root)
     let mut all_node_ids = Vec::new();
     let mut current_id = Some(target_node_id.clone());
@@ -1147,13 +1217,13 @@ pub async fn expand_auto_route(
         current_id = tree.get_node(&id).and_then(|n| n.parent_id.clone());
     }
     all_node_ids.reverse();
-    
+
     tracing::info!(
         "Auto-route expanded: {} nodes created, target: {}",
         all_node_ids.len(),
         target_node_id
     );
-    
+
     Ok(ExpandAutoRouteResponse {
         target_node_id,
         route: route_result.path,
@@ -1168,16 +1238,23 @@ fn topology_auth_to_session_auth(
     key_path: &Option<String>,
 ) -> Result<AuthMethod, String> {
     match auth_type {
-        "password" => Err("Password authentication requires password which is not stored in topology".to_string()),
+        "password" => Err(
+            "Password authentication requires password which is not stored in topology".to_string(),
+        ),
         "key" => {
-            let path = key_path.clone().ok_or("Key path required for key authentication")?;
+            let path = key_path
+                .clone()
+                .ok_or("Key path required for key authentication")?;
             Ok(AuthMethod::Key {
                 key_path: path,
                 passphrase: None,
             })
         }
         "agent" => Ok(AuthMethod::Agent),
-        other => Err(format!("Unsupported auth type for topology drill-down: {}", other)),
+        other => Err(format!(
+            "Unsupported auth type for topology drill-down: {}",
+            other
+        )),
     }
 }
 
@@ -1202,15 +1279,15 @@ pub struct DestroyNodeSessionsResponse {
 }
 
 /// 销毁节点关联的所有会话资源（焦土式清理）
-/// 
+///
 /// 此命令用于前端"焦土式清理"，确保后端资源完全释放：
 /// - 关闭所有关联的终端（BridgeManager + SessionRegistry）
 /// - 关闭 SFTP 会话（SftpRegistry）
 /// - 如果 SSH 连接无剩余引用，断开 SSH 连接
 /// - 重置节点元数据
-/// 
+///
 /// # 设计原则
-/// 
+///
 /// 后端作为纯粹的"执行者"，不做决策：
 /// - 前端明确要求销毁什么，后端就销毁什么
 /// - 返回详细的销毁结果，让前端知道发生了什么
@@ -1224,19 +1301,25 @@ pub async fn destroy_node_sessions(
     sftp_registry: State<'_, Arc<SftpRegistry>>,
     node_id: String,
 ) -> Result<DestroyNodeSessionsResponse, String> {
-    tracing::info!("[destroy_node_sessions] Starting cleanup for node: {}", node_id);
-    
+    tracing::info!(
+        "[destroy_node_sessions] Starting cleanup for node: {}",
+        node_id
+    );
+
     let mut destroyed_terminals = Vec::new();
     let mut ssh_disconnected = false;
     let mut sftp_closed = false;
-    
+
     // 1. 获取节点信息（快照，避免长时间持锁）
     let (ssh_connection_id, terminal_session_id, sftp_session_id) = {
         let tree = state.tree.read().await;
         let node = match tree.get_node(&node_id) {
             Some(n) => n,
             None => {
-                tracing::warn!("[destroy_node_sessions] Node not found: {}, treating as already cleaned", node_id);
+                tracing::warn!(
+                    "[destroy_node_sessions] Node not found: {}, treating as already cleaned",
+                    node_id
+                );
                 return Ok(DestroyNodeSessionsResponse {
                     destroyed_terminals: vec![],
                     ssh_disconnected: false,
@@ -1250,28 +1333,37 @@ pub async fn destroy_node_sessions(
             node.sftp_session_id.clone(),
         )
     };
-    
+
     tracing::debug!(
         "[destroy_node_sessions] Node {} resources: ssh={:?}, terminal={:?}, sftp={:?}",
-        node_id, ssh_connection_id, terminal_session_id, sftp_session_id
+        node_id,
+        ssh_connection_id,
+        terminal_session_id,
+        sftp_session_id
     );
-    
+
     // 2. 关闭终端（BridgeManager 会发送 Close 命令到 PTY）
     if let Some(terminal_id) = &terminal_session_id {
         tracing::info!("[destroy_node_sessions] Closing terminal: {}", terminal_id);
-        
+
         // 从 BridgeManager 注销（会发送 Close 命令）
         if let Some(_bridge_info) = bridge_manager.unregister(terminal_id) {
-            tracing::debug!("[destroy_node_sessions] Bridge unregistered: {}", terminal_id);
+            tracing::debug!(
+                "[destroy_node_sessions] Bridge unregistered: {}",
+                terminal_id
+            );
         }
-        
+
         // 从 SessionRegistry 移除
         session_registry.remove(terminal_id);
-        tracing::debug!("[destroy_node_sessions] Session removed from registry: {}", terminal_id);
-        
+        tracing::debug!(
+            "[destroy_node_sessions] Session removed from registry: {}",
+            terminal_id
+        );
+
         destroyed_terminals.push(terminal_id.clone());
     }
-    
+
     // 3. 关闭 SFTP 会话
     if let Some(sftp_id) = &sftp_session_id {
         tracing::info!("[destroy_node_sessions] Closing SFTP session: {}", sftp_id);
@@ -1280,67 +1372,85 @@ pub async fn destroy_node_sessions(
             tracing::debug!("[destroy_node_sessions] SFTP session removed: {}", sftp_id);
         }
     }
-    
+
     // 4. 检查 SSH 连接是否需要断开
     if let Some(ssh_id) = &ssh_connection_id {
-        tracing::info!("[destroy_node_sessions] Checking SSH connection: {}", ssh_id);
-        
+        tracing::info!(
+            "[destroy_node_sessions] Checking SSH connection: {}",
+            ssh_id
+        );
+
         // 从 SSH 连接中移除该终端
         if let Some(terminal_id) = &terminal_session_id {
-            if let Err(e) = connection_registry.remove_terminal(ssh_id, terminal_id).await {
+            if let Err(e) = connection_registry
+                .remove_terminal(ssh_id, terminal_id)
+                .await
+            {
                 tracing::warn!(
                     "[destroy_node_sessions] Failed to remove terminal {} from SSH connection {}: {}",
                     terminal_id, ssh_id, e
                 );
             }
         }
-        
+
         // 检查剩余引用（终端 + SFTP）
         if let Some(info) = connection_registry.get_info(ssh_id).await {
             let terminal_count = info.terminal_ids.len();
             let has_sftp = info.sftp_session_id.is_some();
-            
+
             tracing::debug!(
                 "[destroy_node_sessions] SSH {} remaining refs: terminals={}, has_sftp={}",
-                ssh_id, terminal_count, has_sftp
+                ssh_id,
+                terminal_count,
+                has_sftp
             );
-            
+
             if terminal_count == 0 && !has_sftp {
                 // 无剩余引用，断开 SSH 连接
-                tracing::info!("[destroy_node_sessions] Disconnecting SSH connection: {} (no remaining refs)", ssh_id);
+                tracing::info!(
+                    "[destroy_node_sessions] Disconnecting SSH connection: {} (no remaining refs)",
+                    ssh_id
+                );
                 if let Err(e) = connection_registry.disconnect(ssh_id).await {
-                    tracing::warn!("[destroy_node_sessions] Failed to disconnect SSH {}: {}", ssh_id, e);
+                    tracing::warn!(
+                        "[destroy_node_sessions] Failed to disconnect SSH {}: {}",
+                        ssh_id,
+                        e
+                    );
                 } else {
                     ssh_disconnected = true;
                 }
             }
         } else {
-            tracing::warn!("[destroy_node_sessions] SSH connection {} not found in registry", ssh_id);
+            tracing::warn!(
+                "[destroy_node_sessions] SSH connection {} not found in registry",
+                ssh_id
+            );
         }
     }
-    
+
     // 5. 重置节点元数据（不改变节点状态，交给前端决定）
     {
         let mut tree = state.tree.write().await;
         if let Some(node) = tree.get_node_mut(&node_id) {
             node.terminal_session_id = None;
             node.sftp_session_id = None;
-            
+
             if ssh_disconnected {
                 node.ssh_connection_id = None;
                 // 重置为 Pending，让前端可以重新发起连接
                 node.state = NodeState::Pending;
             }
-            
+
             tracing::debug!("[destroy_node_sessions] Node {} metadata reset", node_id);
         }
     }
-    
+
     tracing::info!(
         "[destroy_node_sessions] Completed for node {}: destroyed_terminals={:?}, ssh_disconnected={}, sftp_closed={}",
         node_id, destroyed_terminals, ssh_disconnected, sftp_closed
     );
-    
+
     Ok(DestroyNodeSessionsResponse {
         destroyed_terminals,
         ssh_disconnected,

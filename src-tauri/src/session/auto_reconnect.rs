@@ -1,7 +1,7 @@
 //! Auto Reconnect Service - NEUTRALIZED
 //!
 //! ⚠️ 此模块已被物理阉割。
-//! 
+//!
 //! 设计原则：后端是纯执行器，禁止自主重连决策。
 //! 所有重连必须由前端发起，经过 connect_tree_node 入口。
 //!
@@ -20,7 +20,7 @@ use super::registry::SessionRegistry;
 use crate::commands::forwarding::ForwardingRegistry;
 
 /// Auto reconnect service - NEUTRALIZED STUB
-/// 
+///
 /// 🛑 所有自动重连逻辑已被移除
 /// 此结构体仅作为 Tauri State 占位符存在
 pub struct AutoReconnectService {
@@ -62,13 +62,19 @@ impl AutoReconnectService {
     /// Cancel reconnection for a session
     /// 🛑 空操作 - 后端不再有重连任务可取消
     pub fn cancel_reconnect(&self, session_id: &str) {
-        info!("🛑 cancel_reconnect called for {} - no-op (service neutralized)", session_id);
+        info!(
+            "🛑 cancel_reconnect called for {} - no-op (service neutralized)",
+            session_id
+        );
     }
 
     /// Set network status (只记录状态，不触发任何操作)
     pub fn set_network_status(&self, online: bool) {
         self.network_online.store(online, Ordering::SeqCst);
-        info!("Network status updated: online={} (no action taken - service neutralized)", online);
+        info!(
+            "Network status updated: online={} (no action taken - service neutralized)",
+            online
+        );
     }
 
     /// Check if network is online
@@ -77,7 +83,7 @@ impl AutoReconnectService {
     }
 
     // 🛑 已移除: trigger_reconnect
-    // 🛑 已移除: run_reconnect_loop  
+    // 🛑 已移除: run_reconnect_loop
     // 🛑 已移除: try_reconnect
     // 🛑 已移除: restore_port_forwards
     // 🛑 已移除: reconnect_all_disconnected

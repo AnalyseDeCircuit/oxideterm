@@ -44,12 +44,7 @@ impl RetryConfig {
     }
 
     /// Set custom backoff parameters
-    pub fn with_backoff(
-        mut self,
-        initial_secs: u64,
-        multiplier: f64,
-        max_secs: u64,
-    ) -> Self {
+    pub fn with_backoff(mut self, initial_secs: u64, multiplier: f64, max_secs: u64) -> Self {
         self.initial_backoff_secs = initial_secs;
         self.backoff_multiplier = multiplier;
         self.max_backoff_secs = max_secs;
@@ -61,7 +56,7 @@ impl RetryConfig {
 pub fn calculate_backoff(attempt: usize, config: &RetryConfig) -> Duration {
     let delay_secs = (config.initial_backoff_secs as f64
         * config.backoff_multiplier.powi(attempt as i32))
-        .min(config.max_backoff_secs as f64);
+    .min(config.max_backoff_secs as f64);
 
     Duration::from_secs(delay_secs as u64)
 }
@@ -112,10 +107,9 @@ where
             if ctrl.is_cancelled() {
                 info!("Transfer {} cancelled by user", progress.transfer_id);
                 progress.mark_cancelled();
-                progress_store
-                    .save(&progress)
-                    .await
-                    .map_err(|e| SftpError::StorageError(format!("Failed to save progress: {}", e)))?;
+                progress_store.save(&progress).await.map_err(|e| {
+                    SftpError::StorageError(format!("Failed to save progress: {}", e))
+                })?;
                 return Err(SftpError::TransferCancelled);
             }
         }
@@ -138,10 +132,9 @@ where
             Ok(transferred_bytes) => {
                 // Success! Update progress to completed
                 progress.mark_completed();
-                progress_store
-                    .save(&progress)
-                    .await
-                    .map_err(|e| SftpError::StorageError(format!("Failed to save progress: {}", e)))?;
+                progress_store.save(&progress).await.map_err(|e| {
+                    SftpError::StorageError(format!("Failed to save progress: {}", e))
+                })?;
 
                 info!(
                     "Transfer {} completed successfully: {} bytes",
@@ -157,10 +150,9 @@ where
                 if !is_retryable_error(&e) {
                     // Non-retryable error, fail immediately
                     progress.mark_failed(e.to_string());
-                    progress_store
-                        .save(&progress)
-                        .await
-                        .map_err(|e2| SftpError::StorageError(format!("Failed to save progress: {}", e2)))?;
+                    progress_store.save(&progress).await.map_err(|e2| {
+                        SftpError::StorageError(format!("Failed to save progress: {}", e2))
+                    })?;
 
                     warn!(
                         "Transfer {} failed with non-retryable error: {}",
@@ -172,10 +164,9 @@ where
 
                 // Update progress to failed (but retryable)
                 progress.mark_failed(e.to_string());
-                progress_store
-                    .save(&progress)
-                    .await
-                    .map_err(|e2| SftpError::StorageError(format!("Failed to save progress: {}", e2)))?;
+                progress_store.save(&progress).await.map_err(|e2| {
+                    SftpError::StorageError(format!("Failed to save progress: {}", e2))
+                })?;
 
                 // If this is not the last attempt, wait and retry
                 if attempt < config.max_retries {
@@ -322,7 +313,10 @@ mod tests {
             async fn load(&self, _id: &str) -> Result<Option<StoredTransferProgress>, SftpError> {
                 Ok(None)
             }
-            async fn list_incomplete(&self, _id: &str) -> Result<Vec<StoredTransferProgress>, SftpError> {
+            async fn list_incomplete(
+                &self,
+                _id: &str,
+            ) -> Result<Vec<StoredTransferProgress>, SftpError> {
                 Ok(vec![])
             }
             async fn list_all_incomplete(&self) -> Result<Vec<StoredTransferProgress>, SftpError> {
@@ -393,7 +387,10 @@ mod tests {
             async fn load(&self, _id: &str) -> Result<Option<StoredTransferProgress>, SftpError> {
                 Ok(None)
             }
-            async fn list_incomplete(&self, _id: &str) -> Result<Vec<StoredTransferProgress>, SftpError> {
+            async fn list_incomplete(
+                &self,
+                _id: &str,
+            ) -> Result<Vec<StoredTransferProgress>, SftpError> {
                 Ok(vec![])
             }
             async fn list_all_incomplete(&self) -> Result<Vec<StoredTransferProgress>, SftpError> {
@@ -449,7 +446,10 @@ mod tests {
             async fn load(&self, _id: &str) -> Result<Option<StoredTransferProgress>, SftpError> {
                 Ok(None)
             }
-            async fn list_incomplete(&self, _id: &str) -> Result<Vec<StoredTransferProgress>, SftpError> {
+            async fn list_incomplete(
+                &self,
+                _id: &str,
+            ) -> Result<Vec<StoredTransferProgress>, SftpError> {
                 Ok(vec![])
             }
             async fn list_all_incomplete(&self) -> Result<Vec<StoredTransferProgress>, SftpError> {

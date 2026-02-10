@@ -113,18 +113,21 @@ pub struct HandleController {
 
 impl HandleController {
     /// Create a new HandleController with the given sender
-    /// 
+    ///
     /// This is primarily used for testing. In production, use `spawn_handle_owner_task`.
     pub fn new(cmd_tx: mpsc::Sender<HandleCommand>) -> Self {
         let (disconnect_tx, _) = broadcast::channel(1);
-        Self { cmd_tx, disconnect_tx }
+        Self {
+            cmd_tx,
+            disconnect_tx,
+        }
     }
 
     /// Subscribe to SSH disconnect notifications.
-    /// 
+    ///
     /// Returns a receiver that will receive `()` when the SSH connection is closed.
     /// Use this in `tokio::select!` to detect SSH disconnection.
-    /// 
+    ///
     /// # Example
     /// ```ignore
     /// let mut disconnect_rx = controller.subscribe_disconnect();
@@ -223,7 +226,12 @@ impl HandleController {
     /// Returns PingResult indicating connection status
     pub async fn ping(&self) -> PingResult {
         let (reply_tx, reply_rx) = oneshot::channel();
-        if self.cmd_tx.send(HandleCommand::Ping { reply_tx }).await.is_err() {
+        if self
+            .cmd_tx
+            .send(HandleCommand::Ping { reply_tx })
+            .await
+            .is_err()
+        {
             return PingResult::IoError;
         }
         reply_rx.await.unwrap_or(PingResult::IoError)
@@ -355,8 +363,13 @@ pub fn spawn_handle_owner_task(
                                 }
                                 Ok(Err(e)) => {
                                     let error_str = format!("{:?}", e);
-                                    if error_str.contains("Disconnect") || error_str.contains("disconnect") {
-                                        warn!("Keepalive SSH disconnect for session {}: {:?}", session_id, e);
+                                    if error_str.contains("Disconnect")
+                                        || error_str.contains("disconnect")
+                                    {
+                                        warn!(
+                                            "Keepalive SSH disconnect for session {}: {:?}",
+                                            session_id, e
+                                        );
                                         PingResult::IoError
                                     } else {
                                         warn!("Keepalive SSH error for session {} (treating as soft failure): {:?}", session_id, e);
@@ -389,7 +402,7 @@ pub fn spawn_handle_owner_task(
         // Notify all disconnect subscribers (port forwards, etc.)
         // The send() may fail if no subscribers, which is fine
         let _ = disconnect_tx_clone.send(());
-        
+
         // Drain all pending commands, notify callers that connection is closed
         drain_pending_commands(&mut cmd_rx);
 
@@ -400,7 +413,10 @@ pub fn spawn_handle_owner_task(
         info!("Handle owner task terminated for session {}", session_id);
     });
 
-    HandleController { cmd_tx, disconnect_tx }
+    HandleController {
+        cmd_tx,
+        disconnect_tx,
+    }
 }
 
 /// Drain all pending commands, returning Disconnected error to each

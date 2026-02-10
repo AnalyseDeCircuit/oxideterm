@@ -6,9 +6,7 @@
 //! - Save message with context snapshot
 //! - Delete/clear conversations
 
-use crate::state::{
-    AiChatError, AiChatStore, ContextSnapshot, ConversationMeta, PersistedMessage,
-};
+use crate::state::{AiChatError, AiChatStore, ContextSnapshot, ConversationMeta, PersistedMessage};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -212,7 +210,9 @@ pub async fn ai_chat_update_conversation(
         session_id: full.meta.session_id,
     };
 
-    store.update_conversation(&updated).map_err(|e| e.to_string())
+    store
+        .update_conversation(&updated)
+        .map_err(|e| e.to_string())
 }
 
 /// Delete a conversation

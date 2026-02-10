@@ -81,9 +81,10 @@ impl LocalTerminalSession {
         cwd: Option<std::path::PathBuf>,
         event_tx: mpsc::Sender<SessionEvent>,
     ) -> Result<(), SessionError> {
-        self.start_with_options(cwd, event_tx, true, false, None).await
+        self.start_with_options(cwd, event_tx, true, false, None)
+            .await
     }
-    
+
     /// Start the session with extended options for profile and Oh My Posh
     pub async fn start_with_options(
         &mut self,

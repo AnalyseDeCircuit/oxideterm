@@ -16,10 +16,12 @@ use super::dynamic::{
 };
 use super::events::ForwardEventEmitter;
 use super::local::{
-    start_local_forward_with_disconnect, ForwardStats as LocalForwardStats, LocalForward, LocalForwardHandle,
+    start_local_forward_with_disconnect, ForwardStats as LocalForwardStats, LocalForward,
+    LocalForwardHandle,
 };
 use super::remote::{
-    start_remote_forward_with_disconnect, ForwardStats as RemoteForwardStats, RemoteForward, RemoteForwardHandle,
+    start_remote_forward_with_disconnect, ForwardStats as RemoteForwardStats, RemoteForward,
+    RemoteForwardHandle,
 };
 use crate::ssh::{HandleController, SshError};
 
@@ -255,7 +257,7 @@ impl ForwardingManager {
             session_id,
         }
     }
-    
+
     /// Create a new forwarding manager with event emitter
     pub fn with_event_emitter(
         handle_controller: HandleController,
@@ -273,12 +275,12 @@ impl ForwardingManager {
             session_id,
         }
     }
-    
+
     /// Set event emitter after construction
     pub fn set_event_emitter(&mut self, event_emitter: ForwardEventEmitter) {
         self.event_emitter = Some(event_emitter);
     }
-    
+
     /// Emit status changed event if emitter is configured
     fn emit_status_changed(&self, forward_id: &str, status: ForwardStatus, error: Option<String>) {
         if let Some(ref emitter) = self.event_emitter {
@@ -325,7 +327,8 @@ impl ForwardingManager {
             disconnect_rx,
             Some(rule.id.clone()),
             self.event_emitter.clone(),
-        ).await?;
+        )
+        .await?;
 
         // Update rule with actual bound address
         rule.bind_address = handle.bound_addr.ip().to_string();
@@ -379,7 +382,8 @@ impl ForwardingManager {
             disconnect_rx,
             Some(rule.id.clone()),
             self.event_emitter.clone(),
-        ).await?;
+        )
+        .await?;
         rule.status = ForwardStatus::Active;
 
         let entry = RemoteForwardEntry {
@@ -423,7 +427,8 @@ impl ForwardingManager {
             disconnect_rx,
             Some(rule.id.clone()),
             self.event_emitter.clone(),
-        ).await?;
+        )
+        .await?;
 
         // Update rule with actual bound address
         rule.bind_address = handle.bound_addr.ip().to_string();

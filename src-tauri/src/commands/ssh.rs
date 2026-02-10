@@ -24,8 +24,8 @@ use crate::session::{
 };
 use crate::sftp::session::SftpRegistry;
 use crate::ssh::{
-    ConnectionInfo, ConnectionPoolConfig, SshConnectionRegistry,
-    HostKeyStatus, check_host_key, accept_host_key, get_host_key_cache,
+    accept_host_key, check_host_key, get_host_key_cache, ConnectionInfo, ConnectionPoolConfig,
+    HostKeyStatus, SshConnectionRegistry,
 };
 
 /// 断开 SSH 连接
@@ -195,14 +195,18 @@ pub async fn create_terminal(
         .get_info(&request.connection_id)
         .await
         .ok_or_else(|| "Connection not found".to_string())?;
-    
+
     use crate::ssh::ConnectionState;
     match &connection_info.state {
         ConnectionState::LinkDown => {
-            return Err("CONNECTION_RECONNECTING: Connection is down, waiting for reconnect".to_string());
+            return Err(
+                "CONNECTION_RECONNECTING: Connection is down, waiting for reconnect".to_string(),
+            );
         }
         ConnectionState::Reconnecting => {
-            return Err("CONNECTION_RECONNECTING: Connection is reconnecting, please wait".to_string());
+            return Err(
+                "CONNECTION_RECONNECTING: Connection is reconnecting, please wait".to_string(),
+            );
         }
         ConnectionState::Disconnected => {
             return Err("Connection is disconnected".to_string());
@@ -257,17 +261,20 @@ pub async fn create_terminal(
             session_registry.remove(&session_id);
             let conn_reg = connection_registry.inner().clone();
             let conn_id = request.connection_id.clone();
-            
+
             // 检查是否是连接断开错误
             let err_str = e.to_string().to_lowercase();
             let is_connection_error = err_str.contains("disconnected")
                 || err_str.contains("connectfailed")
                 || err_str.contains("channel error");
-            
+
             if is_connection_error {
                 // 连接已断开，标记为 LinkDown
                 // 🛑 后端禁止自动重连：只广播事件，等待前端指令
-                warn!("Channel open failed, connection {} may be dead: {}", conn_id, e);
+                warn!(
+                    "Channel open failed, connection {} may be dead: {}",
+                    conn_id, e
+                );
                 let node_emitter = conn_reg.node_emitter(); // Oxide-Next Phase 2
                 tokio::spawn(async move {
                     // 先释放引用
@@ -276,10 +283,15 @@ pub async fn create_terminal(
                     if let Some(entry) = conn_reg.get_connection(&conn_id) {
                         let current_state = entry.state().await;
                         // 只有当连接还不是 LinkDown/Reconnecting 时才标记
-                        if !matches!(current_state, ConnectionState::LinkDown | ConnectionState::Reconnecting) {
+                        if !matches!(
+                            current_state,
+                            ConnectionState::LinkDown | ConnectionState::Reconnecting
+                        ) {
                             entry.set_state(ConnectionState::LinkDown).await;
                             // 发送状态变更事件
-                            conn_reg.emit_connection_status_changed(&conn_id, "link_down").await;
+                            conn_reg
+                                .emit_connection_status_changed(&conn_id, "link_down")
+                                .await;
 
                             // Oxide-Next Phase 2: node:state 事件
                             if let Some(ref emitter) = node_emitter {
@@ -295,7 +307,10 @@ pub async fn create_terminal(
                         }
                     }
                 });
-                return Err("CONNECTION_LINK_DOWN: Connection lost, waiting for frontend command".to_string());
+                return Err(
+                    "CONNECTION_LINK_DOWN: Connection lost, waiting for frontend command"
+                        .to_string(),
+                );
             } else {
                 tokio::spawn(async move {
                     let _ = conn_reg.release(&conn_id).await;
@@ -450,7 +465,10 @@ pub async fn create_terminal(
     let node_emitter_ct = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
-            warn!("Session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
+            warn!(
+                "Session {} WebSocket bridge disconnected: {:?}",
+                session_id_clone, reason
+            );
             if reason.is_recoverable() {
                 // 🔧 修复 ref_count 泄漏：超时后释放连接引用
                 let conn_reg_for_cleanup = conn_registry_clone.clone();
@@ -463,7 +481,10 @@ pub async fn create_terminal(
                         let conn_reg = conn_reg_for_cleanup;
                         let sid = session_id_for_cleanup;
                         tokio::spawn(async move {
-                            info!("Releasing connection {} ref after WS detach timeout (session: {})", conn_id, sid);
+                            info!(
+                                "Releasing connection {} ref after WS detach timeout (session: {})",
+                                conn_id, sid
+                            );
                             let _ = conn_reg.remove_terminal(&conn_id, &sid).await;
                             let _ = conn_reg.release(&conn_id).await;
                         });
@@ -473,10 +494,15 @@ pub async fn create_terminal(
                 // AcceptTimeout 或其他不可恢复的断开：清理会话
                 // 这是因为如果前端从未连接，保留这个会话没有意义
                 if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
-                    warn!("Session {} WS accept timeout, removing from registries", session_id_clone);
+                    warn!(
+                        "Session {} WS accept timeout, removing from registries",
+                        session_id_clone
+                    );
                     // 🔴 关键修复：发送 disconnected 事件通知前端
                     // 这样前端可以清理掉对这个已失效 session 的引用
-                    conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
+                    conn_registry_clone
+                        .emit_connection_status_changed(&conn_id_clone, "disconnected")
+                        .await;
 
                     // Oxide-Next Phase 2: node:state 事件
                     if let Some(ref emitter) = node_emitter_ct {
@@ -488,7 +514,9 @@ pub async fn create_terminal(
                     }
 
                     // 从连接的终端列表中移除
-                    let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    let _ = conn_registry_clone
+                        .remove_terminal(&conn_id_clone, &session_id_clone)
+                        .await;
                     // 释放连接引用
                     let _ = conn_registry_clone.release(&conn_id_clone).await;
                     // 完全移除会话
@@ -531,8 +559,7 @@ pub async fn create_terminal(
         .await;
 
     // 注册 ForwardingManager
-    let forwarding_manager =
-        ForwardingManager::new(forwarding_controller, session_id.clone());
+    let forwarding_manager = ForwardingManager::new(forwarding_controller, session_id.clone());
     forwarding_registry
         .register(session_id.clone(), forwarding_manager)
         .await;
@@ -576,7 +603,10 @@ pub async fn close_terminal(
         .flatten();
 
     // 保存终端缓冲区
-    if let Err(e) = session_registry.persist_session_with_buffer(&session_id).await {
+    if let Err(e) = session_registry
+        .persist_session_with_buffer(&session_id)
+        .await
+    {
         tracing::warn!("Failed to persist session buffer: {}", e);
     }
 
@@ -648,13 +678,10 @@ pub async fn recreate_terminal_pty(
                 stdout_rx: output_tx.subscribe(),
             };
 
-            let (_, port, token, _disconnect_rx) = WsBridge::start_extended_with_disconnect(
-                extended_handle,
-                scroll_buffer,
-                true,
-            )
-            .await
-            .map_err(|e| format!("Failed to start WebSocket bridge: {}", e))?;
+            let (_, port, token, _disconnect_rx) =
+                WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer, true)
+                    .await
+                    .map_err(|e| format!("Failed to start WebSocket bridge: {}", e))?;
 
             session_registry
                 .update_ws_info(&session_id, port, token.clone(), cmd_tx, handle_controller)
@@ -662,7 +689,10 @@ pub async fn recreate_terminal_pty(
 
             let ws_url = format!("ws://localhost:{}", port);
 
-            info!("Terminal WS reattached: session={}, ws_port={}", session_id, port);
+            info!(
+                "Terminal WS reattached: session={}, ws_port={}",
+                session_id, port
+            );
 
             return Ok(RecreateTerminalResponse {
                 session_id,
@@ -678,7 +708,8 @@ pub async fn recreate_terminal_pty(
         .get(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
 
-    let connection_id = session_info.connection_id
+    let connection_id = session_info
+        .connection_id
         .ok_or_else(|| "Session has no connection_id".to_string())?;
 
     // 获取新的 HandleController
@@ -809,7 +840,10 @@ pub async fn recreate_terminal_pty(
     let node_emitter_clone = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
-            warn!("Recreated session {} WebSocket bridge disconnected: {:?}", session_id_clone, reason);
+            warn!(
+                "Recreated session {} WebSocket bridge disconnected: {:?}",
+                session_id_clone, reason
+            );
             if reason.is_recoverable() {
                 // 🔧 修复 ref_count 泄漏：超时后释放连接引用
                 let conn_reg_for_cleanup = conn_registry_clone.clone();
@@ -830,9 +864,14 @@ pub async fn recreate_terminal_pty(
             } else {
                 // AcceptTimeout: 前端没有连接，清理会话
                 if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
-                    warn!("Recreated session {} WS accept timeout, removing from registries", session_id_clone);
+                    warn!(
+                        "Recreated session {} WS accept timeout, removing from registries",
+                        session_id_clone
+                    );
                     // 🔴 关键修复：发送 disconnected 事件通知前端
-                    conn_registry_clone.emit_connection_status_changed(&conn_id_clone, "disconnected").await;
+                    conn_registry_clone
+                        .emit_connection_status_changed(&conn_id_clone, "disconnected")
+                        .await;
                     // Oxide-Next Phase 2: node:state 事件
                     if let Some(ref emitter) = node_emitter_clone {
                         emitter.emit_state_from_connection(
@@ -841,7 +880,9 @@ pub async fn recreate_terminal_pty(
                             "WS accept timeout (recreate)",
                         );
                     }
-                    let _ = conn_registry_clone.remove_terminal(&conn_id_clone, &session_id_clone).await;
+                    let _ = conn_registry_clone
+                        .remove_terminal(&conn_id_clone, &session_id_clone)
+                        .await;
                     let _ = conn_registry_clone.release(&conn_id_clone).await;
                     let _ = registry_clone.disconnect_complete(&session_id_clone, true);
                 } else {
@@ -854,7 +895,13 @@ pub async fn recreate_terminal_pty(
 
     // 更新 session registry 的 ws_port 和 ws_token
     session_registry
-        .update_ws_info(&session_id, port, token.clone(), cmd_tx, handle_controller.clone())
+        .update_ws_info(
+            &session_id,
+            port,
+            token.clone(),
+            cmd_tx,
+            handle_controller.clone(),
+        )
         .map_err(|e| format!("Failed to update session: {}", e))?;
 
     let ws_url = format!("ws://localhost:{}", port);
@@ -917,10 +964,7 @@ pub struct SshPreflightResponse {
 /// 前端根据返回状态决定是否显示确认对话框。
 #[tauri::command]
 pub async fn ssh_preflight(request: SshPreflightRequest) -> Result<SshPreflightResponse, String> {
-    info!(
-        "SSH preflight check: {}:{}",
-        request.host, request.port
-    );
+    info!("SSH preflight check: {}:{}", request.host, request.port);
 
     let status = check_host_key(&request.host, request.port, PREFLIGHT_TIMEOUT_SECS).await;
 

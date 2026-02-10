@@ -74,12 +74,12 @@ const TOKEN_TIMESTAMP_LEN: usize = 8;
 const TOKEN_TOTAL_LEN: usize = TOKEN_RANDOM_LEN + TOKEN_TIMESTAMP_LEN; // 40 bytes
 
 /// Generate a cryptographically secure authentication token
-/// 
+///
 /// Format: Base64(random[32] || timestamp[8])
 /// - 32 bytes of OS-level randomness (256 bits entropy)
 /// - 8 bytes big-endian timestamp (hidden in encoding)
 /// - Output: 54 character URL-safe Base64 string
-/// 
+///
 /// The token appears opaque to external observers - no visible structure.
 fn generate_token() -> String {
     let mut data = [0u8; TOKEN_TOTAL_LEN];
@@ -91,10 +91,10 @@ fn generate_token() -> String {
 }
 
 /// Validate token with expiration check
-/// 
+///
 /// Decodes both tokens, performs constant-time comparison on the random
 /// portion, then checks timestamp expiration from the expected token.
-/// 
+///
 /// Returns true if token matches and has not expired.
 fn validate_token(received: &str, expected: &str) -> bool {
     let received_trimmed = received.trim();
@@ -122,9 +122,8 @@ fn validate_token(received: &str, expected: &str) -> bool {
     };
 
     // Constant-time comparison of random portion (first 32 bytes)
-    let random_matches = bool::from(
-        received_bytes[..TOKEN_RANDOM_LEN].ct_eq(&expected_bytes[..TOKEN_RANDOM_LEN])
-    );
+    let random_matches =
+        bool::from(received_bytes[..TOKEN_RANDOM_LEN].ct_eq(&expected_bytes[..TOKEN_RANDOM_LEN]));
 
     if !random_matches {
         return false;
@@ -441,7 +440,11 @@ impl WsBridge {
         let _ = ready_tx.send(());
 
         // Accept only one connection per session (with timeout)
-        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
+        let accept_result = tokio::time::timeout(
+            Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS),
+            listener.accept(),
+        )
+        .await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -488,7 +491,11 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
+        let accept_result = tokio::time::timeout(
+            Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS),
+            listener.accept(),
+        )
+        .await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -591,7 +598,7 @@ impl WsBridge {
         );
 
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-        
+
         // 发送 scroll_buffer 中最近的历史行给新连接的客户端
         // 只发送最近 REPLAY_LINE_COUNT 行，避免克隆整个缓冲区浪费内存
         let history_lines = scroll_buffer.tail_lines(REPLAY_LINE_COUNT).await;
@@ -607,11 +614,14 @@ impl WsBridge {
                 .map(|line| format!("{}\r\n", line.text))
                 .collect();
             let frame = data_frame(Bytes::from(history_data));
-            if let Err(e) = ws_sender.send(Message::Binary(frame.encode().to_vec())).await {
+            if let Err(e) = ws_sender
+                .send(Message::Binary(frame.encode().to_vec()))
+                .await
+            {
                 warn!("Failed to send history data: {}", e);
             }
         }
-        
+
         // Extract parts from handle, consuming it properly
         let (id, stdin_tx, mut stdout_rx) = session_handle.into_parts();
 
@@ -857,7 +867,11 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
+        let accept_result = tokio::time::timeout(
+            Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS),
+            listener.accept(),
+        )
+        .await;
 
         match accept_result {
             Ok(Ok((stream, addr))) => {
@@ -906,7 +920,11 @@ impl WsBridge {
 
         let _ = ready_tx.send(());
 
-        let accept_result = tokio::time::timeout(Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS), listener.accept()).await;
+        let accept_result = tokio::time::timeout(
+            Duration::from_secs(WS_ACCEPT_TIMEOUT_SECS),
+            listener.accept(),
+        )
+        .await;
 
         let disconnect_reason = match accept_result {
             Ok(Ok((stream, addr))) => {

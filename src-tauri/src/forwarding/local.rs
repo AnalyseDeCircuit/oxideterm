@@ -104,7 +104,7 @@ impl LocalForwardHandle {
         info!("Stopping local port forward on {}", self.bound_addr);
         self.running.store(false, Ordering::SeqCst);
         let _ = self.stop_tx.send(()).await;
-        
+
         // 等待所有活跃连接关闭（最多等待 5 秒）
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(5);
@@ -163,29 +163,26 @@ pub async fn start_local_forward_with_disconnect(
     event_emitter: Option<ForwardEventEmitter>,
 ) -> Result<LocalForwardHandle, SshError> {
     // Bind to local address
-    let listener = TcpListener::bind(&config.local_addr).await.map_err(|e| {
-        match e.kind() {
-            std::io::ErrorKind::AddrInUse => {
-                SshError::ConnectionFailed(format!(
-                    "Port already in use: {}. Another application may be using this port.",
-                    config.local_addr
-                ))
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                SshError::ConnectionFailed(format!(
-                    "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
-                    config.local_addr
-                ))
-            }
-            std::io::ErrorKind::AddrNotAvailable => {
-                SshError::ConnectionFailed(format!(
-                    "Address not available: {}. The specified address is not valid on this system.",
-                    config.local_addr
-                ))
-            }
-            _ => SshError::ConnectionFailed(format!("Failed to bind to {}: {}", config.local_addr, e)),
-        }
-    })?;
+    let listener = TcpListener::bind(&config.local_addr)
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AddrInUse => SshError::ConnectionFailed(format!(
+                "Port already in use: {}. Another application may be using this port.",
+                config.local_addr
+            )),
+            std::io::ErrorKind::PermissionDenied => SshError::ConnectionFailed(format!(
+                "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
+                config.local_addr
+            )),
+            std::io::ErrorKind::AddrNotAvailable => SshError::ConnectionFailed(format!(
+                "Address not available: {}. The specified address is not valid on this system.",
+                config.local_addr
+            )),
+            _ => SshError::ConnectionFailed(format!(
+                "Failed to bind to {}: {}",
+                config.local_addr, e
+            )),
+        })?;
 
     let bound_addr = listener
         .local_addr()
@@ -204,7 +201,7 @@ pub async fn start_local_forward_with_disconnect(
 
     let remote_host = config.remote_host.clone();
     let remote_port = config.remote_port;
-    
+
     // Create a broadcast channel for notifying child tasks of shutdown
     // This propagates the disconnect signal to all spawned connection handlers
     let (child_shutdown_tx, _) = broadcast::channel::<()>(16);
@@ -219,7 +216,7 @@ pub async fn start_local_forward_with_disconnect(
             StopRequested,
             Error, // Reserved for future error handling
         }
-        
+
         let exit_reason = loop {
             tokio::select! {
                 // Handle SSH disconnect signal
@@ -296,11 +293,11 @@ pub async fn start_local_forward_with_disconnect(
         };
 
         running_clone.store(false, Ordering::SeqCst);
-        
+
         // Signal all child tasks to shutdown
         // Ignore error if no receivers (all connections already closed)
         let _ = child_shutdown_tx.send(());
-        
+
         // Emit status event based on exit reason
         if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
             match exit_reason {
@@ -323,7 +320,7 @@ pub async fn start_local_forward_with_disconnect(
                 }
             }
         }
-        
+
         info!("Local port forward task exited");
     });
 
@@ -340,16 +337,16 @@ pub async fn start_local_forward_with_disconnect(
 const FORWARD_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Handle a single forwarded connection
-/// 
+///
 /// # Architecture: Lock-Free Channel I/O
-/// 
+///
 /// Instead of wrapping the russh Channel in `Arc<Mutex<Channel>>` (which causes lock contention
 /// when both read and write tasks compete for the mutex), we use a message-passing approach:
-/// 
+///
 /// 1. A dedicated "channel reader" task owns the Channel and reads from SSH
 /// 2. Data flows through mpsc channels: local_read -> SSH, SSH -> local_write
 /// 3. The shutdown signal propagates to all tasks via broadcast channel
-/// 
+///
 /// This eliminates:
 /// - Lock contention between read/write paths
 /// - Potential deadlocks from holding locks across `.await`
@@ -374,13 +371,13 @@ async fn handle_forward_connection(
 
     // Split local stream for concurrent read/write
     let (mut local_read, mut local_write) = local_stream.split();
-    
+
     // Create internal channels for lock-free data flow
     // local_to_ssh_tx: data read from local socket, to be sent to SSH
     // ssh_to_local_tx: data read from SSH channel, to be sent to local socket
     let (local_to_ssh_tx, mut local_to_ssh_rx) = mpsc::channel::<Vec<u8>>(32);
     let (ssh_to_local_tx, mut ssh_to_local_rx) = mpsc::channel::<Vec<u8>>(32);
-    
+
     // Control signals
     let (close_tx, _) = broadcast::channel::<()>(1);
     let mut close_rx1 = close_tx.subscribe();
@@ -396,12 +393,12 @@ async fn handle_forward_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx1.recv() => {
                     debug!("Local reader: received close signal");
                     break;
                 }
-                
+
                 result = tokio::time::timeout(FORWARD_IDLE_TIMEOUT, local_read.read(&mut buf)) => {
                     match result {
                         Ok(Ok(0)) => {
@@ -434,12 +431,12 @@ async fn handle_forward_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx2.recv() => {
                     debug!("Local writer: received close signal");
                     break;
                 }
-                
+
                 data = ssh_to_local_rx.recv() => {
                     match data {
                         Some(data) => {
@@ -463,13 +460,13 @@ async fn handle_forward_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 // Priority 1: Check for shutdown signal from parent
                 _ = shutdown_rx_clone.recv() => {
                     debug!("SSH I/O: received shutdown signal");
                     break;
                 }
-                
+
                 // Priority 2: Send data to SSH channel
                 data = local_to_ssh_rx.recv() => {
                     match data {
@@ -486,7 +483,7 @@ async fn handle_forward_connection(
                         }
                     }
                 }
-                
+
                 // Priority 3: Receive data from SSH channel (with timeout)
                 result = tokio::time::timeout(FORWARD_IDLE_TIMEOUT, channel.wait()) => {
                     match result {
@@ -519,7 +516,7 @@ async fn handle_forward_connection(
                 }
             }
         }
-        
+
         // Cleanup: close the channel
         let _ = channel.close().await;
     };
@@ -530,7 +527,7 @@ async fn handle_forward_connection(
         _ = local_writer => {}
         _ = ssh_io => {}
     }
-    
+
     // Signal all tasks to close
     let _ = close_tx.send(());
 

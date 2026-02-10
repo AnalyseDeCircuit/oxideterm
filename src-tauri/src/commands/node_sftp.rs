@@ -117,9 +117,7 @@ pub async fn node_sftp_stat(
     path: String,
     router: State<'_, Arc<NodeRouter>>,
 ) -> Result<FileInfo, RouteError> {
-    sftp_with_retry!(router, &node_id, sftp, {
-        sftp.stat(&path).await
-    })
+    sftp_with_retry!(router, &node_id, sftp, { sftp.stat(&path).await })
 }
 
 /// 预览文件内容（支持静默重建）
@@ -129,9 +127,7 @@ pub async fn node_sftp_preview(
     path: String,
     router: State<'_, Arc<NodeRouter>>,
 ) -> Result<PreviewContent, RouteError> {
-    sftp_with_retry!(router, &node_id, sftp, {
-        sftp.preview(&path).await
-    })
+    sftp_with_retry!(router, &node_id, sftp, { sftp.preview(&path).await })
 }
 
 /// 写入文件内容（IDE 编辑器用）
@@ -161,10 +157,7 @@ pub async fn node_sftp_write(
         .map_err(RouteError::from)?;
 
     // 获取写入后的元数据
-    let file_info = sftp
-        .stat(&path)
-        .await
-        .map_err(RouteError::from)?;
+    let file_info = sftp.stat(&path).await.map_err(RouteError::from)?;
 
     info!(
         "node_sftp_write: wrote {} bytes to {} (encoding: {})",
@@ -270,9 +263,7 @@ pub async fn node_sftp_delete(
 ) -> Result<(), RouteError> {
     let sftp = router.acquire_sftp(&node_id).await?;
     let sftp = sftp.lock().await;
-    sftp.delete(&path)
-        .await
-        .map_err(RouteError::from)
+    sftp.delete(&path).await.map_err(RouteError::from)
 }
 
 /// 创建目录
@@ -284,9 +275,7 @@ pub async fn node_sftp_mkdir(
 ) -> Result<(), RouteError> {
     let sftp = router.acquire_sftp(&node_id).await?;
     let sftp = sftp.lock().await;
-    sftp.mkdir(&path)
-        .await
-        .map_err(RouteError::from)
+    sftp.mkdir(&path).await.map_err(RouteError::from)
 }
 
 /// 重命名/移动文件
@@ -339,9 +328,7 @@ pub async fn node_sftp_delete_recursive(
 ) -> Result<u64, RouteError> {
     let sftp = router.acquire_sftp(&node_id).await?;
     let sftp = sftp.lock().await;
-    sftp.delete_recursive(&path)
-        .await
-        .map_err(RouteError::from)
+    sftp.delete_recursive(&path).await.map_err(RouteError::from)
 }
 
 /// 递归下载目录
@@ -561,11 +548,7 @@ pub async fn node_ide_open_project(
         None
     };
 
-    let name = path
-        .rsplit('/')
-        .next()
-        .unwrap_or("project")
-        .to_string();
+    let name = path.rsplit('/').next().unwrap_or("project").to_string();
 
     Ok(crate::commands::ide::ProjectInfo {
         root_path: path,
@@ -593,10 +576,7 @@ pub async fn node_ide_exec_command(
     let controller = connection_registry
         .get_handle_controller(&resolved.connection_id)
         .ok_or_else(|| {
-            RouteError::NotConnected(format!(
-                "Connection {} not found",
-                resolved.connection_id
-            ))
+            RouteError::NotConnected(format!("Connection {} not found", resolved.connection_id))
         })?;
 
     crate::commands::ide::exec_command_inner(controller, command, cwd, timeout_secs)
@@ -614,10 +594,7 @@ pub async fn node_ide_check_file(
     let sftp = router.acquire_sftp(&node_id).await?;
     let sftp = sftp.lock().await;
 
-    let info = sftp
-        .stat(&path)
-        .await
-        .map_err(RouteError::from)?;
+    let info = sftp.stat(&path).await.map_err(RouteError::from)?;
 
     if info.file_type == FileType::Directory {
         return Ok(crate::commands::ide::FileCheckResult::NotEditable {
@@ -633,10 +610,7 @@ pub async fn node_ide_check_file(
         });
     }
 
-    let preview = sftp
-        .preview(&path)
-        .await
-        .map_err(RouteError::from)?;
+    let preview = sftp.preview(&path).await.map_err(RouteError::from)?;
 
     match preview {
         PreviewContent::Text { .. } => Ok(crate::commands::ide::FileCheckResult::Editable {
@@ -668,13 +642,15 @@ pub async fn node_ide_batch_stat(
 
     let mut results = Vec::with_capacity(paths.len());
     for path in paths {
-        let stat = sftp.stat(&path).await.ok().map(|info| {
-            crate::commands::ide::FileStatInfo {
+        let stat = sftp
+            .stat(&path)
+            .await
+            .ok()
+            .map(|info| crate::commands::ide::FileStatInfo {
                 size: info.size,
                 mtime: info.modified as u64,
                 is_dir: info.file_type == FileType::Directory,
-            }
-        });
+            });
         results.push(stat);
     }
 

@@ -101,7 +101,7 @@ impl DynamicForwardHandle {
         info!("Stopping SOCKS5 proxy on {}", self.bound_addr);
         self.running.store(false, Ordering::SeqCst);
         let _ = self.stop_tx.send(()).await;
-        
+
         // 等待所有活跃连接关闭（最多等待 5 秒）
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(5);
@@ -142,7 +142,8 @@ pub async fn start_dynamic_forward(
 ) -> Result<DynamicForwardHandle, SshError> {
     // Subscribe to disconnect notifications
     let disconnect_rx = handle_controller.subscribe_disconnect();
-    start_dynamic_forward_with_disconnect(handle_controller, config, disconnect_rx, None, None).await
+    start_dynamic_forward_with_disconnect(handle_controller, config, disconnect_rx, None, None)
+        .await
 }
 
 /// Start dynamic forward with explicit disconnect receiver
@@ -154,32 +155,26 @@ pub async fn start_dynamic_forward_with_disconnect(
     event_emitter: Option<ForwardEventEmitter>,
 ) -> Result<DynamicForwardHandle, SshError> {
     // Bind to local address
-    let listener = TcpListener::bind(&config.local_addr).await.map_err(|e| {
-        match e.kind() {
-            std::io::ErrorKind::AddrInUse => {
-                SshError::ConnectionFailed(format!(
-                    "Port already in use: {}. Another application may be using this port.",
-                    config.local_addr
-                ))
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                SshError::ConnectionFailed(format!(
-                    "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
-                    config.local_addr
-                ))
-            }
-            std::io::ErrorKind::AddrNotAvailable => {
-                SshError::ConnectionFailed(format!(
-                    "Address not available: {}. The specified address is not valid on this system.",
-                    config.local_addr
-                ))
-            }
+    let listener = TcpListener::bind(&config.local_addr)
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AddrInUse => SshError::ConnectionFailed(format!(
+                "Port already in use: {}. Another application may be using this port.",
+                config.local_addr
+            )),
+            std::io::ErrorKind::PermissionDenied => SshError::ConnectionFailed(format!(
+                "Permission denied binding to {}. Ports below 1024 require elevated privileges.",
+                config.local_addr
+            )),
+            std::io::ErrorKind::AddrNotAvailable => SshError::ConnectionFailed(format!(
+                "Address not available: {}. The specified address is not valid on this system.",
+                config.local_addr
+            )),
             _ => SshError::ConnectionFailed(format!(
                 "Failed to bind SOCKS5 proxy to {}: {}",
                 config.local_addr, e
             )),
-        }
-    })?;
+        })?;
 
     let bound_addr = listener
         .local_addr()
@@ -207,7 +202,7 @@ pub async fn start_dynamic_forward_with_disconnect(
             StopRequested,
             Error, // Reserved for future error handling
         }
-        
+
         let exit_reason = loop {
             tokio::select! {
                 // Handle SSH disconnect signal
@@ -279,11 +274,11 @@ pub async fn start_dynamic_forward_with_disconnect(
         };
 
         running_clone.store(false, Ordering::SeqCst);
-        
+
         // Signal all child tasks to shutdown
         // Ignore error if no receivers (all connections already closed)
         let _ = child_shutdown_tx.send(());
-        
+
         // Emit status event based on exit reason
         if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
             match exit_reason {
@@ -306,7 +301,7 @@ pub async fn start_dynamic_forward_with_disconnect(
                 }
             }
         }
-        
+
         info!("SOCKS5 proxy task exited");
     });
 
@@ -500,9 +495,9 @@ async fn send_socks5_reply(stream: &mut TcpStream, status: u8) -> Result<(), Ssh
 const SOCKS5_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Bridge data between SOCKS5 client and SSH channel
-/// 
+///
 /// # Architecture: Lock-Free Channel I/O
-/// 
+///
 /// Uses the same message-passing pattern as local.rs and remote.rs to avoid lock contention.
 /// A single task owns the SSH Channel, communicating with read/write tasks via mpsc.
 async fn bridge_socks5_connection(
@@ -512,11 +507,11 @@ async fn bridge_socks5_connection(
     shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
-    
+
     // Create internal channels for lock-free data flow
     let (local_to_ssh_tx, mut local_to_ssh_rx) = mpsc::channel::<Vec<u8>>(32);
     let (ssh_to_local_tx, mut ssh_to_local_rx) = mpsc::channel::<Vec<u8>>(32);
-    
+
     // Control signals for clean shutdown
     let (close_tx, _) = broadcast::channel::<()>(1);
     let mut close_rx1 = close_tx.subscribe();
@@ -531,12 +526,12 @@ async fn bridge_socks5_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx1.recv() => {
                     debug!("SOCKS5 local reader: received close signal");
                     break;
                 }
-                
+
                 result = tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, local_read.read(&mut buf)) => {
                     match result {
                         Ok(Ok(0)) => {
@@ -569,12 +564,12 @@ async fn bridge_socks5_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx2.recv() => {
                     debug!("SOCKS5 local writer: received close signal");
                     break;
                 }
-                
+
                 data = ssh_to_local_rx.recv() => {
                     match data {
                         Some(data) => {
@@ -598,7 +593,7 @@ async fn bridge_socks5_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 // Priority 1: Send data to SSH channel
                 data = local_to_ssh_rx.recv() => {
                     match data {
@@ -615,7 +610,7 @@ async fn bridge_socks5_connection(
                         }
                     }
                 }
-                
+
                 // Priority 2: Receive data from SSH channel (with timeout)
                 result = tokio::time::timeout(SOCKS5_IDLE_TIMEOUT, channel.wait()) => {
                     match result {
@@ -648,14 +643,14 @@ async fn bridge_socks5_connection(
                 }
             }
         }
-        
+
         // Cleanup: close the channel
         let _ = channel.close().await;
     };
 
     // Resubscribe to get a fresh receiver for this select
     let mut shutdown_rx_clone = shutdown_rx.resubscribe();
-    
+
     // Run all tasks concurrently, exit when any completes (including parent shutdown)
     tokio::select! {
         _ = local_reader => {}
@@ -665,7 +660,7 @@ async fn bridge_socks5_connection(
             debug!("SOCKS5 bridge: received shutdown signal from parent");
         }
     }
-    
+
     // Signal all tasks to close
     let _ = close_tx.send(());
 

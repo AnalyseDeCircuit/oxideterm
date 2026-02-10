@@ -146,10 +146,10 @@ impl TransferManager {
     }
 
     /// Acquire a permit for concurrent transfer (blocks if at limit)
-    /// 
+    ///
     /// Uses a soft limit approach: the semaphore has MAX_POSSIBLE_CONCURRENT permits,
     /// but we wait until active_count < max_concurrent before acquiring.
-    /// 
+    ///
     /// # Panics
     /// This function will panic if the semaphore is closed, which should never happen
     /// in normal operation as the semaphore lives for the lifetime of the TransferManager.
@@ -164,7 +164,7 @@ impl TransferManager {
             // Wait a bit before checking again
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        
+
         let permit = self
             .semaphore
             .clone()

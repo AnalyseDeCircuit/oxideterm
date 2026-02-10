@@ -108,14 +108,12 @@ impl NodeRouter {
         // Step 3: 状态门禁
         let state = entry.state().await;
         match state {
-            ConnectionState::Active | ConnectionState::Idle => {
-                Ok(ResolvedConnection {
-                    connection_id: conn_id,
-                    handle_controller: entry.handle_controller.clone(),
-                    terminal_session_id,
-                    sftp_session_id,
-                })
-            }
+            ConnectionState::Active | ConnectionState::Idle => Ok(ResolvedConnection {
+                connection_id: conn_id,
+                handle_controller: entry.handle_controller.clone(),
+                terminal_session_id,
+                sftp_session_id,
+            }),
             ConnectionState::Reconnecting | ConnectionState::Connecting => {
                 // 等待连接就绪（带超时）
                 debug!(
@@ -139,12 +137,10 @@ impl NodeRouter {
                 })
             }
             ConnectionState::Error(msg) => Err(RouteError::ConnectionError(msg)),
-            ConnectionState::LinkDown => {
-                Err(RouteError::NotConnected(format!(
-                    "Node {} connection {} is link_down",
-                    node_id, conn_id
-                )))
-            }
+            ConnectionState::LinkDown => Err(RouteError::NotConnected(format!(
+                "Node {} connection {} is link_down",
+                node_id, conn_id
+            ))),
             _ => Err(RouteError::NotConnected(node_id.into())),
         }
     }
@@ -178,11 +174,8 @@ impl NodeRouter {
         // Phase 2: 如果是新建的 SFTP，发射 SftpReady 事件
         if was_new {
             let cwd = entry.sftp_cwd().await;
-            self.emitter.emit_sftp_ready(
-                &resolved.connection_id,
-                true,
-                cwd,
-            );
+            self.emitter
+                .emit_sftp_ready(&resolved.connection_id, true, cwd);
         }
 
         Ok(sftp)
@@ -230,10 +223,9 @@ impl NodeRouter {
         }
 
         // 2. 重新获取（会创建新的 SFTP session）
-        let sftp = entry
-            .acquire_sftp()
-            .await
-            .map_err(|e| RouteError::CapabilityUnavailable(format!("SFTP rebuild failed: {}", e)))?;
+        let sftp = entry.acquire_sftp().await.map_err(|e| {
+            RouteError::CapabilityUnavailable(format!("SFTP rebuild failed: {}", e))
+        })?;
 
         // 3. 获取 cwd 并发送 SftpReady(true)
         let cwd = entry.sftp_cwd().await;
@@ -254,24 +246,24 @@ impl NodeRouter {
     ///
     /// **Phase 0**: 不自动重建，仅查询。
     /// 终端自动重建将在 Phase 2+ 实现（需要 BridgeManager 配合）。
-    pub async fn terminal_url(
-        &self,
-        node_id: &str,
-    ) -> Result<TerminalEndpoint, RouteError> {
+    pub async fn terminal_url(&self, node_id: &str) -> Result<TerminalEndpoint, RouteError> {
         let resolved = self.resolve_connection(node_id).await?;
 
         // 尝试获取现有终端 session
         if let Some(ref session_id) = resolved.terminal_session_id {
-            let endpoint = self.session_registry.with_session(session_id, |entry| {
-                match (entry.ws_port, entry.ws_token.as_ref()) {
-                    (Some(port), Some(token)) => Some(TerminalEndpoint {
-                        ws_port: port,
-                        ws_token: token.clone(),
-                        session_id: session_id.clone(),
-                    }),
-                    _ => None,
-                }
-            }).flatten();
+            let endpoint = self
+                .session_registry
+                .with_session(session_id, |entry| {
+                    match (entry.ws_port, entry.ws_token.as_ref()) {
+                        (Some(port), Some(token)) => Some(TerminalEndpoint {
+                            ws_port: port,
+                            ws_token: token.clone(),
+                            session_id: session_id.clone(),
+                        }),
+                        _ => None,
+                    }
+                })
+                .flatten();
 
             if let Some(ep) = endpoint {
                 return Ok(ep);
@@ -349,16 +341,19 @@ impl NodeRouter {
             drop(tree);
 
             if let Some(ref sid) = tsid {
-                let endpoint = self.session_registry.with_session(sid, |entry| {
-                    match (entry.ws_port, entry.ws_token.as_ref()) {
-                        (Some(port), Some(token)) => Some(TerminalEndpoint {
-                            ws_port: port,
-                            ws_token: token.clone(),
-                            session_id: sid.clone(),
-                        }),
-                        _ => None,
-                    }
-                }).flatten();
+                let endpoint = self
+                    .session_registry
+                    .with_session(sid, |entry| {
+                        match (entry.ws_port, entry.ws_token.as_ref()) {
+                            (Some(port), Some(token)) => Some(TerminalEndpoint {
+                                ws_port: port,
+                                ws_token: token.clone(),
+                                session_id: sid.clone(),
+                            }),
+                            _ => None,
+                        }
+                    })
+                    .flatten();
                 endpoint
             } else {
                 None
@@ -380,17 +375,22 @@ impl NodeRouter {
                                 ConnectionState::LinkDown => Some("Link down".into()),
                                 _ => None,
                             }
-                        } else { None }
+                        } else {
+                            None
+                        }
                     } else {
                         // 从 TreeNodeState 提取
                         let tree2 = self.session_tree.tree.read().await;
-                        tree2.get_node(node_id)
-                            .and_then(|n| match &n.state {
-                                crate::session::tree::NodeState::Failed { error } => Some(error.clone()),
-                                _ => None,
-                            })
+                        tree2.get_node(node_id).and_then(|n| match &n.state {
+                            crate::session::tree::NodeState::Failed { error } => {
+                                Some(error.clone())
+                            }
+                            _ => None,
+                        })
                     }
-                } else { None },
+                } else {
+                    None
+                },
                 readiness,
                 sftp_ready,
                 sftp_cwd,

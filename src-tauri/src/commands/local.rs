@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::local::registry::LocalTerminalRegistry;
 use crate::local::session::{LocalTerminalInfo, SessionEvent};
-use crate::local::shell::{scan_shells, default_shell, ShellInfo};
+use crate::local::shell::{default_shell, scan_shells, ShellInfo};
 
 /// Global local terminal registry state
 pub struct LocalTerminalState {
@@ -125,30 +125,32 @@ pub async fn local_create_terminal(
         request.shell_path,
         request.cwd
     );
-    
+
     // Determine which shell to use
     let shell = if let Some(path) = request.shell_path {
         // Find shell by path
         let shells = scan_shells();
         let path_buf = std::path::PathBuf::from(&path);
-        
-        let found_shell = shells
-            .into_iter()
-            .find(|s| {
-                // Normalize path for comparison (handles case-insensitivity on Windows)
-                #[cfg(target_os = "windows")]
-                {
-                    s.path.to_string_lossy().to_lowercase() == path.to_lowercase()
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    s.path == path_buf
-                }
-            });
-        
+
+        let found_shell = shells.into_iter().find(|s| {
+            // Normalize path for comparison (handles case-insensitivity on Windows)
+            #[cfg(target_os = "windows")]
+            {
+                s.path.to_string_lossy().to_lowercase() == path.to_lowercase()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                s.path == path_buf
+            }
+        });
+
         match found_shell {
             Some(shell) => {
-                tracing::info!("Found matching shell: {} ({})", shell.label, shell.path.display());
+                tracing::info!(
+                    "Found matching shell: {} ({})",
+                    shell.label,
+                    shell.path.display()
+                );
                 shell
             }
             None => {
@@ -167,7 +169,11 @@ pub async fn local_create_terminal(
         }
     } else {
         let shell = default_shell();
-        tracing::info!("No shell_path provided, using default: {} ({})", shell.label, shell.path.display());
+        tracing::info!(
+            "No shell_path provided, using default: {} ({})",
+            shell.label,
+            shell.path.display()
+        );
         shell
     };
 
@@ -177,9 +183,9 @@ pub async fn local_create_terminal(
     let (session_id, mut event_rx) = state
         .registry
         .create_session_with_options(
-            shell, 
-            request.cols, 
-            request.rows, 
+            shell,
+            request.cols,
+            request.rows,
             cwd,
             request.load_profile,
             request.oh_my_posh_enabled,
@@ -206,7 +212,8 @@ pub async fn local_create_terminal(
                         session_id: sid.clone(),
                         data,
                     };
-                    if let Err(e) = app_handle.emit(&format!("local-terminal-data:{}", sid), &event) {
+                    if let Err(e) = app_handle.emit(&format!("local-terminal-data:{}", sid), &event)
+                    {
                         tracing::error!("Failed to emit terminal data event: {}", e);
                     }
                 }
@@ -215,7 +222,9 @@ pub async fn local_create_terminal(
                         session_id: sid.clone(),
                         exit_code,
                     };
-                    if let Err(e) = app_handle.emit(&format!("local-terminal-closed:{}", sid), &event) {
+                    if let Err(e) =
+                        app_handle.emit(&format!("local-terminal-closed:{}", sid), &event)
+                    {
                         tracing::error!("Failed to emit terminal closed event: {}", e);
                     }
                     break;
@@ -308,7 +317,7 @@ pub async fn local_cleanup_dead_sessions(
 }
 
 /// Get available local drives (Windows: A-Z drives, Unix: root)
-/// 
+///
 /// Returns a list of available drive paths that can be navigated to.
 /// On Windows, this scans A-Z for existing drives.
 /// On Unix, returns just "/" as the root.
@@ -365,44 +374,52 @@ pub struct FileChunk {
 }
 
 /// Get detailed file metadata
-/// 
+///
 /// Returns comprehensive file information including size, timestamps, and permissions.
 /// This is called only when entering preview mode, not during directory listing.
 #[tauri::command]
 pub async fn local_get_file_metadata(path: String) -> Result<FileMetadata, String> {
     use std::fs;
     use std::time::UNIX_EPOCH;
-    
+
     let path = std::path::Path::new(&path);
-    let metadata = fs::metadata(path)
-        .map_err(|e| format!("Failed to get metadata: {}", e))?;
-    
+    let metadata = fs::metadata(path).map_err(|e| format!("Failed to get metadata: {}", e))?;
+
     let symlink_metadata = fs::symlink_metadata(path).ok();
-    let is_symlink = symlink_metadata.map(|m| m.file_type().is_symlink()).unwrap_or(false);
-    
+    let is_symlink = symlink_metadata
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+
     // Get timestamps
-    let modified = metadata.modified().ok()
+    let modified = metadata
+        .modified()
+        .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs());
-    
-    let created = metadata.created().ok()
+
+    let created = metadata
+        .created()
+        .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs());
-    
-    let accessed = metadata.accessed().ok()
+
+    let accessed = metadata
+        .accessed()
+        .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs());
-    
+
     // Guess MIME type from extension
-    let mime_type = path.extension()
+    let mime_type = path
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| guess_mime_type(ext));
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = metadata.permissions().mode();
-        
+
         Ok(FileMetadata {
             size: metadata.len(),
             modified,
@@ -415,7 +432,7 @@ pub async fn local_get_file_metadata(path: String) -> Result<FileMetadata, Strin
             mime_type,
         })
     }
-    
+
     #[cfg(not(unix))]
     {
         Ok(FileMetadata {
@@ -433,23 +450,35 @@ pub async fn local_get_file_metadata(path: String) -> Result<FileMetadata, Strin
 
 /// Read a chunk from a file for streaming preview
 #[tauri::command]
-pub async fn local_read_file_range(path: String, offset: u64, length: u64) -> Result<FileChunk, String> {
+pub async fn local_read_file_range(
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<FileChunk, String> {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
 
     let mut file = File::open(&path).map_err(|e| format!("Failed to open file: {}", e))?;
-    let metadata = file.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("Failed to get metadata: {}", e))?;
     let file_len = metadata.len();
 
     if offset >= file_len {
-        return Ok(FileChunk { data: Vec::new(), eof: true });
+        return Ok(FileChunk {
+            data: Vec::new(),
+            eof: true,
+        });
     }
 
     let safe_len = length.min(1024 * 1024); // Cap to 1MB per read
-    file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Failed to seek file: {}", e))?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("Failed to seek file: {}", e))?;
 
     let mut buffer = vec![0u8; safe_len as usize];
-    let bytes_read = file.read(&mut buffer).map_err(|e| format!("Failed to read file: {}", e))?;
+    let bytes_read = file
+        .read(&mut buffer)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
     buffer.truncate(bytes_read);
 
     let eof = offset + bytes_read as u64 >= file_len || bytes_read == 0;
@@ -513,6 +542,6 @@ fn guess_mime_type(ext: &str) -> String {
         "yaml" | "yml" => "text/yaml",
         "toml" => "text/x-toml",
         _ => "application/octet-stream",
-    }.to_string()
+    }
+    .to_string()
 }
-

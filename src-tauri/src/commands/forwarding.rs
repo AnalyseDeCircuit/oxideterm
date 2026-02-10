@@ -86,11 +86,12 @@ impl ForwardingRegistry {
         new_handle_controller: crate::ssh::HandleController,
     ) -> Result<Vec<ForwardRule>, String> {
         // Get stopped rules from the old manager
-        let stopped_rules: Vec<ForwardRule> = if let Some(old_manager) = self.managers.read().await.get(session_id) {
-            old_manager.list_stopped_forwards().await
-        } else {
-            Vec::new()
-        };
+        let stopped_rules: Vec<ForwardRule> =
+            if let Some(old_manager) = self.managers.read().await.get(session_id) {
+                old_manager.list_stopped_forwards().await
+            } else {
+                Vec::new()
+            };
 
         let rules_count = stopped_rules.len();
         if rules_count == 0 {
@@ -100,8 +101,7 @@ impl ForwardingRegistry {
 
         info!(
             "Restoring {} forwards for session {} with new HandleController",
-            rules_count,
-            session_id
+            rules_count, session_id
         );
 
         // Create a new manager with the new HandleController
@@ -139,9 +139,8 @@ impl ForwardingRegistry {
 
     /// Stop all forwards across all sessions (for app shutdown)
     pub async fn stop_all_forwards(&self) {
-        let managers: Vec<Arc<ForwardingManager>> = {
-            self.managers.read().await.values().cloned().collect()
-        };
+        let managers: Vec<Arc<ForwardingManager>> =
+            { self.managers.read().await.values().cloned().collect() };
 
         info!(
             "Stopping all port forwards across {} sessions on shutdown",
@@ -391,7 +390,10 @@ pub async fn create_port_forward(
                 .add_forward(&request.session_id, forward_id)
                 .await
             {
-                warn!("Failed to update forward state in ConnectionRegistry: {}", e);
+                warn!(
+                    "Failed to update forward state in ConnectionRegistry: {}",
+                    e
+                );
             }
 
             Ok(ForwardResponse {
@@ -466,11 +468,15 @@ pub async fn pause_port_forwards(
     session_id: String,
 ) -> Result<Vec<ForwardRuleDto>, String> {
     info!("Pausing all forwards for session {}", session_id);
-    
+
     let paused_rules = registry.pause_forwards(&session_id).await;
-    
-    info!("Paused {} forwards for session {}", paused_rules.len(), session_id);
-    
+
+    info!(
+        "Paused {} forwards for session {}",
+        paused_rules.len(),
+        session_id
+    );
+
     Ok(paused_rules.into_iter().map(|r| r.into()).collect())
 }
 
@@ -483,7 +489,7 @@ pub async fn restore_port_forwards(
     session_id: String,
 ) -> Result<Vec<ForwardRuleDto>, String> {
     info!("Restoring forwards for session {}", session_id);
-    
+
     // Get the session's connection ID
     // For now, we assume session_id == connection_id in the new architecture
     // This might need adjustment based on actual architecture
@@ -495,13 +501,17 @@ pub async fn restore_port_forwards(
             connection_registry.get_handle_controller(&session_id)
         })
         .ok_or_else(|| format!("Cannot find HandleController for session {}", session_id))?;
-    
+
     let restored_rules = registry
         .restore_forwards(&session_id, handle_controller)
         .await?;
-    
-    info!("Restored {} forwards for session {}", restored_rules.len(), session_id);
-    
+
+    info!(
+        "Restored {} forwards for session {}",
+        restored_rules.len(),
+        session_id
+    );
+
     Ok(restored_rules.into_iter().map(|r| r.into()).collect())
 }
 

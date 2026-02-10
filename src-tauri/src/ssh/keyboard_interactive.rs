@@ -20,10 +20,10 @@
 //!    │◀─── ssh_kbi_result event ───────────│ Success/Failure
 //! ```
 
-use serde::{Deserialize, Serialize};
 use parking_lot::Mutex;
-use tokio::sync::oneshot;
+use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
+use tokio::sync::oneshot;
 
 /// Keyboard-Interactive prompt from server
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,7 +144,7 @@ pub fn register_pending(auth_flow_id: String) -> oneshot::Receiver<Result<Vec<St
 pub fn complete_pending(auth_flow_id: &str, responses: Vec<String>) -> Result<(), KbiError> {
     let mut pending = PENDING_REQUESTS.lock();
     let request = pending.remove(auth_flow_id).ok_or(KbiError::FlowNotFound)?;
-    
+
     // Send responses (ignore error if receiver dropped - means flow was cancelled/timed out)
     let _ = request.sender.send(Ok(responses));
     Ok(())
@@ -156,7 +156,7 @@ pub fn complete_pending(auth_flow_id: &str, responses: Vec<String>) -> Result<()
 pub fn cancel_pending(auth_flow_id: &str) -> Result<(), KbiError> {
     let mut pending = PENDING_REQUESTS.lock();
     let request = pending.remove(auth_flow_id).ok_or(KbiError::FlowNotFound)?;
-    
+
     // Send cancellation
     let _ = request.sender.send(Err(KbiError::Cancelled));
     Ok(())

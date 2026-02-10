@@ -23,30 +23,33 @@ use std::path::{Path, PathBuf};
 /// ```
 pub fn is_absolute_local_path(path: &str) -> bool {
     let p = Path::new(path);
-    
+
     // std::path::Path::is_absolute() handles most cases correctly
     if p.is_absolute() {
         return true;
     }
-    
+
     // Unix-style absolute path (for cross-platform compatibility)
     if path.starts_with('/') {
         return true;
     }
-    
+
     // Windows drive letter: C:\ or C:/
     if path.len() >= 3 {
         let bytes = path.as_bytes();
-        if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+        if bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/')
+        {
             return true;
         }
     }
-    
+
     // Windows UNC path: \\server\share or \\?\C:\path (long path prefix)
     if path.starts_with("\\\\") || path.starts_with("//") {
         return true;
     }
-    
+
     false
 }
 
@@ -98,18 +101,18 @@ mod tests {
         // Unix paths
         assert!(is_absolute_local_path("/home/user"));
         assert!(is_absolute_local_path("/"));
-        
+
         // Windows drive letters
         assert!(is_absolute_local_path("C:\\Users"));
         assert!(is_absolute_local_path("C:/Users"));
         assert!(is_absolute_local_path("D:\\data"));
         assert!(is_absolute_local_path("d:/data"));
-        
+
         // Windows UNC paths
         assert!(is_absolute_local_path("\\\\server\\share"));
         assert!(is_absolute_local_path("\\\\?\\C:\\long\\path"));
         assert!(is_absolute_local_path("//server/share"));
-        
+
         // Relative paths
         assert!(!is_absolute_local_path("relative/path"));
         assert!(!is_absolute_local_path("..\\parent"));

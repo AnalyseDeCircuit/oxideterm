@@ -75,7 +75,10 @@ fn build_response(status: u16, reason: &str, content_type: &str, body: &[u8]) ->
          Cache-Control: no-cache\r\n\
          Connection: close\r\n\
          \r\n",
-        status, reason, content_type, body.len()
+        status,
+        reason,
+        content_type,
+        body.len()
     );
     let mut resp = header.into_bytes();
     resp.extend_from_slice(body);
@@ -196,10 +199,7 @@ async fn handle_request(request_line: &str) -> Vec<u8> {
     };
 
     // Determine MIME type from extension
-    let ext = canonical
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = canonical.extension().and_then(|e| e.to_str()).unwrap_or("");
     let mime = mime_for_ext(ext);
 
     build_response(200, "OK", mime, &body)

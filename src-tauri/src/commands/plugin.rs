@@ -229,7 +229,9 @@ pub async fn list_plugins() -> Result<Vec<PluginManifest>, String> {
             Ok(content) => match serde_json::from_str::<PluginManifest>(&content) {
                 Ok(manifest) => {
                     // Validate manifest has required fields
-                    if manifest.id.is_empty() || manifest.name.is_empty() || manifest.main.is_empty()
+                    if manifest.id.is_empty()
+                        || manifest.name.is_empty()
+                        || manifest.main.is_empty()
                     {
                         tracing::warn!(
                             "Plugin {:?} has invalid manifest (missing required fields), skipping",
@@ -255,10 +257,7 @@ pub async fn list_plugins() -> Result<Vec<PluginManifest>, String> {
 /// Read a file from a plugin's directory.
 /// Both plugin_id and relative_path are validated against path traversal.
 #[tauri::command]
-pub async fn read_plugin_file(
-    plugin_id: String,
-    relative_path: String,
-) -> Result<Vec<u8>, String> {
+pub async fn read_plugin_file(plugin_id: String, relative_path: String) -> Result<Vec<u8>, String> {
     validate_plugin_id(&plugin_id)?;
     validate_relative_path(&relative_path)?;
 

@@ -164,7 +164,7 @@ impl NetworkTopology {
         // Build nodes and infer edges from each connection
         for conn in connections {
             let node_id = conn.id.clone();
-            
+
             // Create node from connection
             let auth_type = match &conn.auth {
                 crate::config::types::SavedAuth::Password { .. } => "password",
@@ -172,10 +172,12 @@ impl NetworkTopology {
                 crate::config::types::SavedAuth::Certificate { .. } => "certificate",
                 crate::config::types::SavedAuth::Agent => "agent",
             };
-            
+
             let key_path = match &conn.auth {
                 crate::config::types::SavedAuth::Key { key_path, .. } => Some(key_path.clone()),
-                crate::config::types::SavedAuth::Certificate { key_path, .. } => Some(key_path.clone()),
+                crate::config::types::SavedAuth::Certificate { key_path, .. } => {
+                    Some(key_path.clone())
+                }
                 _ => None,
             };
 
@@ -207,21 +209,21 @@ impl NetworkTopology {
                 // Has proxy chain:
                 // local → first_hop → second_hop → ... → target
                 let mut prev = "local".to_string();
-                
+
                 for hop in &conn.proxy_chain {
                     // Find or create node for this hop
                     let hop_id = Self::find_or_create_hop_node(&mut nodes, hop, connections);
-                    
+
                     // Add edge: prev → hop
                     edges_set.insert(TopologyEdge {
                         from: prev.clone(),
                         to: hop_id.clone(),
                         cost: 1,
                     });
-                    
+
                     prev = hop_id;
                 }
-                
+
                 // Final edge: last_hop → target
                 edges_set.insert(TopologyEdge {
                     from: prev,
@@ -276,7 +278,7 @@ impl NetworkTopology {
             crate::config::types::SavedAuth::Certificate { .. } => "certificate",
             crate::config::types::SavedAuth::Agent => "agent",
         };
-        
+
         let key_path = match &hop.auth {
             crate::config::types::SavedAuth::Key { key_path, .. } => Some(key_path.clone()),
             crate::config::types::SavedAuth::Certificate { key_path, .. } => Some(key_path.clone()),
@@ -304,8 +306,8 @@ impl NetworkTopology {
 
     /// Get edges overlay config path
     fn get_edges_config_path() -> Result<PathBuf, String> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| "Failed to get config directory".to_string())?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| "Failed to get config directory".to_string())?;
         Ok(config_dir.join("oxideterm").join("topology_edges.json"))
     }
 
@@ -315,65 +317,66 @@ impl NetworkTopology {
         if !path.exists() {
             return Ok(TopologyEdgesConfig::default());
         }
-        
+
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read edges config: {}", e))?;
-        
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse edges config: {}", e))
+
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse edges config: {}", e))
     }
 
     /// Save custom edges overlay
     pub fn save_edges_overlay(config: &TopologyEdgesConfig) -> Result<PathBuf, String> {
         let path = Self::get_edges_config_path()?;
-        
+
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
-        
+
         let content = serde_json::to_string_pretty(config)
             .map_err(|e| format!("Failed to serialize edges config: {}", e))?;
-        
+
         std::fs::write(&path, content)
             .map_err(|e| format!("Failed to write edges config: {}", e))?;
-        
+
         Ok(path)
     }
 
     /// Add a custom edge
     pub fn add_custom_edge(from: String, to: String, cost: i32) -> Result<(), String> {
         let mut config = Self::load_edges_overlay().unwrap_or_default();
-        
+
         let edge = TopologyEdge { from, to, cost };
         if !config.custom_edges.contains(&edge) {
             config.custom_edges.push(edge);
             Self::save_edges_overlay(&config)?;
         }
-        
+
         Ok(())
     }
 
     /// Remove a custom edge
     pub fn remove_custom_edge(from: &str, to: &str) -> Result<(), String> {
         let mut config = Self::load_edges_overlay().unwrap_or_default();
-        
-        config.custom_edges.retain(|e| !(e.from == from && e.to == to));
+
+        config
+            .custom_edges
+            .retain(|e| !(e.from == from && e.to == to));
         Self::save_edges_overlay(&config)?;
-        
+
         Ok(())
     }
 
     /// Exclude an auto-generated edge
     pub fn exclude_edge(from: String, to: String) -> Result<(), String> {
         let mut config = Self::load_edges_overlay().unwrap_or_default();
-        
+
         let edge = TopologyEdge { from, to, cost: 1 };
         if !config.excluded_edges.contains(&edge) {
             config.excluded_edges.push(edge);
             Self::save_edges_overlay(&config)?;
         }
-        
+
         Ok(())
     }
 
@@ -391,10 +394,7 @@ impl NetworkTopology {
     pub fn compute_route(&self, target_id: &str) -> Result<RouteResult, String> {
         // Validate target exists
         if !self.nodes.contains_key(target_id) {
-            return Err(format!(
-                "Target node '{}' not found in topology",
-                target_id
-            ));
+            return Err(format!("Target node '{}' not found in topology", target_id));
         }
 
         // Build adjacency list
@@ -471,7 +471,9 @@ impl NetworkTopology {
         let neighbors_map: HashMap<String, Vec<String>> = {
             let mut map: HashMap<String, Vec<String>> = HashMap::new();
             for edge in &self.edges {
-                map.entry(edge.from.clone()).or_default().push(edge.to.clone());
+                map.entry(edge.from.clone())
+                    .or_default()
+                    .push(edge.to.clone());
             }
             map
         };

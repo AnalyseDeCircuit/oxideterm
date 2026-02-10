@@ -275,12 +275,15 @@ impl SessionRegistry {
         entry.cmd_tx = Some(cmd_tx);
         entry.handle_controller = Some(handle_controller);
 
-        info!("Session {} ws_info updated after PTY recreation (port: {})", session_id, ws_port);
+        info!(
+            "Session {} ws_info updated after PTY recreation (port: {})",
+            session_id, ws_port
+        );
         Ok(())
     }
 
     /// Mark WS detached and schedule PTY cleanup after TTL (for seamless reconnect)
-    /// 
+    ///
     /// If `on_timeout` callback is provided, it will be called when the TTL expires
     /// before the session is fully disconnected. This is useful for releasing
     /// connection pool references.
@@ -297,7 +300,7 @@ impl SessionRegistry {
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
-        
+
         // Get connection_id before we release the entry lock
         let connection_id = entry.connection_id.clone();
 
@@ -316,18 +319,18 @@ impl SessionRegistry {
             tokio::select! {
                 _ = tokio::time::sleep(ttl) => {
                     info!("WS detach TTL expired for session {}, cleaning up", session_id);
-                    
+
                     if let Some(entry) = registry.sessions.get(&session_id) {
                         let _ = entry.close().await;
                     }
-                    
+
                     // Call the cleanup callback (e.g., release connection ref_count)
                     if let Some(callback) = on_timeout {
                         if let Some(conn_id) = connection_id {
                             callback(conn_id);
                         }
                     }
-                    
+
                     let _ = registry.disconnect_complete(&session_id, true);
                 }
                 _ = cancel_rx => {
@@ -340,7 +343,7 @@ impl SessionRegistry {
     }
 
     /// Mark WS detached and schedule PTY cleanup after TTL (for seamless reconnect)
-    /// 
+    ///
     /// Simple version without cleanup callback. Use `mark_ws_detached_with_cleanup`
     /// if you need to release connection pool references on timeout.
     pub fn mark_ws_detached(
@@ -655,11 +658,7 @@ impl SessionRegistry {
     /// Disconnect all sessions (for app shutdown)
     /// This drops all SSH handles and clears the registry
     pub async fn disconnect_all(&self) {
-        let session_ids: Vec<String> = self
-            .sessions
-            .iter()
-            .map(|entry| entry.id.clone())
-            .collect();
+        let session_ids: Vec<String> = self.sessions.iter().map(|entry| entry.id.clone()).collect();
 
         info!("Disconnecting {} sessions on shutdown", session_ids.len());
 

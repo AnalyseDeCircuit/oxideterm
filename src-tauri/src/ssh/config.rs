@@ -147,7 +147,9 @@ impl Default for SshConfig {
             host: String::new(),
             port: 22,
             username: String::new(),
-            auth: AuthMethod::Password { password: String::new() },
+            auth: AuthMethod::Password {
+                password: String::new(),
+            },
             timeout_secs: 30,
             cols: 80,
             rows: 24,

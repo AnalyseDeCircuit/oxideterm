@@ -30,9 +30,7 @@ fn state_to_readiness(state: &ConnectionState) -> (NodeReadiness, Option<String>
             (NodeReadiness::Connecting, None)
         }
         ConnectionState::Error(msg) => (NodeReadiness::Error, Some(msg.clone())),
-        ConnectionState::LinkDown => {
-            (NodeReadiness::Error, Some("Link down".to_string()))
-        }
+        ConnectionState::LinkDown => (NodeReadiness::Error, Some("Link down".to_string())),
         ConnectionState::Disconnecting | ConnectionState::Disconnected => {
             (NodeReadiness::Disconnected, None)
         }
@@ -163,7 +161,11 @@ impl NodeEventEmitter {
         let (readiness, error_detail) = state_to_readiness(conn_state);
         // 如果 state 自带错误信息且调用者未提供具体 reason，使用错误详情
         let effective_reason = if let Some(detail) = error_detail {
-            if reason.is_empty() { detail } else { format!("{}: {}", reason, detail) }
+            if reason.is_empty() {
+                detail
+            } else {
+                format!("{}: {}", reason, detail)
+            }
         } else {
             reason.to_string()
         };
@@ -173,12 +175,7 @@ impl NodeEventEmitter {
     /// 发射 SFTP 就绪状态变更事件
     ///
     /// 连接级调用（通过 connectionId 查 nodeId）。
-    pub fn emit_sftp_ready(
-        &self,
-        connection_id: &str,
-        ready: bool,
-        cwd: Option<String>,
-    ) {
+    pub fn emit_sftp_ready(&self, connection_id: &str, ready: bool, cwd: Option<String>) {
         let node_id = match self.get_node_id(connection_id) {
             Some(id) => id,
             None => {

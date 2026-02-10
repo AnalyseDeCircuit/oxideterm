@@ -122,15 +122,15 @@ fn default_args_for_shell(shell_id: &str) -> Vec<String> {
 }
 
 /// Get shell arguments with optional profile loading control
-/// 
+///
 /// This function generates appropriate shell arguments based on:
 /// - The shell type (bash, zsh, powershell, etc.)
 /// - Whether to load the user's profile/startup files
-/// 
+///
 /// # Arguments
 /// * `shell_id` - The shell identifier (e.g., "zsh", "pwsh", "git-bash")
 /// * `load_profile` - Whether to load shell startup files (.bashrc, .zshrc, Profile.ps1)
-/// 
+///
 /// # Returns
 /// A vector of command-line arguments for the shell
 pub fn get_shell_args(shell_id: &str, load_profile: bool) -> Vec<String> {
@@ -233,10 +233,7 @@ fn scan_unix_shells() -> Vec<ShellInfo> {
     // 2. Check common shell locations via `which`
     let common_shells = ["zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh"];
     for shell_name in common_shells {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(shell_name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg(shell_name).output() {
             if output.status.success() {
                 let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 let path = PathBuf::from(&path_str);
@@ -267,10 +264,7 @@ fn shell_info_from_path(path: &PathBuf) -> Option<ShellInfo> {
         _ => return None, // Skip unknown shells
     };
 
-    Some(
-        ShellInfo::new(&id, label, path.clone())
-            .with_args(default_args_for_shell(&id)),
-    )
+    Some(ShellInfo::new(&id, label, path.clone()).with_args(default_args_for_shell(&id)))
 }
 
 // ============================================================================
@@ -285,16 +279,16 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
     shells.push(ShellInfo::new("cmd", "Command Prompt", "cmd.exe"));
 
     // 2. PowerShell (Windows PowerShell, always available on modern Windows)
-    let powershell_path = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+    let powershell_path =
+        PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
     if powershell_path.exists() {
         shells.push(
-            ShellInfo::new("powershell", "Windows PowerShell", powershell_path)
-                .with_args(vec![
-                    "-NoLogo".to_string(),
-                    "-NoExit".to_string(),
-                    "-ExecutionPolicy".to_string(),
-                    "Bypass".to_string(),
-                ]),
+            ShellInfo::new("powershell", "Windows PowerShell", powershell_path).with_args(vec![
+                "-NoLogo".to_string(),
+                "-NoExit".to_string(),
+                "-ExecutionPolicy".to_string(),
+                "Bypass".to_string(),
+            ]),
         );
     }
 
@@ -308,13 +302,12 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
         let path = PathBuf::from(path_str);
         if path.exists() {
             shells.push(
-                ShellInfo::new("pwsh", "PowerShell Core", path)
-                    .with_args(vec![
-                        "-NoLogo".to_string(),
-                        "-NoExit".to_string(),
-                        "-ExecutionPolicy".to_string(),
-                        "Bypass".to_string(),
-                    ]),
+                ShellInfo::new("pwsh", "PowerShell Core", path).with_args(vec![
+                    "-NoLogo".to_string(),
+                    "-NoExit".to_string(),
+                    "-ExecutionPolicy".to_string(),
+                    "Bypass".to_string(),
+                ]),
             );
             break;
         }
@@ -332,13 +325,12 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
             let path = PathBuf::from(&path_str);
             if path.exists() && !shells.iter().any(|s| s.id == "pwsh") {
                 shells.push(
-                    ShellInfo::new("pwsh", "PowerShell Core", path)
-                        .with_args(vec![
-                            "-NoLogo".to_string(),
-                            "-NoExit".to_string(),
-                            "-ExecutionPolicy".to_string(),
-                            "Bypass".to_string(),
-                        ]),
+                    ShellInfo::new("pwsh", "PowerShell Core", path).with_args(vec![
+                        "-NoLogo".to_string(),
+                        "-NoExit".to_string(),
+                        "-ExecutionPolicy".to_string(),
+                        "Bypass".to_string(),
+                    ]),
                 );
             }
         }
@@ -353,8 +345,7 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
         let path = PathBuf::from(path_str);
         if path.exists() {
             shells.push(
-                ShellInfo::new("git-bash", "Git Bash", path)
-                    .with_args(vec!["--login".to_string()]),
+                ShellInfo::new("git-bash", "Git Bash", path).with_args(vec!["--login".to_string()]),
             );
             break;
         }
@@ -429,15 +420,12 @@ fn scan_wsl_distributions(shells: &mut Vec<ShellInfo>) {
             format!("WSL: {}", distro_clean)
         };
 
-        shells.push(
-            ShellInfo::new(id, label, wsl_path.clone())
-                .with_args(vec![
-                    "-d".to_string(),
-                    distro_clean,
-                    "--cd".to_string(),
-                    "~".to_string(),
-                ]),
-        );
+        shells.push(ShellInfo::new(id, label, wsl_path.clone()).with_args(vec![
+            "-d".to_string(),
+            distro_clean,
+            "--cd".to_string(),
+            "~".to_string(),
+        ]));
     }
 }
 

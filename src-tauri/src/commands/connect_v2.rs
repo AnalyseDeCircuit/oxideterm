@@ -1,9 +1,9 @@
 //! Session and Connection Management Commands
 //!
 //! This module provides commands for managing SSH sessions and the connection pool.
-//! 
+//!
 //! ## Active Commands
-//! 
+//!
 //! - `disconnect_v2` - Disconnect a session
 //! - `list_sessions_v2` / `get_session` / `get_session_stats` - Session queries
 //! - `resize_session_v2` / `reorder_sessions` - Session management
@@ -283,7 +283,7 @@ pub struct EstablishConnectionResponse {
 }
 
 /// 建立 SSH 连接（不创建终端）
-/// 
+///
 /// 如果已有相同配置的活跃连接，则复用；否则建立新连接。
 /// 连接加入连接池，用户可以稍后从连接池创建终端。
 #[tauri::command]
@@ -331,7 +331,7 @@ pub async fn establish_connection(
     // 检查是否有可复用的连接
     if let Some(existing_id) = connection_registry.find_by_config(&config) {
         info!("Reusing existing connection: {}", existing_id);
-        
+
         let connection_info = connection_registry
             .get_info(&existing_id)
             .await

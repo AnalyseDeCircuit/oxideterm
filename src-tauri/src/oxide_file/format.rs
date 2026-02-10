@@ -23,13 +23,13 @@ pub mod kdf_flags {
     /// KDF v1: Argon2id with 256MB memory, 4 iterations, parallelism=4
     /// This is the default and current version
     pub const KDF_V1: u32 = 0x0001;
-    
+
     /// KDF v2: Reserved for future use (e.g., higher memory cost)
     pub const KDF_V2: u32 = 0x0002;
-    
+
     /// Mask to extract KDF version from flags
     pub const KDF_VERSION_MASK: u32 = 0x00FF;
-    
+
     /// Current KDF version used for new files
     pub const CURRENT_KDF: u32 = KDF_V1;
 }
@@ -54,7 +54,7 @@ impl FileHeader {
             encrypted_data_length,
         }
     }
-    
+
     /// Get the KDF version from flags
     pub fn kdf_version(&self) -> u32 {
         self.flags & kdf_flags::KDF_VERSION_MASK

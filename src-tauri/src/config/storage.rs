@@ -105,7 +105,7 @@ impl ConfigStorage {
                     Err(e) => {
                         // JSON 解析失败 - 配置文件损坏
                         tracing::warn!("Config file corrupted: {}", e);
-                        
+
                         // 创建备份
                         match self.backup().await {
                             Ok(backup_path) => {
@@ -121,7 +121,7 @@ impl ConfigStorage {
                                 );
                             }
                         }
-                        
+
                         // 返回默认配置
                         Ok(ConfigFile::default())
                     }

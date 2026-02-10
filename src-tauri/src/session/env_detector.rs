@@ -58,7 +58,7 @@ const PHASE_B_WINDOWS_CMD: &str =
 /// `os_type` special values for Windows variants:
 /// - `"Windows"` — native PowerShell/cmd
 /// - `"Windows_MinGW"` — Git Bash / MinGW environment
-/// - `"Windows_MSYS"` — MSYS2 environment 
+/// - `"Windows_MSYS"` — MSYS2 environment
 /// - `"Windows_Cygwin"` — Cygwin environment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,7 +128,10 @@ async fn detect_inner(controller: &HandleController, connection_id: &str) -> Rem
     let mut channel = match open_detect_channel(controller).await {
         Ok(ch) => ch,
         Err(e) => {
-            warn!("[EnvDetector] Failed to open channel for {}: {}", connection_id, e);
+            warn!(
+                "[EnvDetector] Failed to open channel for {}: {}",
+                connection_id, e
+            );
             return RemoteEnvInfo::unknown();
         }
     };
@@ -137,7 +140,10 @@ async fn detect_inner(controller: &HandleController, connection_id: &str) -> Rem
     let result = run_detection(&mut channel, connection_id).await;
 
     if let Err(e) = channel.close().await {
-        debug!("[EnvDetector] Channel close error (non-fatal) for {}: {}", connection_id, e);
+        debug!(
+            "[EnvDetector] Channel close error (non-fatal) for {}: {}",
+            connection_id, e
+        );
     }
 
     result
@@ -145,13 +151,14 @@ async fn detect_inner(controller: &HandleController, connection_id: &str) -> Rem
 
 async fn run_detection(channel: &mut Channel<Msg>, connection_id: &str) -> RemoteEnvInfo {
     // 2. Phase A: Platform discrimination
-    let phase_a_output = match send_and_read(channel, PHASE_A_CMD, "===END===", PHASE_A_TIMEOUT).await {
-        Ok(output) => output,
-        Err(e) => {
-            warn!("[EnvDetector] Phase A failed for {}: {}", connection_id, e);
-            return RemoteEnvInfo::unknown();
-        }
-    };
+    let phase_a_output =
+        match send_and_read(channel, PHASE_A_CMD, "===END===", PHASE_A_TIMEOUT).await {
+            Ok(output) => output,
+            Err(e) => {
+                warn!("[EnvDetector] Phase A failed for {}: {}", connection_id, e);
+                return RemoteEnvInfo::unknown();
+            }
+        };
 
     let is_windows = phase_a_output.contains("PLATFORM=windows");
     let raw_platform = extract_between(&phase_a_output, "PLATFORM=", "\n")
@@ -171,26 +178,27 @@ async fn run_detection(channel: &mut Channel<Msg>, connection_id: &str) -> Remot
         PHASE_B_UNIX_CMD
     };
 
-    let phase_b_output = match send_and_read(channel, phase_b_cmd, "===END===", PHASE_B_TIMEOUT).await {
-        Ok(output) => output,
-        Err(e) => {
-            warn!("[EnvDetector] Phase B failed for {}: {}", connection_id, e);
-            // We at least know the platform from Phase A
-            let os_type = if is_windows {
-                "Windows".to_string()
-            } else {
-                classify_unix_os(&raw_platform)
-            };
-            return RemoteEnvInfo {
-                os_type,
-                os_version: None,
-                kernel: None,
-                arch: None,
-                shell: None,
-                detected_at: Utc::now().timestamp(),
-            };
-        }
-    };
+    let phase_b_output =
+        match send_and_read(channel, phase_b_cmd, "===END===", PHASE_B_TIMEOUT).await {
+            Ok(output) => output,
+            Err(e) => {
+                warn!("[EnvDetector] Phase B failed for {}: {}", connection_id, e);
+                // We at least know the platform from Phase A
+                let os_type = if is_windows {
+                    "Windows".to_string()
+                } else {
+                    classify_unix_os(&raw_platform)
+                };
+                return RemoteEnvInfo {
+                    os_type,
+                    os_version: None,
+                    kernel: None,
+                    arch: None,
+                    shell: None,
+                    detected_at: Utc::now().timestamp(),
+                };
+            }
+        };
 
     // 4. Parse Phase B output
     if is_windows {
@@ -201,7 +209,7 @@ async fn run_detection(channel: &mut Channel<Msg>, connection_id: &str) -> Remot
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Channel Management  
+// Channel Management
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Open a temporary shell channel with minimal initialization.
@@ -340,8 +348,7 @@ fn parse_unix_env(output: &str, raw_platform: &str) -> RemoteEnvInfo {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    let distro_block = extract_section(output, "===DISTRO===", "===END===")
-        .unwrap_or_default();
+    let distro_block = extract_section(output, "===DISTRO===", "===END===").unwrap_or_default();
 
     // Extract PRETTY_NAME from /etc/os-release
     let os_version = extract_os_release_field(&distro_block, "PRETTY_NAME")
@@ -408,7 +415,10 @@ fn extract_section(text: &str, start_marker: &str, end_marker: &str) -> Option<S
 fn extract_between(text: &str, prefix: &str, delimiter: &str) -> Option<String> {
     let start = text.find(prefix)?;
     let after = start + prefix.len();
-    let end = text[after..].find(delimiter).map(|i| after + i).unwrap_or(text.len());
+    let end = text[after..]
+        .find(delimiter)
+        .map(|i| after + i)
+        .unwrap_or(text.len());
     Some(text[after..end].to_string())
 }
 
@@ -550,8 +560,14 @@ ID=ubuntu"#;
     #[test]
     fn test_extract_section() {
         let text = "===A===hello===B===world===C===";
-        assert_eq!(extract_section(text, "===A===", "===B==="), Some("hello".to_string()));
-        assert_eq!(extract_section(text, "===B===", "===C==="), Some("world".to_string()));
+        assert_eq!(
+            extract_section(text, "===A===", "===B==="),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            extract_section(text, "===B===", "===C==="),
+            Some("world".to_string())
+        );
         assert_eq!(extract_section(text, "===X===", "===Y==="), None);
     }
 

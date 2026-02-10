@@ -14,7 +14,7 @@ use super::format::{
 
 /// KDF parameters for different versions
 struct KdfParams {
-    memory_cost: u32,  // in KB
+    memory_cost: u32, // in KB
     iterations: u32,
     parallelism: u32,
 }
@@ -27,7 +27,7 @@ impl KdfParams {
                 // v1 (default): 256MB, 4 iterations, parallelism=4
                 // Also handle legacy files with flags=0
                 Ok(KdfParams {
-                    memory_cost: 262144,  // 256 MB
+                    memory_cost: 262144, // 256 MB
                     iterations: 4,
                     parallelism: 4,
                 })
@@ -35,7 +35,7 @@ impl KdfParams {
             kdf_flags::KDF_V2 => {
                 // v2 (future): 512MB, 6 iterations, parallelism=4
                 Ok(KdfParams {
-                    memory_cost: 524288,  // 512 MB
+                    memory_cost: 524288, // 512 MB
                     iterations: 6,
                     parallelism: 4,
                 })
@@ -148,8 +148,7 @@ pub fn decrypt_oxide_file(
         .map_err(|_| OxideFileError::DecryptionFailed)?;
 
     // 5. Deserialize payload with MessagePack
-    let payload: EncryptedPayload =
-        rmp_serde::from_slice(&plaintext)?;
+    let payload: EncryptedPayload = rmp_serde::from_slice(&plaintext)?;
 
     // 6. Verify internal checksum
     verify_checksum(&payload)?;

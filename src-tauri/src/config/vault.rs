@@ -50,7 +50,7 @@ fn get_machine_fingerprint() -> String {
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown-host".to_string());
     let username = whoami::username();
-    
+
     // Combine hostname and username for a unique machine identifier
     format!("oxideterm-vault-{}-{}", hostname, username)
 }
@@ -60,7 +60,7 @@ fn get_machine_fingerprint() -> String {
 fn derive_xor_key(fingerprint: &str, length: usize) -> Vec<u8> {
     let fp_bytes = fingerprint.as_bytes();
     let mut key = Vec::with_capacity(length);
-    
+
     // Create a longer key by hashing the fingerprint multiple times
     let mut hash_input = fp_bytes.to_vec();
     while key.len() < length {
@@ -79,7 +79,7 @@ fn derive_xor_key(fingerprint: &str, length: usize) -> Vec<u8> {
             hash_input.push(first.wrapping_add(1));
         }
     }
-    
+
     key
 }
 
@@ -102,9 +102,9 @@ impl AiVault {
     pub fn new(app_data_dir: PathBuf) -> Self {
         let vault_path = app_data_dir.join(VAULT_FILENAME);
         let fingerprint = get_machine_fingerprint();
-        
+
         tracing::debug!("AiVault initialized: path={:?}", vault_path);
-        
+
         Self {
             vault_path,
             fingerprint,
@@ -119,31 +119,31 @@ impl AiVault {
     /// Save a key to the vault
     pub fn save(&self, api_key: &str) -> Result<(), VaultError> {
         tracing::info!("Saving API key to vault (length: {})", api_key.len());
-        
+
         // Ensure parent directory exists
         if let Some(parent) = self.vault_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         let plaintext = api_key.as_bytes();
         let xor_key = derive_xor_key(&self.fingerprint, plaintext.len());
         let encrypted = xor_cipher(plaintext, &xor_key);
-        
+
         // Build vault file: MAGIC + length (4 bytes) + encrypted data
         let mut file_data = Vec::with_capacity(VAULT_MAGIC.len() + 4 + encrypted.len());
         file_data.extend_from_slice(VAULT_MAGIC);
         file_data.extend_from_slice(&(encrypted.len() as u32).to_le_bytes());
         file_data.extend_from_slice(&encrypted);
-        
+
         // Write atomically: write to temp file then rename
         let temp_path = self.vault_path.with_extension("tmp");
         let mut file = fs::File::create(&temp_path)?;
         file.write_all(&file_data)?;
         file.sync_all()?;
         drop(file);
-        
+
         fs::rename(&temp_path, &self.vault_path)?;
-        
+
         tracing::info!("API key saved to vault successfully");
         Ok(())
     }
@@ -151,46 +151,46 @@ impl AiVault {
     /// Load a key from the vault
     pub fn load(&self) -> Result<String, VaultError> {
         tracing::info!("Loading API key from vault");
-        
+
         if !self.vault_path.exists() {
             tracing::debug!("Vault file not found");
             return Err(VaultError::NotFound);
         }
-        
+
         let mut file = fs::File::open(&self.vault_path)?;
         let mut file_data = Vec::new();
         file.read_to_end(&mut file_data)?;
-        
+
         // Verify magic header
         if file_data.len() < VAULT_MAGIC.len() + 4 {
             tracing::error!("Vault file too short");
             return Err(VaultError::InvalidFormat);
         }
-        
+
         if &file_data[..VAULT_MAGIC.len()] != VAULT_MAGIC {
             tracing::error!("Invalid vault magic header");
             return Err(VaultError::InvalidFormat);
         }
-        
+
         // Read length
         let len_bytes: [u8; 4] = file_data[VAULT_MAGIC.len()..VAULT_MAGIC.len() + 4]
             .try_into()
             .map_err(|_| VaultError::InvalidFormat)?;
         let data_len = u32::from_le_bytes(len_bytes) as usize;
-        
+
         // Read encrypted data
         let data_start = VAULT_MAGIC.len() + 4;
         if file_data.len() < data_start + data_len {
             tracing::error!("Vault file data truncated");
             return Err(VaultError::InvalidFormat);
         }
-        
+
         let encrypted = &file_data[data_start..data_start + data_len];
         let xor_key = derive_xor_key(&self.fingerprint, encrypted.len());
         let decrypted = xor_cipher(encrypted, &xor_key);
-        
+
         let api_key = String::from_utf8(decrypted)?;
-        
+
         tracing::info!("API key loaded from vault (length: {})", api_key.len());
         Ok(api_key)
     }
@@ -253,7 +253,11 @@ impl AiProviderVault {
 
     /// Save a key for a specific provider
     pub fn save(&self, provider_id: &str, api_key: &str) -> Result<(), VaultError> {
-        tracing::info!("Saving API key for provider {} (length: {})", provider_id, api_key.len());
+        tracing::info!(
+            "Saving API key for provider {} (length: {})",
+            provider_id,
+            api_key.len()
+        );
 
         // Ensure keys directory exists
         fs::create_dir_all(&self.keys_dir)?;
@@ -335,7 +339,11 @@ impl AiProviderVault {
 
         let api_key = String::from_utf8(decrypted)?;
 
-        tracing::debug!("API key loaded for provider {} (length: {})", provider_id, api_key.len());
+        tracing::debug!(
+            "API key loaded for provider {} (length: {})",
+            provider_id,
+            api_key.len()
+        );
         Ok(api_key)
     }
 
@@ -385,10 +393,10 @@ mod tests {
     fn test_xor_roundtrip() {
         let plaintext = b"test-api-key-12345";
         let key = derive_xor_key("test-fingerprint", plaintext.len());
-        
+
         let encrypted = xor_cipher(plaintext, &key);
         assert_ne!(&encrypted, plaintext);
-        
+
         let decrypted = xor_cipher(&encrypted, &key);
         assert_eq!(&decrypted, plaintext);
     }
@@ -397,12 +405,12 @@ mod tests {
     fn test_vault_save_load() {
         let temp_dir = TempDir::new().unwrap();
         let vault = AiVault::new(temp_dir.path().to_path_buf());
-        
+
         let api_key = "sk-test-key-1234567890";
         vault.save(api_key).unwrap();
-        
+
         assert!(vault.exists());
-        
+
         let loaded = vault.load().unwrap();
         assert_eq!(loaded, api_key);
     }
@@ -411,10 +419,10 @@ mod tests {
     fn test_vault_delete() {
         let temp_dir = TempDir::new().unwrap();
         let vault = AiVault::new(temp_dir.path().to_path_buf());
-        
+
         vault.save("test-key").unwrap();
         assert!(vault.exists());
-        
+
         vault.delete().unwrap();
         assert!(!vault.exists());
     }
@@ -423,7 +431,7 @@ mod tests {
     fn test_vault_not_found() {
         let temp_dir = TempDir::new().unwrap();
         let vault = AiVault::new(temp_dir.path().to_path_buf());
-        
+
         let result = vault.load();
         assert!(matches!(result, Err(VaultError::NotFound)));
     }

@@ -12,8 +12,7 @@ use tauri::State;
 use tracing::{error, info, warn};
 
 use crate::commands::forwarding::{
-    ForwardResponse, ForwardRuleDto, ForwardStatsDto,
-    ForwardingRegistry, PersistedForwardDto,
+    ForwardResponse, ForwardRuleDto, ForwardStatsDto, ForwardingRegistry, PersistedForwardDto,
 };
 use crate::forwarding::{ForwardRule, ForwardRuleUpdate, ForwardStatus, ForwardType};
 use crate::router::{NodeRouter, RouteError};
@@ -24,9 +23,9 @@ async fn resolve_terminal_session_id(
     node_id: &str,
 ) -> Result<String, RouteError> {
     let resolved = router.resolve_connection(node_id).await?;
-    resolved
-        .terminal_session_id
-        .ok_or_else(|| RouteError::NotConnected(format!("Node {} has no terminal session", node_id)))
+    resolved.terminal_session_id.ok_or_else(|| {
+        RouteError::NotConnected(format!("Node {} has no terminal session", node_id))
+    })
 }
 
 // ========================================================================
@@ -91,9 +90,15 @@ pub async fn node_create_forward(
     // Health check for non-dynamic forwards
     let do_check = check_health.unwrap_or(true);
     if do_check && fwd_type != ForwardType::Dynamic {
-        info!("Checking port availability: {}:{}", target_host, target_port);
+        info!(
+            "Checking port availability: {}:{}",
+            target_host, target_port
+        );
 
-        match mgr.check_port_available(&target_host, target_port, 3000).await {
+        match mgr
+            .check_port_available(&target_host, target_port, 3000)
+            .await
+        {
             Ok(true) => {
                 info!("Port {}:{} is available", target_host, target_port);
             }
@@ -145,7 +150,10 @@ pub async fn node_create_forward(
                 .add_forward(&session_id, forward_id)
                 .await
             {
-                warn!("Failed to update forward state in ConnectionRegistry: {}", e);
+                warn!(
+                    "Failed to update forward state in ConnectionRegistry: {}",
+                    e
+                );
             }
 
             Ok(ForwardResponse {
@@ -306,10 +314,7 @@ pub async fn node_get_forward_stats(
         RouteError::NotConnected(format!("No forwarding manager for node {}", node_id))
     })?;
 
-    Ok(mgr
-        .get_forward_stats(&forward_id)
-        .await
-        .map(|s| s.into()))
+    Ok(mgr.get_forward_stats(&forward_id).await.map(|s| s.into()))
 }
 
 /// 停止节点的所有转发

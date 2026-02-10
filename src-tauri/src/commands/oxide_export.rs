@@ -57,9 +57,9 @@ fn validate_password(password: &str) -> Result<(), String> {
 fn read_and_embed_key(path: &str) -> Result<Option<String>, String> {
     use std::fs;
     use std::path::Path;
-    
+
     let path = Path::new(path);
-    
+
     // Expand ~ to home directory
     let expanded_path = if path.starts_with("~") {
         if let Some(home) = dirs::home_dir() {
@@ -70,25 +70,24 @@ fn read_and_embed_key(path: &str) -> Result<Option<String>, String> {
     } else {
         path.to_path_buf()
     };
-    
+
     // Check if file exists and is readable
     if !expanded_path.exists() {
         // File doesn't exist on this machine - skip embedding but don't fail
         // This allows exporting connections even if key file is missing
         return Ok(None);
     }
-    
+
     // Read file content (limit to 1MB to prevent memory issues)
-    let metadata = fs::metadata(&expanded_path)
-        .map_err(|e| format!("Cannot read file metadata: {}", e))?;
-    
+    let metadata =
+        fs::metadata(&expanded_path).map_err(|e| format!("Cannot read file metadata: {}", e))?;
+
     if metadata.len() > 1_048_576 {
         return Err("Key file exceeds 1MB limit".to_string());
     }
-    
-    let content = fs::read(&expanded_path)
-        .map_err(|e| format!("Cannot read file: {}", e))?;
-    
+
+    let content = fs::read(&expanded_path).map_err(|e| format!("Cannot read file: {}", e))?;
+
     // Encode as base64
     Ok(Some(BASE64.encode(&content)))
 }
@@ -97,9 +96,9 @@ fn read_and_embed_key(path: &str) -> Result<Option<String>, String> {
 fn check_key_file_exists(path: &str) -> Option<u64> {
     use std::fs;
     use std::path::Path;
-    
+
     let path_obj = Path::new(path);
-    
+
     // Expand ~ to home directory
     let expanded_path = if path_obj.starts_with("~") {
         if let Some(home) = dirs::home_dir() {
@@ -110,7 +109,7 @@ fn check_key_file_exists(path: &str) -> Option<u64> {
     } else {
         path_obj.to_path_buf()
     };
-    
+
     // Check if file exists and return its size
     fs::metadata(&expanded_path).ok().map(|m| m.len())
 }
@@ -122,23 +121,26 @@ pub async fn preflight_export(
     embed_keys: Option<bool>,
     config_state: State<'_, Arc<ConfigState>>,
 ) -> Result<ExportPreflightResult, String> {
-    info!("Running pre-flight check for {} connections", connection_ids.len());
-    
+    info!(
+        "Running pre-flight check for {} connections",
+        connection_ids.len()
+    );
+
     let config = config_state.get_config_snapshot();
     let should_embed_keys = embed_keys.unwrap_or(false);
-    
+
     let mut missing_keys: Vec<(String, String)> = Vec::new();
     let mut connections_with_keys = 0;
     let mut connections_with_passwords = 0;
     let mut connections_with_agent = 0;
     let mut total_key_bytes: u64 = 0;
-    
+
     for id in &connection_ids {
         let saved_conn = match config.get_connection(id) {
             Some(c) => c,
             None => continue,
         };
-        
+
         // Check main connection auth
         match &saved_conn.auth {
             SavedAuth::Password { .. } => {
@@ -154,7 +156,11 @@ pub async fn preflight_export(
                     }
                 }
             }
-            SavedAuth::Certificate { key_path, cert_path, .. } => {
+            SavedAuth::Certificate {
+                key_path,
+                cert_path,
+                ..
+            } => {
                 connections_with_keys += 1;
                 if should_embed_keys {
                     if let Some(size) = check_key_file_exists(key_path) {
@@ -173,7 +179,7 @@ pub async fn preflight_export(
                 connections_with_agent += 1;
             }
         }
-        
+
         // Check proxy chain auth
         for hop in &saved_conn.proxy_chain {
             match &hop.auth {
@@ -185,21 +191,28 @@ pub async fn preflight_export(
                         if let Some(size) = check_key_file_exists(key_path) {
                             total_key_bytes += size;
                         } else {
-                            missing_keys.push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
+                            missing_keys
+                                .push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
                         }
                     }
                 }
-                SavedAuth::Certificate { key_path, cert_path, .. } => {
+                SavedAuth::Certificate {
+                    key_path,
+                    cert_path,
+                    ..
+                } => {
                     if should_embed_keys {
                         if let Some(size) = check_key_file_exists(key_path) {
                             total_key_bytes += size;
                         } else {
-                            missing_keys.push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
+                            missing_keys
+                                .push((format!("{} (proxy)", saved_conn.name), key_path.clone()));
                         }
                         if let Some(size) = check_key_file_exists(cert_path) {
                             total_key_bytes += size;
                         } else {
-                            missing_keys.push((format!("{} (proxy)", saved_conn.name), cert_path.clone()));
+                            missing_keys
+                                .push((format!("{} (proxy)", saved_conn.name), cert_path.clone()));
                         }
                     }
                 }
@@ -207,7 +220,7 @@ pub async fn preflight_export(
             }
         }
     }
-    
+
     Ok(ExportPreflightResult {
         total_connections: connection_ids.len(),
         missing_keys,
@@ -273,16 +286,15 @@ pub async fn export_to_oxide(
                         } else {
                             None
                         };
-                    
+
                     // Optionally embed the private key content
                     let embedded_key = if should_embed_keys {
-                        read_and_embed_key(key_path).map_err(|e| {
-                            format!("Failed to embed key for {}: {}", context, e)
-                        })?
+                        read_and_embed_key(key_path)
+                            .map_err(|e| format!("Failed to embed key for {}: {}", context, e))?
                     } else {
                         None
                     };
-                    
+
                     Ok(EncryptedAuth::Key {
                         key_path: key_path.clone(),
                         passphrase,
@@ -307,7 +319,7 @@ pub async fn export_to_oxide(
                         } else {
                             None
                         };
-                    
+
                     // Optionally embed key and cert content
                     let (embedded_key, embedded_cert) = if should_embed_keys {
                         (
@@ -321,7 +333,7 @@ pub async fn export_to_oxide(
                     } else {
                         (None, None)
                     };
-                    
+
                     Ok(EncryptedAuth::Certificate {
                         key_path: key_path.clone(),
                         cert_path: cert_path.clone(),

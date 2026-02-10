@@ -73,7 +73,9 @@ impl ProxyHop {
             host: host.into(),
             port: 22,
             username: username.into(),
-            auth: AuthMethod::Password { password: password.into() },
+            auth: AuthMethod::Password {
+                password: password.into(),
+            },
         }
     }
 
@@ -246,7 +248,10 @@ async fn direct_connect(
             // Expand ~ in paths before loading (russh::keys doesn't handle tilde)
             let expanded_key_path = expand_tilde(key_path);
             let expanded_cert_path = expand_tilde(cert_path);
-            info!("Authenticating to jump host with certificate: {}", expanded_cert_path);
+            info!(
+                "Authenticating to jump host with certificate: {}",
+                expanded_cert_path
+            );
             let key = russh::keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
@@ -261,7 +266,9 @@ async fn direct_connect(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&mut handle, hop.username.clone()).await?;
+            agent
+                .authenticate(&mut handle, hop.username.clone())
+                .await?;
             client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {
@@ -375,7 +382,10 @@ async fn connect_via_stream(
             // Expand ~ in paths before loading (russh::keys doesn't handle tilde)
             let expanded_key_path = expand_tilde(key_path);
             let expanded_cert_path = expand_tilde(cert_path);
-            info!("Authenticating via stream with certificate: {}", expanded_cert_path);
+            info!(
+                "Authenticating via stream with certificate: {}",
+                expanded_cert_path
+            );
             let key = russh::keys::load_secret_key(&expanded_key_path, passphrase.as_deref())
                 .map_err(|e| SshError::KeyError(e.to_string()))?;
 
@@ -390,7 +400,9 @@ async fn connect_via_stream(
         AuthMethod::Agent => {
             // Connect to SSH Agent and authenticate
             let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent.authenticate(&mut handle, hop.username.clone()).await?;
+            agent
+                .authenticate(&mut handle, hop.username.clone())
+                .await?;
             client::AuthResult::Success
         }
         AuthMethod::KeyboardInteractive => {

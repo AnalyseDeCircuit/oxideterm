@@ -4,7 +4,7 @@
 //! and managing pseudo-terminals across platforms.
 //!
 //! ## Windows Terminal Support
-//! 
+//!
 //! On Windows, this module provides enhanced support for:
 //! - **UTF-8 encoding**: Automatic initialization of console code page and PowerShell encoding
 //! - **Oh My Posh**: Automatic initialization when enabled in settings
@@ -14,9 +14,9 @@
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex as StdMutex};
 #[cfg(unix)]
 use std::path::Path;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::local::shell::{get_shell_args, ShellInfo};
 
@@ -65,15 +65,15 @@ pub struct PtyConfig {
 // ============================================================================
 
 /// Generate PowerShell initialization script for UTF-8 and Oh My Posh support.
-/// 
+///
 /// This function generates a PowerShell command string that:
 /// 1. Sets console encoding to UTF-8 (fixes CJK, emoji, Nerd Font display)
 /// 2. Initializes Oh My Posh if enabled (loads prompt theme)
-/// 
+///
 /// The script is injected via `-Command` parameter when spawning PowerShell.
-/// 
+///
 /// # Why this is necessary
-/// 
+///
 /// - `CHCP=65001` as environment variable doesn't work - must run as command
 /// - `[Console]::OutputEncoding` must be set in PowerShell context
 /// - Oh My Posh requires explicit `oh-my-posh init pwsh | Invoke-Expression`
@@ -83,9 +83,9 @@ fn generate_powershell_init_script(config: &PtyConfig) -> Option<String> {
     if !matches!(config.shell.id.as_str(), "powershell" | "pwsh") {
         return None;
     }
-    
+
     let mut parts: Vec<String> = Vec::new();
-    
+
     // 1. UTF-8 encoding initialization
     // This fixes display of:
     // - CJK characters (中文, 日本語, 한국어)
@@ -93,9 +93,10 @@ fn generate_powershell_init_script(config: &PtyConfig) -> Option<String> {
     // - Nerd Font icons (, , )
     parts.push(
         "[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-         $OutputEncoding = [System.Text.Encoding]::UTF8".to_string()
+         $OutputEncoding = [System.Text.Encoding]::UTF8"
+            .to_string(),
     );
-    
+
     // 2. Oh My Posh initialization (if enabled)
     if config.oh_my_posh_enabled {
         let omp_init = if let Some(theme) = &config.oh_my_posh_theme {
@@ -104,24 +105,26 @@ fn generate_powershell_init_script(config: &PtyConfig) -> Option<String> {
                 format!(
                     "if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {{ \
                      oh-my-posh init pwsh --config '{}' | Invoke-Expression }}",
-                    theme.replace('\'', "''")  // Escape single quotes
+                    theme.replace('\'', "''") // Escape single quotes
                 )
             } else {
                 // Default theme
                 "if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) { \
-                 oh-my-posh init pwsh | Invoke-Expression }".to_string()
+                 oh-my-posh init pwsh | Invoke-Expression }"
+                    .to_string()
             }
         } else {
             // Default theme
             "if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) { \
-             oh-my-posh init pwsh | Invoke-Expression }".to_string()
+             oh-my-posh init pwsh | Invoke-Expression }"
+                .to_string()
         };
         parts.push(omp_init);
     }
-    
+
     // 3. Clear screen for clean start (hide init commands output)
     parts.push("Clear-Host".to_string());
-    
+
     if parts.is_empty() {
         None
     } else {
@@ -145,7 +148,7 @@ impl Default for PtyConfig {
 }
 
 /// Thread-safe PTY handle
-/// 
+///
 /// Since MasterPty is not Sync, we wrap it in a standard Mutex
 /// and handle all operations through this wrapper.
 pub struct PtyHandle {
@@ -185,26 +188,28 @@ impl PtyHandle {
         let using_powershell_init = {
             if let Some(init_script) = generate_powershell_init_script(&config) {
                 tracing::info!("Injecting PowerShell init script for UTF-8 and OMP support");
-                
+
                 // Get shell args without -Command (we'll add our own)
                 let mut base_args = get_shell_args(&config.shell.id, config.load_profile);
-                
+
                 // Add our init script via -Command
                 // Note: -Command must come last, and we chain with user's profile if loaded
                 base_args.push("-Command".to_string());
-                
+
                 // Build the full init command
-                let cwd_path = config.cwd.as_ref()
+                let cwd_path = config
+                    .cwd
+                    .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| "$HOME".to_string());
-                
+
                 let full_command = format!(
                     "{}; Set-Location -LiteralPath '{}'",
                     init_script,
                     cwd_path.replace('\'', "''")
                 );
                 base_args.push(full_command);
-                
+
                 for arg in &base_args {
                     cmd.arg(arg);
                 }
@@ -213,10 +218,10 @@ impl PtyHandle {
                 false
             }
         };
-        
+
         #[cfg(not(target_os = "windows"))]
         let using_powershell_init = false;
-        
+
         // Add shell arguments for non-PowerShell shells (or Windows non-PowerShell)
         if !using_powershell_init {
             let shell_args = if config.shell.id.starts_with("wsl") {
@@ -226,7 +231,7 @@ impl PtyHandle {
                 // Use the dynamic args function for profile control
                 get_shell_args(&config.shell.id, config.load_profile)
             };
-            
+
             for arg in &shell_args {
                 cmd.arg(arg);
             }
@@ -258,39 +263,35 @@ impl PtyHandle {
         {
             // Enable UTF-8 output for Python and other tools
             cmd.env("PYTHONIOENCODING", "utf-8");
-            
+
             // Identify terminal program to all shells
             cmd.env("TERM_PROGRAM", "OxideTerm");
             cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-            
+
             // WSL-specific: enable UTF-8 mode and pass environment variables
             if config.shell.id.starts_with("wsl") {
                 cmd.env("WSL_UTF8", "1");
-                
+
                 // WSLENV controls which env vars are passed to WSL
                 // Format: VAR1:VAR2/p  (/p = translate Windows path to WSL path)
-                let mut wslenv_vars = vec![
-                    "TERM",
-                    "COLORTERM", 
-                    "TERM_PROGRAM",
-                    "TERM_PROGRAM_VERSION",
-                ];
-                
+                let mut wslenv_vars =
+                    vec!["TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"];
+
                 // Add POSH_THEME with path translation if Oh My Posh is enabled
                 if config.oh_my_posh_enabled {
                     if let Some(theme_path) = &config.oh_my_posh_theme {
                         if !theme_path.is_empty() {
                             cmd.env("POSH_THEME", theme_path);
-                            wslenv_vars.push("POSH_THEME/p");  // /p = path translation
+                            wslenv_vars.push("POSH_THEME/p"); // /p = path translation
                         }
                     }
                 }
-                
+
                 cmd.env("WSLENV", wslenv_vars.join(":"));
-                
+
                 tracing::debug!("WSL WSLENV set to: {}", wslenv_vars.join(":"));
             }
-            
+
             // Oh My Posh environment variables (for non-WSL shells)
             // Note: PowerShell init script handles OMP initialization via -Command
             if config.oh_my_posh_enabled && !config.shell.id.starts_with("wsl") {
@@ -330,16 +331,16 @@ impl PtyHandle {
             config.cwd,
             using_powershell_init
         );
-        
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| {
-                tracing::error!("Failed to spawn PTY shell: {}", e);
-                PtyError::SpawnFailed(e.to_string())
-            })?;
-        
-        tracing::info!("PTY shell spawned successfully, PID: {:?}", child.process_id());
+
+        let child = pair.slave.spawn_command(cmd).map_err(|e| {
+            tracing::error!("Failed to spawn PTY shell: {}", e);
+            PtyError::SpawnFailed(e.to_string())
+        })?;
+
+        tracing::info!(
+            "PTY shell spawned successfully, PID: {:?}",
+            child.process_id()
+        );
 
         // Get reader/writer handles
         let reader = pair
@@ -430,26 +431,30 @@ impl PtyHandle {
     pub fn kill_process_group(&self) -> Result<(), PtyError> {
         if let Some(pid) = self.pid() {
             tracing::debug!("Killing process group for PID {}", pid);
-            
+
             // First try to kill the process group
             // On Unix, the child process becomes a session leader and process group leader
             // So we can use the PID as the PGID
             let pgid = Pid::from_raw(pid as i32);
-            
+
             // Send SIGTERM first to allow graceful shutdown
             if let Err(e) = killpg(pgid, Signal::SIGTERM) {
                 tracing::warn!("Failed to send SIGTERM to process group {}: {}", pid, e);
             }
-            
+
             // Give processes a brief moment to handle SIGTERM
             std::thread::sleep(std::time::Duration::from_millis(50));
-            
+
             // Then send SIGKILL to ensure termination
             if let Err(e) = killpg(pgid, Signal::SIGKILL) {
                 // This might fail if the process already exited, which is fine
-                tracing::debug!("SIGKILL to process group {} (may have already exited): {}", pid, e);
+                tracing::debug!(
+                    "SIGKILL to process group {} (may have already exited): {}",
+                    pid,
+                    e
+                );
             }
-            
+
             Ok(())
         } else {
             // Fallback to regular kill
@@ -466,13 +471,13 @@ impl PtyHandle {
         // TODO: Implement proper job object handling for Windows
         if let Some(pid) = self.pid() {
             tracing::debug!("Killing process tree for PID {} (Windows)", pid);
-            
+
             // Try to use taskkill with /T flag to kill process tree
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .output();
         }
-        
+
         self.kill()
     }
 

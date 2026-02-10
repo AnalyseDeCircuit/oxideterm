@@ -300,7 +300,9 @@ impl From<&SessionEntry> for SessionInfo {
         let (auth_type, key_path) = match &entry.config.auth {
             AuthMethod::Password { .. } => ("password".to_string(), None),
             AuthMethod::Key { key_path, .. } => ("key".to_string(), Some(key_path.clone())),
-            AuthMethod::Certificate { key_path, .. } => ("certificate".to_string(), Some(key_path.clone())),
+            AuthMethod::Certificate { key_path, .. } => {
+                ("certificate".to_string(), Some(key_path.clone()))
+            }
             AuthMethod::Agent => ("agent".to_string(), None),
             AuthMethod::KeyboardInteractive => ("keyboard_interactive".to_string(), None),
         };

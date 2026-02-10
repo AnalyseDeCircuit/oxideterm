@@ -94,8 +94,7 @@ fn verify_checksum(data: &[u8], expected: &str) -> Result<(), String> {
 /// Uses `enclosed_name()` for zip-slip protection.
 fn extract_plugin_zip(data: &[u8], dest: &Path) -> Result<(), String> {
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        ZipArchive::new(cursor).map_err(|e| format!("Invalid ZIP archive: {}", e))?;
+    let mut archive = ZipArchive::new(cursor).map_err(|e| format!("Invalid ZIP archive: {}", e))?;
 
     for i in 0..archive.len() {
         let mut file = archive
@@ -223,11 +222,9 @@ pub async fn install_plugin(
     // Extract ZIP (blocking I/O — run in spawn_blocking)
     let temp_dir_clone = temp_dir.clone();
     let bytes_vec = bytes.to_vec();
-    tokio::task::spawn_blocking(move || {
-        extract_plugin_zip(&bytes_vec, &temp_dir_clone)
-    })
-    .await
-    .map_err(|e| format!("Extract task failed: {}", e))??;
+    tokio::task::spawn_blocking(move || extract_plugin_zip(&bytes_vec, &temp_dir_clone))
+        .await
+        .map_err(|e| format!("Extract task failed: {}", e))??;
 
     // 5. Read and validate the extracted manifest
     let manifest_path = temp_dir.join("plugin.json");
@@ -235,8 +232,8 @@ pub async fn install_plugin(
         .await
         .map_err(|e| format!("No plugin.json in package: {}", e))?;
 
-    let manifest: PluginManifest = serde_json::from_str(&manifest_str)
-        .map_err(|e| format!("Invalid plugin.json: {}", e))?;
+    let manifest: PluginManifest =
+        serde_json::from_str(&manifest_str).map_err(|e| format!("Invalid plugin.json: {}", e))?;
 
     // 6. Validate manifest ID matches expected
     if manifest.id != expected_id {
@@ -342,11 +339,8 @@ pub async fn check_plugin_updates(
 /// Simple semver comparison: returns true if `new_ver` is newer than `old_ver`.
 /// Handles versions like "1.2.3", "1.2", "1".
 fn is_newer_version(new_ver: &str, old_ver: &str) -> bool {
-    let parse_parts = |v: &str| -> Vec<u32> {
-        v.split('.')
-            .filter_map(|s| s.parse::<u32>().ok())
-            .collect()
-    };
+    let parse_parts =
+        |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse::<u32>().ok()).collect() };
 
     let new_parts = parse_parts(new_ver);
     let old_parts = parse_parts(old_ver);

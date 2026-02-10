@@ -95,15 +95,15 @@ impl Keychain {
             Ok(secret) => {
                 tracing::info!("Keychain get success: id={}, len={}", id, secret.len());
                 Ok(secret)
-            },
+            }
             Err(keyring::Error::NoEntry) => {
                 tracing::warn!("Keychain get: no entry for id={}", id);
                 Err(KeychainError::NotFound(id.to_string()))
-            },
+            }
             Err(e) => {
                 tracing::error!("Keychain get failed: id={}, error={:?}", id, e);
                 Err(KeychainError::Keyring(e))
-            },
+            }
         }
     }
 

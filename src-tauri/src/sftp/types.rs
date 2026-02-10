@@ -79,10 +79,7 @@ pub enum PreviewContent {
         original_mime: Option<String>,
     },
     /// Base64-encoded Office document for frontend rendering
-    Office {
-        data: String,
-        mime_type: String,
-    },
+    Office { data: String, mime_type: String },
     /// Hex dump for binary files (incremental loading)
     Hex {
         /// Hex dump string
@@ -376,22 +373,22 @@ pub fn is_likely_text_content(bytes: &[u8]) -> bool {
     if bytes.is_empty() {
         return true;
     }
-    
+
     // Sample size: check first 8KB or entire file if smaller
     let sample_size = bytes.len().min(8192);
     let sample = &bytes[..sample_size];
-    
+
     // Count different character types
     let mut nul_count = 0;
     let mut control_count = 0;
     let mut high_byte_count = 0;
-    
+
     for &byte in sample {
         match byte {
             // NUL byte - strong binary indicator
             0x00 => nul_count += 1,
             // Common text control characters (tab, newline, carriage return)
-            0x09 | 0x0A | 0x0D => {},
+            0x09 | 0x0A | 0x0D => {}
             // Other control characters (0x01-0x08, 0x0B-0x0C, 0x0E-0x1F)
             0x01..=0x08 | 0x0B..=0x0C | 0x0E..=0x1F => control_count += 1,
             // DEL character
@@ -399,27 +396,27 @@ pub fn is_likely_text_content(bytes: &[u8]) -> bool {
             // High bytes (could be UTF-8 continuation or binary)
             0x80..=0xFF => high_byte_count += 1,
             // Printable ASCII (0x20-0x7E)
-            _ => {},
+            _ => {}
         }
     }
-    
+
     // If there are any NUL bytes, it's likely binary
     // (text files almost never contain NUL)
     if nul_count > 0 {
         return false;
     }
-    
+
     // If more than 10% are control characters, it's likely binary
     let control_ratio = control_count as f64 / sample_size as f64;
     if control_ratio > 0.10 {
         return false;
     }
-    
+
     // Try to validate as UTF-8 - if it's valid UTF-8, treat as text
     if std::str::from_utf8(bytes).is_ok() {
         return true;
     }
-    
+
     // If high bytes exist but not valid UTF-8, could still be text in other encoding
     // (e.g., Latin-1, GB2312, Shift-JIS)
     // Use chardetng to detect - if it finds a reasonable encoding, treat as text
@@ -433,7 +430,7 @@ pub fn is_likely_text_content(bytes: &[u8]) -> bool {
         // - Reasonable control character ratio
         return true;
     }
-    
+
     // Pure ASCII with minimal control characters - definitely text
     true
 }
@@ -484,7 +481,7 @@ pub fn generate_hex_dump(data: &[u8], offset: u64) -> String {
 }
 
 /// Detect encoding and decode bytes to UTF-8 string
-/// 
+///
 /// Uses chardetng for encoding detection and encoding_rs for conversion.
 /// Returns: (decoded_text, encoding_name, confidence, has_bom)
 pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
@@ -492,7 +489,7 @@ pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
 
     // Check for BOM first
     let (has_bom, bom_encoding) = check_bom(bytes);
-    
+
     if let Some(encoding) = bom_encoding {
         // If BOM detected, use that encoding directly
         let (cow, _, _) = encoding.decode(bytes);
@@ -502,10 +499,10 @@ pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
     // Use chardetng for detection
     let mut detector = EncodingDetector::new();
     detector.feed(bytes, true);
-    
+
     // Guess with allow_utf8 = true to prefer UTF-8 when valid
     let encoding = detector.guess(None, true);
-    
+
     // Calculate rough confidence based on encoding detection
     // chardetng doesn't expose confidence directly, so we estimate:
     // - UTF-8 that validates perfectly = high confidence
@@ -523,7 +520,7 @@ pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
 
     // Decode using the detected encoding
     let (cow, _, had_errors) = encoding.decode(bytes);
-    
+
     // Adjust confidence if there were decoding errors
     let final_confidence = if had_errors {
         confidence * 0.8
@@ -531,14 +528,19 @@ pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
         confidence
     };
 
-    (cow.into_owned(), encoding.name().to_string(), final_confidence, has_bom)
+    (
+        cow.into_owned(),
+        encoding.name().to_string(),
+        final_confidence,
+        has_bom,
+    )
 }
 
 /// Check for Byte Order Mark (BOM) at the start of bytes
 /// Returns (has_bom, Option<encoding>)
 fn check_bom(bytes: &[u8]) -> (bool, Option<&'static encoding_rs::Encoding>) {
-    use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
-    
+    use encoding_rs::{UTF_16BE, UTF_16LE, UTF_8};
+
     if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
         return (true, Some(UTF_8));
     }
@@ -554,18 +556,18 @@ fn check_bom(bytes: &[u8]) -> (bool, Option<&'static encoding_rs::Encoding>) {
 }
 
 /// Encode UTF-8 string to target encoding
-/// 
+///
 /// Returns the encoded bytes. If encoding fails, returns UTF-8 bytes as fallback.
 pub fn encode_to_encoding(text: &str, encoding_name: &str) -> Vec<u8> {
     // Find the encoding by name
-    let encoding = encoding_rs::Encoding::for_label(encoding_name.as_bytes())
-        .unwrap_or(encoding_rs::UTF_8);
-    
+    let encoding =
+        encoding_rs::Encoding::for_label(encoding_name.as_bytes()).unwrap_or(encoding_rs::UTF_8);
+
     // If target is UTF-8, just return the bytes directly
     if encoding == encoding_rs::UTF_8 {
         return text.as_bytes().to_vec();
     }
-    
+
     // Encode to target encoding
     let (cow, _, _) = encoding.encode(text);
     cow.into_owned()

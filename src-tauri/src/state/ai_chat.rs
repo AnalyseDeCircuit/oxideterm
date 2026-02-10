@@ -46,7 +46,8 @@ const CONVERSATIONS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("
 const MESSAGES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("messages");
 
 /// Table: conversation_messages (key: conv_id, value: Vec<message_id> as MessagePack)
-const CONV_MESSAGES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("conversation_messages");
+const CONV_MESSAGES_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("conversation_messages");
 
 /// Table: metadata (key: string, value: MessagePack bytes)
 const METADATA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("ai_chat_metadata");
@@ -178,7 +179,8 @@ fn compress_buffer(content: &str) -> (String, bool) {
         Ok(compressed) => {
             // Only use compression if it actually reduces size
             if compressed.len() < content.len() {
-                let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed);
+                let encoded =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed);
                 debug!(
                     "Compressed buffer: {} -> {} bytes ({:.1}% reduction)",
                     content.len(),
@@ -232,7 +234,10 @@ impl AiChatStore {
                 db
             }
             Err(e) => {
-                warn!("Failed to open AI chat database: {:?}, attempting recovery", e);
+                warn!(
+                    "Failed to open AI chat database: {:?}, attempting recovery",
+                    e
+                );
 
                 // Backup corrupted file
                 let backup_path = path.with_extension("redb.backup");
@@ -250,12 +255,13 @@ impl AiChatStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+            if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            {
                 warn!("Failed to set AI chat database permissions: {}", e);
             }
         }
 
-        let store = Self { 
+        let store = Self {
             db: Arc::new(db),
             path,
         };
@@ -292,13 +298,17 @@ impl AiChatStore {
             let mut table = write_txn.open_table(METADATA_TABLE)?;
 
             // Read existing version first
-            let existing_version = table.get("version")?.map(|v| {
-                rmp_serde::from_slice::<u32>(v.value()).ok()
-            }).flatten();
+            let existing_version = table
+                .get("version")?
+                .map(|v| rmp_serde::from_slice::<u32>(v.value()).ok())
+                .flatten();
 
             match existing_version {
                 Some(version) if version < AI_CHAT_DB_VERSION => {
-                    info!("Migrating AI chat database from v{} to v{}", version, AI_CHAT_DB_VERSION);
+                    info!(
+                        "Migrating AI chat database from v{} to v{}",
+                        version, AI_CHAT_DB_VERSION
+                    );
                     // Add migration logic here if needed
                     let version_bytes = rmp_serde::to_vec(&AI_CHAT_DB_VERSION)?;
                     table.insert("version", version_bytes.as_slice())?;
@@ -373,7 +383,7 @@ impl AiChatStore {
             // Get message IDs for this conversation
             if let Some(list_bytes) = msg_index_table.get(conversation_id)? {
                 let message_ids: Vec<String> = rmp_serde::from_slice(list_bytes.value())?;
-                
+
                 // Delete all messages
                 for msg_id in message_ids {
                     let _ = msg_table.remove(msg_id.as_str());
@@ -424,11 +434,12 @@ impl AiChatStore {
 
         // Get message IDs
         let msg_index_table = read_txn.open_table(CONV_MESSAGES_TABLE)?;
-        let message_ids: Vec<String> = if let Some(list_bytes) = msg_index_table.get(conversation_id)? {
-            rmp_serde::from_slice(list_bytes.value())?
-        } else {
-            vec![]
-        };
+        let message_ids: Vec<String> =
+            if let Some(list_bytes) = msg_index_table.get(conversation_id)? {
+                rmp_serde::from_slice(list_bytes.value())?
+            } else {
+                vec![]
+            };
 
         // Load messages
         let msg_table = read_txn.open_table(MESSAGES_TABLE)?;
@@ -437,7 +448,7 @@ impl AiChatStore {
         for msg_id in message_ids {
             if let Some(msg_bytes) = msg_table.get(msg_id.as_str())? {
                 let mut msg: PersistedMessage = rmp_serde::from_slice(msg_bytes.value())?;
-                
+
                 // Decompress buffer if needed
                 if let Some(ref mut ctx) = msg.context_snapshot {
                     if let Some(ref buffer) = ctx.buffer_tail {
@@ -445,7 +456,7 @@ impl AiChatStore {
                         ctx.buffer_compressed = false;
                     }
                 }
-                
+
                 messages.push(msg);
             }
         }
@@ -492,7 +503,7 @@ impl AiChatStore {
 
             if !message_ids.contains(&message.id) {
                 message_ids.push(message.id.clone());
-                
+
                 // Enforce message limit per conversation
                 while message_ids.len() > MAX_MESSAGES_PER_CONVERSATION {
                     if let Some(old_id) = message_ids.first().cloned() {
@@ -520,7 +531,10 @@ impl AiChatStore {
         }
 
         write_txn.commit()?;
-        debug!("Saved message {} to conversation {}", message.id, message.conversation_id);
+        debug!(
+            "Saved message {} to conversation {}",
+            message.id, message.conversation_id
+        );
         Ok(())
     }
 
@@ -549,7 +563,11 @@ impl AiChatStore {
     }
 
     /// Delete messages after a certain message (for regeneration)
-    pub fn delete_messages_after(&self, conversation_id: &str, after_message_id: &str) -> Result<(), AiChatError> {
+    pub fn delete_messages_after(
+        &self,
+        conversation_id: &str,
+        after_message_id: &str,
+    ) -> Result<(), AiChatError> {
         let write_txn = self.db.begin_write()?;
 
         {
@@ -603,7 +621,7 @@ impl AiChatStore {
     /// Enforce conversation limit by deleting oldest conversations
     fn enforce_conversation_limit(&self) -> Result<(), AiChatError> {
         let conversations = self.list_conversations()?;
-        
+
         if conversations.len() <= MAX_CONVERSATIONS {
             return Ok(());
         }
@@ -614,7 +632,10 @@ impl AiChatStore {
             self.delete_conversation(&conv.id)?;
         }
 
-        info!("Evicted {} old conversations to enforce limit", to_delete.len());
+        info!(
+            "Evicted {} old conversations to enforce limit",
+            to_delete.len()
+        );
         Ok(())
     }
 
@@ -664,7 +685,7 @@ impl AiChatStore {
     /// Get database statistics
     pub fn get_stats(&self) -> Result<AiChatStats, AiChatError> {
         let read_txn = self.db.begin_read()?;
-        
+
         let conv_table = read_txn.open_table(CONVERSATIONS_TABLE)?;
         let msg_table = read_txn.open_table(MESSAGES_TABLE)?;
 
@@ -770,7 +791,7 @@ mod tests {
         let full = store.get_conversation("conv-1").unwrap();
         assert_eq!(full.messages.len(), 1);
         assert!(full.messages[0].context_snapshot.is_some());
-        
+
         let ctx = full.messages[0].context_snapshot.as_ref().unwrap();
         assert_eq!(ctx.cwd, Some("/home/user".to_string()));
         assert_eq!(ctx.local_os, Some("macOS".to_string()));
@@ -834,8 +855,14 @@ mod tests {
 
         // Verify ALL data is cleaned up
         let stats_after = store.get_stats().unwrap();
-        assert_eq!(stats_after.conversation_count, 0, "Conversation meta should be deleted");
-        assert_eq!(stats_after.message_count, 0, "All messages should be deleted");
+        assert_eq!(
+            stats_after.conversation_count, 0,
+            "Conversation meta should be deleted"
+        );
+        assert_eq!(
+            stats_after.message_count, 0,
+            "All messages should be deleted"
+        );
 
         // Verify conversation cannot be retrieved
         let result = store.get_conversation("conv-cascade");
@@ -881,7 +908,13 @@ mod tests {
 
         // Verify complete cleanup
         let stats_after = store.get_stats().unwrap();
-        assert_eq!(stats_after.conversation_count, 0, "All conversations should be cleared");
-        assert_eq!(stats_after.message_count, 0, "All messages should be cleared");
+        assert_eq!(
+            stats_after.conversation_count, 0,
+            "All conversations should be cleared"
+        );
+        assert_eq!(
+            stats_after.message_count, 0,
+            "All messages should be cleared"
+        );
     }
 }

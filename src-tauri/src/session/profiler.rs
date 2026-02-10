@@ -73,7 +73,14 @@ struct CpuSnapshot {
 
 impl CpuSnapshot {
     fn total(&self) -> u64 {
-        self.user + self.nice + self.system + self.idle + self.iowait + self.irq + self.softirq + self.steal
+        self.user
+            + self.nice
+            + self.system
+            + self.idle
+            + self.iowait
+            + self.irq
+            + self.softirq
+            + self.steal
     }
 
     fn active(&self) -> u64 {
@@ -219,7 +226,10 @@ async fn sampling_loop(
     let mut shell_channel = match open_shell_channel(&controller).await {
         Ok(ch) => ch,
         Err(e) => {
-            warn!("Profiler failed to open shell channel for {}: {}", connection_id, e);
+            warn!(
+                "Profiler failed to open shell channel for {}: {}",
+                connection_id, e
+            );
             *state.write().unwrap() = ProfilerState::Degraded;
             // Emit degraded metrics so frontend knows
             let metrics = make_empty_metrics(MetricsSource::RttOnly);
@@ -372,8 +382,7 @@ async fn shell_sample(channel: &mut Channel<Msg>) -> Result<String, String> {
         Err(_) => Err("Sample command timed out".into()),
         Ok(Err(e)) => Err(e),
         Ok(Ok(())) => {
-            let full = String::from_utf8(stdout)
-                .map_err(|e| format!("Invalid UTF-8: {}", e))?;
+            let full = String::from_utf8(stdout).map_err(|e| format!("Invalid UTF-8: {}", e))?;
             // Extract only the portion from ===STAT=== to ===END===
             if let Some(start) = full.find("===STAT===") {
                 if let Some(end) = full.find("===END===") {
@@ -433,8 +442,10 @@ fn parse_metrics(output: &str, prev: &Option<PreviousSample>) -> ResourceMetrics
             let elapsed_ms = ts.saturating_sub(prev_s.timestamp_ms);
             if elapsed_ms > 0 {
                 let elapsed_secs = elapsed_ms as f64 / 1000.0;
-                let rx = ((curr.rx_bytes.saturating_sub(prev_s.net.rx_bytes)) as f64 / elapsed_secs) as u64;
-                let tx = ((curr.tx_bytes.saturating_sub(prev_s.net.tx_bytes)) as f64 / elapsed_secs) as u64;
+                let rx = ((curr.rx_bytes.saturating_sub(prev_s.net.rx_bytes)) as f64 / elapsed_secs)
+                    as u64;
+                let tx = ((curr.tx_bytes.saturating_sub(prev_s.net.tx_bytes)) as f64 / elapsed_secs)
+                    as u64;
                 (Some(rx), Some(tx))
             } else {
                 (None, None)

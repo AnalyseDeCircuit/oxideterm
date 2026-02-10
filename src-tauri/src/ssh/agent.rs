@@ -189,18 +189,16 @@ impl SshAgentClient {
         // 2. Try each key until one succeeds
         let mut last_error: Option<String> = None;
         for key in &keys {
-            debug!(
-                "Trying agent key: {} ({})",
-                key.algorithm(),
-                key.comment()
-            );
+            debug!("Trying agent key: {} ({})", key.algorithm(), key.comment());
 
             match handle
                 .authenticate_publickey_with(
                     &username,
                     key.clone(),
                     None,
-                    &mut AgentSigner { agent: &mut self.agent },
+                    &mut AgentSigner {
+                        agent: &mut self.agent,
+                    },
                 )
                 .await
             {

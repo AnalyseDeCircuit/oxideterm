@@ -31,12 +31,14 @@ pub use connection_registry::{
     ConnectionRegistryError, ConnectionState, SshConnectionRegistry,
 };
 pub use error::SshError;
+pub use handle_owner::{spawn_handle_owner_task, HandleCommand, HandleController};
 pub use keyboard_interactive::{
     KbiCancelRequest, KbiError, KbiPrompt, KbiPromptEvent, KbiRespondRequest, KbiResultEvent,
     EVENT_KBI_PROMPT, EVENT_KBI_RESULT,
 };
-pub use handle_owner::{spawn_handle_owner_task, HandleCommand, HandleController};
 pub use known_hosts::{get_known_hosts, HostKeyVerification, KnownHostsStore};
-pub use preflight::{check_host_key, get_host_key_cache, accept_host_key, HostKeyCache, HostKeyStatus};
+pub use preflight::{
+    accept_host_key, check_host_key, get_host_key_cache, HostKeyCache, HostKeyStatus,
+};
 pub use proxy::{connect_via_proxy, connect_via_single_hop, ProxyChain, ProxyConnection, ProxyHop};
 pub use session::{ExtendedSessionHandle, SessionCommand, SessionHandle, SshSession};

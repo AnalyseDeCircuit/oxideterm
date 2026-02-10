@@ -23,9 +23,9 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, info, warn};
 
-use crate::ssh::{HandleController, SshError};
 use super::events::ForwardEventEmitter;
 use super::manager::ForwardStatus;
+use crate::ssh::{HandleController, SshError};
 
 /// Forward statistics
 #[derive(Debug, Clone, Default)]
@@ -238,7 +238,7 @@ impl RemoteForwardHandle {
             .await;
 
         let _ = self.stop_tx.send(()).await;
-        
+
         // 等待活跃连接关闭（最多等待 5 秒）
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(5);
@@ -332,7 +332,7 @@ pub async fn start_remote_forward_with_disconnect(
             StopRequested,
             SshDisconnected,
         }
-        
+
         let exit_reason = tokio::select! {
             _ = stop_rx.recv() => {
                 info!("Remote port forward stopped by request");
@@ -344,12 +344,12 @@ pub async fn start_remote_forward_with_disconnect(
             }
         };
         running_clone.store(false, Ordering::SeqCst);
-        
+
         // Unregister from registry on exit
         REMOTE_FORWARD_REGISTRY
             .unregister(&remote_addr_clone, bound_port_clone)
             .await;
-        
+
         // Emit status event based on exit reason
         if let (Some(ref emitter), Some(ref fwd_id)) = (&event_emitter, &forward_id) {
             match exit_reason {
@@ -365,7 +365,7 @@ pub async fn start_remote_forward_with_disconnect(
                 }
             }
         }
-        
+
         info!("Remote port forward monitor task exited");
     });
 
@@ -448,12 +448,12 @@ pub async fn handle_forwarded_connection(
 const REMOTE_FORWARD_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Bridge data between local socket and SSH channel
-/// 
+///
 /// # Architecture: Lock-Free Channel I/O with Timeout Protection
-/// 
+///
 /// Uses the same message-passing pattern as local.rs to avoid lock contention.
 /// A single task owns the SSH Channel, communicating with read/write tasks via mpsc.
-/// 
+///
 /// Key improvements over the original Arc<Mutex<Channel>> approach:
 /// 1. No lock contention between concurrent read/write operations
 /// 2. Explicit timeout on all I/O operations (protects against zombie connections)
@@ -464,11 +464,11 @@ async fn bridge_forwarded_connection(
     stats: Arc<RemoteForwardStatsAtomic>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
-    
+
     // Create internal channels for lock-free data flow
     let (local_to_ssh_tx, mut local_to_ssh_rx) = mpsc::channel::<Vec<u8>>(32);
     let (ssh_to_local_tx, mut ssh_to_local_rx) = mpsc::channel::<Vec<u8>>(32);
-    
+
     // Control signals for clean shutdown
     let (close_tx, _) = broadcast::channel::<()>(1);
     let mut close_rx1 = close_tx.subscribe();
@@ -483,12 +483,12 @@ async fn bridge_forwarded_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx1.recv() => {
                     debug!("Remote forward local reader: received close signal");
                     break;
                 }
-                
+
                 result = tokio::time::timeout(REMOTE_FORWARD_IDLE_TIMEOUT, local_read.read(&mut buf)) => {
                     match result {
                         Ok(Ok(0)) => {
@@ -521,12 +521,12 @@ async fn bridge_forwarded_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 _ = close_rx2.recv() => {
                     debug!("Remote forward local writer: received close signal");
                     break;
                 }
-                
+
                 data = ssh_to_local_rx.recv() => {
                     match data {
                         Some(data) => {
@@ -550,7 +550,7 @@ async fn bridge_forwarded_connection(
         loop {
             tokio::select! {
                 biased;
-                
+
                 // Priority 1: Send data to SSH channel
                 data = local_to_ssh_rx.recv() => {
                     match data {
@@ -567,7 +567,7 @@ async fn bridge_forwarded_connection(
                         }
                     }
                 }
-                
+
                 // Priority 2: Receive data from SSH channel (with timeout)
                 result = tokio::time::timeout(REMOTE_FORWARD_IDLE_TIMEOUT, channel.wait()) => {
                     match result {
@@ -600,7 +600,7 @@ async fn bridge_forwarded_connection(
                 }
             }
         }
-        
+
         // Cleanup: close the channel
         let _ = channel.close().await;
     };
@@ -611,7 +611,7 @@ async fn bridge_forwarded_connection(
         _ = local_writer => {}
         _ = ssh_io => {}
     }
-    
+
     // Signal all tasks to close
     let _ = close_tx.send(());
 

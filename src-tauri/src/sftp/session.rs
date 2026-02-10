@@ -19,8 +19,8 @@ use super::error::SftpError;
 use super::path_utils::{is_absolute_remote_path, join_local_path, join_remote_path};
 use super::progress::{ProgressStore, StoredTransferProgress, TransferType};
 use super::retry::{transfer_with_retry, RetryConfig};
-use super::types::*;
 use super::transfer::TransferManager;
+use super::types::*;
 use crate::ssh::HandleController;
 
 /// Resume context for partial transfers
@@ -302,7 +302,11 @@ impl SftpSession {
 
         // File is closed when dropped
 
-        info!("Successfully wrote {} bytes to {}", content.len(), canonical_path);
+        info!(
+            "Successfully wrote {} bytes to {}",
+            content.len(),
+            canonical_path
+        );
         Ok(())
     }
 
@@ -348,13 +352,11 @@ impl SftpSession {
                 .preview_text(&canonical_path, &extension, &mime_type)
                 .await;
         }
-        
+
         // Priority 1.5: Dotfiles without extension are usually text configs
         // e.g., .gitignore, .env, .htaccess (these have no extension when parsed)
         if file_name.starts_with('.') && extension.is_empty() {
-            return self
-                .preview_text(&canonical_path, "conf", &mime_type)
-                .await;
+            return self.preview_text(&canonical_path, "conf", &mime_type).await;
         }
         // Priority 2: PDF files
         if is_pdf_extension(&extension) || mime_type == "application/pdf" {
@@ -435,17 +437,17 @@ impl SftpSession {
     /// Read a small sample from the beginning of a file for content detection
     async fn read_sample(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, SftpError> {
         use tokio::io::AsyncReadExt;
-        
+
         let mut file = self
             .sftp
             .open(path)
             .await
             .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-        
+
         let mut buffer = vec![0u8; max_bytes];
         let bytes_read = file.read(&mut buffer).await.map_err(SftpError::IoError)?;
         buffer.truncate(bytes_read);
-        
+
         Ok(buffer)
     }
 
@@ -643,10 +645,7 @@ impl SftpSession {
         // Encode to base64 for frontend
         let data = base64::engine::general_purpose::STANDARD.encode(&content);
 
-        Ok(PreviewContent::Office {
-            data,
-            mime_type,
-        })
+        Ok(PreviewContent::Office { data, mime_type })
     }
 
     /// Preview binary files as hex dump (incremental)
@@ -704,7 +703,6 @@ impl SftpSession {
             has_more,
         })
     }
-
 
     /// Download directory recursively with progress reporting
     pub async fn download_dir(
@@ -1064,11 +1062,14 @@ impl SftpSession {
         let canonical_path = self.resolve_path(remote_path).await?;
 
         // Register transfer control if manager provided
-        let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager.as_ref().map(|tm| tm.register(&transfer_id));
+        let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager
+            .as_ref()
+            .map(|tm| tm.register(&transfer_id));
 
         // Check if this is a resume (local file exists)
         let resume_context = if Path::new(local_path).exists() {
-            let metadata = tokio::fs::metadata(local_path).await
+            let metadata = tokio::fs::metadata(local_path)
+                .await
                 .map_err(SftpError::IoError)?;
             let offset = metadata.len();
 
@@ -1097,7 +1098,11 @@ impl SftpSession {
         // Also sanity-check that our offset doesn't exceed the current remote size.
         let resume_context = if resume_context.is_resume {
             // Try to load previously stored progress for this transfer
-            let stored = progress_store.load(&resume_context.transfer_id).await.ok().flatten();
+            let stored = progress_store
+                .load(&resume_context.transfer_id)
+                .await
+                .ok()
+                .flatten();
             let needs_restart = if let Some(ref sp) = stored {
                 if sp.total_bytes != total_bytes {
                     warn!(
@@ -1161,19 +1166,22 @@ impl SftpSession {
 
         // Execute transfer with retry
         let transferred = transfer_with_retry(
-            || self.download_inner(
-                &canonical_path,
-                local_path,
-                &resume_context,
-                total_bytes, // Pass total_bytes for progress updates
-                progress_tx.clone(),
-                control.clone(),
-            ),
+            || {
+                self.download_inner(
+                    &canonical_path,
+                    local_path,
+                    &resume_context,
+                    total_bytes, // Pass total_bytes for progress updates
+                    progress_tx.clone(),
+                    control.clone(),
+                )
+            },
             RetryConfig::default(),
             progress_store.clone(),
             stored_progress.clone(),
             control.clone(),
-        ).await?;
+        )
+        .await?;
 
         info!(
             "Download complete: {} ({} bytes)",
@@ -1250,10 +1258,13 @@ impl SftpSession {
             // Check for cancellation before each read/write cycle
             if let Some(ref ctrl) = control {
                 if ctrl.is_cancelled() {
-                    info!("Download cancelled during transfer at {} bytes", transferred);
+                    info!(
+                        "Download cancelled during transfer at {} bytes",
+                        transferred
+                    );
                     return Err(SftpError::TransferCancelled);
                 }
-                
+
                 // Wait while paused, checking for cancellation
                 while ctrl.is_paused() {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -1265,24 +1276,30 @@ impl SftpSession {
             }
 
             // Read with timeout to prevent zombie transfers on SSH disconnect
-            let bytes_read = match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_file.read(&mut buffer)).await {
-                Ok(Ok(n)) => n,
-                Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
-                Err(_) => {
-                    warn!("SFTP download read timeout after {:?} at {} bytes", SFTP_IO_TIMEOUT, transferred);
-                    return Err(SftpError::TransferError(format!(
-                        "Read timeout after {:?} - SSH connection may be dead",
-                        SFTP_IO_TIMEOUT
-                    )));
-                }
-            };
+            let bytes_read =
+                match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_file.read(&mut buffer)).await {
+                    Ok(Ok(n)) => n,
+                    Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
+                    Err(_) => {
+                        warn!(
+                            "SFTP download read timeout after {:?} at {} bytes",
+                            SFTP_IO_TIMEOUT, transferred
+                        );
+                        return Err(SftpError::TransferError(format!(
+                            "Read timeout after {:?} - SSH connection may be dead",
+                            SFTP_IO_TIMEOUT
+                        )));
+                    }
+                };
 
             if bytes_read == 0 {
                 break; // EOF
             }
 
             // Write to local file (with timeout for consistency)
-            match tokio::time::timeout(SFTP_IO_TIMEOUT, local_file.write_all(&buffer[..bytes_read])).await {
+            match tokio::time::timeout(SFTP_IO_TIMEOUT, local_file.write_all(&buffer[..bytes_read]))
+                .await
+            {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => return Err(SftpError::IoError(e)),
                 Err(_) => {
@@ -1298,18 +1315,20 @@ impl SftpSession {
 
             // Send progress update
             if let Some(ref tx) = progress_tx {
-                let _ = tx.send(TransferProgress {
-                    id: ctx.transfer_id.clone(),
-                    remote_path: remote_path.to_string(),
-                    local_path: local_path.to_string(),
-                    direction: TransferDirection::Download,
-                    state: TransferState::InProgress,
-                    total_bytes, // Use actual total_bytes
-                    transferred_bytes: transferred,
-                    speed: 0,
-                    eta_seconds: None,
-                    error: None,
-                }).await;
+                let _ = tx
+                    .send(TransferProgress {
+                        id: ctx.transfer_id.clone(),
+                        remote_path: remote_path.to_string(),
+                        local_path: local_path.to_string(),
+                        direction: TransferDirection::Download,
+                        state: TransferState::InProgress,
+                        total_bytes, // Use actual total_bytes
+                        transferred_bytes: transferred,
+                        speed: 0,
+                        eta_seconds: None,
+                        error: None,
+                    })
+                    .await;
             }
         }
 
@@ -1345,17 +1364,22 @@ impl SftpSession {
         transfer_id: Option<String>,
     ) -> Result<u64, SftpError> {
         let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let canonical_path = self.resolve_path(remote_path).await
+        let canonical_path = self
+            .resolve_path(remote_path)
+            .await
             .unwrap_or_else(|_| remote_path.to_string());
 
         // Use .oxide-part as temporary file
         let temp_path = format!("{}.oxide-part", canonical_path);
 
         // Register transfer control if manager provided
-        let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager.as_ref().map(|tm| tm.register(&transfer_id));
+        let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager
+            .as_ref()
+            .map(|tm| tm.register(&transfer_id));
 
         // Get local file size
-        let metadata = tokio::fs::metadata(local_path).await
+        let metadata = tokio::fs::metadata(local_path)
+            .await
             .map_err(SftpError::IoError)?;
         let total_bytes = metadata.len();
 
@@ -1365,7 +1389,10 @@ impl SftpSession {
         // modified and we must restart to avoid uploading a corrupt mix.
         let force_restart = {
             // Look up stored progress by listing incomplete transfers and matching paths
-            let stored_list = progress_store.list_incomplete(&self.session_id).await.unwrap_or_default();
+            let stored_list = progress_store
+                .list_incomplete(&self.session_id)
+                .await
+                .unwrap_or_default();
             let stored = stored_list.iter().find(|sp| {
                 sp.transfer_type == super::progress::TransferType::Upload
                     && sp.source_path == PathBuf::from(local_path)
@@ -1392,7 +1419,10 @@ impl SftpSession {
         let resume_context = if force_restart {
             // Source file changed — delete remote temp if it exists and start fresh
             if let Ok(_) = self.stat(&temp_path).await {
-                info!("Deleting stale remote temp file {} due to source file change", temp_path);
+                info!(
+                    "Deleting stale remote temp file {} due to source file change",
+                    temp_path
+                );
                 let _ = self.delete(&temp_path).await;
             }
             ResumeContext {
@@ -1419,7 +1449,10 @@ impl SftpSession {
                         }
                     } else {
                         // Temp file already complete, rename to final
-                        info!("Temp file already complete ({} bytes), renaming", remote_size);
+                        info!(
+                            "Temp file already complete ({} bytes), renaming",
+                            remote_size
+                        );
 
                         // Rename temp file to final
                         self.rename(&temp_path, &canonical_path).await?;
@@ -1454,19 +1487,22 @@ impl SftpSession {
 
         // Execute transfer with retry (upload to temp file)
         let result = transfer_with_retry(
-            || self.upload_inner(
-                local_path,
-                &temp_path, // Upload to temp file
-                &resume_context,
-                total_bytes,
-                progress_tx.clone(),
-                control.clone(),
-            ),
+            || {
+                self.upload_inner(
+                    local_path,
+                    &temp_path, // Upload to temp file
+                    &resume_context,
+                    total_bytes,
+                    progress_tx.clone(),
+                    control.clone(),
+                )
+            },
             RetryConfig::default(),
             progress_store.clone(),
             stored_progress.clone(),
             control.clone(),
-        ).await;
+        )
+        .await;
 
         // Handle result
         match result {
@@ -1474,27 +1510,30 @@ impl SftpSession {
                 // Final cancellation check before rename (race condition mitigation)
                 if let Some(ref ctrl) = control {
                     if ctrl.is_cancelled() {
-                        info!("Upload cancelled after completion but before rename, cleaning up {}", temp_path);
-                        
+                        info!(
+                            "Upload cancelled after completion but before rename, cleaning up {}",
+                            temp_path
+                        );
+
                         // Delete temp file
                         if let Err(e) = self.delete(&temp_path).await {
                             warn!("Failed to delete temp file {}: {}", temp_path, e);
                         }
-                        
+
                         // Remove from progress store
                         if let Err(e) = progress_store.delete(&transfer_id).await {
                             warn!("Failed to delete progress for {}: {}", transfer_id, e);
                         }
-                        
+
                         // Unregister from transfer manager
                         if let Some(tm) = transfer_manager {
                             tm.unregister(&transfer_id);
                         }
-                        
+
                         return Err(SftpError::TransferCancelled);
                     }
                 }
-                
+
                 // Transfer complete, rename temp file to final
                 info!(
                     "Upload complete, renaming {} to {}",
@@ -1538,7 +1577,10 @@ impl SftpSession {
             }
             Err(e) => {
                 // Other error - don't clean up, allow resume
-                warn!("Upload failed with error (file preserved for resume): {}", e);
+                warn!(
+                    "Upload failed with error (file preserved for resume): {}",
+                    e
+                );
                 Err(e)
             }
         }
@@ -1562,7 +1604,8 @@ impl SftpSession {
         const SFTP_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
         // Open local file
-        let mut local_file = tokio::fs::File::open(local_path).await
+        let mut local_file = tokio::fs::File::open(local_path)
+            .await
             .map_err(SftpError::IoError)?;
 
         // Seek to offset if resuming
@@ -1581,10 +1624,7 @@ impl SftpSession {
             // This allows us to continue writing from the end of the file
             info!("Opening remote file with APPEND mode for resume");
             self.sftp
-                .open_with_flags(
-                    remote_path,
-                    OpenFlags::WRITE | OpenFlags::APPEND
-                )
+                .open_with_flags(remote_path, OpenFlags::WRITE | OpenFlags::APPEND)
                 .await
                 .map_err(|e| SftpError::ProtocolError(e.to_string()))?
         } else {
@@ -1608,7 +1648,7 @@ impl SftpSession {
                     info!("Upload cancelled during transfer at {} bytes", transferred);
                     return Err(SftpError::TransferCancelled);
                 }
-                
+
                 // Wait while paused, checking for cancellation
                 while ctrl.is_paused() {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -1631,12 +1671,17 @@ impl SftpSession {
             // Write to remote file with timeout to prevent zombie transfers
             match tokio::time::timeout(
                 SFTP_IO_TIMEOUT,
-                AsyncWriteExt::write_all(&mut remote_file, &buffer[..bytes_read])
-            ).await {
+                AsyncWriteExt::write_all(&mut remote_file, &buffer[..bytes_read]),
+            )
+            .await
+            {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
                 Err(_) => {
-                    warn!("SFTP upload write timeout after {:?} at {} bytes", SFTP_IO_TIMEOUT, transferred);
+                    warn!(
+                        "SFTP upload write timeout after {:?} at {} bytes",
+                        SFTP_IO_TIMEOUT, transferred
+                    );
                     return Err(SftpError::TransferError(format!(
                         "Remote write timeout after {:?} - SSH connection may be dead",
                         SFTP_IO_TIMEOUT
@@ -1648,26 +1693,25 @@ impl SftpSession {
 
             // Send progress update
             if let Some(ref tx) = progress_tx {
-                let _ = tx.send(TransferProgress {
-                    id: ctx.transfer_id.clone(),
-                    remote_path: remote_path.to_string(),
-                    local_path: local_path.to_string(),
-                    direction: TransferDirection::Upload,
-                    state: TransferState::InProgress,
-                    total_bytes,
-                    transferred_bytes: transferred,
-                    speed: 0,
-                    eta_seconds: None,
-                    error: None,
-                }).await;
+                let _ = tx
+                    .send(TransferProgress {
+                        id: ctx.transfer_id.clone(),
+                        remote_path: remote_path.to_string(),
+                        local_path: local_path.to_string(),
+                        direction: TransferDirection::Upload,
+                        state: TransferState::InProgress,
+                        total_bytes,
+                        transferred_bytes: transferred,
+                        speed: 0,
+                        eta_seconds: None,
+                        error: None,
+                    })
+                    .await;
             }
         }
 
         // Flush remote file (with timeout)
-        match tokio::time::timeout(
-            SFTP_IO_TIMEOUT,
-            AsyncWriteExt::flush(&mut remote_file)
-        ).await {
+        match tokio::time::timeout(SFTP_IO_TIMEOUT, AsyncWriteExt::flush(&mut remote_file)).await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
             Err(_) => {

@@ -160,7 +160,10 @@ pub trait ProgressStore: Send + Sync {
     async fn load(&self, transfer_id: &str) -> Result<Option<StoredTransferProgress>, SftpError>;
 
     /// List all incomplete transfers for a session
-    async fn list_incomplete(&self, session_id: &str) -> Result<Vec<StoredTransferProgress>, SftpError>;
+    async fn list_incomplete(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredTransferProgress>, SftpError>;
 
     /// List all incomplete transfers across all sessions
     async fn list_all_incomplete(&self) -> Result<Vec<StoredTransferProgress>, SftpError>;
@@ -194,7 +197,10 @@ impl ProgressStore for DummyProgressStore {
         Ok(None)
     }
 
-    async fn list_incomplete(&self, _session_id: &str) -> Result<Vec<StoredTransferProgress>, SftpError> {
+    async fn list_incomplete(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<StoredTransferProgress>, SftpError> {
         Ok(vec![])
     }
 
@@ -231,9 +237,9 @@ impl RedbProgressStore {
             })?;
         }
 
-        write_txn.commit().map_err(|e| {
-            SftpError::StorageError(format!("Failed to commit transaction: {}", e))
-        })?;
+        write_txn
+            .commit()
+            .map_err(|e| SftpError::StorageError(format!("Failed to commit transaction: {}", e)))?;
 
         debug!("SFTP progress store initialized successfully");
 
@@ -242,8 +248,9 @@ impl RedbProgressStore {
 
     /// Get default progress store path (in ~/.oxideterm)
     pub fn default_path() -> Result<PathBuf, SftpError> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| SftpError::StorageError("Cannot determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(|| {
+            SftpError::StorageError("Cannot determine home directory".to_string())
+        })?;
 
         let config_dir = home.join(".oxideterm");
 
@@ -269,9 +276,8 @@ impl ProgressStore for RedbProgressStore {
             progress.progress_percent()
         );
 
-        let serialized = rmp_serde::to_vec_named(progress).map_err(|e| {
-            SftpError::StorageError(format!("Failed to serialize progress: {}", e))
-        })?;
+        let serialized = rmp_serde::to_vec_named(progress)
+            .map_err(|e| SftpError::StorageError(format!("Failed to serialize progress: {}", e)))?;
 
         let write_txn = self.db.begin_write().map_err(|e| {
             SftpError::StorageError(format!("Failed to begin write transaction: {}", e))
@@ -289,9 +295,9 @@ impl ProgressStore for RedbProgressStore {
                 })?;
         }
 
-        write_txn.commit().map_err(|e| {
-            SftpError::StorageError(format!("Failed to commit transaction: {}", e))
-        })?;
+        write_txn
+            .commit()
+            .map_err(|e| SftpError::StorageError(format!("Failed to commit transaction: {}", e)))?;
 
         debug!("Progress saved successfully for transfer {}", transfer_id);
 
@@ -309,9 +315,10 @@ impl ProgressStore for RedbProgressStore {
             SftpError::StorageError(format!("Failed to open progress table: {}", e))
         })?;
 
-        match table.get(transfer_id).map_err(|e| {
-            SftpError::StorageError(format!("Failed to read progress: {}", e))
-        })? {
+        match table
+            .get(transfer_id)
+            .map_err(|e| SftpError::StorageError(format!("Failed to read progress: {}", e)))?
+        {
             Some(value) => {
                 let progress: StoredTransferProgress = rmp_serde::from_slice(&value.value())
                     .map_err(|e| {
@@ -332,7 +339,10 @@ impl ProgressStore for RedbProgressStore {
         }
     }
 
-    async fn list_incomplete(&self, session_id: &str) -> Result<Vec<StoredTransferProgress>, SftpError> {
+    async fn list_incomplete(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredTransferProgress>, SftpError> {
         debug!("Listing incomplete transfers for session {}", session_id);
 
         let read_txn = self.db.begin_read().map_err(|e| {
@@ -352,8 +362,8 @@ impl ProgressStore for RedbProgressStore {
                 SftpError::StorageError(format!("Failed to read progress entry: {}", e))
             })?;
 
-            let progress: StoredTransferProgress = rmp_serde::from_slice(value.value())
-                .map_err(|e| {
+            let progress: StoredTransferProgress =
+                rmp_serde::from_slice(value.value()).map_err(|e| {
                     SftpError::StorageError(format!("Failed to deserialize progress: {}", e))
                 })?;
 
@@ -397,8 +407,8 @@ impl ProgressStore for RedbProgressStore {
                 SftpError::StorageError(format!("Failed to read progress entry: {}", e))
             })?;
 
-            let progress: StoredTransferProgress = rmp_serde::from_slice(value.value())
-                .map_err(|e| {
+            let progress: StoredTransferProgress =
+                rmp_serde::from_slice(value.value()).map_err(|e| {
                     SftpError::StorageError(format!("Failed to deserialize progress: {}", e))
                 })?;
 
@@ -429,9 +439,9 @@ impl ProgressStore for RedbProgressStore {
             })?;
         }
 
-        write_txn.commit().map_err(|e| {
-            SftpError::StorageError(format!("Failed to commit transaction: {}", e))
-        })?;
+        write_txn
+            .commit()
+            .map_err(|e| SftpError::StorageError(format!("Failed to commit transaction: {}", e)))?;
 
         debug!("Progress deleted for transfer {}", transfer_id);
 
@@ -458,8 +468,7 @@ impl ProgressStore for RedbProgressStore {
 
         debug!(
             "Deleted {} transfers for session {}",
-            transfer_count,
-            session_id
+            transfer_count, session_id
         );
 
         Ok(())

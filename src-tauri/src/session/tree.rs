@@ -342,14 +342,10 @@ impl SessionTree {
         hops: Vec<NodeConnection>,
         target: NodeConnection,
     ) -> Result<String, TreeError> {
-        self.expand_preset_chain_internal(
-            hops,
-            target,
-            |hop_index| NodeOrigin::ManualPreset {
-                saved_connection_id: saved_connection_id.to_string(),
-                hop_index,
-            },
-        )
+        self.expand_preset_chain_internal(hops, target, |hop_index| NodeOrigin::ManualPreset {
+            saved_connection_id: saved_connection_id.to_string(),
+            hop_index,
+        })
     }
 
     /// 展开自动计算路径为树节点（模式2）
@@ -754,7 +750,9 @@ mod tests {
         tree.update_state(&root_id, NodeState::Connected).unwrap();
 
         // 钻入
-        let child_id = tree.drill_down(&root_id, make_connection("server-b")).unwrap();
+        let child_id = tree
+            .drill_down(&root_id, make_connection("server-b"))
+            .unwrap();
 
         assert_eq!(tree.len(), 2);
 
@@ -810,10 +808,14 @@ mod tests {
         let root_id = tree.add_root_node(make_connection("server-a"), NodeOrigin::Direct);
         tree.update_state(&root_id, NodeState::Connected).unwrap();
 
-        let child1_id = tree.drill_down(&root_id, make_connection("server-b")).unwrap();
+        let child1_id = tree
+            .drill_down(&root_id, make_connection("server-b"))
+            .unwrap();
         tree.update_state(&child1_id, NodeState::Connected).unwrap();
 
-        let _child2_id = tree.drill_down(&root_id, make_connection("server-c")).unwrap();
+        let _child2_id = tree
+            .drill_down(&root_id, make_connection("server-c"))
+            .unwrap();
 
         let flat = tree.flatten();
         assert_eq!(flat.len(), 3);
@@ -835,10 +837,14 @@ mod tests {
         let root_id = tree.add_root_node(make_connection("server-a"), NodeOrigin::Direct);
         tree.update_state(&root_id, NodeState::Connected).unwrap();
 
-        let child_id = tree.drill_down(&root_id, make_connection("server-b")).unwrap();
+        let child_id = tree
+            .drill_down(&root_id, make_connection("server-b"))
+            .unwrap();
         tree.update_state(&child_id, NodeState::Connected).unwrap();
 
-        let grandchild_id = tree.drill_down(&child_id, make_connection("server-c")).unwrap();
+        let grandchild_id = tree
+            .drill_down(&child_id, make_connection("server-c"))
+            .unwrap();
 
         assert_eq!(tree.len(), 3);
 

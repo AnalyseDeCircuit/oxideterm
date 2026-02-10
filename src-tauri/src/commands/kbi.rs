@@ -74,7 +74,10 @@ pub async fn ssh_connect_kbi(
     // Always emit result event
     match &result {
         Ok((session_id, ws_port, ws_token)) => {
-            info!("KBI auth flow {} succeeded, session: {}", auth_flow_id, session_id);
+            info!(
+                "KBI auth flow {} succeeded, session: {}",
+                auth_flow_id, session_id
+            );
             let _ = app.emit(
                 EVENT_KBI_RESULT,
                 KbiResultEvent {
@@ -114,8 +117,7 @@ pub async fn ssh_kbi_respond(request: KbiRespondRequest) -> Result<(), String> {
         request.auth_flow_id,
         request.responses.len()
     );
-    complete_pending(&request.auth_flow_id, request.responses)
-        .map_err(|e| e.to_string())
+    complete_pending(&request.auth_flow_id, request.responses).map_err(|e| e.to_string())
 }
 
 /// Cancel a keyboard-interactive authentication
@@ -299,10 +301,8 @@ async fn run_kbi_flow(
     let ssh_session = SshSession::new(handle, cols, rows);
 
     // Request shell with PTY
-    let (session_handle, handle_controller) = ssh_session
-        .request_shell_extended()
-        .await
-        .map_err(|e| {
+    let (session_handle, handle_controller) =
+        ssh_session.request_shell_extended().await.map_err(|e| {
             registry.remove(&sid);
             format!("Failed to open shell: {}", e)
         })?;
