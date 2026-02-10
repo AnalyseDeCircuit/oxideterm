@@ -227,7 +227,7 @@ pub async fn start_session(
     dbus_cmd: &str,
 ) -> Result<(u16, Child, Option<Child>), GraphicsError> {
     let port = find_free_port().await?;
-    let display = find_free_display(distro).await;
+    let disp = find_free_display(distro).await;
 
     // 1. Start Xtigervnc
     let vnc_child = Command::new("wsl.exe")
@@ -236,7 +236,7 @@ pub async fn start_session(
             distro,
             "--",
             "Xtigervnc",
-            &display,
+            &disp,
             "-rfbport",
             &port.to_string(),
             "-SecurityTypes",
@@ -255,7 +255,7 @@ pub async fn start_session(
 
     tracing::info!(
         "WSL Graphics: Xtigervnc launched on display {} port {}",
-        display,
+        disp,
         port
     );
 
@@ -264,7 +264,7 @@ pub async fn start_session(
 
     // 3. Launch desktop session via bootstrap script
     let desktop_child =
-        start_desktop_session(distro, &display, desktop_cmd, dbus_cmd).await;
+        start_desktop_session(distro, &disp, desktop_cmd, dbus_cmd).await;
 
     Ok((port, vnc_child, desktop_child))
 }
