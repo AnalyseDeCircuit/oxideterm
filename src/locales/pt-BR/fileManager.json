@@ -26,6 +26,7 @@
     "newFolder": "Nova Pasta",
     "selectDrive": "Selecionar Unidade",
     "selectDriveDesc": "Escolha uma unidade para navegar",
+    "localDisk": "Disco local",
     "newFolderDesc": "Digite um nome para a nova pasta",
     "folderName": "Nome da pasta",
     "renameDesc": "Digite um novo nome",

@@ -1785,18 +1785,25 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
               {t('sftp.dialogs.select_drive_desc')}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-4 gap-2 py-4">
-            {availableDrives.map((drive) => (
-              <Button
-                key={drive}
-                variant="outline"
-                className="h-16 flex flex-col items-center justify-center gap-1"
-                onClick={() => handleSelectDrive(drive)}
-              >
-                <HardDrive className="h-6 w-6" />
-                <span className="text-xs font-mono">{drive}</span>
-              </Button>
-            ))}
+          <div className="grid grid-cols-3 gap-3 py-4">
+            {availableDrives.map((drive) => {
+              const letter = drive.replace(/[:\\\/]/g, '');
+              return (
+                <button
+                  key={drive}
+                  className="group relative flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-primary/50 hover:bg-accent hover:shadow-sm active:scale-[0.98]"
+                  onClick={() => handleSelectDrive(drive)}
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/20">
+                    <HardDrive className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{letter}:</div>
+                    <div className="text-xs text-muted-foreground truncate">{t('sftp.dialogs.local_disk')}</div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.8.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.9.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -259,6 +259,7 @@ Malgré des sources d’état différentes, la logique de rendu est unifiée via
 | **Redirection** | Locale (-L), distante (-R), SOCKS5 dynamique (-D), auto-restauration, rapport de décès, I/O sans verrou |
 | **IA** | Panneau inline + chat latéral, SSE streaming, insertion de code, OpenAI/Ollama/DeepSeek |
 | **Plugins** | Chargement ESM runtime, 8 espaces API, 24 UI Kit, exécution sandboxée, disjoncteur |
+| **WSL Graphics** ⚠️ | Visionneuse de bureau VNC intégrée (Expérimental), Xtigervnc + noVNC, 9 bureaux (Xfce / GNOME / KDE Plasma / MATE / …), reconnexion, feature-gated |
 | **Sécurité** | Chiffrement .oxide, trousseau système, `zeroize` mémoire, TOFU clé d'hôte |
 | **i18n** | EN, 简体中文, 繁體中文, 日本語, FR, DE, ES, IT, 한국어, PT-BR, VI |
 
@@ -308,7 +309,12 @@ Recherche de contenu à l’échelle du projet avec cache intelligent :
 - **Protocole binaire custom** : `[Type:1][Length:4][Payload:n]`, zéro surcharge JSON.
 - **Contrôle de back-pressure** : prévient le débordement mémoire lors de pics.
 - **Auto-reconnexion** : recul exponentiel, jusqu’à 5 tentatives.
-
+### 🖥️ WSL Graphics (⚠️ Expérimental)
+- **Visionneuse de bureau VNC intégrée** : exécutez des bureaux Linux GUI dans un onglet terminal — aucun client VNC externe nécessaire.
+- **Xtigervnc + noVNC** : serveur X autonome rendu via `<canvas>` in-app, avec `scaleViewport` et `resizeSession`.
+- **Détection automatique** : 9 environnements de bureau pris en charge (Xfce / GNOME / KDE Plasma / MATE / LXDE / Cinnamon / Openbox / Fluxbox / IceWM), détection automatique par présence de commande.
+- **Reconnexion** : rétablissement du pont WebSocket sans tuer la session VNC.
+- **Feature-gated** : feature Cargo `wsl-graphics`, commandes stub sur les plateformes non-Windows.
 ---
 
 ## Démarrage rapide
@@ -353,6 +359,7 @@ OxideTerm/
 │   │   ├── sftp/                   #   Navigateur fichiers double panneau
 │   │   ├── ide/                    #   Éditeur, arborescence, dialogues Git
 │   │   ├── ai/                     #   Chat inline + latéral
+│   │   ├── graphics/               #   WSL Graphics (visionneuse bureau VNC)
 │   │   ├── plugin/                 #   Gestionnaire de plugins & UI runtime
 │   │   ├── forwards/               #   Gestion des redirections de ports
 │   │   ├── connections/            #   CRUD connexions & import
@@ -370,6 +377,7 @@ OxideTerm/
 │       ├── router/                 #   NodeRouter (nodeId → ressource)
 │       ├── ssh/                    #   Client SSH (12 modules incl. Agent)
 │       ├── local/                  #   PTY local (feature-gated)
+│       ├── graphics/               #   WSL Graphics (feature-gated)
 │       ├── bridge/                 #   Pont WebSocket & Wire Protocol v1
 │       ├── session/                #   Gestion de sessions (16 modules)
 │       ├── forwarding/             #   Redirection de ports (6 modules)
@@ -405,6 +413,7 @@ OxideTerm/
 - [x] i18n — 11 langues × 18 espaces de noms
 - [x] Auth Keyboard-Interactive (2FA/MFA)
 - [x] Recherche historique profonde (30K lignes, Rust regex)
+- [x] WSL Graphics — visionneuse de bureau VNC intégrée (⚠️ Expérimental)
 
 ### 🚧 En cours
 
@@ -415,7 +424,6 @@ OxideTerm/
 
 - [ ] Transfert SSH Agent
 - [ ] Enregistrement & lecture de sessions
-- [ ] Transfert X11
 - [ ] Adaptation mobile (iOS / Android)
 
 ---

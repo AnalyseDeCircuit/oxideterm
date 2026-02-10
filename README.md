@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.8.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.9.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -261,6 +261,7 @@ Despite different state sources, rendering logic is unified through `TerminalVie
 | **Forwarding** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), auto-restore, death reporting, lock-free I/O |
 | **AI** | Inline panel + sidebar chat, streaming SSE, code insertion, OpenAI/Ollama/DeepSeek |
 | **Plugins** | Runtime ESM loading, 8 API namespaces, 24 UI Kit, sandboxed, circuit breaker |
+| **WSL Graphics** ⚠️ | Built-in VNC desktop viewer (Experimental), Xtigervnc + noVNC, 9 desktops (Xfce / GNOME / KDE Plasma / MATE / …), reconnect, feature-gated |
 | **Security** | .oxide encryption, OS keychain, `zeroize` memory, host key TOFU |
 | **i18n** | EN, 简体中文, 繁體中文, 日本語, FR, DE, ES, IT, 한국어, PT-BR, VI |
 
@@ -311,6 +312,13 @@ Project-wide file content search with intelligent caching:
 - **Backpressure control**: prevents memory overflow during burst traffic.
 - **Auto-reconnect**: exponential backoff retry, up to 5 attempts.
 
+### 🖥️ WSL Graphics (⚠️ Experimental)
+- **Built-in VNC desktop viewer**: run Linux GUI desktops inside a terminal tab — no external VNC client.
+- **Xtigervnc + noVNC**: standalone X server rendered via in-app `<canvas>`, with `scaleViewport` and `resizeSession`.
+- **Auto-detect desktop**: 9 desktop environments supported (Xfce / GNOME / KDE Plasma / MATE / LXDE / Cinnamon / Openbox / Fluxbox / IceWM), auto-detected via command presence.
+- **Reconnect**: WebSocket bridge re-establish without killing the VNC session.
+- **Feature-gated**: `wsl-graphics` Cargo feature, stub commands on non-Windows platforms.
+
 ---
 
 ## Quick Start
@@ -355,6 +363,7 @@ OxideTerm/
 │   │   ├── sftp/                   #   Dual-pane file browser
 │   │   ├── ide/                    #   Editor, file tree, Git dialogs
 │   │   ├── ai/                     #   Inline + sidebar chat
+│   │   ├── graphics/               #   WSL Graphics (VNC desktop viewer)
 │   │   ├── plugin/                 #   Plugin manager & runtime UI
 │   │   ├── forwards/               #   Port forwarding management
 │   │   ├── connections/            #   Connection CRUD & import
@@ -372,6 +381,7 @@ OxideTerm/
 │       ├── router/                 #   NodeRouter (nodeId → resource)
 │       ├── ssh/                    #   SSH client (12 modules incl. Agent)
 │       ├── local/                  #   Local PTY (feature-gated)
+│       ├── graphics/               #   WSL Graphics (feature-gated)
 │       ├── bridge/                 #   WebSocket bridge & Wire Protocol v1
 │       ├── session/                #   Session management (16 modules)
 │       ├── forwarding/             #   Port forwarding (6 modules)
@@ -407,6 +417,7 @@ OxideTerm/
 - [x] i18n — 11 languages × 18 namespaces
 - [x] Keyboard-Interactive auth (2FA/MFA)
 - [x] Deep history search (30K lines, Rust regex)
+- [x] WSL Graphics — built-in VNC desktop viewer (⚠️ Experimental)
 
 ### 🚧 In Progress
 
@@ -417,7 +428,6 @@ OxideTerm/
 
 - [ ] SSH Agent forwarding
 - [ ] Session recording & playback
-- [ ] X11 forwarding
 - [ ] Mobile adaptation (iOS / Android)
 
 ---

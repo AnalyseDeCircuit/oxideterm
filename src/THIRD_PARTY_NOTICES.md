@@ -1,7 +1,7 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-09T19:40:36.224Z
+Generated: 2026-02-10T19:38:21.378Z
 
 ## Summary
 - MIT: 214
@@ -10,6 +10,7 @@ Generated: 2026-02-09T19:40:36.224Z
 - BSD-3-Clause: 7
 - MIT OR Apache-2.0: 4
 - BSD-2-Clause: 4
+- MPL-2.0: 1
 - Apache-2.0 OR MIT: 1
 - (MPL-2.0 OR Apache-2.0): 1
 - BSD: 1
@@ -78,6 +79,7 @@ Generated: 2026-02-09T19:40:36.224Z
 | @lezer/yaml | 1.0.3 | MIT | https://github.com/lezer-parser/yaml#readme |
 | @marijn/find-cluster-break | 1.0.2 | MIT | https://github.com/marijnh/find-cluster-break#readme |
 | @mermaid-js/parser | 0.6.3 | MIT | https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme |
+| @novnc/novnc | 1.5.0 | MPL-2.0 | https://github.com/novnc/noVNC |
 | @radix-ui/number | 1.1.1 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/primitive | 1.1.3 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/react-arrow | 1.1.7 | MIT | https://radix-ui.com/primitives |
@@ -329,3 +331,6 @@ Generated: 2026-02-09T19:40:36.224Z
 - **Multi-license policy**: Where a dependency offers multiple licenses (e.g. `MIT OR Apache-2.0`), OxideTerm always exercises the most permissive option available.
 - Licenses are taken from package metadata reported by pnpm at generation time.
 - This list is intended for notice/compliance purposes and does not replace the full license texts included by upstream projects.
+- Licensing Strategy for OxideTerm
+
+OxideTerm is licensed under the PolyForm Noncommercial License 1.0.0. To ensure full compatibility and respect the terms of all upstream dependencies, OxideTerm strictly adheres to the following policy: Whenever a third-party dependency offers multiple licensing options (e.g., dual-licensing under MIT and Apache-2.0), OxideTerm elects to exercise the most permissive license available (typically MIT or ISC). > This choice is made to maintain the integrity of our non-commercial licensing model while fulfilling all attribution requirements of the open-source community.

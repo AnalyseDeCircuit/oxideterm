@@ -26,6 +26,7 @@
     "newFolder": "新規フォルダ",
     "selectDrive": "ドライブを選択",
     "selectDriveDesc": "移動先のドライブを選択してください",
+    "localDisk": "ローカル ディスク",
     "newFolderDesc": "新規フォルダの名前を入力してください",
     "folderName": "フォルダ名",
     "renameDesc": "新しい名前を入力してください",

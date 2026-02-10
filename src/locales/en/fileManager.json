@@ -26,6 +26,7 @@
     "newFolder": "New Folder",
     "selectDrive": "Select Drive",
     "selectDriveDesc": "Choose a drive to navigate to",
+    "localDisk": "Local Disk",
     "newFolderDesc": "Enter a name for the new folder",
     "folderName": "Folder name",
     "renameDesc": "Enter a new name",

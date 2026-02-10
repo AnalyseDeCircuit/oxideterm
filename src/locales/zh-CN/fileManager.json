@@ -26,6 +26,7 @@
     "newFolder": "新建文件夹",
     "selectDrive": "选择驱动器",
     "selectDriveDesc": "选择要导航到的驱动器",
+    "localDisk": "本地磁盘",
     "newFolderDesc": "输入新文件夹的名称",
     "folderName": "文件夹名称",
     "renameDesc": "输入新名称",

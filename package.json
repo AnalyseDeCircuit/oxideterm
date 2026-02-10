@@ -1,7 +1,7 @@
 {
   "name": "tauri-app",
   "private": true,
-  "version": "1.8.1",
+  "version": "1.9.0",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "license:check:backend": "cd src-tauri && node scripts/check-license-policy.cjs",
     "license:generate:backend": "cd src-tauri && node scripts/generate-third-party-notices.cjs",
+    "license:generate:frontend": "node scripts/generate-third-party-notices.cjs",
     "i18n:check": "node scripts/check-i18n.cjs",
     "i18n:check:all": "node scripts/check-i18n.cjs",
     "project:stats": "node scripts/project-stats.cjs",

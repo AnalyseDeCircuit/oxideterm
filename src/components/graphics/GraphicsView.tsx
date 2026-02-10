@@ -143,7 +143,7 @@ function Toolbar({
 }) {
   const { t } = useTranslation();
 
-  const isExperimental = sessionInfo?.desktopName === 'GNOME' || sessionInfo?.desktopName === 'KDE Plasma';
+  const isExperimental = true; // WSL Graphics is globally experimental
 
   const buttonClass =
     'px-3 py-1.5 text-xs font-medium rounded transition-colors border border-border hover:bg-accent text-foreground';
