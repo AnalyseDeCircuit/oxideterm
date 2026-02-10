@@ -1,0 +1,18 @@
+{
+  "graphics": {
+    "tab_title": "WSL 图形",
+    "select_distro": "选择 WSL 发行版",
+    "loading_distros": "正在检测 WSL 发行版...",
+    "no_distros": "未找到 WSL 发行版。请确保已安装 WSL 并至少配置了一个发行版。",
+    "starting": "正在启动 VNC 服务器...",
+    "disconnected": "连接已断开，点击重连以重试。",
+    "error": "图形错误",
+    "reconnect": "重连",
+    "fullscreen": "全屏",
+    "stop": "停止",
+    "distro_running": "运行中",
+    "distro_stopped": "已停止",
+    "no_vnc_server": "未安装 VNC 服务器。请运行: sudo apt install x11vnc",
+    "not_available": "WSL 图形转发仅在 Windows 平台且启用 wsl-graphics 特性时可用。"
+  }
+}

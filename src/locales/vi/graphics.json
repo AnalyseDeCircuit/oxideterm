@@ -1,0 +1,18 @@
+{
+  "graphics": {
+    "tab_title": "WSL Đồ họa",
+    "select_distro": "Chọn bản phân phối WSL",
+    "loading_distros": "Đang phát hiện các bản phân phối WSL...",
+    "no_distros": "Không tìm thấy bản phân phối WSL nào. Hãy đảm bảo WSL đã được cài đặt và có ít nhất một bản phân phối.",
+    "starting": "Đang khởi động máy chủ VNC...",
+    "disconnected": "Mất kết nối. Nhấn Kết nối lại để thử lại.",
+    "error": "Lỗi đồ họa",
+    "reconnect": "Kết nối lại",
+    "fullscreen": "Toàn màn hình",
+    "stop": "Dừng",
+    "distro_running": "Đang chạy",
+    "distro_stopped": "Đã dừng",
+    "no_vnc_server": "Chưa cài đặt máy chủ VNC. Chạy: sudo apt install x11vnc",
+    "not_available": "WSL Đồ họa chỉ khả dụng trên Windows khi tính năng wsl-graphics được bật."
+  }
+}

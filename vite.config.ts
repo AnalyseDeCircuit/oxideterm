@@ -48,6 +48,8 @@ export default defineConfig(async () => {
           'katex': ['katex'],
           'office': ['mammoth', 'xlsx'],
           'prism': ['prismjs'],
+          // VNC client (loaded only when Graphics tab is opened)
+          'novnc': ['@novnc/novnc'],
           // Icons (large due to plugin system requiring full icon registry)
           'lucide': ['lucide-react'],
         },

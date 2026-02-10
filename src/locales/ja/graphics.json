@@ -1,0 +1,18 @@
+{
+  "graphics": {
+    "tab_title": "WSL グラフィックス",
+    "select_distro": "WSL ディストリビューションを選択",
+    "loading_distros": "WSL ディストリビューションを検出中...",
+    "no_distros": "WSL ディストリビューションが見つかりません。WSL がインストールされ、少なくとも1つのディストリビューションが利用可能であることを確認してください。",
+    "starting": "VNC サーバーを起動中...",
+    "disconnected": "接続が切断されました。再接続をクリックしてリトライしてください。",
+    "error": "グラフィックスエラー",
+    "reconnect": "再接続",
+    "fullscreen": "全画面",
+    "stop": "停止",
+    "distro_running": "実行中",
+    "distro_stopped": "停止中",
+    "no_vnc_server": "VNC サーバーがインストールされていません。実行: sudo apt install x11vnc",
+    "not_available": "WSL グラフィックスは Windows で wsl-graphics 機能が有効な場合のみ利用できます。"
+  }
+}

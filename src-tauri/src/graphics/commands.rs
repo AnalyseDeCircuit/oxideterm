@@ -61,9 +61,15 @@ pub async fn wsl_graphics_start(
     let session_id = uuid::Uuid::new_v4().to_string();
     let state_arc: Arc<WslGraphicsState> = state.inner().clone();
     let (ws_port, ws_token, bridge_handle) =
-        bridge::start_proxy(vnc_addr, state_arc, session_id.clone())
-            .await
-            .map_err(|e| e.to_string())?;
+        match bridge::start_proxy(vnc_addr, state_arc, session_id.clone()).await {
+            Ok(result) => result,
+            Err(e) => {
+                // Kill VNC child to avoid orphan process
+                let mut child = vnc_child;
+                let _ = child.kill().await;
+                return Err(e.to_string());
+            }
+        };
     tracing::info!("WSL Graphics: WebSocket proxy on port {}", ws_port);
 
     // 4. Register session

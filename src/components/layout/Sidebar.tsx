@@ -21,6 +21,7 @@ import {
   HeartPulse,
   LayoutList,
   Puzzle,
+  Monitor,
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -660,8 +661,9 @@ export const Sidebar = () => {
   const bottomButtons: SidebarButtonDef[] = [
     { kind: 'action', key: 'local_terminal', icon: Square, titleKey: 'sidebar.actions.new_local_terminal', badge: localTerminals.size > 0 ? localTerminals.size : undefined, badgeColor: 'bg-blue-500' },
     { kind: 'tab', key: 'file_manager', icon: FolderOpen, titleKey: 'sidebar.panels.files' },
-    { kind: 'tab', key: 'settings', icon: Settings, titleKey: 'sidebar.tooltips.settings' },
+    { kind: 'tab', key: 'graphics', icon: Monitor, titleKey: 'graphics.tab_title' },
     { kind: 'tab', key: 'plugin_manager', icon: Puzzle, titleKey: 'sidebar.panels.plugins' },
+    { kind: 'tab', key: 'settings', icon: Settings, titleKey: 'sidebar.tooltips.settings' },
   ];
 
   const getButtonVariant = (def: SidebarButtonDef): 'secondary' | 'ghost' => {

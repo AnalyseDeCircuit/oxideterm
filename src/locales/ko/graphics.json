@@ -1,0 +1,18 @@
+{
+  "graphics": {
+    "tab_title": "WSL 그래픽",
+    "select_distro": "WSL 배포판 선택",
+    "loading_distros": "WSL 배포판 감지 중...",
+    "no_distros": "WSL 배포판을 찾을 수 없습니다. WSL이 설치되어 있고 배포판이 하나 이상 있는지 확인하세요.",
+    "starting": "VNC 서버 시작 중...",
+    "disconnected": "연결이 끊어졌습니다. 재연결을 클릭하세요.",
+    "error": "그래픽 오류",
+    "reconnect": "재연결",
+    "fullscreen": "전체화면",
+    "stop": "중지",
+    "distro_running": "실행 중",
+    "distro_stopped": "중지됨",
+    "no_vnc_server": "VNC 서버가 설치되지 않았습니다. 실행: sudo apt install x11vnc",
+    "not_available": "WSL 그래픽은 Windows에서 wsl-graphics 기능이 활성화된 경우에만 사용할 수 있습니다."
+  }
+}

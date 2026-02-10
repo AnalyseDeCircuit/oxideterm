@@ -1,0 +1,18 @@
+{
+  "graphics": {
+    "tab_title": "WSL Grafik",
+    "select_distro": "WSL-Distribution auswählen",
+    "loading_distros": "WSL-Distributionen werden erkannt...",
+    "no_distros": "Keine WSL-Distributionen gefunden. Stellen Sie sicher, dass WSL installiert ist und mindestens eine Distribution verfügbar ist.",
+    "starting": "VNC-Server wird gestartet...",
+    "disconnected": "Verbindung verloren. Klicken Sie auf Erneut verbinden.",
+    "error": "Grafikfehler",
+    "reconnect": "Erneut verbinden",
+    "fullscreen": "Vollbild",
+    "stop": "Stopp",
+    "distro_running": "Läuft",
+    "distro_stopped": "Gestoppt",
+    "no_vnc_server": "Kein VNC-Server installiert. Ausführen: sudo apt install x11vnc",
+    "not_available": "WSL Grafik ist nur unter Windows mit aktivierter wsl-graphics-Funktion verfügbar."
+  }
+}
