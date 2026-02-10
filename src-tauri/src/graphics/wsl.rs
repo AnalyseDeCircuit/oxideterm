@@ -188,9 +188,9 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
                 &port.to_string(),
                 "-SecurityTypes",
                 "None",
-                "-localhost",
-                "no",
-                "--I-KNOW-THIS-IS-INSECURE",
+                "-localhost=0",
+                "-ac",
+                "-AlwaysShared",
                 "-geometry",
                 "1280x720",
                 "-depth",
@@ -211,8 +211,7 @@ pub async fn start_vnc(distro: &str, vnc_binary: &str) -> Result<(u16, Child), G
                 &port.to_string(),
                 "-SecurityTypes",
                 "None",
-                "-localhost",
-                "no",
+                "-localhost=0",
                 "--I-KNOW-THIS-IS-INSECURE",
             ])
             .env_remove("WAYLAND_DISPLAY")
