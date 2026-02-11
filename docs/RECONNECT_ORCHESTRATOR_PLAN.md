@@ -1,4 +1,6 @@
-# Reconnect Orchestrator Plan (Frontend-Only)
+# Reconnect Orchestrator (Frontend-Only)
+
+> **状态**: ✅ 已完整实现（v1.6.2），当前版本 v1.9.1。下文保留原始设计文档作为架构参考。
 
 ## Summary
 Introduce a frontend-only reconnect orchestrator to replace the current debounce+retry logic in `useConnectionEvents`. The orchestrator owns reconnection state, queues per node, and runs a deterministic recovery pipeline for SSH, port forwards, SFTP transfers, and IDE state. No backend changes. Terminal recovery is handled automatically by React Key-Driven Reset and is NOT part of the pipeline.
@@ -54,7 +56,7 @@ type ReconnectJob = {
   nodeName: string;           // For toast messages
   status: ReconnectPhase;
   attempt: number;
-  maxAttempts: number;        // 3
+  maxAttempts: number;        // 5 (MAX_ATTEMPTS)
   startedAt: number;
   endedAt?: number;
   error?: string;
@@ -104,7 +106,7 @@ Core methods:
 - Debounce: 500ms window collects multiple link_down nodes, then picks shallowest root.
 - Idempotent: if `jobs.has(nodeId)` and status not terminal (`done`/`failed`/`cancelled`), skip.
 - Concurrency: 1 (reuse existing `chainLock` mechanism).
-- Retry: Only on `CHAIN_LOCK_BUSY`/`NODE_LOCK_BUSY`, max 3 attempts, 2s backoff.
+- Retry: exponential backoff, `MAX_ATTEMPTS = 5`, `BASE_RETRY_DELAY_MS = 1000`, `MAX_RETRY_DELAY_MS = 15000`, `BACKOFF_MULTIPLIER = 1.5` (± 20% jitter).
 
 ## Pipeline Details
 
@@ -245,13 +247,25 @@ Add keys to `connections.json` in all 11 locales. Do NOT create a new locale nam
 | `docs/SYSTEM_INVARIANTS.md` | **Update** | Add orchestrator invariants |
 
 ## Verification Checklist
-- [ ] Link down → job enqueued with snapshot → SSH reconnect → services restored → toast
-- [ ] Cancel mid-run → job cancelled, later phases skipped, toast
-- [ ] Multiple link_down events within 500ms → debounce to shallowest root
-- [ ] Idempotent: same nodeId enqueued twice → second is skipped
-- [ ] Suspended forwards restored on new session; user-stopped forwards NOT restored
-- [ ] SFTP incomplete transfers resume on new session using old session query
-- [ ] IDE project reopens with file tabs (content re-fetched, not from cache)
-- [ ] Terminal restored automatically via Key-Driven Reset (no orchestrator involvement)
-- [ ] `npm run i18n:check` passes with all new keys
+- [x] Link down → job enqueued with snapshot → SSH reconnect → services restored → toast
+- [x] Cancel mid-run → job cancelled, later phases skipped, toast
+- [x] Multiple link_down events within 500ms → debounce to shallowest root
+- [x] Idempotent: same nodeId enqueued twice → second is skipped
+- [x] Suspended forwards restored on new session; user-stopped forwards NOT restored
+- [x] SFTP incomplete transfers resume on new session using old session query
+- [x] IDE project reopens with file tabs (content re-fetched, not from cache)
+- [x] Terminal restored automatically via Key-Driven Reset (no orchestrator involvement)
+- [x] `pnpm i18n:check` passes with all new keys
+
+**实现常量（实际代码）**：
+| 常量 | 值 |
+|------|-----|
+| `DEBOUNCE_MS` | 500 |
+| `MAX_ATTEMPTS` | 5 |
+| `BASE_RETRY_DELAY_MS` | 1,000 |
+| `MAX_RETRY_DELAY_MS` | 15,000 |
+| `BACKOFF_MULTIPLIER` | 1.5 |
+| `MAX_RETAINED_JOBS` | 200 |
+| `AUTO_CLEANUP_DELAY_MS` | 30,000 |
+| `MAX_PHASE_HISTORY` | 64 |
 

@@ -1,8 +1,8 @@
-# OxideTerm 使用指南 (v1.4.0)
+# OxideTerm 使用指南 (v1.9.1)
 
 > 从入门到精通，全面掌握 OxideTerm 的核心功能和最佳实践。
 >
-> **v1.4.0 新特性**：自动重连更可靠、SFTP 路径记忆、端口转发自动恢复。
+> **v1.9.1 主要特性**：重连编排器、Oxide-Next 单键架构、AI 侧边栏 & 内联助手、插件系统、WSL 图形转发、本地终端。
 
 ## 📋 目录
 
@@ -274,7 +274,7 @@ OxideTerm 内置多个终端主题：
 
 右键连接 → SFTP Browser
 
-### v1.4.0 新特性
+### SFTP 特性
 
 #### State Gating（状态门禁）
 
@@ -399,9 +399,9 @@ OxideTerm 内置多个终端主题：
 2. 设置 SOCKS5 代理: `localhost:1080`
 3. 所有浏览流量通过 SSH 加密
 
-### v1.4.0 Link Resilience
+### 端口转发 Link Resilience
 
-端口转发规则会被持久化，重连后**自动恢复**：
+端口转发规则会被持久化，重连后由 Orchestrator **自动恢复**：
 
 ```
 网络断开 → 显示警告 → 自动重连 → 规则自动恢复 → 继续使用
@@ -415,14 +415,15 @@ OxideTerm 内置多个终端主题：
 
 ## 🚀 高级功能
 
-### 自动重连 (v1.4.0 增强)
+### 自动重连 (Reconnect Orchestrator)
 
-**功能**: 网络断开时自动恢复连接
+**功能**: 网络断开时自动恢复连接，由 `reconnectOrchestratorStore` 统一管理
 
-**v1.4.0 改进**：
-- 重连成功后自动恢复 SFTP 路径
-- 端口转发规则自动重建
-- 终端无缝恢复输入
+**特性**：
+- 最多重试 5 次，指数退避（1s → 15s max）
+- 重连成功后自动恢复 SFTP 路径、端口转发和 IDE 状态
+- 500ms 去抖窗口合并多个 link_down 事件
+- 终端无缝恢复输入（Key-Driven Reset）
 
 **行为**：
 ```
@@ -496,7 +497,7 @@ OxideTerm 内置多个终端主题：
 ```
 
 **v1.4.0 级联故障处理**：
-当跳板机断开时，所有下游连接自动标记为断开，并尝试级联重连。
+当跳板机断开时，所有下游连接自动标记为断开，Orchestrator 尝试级联重连。
 
 详见：[NETWORK_TOPOLOGY.md](./NETWORK_TOPOLOGY.md)
 
@@ -777,4 +778,4 @@ OxideTerm 内置多个终端主题：
 
 ---
 
-*文档版本: v1.4.0 (Strong Sync + Key-Driven Reset) | 最后更新: 2026-02-04*
+*文档版本: v1.9.1 (Strong Sync + Key-Driven Reset + Orchestrator + Oxide-Next) | 最后更新: 2026-02-11*

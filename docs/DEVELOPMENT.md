@@ -37,33 +37,36 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup default stable
 
 # 验证安装
-rustc --version  # 需要 1.75+
+rustc --version  # stable 即可，无最低版本要求
 ```
 
-#### 2. Node.js
+#### 2. Node.js + pnpm
 
 ```bash
 # 使用 nvm (推荐)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-nvm install 18
-nvm use 18
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+nvm install 20
+nvm use 20
 
 # 或使用 Homebrew (macOS)
-brew install node@18
+brew install node@20
+
+# 安装 pnpm（项目使用 pnpm 管理依赖）
+npm install -g pnpm
 
 # 验证
-node --version  # 需要 18+
-npm --version
+node --version  # 需要 20+
+pnpm --version
 ```
 
 #### 3. Tauri CLI
 
 ```bash
-# 使用 Cargo 安装
-cargo install tauri-cli
+# 使用 Cargo 安装 (Tauri 2)
+cargo install tauri-cli --version "^2"
 
 # 验证
-cargo tauri --version
+cargo tauri --version  # 需要 2.x
 ```
 
 #### 4. 平台特定依赖
@@ -111,16 +114,18 @@ OxideTerm/
 ├── docs/                   # 项目文档
 ├── public/                 # 静态资源
 │   ├── tauri.svg            # Tauri 入口页图标
-│   └── fonts/              # 字体文件
+│   └── fonts/              # 终端字体 (JetBrains Mono, Maple Mono, Meslo)
+├── scripts/                # 构建与发布脚本
 ├── src/                    # 前端源码
-│   ├── components/         # React 组件
+│   ├── components/         # React 组件 (18 个子目录)
 │   │   └── plugin/          # 插件 UI 视图
 │   ├── hooks/              # 自定义 Hooks
 │   ├── lib/                # 工具函数
 │   │   └── plugin/          # 插件运行时与 UI Kit
-│   ├── store/              # Zustand 状态
+│   ├── locales/            # i18n 翻译文件 (11 种语言)
+│   ├── store/              # Zustand 状态 (10 个 Store)
 │   │   └── pluginStore.ts   # 插件运行时状态
-│   ├── styles.css          # CSS 样式
+│   ├── styles.css          # CSS 样式 (Tailwind 4)
 │   └── types/              # TypeScript 类型
 ├── src-tauri/              # 后端源码
 │   ├── capabilities/       # Tauri 权限配置
@@ -146,11 +151,11 @@ OxideTerm/
 ### 启动开发服务器
 
 ```bash
-# 安装 NPM 依赖
-npm install
+# 安装依赖
+pnpm install
 
 # 启动开发模式 (同时启动前端和后端)
-npm run tauri dev
+pnpm tauri dev
 ```
 
 这会：
@@ -162,17 +167,16 @@ npm run tauri dev
 
 ```bash
 # 仅前端开发 (不启动 Tauri)
-npm run dev
+pnpm dev
 
 # 仅检查 Rust 代码
 cd src-tauri && cargo check
 
 # 格式化代码
-npm run lint          # 前端 (注意: lint 命令当前尚未配置)
-cd src-tauri && cargo fmt  # 后端
+cd src-tauri && cargo fmt  # 后端 (前端 lint 尚未配置)
 
 # 构建生产版本
-npm run tauri build
+pnpm build && pnpm tauri build
 ```
 
 ### 文件监听
@@ -265,11 +269,11 @@ pub async fn my_command(
 > **注意**: 前端测试框架尚未配置，以下命令暂不可用。
 
 ```bash
-# 运行测试
-npm test
+# 运行测试 (待配置)
+pnpm test
 
-# 运行测试并生成覆盖率报告
-npm test -- --coverage
+# 运行测试并生成覆盖率报告 (待配置)
+pnpm test -- --coverage
 ```
 
 ### 后端测试
@@ -290,8 +294,8 @@ cargo test -- --nocapture
 ### 集成测试
 
 ```bash
-# 使用 Playwright 进行 E2E 测试
-npm run test:e2e
+# 使用 Playwright 进行 E2E 测试 (待配置)
+pnpm test:e2e
 ```
 
 ---
@@ -379,14 +383,11 @@ wireshark
 
 1. **更新版本号**
    ```bash
-   # package.json
-   npm version patch  # 或 minor / major
+   # 使用统一版本管理脚本
+   pnpm version:bump patch  # 或 minor / major
+   # 会同时更新 package.json、Cargo.toml、tauri.conf.json
    
-   # src-tauri/Cargo.toml
-   # 手动更新 version 字段
-   
-   # src-tauri/tauri.conf.json
-   # 手动更新 version 字段
+   # 或手动: npm version + 手动编辑 Cargo.toml 和 tauri.conf.json
    ```
 
 2. **生成 Changelog**
@@ -396,7 +397,7 @@ wireshark
 
 3. **构建发布版本**
    ```bash
-   npm run tauri build
+   pnpm tauri build
    ```
 
 4. **创建 Git Tag**

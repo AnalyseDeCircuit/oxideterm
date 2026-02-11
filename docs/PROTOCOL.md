@@ -1,6 +1,6 @@
-# OxideTerm Protocol Documentation (v1.4.0)
+# OxideTerm Protocol Documentation (v1.9.1)
 
-> **v1.4.0 核心架构**: 本协议文档已与 **Strong Consistency Sync** 和 **Key-Driven Reset** 架构完全对齐。所有连接状态变更均通过事件系统触发前端强制同步。
+> **v1.9.1 核心架构**: 本协议文档已与 **Strong Consistency Sync**、**Key-Driven Reset** 和 **Oxide-Next** 架构完全对齐。所有连接状态变更均通过事件系统触发前端强制同步。SFTP 命令已迁移至 `node_sftp_*` 前缀，使用 `nodeId` 路由。
 
 ## 目录
 
@@ -1042,4 +1042,4 @@ flowchart TD
 
 ---
 
-*文档版本: v1.4.0 (Strong Sync + Key-Driven Reset) | 最后更新: 2026-02-04*
+*文档版本: v1.9.1 (Strong Sync + Key-Driven Reset + Oxide-Next) | 最后更新: 2026-02-11*

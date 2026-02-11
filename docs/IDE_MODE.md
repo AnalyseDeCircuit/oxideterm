@@ -14,7 +14,7 @@ IDE 模式是 OxideTerm 的核心特性之一，让你无需安装 VS Code Remot
 | **轻量快速** | 基于 SFTP 协议，复用现有 SSH 连接 |
 | **原生体验** | CodeMirror 6 编辑器，支持语法高亮、自动补全 |
 | **Git 集成** | 实时显示文件修改状态和分支信息 |
-| **自愈连接** | v1.4.0 引入的强一致性连接架构，断网重连不丢失上下文 |
+| **自愈连接** | Orchestrator 统一管理断网重连，不丢失上下文 |
 
 ## 🚀 快速开始
 
@@ -102,7 +102,7 @@ sequenceDiagram
 <IdeWorkspace nodeId={nodeId} rootPath={rootPath} />
 ```
 
-**生命周期��转**：
+**生命周期流转**：
 1. **断网**：Backend 重连，前一个 `connectionId` 失效。
 2. **销毁**：React 卸载旧组件，自动清理所有 Pending 的 SFTP 请求、Watcher 和各种内存状态。
 3. **重建**：重连成功，生成新 `connectionId`，组件重新挂载。
@@ -243,4 +243,4 @@ set({
 
 ---
 
-*文档版本: v1.4.0 | 适配架构: Strong Sync + Key-Driven Reset*
+*文档版本: v1.9.1 | 适配架构: Strong Sync + Key-Driven Reset + Oxide-Next*
