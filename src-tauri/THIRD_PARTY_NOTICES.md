@@ -1,11 +1,11 @@
 # Third-Party Notices (Backend / Rust)
 
 This file lists third-party crates used by the Rust backend and their detected licenses (including transitive dependencies).
-Generated: 2026-02-11T15:34:56.194Z
+Generated: 2026-02-11T17:13:45.858Z
 
 ## Summary
-- MIT: 597
-- Apache-2.0: 447
+- MIT: 603
+- Apache-2.0: 452
 - Unicode-3.0: 19
 - Zlib: 18
 - BSD-3-Clause: 10
@@ -494,6 +494,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | syn | 2.0.114 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | sync_wrapper | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | synstructure | 0.13.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| sysinfo | 0.33.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | system-deps | 6.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tao | 0.34.5 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tao-macros | 0.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -597,6 +598,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | window-vibrancy | 0.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | windows | 0.52.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| windows | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows | 0.59.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows | 0.61.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows_aarch64_gnullvm | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -624,16 +626,20 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | windows_x86_64_msvc | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-collections | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-core | 0.52.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| windows-core | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-core | 0.59.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-core | 0.61.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-core | 0.62.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-future | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| windows-implement | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-implement | 0.59.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-implement | 0.60.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| windows-interface | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-interface | 0.59.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-link | 0.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-link | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-numerics | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| windows-result | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-result | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-result | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-strings | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |

@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { Folder, File, FileSymlink, Hash, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -35,15 +36,15 @@ export interface FilePropertiesDialogProps {
 }
 
 /** Format bytes with locale-aware thousand separators */
-function formatExactBytes(bytes: number, t: FilePropertiesDialogProps['t']): string {
-  const formatted = bytes.toLocaleString();
+function formatExactBytes(bytes: number, t: FilePropertiesDialogProps['t'], locale: string): string {
+  const formatted = bytes.toLocaleString(locale);
   return `${formatted} ${t('fileManager.propBytes')}`;
 }
 
-/** Full timestamp with weekday */
-function formatFullTimestamp(timestamp: number | undefined): string {
+/** Full timestamp with weekday, following the app's i18n locale */
+function formatFullTimestamp(timestamp: number | undefined, locale: string): string {
   if (!timestamp) return '-';
-  return new Date(timestamp * 1000).toLocaleString(undefined, {
+  return new Date(timestamp * 1000).toLocaleString(locale, {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -91,11 +92,11 @@ const PropertyRow: React.FC<{
   mono?: boolean;
 }> = ({ label, value, mono }) => (
   <div className="flex items-start gap-3 py-1.5">
-    <span className="text-zinc-500 text-xs shrink-0 w-28 text-right select-none">
+    <span className="text-zinc-500 text-xs shrink-0 min-w-[6.5rem] max-w-[8rem] text-right select-none break-keep">
       {label}
     </span>
     <span
-      className={`text-zinc-200 text-xs break-all select-text ${mono ? 'font-mono' : ''}`}
+      className={`text-zinc-200 text-xs break-all min-w-0 flex-1 select-text ${mono ? 'font-mono' : ''}`}
     >
       {value}
     </span>
@@ -120,6 +121,10 @@ export const FilePropertiesDialog: React.FC<FilePropertiesDialogProps> = ({
   t,
 }) => {
   if (!file) return null;
+
+  // Use the app's i18n language for date/number formatting
+  const { i18n } = useTranslation();
+  const locale = i18n.language;
 
   const isDir = file.file_type === 'Directory';
   const isSymlink = file.file_type === 'Symlink';
@@ -168,7 +173,7 @@ export const FilePropertiesDialog: React.FC<FilePropertiesDialogProps> = ({
                     {formatFileSize(metadata.size)}
                     {metadata.size >= 1024 && (
                       <span className="text-zinc-600 ml-1">
-                        ({formatExactBytes(metadata.size, t)})
+                        ({formatExactBytes(metadata.size, t, locale)})
                       </span>
                     )}
                   </span>
@@ -185,17 +190,17 @@ export const FilePropertiesDialog: React.FC<FilePropertiesDialogProps> = ({
               {metadata.created != null && (
                 <PropertyRow
                   label={t('fileManager.created')}
-                  value={formatFullTimestamp(metadata.created)}
+                  value={formatFullTimestamp(metadata.created, locale)}
                 />
               )}
               <PropertyRow
                 label={t('fileManager.modified')}
-                value={formatFullTimestamp(metadata.modified)}
+                value={formatFullTimestamp(metadata.modified, locale)}
               />
               {metadata.accessed != null && (
                 <PropertyRow
                   label={t('fileManager.propAccessed')}
-                  value={formatFullTimestamp(metadata.accessed)}
+                  value={formatFullTimestamp(metadata.accessed, locale)}
                 />
               )}
 
@@ -275,7 +280,7 @@ export const FilePropertiesDialog: React.FC<FilePropertiesDialogProps> = ({
                             {formatFileSize(dirStats.totalSize)}
                             {dirStats.totalSize >= 1024 && (
                               <span className="text-zinc-600 ml-1">
-                                ({formatExactBytes(dirStats.totalSize, t)})
+                                ({formatExactBytes(dirStats.totalSize, t, locale)})
                               </span>
                             )}
                           </span>
