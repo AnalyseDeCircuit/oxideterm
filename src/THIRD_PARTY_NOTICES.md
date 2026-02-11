@@ -1,7 +1,7 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-10T19:38:21.378Z
+Generated: 2026-02-11T08:03:02.589Z
 
 ## Summary
 - MIT: 214
@@ -331,6 +331,5 @@ Generated: 2026-02-10T19:38:21.378Z
 - **Multi-license policy**: Where a dependency offers multiple licenses (e.g. `MIT OR Apache-2.0`), OxideTerm always exercises the most permissive option available.
 - Licenses are taken from package metadata reported by pnpm at generation time.
 - This list is intended for notice/compliance purposes and does not replace the full license texts included by upstream projects.
-- Licensing Strategy for OxideTerm
-
+Licensing Strategy for OxideTerm
 OxideTerm is licensed under the PolyForm Noncommercial License 1.0.0. To ensure full compatibility and respect the terms of all upstream dependencies, OxideTerm strictly adheres to the following policy: Whenever a third-party dependency offers multiple licensing options (e.g., dual-licensing under MIT and Apache-2.0), OxideTerm elects to exercise the most permissive license available (typically MIT or ISC). > This choice is made to maintain the integrity of our non-commercial licensing model while fulfilling all attribution requirements of the open-source community.

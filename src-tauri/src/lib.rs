@@ -623,6 +623,8 @@ pub fn run() {
         graphics::commands::wsl_graphics_stop,
         graphics::commands::wsl_graphics_reconnect,
         graphics::commands::wsl_graphics_list_sessions,
+        graphics::commands::wsl_graphics_detect_wslg,
+        graphics::commands::wsl_graphics_start_app,
     ]);
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -843,6 +845,8 @@ pub fn run() {
         graphics::commands::wsl_graphics_stop,
         graphics::commands::wsl_graphics_reconnect,
         graphics::commands::wsl_graphics_list_sessions,
+        graphics::commands::wsl_graphics_detect_wslg,
+        graphics::commands::wsl_graphics_start_app,
     ]);
 
     builder

@@ -15,6 +15,19 @@
     "no_vnc_server": "VNC サーバーがインストールされていません。実行: sudo apt install tigervnc-standalone-server dbus-x11 -y、その後デスクトップをインストール (xfce4、ubuntu-desktop、または kde-plasma-desktop)",
     "no_dbus": "D-Bus が利用できません。実行: sudo apt update && sudo apt install dbus-x11 -y",
     "not_available": "WSL グラフィックスは Windows で wsl-graphics 機能が有効な場合のみ利用できます。",
-    "desktop_experimental": "実験的機能、無保証"
+    "desktop_experimental": "実験的機能、無保証",
+    "wslg_available": "利用可能",
+    "wslg_unavailable": "このディストリビューションで WSLg は利用できません。GUI アプリには WSLg（Windows 11）または VNC デスクトップモードが必要です。",
+    "openbox_missing": "Openbox なし",
+    "openbox_hint": "Openbox がインストールされていません。シングルアプリモードには: sudo apt install openbox -y",
+    "desktop_mode": "デスクトップモード",
+    "app_mode": "アプリモード",
+    "app_select_distro": "GUI アプリケーションを起動",
+    "app_distro_label": "ディストリビューション",
+    "app_command_label": "コマンド",
+    "app_command_placeholder": "例: gedit /home/user/file.txt",
+    "app_common_apps": "よく使うアプリ:",
+    "start_app": "アプリを起動",
+    "app_starting": "アプリケーションを起動中..."
   }
 }

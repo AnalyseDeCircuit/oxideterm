@@ -15,6 +15,19 @@
     "no_vnc_server": "未安装 VNC 服务器。请运行: sudo apt install tigervnc-standalone-server dbus-x11 -y，然后安装桌面环境 (xfce4、ubuntu-desktop 或 kde-plasma-desktop)",
     "no_dbus": "D-Bus 不可用。请运行: sudo apt update && sudo apt install dbus-x11 -y",
     "not_available": "WSL 图形转发仅在 Windows 平台且启用 wsl-graphics 特性时可用。",
-    "desktop_experimental": "实验性功能，概不负责"
+    "desktop_experimental": "实验性功能，概不负责",
+    "wslg_available": "可用",
+    "wslg_unavailable": "此发行版中 WSLg 不可用。GUI 应用需要 WSLg（Windows 11）或 VNC 桌面模式。",
+    "openbox_missing": "无 Openbox",
+    "openbox_hint": "Openbox 未安装。若要使用单应用模式，请安装: sudo apt install openbox -y",
+    "desktop_mode": "桌面模式",
+    "app_mode": "应用模式",
+    "app_select_distro": "启动 GUI 应用",
+    "app_distro_label": "发行版",
+    "app_command_label": "命令",
+    "app_command_placeholder": "例如 gedit /home/user/file.txt",
+    "app_common_apps": "常用应用：",
+    "start_app": "启动应用",
+    "app_starting": "正在启动应用..."
   }
 }

@@ -431,12 +431,201 @@ trap cleanup EXIT
     }
 }
 
+// ─── App Mode (Phase 2) ─────────────────────────────────────────────
+
+/// Check that Xtigervnc is available in the distro (without checking for desktop env).
+///
+/// Used by app mode which doesn't need a desktop environment.
+pub async fn check_vnc_available(distro: &str) -> Result<(), GraphicsError> {
+    let output = Command::new("wsl.exe")
+        .args(["-d", distro, "--", "which", "Xtigervnc"])
+        .output()
+        .await;
+    let has_vnc = output.map(|o| o.status.success()).unwrap_or(false);
+    if !has_vnc {
+        return Err(GraphicsError::NoVncServer(distro.to_string()));
+    }
+    Ok(())
+}
+
+/// Start a single-app graphics session (no desktop environment).
+///
+/// Similar to `start_session()` but:
+/// - Uses a smaller default resolution
+/// - Launches an optional lightweight WM (Openbox) + the target application
+/// - No D-Bus required (though some apps may need it)
+///
+/// Returns `(vnc_port, x_display, vnc_child, app_child)`.
+pub async fn start_app_session(
+    distro: &str,
+    argv: &[String],
+    geometry: Option<&str>,
+) -> Result<(u16, String, Child, Child), GraphicsError> {
+    let port = find_free_port().await?;
+    let disp = find_free_display(distro).await;
+    let geo = geometry.unwrap_or("1280x720");
+
+    // 1. Start Xtigervnc with smaller resolution (app mode)
+    let vnc_child = Command::new("wsl.exe")
+        .args([
+            "-d",
+            distro,
+            "--",
+            "Xtigervnc",
+            &disp,
+            "-rfbport",
+            &port.to_string(),
+            "-SecurityTypes",
+            "None",
+            "-localhost=0",
+            "-ac",
+            "-AlwaysShared",
+            "-geometry",
+            geo,
+            "-depth",
+            "24",
+        ])
+        .env_remove("WAYLAND_DISPLAY")
+        .kill_on_drop(true)
+        .spawn()?;
+
+    tracing::info!(
+        "WSL Graphics App: Xtigervnc launched on display {} port {} ({})",
+        disp,
+        port,
+        geo
+    );
+
+    // 2. Wait for VNC to be ready
+    wait_for_vnc_ready(port, Duration::from_secs(10)).await?;
+
+    // 3. Launch app via bootstrap script
+    let app_child = start_app_process(distro, &disp, argv).await?;
+
+    Ok((port, disp.to_string(), vnc_child, app_child))
+}
+
+/// Generate the app-mode bootstrap script.
+///
+/// Sets up DISPLAY, XDG_RUNTIME_DIR, optionally starts Openbox WM,
+/// then executes the target application via `exec "$@"` (no shell injection).
+fn build_app_bootstrap_script(x_display: &str) -> String {
+    format!(
+        r#"#!/bin/bash
+set -e
+
+# Clear WSLg environment to avoid Weston interference
+unset WAYLAND_DISPLAY XDG_SESSION_TYPE
+
+# Reset dangerous environment variables (§11.4 defense)
+unset LD_PRELOAD LD_LIBRARY_PATH PYTHONPATH PYTHONSTARTUP NODE_OPTIONS
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+export DISPLAY={display}
+export XDG_RUNTIME_DIR="/tmp/oxideterm-app-xdg-$$"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+
+# Optional: start lightweight window manager for window decorations
+if command -v openbox-session &>/dev/null; then
+    openbox --config-file /dev/null &
+    sleep 0.3
+fi
+
+echo $$ > /tmp/oxideterm-app-$$.pid
+
+cleanup() {{
+    rm -f /tmp/oxideterm-app-$$.pid
+    rm -rf "$XDG_RUNTIME_DIR"
+}}
+trap cleanup EXIT
+
+# Application command passed via positional parameters — no shell parsing
+exec "$@"
+"#,
+        display = x_display,
+    )
+}
+
+/// Start the application process inside WSL.
+///
+/// Uses `env_clear()` + minimal whitelist (§11.4) and pipes the bootstrap
+/// script via stdin. argv elements become positional parameters via `bash -s --`.
+async fn start_app_process(
+    distro: &str,
+    x_display: &str,
+    argv: &[String],
+) -> Result<Child, GraphicsError> {
+    let script = build_app_bootstrap_script(x_display);
+
+    // Build wsl.exe args:
+    // wsl.exe -d Ubuntu -- bash -s -- gedit /home/user/file.txt
+    //                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    //                                 These become $1, $2, ... executed by `exec "$@"`
+    let mut args = vec![
+        "-d".to_string(),
+        distro.to_string(),
+        "--".to_string(),
+        "bash".to_string(),
+        "-s".to_string(),
+        "--".to_string(),
+    ];
+    args.extend_from_slice(argv);
+
+    let mut child = Command::new("wsl.exe")
+        .args(&args)
+        // §11.4: Clear all inherited environment, inject only safe minimum
+        .env_clear()
+        .env(
+            "SYSTEMROOT",
+            std::env::var("SYSTEMROOT").unwrap_or_default(),
+        )
+        .env(
+            "SYSTEMDRIVE",
+            std::env::var("SYSTEMDRIVE").unwrap_or_default(),
+        )
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env(
+            "USERPROFILE",
+            std::env::var("USERPROFILE").unwrap_or_default(),
+        )
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+    // Write the bootstrap script to stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        if let Err(e) = stdin.write_all(script.as_bytes()).await {
+            tracing::warn!("WSL Graphics App: failed to write bootstrap script: {}", e);
+            let _ = child.kill().await;
+            return Err(GraphicsError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                format!("Failed to write app bootstrap script: {}", e),
+            )));
+        }
+        drop(stdin); // Close stdin so bash starts executing
+    }
+
+    tracing::info!(
+        "WSL Graphics App: '{}' launched on display {}",
+        argv.first().map(|s| s.as_str()).unwrap_or("?"),
+        x_display
+    );
+
+    Ok(child)
+}
+
 /// Clean up any lingering session processes inside WSL.
 ///
 /// Called when stopping a session — reads the PID file written by the
 /// bootstrap script and recursively kills the entire process tree.
 /// This is critical for GNOME which spawns deep process trees
 /// (gnome-session → gnome-shell → gnome-settings-daemon → ...).
+///
+/// Also cleans up app-mode PID files (oxideterm-app-*.pid).
 pub async fn cleanup_wsl_session(distro: &str) {
     let cleanup_cmd = format!(
         r#"# Recursive process tree killer
@@ -464,7 +653,9 @@ if [ -f {pid} ]; then
     fi
     rm -f {pid}
 fi
-rm -rf /tmp/oxideterm-xdg-* 2>/dev/null || true"#,
+rm -rf /tmp/oxideterm-xdg-* 2>/dev/null || true
+rm -rf /tmp/oxideterm-app-xdg-* 2>/dev/null || true
+rm -f /tmp/oxideterm-app-*.pid 2>/dev/null || true"#,
         pid = PID_FILE,
     );
 

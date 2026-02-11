@@ -18,13 +18,37 @@ interface WslDistro {
   isRunning: boolean;
 }
 
+/** 图形会话模式 — 与后端 GraphicsSessionMode 对应 */
+type GraphicsSessionMode =
+  | { type: 'desktop' }
+  | { type: 'app'; argv: string[]; title: string | null };
+
 interface WslGraphicsSession {
   id: string;
   wsPort: number;
   wsToken: string;
   distro: string;
   desktopName: string;
+  mode: GraphicsSessionMode;
 }
+
+interface WslgStatus {
+  available: boolean;
+  wayland: boolean;
+  x11: boolean;
+  wslgVersion: string | null;
+  hasOpenbox: boolean;
+}
+
+/** 常用 GUI 应用快捷列表 */
+const COMMON_APPS = [
+  { label: 'gedit', argv: ['gedit'] },
+  { label: 'Firefox', argv: ['firefox'] },
+  { label: 'Nautilus', argv: ['nautilus'] },
+  { label: 'VS Code', argv: ['code'] },
+  { label: 'xterm', argv: ['xterm'] },
+  { label: 'GIMP', argv: ['gimp'] },
+] as const;
 
 const STATUS = {
   IDLE: 'idle',
@@ -36,21 +60,81 @@ const STATUS = {
 
 type Status = typeof STATUS[keyof typeof STATUS];
 
+type LaunchMode = 'desktop' | 'app';
+
+// ─── WSLg Status Badge ──────────────────────────────────────────────
+
+function WslgBadge({ status }: { status: WslgStatus }) {
+  const { t } = useTranslation();
+
+  if (status.available) {
+    const protocols: string[] = [];
+    if (status.wayland) protocols.push('Wayland');
+    if (status.x11) protocols.push('X11');
+    const label = protocols.length > 0 ? protocols.join(' + ') : 'WSLg';
+
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span
+          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+          title={`WSLg ${t('graphics.wslg_available')}${status.wslgVersion ? ` (v${status.wslgVersion})` : ''}`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          {label}
+        </span>
+        {!status.hasOpenbox && (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+            title={t('graphics.openbox_hint')}
+          >
+            {t('graphics.openbox_missing')}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground border border-border"
+      title={t('graphics.wslg_unavailable')}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
+      WSLg N/A
+    </span>
+  );
+}
+
 // ─── Distro Selector ────────────────────────────────────────────────
 
 function DistroSelector({
   distros,
-  onSelect,
+  onSelectDesktop,
+  onSelectApp,
   error,
   loading,
+  wslgStatuses,
 }: {
   distros: WslDistro[];
-  onSelect: (name: string) => void;
+  onSelectDesktop: (name: string) => void;
+  onSelectApp: (distro: string, argv: string[], title?: string) => void;
   error: string | null;
   loading: boolean;
+  wslgStatuses: Record<string, WslgStatus>;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<LaunchMode>('desktop');
+  const [selectedDistro, setSelectedDistro] = useState<string>('');
+  const [appCommand, setAppCommand] = useState('');
   const displayError = error === '__NOT_AVAILABLE__' ? t('graphics.not_available') : error;
+
+  // Auto-select default distro for app mode
+  useEffect(() => {
+    if (!selectedDistro && distros.length > 0) {
+      const defaultDistro = distros.find((d) => d.isDefault) ?? distros[0];
+      setSelectedDistro(defaultDistro.name);
+    }
+  }, [distros, selectedDistro]);
 
   if (loading) {
     return (
@@ -81,11 +165,42 @@ function DistroSelector({
     );
   }
 
+  const handleStartApp = () => {
+    const trimmed = appCommand.trim();
+    if (!trimmed || !selectedDistro) return;
+    // Split command string into argv (simple whitespace split)
+    const argv = trimmed.split(/\s+/).filter(Boolean);
+    if (argv.length === 0) return;
+    onSelectApp(selectedDistro, argv);
+  };
+
+  const handleQuickApp = (argv: readonly string[]) => {
+    if (!selectedDistro) return;
+    onSelectApp(selectedDistro, [...argv]);
+  };
+
+  const tabClass = (active: boolean) =>
+    `flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+      active
+        ? 'bg-primary text-primary-foreground shadow-sm'
+        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+    }`;
+
   return (
     <div className="flex items-center justify-center h-full">
       <div className="flex flex-col gap-4 max-w-sm w-full px-6">
+        {/* Mode tabs */}
+        <div className="flex gap-1 p-1 rounded-lg bg-muted">
+          <button className={tabClass(mode === 'desktop')} onClick={() => setMode('desktop')}>
+            🖥️ {t('graphics.desktop_mode')}
+          </button>
+          <button className={tabClass(mode === 'app')} onClick={() => setMode('app')}>
+            📱 {t('graphics.app_mode')}
+          </button>
+        </div>
+
         <h2 className="text-lg font-semibold text-foreground text-center">
-          {t('graphics.select_distro')}
+          {mode === 'desktop' ? t('graphics.select_distro') : t('graphics.app_select_distro')}
         </h2>
 
         {displayError && (
@@ -94,33 +209,108 @@ function DistroSelector({
           </div>
         )}
 
-        {distros.map((distro) => (
-          <button
-            key={distro.name}
-            onClick={() => onSelect(distro.name)}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors border-border hover:border-primary hover:bg-accent text-left"
-          >
-            <div className="flex-1">
-              <div className="font-medium text-foreground">
-                {distro.name}
-                {distro.isDefault && (
-                  <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                    Default
-                  </span>
-                )}
+        {mode === 'desktop' ? (
+          /* Desktop mode: click distro to launch full desktop */
+          distros.map((distro) => (
+            <button
+              key={distro.name}
+              onClick={() => onSelectDesktop(distro.name)}
+              className="flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors border-border hover:border-primary hover:bg-accent text-left"
+            >
+              <div className="flex-1">
+                <div className="font-medium text-foreground">
+                  {distro.name}
+                  {distro.isDefault && (
+                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                      Default
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
+                  <span>{distro.isRunning ? t('graphics.distro_running') : t('graphics.distro_stopped')}</span>
+                  {wslgStatuses[distro.name] && (
+                    <WslgBadge status={wslgStatuses[distro.name]} />
+                  )}
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {distro.isRunning ? t('graphics.distro_running') : t('graphics.distro_stopped')}
+              <svg
+                className="w-4 h-4 text-muted-foreground"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          ))
+        ) : (
+          /* App mode: select distro + enter command */
+          <>
+            {/* Distro selector dropdown */}
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                {t('graphics.app_distro_label')}
+              </label>
+              <select
+                value={selectedDistro}
+                onChange={(e) => setSelectedDistro(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {distros.map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.name}{d.isDefault ? ' (Default)' : ''}{d.isRunning ? '' : ` — ${t('graphics.distro_stopped')}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* WSLg badge for selected distro */}
+            {selectedDistro && wslgStatuses[selectedDistro] && (
+              <div className="flex items-center gap-2">
+                <WslgBadge status={wslgStatuses[selectedDistro]} />
+              </div>
+            )}
+
+            {/* Command input */}
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                {t('graphics.app_command_label')}
+              </label>
+              <input
+                type="text"
+                value={appCommand}
+                onChange={(e) => setAppCommand(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleStartApp(); }}
+                placeholder={t('graphics.app_command_placeholder')}
+                className="w-full px-3 py-2 rounded-md border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                autoFocus
+              />
+            </div>
+
+            {/* Common apps shortcuts */}
+            <div>
+              <span className="text-xs text-muted-foreground">{t('graphics.app_common_apps')}</span>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {COMMON_APPS.map((app) => (
+                  <button
+                    key={app.label}
+                    onClick={() => handleQuickApp(app.argv)}
+                    className="px-2.5 py-1 text-xs rounded-md border border-border hover:border-primary hover:bg-accent transition-colors text-foreground"
+                  >
+                    {app.label}
+                  </button>
+                ))}
               </div>
             </div>
-            <svg
-              className="w-4 h-4 text-muted-foreground"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+
+            {/* Start button */}
+            <button
+              onClick={handleStartApp}
+              disabled={!appCommand.trim() || !selectedDistro}
+              className="w-full py-2.5 rounded-md font-medium text-sm transition-colors bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
-        ))}
+              ▶ {t('graphics.start_app')}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -159,10 +349,16 @@ function Toolbar({
                 · {sessionInfo.desktopName}
               </span>
             )}
-            {isExperimental && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/15 text-warning border border-warning/20">
-                {t('graphics.desktop_experimental')}
+            {sessionInfo.mode?.type === 'app' ? (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                {t('graphics.app_mode')}
               </span>
+            ) : (
+              isExperimental && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/15 text-warning border border-warning/20">
+                  {t('graphics.desktop_experimental')}
+                </span>
+              )
             )}
           </span>
         )}
@@ -248,6 +444,7 @@ export function GraphicsView() {
   const [distros, setDistros] = useState<WslDistro[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [wslgStatuses, setWslgStatuses] = useState<Record<string, WslgStatus>>({});
 
   // ── Load WSL distros on mount ───────────────────────────────────
   useEffect(() => {
@@ -280,12 +477,58 @@ export function GraphicsView() {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Start session ───────────────────────────────────────────────
+  // ── Detect WSLg status for each distro ──────────────────────────
+  useEffect(() => {
+    if (distros.length === 0) return;
+    let cancelled = false;
+
+    // Detect WSLg for each running distro in parallel
+    const runningDistros = distros.filter((d) => d.isRunning);
+    Promise.allSettled(
+      runningDistros.map((d) =>
+        invoke<WslgStatus>('wsl_graphics_detect_wslg', { distro: d.name })
+          .then((wslg) => ({ name: d.name, wslg }))
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const statuses: Record<string, WslgStatus> = {};
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          statuses[result.value.name] = result.value.wslg;
+        }
+      }
+      setWslgStatuses(statuses);
+    });
+
+    return () => { cancelled = true; };
+  }, [distros]);
+
+  // ── Start desktop session ─────────────────────────────────────────
   const startSession = useCallback(async (distro: string) => {
     setStatus(STATUS.STARTING);
     setError(null);
     try {
       const sess = await invoke<WslGraphicsSession>('wsl_graphics_start', { distro });
+      sessionRef.current = sess;
+      setSession(sess);
+      setStatus(STATUS.ACTIVE);
+    } catch (e) {
+      setError(String(e));
+      setStatus(STATUS.ERROR);
+    }
+  }, []);
+
+  // ── Start app session ───────────────────────────────────────────
+  const startAppSession = useCallback(async (distro: string, argv: string[], title?: string) => {
+    setStatus(STATUS.STARTING);
+    setError(null);
+    try {
+      const sess = await invoke<WslGraphicsSession>('wsl_graphics_start_app', {
+        distro,
+        argv,
+        title: title ?? null,
+        geometry: null,
+      });
       sessionRef.current = sess;
       setSession(sess);
       setStatus(STATUS.ACTIVE);
@@ -439,9 +682,11 @@ export function GraphicsView() {
     return (
       <DistroSelector
         distros={distros}
-        onSelect={startSession}
+        onSelectDesktop={startSession}
+        onSelectApp={startAppSession}
         error={error}
         loading={loading}
+        wslgStatuses={wslgStatuses}
       />
     );
   }

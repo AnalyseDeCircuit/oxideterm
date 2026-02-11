@@ -15,6 +15,19 @@
     "no_vnc_server": "Chưa cài đặt máy chủ VNC. Chạy: sudo apt install tigervnc-standalone-server dbus-x11 -y, sau đó cài đặt môi trường desktop (xfce4, ubuntu-desktop hoặc kde-plasma-desktop)",
     "no_dbus": "D-Bus không khả dụng. Chạy: sudo apt update && sudo apt install dbus-x11 -y",
     "not_available": "WSL Đồ họa chỉ khả dụng trên Windows khi tính năng wsl-graphics được bật.",
-    "desktop_experimental": "Thử nghiệm, không bảo hành"
+    "desktop_experimental": "Thử nghiệm, không bảo hành",
+    "wslg_available": "Khả dụng",
+    "wslg_unavailable": "WSLg không khả dụng trong bản phân phối này. Ứng dụng GUI yêu cầu WSLg (Windows 11) hoặc chế độ desktop VNC.",
+    "openbox_missing": "Không có Openbox",
+    "openbox_hint": "Openbox chưa được cài đặt. Để sử dụng chế độ ứng dụng đơn, hãy cài: sudo apt install openbox -y",
+    "desktop_mode": "Chế độ desktop",
+    "app_mode": "Chế độ ứng dụng",
+    "app_select_distro": "Khởi chạy ứng dụng GUI",
+    "app_distro_label": "Bản phân phối",
+    "app_command_label": "Lệnh",
+    "app_command_placeholder": "vd. gedit /home/user/file.txt",
+    "app_common_apps": "Ứng dụng phổ biến:",
+    "start_app": "Khởi chạy ứng dụng",
+    "app_starting": "Đang khởi chạy ứng dụng..."
   }
 }

@@ -15,6 +15,19 @@
     "no_vnc_server": "Nenhum servidor VNC instalado. Execute: sudo apt install tigervnc-standalone-server dbus-x11 -y, depois instale um desktop (xfce4, ubuntu-desktop ou kde-plasma-desktop)",
     "no_dbus": "D-Bus não está disponível. Execute: sudo apt update && sudo apt install dbus-x11 -y",
     "not_available": "WSL Gráficos está disponível apenas no Windows com o recurso wsl-graphics habilitado.",
-    "desktop_experimental": "Experimental, sem garantia"
+    "desktop_experimental": "Experimental, sem garantia",
+    "wslg_available": "Disponível",
+    "wslg_unavailable": "WSLg não está disponível nesta distribuição. Aplicativos GUI requerem WSLg (Windows 11) ou modo de desktop VNC.",
+    "openbox_missing": "Sem Openbox",
+    "openbox_hint": "Openbox não está instalado. Para o modo de aplicativo único, instale: sudo apt install openbox -y",
+    "desktop_mode": "Modo desktop",
+    "app_mode": "Modo aplicativo",
+    "app_select_distro": "Iniciar aplicativo GUI",
+    "app_distro_label": "Distribuição",
+    "app_command_label": "Comando",
+    "app_command_placeholder": "ex. gedit /home/user/file.txt",
+    "app_common_apps": "Apps comuns:",
+    "start_app": "Iniciar app",
+    "app_starting": "Iniciando aplicativo..."
   }
 }

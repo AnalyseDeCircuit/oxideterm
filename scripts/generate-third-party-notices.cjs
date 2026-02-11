@@ -125,6 +125,7 @@ function buildNotices() {
   out += '- **Multi-license policy**: Where a dependency offers multiple licenses (e.g. `MIT OR Apache-2.0`), OxideTerm always exercises the most permissive option available.\n';
   out += '- Licenses are taken from package metadata reported by pnpm at generation time.\n';
   out += '- This list is intended for notice/compliance purposes and does not replace the full license texts included by upstream projects.\n';
+  out += 'Licensing Strategy for OxideTerm\nOxideTerm is licensed under the PolyForm Noncommercial License 1.0.0. To ensure full compatibility and respect the terms of all upstream dependencies, OxideTerm strictly adheres to the following policy: Whenever a third-party dependency offers multiple licensing options (e.g., dual-licensing under MIT and Apache-2.0), OxideTerm elects to exercise the most permissive license available (typically MIT or ISC). > This choice is made to maintain the integrity of our non-commercial licensing model while fulfilling all attribution requirements of the open-source community.\n';
 
   return { out, count: packages.length };
 }
