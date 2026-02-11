@@ -1061,10 +1061,15 @@ impl SftpSession {
         let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let canonical_path = self.resolve_path(remote_path).await?;
 
-        // Register transfer control if manager provided
+        // Register transfer control if manager provided.
+        // TransferGuard ensures unregister runs on *every* return path (RAII).
         let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager
             .as_ref()
             .map(|tm| tm.register(&transfer_id));
+        let _guard = super::transfer::TransferGuard::new(
+            transfer_manager.as_ref(),
+            transfer_id.clone(),
+        );
 
         // Check if this is a resume (local file exists)
         let resume_context = if Path::new(local_path).exists() {
@@ -1165,7 +1170,7 @@ impl SftpSession {
         }
 
         // Execute transfer with retry
-        let transferred = transfer_with_retry(
+        let result = transfer_with_retry(
             || {
                 self.download_inner(
                     &canonical_path,
@@ -1181,17 +1186,15 @@ impl SftpSession {
             stored_progress.clone(),
             control.clone(),
         )
-        .await?;
+        .await;
+
+        // Guard handles unregister on all paths (success, error, early return).
+        let transferred = result?;
 
         info!(
             "Download complete: {} ({} bytes)",
             canonical_path, transferred
         );
-
-        // Unregister transfer control to prevent DashMap entry leak
-        if let Some(tm) = &transfer_manager {
-            tm.unregister(&transfer_id);
-        }
 
         Ok(transferred)
     }
@@ -1372,10 +1375,15 @@ impl SftpSession {
         // Use .oxide-part as temporary file
         let temp_path = format!("{}.oxide-part", canonical_path);
 
-        // Register transfer control if manager provided
+        // Register transfer control if manager provided.
+        // TransferGuard ensures unregister runs on *every* return path (RAII).
         let control: Option<std::sync::Arc<super::transfer::TransferControl>> = transfer_manager
             .as_ref()
             .map(|tm| tm.register(&transfer_id));
+        let _guard = super::transfer::TransferGuard::new(
+            transfer_manager.as_ref(),
+            transfer_id.clone(),
+        );
 
         // Get local file size
         let metadata = tokio::fs::metadata(local_path)
@@ -1457,6 +1465,7 @@ impl SftpSession {
                         // Rename temp file to final
                         self.rename(&temp_path, &canonical_path).await?;
 
+                        // Guard handles unregister on return
                         return Ok(total_bytes);
                     }
                 }
@@ -1525,11 +1534,7 @@ impl SftpSession {
                             warn!("Failed to delete progress for {}: {}", transfer_id, e);
                         }
 
-                        // Unregister from transfer manager
-                        if let Some(tm) = transfer_manager {
-                            tm.unregister(&transfer_id);
-                        }
-
+                        // Guard handles unregister on return
                         return Err(SftpError::TransferCancelled);
                     }
                 }
@@ -1547,11 +1552,7 @@ impl SftpSession {
                     local_path, canonical_path, transferred
                 );
 
-                // Unregister transfer control to prevent DashMap entry leak
-                if let Some(tm) = &transfer_manager {
-                    tm.unregister(&transfer_id);
-                }
-
+                // Guard handles unregister on return
                 Ok(transferred)
             }
             Err(SftpError::TransferCancelled) => {
@@ -1568,15 +1569,12 @@ impl SftpSession {
                     warn!("Failed to delete progress for {}: {}", transfer_id, e);
                 }
 
-                // Unregister from transfer manager
-                if let Some(tm) = transfer_manager {
-                    tm.unregister(&transfer_id);
-                }
-
+                // Guard handles unregister on return
                 Err(SftpError::TransferCancelled)
             }
             Err(e) => {
-                // Other error - don't clean up, allow resume
+                // Other error - don't clean up temp file (allow resume).
+                // Guard handles unregister on return.
                 warn!(
                     "Upload failed with error (file preserved for resume): {}",
                     e

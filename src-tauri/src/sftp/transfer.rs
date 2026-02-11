@@ -70,6 +70,36 @@ impl Default for TransferControl {
     }
 }
 
+/// RAII guard that automatically unregisters a transfer from [`TransferManager`] on drop.
+///
+/// This prevents `controls` HashMap entry leaks on **any** early-return path
+/// (e.g. `?` operator, explicit `return Err(...)`, panics). Create one
+/// immediately after `tm.register()` and let the guard live for the duration
+/// of the transfer function.
+pub struct TransferGuard {
+    manager: Option<Arc<TransferManager>>,
+    transfer_id: String,
+}
+
+impl TransferGuard {
+    /// Wrap an optional `TransferManager` reference.  If `manager` is `None`
+    /// the guard becomes a no-op (no-manager scenario).
+    pub fn new(manager: Option<&Arc<TransferManager>>, transfer_id: String) -> Self {
+        Self {
+            manager: manager.cloned(),
+            transfer_id,
+        }
+    }
+}
+
+impl Drop for TransferGuard {
+    fn drop(&mut self) {
+        if let Some(tm) = &self.manager {
+            tm.unregister(&self.transfer_id);
+        }
+    }
+}
+
 /// Maximum possible concurrent transfers (semaphore upper bound)
 const MAX_POSSIBLE_CONCURRENT: usize = 10;
 

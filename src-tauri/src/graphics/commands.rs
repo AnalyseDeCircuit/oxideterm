@@ -385,7 +385,8 @@ pub async fn wsl_graphics_start_app(
         match bridge::start_proxy(vnc_addr, session_id.clone()).await {
             Ok(result) => result,
             Err(e) => {
-                // Rollback: kill app + vnc
+                // Rollback: kill app + vnc explicitly, then clean up WSL session
+                let _ = app_child.kill().await;
                 let _ = vnc_child.kill().await;
                 wsl::cleanup_wsl_session(&distro).await;
                 return Err(e.to_string());

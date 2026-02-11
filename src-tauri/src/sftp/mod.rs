@@ -17,5 +17,5 @@ pub use progress::{
 };
 pub use retry::{calculate_backoff, is_retryable_error, transfer_with_retry, RetryConfig};
 pub use session::{ResumeContext, SftpSession};
-pub use transfer::{check_transfer_control, TransferControl, TransferManager};
+pub use transfer::{check_transfer_control, TransferControl, TransferGuard, TransferManager};
 pub use types::*;

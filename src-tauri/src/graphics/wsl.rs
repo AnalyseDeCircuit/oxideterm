@@ -655,7 +655,18 @@ if [ -f {pid} ]; then
 fi
 rm -rf /tmp/oxideterm-xdg-* 2>/dev/null || true
 rm -rf /tmp/oxideterm-app-xdg-* 2>/dev/null || true
-rm -f /tmp/oxideterm-app-*.pid 2>/dev/null || true"#,
+
+# Kill app process trees before removing PID files
+for pidfile in /tmp/oxideterm-app-*.pid; do
+    [ -f "$pidfile" ] || continue
+    APP_PID=$(cat "$pidfile" 2>/dev/null) || continue
+    if kill -0 "$APP_PID" 2>/dev/null; then
+        kill_tree "$APP_PID"
+        sleep 0.3
+        kill -KILL "$APP_PID" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
+done"#,
         pid = PID_FILE,
     );
 
