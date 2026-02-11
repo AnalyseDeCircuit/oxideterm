@@ -115,6 +115,13 @@ const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 15_000;
 const BACKOFF_MULTIPLIER = 1.5;
 
+/** Max completed/failed/cancelled jobs to retain before auto-eviction */
+const MAX_RETAINED_JOBS = 200;
+/** Delay (ms) before auto-removing a terminal (done/failed/cancelled) job */
+const AUTO_CLEANUP_DELAY_MS = 30_000;
+/** Maximum phaseHistory entries per job (ring-buffer style) */
+const MAX_PHASE_HISTORY = 64;
+
 /**
  * Adaptive backoff with ±20% jitter.
  * delay = min(BASE × MULTIPLIER^(attempt-1), MAX) × (0.8 ~ 1.2)
@@ -300,7 +307,9 @@ function enterPhase(nodeId: string, phase: ReconnectPhase) {
   const job = getJob(nodeId);
   if (!job) return;
   const history = [...job.phaseHistory, { phase, startedAt: Date.now(), result: 'running' as PhaseResult }];
-  updateJob(nodeId, { status: phase, phaseHistory: history });
+  // Cap phaseHistory to prevent unbounded growth in long-running retry loops
+  const trimmed = history.length > MAX_PHASE_HISTORY ? history.slice(-MAX_PHASE_HISTORY) : history;
+  updateJob(nodeId, { status: phase, phaseHistory: trimmed });
 
   slog({
     component: 'Orchestrator',
@@ -507,6 +516,8 @@ async function runPipeline(nodeId: string) {
     toast('connections.reconnect.failed', 'error', { error: msg });
   } finally {
     isRunning = false;
+    // Schedule auto-cleanup for terminal jobs
+    scheduleAutoCleanup(nodeId);
   }
 }
 
@@ -514,6 +525,54 @@ function markCancelled(nodeId: string) {
   exitPhase(nodeId, 'failed', 'cancelled');
   updateJob(nodeId, { status: 'cancelled', endedAt: Date.now() });
   toast('connections.reconnect.cancelled', 'default');
+  scheduleAutoCleanup(nodeId);
+}
+
+/**
+ * Schedule removal of a terminal job after a delay.
+ * Also enforces MAX_RETAINED_JOBS hard cap with LRU eviction.
+ * Deduplicates: only one pending timer per nodeId+startedAt pair.
+ */
+const pendingCleanups = new Set<string>();
+
+function scheduleAutoCleanup(nodeId: string) {
+  const job = getJob(nodeId);
+  if (!job || !isTerminal(job.status)) return;
+
+  // Capture the job's startedAt so the timer only removes *this* job instance.
+  const jobStartedAt = job.startedAt;
+  const dedupeKey = `${nodeId}:${jobStartedAt}`;
+
+  // Skip if a timer is already pending for this exact job instance
+  if (pendingCleanups.has(dedupeKey)) return;
+  pendingCleanups.add(dedupeKey);
+
+  setTimeout(() => {
+    pendingCleanups.delete(dedupeKey);
+    const store = useReconnectOrchestratorStore.getState();
+    const jobs = new Map(store.jobs);
+    const current = jobs.get(nodeId);
+    // Only remove if still terminal AND same job instance (startedAt matches)
+    if (current && isTerminal(current.status) && current.startedAt === jobStartedAt) {
+      jobs.delete(nodeId);
+      useReconnectOrchestratorStore.setState({ jobs, jobEntries: syncEntries(jobs) });
+    }
+  }, AUTO_CLEANUP_DELAY_MS);
+
+  // Enforce hard cap: evict oldest terminal jobs if over limit
+  const store = useReconnectOrchestratorStore.getState();
+  const terminalJobs = Array.from(store.jobs.entries())
+    .filter(([, j]) => isTerminal(j.status))
+    .sort((a, b) => (a[1].endedAt ?? 0) - (b[1].endedAt ?? 0));
+
+  if (terminalJobs.length > MAX_RETAINED_JOBS) {
+    const jobs = new Map(store.jobs);
+    const toEvict = terminalJobs.length - MAX_RETAINED_JOBS;
+    for (let i = 0; i < toEvict; i++) {
+      jobs.delete(terminalJobs[i][0]);
+    }
+    useReconnectOrchestratorStore.setState({ jobs, jobEntries: syncEntries(jobs) });
+  }
 }
 
 // ─── Phase 0: Snapshot ───────────────────────────────────────────────────────

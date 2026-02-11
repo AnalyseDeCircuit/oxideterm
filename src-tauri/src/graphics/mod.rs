@@ -252,6 +252,9 @@ mod types {
         pub vnc_port: u16,
         /// Desktop environment / app display name (for UI)
         pub desktop_name: String,
+        /// Signal to stop the app-exit watcher (so `stop` can kill the app
+        /// process even after `watch_app_exit` took ownership of `app_child`).
+        pub stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     }
 
     /// Global state for WSL Graphics, managed by Tauri
@@ -271,6 +274,10 @@ mod types {
             let mut sessions = self.sessions.write().await;
             for (id, mut handle) in sessions.drain() {
                 tracing::info!("Shutting down graphics session: {}", id);
+                // Signal the app-exit watcher so it kills its owned app_child
+                if let Some(tx) = handle.stop_tx.take() {
+                    let _ = tx.send(());
+                }
                 handle.bridge_handle.abort();
                 let _ = handle.vnc_child.kill().await;
                 if let Some(ref mut desktop) = handle.desktop_child {

@@ -1183,7 +1183,7 @@ impl SftpSession {
             },
             RetryConfig::default(),
             progress_store.clone(),
-            stored_progress.clone(),
+            stored_progress,
             control.clone(),
         )
         .await;
@@ -1508,7 +1508,7 @@ impl SftpSession {
             },
             RetryConfig::default(),
             progress_store.clone(),
-            stored_progress.clone(),
+            stored_progress,
             control.clone(),
         )
         .await;

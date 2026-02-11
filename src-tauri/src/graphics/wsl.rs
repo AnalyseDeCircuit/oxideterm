@@ -502,7 +502,7 @@ pub async fn start_app_session(
     // 3. Launch app via bootstrap script
     let app_child = start_app_process(distro, &disp, argv).await?;
 
-    Ok((port, disp.to_string(), vnc_child, app_child))
+    Ok((port, disp, vnc_child, app_child))
 }
 
 /// Generate the app-mode bootstrap script.
@@ -562,18 +562,9 @@ async fn start_app_process(
     // wsl.exe -d Ubuntu -- bash -s -- gedit /home/user/file.txt
     //                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     //                                 These become $1, $2, ... executed by `exec "$@"`
-    let mut args = vec![
-        "-d".to_string(),
-        distro.to_string(),
-        "--".to_string(),
-        "bash".to_string(),
-        "-s".to_string(),
-        "--".to_string(),
-    ];
-    args.extend_from_slice(argv);
-
     let mut child = Command::new("wsl.exe")
-        .args(&args)
+        .args(["-d", distro, "--", "bash", "-s", "--"])
+        .args(argv)
         // §11.4: Clear all inherited environment, inject only safe minimum
         .env_clear()
         .env(

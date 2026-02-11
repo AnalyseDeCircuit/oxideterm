@@ -62,6 +62,9 @@ pub async fn wsl_graphics_start(
     );
 
     // 2. Start Xtigervnc + desktop session
+    // All Child handles have kill_on_drop(true), so if this function returns
+    // early (Err) before they are moved into the session handle, they are
+    // automatically killed. We only need to ensure WSL cleanup runs.
     let (vnc_port, vnc_child, desktop_child) =
         wsl::start_session(&distro, &desktop_cmd, &dbus_cmd, extra_env)
             .await
@@ -82,12 +85,8 @@ pub async fn wsl_graphics_start(
     {
         Ok(result) => result,
         Err(e) => {
-            // Kill VNC + desktop to avoid orphan processes
-            let mut child = vnc_child;
-            let _ = child.kill().await;
-            if let Some(mut dc) = desktop_child {
-                let _ = dc.kill().await;
-            }
+            // vnc_child + desktop_child are dropped here → kill_on_drop fires.
+            // We still need WSL-level cleanup (PID files, temp dirs).
             wsl::cleanup_wsl_session(&distro).await;
             return Err(e.to_string());
         }
@@ -113,6 +112,7 @@ pub async fn wsl_graphics_start(
         distro: distro.clone(),
         vnc_port,
         desktop_name: desktop_name.to_string(),
+        stop_tx: None, // Desktop mode has no app-exit watcher
     };
 
     state.sessions.write().await.insert(session_id, handle);
@@ -133,6 +133,10 @@ pub async fn wsl_graphics_stop(
     match sessions.remove(&session_id) {
         Some(mut handle) => {
             tracing::info!("WSL Graphics: stopping session {}", session_id);
+            // 0. Signal the app-exit watcher to kill its owned app_child
+            if let Some(tx) = handle.stop_tx.take() {
+                let _ = tx.send(());
+            }
             // 1. Abort the bridge proxy task
             handle.bridge_handle.abort();
             // 2. Kill the VNC child process
@@ -141,7 +145,7 @@ pub async fn wsl_graphics_stop(
             if let Some(ref mut desktop) = handle.desktop_child {
                 let _ = desktop.kill().await;
             }
-            // 4. Kill the app child process
+            // 4. Kill the app child process (if watcher hasn't taken it)
             if let Some(ref mut app) = handle.app_child {
                 let _ = app.kill().await;
             }
@@ -361,8 +365,11 @@ pub async fn wsl_graphics_start_app(
         .map_err(|e| e.to_string())?;
 
     // ── 4. Start Xtigervnc + app ──
+    // All Child handles have kill_on_drop(true), so if this function returns
+    // early (Err) before they are moved into the session handle, they are
+    // automatically killed. We only need to ensure WSL cleanup runs.
     let geo = geometry.as_deref().unwrap_or("1280x720");
-    let (vnc_port, _x_display, mut vnc_child, app_child) =
+    let (vnc_port, _x_display, vnc_child, app_child) =
         match wsl::start_app_session(&distro, &argv, Some(geo)).await {
             Ok(result) => result,
             Err(e) => return Err(e.to_string()),
@@ -385,9 +392,8 @@ pub async fn wsl_graphics_start_app(
         match bridge::start_proxy(vnc_addr, session_id.clone()).await {
             Ok(result) => result,
             Err(e) => {
-                // Rollback: kill app + vnc explicitly, then clean up WSL session
-                let _ = app_child.kill().await;
-                let _ = vnc_child.kill().await;
+                // vnc_child + app_child dropped here → kill_on_drop fires.
+                // WSL-level cleanup (PID files, temp dirs) still needed.
                 wsl::cleanup_wsl_session(&distro).await;
                 return Err(e.to_string());
             }
@@ -406,10 +412,13 @@ pub async fn wsl_graphics_start_app(
         distro: distro.clone(),
         desktop_name: app_title.clone(),
         mode: GraphicsSessionMode::App {
-            argv: argv.clone(),
+            argv,
             title,
         },
     };
+
+    // Create stop signal channel for the app-exit watcher
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = WslGraphicsHandle {
         info: session.clone(),
@@ -420,6 +429,7 @@ pub async fn wsl_graphics_start_app(
         distro: distro.clone(),
         vnc_port,
         desktop_name: app_title,
+        stop_tx: Some(stop_tx),
     };
 
     state
@@ -433,7 +443,7 @@ pub async fn wsl_graphics_start_app(
     let sid = session_id.clone();
     let distro_clone = distro.clone();
     tokio::spawn(async move {
-        watch_app_exit(sid, distro_clone, state_clone).await;
+        watch_app_exit(sid, distro_clone, state_clone, stop_rx).await;
     });
 
     Ok(session)
@@ -441,87 +451,89 @@ pub async fn wsl_graphics_start_app(
 
 /// Watch for app process exit and automatically clean up the session.
 ///
-/// Polls the session's app_child process. When it exits, the entire session
+/// Takes ownership of the app Child process and awaits its exit directly
+/// (event-driven, no polling). When exit is detected, the entire session
 /// (VNC + bridge + WSL cleanup) is torn down automatically.
+///
+/// Also listens for a stop signal from `wsl_graphics_stop` — if fired,
+/// this watcher kills the app process it owns and exits without doing
+/// session teardown (the stop function handles that).
 async fn watch_app_exit(
     session_id: String,
     distro: String,
     state: Arc<WslGraphicsState>,
+    mut stop_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
-    // Poll every 2 seconds until the app process exits
-    loop {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
+    // Take ownership of app_child from the session handle so we can
+    // call `.wait()` without holding the write lock.
+    let mut app_child = {
         let mut sessions = state.sessions.write().await;
         let Some(handle) = sessions.get_mut(&session_id) else {
-            // Session was already removed (manual stop)
-            return;
+            return; // Session was already removed (manual stop)
         };
+        match handle.app_child.take() {
+            Some(child) => child,
+            None => return, // No app_child (shouldn't happen for app sessions)
+        }
+    };
 
-        // Check if app_child has exited
-        if let Some(ref mut app) = handle.app_child {
-            match app.try_wait() {
-                Ok(Some(status)) => {
-                    // Read stderr for diagnostic info
-                    let stderr_msg = if let Some(mut stderr) = handle
-                        .app_child
-                        .as_mut()
-                        .and_then(|c| c.stderr.take())
-                    {
-                        use tokio::io::AsyncReadExt;
-                        let mut buf = Vec::with_capacity(4096);
-                        let _ = stderr.read_to_end(&mut buf).await;
-                        String::from_utf8_lossy(&buf).trim().to_string()
-                    } else {
-                        String::new()
-                    };
+    // Wait for either the app to exit naturally or a stop signal from the caller.
+    tokio::select! {
+        status = app_child.wait() => {
+            // ── Natural exit path ──
+            // Read stderr for diagnostic info
+            let stderr_msg = if let Some(mut stderr) = app_child.stderr.take() {
+                use tokio::io::AsyncReadExt;
+                let mut buf = Vec::with_capacity(4096);
+                let _ = stderr.read_to_end(&mut buf).await;
+                String::from_utf8_lossy(&buf).trim().to_string()
+            } else {
+                String::new()
+            };
 
+            match &status {
+                Ok(exit) => {
                     if stderr_msg.is_empty() {
                         tracing::info!(
                             "WSL Graphics App: process exited for session {} (status: {:?})",
-                            session_id,
-                            status
+                            session_id, exit
                         );
                     } else {
                         tracing::warn!(
                             "WSL Graphics App: process exited for session {} (status: {:?}), stderr: {}",
-                            session_id,
-                            status,
-                            stderr_msg
+                            session_id, exit, stderr_msg
                         );
                     }
-                    // App exited — tear down the whole session
-                    let mut handle = sessions.remove(&session_id).unwrap();
-                    handle.bridge_handle.abort();
-                    let _ = handle.vnc_child.kill().await;
-                    if let Some(ref mut desktop) = handle.desktop_child {
-                        let _ = desktop.kill().await;
-                    }
-                    wsl::cleanup_wsl_session(&distro).await;
-                    // TODO: emit Tauri event to frontend for UI update
-                    // e.g. app_handle.emit("wsl-graphics-app-exited", &session_id)
-                    return;
-                }
-                Ok(None) => {
-                    // Still running — continue polling
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "WSL Graphics App: error checking process for session {}: {}",
-                        session_id,
-                        e
+                        "WSL Graphics App: error waiting for process in session {}: {}",
+                        session_id, e
                     );
-                    // Treat as exited to be safe
-                    let mut handle = sessions.remove(&session_id).unwrap();
-                    handle.bridge_handle.abort();
-                    let _ = handle.vnc_child.kill().await;
-                    wsl::cleanup_wsl_session(&distro).await;
-                    return;
                 }
             }
-        } else {
-            // No app_child (shouldn't happen for app sessions, but be safe)
-            return;
+
+            // Tear down the session
+            let mut sessions = state.sessions.write().await;
+            if let Some(mut handle) = sessions.remove(&session_id) {
+                handle.bridge_handle.abort();
+                let _ = handle.vnc_child.kill().await;
+                if let Some(ref mut desktop) = handle.desktop_child {
+                    let _ = desktop.kill().await;
+                }
+                drop(sessions); // Release lock before potentially slow WSL cleanup
+                wsl::cleanup_wsl_session(&distro).await;
+            }
+            // TODO: emit Tauri event to frontend for UI update
+        }
+        _ = &mut stop_rx => {
+            // ── Stop signal from wsl_graphics_stop ──
+            // Kill the app process we own; session teardown is handled by the caller.
+            tracing::info!(
+                "WSL Graphics App: stop signal received for session {}, killing app process",
+                session_id
+            );
+            let _ = app_child.kill().await;
         }
     }
 }

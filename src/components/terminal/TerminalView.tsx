@@ -195,7 +195,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           const addon = new ImageAddon({
             enableSizeReports: true,
             pixelLimit: 16777216,
-            storageLimit: 64,
+            storageLimit: 16,
             showPlaceholder: true,
             sixelSupport: true,
             iipSupport: true,
@@ -209,7 +209,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         const addon = new ImageAddon({
           enableSizeReports: true,
           pixelLimit: 16777216,
-          storageLimit: 64,
+          storageLimit: 16,
           showPlaceholder: true,
           sixelSupport: true,
           iipSupport: true,
@@ -1019,8 +1019,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       const lines: string[] = [];
       const lineCount = buffer.length;
       
-      // Read all lines from the buffer
-      for (let i = 0; i < lineCount; i++) {
+      // Only read the last 500 lines to avoid copying huge scrollback buffers
+      const maxLines = 500;
+      const startLine = Math.max(0, lineCount - maxLines);
+      for (let i = startLine; i < lineCount; i++) {
         const line = buffer.getLine(i);
         if (line) {
           lines.push(line.translateToString(true));

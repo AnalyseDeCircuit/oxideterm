@@ -45,7 +45,7 @@ pub async fn start_proxy(
         match listener.accept().await {
             Ok((stream, addr)) => {
                 tracing::info!("Graphics proxy: client connected from {}", addr);
-                if let Err(e) = proxy_connection(stream, &vnc_addr, &expected_token).await {
+                if let Err(e) = proxy_connection(stream, &vnc_addr, expected_token).await {
                     tracing::warn!("Graphics proxy error: {}", e);
                 }
             }
@@ -69,10 +69,9 @@ pub async fn start_proxy(
 async fn proxy_connection(
     tcp_stream: TcpStream,
     vnc_addr: &str,
-    expected_token: &str,
+    expected_token: String,
 ) -> Result<(), GraphicsError> {
     // 1. WebSocket handshake with token validation + subprotocol negotiation
-    let expected_token_owned = expected_token.to_string();
     let ws_stream = tokio_tungstenite::accept_hdr_async(
         tcp_stream,
         |req: &tokio_tungstenite::tungstenite::http::Request<()>, resp: Response<()>| -> Result<Response<()>, Response<Option<String>>> {
@@ -82,7 +81,7 @@ async fn proxy_connection(
             let token_valid = extract_token(&uri)
                 .map(|t| {
                     let a = t.as_bytes();
-                    let b = expected_token_owned.as_bytes();
+                    let b = expected_token.as_bytes();
                     a.len() == b.len() && bool::from(a.ct_eq(b))
                 })
                 .unwrap_or(false);

@@ -16,6 +16,7 @@ import { nodeIdeExecCommand } from '../../lib/api';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 搜索缓存（模块级别，组件卸载不会丢失）
+// LRU eviction at MAX_SEARCH_CACHE_SIZE, TTL-based expiry on read.
 // ═══════════════════════════════════════════════════════════════════════════
 interface SearchCacheEntry {
   results: SearchResultGroup[];
@@ -24,6 +25,23 @@ interface SearchCacheEntry {
 
 const searchCache = new Map<string, SearchCacheEntry>();
 const SEARCH_CACHE_TTL = 60 * 1000; // 60秒缓存
+const MAX_SEARCH_CACHE_SIZE = 50;
+
+/**
+ * Set a cache entry, evicting the oldest entry if over capacity.
+ * Preserves insertion-order LRU: re-inserting a key moves it to the end.
+ */
+function searchCacheSet(key: string, entry: SearchCacheEntry) {
+  // Delete first so re-insertion moves key to end (LRU refresh)
+  searchCache.delete(key);
+  searchCache.set(key, entry);
+  // Evict oldest entries (Map iteration is insertion-order)
+  while (searchCache.size > MAX_SEARCH_CACHE_SIZE) {
+    const oldest = searchCache.keys().next().value;
+    if (oldest !== undefined) searchCache.delete(oldest);
+    else break;
+  }
+}
 
 // 注册缓存清除回调（保存文件时触发）
 registerSearchCacheClearCallback(() => {
@@ -232,8 +250,8 @@ export function IdeSearchPanel({ open, onClose }: IdeSearchPanelProps) {
         ([path, fileMatches]) => ({ path, matches: fileMatches })
       );
       
-      // 写入缓存
-      searchCache.set(cacheKey, {
+      // 写入缓存（LRU eviction if over capacity）
+      searchCacheSet(cacheKey, {
         results: resultGroups,
         timestamp: Date.now(),
       });

@@ -132,7 +132,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           const addon = new ImageAddon({
             enableSizeReports: true,
             pixelLimit: 16777216,
-            storageLimit: 128,
+            storageLimit: 32,
             showPlaceholder: true,
             sixelSupport: true,
             iipSupport: true,
@@ -146,7 +146,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         const addon = new ImageAddon({
           enableSizeReports: true,
           pixelLimit: 16777216,
-          storageLimit: 128,
+          storageLimit: 32,
           showPlaceholder: true,
           sixelSupport: true,
           iipSupport: true,
@@ -522,10 +522,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const getBufferContent = (): string => {
       const buffer = term.buffer.active;
       const lines: string[] = [];
-      // Get visible lines plus some scrollback
-      const startRow = Math.max(0, buffer.baseY);
-      const endRow = buffer.baseY + term.rows;
-      for (let i = startRow; i < endRow; i++) {
+      const lineCount = buffer.length;
+      // Read last 500 lines (scrollback + visible) for AI context
+      const maxLines = 500;
+      const startRow = Math.max(0, lineCount - maxLines);
+      for (let i = startRow; i < lineCount; i++) {
         const line = buffer.getLine(i);
         if (line) {
           lines.push(line.translateToString(true));
