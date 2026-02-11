@@ -36,6 +36,8 @@
     "selectDrive": "Select Drive",
     "selectDriveDesc": "Choose a drive to navigate to",
     "localDisk": "Local Disk",
+    "available": "available",
+    "readOnly": "Read-only",
     "newFolderDesc": "Enter a name for the new folder",
     "folderName": "Folder name",
     "renameDesc": "Enter a new name",

@@ -36,6 +36,8 @@
     "selectDrive": "Laufwerk auswählen",
     "selectDriveDesc": "Wählen Sie ein Laufwerk zum Navigieren",
     "localDisk": "Lokaler Datenträger",
+    "available": "verfügbar",
+    "readOnly": "Schreibgeschützt",
     "newFolderDesc": "Geben Sie einen Namen für den neuen Ordner ein",
     "folderName": "Ordnername",
     "renameDesc": "Geben Sie einen neuen Namen ein",

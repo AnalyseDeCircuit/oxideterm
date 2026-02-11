@@ -36,6 +36,8 @@
     "selectDrive": "選擇磁碟機",
     "selectDriveDesc": "選擇要瀏覽的磁碟機",
     "localDisk": "本機磁碟",
+    "available": "可用",
+    "readOnly": "唯讀",
     "newFolderDesc": "輸入新資料夾的名稱",
     "folderName": "資料夾名稱",
     "renameDesc": "輸入新名稱",

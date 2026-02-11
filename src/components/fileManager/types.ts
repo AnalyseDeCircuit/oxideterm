@@ -44,6 +44,16 @@ export interface DragDropData {
   basePath: string;
 }
 
+// Drive / volume info from the backend
+export interface DriveInfo {
+  path: string;
+  name: string;
+  driveType: 'system' | 'removable' | 'network';
+  totalSpace: number;
+  availableSpace: number;
+  isReadOnly: boolean;
+}
+
 // Context menu actions
 export type FileAction = 
   | 'open'

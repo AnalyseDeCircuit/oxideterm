@@ -36,6 +36,8 @@
     "selectDrive": "드라이브 선택",
     "selectDriveDesc": "이동할 드라이브를 선택하세요",
     "localDisk": "로컬 디스크",
+    "available": "사용 가능",
+    "readOnly": "읽기 전용",
     "newFolderDesc": "새 폴더의 이름을 입력하세요",
     "folderName": "폴더 이름",
     "renameDesc": "새 이름을 입력하세요",

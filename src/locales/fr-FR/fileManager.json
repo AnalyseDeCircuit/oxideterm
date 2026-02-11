@@ -36,6 +36,8 @@
     "selectDrive": "Sélectionner un Lecteur",
     "selectDriveDesc": "Choisissez un lecteur pour naviguer",
     "localDisk": "Disque local",
+    "available": "disponible",
+    "readOnly": "Lecture seule",
     "newFolderDesc": "Entrez un nom pour le nouveau dossier",
     "folderName": "Nom du dossier",
     "renameDesc": "Entrez un nouveau nom",

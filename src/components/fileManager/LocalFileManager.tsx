@@ -3,11 +3,11 @@
  * Standalone local file browser panel with Quick Look, Bookmarks, and Terminal integration
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FolderPlus, Trash2, Terminal, Star, PanelLeftClose, PanelLeft, Copy, Scissors, ClipboardPaste, Archive, FolderArchive, HardDrive } from 'lucide-react';
+import { FolderPlus, Trash2, Terminal, Star, PanelLeftClose, PanelLeft, Copy, Scissors, ClipboardPaste, Archive, FolderArchive, HardDrive, Usb, Globe } from 'lucide-react';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
-import { FileList } from './FileList';
+import { FileList, formatFileSize } from './FileList';
 import { QuickLook } from './QuickLook';
 import { BookmarksPanel } from './BookmarksPanel';
 import { FilePropertiesDialog } from './FilePropertiesDialog';
@@ -26,7 +26,7 @@ import {
   DialogFooter
 } from '../ui/dialog';
 import { cn } from '../../lib/utils';
-import type { FileInfo, FilePreview, PreviewType, FileMetadata, ArchiveInfo, ChecksumResult, DirStatsResult } from './types';
+import type { FileInfo, FilePreview, PreviewType, FileMetadata, ArchiveInfo, ChecksumResult, DirStatsResult, DriveInfo } from './types';
 
 // Preview imports
 import { readFile, stat, writeTextFile, copyFile } from '@tauri-apps/plugin-fs';
@@ -162,7 +162,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   const [renameDialog, setRenameDialog] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string[] | null>(null);
   const [drivesDialog, setDrivesDialog] = useState(false);
-  const [availableDrives, setAvailableDrives] = useState<string[]>([]);
+  const [availableDrives, setAvailableDrives] = useState<DriveInfo[]>([]);
   const [inputValue, setInputValue] = useState('');
   
   // Preview state (for Quick Look)
@@ -177,6 +177,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   const [dirStatsLoading, setDirStatsLoading] = useState(false);
   const [checksum, setChecksum] = useState<ChecksumResult | null>(null);
   const [checksumLoading, setChecksumLoading] = useState(false);
+  const propertiesPathRef = useRef<string | null>(null);
   
   // Compute previewable files (non-directories) from displayFiles
   const previewableFiles = React.useMemo(() => 
@@ -394,8 +395,8 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   }, [localFiles, selection, handleShowDrives]);
   
   // Handle select drive
-  const handleSelectDrive = useCallback((drive: string) => {
-    localFiles.navigate(drive);
+  const handleSelectDrive = useCallback((drivePath: string) => {
+    localFiles.navigate(drivePath);
     selection.clearSelection();
     setDrivesDialog(false);
   }, [localFiles, selection]);
@@ -494,6 +495,8 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
 
   // Handle properties dialog
   const handleProperties = useCallback(async (file: FileInfo) => {
+    const requestPath = file.path;
+    propertiesPathRef.current = requestPath;
     setPropertiesFile(file);
     setPropertiesMetadata(null);
     setPropertiesLoading(true);
@@ -503,30 +506,45 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
     setChecksumLoading(false);
     try {
       const meta = await invoke<FileMetadata>('local_get_file_metadata', { path: file.path });
+      // Guard: only apply if this is still the active properties request
+      if (propertiesPathRef.current !== requestPath) return;
       setPropertiesMetadata(meta);
 
       // Auto-fetch dir stats for directories
       if (file.file_type === 'Directory') {
         setDirStatsLoading(true);
         invoke<DirStatsResult>('local_dir_stats', { path: file.path })
-          .then(setDirStats)
+          .then((stats) => {
+            if (propertiesPathRef.current === requestPath) setDirStats(stats);
+          })
           .catch((err) => console.warn('Failed to fetch dir stats:', err))
-          .finally(() => setDirStatsLoading(false));
+          .finally(() => {
+            if (propertiesPathRef.current === requestPath) setDirStatsLoading(false);
+          });
       }
     } catch (err) {
-      console.warn('Failed to fetch file metadata:', err);
+      if (propertiesPathRef.current === requestPath) {
+        console.warn('Failed to fetch file metadata:', err);
+      }
     } finally {
-      setPropertiesLoading(false);
+      if (propertiesPathRef.current === requestPath) {
+        setPropertiesLoading(false);
+      }
     }
   }, []);
 
   const handleCalculateChecksum = useCallback(() => {
     if (!propertiesFile || checksumLoading) return;
+    const requestPath = propertiesFile.path;
     setChecksumLoading(true);
-    invoke<ChecksumResult>('local_calculate_checksum', { path: propertiesFile.path })
-      .then(setChecksum)
+    invoke<ChecksumResult>('local_calculate_checksum', { path: requestPath })
+      .then((result) => {
+        if (propertiesPathRef.current === requestPath) setChecksum(result);
+      })
       .catch((err) => console.warn('Failed to calculate checksum:', err))
-      .finally(() => setChecksumLoading(false));
+      .finally(() => {
+        if (propertiesPathRef.current === requestPath) setChecksumLoading(false);
+      });
   }, [propertiesFile, checksumLoading]);
 
   // Handle open terminal at directory
@@ -581,10 +599,14 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   // Handle paste
   const handlePaste = useCallback(async () => {
     if (fileClipboard.hasClipboard) {
-      await fileClipboard.paste(localFiles.path);
+      try {
+        await fileClipboard.paste(localFiles.path);
+      } catch (err) {
+        toastError(t('fileManager.error'), String(err));
+      }
       localFiles.refresh();
     }
-  }, [fileClipboard, localFiles]);
+  }, [fileClipboard, localFiles, toastError, t]);
   
   // Handle compress
   const handleCompress = useCallback(async () => {
@@ -593,10 +615,14 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       const archiveName = files.length === 1 
         ? `${files[0].name}.zip`
         : `Archive_${new Date().toISOString().slice(0, 10)}.zip`;
-      await fileArchive.compress(files, localFiles.path, archiveName);
+      try {
+        await fileArchive.compress(files, localFiles.path, archiveName);
+      } catch (err) {
+        toastError(t('fileManager.error'), String(err));
+      }
       localFiles.refresh();
     }
-  }, [getSelectedFiles, fileArchive, localFiles]);
+  }, [getSelectedFiles, fileArchive, localFiles, toastError, t]);
   
   // Handle extract
   const handleExtract = useCallback(async () => {
@@ -606,10 +632,14 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       const archiveName = files[0].name;
       const folderName = archiveName.replace(/\.(zip|tar|gz|tgz|tar\.gz|bz2|xz|7z)$/i, '');
       const destPath = `${localFiles.path}/${folderName}`;
-      await fileArchive.extract(files[0].path, destPath);
+      try {
+        await fileArchive.extract(files[0].path, destPath);
+      } catch (err) {
+        toastError(t('fileManager.error'), String(err));
+      }
       localFiles.refresh();
     }
-  }, [getSelectedFiles, fileArchive, localFiles]);
+  }, [getSelectedFiles, fileArchive, localFiles, toastError, t]);
   
   // Keyboard shortcuts for clipboard operations
   useEffect(() => {
@@ -894,19 +924,47 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
           </DialogHeader>
           <div className="flex flex-col gap-1.5 py-2">
             {availableDrives.map(drive => {
-              const letter = drive.replace(/[:\\\/]/g, '');
+              const DriveIcon = drive.driveType === 'removable' ? Usb
+                : drive.driveType === 'network' ? Globe
+                : HardDrive;
+              const usedRatio = drive.totalSpace > 0
+                ? ((drive.totalSpace - drive.availableSpace) / drive.totalSpace) * 100
+                : 0;
               return (
                 <button
-                  key={drive}
+                  key={drive.path}
                   className="group flex items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-accent active:scale-[0.99]"
-                  onClick={() => handleSelectDrive(drive)}
+                  onClick={() => handleSelectDrive(drive.path)}
                 >
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
-                    <HardDrive className="h-4 w-4" />
+                    <DriveIcon className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{t('fileManager.localDisk')} ({letter}:)</div>
-                    <div className="text-xs text-muted-foreground">{drive}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium">{drive.name}</span>
+                      {drive.isReadOnly && (
+                        <span className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                          {t('fileManager.readOnly')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{drive.path}</div>
+                    {drive.totalSpace > 0 && (
+                      <div className="mt-1">
+                        <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all",
+                              usedRatio > 90 ? "bg-red-500" : usedRatio > 70 ? "bg-amber-500" : "bg-primary"
+                            )}
+                            style={{ width: `${Math.min(usedRatio, 100)}%` }}
+                          />
+                        </div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {formatFileSize(drive.availableSpace)} {t('fileManager.available')} / {formatFileSize(drive.totalSpace)}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <svg className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="9 18 15 12 9 6" />

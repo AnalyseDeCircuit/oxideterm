@@ -105,6 +105,7 @@ export function useFileClipboard(options: UseFileClipboardOptions = {}): UseFile
     const { files, mode, sourcePath } = clipboard;
     let successCount = 0;
     let errorCount = 0;
+    let firstError: string | null = null;
 
     for (const file of files) {
       try {
@@ -141,6 +142,7 @@ export function useFileClipboard(options: UseFileClipboardOptions = {}): UseFile
         successCount++;
       } catch (err) {
         console.error(`Failed to ${mode} file:`, file.name, err);
+        if (!firstError) firstError = `${file.name}: ${String(err)}`;
         errorCount++;
       }
     }
@@ -155,7 +157,10 @@ export function useFileClipboard(options: UseFileClipboardOptions = {}): UseFile
       const action = mode === 'copy' ? 'Copied' : 'Moved';
       onSuccess?.(`${action} ${successCount} item(s)`);
     } else if (errorCount > 0) {
-      onError?.('Paste Error', `Failed to paste ${errorCount} of ${files.length} items`);
+      const detail = errorCount === 1 && firstError
+        ? firstError
+        : `Failed to paste ${errorCount} of ${files.length} items${firstError ? `\n${firstError}` : ''}`;
+      onError?.('Paste Error', detail);
     }
   }, [clipboard, onSuccess, onError]);
 

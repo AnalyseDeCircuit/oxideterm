@@ -36,6 +36,8 @@
     "selectDrive": "Seleccionar Unidad",
     "selectDriveDesc": "Elija una unidad para navegar",
     "localDisk": "Disco local",
+    "available": "disponible",
+    "readOnly": "Solo lectura",
     "newFolderDesc": "Ingrese un nombre para la nueva carpeta",
     "folderName": "Nombre de carpeta",
     "renameDesc": "Ingrese un nuevo nombre",

@@ -1095,10 +1095,11 @@ export const api = {
   },
 
   /**
-   * Get available local drives (Windows: C:\, D:\, etc. Unix: /)
+   * Get available local drives / mounted volumes.
+   * Returns structured DriveInfo with path, name, type, and capacity.
    */
-  localGetDrives: async (): Promise<string[]> => {
-    if (USE_MOCK) return ['/'];
+  localGetDrives: async (): Promise<import('../components/fileManager/types').DriveInfo[]> => {
+    if (USE_MOCK) return [{ path: '/', name: 'System', driveType: 'system', totalSpace: 0, availableSpace: 0, isReadOnly: false }];
     return invoke('local_get_drives');
   },
 

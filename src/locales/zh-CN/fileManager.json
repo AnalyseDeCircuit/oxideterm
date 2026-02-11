@@ -36,6 +36,8 @@
     "selectDrive": "选择驱动器",
     "selectDriveDesc": "选择要导航到的驱动器",
     "localDisk": "本地磁盘",
+    "available": "可用",
+    "readOnly": "只读",
     "newFolderDesc": "输入新文件夹的名称",
     "folderName": "文件夹名称",
     "renameDesc": "输入新名称",

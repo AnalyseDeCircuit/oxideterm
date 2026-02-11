@@ -316,27 +316,227 @@ pub async fn local_cleanup_dead_sessions(
     Ok(state.registry.cleanup_dead_sessions().await)
 }
 
-/// Get available local drives (Windows: A-Z drives, Unix: root)
+/// Drive / volume information returned to the frontend.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveInfo {
+    /// Mount point path (e.g. "/", "/Volumes/USB", "C:\\")
+    pub path: String,
+    /// Human-readable display name (volume label or folder name)
+    pub name: String,
+    /// Drive classification: "system" | "removable" | "network"
+    pub drive_type: String,
+    /// Total capacity in bytes
+    pub total_space: u64,
+    /// Available (free) space in bytes
+    pub available_space: u64,
+    /// Whether the volume is mounted read-only
+    pub is_read_only: bool,
+}
+
+/// Get available local drives / mounted volumes.
 ///
-/// Returns a list of available drive paths that can be navigated to.
-/// On Windows, this scans A-Z for existing drives.
-/// On Unix, returns just "/" as the root.
+/// Uses `sysinfo::Disks` for cross-platform detection:
+/// - **macOS**: system root + external volumes (filters the /Volumes symlink to /)
+/// - **Linux**: all mounted partitions from /proc/mounts (including USB, NAS, etc.)
+/// - **Windows**: all lettered drives (C:\, D:\, etc.)
+///
+/// Each entry includes capacity info so the frontend can render usage bars.
 #[tauri::command]
-pub fn local_get_drives() -> Vec<String> {
-    #[cfg(windows)]
-    {
-        let mut drives = Vec::new();
-        for letter in b'A'..=b'Z' {
-            let drive = format!("{}:\\", letter as char);
-            if std::path::Path::new(&drive).exists() {
-                drives.push(drive);
+pub fn local_get_drives() -> Vec<DriveInfo> {
+    use sysinfo::Disks;
+
+    let disks = Disks::new_with_refreshed_list();
+    let mut drives: Vec<DriveInfo> = Vec::new();
+    // Track seen volumes by device ID (Unix) or canonical path (Windows).
+    // On macOS, APFS firmlinks (e.g. /Volumes/Macintosh HD → /) share the
+    // same dev_id but canonicalize() won't resolve them. Comparing dev_id
+    // catches both symlinks and firmlinks. We keep the shortest mount path.
+    #[cfg(unix)]
+    let mut seen_dev_ids: std::collections::HashMap<u64, usize> = std::collections::HashMap::new(); // dev_id → index in `drives`
+    #[cfg(not(unix))]
+    let mut seen_mount_points: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+
+    for disk in disks.list() {
+        let mount_point = disk.mount_point().to_path_buf();
+
+        // ── Deduplication (check only; registration happens after filtering) ──
+        #[cfg(unix)]
+        let unix_dev_id: Option<u64>;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(meta) = std::fs::metadata(&mount_point) {
+                let dev = meta.dev();
+                if let Some(&existing_idx) = seen_dev_ids.get(&dev) {
+                    // Same device — keep the one with the shorter path (prefer "/" over "/Volumes/Macintosh HD")
+                    if mount_point.as_os_str().len() < drives[existing_idx].path.len() {
+                        // Current path is shorter — replace the existing entry
+                        drives[existing_idx].path = mount_point.to_string_lossy().to_string();
+                        drives[existing_idx].name = {
+                            let raw = disk.name().to_string_lossy().to_string();
+                            if raw.is_empty() {
+                                mount_point
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| {
+                                        if mount_point.to_string_lossy() == "/" { "System".to_string() } else { mount_point.to_string_lossy().to_string() }
+                                    })
+                            } else {
+                                raw
+                            }
+                        };
+                    }
+                    continue; // Skip duplicate either way
+                }
+                unix_dev_id = Some(dev);
+            } else {
+                unix_dev_id = None;
             }
         }
-        drives
+        #[cfg(not(unix))]
+        {
+            let canonical = mount_point.canonicalize().unwrap_or_else(|_| mount_point.clone());
+            if seen_mount_points.contains(&canonical) {
+                continue;
+            }
+            seen_mount_points.insert(canonical);
+        }
+
+        // Skip pseudo/virtual filesystems (common on Linux)
+        let mount_str = mount_point.to_string_lossy();
+        if mount_str.starts_with("/proc")
+            || mount_str.starts_with("/sys")
+            || mount_str.starts_with("/dev")
+            || mount_str.starts_with("/snap")
+            || mount_str == "/boot"
+            || mount_str == "/boot/efi"
+        {
+            continue;
+        }
+        // /run has many pseudo-paths but some are real mounts:
+        //   /run/media/$USER/*  — udisks2 auto-mount (most distros)
+        //   /run/mount/*        — some desktop environments
+        //   /run/user/*/gvfs/*  — GNOME virtual FS mounts
+        // Block /run unless it matches one of these real-mount patterns.
+        if mount_str.starts_with("/run")
+            && !mount_str.starts_with("/run/media/")
+            && !mount_str.starts_with("/run/mount/")
+            && !mount_str.starts_with("/run/user/")
+        {
+            continue;
+        }
+        // /run/user/* sub-paths: only allow gvfs mounts
+        if mount_str.starts_with("/run/user/") {
+            if !mount_str.contains("/gvfs/") {
+                continue;
+            }
+        }
+
+        let drive_type = classify_disk(disk);
+
+        // Determine display name
+        let raw_name = disk.name().to_string_lossy().to_string();
+        let name = if raw_name.is_empty() {
+            // Derive name from mount point
+            mount_point
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| {
+                    if mount_str == "/" { "System".to_string() } else { mount_str.to_string() }
+                })
+        } else {
+            raw_name
+        };
+
+        // Register dev_id only now, after all filters have passed
+        #[cfg(unix)]
+        if let Some(dev) = unix_dev_id {
+            seen_dev_ids.insert(dev, drives.len());
+        }
+
+        // Determine read-only status.
+        // On macOS Catalina+, the root system volume (/) is technically read-only
+        // (Signed System Volume), but firmlinks to the Data volume make it
+        // functionally writable for the user. Avoid showing a misleading badge.
+        let is_read_only = if cfg!(target_os = "macos") && mount_str == "/" {
+            // Check if the user-writable firmlink target is actually writable
+            !std::fs::metadata("/Users")
+                .map(|m| !m.permissions().readonly())
+                .unwrap_or(false)
+        } else {
+            disk.is_read_only()
+        };
+
+        drives.push(DriveInfo {
+            path: mount_str.to_string(),
+            name,
+            drive_type,
+            total_space: disk.total_space(),
+            available_space: disk.available_space(),
+            is_read_only,
+        });
     }
+
+    // Sort: system first, then alphabetical by path
+    drives.sort_by(|a, b| {
+        let a_sys = if a.drive_type == "system" { 0 } else { 1 };
+        let b_sys = if b.drive_type == "system" { 0 } else { 1 };
+        a_sys.cmp(&b_sys).then(a.path.cmp(&b.path))
+    });
+
+    // Fallback: ensure at least root is present
+    if drives.is_empty() {
+        #[cfg(not(windows))]
+        drives.push(DriveInfo {
+            path: "/".to_string(),
+            name: "System".to_string(),
+            drive_type: "system".to_string(),
+            total_space: 0,
+            available_space: 0,
+            is_read_only: false,
+        });
+    }
+
+    drives
+}
+
+/// Classify a disk as "system", "removable", or "network".
+fn classify_disk(disk: &sysinfo::Disk) -> String {
+    use sysinfo::DiskKind;
+
+    // Check if it's the root mount point → system
+    let mount = disk.mount_point().to_string_lossy();
     #[cfg(not(windows))]
+    if mount == "/" {
+        return "system".to_string();
+    }
+    #[cfg(windows)]
     {
-        vec!["/".to_string()]
+        // On Windows, C:\ is typically the system drive
+        let m = mount.to_uppercase();
+        if m.starts_with("C:") {
+            return "system".to_string();
+        }
+    }
+
+    // Check if removable by disk kind or filesystem hints
+    if disk.is_removable() {
+        return "removable".to_string();
+    }
+
+    // Network filesystems
+    let fs_type = disk.file_system().to_string_lossy().to_lowercase();
+    if fs_type == "nfs" || fs_type == "cifs" || fs_type == "smb" || fs_type == "smbfs"
+        || fs_type == "afpfs" || fs_type == "9p" || fs_type == "fuse.sshfs"
+    {
+        return "network".to_string();
+    }
+
+    // SSDs / HDDs that aren't root and aren't removable
+    match disk.kind() {
+        DiskKind::SSD | DiskKind::HDD => "system".to_string(),
+        _ => "removable".to_string(),
     }
 }
 

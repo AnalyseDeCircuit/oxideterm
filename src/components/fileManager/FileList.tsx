@@ -24,7 +24,6 @@ import {
   HardDrive,
   FolderOpen,
   CornerDownLeft,
-  Terminal,
   Scissors,
   ClipboardPaste,
   Archive,

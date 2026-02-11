@@ -8,7 +8,7 @@ import { readDir, stat, remove, rename as fsRename, mkdir } from '@tauri-apps/pl
 import { homeDir } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from '../../../lib/api';
-import type { FileInfo, SortField, SortDirection } from '../types';
+import type { FileInfo, SortField, SortDirection, DriveInfo } from '../types';
 
 export interface UseLocalFilesOptions {
   initialPath?: string;
@@ -45,7 +45,7 @@ export interface UseLocalFilesReturn {
   
   // Actions
   browseFolder: () => Promise<void>;
-  showDrives: () => Promise<string[]>;
+  showDrives: () => Promise<DriveInfo[]>;
   createFolder: (name: string) => Promise<void>;
   deleteFiles: (names: string[]) => Promise<void>;
   renameFile: (oldName: string, newName: string) => Promise<void>;
@@ -281,12 +281,12 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
     }
   }, [path]);
   
-  // Show drives (Windows)
-  const showDrives = useCallback(async (): Promise<string[]> => {
+  // Show drives / mounted volumes (cross-platform)
+  const showDrives = useCallback(async (): Promise<DriveInfo[]> => {
     try {
       return await api.localGetDrives();
     } catch {
-      return ['/'];
+      return [{ path: '/', name: 'System', driveType: 'system', totalSpace: 0, availableSpace: 0, isReadOnly: false }];
     }
   }, []);
   

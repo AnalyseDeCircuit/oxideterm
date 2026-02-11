@@ -36,6 +36,8 @@
     "selectDrive": "ドライブを選択",
     "selectDriveDesc": "移動先のドライブを選択してください",
     "localDisk": "ローカル ディスク",
+    "available": "空き",
+    "readOnly": "読み取り専用",
     "newFolderDesc": "新規フォルダの名前を入力してください",
     "folderName": "フォルダ名",
     "renameDesc": "新しい名前を入力してください",
