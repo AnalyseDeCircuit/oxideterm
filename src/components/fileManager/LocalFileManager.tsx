@@ -6,10 +6,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderPlus, Trash2, Terminal, Star, PanelLeftClose, PanelLeft, Copy, Scissors, ClipboardPaste, Archive, FolderArchive, HardDrive } from 'lucide-react';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { FileList } from './FileList';
 import { QuickLook } from './QuickLook';
 import { BookmarksPanel } from './BookmarksPanel';
+import { FilePropertiesDialog } from './FilePropertiesDialog';
 import { useLocalFiles, useFileSelection, useBookmarks, useFileClipboard, useFileArchive } from './hooks';
 import { useToast } from '../../hooks/useToast';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
@@ -28,7 +29,7 @@ import { cn } from '../../lib/utils';
 import type { FileInfo, FilePreview, PreviewType, FileMetadata, ArchiveInfo } from './types';
 
 // Preview imports
-import { readFile, stat } from '@tauri-apps/plugin-fs';
+import { readFile, stat, writeTextFile, copyFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 
 // File extension categorization
@@ -167,6 +168,11 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   // Preview state (for Quick Look)
   const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number>(-1);
+
+  // Properties dialog state
+  const [propertiesFile, setPropertiesFile] = useState<FileInfo | null>(null);
+  const [propertiesMetadata, setPropertiesMetadata] = useState<FileMetadata | null>(null);
+  const [propertiesLoading, setPropertiesLoading] = useState(false);
   
   // Compute previewable files (non-directories) from displayFiles
   const previewableFiles = React.useMemo(() => 
@@ -441,7 +447,62 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       toastError(t('fileManager.error'), String(err));
     }
   }, [toastError, t]);
-  
+
+  // Handle reveal in system file manager (Finder/Explorer/Nautilus)
+  const handleRevealInFileManager = useCallback(async (filePath: string) => {
+    try {
+      await revealItemInDir(filePath);
+    } catch (err) {
+      toastError(t('fileManager.error'), String(err));
+    }
+  }, [toastError, t]);
+
+  // Handle create new empty file
+  const handleNewFile = useCallback(async () => {
+    const name = prompt(t('fileManager.newFilePrompt'));
+    if (!name || !name.trim()) return;
+    try {
+      const filePath = `${localFiles.path}/${name.trim()}`;
+      await writeTextFile(filePath, '');
+      localFiles.refresh();
+      toastSuccess(t('fileManager.fileCreated'), name.trim());
+    } catch (err) {
+      toastError(t('fileManager.error'), String(err));
+    }
+  }, [localFiles, toastSuccess, toastError, t]);
+
+  // Handle duplicate selected files
+  const handleDuplicate = useCallback(async (fileNames: string[]) => {
+    try {
+      for (const name of fileNames) {
+        const srcPath = `${localFiles.path}/${name}`;
+        const ext = name.lastIndexOf('.') > 0 ? name.slice(name.lastIndexOf('.')) : '';
+        const base = ext ? name.slice(0, name.lastIndexOf('.')) : name;
+        const destPath = `${localFiles.path}/${base} copy${ext}`;
+        await copyFile(srcPath, destPath);
+      }
+      localFiles.refresh();
+      toastSuccess(t('fileManager.duplicated'), `${fileNames.length}`);
+    } catch (err) {
+      toastError(t('fileManager.error'), String(err));
+    }
+  }, [localFiles, toastSuccess, toastError, t]);
+
+  // Handle properties dialog
+  const handleProperties = useCallback(async (file: FileInfo) => {
+    setPropertiesFile(file);
+    setPropertiesMetadata(null);
+    setPropertiesLoading(true);
+    try {
+      const meta = await invoke<FileMetadata>('local_get_file_metadata', { path: file.path });
+      setPropertiesMetadata(meta);
+    } catch (err) {
+      console.warn('Failed to fetch file metadata:', err);
+    } finally {
+      setPropertiesLoading(false);
+    }
+  }, []);
+
   // Handle open terminal at directory
   const handleOpenTerminal = useCallback(async (dirPath: string) => {
     try {
@@ -745,7 +806,11 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
             }}
             onBrowse={localFiles.browseFolder}
             onShowDrives={handleShowDrives}
-            onOpenTerminal={handleOpenTerminalHere}
+            onOpenExternal={handleOpenExternal}
+            onRevealInFileManager={handleRevealInFileManager}
+            onNewFile={handleNewFile}
+            onDuplicate={handleDuplicate}
+            onProperties={handleProperties}
             onCopy={handleCopy}
             onCut={handleCut}
             onPaste={handlePaste}
@@ -770,7 +835,20 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
         currentIndex={previewIndex}
         onNavigate={handlePreviewNavigate}
       />
-      
+
+      {/* Properties Dialog */}
+      <FilePropertiesDialog
+        open={propertiesFile !== null}
+        onClose={() => {
+          setPropertiesFile(null);
+          setPropertiesMetadata(null);
+        }}
+        file={propertiesFile}
+        metadata={propertiesMetadata}
+        loading={propertiesLoading}
+        t={t}
+      />
+
       {/* Drives Dialog */}
       <Dialog open={drivesDialog} onOpenChange={setDrivesDialog}>
         <DialogContent className="max-w-xs">

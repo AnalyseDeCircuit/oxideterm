@@ -3,7 +3,7 @@
  * Generic file list UI supporting both local and remote file systems
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { 
   Folder, 
   File, 
@@ -28,7 +28,13 @@ import {
   Scissors,
   ClipboardPaste,
   Archive,
-  FolderArchive
+  FolderArchive,
+  ExternalLink,
+  FolderSearch,
+  FilePlus,
+  CopyPlus,
+  CheckSquare,
+  Info
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
@@ -86,8 +92,12 @@ export interface FileListProps {
   onNewFolder?: () => void;
   onBrowse?: () => void;
   onShowDrives?: () => void;
-  onOpenTerminal?: () => void;
-  
+  onOpenExternal?: (path: string) => void;
+  onRevealInFileManager?: (path: string) => void;
+  onNewFile?: () => void;
+  onDuplicate?: (files: string[]) => void;
+  onProperties?: (file: FileInfo) => void;
+
   // Clipboard & Archive
   onCopy?: () => void;
   onCut?: () => void;
@@ -137,7 +147,11 @@ export const FileList: React.FC<FileListProps> = ({
   onNewFolder,
   onBrowse,
   onShowDrives,
-  onOpenTerminal,
+  onOpenExternal,
+  onRevealInFileManager,
+  onNewFile,
+  onDuplicate,
+  onProperties,
   onCopy,
   onCut,
   onPaste,
@@ -153,6 +167,7 @@ export const FileList: React.FC<FileListProps> = ({
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   
   const isLocalPane = !isRemote;
 
@@ -233,6 +248,26 @@ export const FileList: React.FC<FileListProps> = ({
     if (contextMenu) {
       document.addEventListener('click', handleClick);
       return () => document.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu]);
+
+  // Adjust context menu position to stay within viewport
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const el = contextMenuRef.current;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pad = 8;
+    let x = contextMenu.x;
+    let y = contextMenu.y;
+    if (x + rect.width > vw - pad) x = vw - rect.width - pad;
+    if (y + rect.height > vh - pad) y = Math.max(pad, vh - rect.height - pad);
+    if (x < pad) x = pad;
+    if (y < pad) y = pad;
+    if (x !== contextMenu.x || y !== contextMenu.y) {
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
     }
   }, [contextMenu]);
 
@@ -456,27 +491,54 @@ export const FileList: React.FC<FileListProps> = ({
 
       {/* Context Menu */}
       {contextMenu && (
-        <div 
-          className="fixed z-50 bg-theme-bg-panel border border-theme-border rounded-sm shadow-lg py-1 min-w-[180px]"
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 bg-theme-bg-panel border border-theme-border rounded-sm shadow-lg py-1 min-w-[180px] max-h-[80vh] overflow-y-auto"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {/* Transfer */}
-          {onTransfer && selected.size > 0 && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+          {/* Open (directories only — navigate into folder) */}
+          {contextMenu.file && contextMenu.file.file_type === 'Directory' && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2 font-medium"
               onClick={() => {
-                onTransfer(Array.from(selected), isLocalPane ? 'upload' : 'download');
+                onNavigate(`${path}/${contextMenu.file!.name}`);
                 setContextMenu(null);
               }}
             >
-              {isLocalPane ? <Upload className="h-3 w-3" /> : <Download className="h-3 w-3" />}
-              {isLocalPane ? t('fileManager.upload') : t('fileManager.download')}
+              <FolderOpen className="h-3 w-3" />
+              {t('fileManager.open')}
             </button>
           )}
-          
+
+          {/* Open in External App (files only, local only) */}
+          {contextMenu.file && contextMenu.file.file_type !== 'Directory' && !isRemote && onOpenExternal && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onOpenExternal(`${path}/${contextMenu.file!.name}`);
+                setContextMenu(null);
+              }}
+            >
+              <ExternalLink className="h-3 w-3" /> {t('fileManager.openExternal')}
+            </button>
+          )}
+
+          {/* Reveal in File Manager (local only) */}
+          {contextMenu.file && !isRemote && onRevealInFileManager && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => {
+                onRevealInFileManager(`${path}/${contextMenu.file!.name}`);
+                setContextMenu(null);
+              }}
+            >
+              <FolderSearch className="h-3 w-3" /> {t('fileManager.revealInFileManager')}
+            </button>
+          )}
+
           {/* Preview (only for files) */}
           {contextMenu.file && contextMenu.file.file_type !== 'Directory' && onPreview && (
-            <button 
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
               onClick={() => {
                 onPreview(contextMenu.file!);
@@ -486,23 +548,82 @@ export const FileList: React.FC<FileListProps> = ({
               <Eye className="h-3 w-3" /> {t('fileManager.preview')}
             </button>
           )}
-          
-          {/* Rename */}
-          {contextMenu.file && selected.size === 1 && onRename && (
-            <button 
+
+          {/* Transfer */}
+          {onTransfer && selected.size > 0 && (
+            <>
+              <div className="border-t border-theme-border my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+                onClick={() => {
+                  onTransfer(Array.from(selected), isLocalPane ? 'upload' : 'download');
+                  setContextMenu(null);
+                }}
+              >
+                {isLocalPane ? <Upload className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+                {isLocalPane ? t('fileManager.upload') : t('fileManager.download')}
+              </button>
+            </>
+          )}
+
+          {/* Clipboard operations */}
+          {(onCopy || onCut || onPaste) && (
+            <div className="border-t border-theme-border my-1" />
+          )}
+
+          {onCut && selected.size > 0 && (
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onRename(contextMenu.file!.name);
-                setContextMenu(null);
-              }}
+              onClick={() => { onCut(); setContextMenu(null); }}
+            >
+              <Scissors className="h-3 w-3" /> {t('fileManager.cut')}
+            </button>
+          )}
+
+          {onCopy && selected.size > 0 && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => { onCopy(); setContextMenu(null); }}
+            >
+              <Copy className="h-3 w-3" /> {t('fileManager.copy')}
+            </button>
+          )}
+
+          {onPaste && hasClipboard && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => { onPaste(); setContextMenu(null); }}
+            >
+              <ClipboardPaste className="h-3 w-3" /> {t('fileManager.paste')}
+            </button>
+          )}
+
+          {/* Duplicate */}
+          {onDuplicate && selected.size > 0 && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => { onDuplicate(Array.from(selected)); setContextMenu(null); }}
+            >
+              <CopyPlus className="h-3 w-3" /> {t('fileManager.duplicate')}
+            </button>
+          )}
+
+          {/* Rename & Path operations */}
+          {contextMenu.file && (
+            <div className="border-t border-theme-border my-1" />
+          )}
+
+          {contextMenu.file && selected.size === 1 && onRename && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => { onRename(contextMenu.file!.name); setContextMenu(null); }}
             >
               <Edit3 className="h-3 w-3" /> {t('fileManager.rename')}
             </button>
           )}
-          
-          {/* Copy Path */}
+
           {contextMenu.file && (
-            <button 
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
               onClick={() => {
                 const fullPath = `${path}/${contextMenu.file!.name}`;
@@ -513,121 +634,101 @@ export const FileList: React.FC<FileListProps> = ({
               <Copy className="h-3 w-3" /> {t('fileManager.copyPath')}
             </button>
           )}
-          
-          {/* Delete */}
-          {selected.size > 0 && onDelete && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2 text-red-400"
+
+          {contextMenu.file && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
               onClick={() => {
-                onDelete(Array.from(selected));
+                navigator.clipboard.writeText(contextMenu.file!.name);
                 setContextMenu(null);
               }}
             >
-              <Trash2 className="h-3 w-3" /> {t('fileManager.delete')}
+              <Copy className="h-3 w-3" /> {t('fileManager.copyName')}
             </button>
           )}
-          
-          {/* Clipboard operations separator */}
-          {(onCopy || onCut || onPaste) && (
+
+          {/* Archive operations */}
+          {(onCompress || onExtract) && selected.size > 0 && (
             <div className="border-t border-theme-border my-1" />
           )}
-          
-          {/* Copy */}
-          {onCopy && selected.size > 0 && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onCopy();
-                setContextMenu(null);
-              }}
-            >
-              <Copy className="h-3 w-3" /> {t('fileManager.copy')}
-            </button>
-          )}
-          
-          {/* Cut */}
-          {onCut && selected.size > 0 && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onCut();
-                setContextMenu(null);
-              }}
-            >
-              <Scissors className="h-3 w-3" /> {t('fileManager.cut')}
-            </button>
-          )}
-          
-          {/* Paste */}
-          {onPaste && hasClipboard && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onPaste();
-                setContextMenu(null);
-              }}
-            >
-              <ClipboardPaste className="h-3 w-3" /> {t('fileManager.paste')}
-            </button>
-          )}
-          
-          {/* Archive operations separator */}
-          {(onCompress || onExtract) && (
-            <div className="border-t border-theme-border my-1" />
-          )}
-          
-          {/* Compress */}
+
           {onCompress && selected.size > 0 && (
-            <button 
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onCompress();
-                setContextMenu(null);
-              }}
+              onClick={() => { onCompress(); setContextMenu(null); }}
             >
               <Archive className="h-3 w-3" /> {t('fileManager.compress')}
             </button>
           )}
-          
-          {/* Extract */}
+
           {onExtract && selected.size === 1 && canExtract && (
-            <button 
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onExtract();
-                setContextMenu(null);
-              }}
+              onClick={() => { onExtract(); setContextMenu(null); }}
             >
               <FolderArchive className="h-3 w-3" /> {t('fileManager.extract')}
             </button>
           )}
-          
+
+          {/* Creation & Utility */}
           <div className="border-t border-theme-border my-1" />
-          
-          {/* Open Terminal Here (local only) */}
-          {!isRemote && onOpenTerminal && (
-            <button 
-              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onOpenTerminal();
-                setContextMenu(null);
-              }}
-            >
-              <Terminal className="h-3 w-3" /> {t('fileManager.openTerminalHere')}
-            </button>
-          )}
-          
-          {/* New Folder */}
+
           {onNewFolder && (
-            <button 
+            <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
-              onClick={() => {
-                onNewFolder();
-                setContextMenu(null);
-              }}
+              onClick={() => { onNewFolder(); setContextMenu(null); }}
             >
               <FolderPlus className="h-3 w-3" /> {t('fileManager.newFolder')}
             </button>
+          )}
+
+          {onNewFile && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+              onClick={() => { onNewFile(); setContextMenu(null); }}
+            >
+              <FilePlus className="h-3 w-3" /> {t('fileManager.newFile')}
+            </button>
+          )}
+
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+            onClick={() => { onSelectAll(); setContextMenu(null); }}
+          >
+            <CheckSquare className="h-3 w-3" /> {t('fileManager.selectAll')}
+          </button>
+
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+            onClick={() => { onRefresh(); setContextMenu(null); }}
+          >
+            <RefreshCw className="h-3 w-3" /> {t('fileManager.refresh')}
+          </button>
+
+          {/* Properties */}
+          {contextMenu.file && onProperties && (
+            <>
+              <div className="border-t border-theme-border my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2"
+                onClick={() => { onProperties(contextMenu.file!); setContextMenu(null); }}
+              >
+                <Info className="h-3 w-3" /> {t('fileManager.properties')}
+              </button>
+            </>
+          )}
+
+          {/* Delete (destructive, at bottom) */}
+          {selected.size > 0 && onDelete && (
+            <>
+              <div className="border-t border-theme-border my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800 flex items-center gap-2 text-red-400"
+                onClick={() => { onDelete(Array.from(selected)); setContextMenu(null); }}
+              >
+                <Trash2 className="h-3 w-3" /> {t('fileManager.delete')}
+              </button>
+            </>
           )}
         </div>
       )}
