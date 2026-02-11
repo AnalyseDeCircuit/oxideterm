@@ -76,6 +76,8 @@
       "input_safety": "Seguridad de entrada",
       "paste_protection": "Protección de pegado",
       "paste_protection_hint": "Confirmar antes de pegar contenido multilínea para prevenir ejecución accidental de comandos",
+      "osc52_clipboard": "Portapapeles OSC 52",
+      "osc52_clipboard_hint": "Permitir que programas remotos (tmux, vim) escriban en el portapapeles del sistema mediante secuencia de escape OSC 52",
       "buffer": "Buffer",
       "scrollback": "Líneas de scrollback",
       "scrollback_hint": "Número de líneas guardadas en memoria para desplazamiento"

@@ -102,6 +102,7 @@
       "focus_next": "Focus Pannello Successivo",
       "focus_previous": "Focus Pannello Precedente",
       "cannot_close_last": "Impossibile chiudere l'ultimo pannello"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + trascinare per selezionare"
   }
 }

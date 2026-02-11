@@ -102,6 +102,7 @@
       "focus_next": "Khung tiếp theo",
       "focus_previous": "Khung trước",
       "cannot_close_last": "Không thể đóng khung cuối cùng"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + kéo để chọn"
   }
 }

@@ -76,6 +76,8 @@
       "input_safety": "Segurança de entrada",
       "paste_protection": "Proteção de colagem",
       "paste_protection_hint": "Confirmar antes de colar conteúdo multilinha para prevenir execução acidental de comandos",
+      "osc52_clipboard": "Área de transferência OSC 52",
+      "osc52_clipboard_hint": "Permitir que programas remotos (tmux, vim) escrevam na área de transferência do sistema via sequência de escape OSC 52",
       "buffer": "Buffer",
       "scrollback": "Linhas de scrollback",
       "scrollback_hint": "Número de linhas salvas na memória para rolagem"

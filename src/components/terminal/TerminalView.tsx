@@ -126,6 +126,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Derive stable nodeId from sessionTreeStore (for plugin hooks etc.)
   const nodeId = useSessionTreeStore(s => s.terminalNodeMap.get(sessionId));
   
+  // Mouse tracking mode indicator (tmux/vim mouse capture)
+  const [mouseMode, setMouseMode] = useState(false);
+
   // Paste protection state
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   
@@ -889,6 +892,50 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     term.unicode.activeVersion = '11';
     
     webLinksAddonRef.current = webLinksAddon;
+
+    // OSC 52 clipboard write support
+    // Allows remote programs (tmux, vim, etc.) to write to the local system clipboard
+    // Format: ESC ] 52 ; <target> ; <base64-content> ST
+    // Security: only clipboard write is supported; read requests ('?') are ignored
+    term.parser.registerOscHandler(52, (data: string) => {
+      const osc52Enabled = useSettingsStore.getState().settings.terminal.osc52Clipboard;
+      if (!osc52Enabled) return true;
+
+      const semicolonIdx = data.indexOf(';');
+      if (semicolonIdx === -1) return true;
+
+      const payload = data.slice(semicolonIdx + 1);
+      // '?' = read request → deny for security
+      if (!payload || payload === '?') return true;
+
+      // Reject oversized payloads (1 MB base64 ≈ 768 KB decoded)
+      if (payload.length > 1_048_576) {
+        console.warn('[OSC 52] Payload too large, ignored');
+        return true;
+      }
+
+      try {
+        // Decode base64 → bytes → UTF-8 (atob alone mangles non-ASCII)
+        const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+        const text = new TextDecoder('utf-8').decode(bytes);
+        navigator.clipboard.writeText(text).catch((err) => {
+          console.warn('[OSC 52] Clipboard write failed:', err);
+        });
+      } catch {
+        console.warn('[OSC 52] Invalid base64 payload');
+      }
+      return true;
+    });
+
+    // Detect mouse tracking mode changes (tmux, vim, etc.)
+    let prevMouseTracking = false;
+    term.onWriteParsed(() => {
+      const active = term.modes.mouseTrackingMode !== 'none';
+      if (active !== prevMouseTracking) {
+        prevMouseTracking = active;
+        setMouseMode(active);
+      }
+    });
 
     // Load renderer based on settings
     // renderer: 'auto' | 'webgl' | 'canvas'
@@ -2000,6 +2047,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          sessionId={sessionId}
          terminalType="terminal"
        />
+
+       {/* Mouse mode indicator */}
+       {mouseMode && (
+         <div className="absolute bottom-2 right-2 bg-zinc-800/70 text-zinc-400 text-[11px] px-2 py-0.5 rounded pointer-events-none select-none">
+           {t('terminal.mouse_mode_hint')}
+         </div>
+       )}
     </div>
   );
 };

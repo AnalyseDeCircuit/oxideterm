@@ -76,6 +76,8 @@
       "input_safety": "Input Safety",
       "paste_protection": "Paste Protection",
       "paste_protection_hint": "Confirm before pasting multi-line content to prevent accidental command execution",
+      "osc52_clipboard": "OSC 52 Clipboard",
+      "osc52_clipboard_hint": "Allow remote programs (tmux, vim) to write to system clipboard via OSC 52 escape sequence",
       "buffer": "Buffer",
       "scrollback": "Scrollback Lines",
       "scrollback_hint": "Number of lines kept in memory for scrolling"

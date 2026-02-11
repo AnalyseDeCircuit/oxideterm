@@ -923,6 +923,19 @@ export const SettingsView = () => {
                                         onCheckedChange={(checked) => updateTerminal('pasteProtection', checked as boolean)}
                                     />
                                 </div>
+                                <div className="flex items-center justify-between mt-4">
+                                    <div>
+                                        <Label className="text-theme-text">{t('settings_view.terminal.osc52_clipboard')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">
+                                            {t('settings_view.terminal.osc52_clipboard_hint')}
+                                        </p>
+                                    </div>
+                                    <Checkbox
+                                        id="osc52-clipboard"
+                                        checked={terminal.osc52Clipboard}
+                                        onCheckedChange={(checked) => updateTerminal('osc52Clipboard', checked as boolean)}
+                                    />
+                                </div>
                             </div>
 
                             {/* Buffer Section */}

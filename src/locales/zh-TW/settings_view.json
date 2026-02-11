@@ -76,6 +76,8 @@
       "input_safety": "輸入安全",
       "paste_protection": "貼上保護",
       "paste_protection_hint": "貼上多行內容前確認，以防止意外執行命令",
+      "osc52_clipboard": "OSC 52 剪貼簿",
+      "osc52_clipboard_hint": "允許遠端程式（tmux、vim）透過 OSC 52 跳脫序列寫入系統剪貼簿",
       "buffer": "緩衝區",
       "scrollback": "捲動緩衝區行數",
       "scrollback_hint": "保存在記憶體中供捲動的行數"

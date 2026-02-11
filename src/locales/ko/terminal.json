@@ -102,6 +102,7 @@
       "focus_next": "다음 창으로 포커스",
       "focus_previous": "이전 창으로 포커스",
       "cannot_close_last": "마지막 창은 닫을 수 없음"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + 드래그로 선택"
   }
 }

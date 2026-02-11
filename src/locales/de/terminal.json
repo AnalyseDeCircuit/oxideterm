@@ -102,6 +102,7 @@
       "focus_next": "Nächster Bereich",
       "focus_previous": "Vorheriger Bereich",
       "cannot_close_last": "Letzter Bereich kann nicht geschlossen werden"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + Ziehen zum Auswählen"
   }
 }

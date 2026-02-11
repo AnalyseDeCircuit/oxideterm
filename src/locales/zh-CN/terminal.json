@@ -102,6 +102,7 @@
       "focus_next": "聚焦下一面板",
       "focus_previous": "聚焦上一面板",
       "cannot_close_last": "无法关闭最后一个面板"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + 拖拽以选择文本"
   }
 }

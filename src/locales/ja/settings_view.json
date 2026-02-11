@@ -76,6 +76,8 @@
       "input_safety": "入力安全性",
       "paste_protection": "ペースト保護",
       "paste_protection_hint": "複数行のコンテンツをペーストする前に確認し、コマンドの誤実行を防止",
+      "osc52_clipboard": "OSC 52 クリップボード",
+      "osc52_clipboard_hint": "リモートプログラム（tmux、vim）が OSC 52 エスケープシーケンスでシステムクリップボードに書き込むことを許可",
       "buffer": "バッファ",
       "scrollback": "スクロールバック行数",
       "scrollback_hint": "スクロール用にメモリに保持される行数"

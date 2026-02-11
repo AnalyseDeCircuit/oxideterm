@@ -102,6 +102,7 @@
       "focus_next": "次のペインにフォーカス",
       "focus_previous": "前のペインにフォーカス",
       "cannot_close_last": "最後のペインは閉じられません"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + ドラッグで選択"
   }
 }

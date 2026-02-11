@@ -94,6 +94,7 @@ export interface TerminalSettings {
   scrollback: number;      // xterm scrollback lines
   renderer: RendererType;
   pasteProtection: boolean; // Confirm before pasting multi-line content
+  osc52Clipboard: boolean;  // Allow remote programs to write system clipboard via OSC 52
 }
 
 /** Buffer settings (used by backend) */
@@ -228,6 +229,7 @@ const defaultTerminalSettings: TerminalSettings = {
   scrollback: 5000,
   renderer: isWindows ? 'canvas' : 'auto',
   pasteProtection: true,  // Default enabled for safety
+  osc52Clipboard: false,  // Opt-in: user must explicitly enable OSC 52 clipboard bridge
 };
 
 const defaultBufferSettings: BufferSettings = {

@@ -76,7 +76,10 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
   const [isRunning, setIsRunning] = useState(true);
-  
+
+  // Mouse tracking mode indicator (tmux/vim mouse capture)
+  const [mouseMode, setMouseMode] = useState(false);
+
   // Paste protection state
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   
@@ -422,9 +425,49 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const unicode11Addon = new Unicode11Addon();
     term.loadAddon(unicode11Addon);
     term.unicode.activeVersion = '11';
-    
-    
-    
+
+    // OSC 52 clipboard write support
+    // Allows programs (tmux, vim, etc.) to write to the local system clipboard
+    term.parser.registerOscHandler(52, (data: string) => {
+      const osc52Enabled = useSettingsStore.getState().settings.terminal.osc52Clipboard;
+      if (!osc52Enabled) return true;
+
+      const semicolonIdx = data.indexOf(';');
+      if (semicolonIdx === -1) return true;
+
+      const payload = data.slice(semicolonIdx + 1);
+      if (!payload || payload === '?') return true;
+
+      // Reject oversized payloads (1 MB base64 ≈ 768 KB decoded)
+      if (payload.length > 1_048_576) {
+        console.warn('[OSC 52] Payload too large, ignored');
+        return true;
+      }
+
+      try {
+        // Decode base64 → bytes → UTF-8 (atob alone mangles non-ASCII)
+        const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+        const text = new TextDecoder('utf-8').decode(bytes);
+        navigator.clipboard.writeText(text).catch((err) => {
+          console.warn('[OSC 52] Clipboard write failed:', err);
+        });
+      } catch {
+        console.warn('[OSC 52] Invalid base64 payload');
+      }
+      return true;
+    });
+
+    // Detect mouse tracking mode changes (tmux, vim, etc.)
+    let prevMouseTracking = false;
+    term.onWriteParsed(() => {
+      const active = term.modes.mouseTrackingMode !== 'none';
+      if (active !== prevMouseTracking) {
+        prevMouseTracking = active;
+        setMouseMode(active);
+      }
+    });
+
+
     // Load renderer (WebGL or Canvas)
     const loadRenderer = async () => {
       const rendererSetting = terminalSettings.renderer || 'auto';
@@ -1172,6 +1215,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         style={{ minHeight: 0 }}
       />
       
+      {/* Mouse mode indicator */}
+      {mouseMode && isRunning && (
+        <div className="absolute bottom-2 right-2 bg-zinc-800/70 text-zinc-400 text-[11px] px-2 py-0.5 rounded pointer-events-none select-none">
+          {t('terminal.mouse_mode_hint')}
+        </div>
+      )}
+
       {/* Status overlay when not running */}
       {!isRunning && (
         <div className="absolute bottom-4 right-4 bg-zinc-800/80 text-zinc-400 text-xs px-2 py-1 rounded">

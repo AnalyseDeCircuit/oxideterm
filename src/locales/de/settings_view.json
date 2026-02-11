@@ -76,6 +76,8 @@
       "input_safety": "Eingabesicherheit",
       "paste_protection": "Einfügeschutz",
       "paste_protection_hint": "Vor dem Einfügen mehrzeiliger Inhalte bestätigen, um versehentliche Befehlsausführung zu verhindern",
+      "osc52_clipboard": "OSC 52 Zwischenablage",
+      "osc52_clipboard_hint": "Remote-Programme (tmux, vim) dürfen über OSC 52 Escape-Sequenz in die System-Zwischenablage schreiben",
       "buffer": "Puffer",
       "scrollback": "Scrollback-Zeilen",
       "scrollback_hint": "Anzahl der im Speicher für Scrollen gehaltenen Zeilen"

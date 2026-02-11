@@ -102,6 +102,7 @@
       "focus_next": "Focus Next Pane",
       "focus_previous": "Focus Previous Pane",
       "cannot_close_last": "Cannot close the last pane"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + drag to select"
   }
 }

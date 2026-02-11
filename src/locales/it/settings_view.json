@@ -76,6 +76,8 @@
       "input_safety": "Sicurezza Input",
       "paste_protection": "Protezione Incolla",
       "paste_protection_hint": "Conferma prima di incollare contenuti multi-riga per prevenire esecuzioni accidentali",
+      "osc52_clipboard": "Appunti OSC 52",
+      "osc52_clipboard_hint": "Consenti ai programmi remoti (tmux, vim) di scrivere negli appunti di sistema tramite sequenza di escape OSC 52",
       "buffer": "Buffer",
       "scrollback": "Linee Scrollback",
       "scrollback_hint": "Numero di linee mantenute in memoria per lo scorrimento"

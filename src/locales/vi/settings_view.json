@@ -76,6 +76,8 @@
       "input_safety": "An toàn nhập liệu",
       "paste_protection": "Bảo vệ dán",
       "paste_protection_hint": "Xác nhận trước khi dán nội dung nhiều dòng để tránh thực thi lệnh ngoài ý muốn",
+      "osc52_clipboard": "Clipboard OSC 52",
+      "osc52_clipboard_hint": "Cho phép các chương trình từ xa (tmux, vim) ghi vào clipboard hệ thống qua chuỗi escape OSC 52",
       "buffer": "Buffer",
       "scrollback": "Dòng cuộn lại",
       "scrollback_hint": "Số dòng được giữ trong bộ nhớ để cuộn"

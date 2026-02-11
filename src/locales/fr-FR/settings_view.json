@@ -76,6 +76,8 @@
       "input_safety": "Sécurité de saisie",
       "paste_protection": "Protection au collage",
       "paste_protection_hint": "Confirmer avant de coller du contenu multiligne pour éviter l'exécution accidentelle de commandes",
+      "osc52_clipboard": "Presse-papiers OSC 52",
+      "osc52_clipboard_hint": "Autoriser les programmes distants (tmux, vim) à écrire dans le presse-papiers système via la séquence d'échappement OSC 52",
       "buffer": "Tampon",
       "scrollback": "Lignes de défilement",
       "scrollback_hint": "Nombre de lignes conservées en mémoire pour le défilement"

@@ -102,6 +102,7 @@
       "focus_next": "Siguiente panel",
       "focus_previous": "Panel anterior",
       "cannot_close_last": "No se puede cerrar el último panel"
-    }
+    },
+    "mouse_mode_hint": "⇧ Shift + arrastrar para seleccionar"
   }
 }
