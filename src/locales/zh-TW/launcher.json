@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "啟動台",
+    "tabTitle": "啟動台",
+    "search": "搜尋連線…",
+    "refresh": "重新整理",
+    "scanning": "掃描中…",
+    "retry": "重試",
+    "noResults": "找不到符合的連線。",
+    "empty": "目前沒有可用的連線。請新增連線以開始使用。",
+    "wslTitle": "WSL 發行版",
+    "searchWsl": "搜尋 WSL 發行版…",
+    "loadingWsl": "正在載入 WSL 發行版…",
+    "noWslResults": "找不到符合的 WSL 發行版。",
+    "noWsl": "沒有可用的 WSL 發行版。請確認已安裝 WSL。"
+  }
+}

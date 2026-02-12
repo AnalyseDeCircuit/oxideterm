@@ -14,6 +14,7 @@ pub mod forwarding;
 pub mod graphics;
 #[cfg(feature = "local-terminal")]
 pub mod local;
+pub mod launcher;
 pub mod oxide_file;
 pub mod router;
 pub mod session;
@@ -630,6 +631,10 @@ pub fn run() {
         graphics::commands::wsl_graphics_list_sessions,
         graphics::commands::wsl_graphics_detect_wslg,
         graphics::commands::wsl_graphics_start_app,
+        // Platform launcher commands
+        launcher::launcher_list_apps,
+        launcher::launcher_launch_app,
+        launcher::launcher_wsl_launch,
     ]);
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -852,6 +857,10 @@ pub fn run() {
         graphics::commands::wsl_graphics_list_sessions,
         graphics::commands::wsl_graphics_detect_wslg,
         graphics::commands::wsl_graphics_start_app,
+        // Platform launcher commands
+        launcher::launcher_list_apps,
+        launcher::launcher_launch_app,
+        launcher::launcher_wsl_launch,
     ]);
 
     builder

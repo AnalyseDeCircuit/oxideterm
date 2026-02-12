@@ -26,6 +26,7 @@ const SessionManagerPanel = lazy(() => import('../sessionManager').then(m => ({ 
 const PluginTabRenderer = lazy(() => import('../plugin/PluginTabRenderer').then(m => ({ default: m.PluginTabRenderer })));
 const PluginManagerView = lazy(() => import('../plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })));
 const GraphicsView = lazy(() => import('../graphics/GraphicsView').then(m => ({ default: m.GraphicsView })));
+const LauncherView = lazy(() => import('../launcher/LauncherView').then(m => ({ default: m.LauncherView })));
 
 // Loading fallback for lazy components
 const ViewLoader = () => {
@@ -189,6 +190,11 @@ export const AppLayout = () => {
                   {tab.type === 'graphics' && (
                     <Suspense fallback={<ViewLoader />}>
                       <GraphicsView />
+                    </Suspense>
+                  )}
+                  {tab.type === 'launcher' && (
+                    <Suspense fallback={<ViewLoader />}>
+                      <LauncherView />
                     </Suspense>
                   )}
                 </div>

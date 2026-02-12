@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Painel de início",
+    "tabTitle": "Painel de início",
+    "search": "Pesquisar conexões…",
+    "refresh": "Atualizar",
+    "scanning": "Verificando…",
+    "retry": "Tentar novamente",
+    "noResults": "Nenhuma conexão correspondente encontrada.",
+    "empty": "Nenhuma conexão disponível. Adicione uma conexão para começar.",
+    "wslTitle": "Distribuições WSL",
+    "searchWsl": "Pesquisar distribuições WSL…",
+    "loadingWsl": "Carregando distribuições WSL…",
+    "noWslResults": "Nenhuma distribuição WSL correspondente encontrada.",
+    "noWsl": "Nenhuma distribuição WSL disponível. Verifique se o WSL está instalado."
+  }
+}

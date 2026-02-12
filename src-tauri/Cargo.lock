@@ -3294,6 +3294,7 @@ dependencies = [
  "mime_guess",
  "nix 0.29.0",
  "parking_lot",
+ "plist",
  "portable-pty",
  "rand 0.8.5",
  "redb",

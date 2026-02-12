@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "런치패드",
+    "tabTitle": "런치패드",
+    "search": "연결 검색…",
+    "refresh": "새로고침",
+    "scanning": "스캔 중…",
+    "retry": "재시도",
+    "noResults": "일치하는 연결을 찾을 수 없습니다.",
+    "empty": "사용 가능한 연결이 없습니다. 연결을 추가하여 시작하세요.",
+    "wslTitle": "WSL 배포판",
+    "searchWsl": "WSL 배포판 검색…",
+    "loadingWsl": "WSL 배포판 로딩 중…",
+    "noWslResults": "일치하는 WSL 배포판을 찾을 수 없습니다.",
+    "noWsl": "사용 가능한 WSL 배포판이 없습니다. WSL이 설치되어 있는지 확인하세요."
+  }
+}

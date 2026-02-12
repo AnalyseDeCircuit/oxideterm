@@ -76,6 +76,29 @@
 - **备注**
   - 仅用于断点续传与进度恢复。
 
+### 2.3 `launcher_icons/`（应用启动器图标缓存 - macOS）
+- **存储位置**
+  - `~/Library/Application Support/com.oxideterm.app/launcher_icons/`
+  - 通过 `app.path().app_data_dir().join("launcher_icons")` 获取
+- **文件命名**
+  - 使用 app 路径的 64 位哈希值：`{hash}.png`（如 `a1b2c3d4e5f67890.png`）
+  - 哈希算法：`std::collections::hash_map::DefaultHasher`
+- **缓存策略**
+  - **提取来源**：通过 Swift `NSWorkspace.shared.icon(forFile:)` 批量提取（支持 `.icns` 和 Asset Catalog）
+  - **尺寸规格**：128×128 PNG
+  - **缓存时效**：已存在且修改时间 < 7 天的图标会复用，无需重新提取
+  - **懒加载**：仅在首次打开 Launcher 时扫描 `/Applications` 并提取缺失图标
+- **Asset Protocol 授权**
+  - 在 `launcher_list_apps` 命令中，一次性对整个 `launcher_icons/` 目录调用 `app.asset_protocol_scope().allow_directory(&icon_cache_dir, false)`
+  - 前端直接用 `convertFileSrc(iconPath)` 构造 `asset://` URL，无需 per-icon IPC
+- **实现位置**
+  - [src-tauri/src/launcher/mod.rs](../src-tauri/src/launcher/mod.rs)（commands: `launcher_list_apps`）
+  - [src-tauri/src/launcher/macos.rs](../src-tauri/src/launcher/macos.rs)（扫描/提取/缓存逻辑）
+  - [src/components/launcher/LauncherView.tsx](../src/components/launcher/LauncherView.tsx)（前端展示）
+- **备注**
+  - 仅 macOS 平台启用；Windows 使用 WSL distro 列表，无图标缓存
+  - 图标提取采用 spawn_blocking 避免阻塞 async runtime
+
 ---
 
 ## 3) 其他持久化入口（需留意）
@@ -91,7 +114,7 @@
 
 1. **前端设置持久化**：存在多处入口（SettingsModal + SettingsView + TerminalView + themeManager），必须收敛。
 2. **UI 状态持久化**：仅在 `beforeunload` 保存，异常退出时丢失风险存在。
-3. **后端持久化**：已经有明确边界（session/forwarding/sftp），暂不承载端偏好设置。
+3. **后端持久化**：已经有明确边界（session/forwarding/sftp/launcher_icons），暂不承载端偏好设置。
 
 ---
 

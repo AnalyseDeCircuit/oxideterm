@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Launchpad",
+    "tabTitle": "Launchpad",
+    "search": "Search connections…",
+    "refresh": "Refresh",
+    "scanning": "Scanning…",
+    "retry": "Retry",
+    "noResults": "No matching connections found.",
+    "empty": "No connections available. Add a connection to get started.",
+    "wslTitle": "WSL Distributions",
+    "searchWsl": "Search WSL distributions…",
+    "loadingWsl": "Loading WSL distributions…",
+    "noWslResults": "No matching WSL distributions found.",
+    "noWsl": "No WSL distributions available. Make sure WSL is installed."
+  }
+}

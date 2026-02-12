@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "启动台",
+    "tabTitle": "启动台",
+    "search": "搜索连接…",
+    "refresh": "刷新",
+    "scanning": "扫描中…",
+    "retry": "重试",
+    "noResults": "未找到匹配的连接。",
+    "empty": "暂无可用连接。请添加一个连接以开始使用。",
+    "wslTitle": "WSL 发行版",
+    "searchWsl": "搜索 WSL 发行版…",
+    "loadingWsl": "正在加载 WSL 发行版…",
+    "noWslResults": "未找到匹配的 WSL 发行版。",
+    "noWsl": "没有可用的 WSL 发行版。请确保已安装 WSL。"
+  }
+}

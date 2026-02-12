@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Panel de inicio",
+    "tabTitle": "Panel de inicio",
+    "search": "Buscar conexiones…",
+    "refresh": "Actualizar",
+    "scanning": "Escaneando…",
+    "retry": "Reintentar",
+    "noResults": "No se encontraron conexiones coincidentes.",
+    "empty": "No hay conexiones disponibles. Añada una conexión para comenzar.",
+    "wslTitle": "Distribuciones WSL",
+    "searchWsl": "Buscar distribuciones WSL…",
+    "loadingWsl": "Cargando distribuciones WSL…",
+    "noWslResults": "No se encontraron distribuciones WSL coincidentes.",
+    "noWsl": "No hay distribuciones WSL disponibles. Asegúrese de que WSL esté instalado."
+  }
+}

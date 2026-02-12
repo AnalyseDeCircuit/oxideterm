@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Startrampe",
+    "tabTitle": "Startrampe",
+    "search": "Verbindungen suchen…",
+    "refresh": "Aktualisieren",
+    "scanning": "Wird gescannt…",
+    "retry": "Erneut versuchen",
+    "noResults": "Keine passenden Verbindungen gefunden.",
+    "empty": "Keine Verbindungen verfügbar. Fügen Sie eine Verbindung hinzu, um zu beginnen.",
+    "wslTitle": "WSL-Distributionen",
+    "searchWsl": "WSL-Distributionen suchen…",
+    "loadingWsl": "WSL-Distributionen werden geladen…",
+    "noWslResults": "Keine passenden WSL-Distributionen gefunden.",
+    "noWsl": "Keine WSL-Distributionen verfügbar. Stellen Sie sicher, dass WSL installiert ist."
+  }
+}

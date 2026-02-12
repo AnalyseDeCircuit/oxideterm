@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Tableau de bord",
+    "tabTitle": "Tableau de bord",
+    "search": "Rechercher des connexions…",
+    "refresh": "Actualiser",
+    "scanning": "Analyse en cours…",
+    "retry": "Réessayer",
+    "noResults": "Aucune connexion correspondante trouvée.",
+    "empty": "Aucune connexion disponible. Ajoutez une connexion pour commencer.",
+    "wslTitle": "Distributions WSL",
+    "searchWsl": "Rechercher des distributions WSL…",
+    "loadingWsl": "Chargement des distributions WSL…",
+    "noWslResults": "Aucune distribution WSL correspondante trouvée.",
+    "noWsl": "Aucune distribution WSL disponible. Vérifiez que WSL est installé."
+  }
+}

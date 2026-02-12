@@ -44,6 +44,8 @@ const TabIcon = ({ type }: { type: string }) => {
       return <Puzzle className={iconClass} />;
     case 'graphics':
       return <Monitor className={iconClass} />;
+    case 'launcher':
+      return <Monitor className={iconClass} />;
     case 'plugin':
       return null; // handled by PluginTabIcon
     default:
@@ -79,6 +81,8 @@ const getTabTitle = (
       return t('tabs.session_manager');
     case 'graphics':
       return t('graphics.tab_title');
+    case 'launcher':
+      return t('launcher.tabTitle');
     case 'plugin_manager':
       return t('tabs.plugin_manager');
   }

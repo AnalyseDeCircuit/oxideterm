@@ -97,6 +97,9 @@ md-5 = "0.10"
 # Audio metadata (ID3, Vorbis, FLAC, etc.)
 lofty = "0.22"
 
+# macOS app launcher (Info.plist parsing)
+plist = "1"
+
 # System info (disk/volume detection)
 sysinfo = { version = "0.33", default-features = false, features = ["disk"] }
 

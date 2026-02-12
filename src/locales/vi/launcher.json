@@ -1,0 +1,17 @@
+{
+  "launcher": {
+    "title": "Bảng khởi chạy",
+    "tabTitle": "Bảng khởi chạy",
+    "search": "Tìm kiếm kết nối…",
+    "refresh": "Làm mới",
+    "scanning": "Đang quét…",
+    "retry": "Thử lại",
+    "noResults": "Không tìm thấy kết nối phù hợp.",
+    "empty": "Không có kết nối nào. Thêm một kết nối để bắt đầu.",
+    "wslTitle": "Bản phân phối WSL",
+    "searchWsl": "Tìm kiếm bản phân phối WSL…",
+    "loadingWsl": "Đang tải bản phân phối WSL…",
+    "noWslResults": "Không tìm thấy bản phân phối WSL phù hợp.",
+    "noWsl": "Không có bản phân phối WSL nào. Hãy đảm bảo WSL đã được cài đặt."
+  }
+}

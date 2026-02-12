@@ -21,6 +21,7 @@ import zhCNProfiler from './locales/zh-CN/profiler.json';
 import zhCNSessionManager from './locales/zh-CN/sessionManager.json';
 import zhCNPlugin from './locales/zh-CN/plugin.json';
 import zhCNGraphics from './locales/zh-CN/graphics.json';
+import zhCNLauncher from './locales/zh-CN/launcher.json';
 
 // en 翻译文件
 import enCommon from './locales/en/common.json';
@@ -42,6 +43,7 @@ import enProfiler from './locales/en/profiler.json';
 import enSessionManager from './locales/en/sessionManager.json';
 import enPlugin from './locales/en/plugin.json';
 import enGraphics from './locales/en/graphics.json';
+import enLauncher from './locales/en/launcher.json';
 
 // fr-FR 翻译文件
 import frFRCommon from './locales/fr-FR/common.json';
@@ -63,6 +65,7 @@ import frFRProfiler from './locales/fr-FR/profiler.json';
 import frFRSessionManager from './locales/fr-FR/sessionManager.json';
 import frFRPlugin from './locales/fr-FR/plugin.json';
 import frFRGraphics from './locales/fr-FR/graphics.json';
+import frFRLauncher from './locales/fr-FR/launcher.json';
 
 // ja 翻译文件
 import jaCommon from './locales/ja/common.json';
@@ -84,6 +87,7 @@ import jaProfiler from './locales/ja/profiler.json';
 import jaSessionManager from './locales/ja/sessionManager.json';
 import jaPlugin from './locales/ja/plugin.json';
 import jaGraphics from './locales/ja/graphics.json';
+import jaLauncher from './locales/ja/launcher.json';
 
 // es-ES 翻译文件
 import esESCommon from './locales/es-ES/common.json';
@@ -105,6 +109,7 @@ import esESProfiler from './locales/es-ES/profiler.json';
 import esESSessionManager from './locales/es-ES/sessionManager.json';
 import esESPlugin from './locales/es-ES/plugin.json';
 import esESGraphics from './locales/es-ES/graphics.json';
+import esESLauncher from './locales/es-ES/launcher.json';
 
 // pt-BR 翻译文件
 import ptBRCommon from './locales/pt-BR/common.json';
@@ -126,6 +131,7 @@ import ptBRProfiler from './locales/pt-BR/profiler.json';
 import ptBRSessionManager from './locales/pt-BR/sessionManager.json';
 import ptBRPlugin from './locales/pt-BR/plugin.json';
 import ptBRGraphics from './locales/pt-BR/graphics.json';
+import ptBRLauncher from './locales/pt-BR/launcher.json';
 
 // vi 翻译文件
 import viCommon from './locales/vi/common.json';
@@ -147,6 +153,7 @@ import viProfiler from './locales/vi/profiler.json';
 import viSessionManager from './locales/vi/sessionManager.json';
 import viPlugin from './locales/vi/plugin.json';
 import viGraphics from './locales/vi/graphics.json';
+import viLauncher from './locales/vi/launcher.json';
 
 // ko 翻译文件
 import koCommon from './locales/ko/common.json';
@@ -168,6 +175,7 @@ import koProfiler from './locales/ko/profiler.json';
 import koSessionManager from './locales/ko/sessionManager.json';
 import koPlugin from './locales/ko/plugin.json';
 import koGraphics from './locales/ko/graphics.json';
+import koLauncher from './locales/ko/launcher.json';
 
 // de 翻译文件
 import deCommon from './locales/de/common.json';
@@ -189,6 +197,7 @@ import deProfiler from './locales/de/profiler.json';
 import deSessionManager from './locales/de/sessionManager.json';
 import dePlugin from './locales/de/plugin.json';
 import deGraphics from './locales/de/graphics.json';
+import deLauncher from './locales/de/launcher.json';
 
 // it 翻译文件 (意大利语)
 import itCommon from './locales/it/common.json';
@@ -210,6 +219,7 @@ import itProfiler from './locales/it/profiler.json';
 import itSessionManager from './locales/it/sessionManager.json';
 import itPlugin from './locales/it/plugin.json';
 import itGraphics from './locales/it/graphics.json';
+import itLauncher from './locales/it/launcher.json';
 
 // zh-TW 翻译文件 (繁体中文)
 import zhTWCommon from './locales/zh-TW/common.json';
@@ -231,6 +241,7 @@ import zhTWProfiler from './locales/zh-TW/profiler.json';
 import zhTWSessionManager from './locales/zh-TW/sessionManager.json';
 import zhTWPlugin from './locales/zh-TW/plugin.json';
 import zhTWGraphics from './locales/zh-TW/graphics.json';
+import zhTWLauncher from './locales/zh-TW/launcher.json';
 
 // 合并翻译资源
 const zhCN = {
@@ -253,6 +264,7 @@ const zhCN = {
   ...zhCNSessionManager,
   ...zhCNPlugin,
   ...zhCNGraphics,
+  ...zhCNLauncher,
 };
 
 const enUS = {
@@ -275,6 +287,7 @@ const enUS = {
   ...enSessionManager,
   ...enPlugin,
   ...enGraphics,
+  ...enLauncher,
 };
 
 const frFR = {
@@ -297,6 +310,7 @@ const frFR = {
   ...frFRSessionManager,
   ...frFRPlugin,
   ...frFRGraphics,
+  ...frFRLauncher,
 };
 
 const ja = {
@@ -319,6 +333,7 @@ const ja = {
   ...jaSessionManager,
   ...jaPlugin,
   ...jaGraphics,
+  ...jaLauncher,
 };
 
 const esES = {
@@ -341,6 +356,7 @@ const esES = {
   ...esESSessionManager,
   ...esESPlugin,
   ...esESGraphics,
+  ...esESLauncher,
 };
 
 const ptBR = {
@@ -363,6 +379,7 @@ const ptBR = {
   ...ptBRSessionManager,
   ...ptBRPlugin,
   ...ptBRGraphics,
+  ...ptBRLauncher,
 };
 
 const vi = {
@@ -385,6 +402,7 @@ const vi = {
   ...viSessionManager,
   ...viPlugin,
   ...viGraphics,
+  ...viLauncher,
 };
 
 const ko = {
@@ -407,6 +425,7 @@ const ko = {
   ...koSessionManager,
   ...koPlugin,
   ...koGraphics,
+  ...koLauncher,
 };
 
 const de = {
@@ -429,6 +448,7 @@ const de = {
   ...deSessionManager,
   ...dePlugin,
   ...deGraphics,
+  ...deLauncher,
 };
 
 const it = {
@@ -451,6 +471,7 @@ const it = {
   ...itSessionManager,
   ...itPlugin,
   ...itGraphics,
+  ...itLauncher,
 };
 
 const zhTW = {
@@ -473,6 +494,7 @@ const zhTW = {
   ...zhTWSessionManager,
   ...zhTWPlugin,
   ...zhTWGraphics,
+  ...zhTWLauncher,
 };
 
 // 获取初始语言：优先本地存储 -> 浏览器语言 -> 默认中文

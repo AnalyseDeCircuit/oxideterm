@@ -6,17 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OxideTerm</title>
 
-    <!-- 字体预加载 - 仅 Regular 权重，其他权重懒加载 -->
+    <!-- 字体预取 - 低优先级提示，终端打开时按需使用 -->
     <!-- JetBrains Mono - 主要等宽字体 -->
-    <link rel="preload" href="/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Regular.woff2"
+    <link rel="prefetch" href="/fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Regular.woff2"
           as="font" type="font/woff2" crossorigin />
     
     <!-- Meslo - 备选等宽字体 -->
-    <link rel="preload" href="/fonts/Meslo/MesloLGMNerdFontMono-Regular.woff2"
+    <link rel="prefetch" href="/fonts/Meslo/MesloLGMNerdFontMono-Regular.woff2"
           as="font" type="font/woff2" crossorigin />
     
     <!-- Maple Mono NF CN - CJK 字体 (仅 Regular，其他权重 requestIdleCallback 加载) -->
-    <link rel="preload" href="/fonts/MapleMono/MapleMono-NF-CN-Regular.woff2"
+    <link rel="prefetch" href="/fonts/MapleMono/MapleMono-NF-CN-Regular.woff2"
           as="font" type="font/woff2" crossorigin />
   </head>
 
