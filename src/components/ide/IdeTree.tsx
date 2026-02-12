@@ -625,7 +625,7 @@ export function IdeTree() {
   
   return (
     <GitStatusContext.Provider value={gitStatusContextValue}>
-      <div className="h-full flex flex-col bg-theme-bg/50">
+      <div className="h-full flex flex-col bg-theme-bg/85">
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border/50">
           <div className="flex items-center gap-2 min-w-0 flex-1">

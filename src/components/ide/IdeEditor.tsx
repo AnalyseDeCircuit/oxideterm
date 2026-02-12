@@ -127,7 +127,7 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   // 加载中状态
   if (tab.isLoading || tab.content === null) {
     return (
-      <div className="h-full flex items-center justify-center bg-theme-bg">
+      <div className="h-full flex items-center justify-center bg-theme-bg/50">
         <div className="flex flex-col items-center gap-2">
           <Loader2 className="w-6 h-6 animate-spin text-theme-text-muted" />
           <span className="text-xs text-theme-text-muted">{t('ide.loading_file')}</span>
@@ -137,7 +137,7 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   }
 
   return (
-    <div className="h-full w-full relative bg-theme-bg">
+    <div className="h-full w-full relative bg-theme-bg/40">
       {/* 编辑器加载中遮罩 */}
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-theme-bg z-10">

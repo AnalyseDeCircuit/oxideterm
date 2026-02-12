@@ -48,14 +48,16 @@ const oxideTheme = EditorView.theme({
   '&': {
     height: '100%',
     fontSize: '13px',
-    backgroundColor: 'transparent',
+    backgroundColor: 'transparent !important',
   },
   '.cm-scroller': {
     fontFamily: '"JetBrains Mono", "Fira Code", "Menlo", monospace',
     overflow: 'auto',
+    backgroundColor: 'transparent !important',
   },
   '.cm-content': {
     minHeight: '100%',
+    backgroundColor: 'transparent !important',
   },
   '.cm-gutters': {
     backgroundColor: 'var(--theme-bg-panel)',

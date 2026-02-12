@@ -166,7 +166,7 @@ export function IdeEditorTabs() {
     <>
       <div
         ref={scrollRef}
-        className="flex items-stretch border-b border-theme-border/50 bg-theme-bg/80 overflow-x-auto scrollbar-none"
+        className="flex items-stretch border-b border-theme-border/50 bg-theme-bg/60 overflow-x-auto scrollbar-none"
         onWheel={handleWheel}
       >
         {tabs.map(tab => (

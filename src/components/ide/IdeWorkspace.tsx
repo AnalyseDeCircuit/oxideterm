@@ -125,7 +125,7 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
         
         {/* 可拖拽分隔线 */}
         <div
-          className="w-1 bg-theme-border hover:bg-theme-accent/50 cursor-col-resize transition-colors"
+          className="w-px bg-theme-border hover:bg-theme-accent/50 cursor-col-resize transition-colors"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;

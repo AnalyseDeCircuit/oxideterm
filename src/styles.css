@@ -736,6 +736,7 @@ html {
   --color-theme-bg: color-mix(in srgb, var(--theme-bg) 40%, transparent);
   --color-theme-bg-panel: color-mix(in srgb, var(--theme-bg-panel) 40%, transparent);
   --color-theme-bg-hover: color-mix(in srgb, var(--theme-bg-hover) 50%, transparent);
+  --color-theme-border: color-mix(in srgb, var(--theme-border) 75%, transparent);
 }
 /* Hardcoded bg-zinc-* used in FileList, ForwardsView etc. — same 40% alpha */
 [data-bg-active] .bg-zinc-900 {
@@ -761,6 +762,14 @@ html {
 }
 [data-bg-active] .bg-black {
   background-color: rgb(0 0 0 / 0.4) !important;
+}
+/* CodeMirror: gutters, active line gutter, and status bar use raw CSS vars
+   that bypass Tailwind mapping — override them directly. */
+[data-bg-active] .cm-gutters {
+  background-color: color-mix(in srgb, var(--theme-bg-panel) 30%, transparent) !important;
+}
+[data-bg-active] .cm-activeLineGutter {
+  background-color: color-mix(in srgb, var(--theme-accent) 40%, transparent) !important;
 }
 /* Topology SVG background rects */
 [data-bg-active] .topo-bg-fill {

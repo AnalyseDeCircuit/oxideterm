@@ -43,7 +43,7 @@ export function IdeEditorArea() {
   }
   
   return (
-    <div className="h-full flex flex-col bg-theme-bg">
+    <div className="h-full flex flex-col">
       {/* 标签栏 */}
       <IdeEditorTabs />
       
