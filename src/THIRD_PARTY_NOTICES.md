@@ -1,7 +1,7 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-12T16:11:34.905Z
+Generated: 2026-02-12T17:52:22.109Z
 
 ## Summary
 - MIT: 215

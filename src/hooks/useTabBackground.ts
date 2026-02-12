@@ -7,7 +7,8 @@ import { useSettingsStore } from '../store/settingsStore';
  * can show through.
  */
 export function useTabBgActive(tabType: string): boolean {
-  const terminal = useSettingsStore((s) => s.settings.terminal);
-  const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
-  return terminal.backgroundEnabled !== false && !!terminal.backgroundImage && enabledTabs.includes(tabType);
+  const backgroundEnabled = useSettingsStore((s) => s.settings.terminal.backgroundEnabled);
+  const backgroundImage = useSettingsStore((s) => s.settings.terminal.backgroundImage);
+  const enabledTabs = useSettingsStore((s) => s.settings.terminal.backgroundEnabledTabs) ?? ['terminal', 'local_terminal'];
+  return backgroundEnabled !== false && !!backgroundImage && enabledTabs.includes(tabType);
 }

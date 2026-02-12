@@ -59,44 +59,40 @@ export const Sidebar = () => {
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  const {
-    setSidebarSection,
-    sessions,
-    connections,
-    toggleModal,
-    createTab,
-    closeTab,
-    tabs,
-    activeTabId,
-    setActiveTab,
-    savedConnections,
-    loadSavedConnections,
-    loadGroups,
-    modals,
-    editingConnection,
-    refreshConnections,
-    openConnectionEditor,
-  } = useAppStore();
+  const setSidebarSection = useAppStore((s) => s.setSidebarSection);
+  const sessions = useAppStore((s) => s.sessions);
+  const connections = useAppStore((s) => s.connections);
+  const toggleModal = useAppStore((s) => s.toggleModal);
+  const createTab = useAppStore((s) => s.createTab);
+  const closeTab = useAppStore((s) => s.closeTab);
+  const tabs = useAppStore((s) => s.tabs);
+  const activeTabId = useAppStore((s) => s.activeTabId);
+  const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const savedConnections = useAppStore((s) => s.savedConnections);
+  const loadSavedConnections = useAppStore((s) => s.loadSavedConnections);
+  const loadGroups = useAppStore((s) => s.loadGroups);
+  const modals = useAppStore((s) => s.modals);
+  const editingConnection = useAppStore((s) => s.editingConnection);
+  const refreshConnections = useAppStore((s) => s.refreshConnections);
+  const openConnectionEditor = useAppStore((s) => s.openConnectionEditor);
 
   // SessionTree store
-  const {
-    nodes: treeNodes,
-    selectedNodeId,
-    getFocusedNodeId,
-    fetchTree,
-    selectNode,
-    toggleExpand,
-    removeNode,
-    getNode,
-    createTerminalForNode,
-    closeTerminalForNode,
-    connectNode,
-    disconnectNode,
-    setFocusedNode,
-    getBreadcrumbPath,
-    getVisibleNodes,
-    enterNode,
-  } = useSessionTreeStore();
+  const treeNodes = useSessionTreeStore((s) => s.nodes);
+  const selectedNodeId = useSessionTreeStore((s) => s.selectedNodeId);
+  const getFocusedNodeId = useSessionTreeStore((s) => s.getFocusedNodeId);
+  const fetchTree = useSessionTreeStore((s) => s.fetchTree);
+  const selectNode = useSessionTreeStore((s) => s.selectNode);
+  const toggleExpand = useSessionTreeStore((s) => s.toggleExpand);
+  const removeNode = useSessionTreeStore((s) => s.removeNode);
+  const getNode = useSessionTreeStore((s) => s.getNode);
+  const createTerminalForNode = useSessionTreeStore((s) => s.createTerminalForNode);
+  const closeTerminalForNode = useSessionTreeStore((s) => s.closeTerminalForNode);
+  const connectNode = useSessionTreeStore((s) => s.connectNode);
+  const disconnectNode = useSessionTreeStore((s) => s.disconnectNode);
+  const setFocusedNode = useSessionTreeStore((s) => s.setFocusedNode);
+  const getBreadcrumbPath = useSessionTreeStore((s) => s.getBreadcrumbPath);
+  const getVisibleNodes = useSessionTreeStore((s) => s.getVisibleNodes);
+  const enterNode = useSessionTreeStore((s) => s.enterNode);
 
   const [savedSearchQuery, setSavedSearchQuery] = useState('');
 
@@ -116,7 +112,8 @@ export const Sidebar = () => {
   const [addRootNodeOpen, setAddRootNodeOpen] = useState(false);
 
   // Local terminal store
-  const { createTerminal: createLocalTerminal, terminals: localTerminals } = useLocalTerminalStore();
+  const createLocalTerminal = useLocalTerminalStore((s) => s.createTerminal);
+  const localTerminals = useLocalTerminalStore((s) => s.terminals);
 
   // Toast hook (需要在所有使用 toast 的 useCallback 之前声明)
   const { toast } = useToast();

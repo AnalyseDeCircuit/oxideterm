@@ -144,6 +144,14 @@ const ReconnectIndicator = ({
   const [showTimeline, setShowTimeline] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
+  // Per-indicator countdown tick — only this component re-renders every second
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') return;
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [job.status]);
+
   return (
     <div
       ref={containerRef}
@@ -188,10 +196,10 @@ export const TabBar = () => {
     sessions,
     networkOnline
   } = useAppStore();
-  const orchestrator = useReconnectOrchestratorStore();
+  const orchestratorGetJob = useReconnectOrchestratorStore((s) => s.getJob);
+  const orchestratorScheduleReconnect = useReconnectOrchestratorStore((s) => s.scheduleReconnect);
+  const orchestratorCancel = useReconnectOrchestratorStore((s) => s.cancel);
   const [closing, setClosing] = React.useState<string | null>(null);
-  // Force re-render for countdown
-  const [, setTick] = React.useState(0);
 
   // Scroll container ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -205,21 +213,6 @@ export const TabBar = () => {
     }
   };
 
-  // Update indicator when orchestrator jobs change
-  React.useEffect(() => {
-    const hasActiveJobs = orchestrator.jobEntries.some(
-      ([, job]) => job.status !== 'done' && job.status !== 'failed' && job.status !== 'cancelled'
-    );
-
-    if (!hasActiveJobs) return;
-
-    const interval = setInterval(() => {
-      setTick((t) => t + 1);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [orchestrator.jobEntries]);
-
   const handleReconnect = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
     // 从 session 获取 connectionId，再通过 topologyResolver 获取 nodeId
@@ -229,7 +222,7 @@ export const TabBar = () => {
     
     if (nodeId) {
       // 委托给 orchestrator
-      orchestrator.scheduleReconnect(nodeId);
+      orchestratorScheduleReconnect(nodeId);
     } else {
       console.warn(`[TabBar] Cannot reconnect session ${sessionId}: no associated tree node`);
     }
@@ -237,7 +230,7 @@ export const TabBar = () => {
 
   const handleCancelReconnect = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
-    orchestrator.cancel(nodeId);
+    orchestratorCancel(nodeId);
   };
 
   // 关闭 Tab 时释放后端资源
@@ -313,7 +306,7 @@ export const TabBar = () => {
             // Look up orchestrator job for this tab's node
             const connectionId = session?.connectionId;
             const nodeId = connectionId ? topologyResolver.getNodeId(connectionId) : undefined;
-            const orchJob = nodeId ? orchestrator.getJob(nodeId) : undefined;
+            const orchJob = nodeId ? orchestratorGetJob(nodeId) : undefined;
             const isOrchestratorActive = orchJob && orchJob.status !== 'done' && orchJob.status !== 'failed' && orchJob.status !== 'cancelled';
             const isManualReconnecting = !!isOrchestratorActive;
             const showReconnectProgress = !!isOrchestratorActive;

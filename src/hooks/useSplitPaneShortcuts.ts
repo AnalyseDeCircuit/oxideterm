@@ -30,16 +30,14 @@ function getAllLeafPaneIds(node: PaneNode): string[] {
 }
 
 export function useSplitPaneShortcuts({ enabled }: UseSplitPaneShortcutsOptions) {
-  const { 
-    tabs, 
-    activeTabId, 
-    splitPane, 
-    closePane, 
-    setActivePaneId,
-    getPaneCount,
-  } = useAppStore();
+  const tabs = useAppStore((s) => s.tabs);
+  const activeTabId = useAppStore((s) => s.activeTabId);
+  const splitPane = useAppStore((s) => s.splitPane);
+  const closePane = useAppStore((s) => s.closePane);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const getPaneCount = useAppStore((s) => s.getPaneCount);
   
-  const { createTerminal } = useLocalTerminalStore();
+  const createTerminal = useLocalTerminalStore((s) => s.createTerminal);
   
   // Use ref to avoid stale closures
   const stateRef = useRef({ tabs, activeTabId });

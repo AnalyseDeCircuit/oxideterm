@@ -470,16 +470,16 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
           {/* PDF Preview (iframe) */}
           {preview.type === 'pdf' && (
-            <div className="flex-1 overflow-auto min-h-0">
+            <div className="flex-1 overflow-auto min-h-0 relative">
               <iframe
                 src={preview.data}
-                className="w-full h-[70vh] border-0"
+                className="absolute inset-0 border-0"
                 title={preview.name}
                 style={{
                   transformOrigin: 'top left',
                   transform: `scale(${pdfZoom})`,
                   width: `${100 / pdfZoom}%`,
-                  height: `${70 / pdfZoom}vh`,
+                  height: `${100 / pdfZoom}%`,
                 }}
               />
             </div>

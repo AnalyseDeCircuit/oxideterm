@@ -101,6 +101,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
   const videoWrapRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // ── Drag-seek state ───────────────────────────────────────────────────────
+  const seekBarRef = useRef<HTMLDivElement>(null);
+  const [isSeeking, setIsSeeking] = useState(false);
+  /** Visual-only progress shown during drag (0–100) */
+  const [seekPreview, setSeekPreview] = useState<number | null>(null);
+  /** Whether video was playing before drag started */
+  const wasPlayingRef = useRef(false);
+
   // ── Measure container ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -124,12 +132,82 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
     else { el.pause(); setPlaying(false); }
   }, []);
 
-  const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  // ── Drag-seek handlers ──────────────────────────────────────────────────
+
+  /** Compute ratio (0-1) from mouse position relative to seekbar */
+  const getSeekRatio = useCallback((clientX: number) => {
+    const bar = seekBarRef.current;
+    if (!bar) return 0;
+    const rect = bar.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }, []);
+
+  /** Start drag — pause video, show preview position */
+  const onSeekMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
     const el = videoRef.current;
     if (!el || !isFinite(el.duration)) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    el.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * el.duration;
-  }, []);
+    wasPlayingRef.current = !el.paused;
+    if (!el.paused) el.pause();
+    setIsSeeking(true);
+    const ratio = getSeekRatio(e.clientX);
+    setSeekPreview(ratio * 100);
+    // Immediately seek so user sees the frame
+    el.currentTime = ratio * el.duration;
+  }, [getSeekRatio]);
+
+  useEffect(() => {
+    if (!isSeeking) return;
+    const el = videoRef.current;
+
+    let rafId: number | null = null;
+    let latestRatio = 0;
+
+    const onMove = (e: MouseEvent) => {
+      latestRatio = getSeekRatio(e.clientX);
+      setSeekPreview(latestRatio * 100);
+      // Throttle actual seeks to rAF to avoid hammering the decoder
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (el && isFinite(el.duration)) {
+            el.currentTime = latestRatio * el.duration;
+          }
+        });
+      }
+    };
+
+    const onUp = (e: MouseEvent) => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      const ratio = getSeekRatio(e.clientX);
+      if (el && isFinite(el.duration)) {
+        el.currentTime = ratio * el.duration;
+      }
+      setIsSeeking(false);
+      setSeekPreview(null);
+      if (wasPlayingRef.current && el) {
+        el.play().catch(() => {});
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isSeeking, getSeekRatio]);
+
+  /** Click-to-seek (non-drag) — kept for accessibility */
+  const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // If we just finished a drag, don't double-seek
+    if (isSeeking) return;
+    const el = videoRef.current;
+    if (!el || !isFinite(el.duration)) return;
+    const ratio = getSeekRatio(e.clientX);
+    el.currentTime = ratio * el.duration;
+  }, [isSeeking, getSeekRatio]);
 
   const skip = useCallback((d: number) => {
     const el = videoRef.current;
@@ -274,7 +352,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
     }
   }, [togglePlay, skip, toggleFullscreen, toggleMute]);
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  // During drag, show the preview position; otherwise show actual playback position
+  const progress = seekPreview !== null ? seekPreview : (duration > 0 ? (currentTime / duration) * 100 : 0);
   const bufferProgress = duration > 0 ? (buffered / duration) * 100 : 0;
 
   // ── Smart video sizing ────────────────────────────────────────────────────
@@ -395,7 +474,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
         <div className="relative px-3 pb-2 pt-6">
           {/* ── Seekbar ─────────────────────────────────────────────────── */}
           <div
-            className="group relative h-1 rounded-full cursor-pointer overflow-hidden bg-theme-bg-hover/50 hover:h-1.5 transition-all mb-2"
+            ref={seekBarRef}
+            className={cn(
+              "group relative h-1 rounded-full cursor-pointer overflow-hidden bg-theme-bg-hover/50 hover:h-1.5 transition-all mb-2",
+              isSeeking && "h-1.5",
+            )}
+            onMouseDown={onSeekMouseDown}
             onClick={seek}
           >
             {/* Buffer bar */}
@@ -410,7 +494,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
             />
             {/* Hover thumb */}
             <div
-              className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-theme-text opacity-0 group-hover:opacity-100 transition-opacity"
+              className={cn(
+                "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-theme-text transition-opacity",
+                isSeeking ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+              )}
               style={{ left: `calc(${progress}% - 5px)` }}
             />
           </div>
