@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import { IdeTree } from './IdeTree';
 import { IdeEditorArea } from './IdeEditorArea';
 import { IdeTerminal } from './IdeTerminal';
@@ -16,6 +17,7 @@ interface IdeWorkspaceProps {
 
 export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('ide');
   const project = useIdeProject();
 
   const { 
@@ -78,7 +80,7 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   // 加载中状态
   if (!project && !initError) {
     return (
-      <div className="flex items-center justify-center h-full bg-theme-bg">
+      <div className={`flex items-center justify-center h-full ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
         <Loader2 className="w-8 h-8 animate-spin text-theme-accent" />
         <span className="ml-3 text-theme-text-muted">
           {t('ide.loading_project')}
@@ -90,7 +92,7 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   // 初始化失败状态
   if (initError && !project) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-theme-bg gap-4">
+      <div className={`flex flex-col items-center justify-center h-full gap-4 ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
         <AlertTriangle className="w-10 h-10 text-amber-400" />
         <span className="text-theme-text-muted text-sm max-w-md text-center">
           {t('ide.open_failed', 'Failed to open project')}: {initError}
@@ -107,7 +109,7 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   }
   
   return (
-    <div className="flex flex-col h-full bg-theme-bg">
+    <div className={`flex flex-col h-full ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       {/* 主工作区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 搜索面板（最左侧，可选） */}

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -192,6 +192,17 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 - 基于 Delta 的 CPU% 和网络吞吐量计算
 - 单通道设计——不触发 MaxSessions 限制
 - 非 Linux 主机或连续失败时自动降级为 RTT-Only 模式
+### 🖼️ 背景图片画廊
+
+多图背景系统，支持按标签页透明度控制：
+
+- **画廊管理**：上传多张图片，点击缩略图切换，单张删除或一键清除
+- **总开关**：全局启用/禁用背景图，不会删除已上传图片
+- **按标签页控制**：13 种标签页类型可独立开关（终端、SFTP、IDE、设置、拓扑等）
+- **自定义**：透明度 (3–50%)、模糊 (0–20px)、填充模式 (覆盖/适应/拉伸/平铺)
+- **平台感知**：macOS 透明支持；Windows WSLg 路径排除（VNC 画布不支持透明）
+- **安全**：路径规范化删除防止目录穿越；Rust 后端完整错误传播
+
 ### 🪟 Windows 深度优化
 
 - **原生 ConPTY 集成**：直接调用 Windows Pseudo Console (ConPTY) API，完美支持 TrueColor 和 ANSI 转义序列——告别过时的 WinPTY。
@@ -251,7 +262,7 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 
 | 分类 | 功能 |
 |---|---|
-| **终端** | 本地 PTY、SSH 远程、分屏 (水平/垂直)、跨分屏 AI 上下文、WebGL 渲染 |
+| **终端** | 本地 PTY、SSH 远程、分屏 (水平/垂直)、跨分屏 AI 上下文、WebGL 渲染、背景图片画廊 |
 | **SSH** | 连接池、多路复用、ProxyJump (∞ 跳)、拓扑图、自动重连管道 |
 | **认证** | 密码、SSH 密钥 (RSA/Ed25519/ECDSA)、SSH Agent、证书、Keyboard-Interactive (2FA)、Known Hosts |
 | **文件** | 双面板 SFTP 浏览器、拖放传输、预览 (图片/视频/音频/PDF/代码/Hex)、传输队列 |
@@ -293,7 +304,8 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 - **拖放传输**：支持多文件和文件夹批量操作。
 - **智能预览**：
   - 🎨 图片 (JPEG/PNG/GIF/WebP)
-  - 🎬 视频 (MP4/WebM)
+  - 🎬 视频 (MP4/WebM) 内置播放器
+  - 🎵 音频 (MP3/WAV/OGG/FLAC) 含元数据展示
   - 💻 代码高亮 (30+ 语言)
   - 📄 PDF 文档
   - 🔍 Hex 查看器（二进制文件）
@@ -417,6 +429,8 @@ OxideTerm/
 - [x] Keyboard-Interactive 认证 (2FA/MFA)
 - [x] 深度历史搜索 (30K 行，Rust Regex)
 - [x] WSL 图形 — 桌面模式 + 应用模式 VNC 查看器（⚠️ 实验性）
+- [x] 背景图片画廊 — 多图上传、按标签页控制、总开关
+- [x] 增强媒体预览 — SFTP 浏览器内音频/视频播放
 
 ### 🚧 进行中
 

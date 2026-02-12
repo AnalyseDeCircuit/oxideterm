@@ -44,10 +44,15 @@ function buildNotices() {
   const packages = [];
   for (const [license, items] of Object.entries(data)) {
     for (const item of items) {
+      // Special case: khroma always MIT if homepage matches
+      let fixedLicense = license;
+      if (item.name === 'khroma' && (item.homepage || '').includes('github.com/fabiospampinato/khroma')) {
+        fixedLicense = 'MIT';
+      }
       packages.push({
         name: item.name,
         versions: (item.versions || []).join(', '),
-        license,
+        license: fixedLicense,
         homepage: item.homepage || ''
       });
     }

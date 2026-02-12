@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OxideTerm",
-  "version": "1.9.3",
+  "version": "1.10.0",
   "identifier": "com.oxideterm.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,7 +27,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/backgrounds/**"]
+        "scope": [
+          "$APPDATA/backgrounds/**"
+        ]
       }
     }
   },

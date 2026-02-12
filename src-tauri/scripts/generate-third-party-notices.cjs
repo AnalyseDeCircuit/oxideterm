@@ -44,6 +44,10 @@ function buildNotices() {
 
   crates.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 
+  // Filter out oxideterm before any statistics to avoid leaking local path
+  // and polluting license counts with our own non-commercial license.
+  const thirdPartyCrates = crates.filter(c => c.name !== 'oxideterm');
+
   const licenseCounts = new Map();
 
   function isCopyleft(lic) {
@@ -68,7 +72,7 @@ function buildNotices() {
   const copyleftStrict = [];
   const copyleftWithPermissiveOption = [];
 
-  for (const c of crates) {
+  for (const c of thirdPartyCrates) {
     for (const lic of c.licenses) {
       licenseCounts.set(lic, (licenseCounts.get(lic) || 0) + 1);
     }
@@ -122,7 +126,7 @@ function buildNotices() {
 
   out += '## Crates\n\n';
   out += '| Crate | Version | Licenses | Source |\n|---|---:|---|---|\n';
-  for (const c of crates) {
+  for (const c of thirdPartyCrates) {
     out += `| ${escPipe(c.name)} | ${escPipe(c.version)} | ${escPipe(c.licenses.join(', '))} | ${escPipe(c.source)} |\n`;
   }
   out += '\n';
@@ -134,7 +138,7 @@ function buildNotices() {
 
   return {
     out,
-    count: crates.length,
+    count: thirdPartyCrates.length,
     copyleftCount: copyleftStrict.length + copyleftWithPermissiveOption.length
   };
 }

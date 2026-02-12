@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -193,6 +193,17 @@ Live monitoring of remote hosts via persistent SSH shell channel:
 - Single channel — avoids MaxSessions exhaustion
 - Auto-degrades to RTT-only on non-Linux or consecutive failures
 
+### 🖼️ Background Image Gallery
+
+Multi-image background system with per-tab transparency control:
+
+- **Gallery management**: upload multiple images, click thumbnails to switch, per-image delete or bulk clear
+- **Master toggle**: enable/disable background globally without deleting images
+- **Per-tab control**: 13 tab types individually toggleable (terminal, SFTP, IDE, settings, topology, etc.)
+- **Customization**: opacity (3–50%), blur (0–20px), fit mode (cover/contain/fill/tile)
+- **Platform-aware**: macOS transparency support; Windows WSLg path excluded (opaque VNC canvas)
+- **Security**: path-canonicalized delete prevents directory traversal; full error propagation from Rust backend
+
 ### 🪟 Deep Windows Optimization
 
 - **Native ConPTY Integration**: directly invoking Windows Pseudo Console (ConPTY) API for perfect TrueColor and ANSI escape sequence support — no outdated WinPTY.
@@ -253,7 +264,7 @@ Despite different state sources, rendering logic is unified through `TerminalVie
 
 | Category | Features |
 |---|---|
-| **Terminal** | Local PTY, SSH remote, split panes (H/V), cross-pane AI context, WebGL rendering |
+| **Terminal** | Local PTY, SSH remote, split panes (H/V), cross-pane AI context, WebGL rendering, background image gallery |
 | **SSH** | Connection pool, multiplexing, ProxyJump (∞ hops), topology graph, auto-reconnect pipeline |
 | **Auth** | Password, SSH Key (RSA/Ed25519/ECDSA), SSH Agent, Certificate, Keyboard-Interactive (2FA), Known Hosts |
 | **Files** | Dual-pane SFTP browser, drag-drop, preview (images/video/audio/PDF/code/hex), transfer queue |
@@ -295,7 +306,8 @@ Project-wide file content search with intelligent caching:
 - **Drag-and-drop**: multi-file and folder batch operations.
 - **Intelligent preview**:
   - 🎨 Images (JPEG/PNG/GIF/WebP)
-  - 🎬 Videos (MP4/WebM)
+  - 🎬 Videos (MP4/WebM) with built-in player
+  - 🎵 Audio (MP3/WAV/OGG/FLAC) with metadata display
   - 💻 Code highlighting (30+ languages)
   - 📄 PDF documents
   - 🔍 Hex viewer (binary files)
@@ -420,6 +432,8 @@ OxideTerm/
 - [x] Keyboard-Interactive auth (2FA/MFA)
 - [x] Deep history search (30K lines, Rust regex)
 - [x] WSL Graphics — desktop mode + app mode VNC viewer (⚠️ Experimental)
+- [x] Background image gallery — multi-image upload, per-tab control, master toggle
+- [x] Enhanced media preview — audio/video playback in SFTP browser
 
 ### 🚧 In Progress
 

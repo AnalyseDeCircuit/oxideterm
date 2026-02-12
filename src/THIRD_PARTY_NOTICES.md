@@ -1,10 +1,10 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-12T12:33:04.058Z
+Generated: 2026-02-12T16:11:34.905Z
 
 ## Summary
-- MIT: 214
+- MIT: 215
 - ISC: 34
 - Apache-2.0: 17
 - BSD-3-Clause: 7
@@ -15,7 +15,6 @@ Generated: 2026-02-12T12:33:04.058Z
 - (MPL-2.0 OR Apache-2.0): 1
 - BSD: 1
 - (MIT OR GPL-3.0-or-later): 1
-- Unknown: 1
 - (MIT AND Zlib): 1
 - Unlicense: 1
 - 0BSD: 1
@@ -245,7 +244,7 @@ Generated: 2026-02-12T12:33:04.058Z
 | isarray | 1.0.0 | MIT | https://github.com/juliangruber/isarray |
 | jszip | 3.10.1 | (MIT OR GPL-3.0-or-later) | https://github.com/Stuk/jszip#readme |
 | katex | 0.16.28 | MIT | https://katex.org |
-| khroma | 2.1.0 | Unknown | https://github.com/fabiospampinato/khroma#readme |
+| khroma | 2.1.0 | MIT | https://github.com/fabiospampinato/khroma#readme |
 | langium | 3.3.1 | MIT | https://langium.org |
 | layout-base | 1.0.2, 2.0.1 | MIT | https://github.com/iVis-at-Bilkent/layout-base#readme |
 | lie | 3.3.0 | MIT | https://github.com/calvinmetcalf/lie#readme |

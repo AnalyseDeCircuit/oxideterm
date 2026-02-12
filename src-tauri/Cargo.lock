@@ -3331,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm"
-version = "1.9.3"
+version = "1.10.0"
 dependencies = [
  "argon2",
  "async-trait",

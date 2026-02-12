@@ -1,7 +1,7 @@
 # Third-Party Notices (Backend / Rust)
 
 This file lists third-party crates used by the Rust backend and their detected licenses (including transitive dependencies).
-Generated: 2026-02-12T12:46:57.841Z
+Generated: 2026-02-12T16:01:36.833Z
 
 ## Summary
 - MIT: 618
@@ -18,7 +18,6 @@ Generated: 2026-02-12T12:46:57.841Z
 - MIT-0: 2
 - 0BSD: 1
 - BSD-1-Clause: 1
-- LicenseRef-PolyForm-Noncommercial-1.0.0: 1
 - LGPL-2.1-or-later: 1
 - CDLA-Permissive-2.0: 1
 - BSD-2-Clause: 1
@@ -354,7 +353,6 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | open | 5.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | option-ext | 0.2.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ordered-stream | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| oxideterm | 1.9.3 | LicenseRef-PolyForm-Noncommercial-1.0.0 | path+file:///Users/dominical/Documents/OxideTerm/src-tauri |
 | p256 | 0.13.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | p384 | 0.13.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | p521 | 0.13.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |

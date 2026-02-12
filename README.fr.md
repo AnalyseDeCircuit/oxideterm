@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -192,6 +192,17 @@ Surveillance en temps réel des hôtes distants via canal shell SSH persistant :
 - Calcul CPU% et débit réseau basé sur le delta
 - Canal unique — évite l'épuisement de MaxSessions
 - Dégradation auto vers RTT-only sur hôtes non-Linux ou échecs consécutifs
+### 🖼️ Galerie d'images d'arrière-plan
+
+Système multi-images avec contrôle de transparence par onglet :
+
+- **Gestion galerie** : téléversement multiple, cliquer sur les miniatures pour changer, suppression individuelle ou en bloc
+- **Interrupteur principal** : activer/désactiver l'arrière-plan globalement sans supprimer les images
+- **Contrôle par onglet** : 13 types d'onglets configurables individuellement (terminal, SFTP, IDE, paramètres, topologie, etc.)
+- **Personnalisation** : opacité (3–50%), flou (0–20px), mode d'ajustement (couvrir/contenir/remplir/mosaïque)
+- **Adapté aux plateformes** : transparence macOS ; chemin WSLg Windows exclu (canvas VNC opaque)
+- **Sécurité** : suppression canonicalisée empêchant la traversée de répertoire ; propagation complète des erreurs depuis le backend Rust
+
 ### 🪟 Optimisation Windows approfondie
 
 - **Intégration ConPTY native** : appel direct de l’API Windows Pseudo Console (ConPTY) pour un support parfait TrueColor et séquences ANSI — fini le WinPTY obsolète.
@@ -251,7 +262,7 @@ Malgré des sources d’état différentes, la logique de rendu est unifiée via
 
 | Catégorie | Fonctionnalités |
 |---|---|
-| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), contexte IA cross-pane, rendu WebGL |
+| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), contexte IA cross-pane, rendu WebGL, galerie d'images d'arrière-plan |
 | **SSH** | Pool de connexions, multiplexage, ProxyJump (∞ sauts), graphe topologique, pipeline auto-reconnexion |
 | **Auth** | Mot de passe, clé SSH (RSA/Ed25519/ECDSA), SSH Agent, certificat, Keyboard-Interactive (2FA), Known Hosts |
 | **Fichiers** | Navigateur SFTP double panneau, glisser-déposer, aperçu (images/vidéo/audio/PDF/code/hex), file de transfert |
@@ -293,7 +304,8 @@ Recherche de contenu à l’échelle du projet avec cache intelligent :
 - **Glisser-déposer** : opérations multi-fichiers et dossiers par lots.
 - **Aperçu intelligent** :
   - 🎨 Images (JPEG/PNG/GIF/WebP)
-  - 🎬 Vidéos (MP4/WebM)
+  - 🎬 Vidéos (MP4/WebM) avec lecteur intégré
+  - 🎵 Audio (MP3/WAV/OGG/FLAC) avec affichage des métadonnées
   - 💻 Coloration code (30+ langages)
   - 📄 Documents PDF
   - 🔍 Visionneuse Hex (fichiers binaires)
@@ -416,6 +428,8 @@ OxideTerm/
 - [x] Auth Keyboard-Interactive (2FA/MFA)
 - [x] Recherche historique profonde (30K lignes, Rust regex)
 - [x] WSL Graphics — mode bureau + mode application VNC (⚠️ Expérimental)
+- [x] Galerie d'images d'arrière-plan — téléversement multi-images, contrôle par onglet, interrupteur principal
+- [x] Aperçu multimédia amélioré — lecture audio/vidéo dans le navigateur SFTP
 
 ### 🚧 En cours
 
