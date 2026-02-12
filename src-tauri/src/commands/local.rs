@@ -865,17 +865,20 @@ pub fn allow_asset_file(app: tauri::AppHandle, path: String) -> Result<String, S
         .ok_or_else(|| "Canonical path contains invalid UTF-8".to_string())
 }
 
-/// Revoke a file that was previously allowed on the asset protocol scope.
-/// The caller **must** pass the exact canonical path originally returned by
-/// `allow_asset_file` — we do not re-canonicalize because the file may have
-/// been moved/deleted or a symlink retargeted since it was granted.
+/// "Revoke" a file that was previously allowed on the asset protocol scope.
+///
+/// **Important:** This is intentionally a no-op. Tauri's `forbid_file` adds
+/// the path to `forbidden_patterns`, which takes **permanent precedence** over
+/// `allowed_patterns`. There is no Tauri API to remove a forbidden pattern.
+/// Calling `forbid_file` then `allow_file` on the same path leaves it in
+/// *both* sets, and the forbidden check wins — resulting in a permanent 403
+/// for that path for the rest of the session.
+///
+/// Since the allowed set is ephemeral (cleared on app restart), leaving paths
+/// in it is harmless and far preferable to poisoning them.
 #[tauri::command]
-pub fn revoke_asset_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    use tauri::Manager;
-    let canonical = std::path::PathBuf::from(&path);
-    app.asset_protocol_scope()
-        .forbid_file(&canonical)
-        .map_err(|e| format!("Failed to revoke asset file '{}': {}", path, e))?;
+pub fn revoke_asset_file(_app: tauri::AppHandle, _path: String) -> Result<(), String> {
+    // Intentional no-op — see doc comment above.
     Ok(())
 }
 

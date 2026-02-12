@@ -248,7 +248,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
                    ext === 'avi' ? 'video/x-msvideo' : 'video/mp4';
         const resolvedVideo = await invoke<string>('allow_asset_file', { path: filePath });
         canonicalPath = resolvedVideo;
-        data = convertFileSrc(resolvedVideo);
+        data = convertFileSrc(resolvedVideo) + `?t=${Date.now()}`;
       } else if (AUDIO_EXTENSIONS.has(ext)) {
         // Authorize file in asset protocol scope, then stream from disk
         previewType = 'audio';
@@ -260,7 +260,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
                    ext === 'wma' ? 'audio/x-ms-wma' : 'audio/mpeg';
         const resolvedAudio = await invoke<string>('allow_asset_file', { path: filePath });
         canonicalPath = resolvedAudio;
-        data = convertFileSrc(resolvedAudio);
+        data = convertFileSrc(resolvedAudio) + `?t=${Date.now()}`;
       } else if (FONT_EXTENSIONS.has(ext)) {
         previewType = 'font';
         // Read font and convert to base64 data URL

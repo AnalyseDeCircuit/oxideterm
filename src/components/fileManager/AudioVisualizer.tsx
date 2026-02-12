@@ -91,6 +91,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   const [showMeta, setShowMeta] = useState(true);
   /** When lyrics exist, user can toggle between metadata & lyrics view in the panel */
   const [showLyrics, setShowLyrics] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── Metadata fetch ─────────────────────────────────────────────────────────
 
@@ -109,10 +110,19 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
-    if (!el) return;
-    if (el.paused) { el.play(); setPlaying(true); }
-    else { el.pause(); setPlaying(false); }
-  }, []);
+    if (!el || loadError) return;
+    if (el.paused) {
+      el.play().catch((err) => {
+        console.warn('Audio play failed:', err);
+        setLoadError(`Playback failed: ${err.message || err}`);
+        setPlaying(false);
+      });
+      setPlaying(true);
+    } else {
+      el.pause();
+      setPlaying(false);
+    }
+  }, [loadError]);
 
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const el = audioRef.current;
@@ -147,21 +157,35 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     if (!el) return;
     el.volume = volume;
     // Reset playback state when src changes (e.g. re-opening same file)
-    el.load();
+    setLoadError(null);
     setPlaying(false);
     setCurrent(0);
     setDuration(0);
+    el.load();
     const onTime = () => setCurrent(el.currentTime);
     const onMeta = () => setDuration(el.duration);
     const onEnd = () => setPlaying(false);
+    const onError = () => {
+      const code = el.error?.code;
+      const msg = el.error?.message || 'Unknown error';
+      // MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED (4) — typically 403 / asset scope denied
+      if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+        setLoadError('Media source not supported or access denied (403)');
+      } else {
+        setLoadError(`Playback error: ${msg}`);
+      }
+      console.warn('Audio load error:', el.error);
+    };
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('loadedmetadata', onMeta);
     el.addEventListener('ended', onEnd);
+    el.addEventListener('error', onError);
     return () => {
       el.pause();
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('loadedmetadata', onMeta);
       el.removeEventListener('ended', onEnd);
+      el.removeEventListener('error', onError);
     };
   }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -202,6 +226,17 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     <div className="flex-1 flex min-h-[320px] select-none overflow-hidden relative bg-theme-bg">
       {/* Hidden audio */}
       <audio ref={audioRef} src={src} preload="metadata" {...(mimeType ? { type: mimeType } : {})} />
+
+      {/* Load error banner */}
+      {loadError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-theme-bg/80 backdrop-blur-sm">
+          <div className="text-center px-6 max-w-sm">
+            <div className="text-3xl mb-3">⚠️</div>
+            <div className="text-sm text-red-400 mb-1">Audio Load Error</div>
+            <div className="text-xs text-zinc-500">{loadError}</div>
+          </div>
+        </div>
+      )}
 
       {/* ── Left: Main player area ───────────────────────────────────────── */}
       <div className="flex-1 flex flex-col items-center justify-center relative p-6 min-w-0">
