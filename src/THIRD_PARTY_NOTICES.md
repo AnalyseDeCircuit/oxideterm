@@ -1,12 +1,12 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-02-12T17:52:22.109Z
+Generated: 2026-02-12T19:01:01.469Z
 
 ## Summary
-- MIT: 215
+- MIT: 217
 - ISC: 34
-- Apache-2.0: 17
+- Apache-2.0: 18
 - BSD-3-Clause: 7
 - MIT OR Apache-2.0: 4
 - BSD-2-Clause: 4
@@ -78,6 +78,8 @@ Generated: 2026-02-12T17:52:22.109Z
 | @lezer/yaml | 1.0.3 | MIT | https://github.com/lezer-parser/yaml#readme |
 | @marijn/find-cluster-break | 1.0.2 | MIT | https://github.com/marijnh/find-cluster-break#readme |
 | @mermaid-js/parser | 0.6.3 | MIT | https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme |
+| @napi-rs/canvas | 0.1.92 | MIT | https://github.com/Brooooooklyn/canvas#readme |
+| @napi-rs/canvas-darwin-arm64 | 0.1.92 | MIT | https://github.com/Brooooooklyn/canvas#readme |
 | @novnc/novnc | 1.5.0 | MPL-2.0 | https://github.com/novnc/noVNC |
 | @radix-ui/number | 1.1.1 | MIT | https://radix-ui.com/primitives |
 | @radix-ui/primitive | 1.1.3 | MIT | https://radix-ui.com/primitives |
@@ -262,6 +264,7 @@ Generated: 2026-02-12T17:52:22.109Z
 | path-data-parser | 0.1.0 | MIT | https://github.com/pshihn/path-data-parser#readme |
 | path-is-absolute | 1.0.1 | MIT | https://github.com/sindresorhus/path-is-absolute#readme |
 | pathe | 2.0.3 | MIT | https://github.com/unjs/pathe#readme |
+| pdfjs-dist | 4.10.38 | Apache-2.0 | https://mozilla.github.io/pdf.js/ |
 | pkg-types | 1.3.1 | MIT | https://github.com/unjs/pkg-types#readme |
 | points-on-curve | 0.2.0 | MIT | https://github.com/pshihn/bezier-points#readme |
 | points-on-path | 0.2.1 | MIT | https://github.com/pshihn/points-on-path#readme |

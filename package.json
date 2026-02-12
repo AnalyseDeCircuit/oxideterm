@@ -82,6 +82,7 @@
     "marked": "^17.0.1",
     "mermaid": "^11.12.2",
     "nanoid": "^5.1.6",
+    "pdfjs-dist": "4.10.38",
     "prismjs": "^1.30.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

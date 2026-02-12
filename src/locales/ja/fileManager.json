@@ -103,6 +103,8 @@
     "size": "サイズ",
     "compressed": "圧縮後",
     "modified": "更新日時",
+    "expandAll": "すべて展開",
+    "collapseAll": "すべて折りたたむ",
     "quickLookHintNav": "←→ ナビゲート • i 情報 • スペースで閉じる",
     "created": "作成日時",
     "permissions": "権限",

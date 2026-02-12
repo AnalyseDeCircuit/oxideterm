@@ -103,6 +103,8 @@
     "size": "Kích thước",
     "compressed": "Nén",
     "modified": "Đã sửa đổi",
+    "expandAll": "Mở rộng tất cả",
+    "collapseAll": "Thu gọn tất cả",
     "quickLookHintNav": "←→ Điều hướng • i Thông tin • Space đóng",
     "created": "Đã tạo",
     "permissions": "Quyền",

@@ -103,6 +103,8 @@
     "size": "크기",
     "compressed": "압축 후",
     "modified": "수정일",
+    "expandAll": "모두 펼치기",
+    "collapseAll": "모두 접기",
     "quickLookHintNav": "←→ 탐색 • i 정보 • Space 닫기",
     "created": "생성일",
     "permissions": "권한",

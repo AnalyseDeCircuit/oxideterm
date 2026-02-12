@@ -103,6 +103,8 @@
     "size": "Größe",
     "compressed": "Komprimiert",
     "modified": "Geändert",
+    "expandAll": "Alle aufklappen",
+    "collapseAll": "Alle zuklappen",
     "quickLookHintNav": "←→ Navigieren • i Info • Leertaste schließen",
     "created": "Erstellt",
     "permissions": "Berechtigungen",

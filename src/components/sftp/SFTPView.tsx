@@ -38,6 +38,7 @@ import { FileDiffDialog } from './FileDiffDialog';
 import { RemoteFileEditor } from '../editor/RemoteFileEditor';
 import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
+import { PdfViewer } from '../fileManager/PdfViewer';
 import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename } from '../../lib/api';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -645,6 +646,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [hexLoadingMore, setHexLoadingMore] = useState(false);
+  const [sftpPdfZoom, setSftpPdfZoom] = useState(1);
 
   // Dialog States
   const [renameDialog, setRenameDialog] = useState<{oldName: string, isRemote: boolean} | null>(null);
@@ -1847,7 +1849,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
       <TransferQueue nodeId={nodeId} />
 
       {/* Preview Dialog */}
-      <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
+      <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) { setPreviewFile(null); setSftpPdfZoom(1); } }}>
         <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0 gap-0" aria-describedby="preview-desc">
             <DialogHeader className="px-4 py-2 border-b border-theme-border bg-theme-bg-panel flex flex-row items-center justify-between">
                 <div className="flex flex-col gap-1">
@@ -1876,7 +1878,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
             </DialogHeader>
             
             {/* Preview Content Area */}
-            <div className="flex-1 overflow-auto bg-zinc-950">
+            <div className={`flex-1 bg-zinc-950 ${previewFile?.type === 'pdf' ? 'flex flex-col min-h-0' : 'overflow-auto'}`}>
                 {/* Loading State */}
                 {previewLoading && (
                     <div className="flex items-center justify-center h-full">
@@ -1936,10 +1938,12 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 
                 {/* PDF Preview */}
                 {!previewLoading && previewFile?.type === 'pdf' && (
-                    <iframe
-                        src={`data:application/pdf;base64,${previewFile.data}`}
-                        className="w-full h-full"
-                        title={previewFile.name}
+                    <PdfViewer
+                        data={previewFile.data}
+                        name={previewFile.name}
+                        zoom={sftpPdfZoom}
+                        onZoomChange={setSftpPdfZoom}
+                        className="flex-1 min-h-0"
                     />
                 )}
 

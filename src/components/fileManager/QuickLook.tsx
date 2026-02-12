@@ -19,8 +19,6 @@ import {
   ZoomOut,
   RotateCw,
   Archive,
-  Folder,
-  File,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -42,16 +40,9 @@ import { OfficePreview } from './OfficePreview';
 import { FontPreview } from './FontPreview';
 import { AudioVisualizer } from './AudioVisualizer';
 import { VideoPlayer } from './VideoPlayer';
-import type { FilePreview, PreviewType, ArchiveEntry, FileInfo } from './types';
-
-// Format file size
-const formatSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
+import { PdfViewer } from './PdfViewer';
+import { ArchiveTreeView } from './ArchiveTreeView';
+import type { FilePreview, PreviewType, FileInfo } from './types';
 
 // Get file type icon
 const getPreviewIcon = (type: PreviewType) => {
@@ -468,21 +459,15 @@ export const QuickLook: React.FC<QuickLookProps> = ({
             )
           )}
 
-          {/* PDF Preview (iframe) */}
+          {/* PDF Preview */}
           {preview.type === 'pdf' && (
-            <div className="flex-1 overflow-auto min-h-0 relative">
-              <iframe
-                src={preview.data}
-                className="absolute inset-0 border-0"
-                title={preview.name}
-                style={{
-                  transformOrigin: 'top left',
-                  transform: `scale(${pdfZoom})`,
-                  width: `${100 / pdfZoom}%`,
-                  height: `${100 / pdfZoom}%`,
-                }}
-              />
-            </div>
+            <PdfViewer
+              data={preview.data}
+              name={preview.name}
+              zoom={pdfZoom}
+              onZoomChange={setPdfZoom}
+              className="flex-1 min-h-0"
+            />
           )}
 
           {/* Office Document Preview */}
@@ -537,71 +522,7 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
           {/* Archive Preview */}
           {preview.type === 'archive' && preview.archiveInfo && (
-            <div className="p-4">
-              {/* Archive Stats */}
-              <div className="flex items-center gap-4 mb-4 p-3 bg-zinc-900/50 rounded-lg text-xs text-zinc-400">
-                <div className="flex items-center gap-1.5">
-                  <Folder className="h-3.5 w-3.5" />
-                  <span>{preview.archiveInfo.totalDirs} {t('fileManager.folders')}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <File className="h-3.5 w-3.5" />
-                  <span>{preview.archiveInfo.totalFiles} {t('fileManager.files')}</span>
-                </div>
-                <div className="ml-auto flex items-center gap-3">
-                  <span>{t('fileManager.originalSize')}: {formatSize(preview.archiveInfo.totalSize)}</span>
-                  <span>{t('fileManager.compressedSize')}: {formatSize(preview.archiveInfo.compressedSize)}</span>
-                  <span className="text-emerald-400">
-                    {preview.archiveInfo.totalSize > 0 
-                      ? `${Math.round((1 - preview.archiveInfo.compressedSize / preview.archiveInfo.totalSize) * 100)}%`
-                      : '0%'
-                    } {t('fileManager.saved')}
-                  </span>
-                </div>
-              </div>
-
-              {/* File List */}
-              <div className="border border-theme-border rounded-lg overflow-hidden">
-                <div className="grid grid-cols-[1fr_80px_80px_120px] gap-2 px-3 py-2 bg-zinc-900/80 border-b border-theme-border text-xs font-medium text-zinc-400">
-                  <span>{t('fileManager.name')}</span>
-                  <span className="text-right">{t('fileManager.size')}</span>
-                  <span className="text-right">{t('fileManager.compressed')}</span>
-                  <span className="text-right">{t('fileManager.modified')}</span>
-                </div>
-                <div className="max-h-[400px] overflow-y-auto">
-                  {preview.archiveInfo.entries.map((entry: ArchiveEntry, idx: number) => (
-                    <div 
-                      key={idx}
-                      className={cn(
-                        "grid grid-cols-[1fr_80px_80px_120px] gap-2 px-3 py-1.5 text-xs",
-                        idx % 2 === 0 ? "bg-zinc-900/20" : "bg-transparent",
-                        "hover:bg-zinc-800/50"
-                      )}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {entry.isDir ? (
-                          <Folder className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                        ) : (
-                          <File className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                        )}
-                        <span className="truncate text-zinc-300" title={entry.path}>
-                          {entry.name}
-                        </span>
-                      </div>
-                      <span className="text-right text-zinc-500">
-                        {entry.isDir ? '-' : formatSize(entry.size)}
-                      </span>
-                      <span className="text-right text-zinc-500">
-                        {entry.isDir ? '-' : formatSize(entry.compressedSize)}
-                      </span>
-                      <span className="text-right text-zinc-600">
-                        {entry.modified || '-'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <ArchiveTreeView archiveInfo={preview.archiveInfo} t={t} />
           )}
         </div>
 

@@ -104,6 +104,8 @@
     "size": "大小",
     "compressed": "压缩后",
     "modified": "修改时间",
+    "expandAll": "全部展开",
+    "collapseAll": "全部折叠",
     "created": "创建时间",
     "permissions": "权限",
     "mimeType": "MIME 类型",

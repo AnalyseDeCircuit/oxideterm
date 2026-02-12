@@ -104,6 +104,8 @@
     "size": "Size",
     "compressed": "Compressed",
     "modified": "Modified",
+    "expandAll": "Expand All",
+    "collapseAll": "Collapse All",
     "created": "Created",
     "permissions": "Permissions",
     "mimeType": "MIME Type",

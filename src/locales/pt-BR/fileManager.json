@@ -103,6 +103,8 @@
     "size": "Tamanho",
     "compressed": "Compactado",
     "modified": "Modificado",
+    "expandAll": "Expandir tudo",
+    "collapseAll": "Recolher tudo",
     "quickLookHintNav": "←→ Navegar • i Info • Espaço fechar",
     "created": "Criado",
     "permissions": "Permissões",

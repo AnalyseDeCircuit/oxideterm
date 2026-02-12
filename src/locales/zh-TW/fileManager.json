@@ -103,6 +103,8 @@
     "size": "大小",
     "compressed": "壓縮後",
     "modified": "修改時間",
+    "expandAll": "全部展開",
+    "collapseAll": "全部摺疊",
     "quickLookHintNav": "←→ 導航 • i 顯示資訊 • 空格關閉",
     "created": "建立時間",
     "permissions": "權限",
