@@ -215,6 +215,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       let language: string | undefined;
       let archiveInfo: ArchiveInfo | undefined;
       let stream: FilePreview['stream'];
+      let canonicalPath: string | undefined;
 
       const isShellConfig = SHELL_CONFIG_FILES.has(file.name) || (file.name.startsWith('.') && ext === '');
       const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
@@ -244,6 +245,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
                    ext === 'mkv' ? 'video/x-matroska' :
                    ext === 'avi' ? 'video/x-msvideo' : 'video/mp4';
         const resolvedVideo = await invoke<string>('allow_asset_file', { path: filePath });
+        canonicalPath = resolvedVideo;
         data = convertFileSrc(resolvedVideo);
       } else if (AUDIO_EXTENSIONS.has(ext)) {
         // Authorize file in asset protocol scope, then stream from disk
@@ -255,6 +257,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
                    ext === 'aac' || ext === 'm4a' ? 'audio/mp4' :
                    ext === 'wma' ? 'audio/x-ms-wma' : 'audio/mpeg';
         const resolvedAudio = await invoke<string>('allow_asset_file', { path: filePath });
+        canonicalPath = resolvedAudio;
         data = convertFileSrc(resolvedAudio);
       } else if (FONT_EXTENSIONS.has(ext)) {
         previewType = 'font';
@@ -367,6 +370,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
         archiveInfo,
         metadata,
         stream,
+        canonicalPath,
       });
     } catch (err) {
       // Provide more detailed error info
@@ -377,10 +381,14 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   
   // Handle navigation in Quick Look (navigate to another file in the list)
   const handlePreviewNavigate = useCallback((file: FileInfo, newIndex: number) => {
+    // Revoke asset grant for the current media file before navigating away
+    if (previewFile && previewFile.canonicalPath) {
+      invoke('revoke_asset_file', { path: previewFile.canonicalPath }).catch(() => {});
+    }
     // The file parameter provides the target file directly
     handlePreview(file);
     setPreviewIndex(newIndex);
-  }, [handlePreview]);
+  }, [handlePreview, previewFile]);
   
   // Handle keyboard shortcuts (global)
   useEffect(() => {
@@ -914,6 +922,10 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       <QuickLook
         preview={previewFile}
         onClose={() => {
+          // Revoke asset protocol grants for media files to avoid accumulation
+          if (previewFile && previewFile.canonicalPath) {
+            invoke('revoke_asset_file', { path: previewFile.canonicalPath }).catch(() => {});
+          }
           setPreviewFile(null);
           setPreviewIndex(-1);
         }}

@@ -864,3 +864,104 @@ pub fn allow_asset_file(app: tauri::AppHandle, path: String) -> Result<String, S
         .map(|s| s.to_string())
         .ok_or_else(|| "Canonical path contains invalid UTF-8".to_string())
 }
+
+/// Revoke a file that was previously allowed on the asset protocol scope.
+/// The caller **must** pass the exact canonical path originally returned by
+/// `allow_asset_file` — we do not re-canonicalize because the file may have
+/// been moved/deleted or a symlink retargeted since it was granted.
+#[tauri::command]
+pub fn revoke_asset_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri::Manager;
+    let canonical = std::path::PathBuf::from(&path);
+    app.asset_protocol_scope()
+        .forbid_file(&canonical)
+        .map_err(|e| format!("Failed to revoke asset file '{}': {}", path, e))?;
+    Ok(())
+}
+
+// ── Audio Metadata ──────────────────────────────────────────────────────────
+
+/// Audio metadata returned to the frontend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioMetadata {
+    /// Duration in seconds
+    pub duration_secs: Option<f64>,
+    /// Overall bitrate in kbps (may be average for VBR)
+    pub bitrate_kbps: Option<u32>,
+    /// Sample rate in Hz (e.g. 44100)
+    pub sample_rate: Option<u32>,
+    /// Bit depth if available (e.g. 16, 24)
+    pub bit_depth: Option<u8>,
+    /// Number of channels
+    pub channels: Option<u8>,
+    /// Codec / format description
+    pub codec: Option<String>,
+    /// ID3 / Vorbis tags
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub year: Option<u32>,
+    pub genre: Option<String>,
+    pub track_number: Option<u32>,
+    pub comment: Option<String>,
+    /// Embedded lyrics (USLT / Vorbis LYRICS)
+    pub lyrics: Option<String>,
+    /// true if embedded cover art was detected
+    pub has_cover: bool,
+}
+
+/// Read audio file metadata (ID3, Vorbis, FLAC, etc.) using the `lofty` crate.
+#[tauri::command]
+pub fn get_audio_metadata(path: String) -> Result<AudioMetadata, String> {
+    use lofty::file::{AudioFile, TaggedFileExt};
+    use lofty::tag::{Accessor, ItemKey};
+    use lofty::probe::Probe;
+
+    let tagged_file = Probe::open(&path)
+        .map_err(|e| format!("Cannot open '{}': {}", path, e))?
+        .read()
+        .map_err(|e| format!("Cannot read tags from '{}': {}", path, e))?;
+
+    let properties = tagged_file.properties();
+    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+
+    let (title, artist, album, year, genre, track_number, comment, lyrics, has_cover) =
+        if let Some(t) = tag {
+            (
+                t.title().map(|s| s.to_string()),
+                t.artist().map(|s| s.to_string()),
+                t.album().map(|s| s.to_string()),
+                t.year(),
+                t.genre().map(|s| s.to_string()),
+                t.track(),
+                t.comment().map(|s| s.to_string()),
+                t.get_string(&ItemKey::Lyrics).map(|s| s.to_string()),
+                !t.pictures().is_empty(),
+            )
+        } else {
+            (None, None, None, None, None, None, None, None, false)
+        };
+
+    Ok(AudioMetadata {
+        duration_secs: {
+            let d = properties.duration();
+            let secs = d.as_secs_f64();
+            if secs > 0.0 { Some(secs) } else { None }
+        },
+        bitrate_kbps: properties.audio_bitrate(),
+        sample_rate: properties.sample_rate(),
+        bit_depth: properties.bit_depth(),
+        channels: properties.channels(),
+        codec: None, // lofty doesn't expose codec name directly; we use file extension on frontend
+        title,
+        artist,
+        album,
+        year,
+        genre,
+        track_number,
+        comment,
+        lyrics,
+        has_cover,
+    })
+}

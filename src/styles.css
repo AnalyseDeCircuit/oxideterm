@@ -519,6 +519,79 @@ html {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Audio Player — Vinyl Disk & Volume Slider
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Vinyl record rotation */
+@keyframes vinyl-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.audio-vinyl-disk {
+  will-change: transform;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.audio-vinyl-spin {
+  animation: vinyl-spin 3s linear infinite;
+}
+
+/* Pause the rotation when not spinning (preserves angle) */
+.audio-vinyl-disk:not(.audio-vinyl-spin) {
+  animation: vinyl-spin 3s linear infinite paused;
+}
+
+/* Subtle outer glow ring — uses theme accent via CSS var */
+@keyframes vinyl-glow {
+  0%, 100% { opacity: 0.2; box-shadow: 0 0 16px 3px var(--theme-accent, #ea580c); }
+  50%      { opacity: 0.4; box-shadow: 0 0 24px 6px var(--theme-accent, #ea580c); }
+}
+
+.audio-vinyl-glow {
+  animation: vinyl-glow 2.5s ease-in-out infinite;
+  border-radius: 50%;
+}
+
+/* Volume range slider — consistent cross-browser styling */
+.audio-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--theme-border, #27272a);
+  border-radius: 9999px;
+  outline: none;
+}
+.audio-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--theme-accent, #ea580c);
+  cursor: pointer;
+  border: none;
+  margin-top: -3px; /* centre 10px thumb on 4px track */
+}
+.audio-volume-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--theme-accent, #ea580c);
+  cursor: pointer;
+  border: none;
+}
+.audio-volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--theme-border, #27272a);
+}
+.audio-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--theme-border, #27272a);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Topology View Animations (replacing framer-motion)
    ═══════════════════════════════════════════════════════════════════════════ */
 

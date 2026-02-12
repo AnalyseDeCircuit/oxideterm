@@ -408,6 +408,8 @@ pub fn run() {
         commands::local_calculate_checksum,
         commands::local_dir_stats,
         commands::allow_asset_file,
+        commands::revoke_asset_file,
+        commands::get_audio_metadata,
         // Session commands (v2 with registry)
         commands::disconnect_v2,
         commands::list_sessions_v2,

@@ -40,6 +40,8 @@ import { CodeHighlight } from './CodeHighlight';
 import { VirtualTextPreview } from './VirtualTextPreview';
 import { OfficePreview } from './OfficePreview';
 import { FontPreview } from './FontPreview';
+import { AudioVisualizer } from './AudioVisualizer';
+import { VideoPlayer } from './VideoPlayer';
 import type { FilePreview, PreviewType, ArchiveEntry, FileInfo } from './types';
 
 // Format file size
@@ -99,6 +101,7 @@ export const QuickLook: React.FC<QuickLookProps> = ({
   const [copied, setCopied] = useState(false);
   const [imageZoom, setImageZoom] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
+  const [pdfZoom, setPdfZoom] = useState(1);
   const [showMetadata, setShowMetadata] = useState(true);
   const markdownRef = useRef<HTMLDivElement>(null);
 
@@ -145,6 +148,7 @@ export const QuickLook: React.FC<QuickLookProps> = ({
     setCopied(false);
     setImageZoom(1);
     setImageRotation(0);
+    setPdfZoom(1);
   }, [preview?.path]);
 
   // Inject markdown styles once
@@ -161,17 +165,27 @@ export const QuickLook: React.FC<QuickLookProps> = ({
     if (!preview) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape or Space to close
-      if (e.key === 'Escape' || e.key === ' ') {
+      // Only VideoPlayer has its own scoped keyboard handler;
+      // AudioVisualizer does not, so we only suppress for video.
+      const isVideo = preview.type === 'video';
+
+      // Escape to close (always)
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      // Space to close — but NOT when previewing video (Space = play/pause there)
+      if (e.key === ' ' && !isVideo) {
         e.preventDefault();
         onClose();
       }
-      // Left/Right arrow for navigation
-      if (e.key === 'ArrowLeft' && canNavigate) {
+      // Left/Right arrow for navigation — but NOT when previewing video (arrows = seek there)
+      if (e.key === 'ArrowLeft' && canNavigate && !isVideo) {
         e.preventDefault();
         navigatePrev();
       }
-      if (e.key === 'ArrowRight' && canNavigate) {
+      if (e.key === 'ArrowRight' && canNavigate && !isVideo) {
         e.preventDefault();
         navigateNext();
       }
@@ -198,6 +212,21 @@ export const QuickLook: React.FC<QuickLookProps> = ({
         if (e.key === 'r') {
           e.preventDefault();
           setImageRotation(r => (r + 90) % 360);
+        }
+      }
+      // Zoom controls for PDF
+      if (preview.type === 'pdf') {
+        if (e.key === '+' || e.key === '=') {
+          e.preventDefault();
+          setPdfZoom(z => Math.min(z + 0.25, 3));
+        }
+        if (e.key === '-') {
+          e.preventDefault();
+          setPdfZoom(z => Math.max(z - 0.25, 0.25));
+        }
+        if (e.key === '0') {
+          e.preventDefault();
+          setPdfZoom(1);
         }
       }
     };
@@ -229,7 +258,12 @@ export const QuickLook: React.FC<QuickLookProps> = ({
   return createPortal(
     <div 
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center overflow-auto"
-      onClick={onClose}
+      onMouseDown={e => {
+        // Only close when clicking directly on the backdrop itself.
+        // During CSS resize-drag the mouse can leave the panel bounds;
+        // using onMouseDown + target check prevents accidental dismissal.
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div 
         className="relative bg-theme-bg-panel border border-theme-border rounded-lg shadow-2xl flex flex-col quicklook-resizable m-auto shrink-0"
@@ -241,7 +275,6 @@ export const QuickLook: React.FC<QuickLookProps> = ({
           maxWidth: '95vw',
           maxHeight: '95vh',
         }}
-        onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-theme-border bg-zinc-900/50">
@@ -292,6 +325,20 @@ export const QuickLook: React.FC<QuickLookProps> = ({
                 </Button>
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setImageRotation(r => (r + 90) % 360)} title={t('fileManager.rotate')}>
                   <RotateCw className="h-3.5 w-3.5" />
+                </Button>
+                <div className="w-px h-4 bg-theme-border mx-1" />
+              </>
+            )}
+            
+            {/* PDF zoom controls */}
+            {preview.type === 'pdf' && (
+              <>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setPdfZoom(z => Math.max(z - 0.25, 0.25))} title={t('fileManager.zoomOut')}>
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </Button>
+                <span className="text-xs text-zinc-500 w-12 text-center">{Math.round(pdfZoom * 100)}%</span>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setPdfZoom(z => Math.min(z + 0.25, 3))} title={t('fileManager.zoomIn')}>
+                  <ZoomIn className="h-3.5 w-3.5" />
                 </Button>
                 <div className="w-px h-4 bg-theme-border mx-1" />
               </>
@@ -356,35 +403,23 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
           {/* Video Preview */}
           {preview.type === 'video' && (
-            <div className="flex-1 flex items-center justify-center min-h-[300px] p-4 bg-black">
-              <video
-                src={preview.data}
-                controls
-                autoPlay={false}
-                className="max-w-full max-h-full"
-                style={{ maxHeight: 'calc(90vh - 160px)' }}
-                {...(preview.mimeType ? { type: preview.mimeType } : {})}
-              >
-                {t('fileManager.videoNotSupported', 'Your browser does not support this video format.')}
-              </video>
-            </div>
+            <VideoPlayer
+              src={preview.data}
+              name={preview.name}
+              mimeType={preview.mimeType}
+              filePath={preview.path}
+              fileSize={preview.size ?? preview.metadata?.size}
+            />
           )}
 
           {/* Audio Preview */}
           {preview.type === 'audio' && (
-            <div className="flex-1 flex flex-col items-center justify-center min-h-[200px] p-8 gap-6">
-              <Music className="h-20 w-20 text-zinc-600" />
-              <p className="text-sm text-zinc-400">{preview.name}</p>
-              <audio
-                src={preview.data}
-                controls
-                autoPlay={false}
-                className="w-full max-w-md"
-                {...(preview.mimeType ? { type: preview.mimeType } : {})}
-              >
-                {t('fileManager.audioNotSupported', 'Your browser does not support this audio format.')}
-              </audio>
-            </div>
+            <AudioVisualizer
+              src={preview.data}
+              name={preview.name}
+              filePath={preview.path}
+              mimeType={preview.mimeType}
+            />
           )}
 
           {/* Code Preview with Syntax Highlighting */}
@@ -435,11 +470,19 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
           {/* PDF Preview (iframe) */}
           {preview.type === 'pdf' && (
-            <iframe
-              src={preview.data}
-              className="w-full h-[70vh]"
-              title={preview.name}
-            />
+            <div className="flex-1 overflow-auto min-h-0">
+              <iframe
+                src={preview.data}
+                className="w-full h-[70vh] border-0"
+                title={preview.name}
+                style={{
+                  transformOrigin: 'top left',
+                  transform: `scale(${pdfZoom})`,
+                  width: `${100 / pdfZoom}%`,
+                  height: `${70 / pdfZoom}vh`,
+                }}
+              />
+            </div>
           )}
 
           {/* Office Document Preview */}

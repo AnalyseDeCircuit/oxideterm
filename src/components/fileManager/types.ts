@@ -171,6 +171,8 @@ export interface FilePreview {
   reason?: string;
   // Archive specific
   archiveInfo?: ArchiveInfo;
+  // Canonical path returned by allow_asset_file (for reliable revocation)
+  canonicalPath?: string;
 }
 
 // Bookmark/Favorite types

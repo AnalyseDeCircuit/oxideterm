@@ -1,6 +1,6 @@
 [package]
 name = "oxideterm"
-version = "1.9.2"
+version = "1.9.3"
 description = "A modern SSH terminal client built with Rust and Tauri"
 authors = ["OxideTerm Team"]
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -93,6 +93,9 @@ walkdir = "2"
 # File type detection (magic bytes)
 infer = "0.16"
 md-5 = "0.10"
+
+# Audio metadata (ID3, Vorbis, FLAC, etc.)
+lofty = "0.22"
 
 # System info (disk/volume detection)
 sysinfo = { version = "0.33", default-features = false, features = ["disk"] }
