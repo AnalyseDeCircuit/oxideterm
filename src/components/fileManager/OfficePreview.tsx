@@ -15,7 +15,8 @@ type MammothModule = typeof import('mammoth');
 type XLSXModule = typeof import('xlsx');
 
 export interface OfficePreviewProps {
-  data: string; // base64 encoded Office file
+  data?: string; // base64 encoded Office file (legacy)
+  url?: string;  // asset:// URL to stream from disk (preferred)
   mimeType: string;
   filename: string;
   className?: string;
@@ -267,6 +268,7 @@ function PowerPointPreview({ filename }: { filename: string }) {
  */
 export const OfficePreview: React.FC<OfficePreviewProps> = ({
   data,
+  url,
   mimeType,
   filename,
   className,
@@ -277,15 +279,28 @@ export const OfficePreview: React.FC<OfficePreviewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const buffer = base64ToArrayBuffer(data);
-      setArrayBuffer(buffer);
-      setLoading(false);
-    } catch (err) {
-      setError('Failed to decode file data');
+    let cancelled = false;
+    if (url) {
+      // Fetch binary from asset:// URL — avoids IPC overhead
+      fetch(url)
+        .then(r => r.arrayBuffer())
+        .then(buf => { if (!cancelled) { setArrayBuffer(buf); setLoading(false); } })
+        .catch(() => { if (!cancelled) { setError('Failed to fetch document'); setLoading(false); } });
+    } else if (data) {
+      try {
+        const buffer = base64ToArrayBuffer(data);
+        setArrayBuffer(buffer);
+        setLoading(false);
+      } catch {
+        setError('Failed to decode file data');
+        setLoading(false);
+      }
+    } else {
+      setError('No data or url provided');
       setLoading(false);
     }
-  }, [data]);
+    return () => { cancelled = true; };
+  }, [data, url]);
 
   if (loading) {
     return (

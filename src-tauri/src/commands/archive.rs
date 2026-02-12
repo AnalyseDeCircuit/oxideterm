@@ -4,7 +4,6 @@
 
 use serde::Serialize;
 use std::fs::{self, File};
-use std::io::{Read, Write};
 use std::path::Path;
 use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
@@ -160,29 +159,23 @@ pub async fn compress_files(files: Vec<String>, archive_path: String) -> Result<
                     zip.add_directory(&dir_name, options)
                         .map_err(|e| format!("Failed to add directory: {}", e))?;
                 } else {
-                    // Add file
+                    // Add file — stream via io::copy to avoid loading entire file into memory
                     zip.start_file(name.to_string(), options)
                         .map_err(|e| format!("Failed to add file: {}", e))?;
 
                     let mut f = File::open(entry_path)
                         .map_err(|e| format!("Failed to open file: {}", e))?;
-                    let mut buffer = Vec::new();
-                    f.read_to_end(&mut buffer)
-                        .map_err(|e| format!("Failed to read file: {}", e))?;
-                    zip.write_all(&buffer)
+                    std::io::copy(&mut f, &mut zip)
                         .map_err(|e| format!("Failed to write file: {}", e))?;
                 }
             }
         } else {
-            // Single file
+            // Single file — stream via io::copy to avoid loading entire file into memory
             zip.start_file(base_name, options)
                 .map_err(|e| format!("Failed to add file: {}", e))?;
 
             let mut f = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
-            let mut buffer = Vec::new();
-            f.read_to_end(&mut buffer)
-                .map_err(|e| format!("Failed to read file: {}", e))?;
-            zip.write_all(&buffer)
+            std::io::copy(&mut f, &mut zip)
                 .map_err(|e| format!("Failed to write file: {}", e))?;
         }
     }

@@ -121,13 +121,51 @@ pub async fn node_sftp_stat(
 }
 
 /// 预览文件内容（支持静默重建）
+///
+/// When the backend decides to stream a file via `asset://` (video, audio,
+/// large images, PDF, Office), the result will be `AssetFile { path, … }`.
+/// This command automatically allows the temp file on the asset protocol
+/// scope so the WebView can stream it directly from disk.
 #[tauri::command]
 pub async fn node_sftp_preview(
     node_id: String,
     path: String,
+    app: AppHandle,
     router: State<'_, Arc<NodeRouter>>,
 ) -> Result<PreviewContent, RouteError> {
-    sftp_with_retry!(router, &node_id, sftp, { sftp.preview(&path).await })
+    let result: Result<PreviewContent, RouteError> =
+        sftp_with_retry!(router, &node_id, sftp, { sftp.preview(&path).await });
+
+    // If the preview produced a temp file, allow it on the asset scope
+    if let Ok(PreviewContent::AssetFile { ref path, .. }) = result {
+        use tauri::Manager;
+        let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(path));
+    }
+    result
+}
+
+/// Clean up a temp file created by SFTP preview.
+/// If `path` is provided, deletes that single file (must be inside the
+/// `oxideterm-sftp-preview` temp dir). Otherwise, removes the entire temp dir.
+#[tauri::command]
+pub async fn cleanup_sftp_preview_temp(path: Option<String>) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir().join("oxideterm-sftp-preview");
+
+    if let Some(p) = path {
+        let target = std::path::Path::new(&p);
+        // Safety: only allow deleting files inside our temp dir
+        if let (Ok(canonical), Ok(canonical_dir)) =
+            (target.canonicalize(), temp_dir.canonicalize())
+        {
+            if canonical.starts_with(&canonical_dir) {
+                let _ = tokio::fs::remove_file(&canonical).await;
+            }
+        }
+    } else {
+        // Wipe the entire preview temp directory
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+    Ok(())
 }
 
 /// 写入文件内容（IDE 编辑器用）

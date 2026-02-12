@@ -39,7 +39,9 @@ import { RemoteFileEditor } from '../editor/RemoteFileEditor';
 import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
 import { PdfViewer } from '../fileManager/PdfViewer';
-import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename } from '../../lib/api';
+import { ImageViewer } from '../fileManager/ImageViewer';
+import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename, cleanupSftpPreviewTemp } from '../../lib/api';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { FileInfo } from '../../types';
@@ -633,6 +635,10 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
     mimeType?: string;
     language?: string | null;
     encoding?: string; // Detected file encoding
+    /** asset:// URL for streaming media from a temp file (set when backend returns AssetFile) */
+    assetSrc?: string;
+    /** Raw local path of the temp file, for cleanup */
+    tempPath?: string;
     // Hex specific
     hexOffset?: number;
     hexTotalSize?: number;
@@ -647,22 +653,6 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [hexLoadingMore, setHexLoadingMore] = useState(false);
   const [sftpPdfZoom, setSftpPdfZoom] = useState(1);
-  const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
-
-  // Convert base64 audio/video data to Blob URL to avoid WKWebView data-URL playback bugs
-  useEffect(() => {
-    if (!previewFile || (previewFile.type !== 'audio' && previewFile.type !== 'video')) {
-      setMediaBlobUrl(null);
-      return;
-    }
-    const binary = atob(previewFile.data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: previewFile.mimeType || 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    setMediaBlobUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [previewFile]);
 
   // Dialog States
   const [renameDialog, setRenameDialog] = useState<{oldName: string, isRemote: boolean} | null>(null);
@@ -1583,46 +1573,22 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
               return;
           }
           
-          if ('Video' in content) {
+          // AssetFile: backend streamed file to temp and allowed it on asset scope.
+          // Build an asset:// URL and map the kind to the right preview type.
+          if ('AssetFile' in content) {
+              const { path: assetPath, mime_type, kind } = (content as { AssetFile: { path: string; mime_type: string; kind: string } }).AssetFile;
+              const assetUrl = convertFileSrc(assetPath) + `?t=${Date.now()}`;
+              const typeMap: Record<string, 'image' | 'video' | 'audio' | 'pdf' | 'office'> = {
+                  image: 'image', video: 'video', audio: 'audio', pdf: 'pdf', office: 'office',
+              };
               setPreviewFile({
                   name: file.name,
                   path: fullPath,
-                  type: 'video',
-                  data: content.Video.data,
-                  mimeType: content.Video.mime_type,
-              });
-              return;
-          }
-          
-          if ('Audio' in content) {
-              setPreviewFile({
-                  name: file.name,
-                  path: fullPath,
-                  type: 'audio',
-                  data: content.Audio.data,
-                  mimeType: content.Audio.mime_type,
-              });
-              return;
-          }
-          
-          if ('Pdf' in content) {
-              setPreviewFile({
-                  name: file.name,
-                  path: fullPath,
-                  type: 'pdf',
-                  data: content.Pdf.data,
-                  mimeType: content.Pdf.original_mime || 'application/pdf',
-              });
-              return;
-          }
-
-          if ('Office' in content) {
-              setPreviewFile({
-                  name: file.name,
-                  path: fullPath,
-                  type: 'office',
-                  data: content.Office.data,
-                  mimeType: content.Office.mime_type,
+                  type: typeMap[kind] || 'unsupported',
+                  data: '', // no base64 data — asset:// streams directly
+                  mimeType: mime_type,
+                  assetSrc: assetUrl,
+                  tempPath: assetPath,
               });
               return;
           }
@@ -1865,7 +1831,16 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
       <TransferQueue nodeId={nodeId} />
 
       {/* Preview Dialog */}
-      <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) { setPreviewFile(null); setSftpPdfZoom(1); } }}>
+      <Dialog open={!!previewFile} onOpenChange={(open) => {
+        if (!open) {
+          // Clean up temp file if the preview used an asset:// stream
+          if (previewFile?.tempPath) {
+            cleanupSftpPreviewTemp(previewFile.tempPath).catch(() => {});
+          }
+          setPreviewFile(null);
+          setSftpPdfZoom(1);
+        }
+      }}>
         <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0 gap-0" aria-describedby="preview-desc">
             <DialogHeader className="px-4 py-2 border-b border-theme-border bg-theme-bg-panel flex flex-row items-center justify-between">
                 <div className="flex flex-col gap-1">
@@ -1915,22 +1890,20 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 
                 {/* Image Preview */}
                 {!previewLoading && previewFile?.type === 'image' && (
-                    <div className="flex items-center justify-center h-full p-4">
-                        <img 
-                            src={`data:${previewFile.mimeType};base64,${previewFile.data}`}
-                            alt={previewFile.name}
-                            className="max-w-full max-h-full object-contain"
-                        />
-                    </div>
+                    <ImageViewer
+                        src={previewFile.assetSrc || `data:${previewFile.mimeType};base64,${previewFile.data}`}
+                        alt={previewFile.name}
+                        className="p-4"
+                    />
                 )}
                 
                 {/* Video Preview */}
-                {!previewLoading && previewFile?.type === 'video' && mediaBlobUrl && (
+                {!previewLoading && previewFile?.type === 'video' && previewFile.assetSrc && (
                     <div className="flex items-center justify-center h-full p-4">
                         <video 
                             controls
                             className="max-w-full max-h-full"
-                            src={mediaBlobUrl}
+                            src={previewFile.assetSrc}
                         >
                             {t('sftp.preview.video_unsupported')}
                         </video>
@@ -1938,14 +1911,14 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 )}
                 
                 {/* Audio Preview */}
-                {!previewLoading && previewFile?.type === 'audio' && mediaBlobUrl && (
+                {!previewLoading && previewFile?.type === 'audio' && previewFile.assetSrc && (
                     <div className="flex flex-col items-center justify-center h-full p-4 gap-4">
                         <div className="text-6xl">🎵</div>
                         <div className="text-zinc-400">{previewFile.name}</div>
                         <audio 
                             controls
                             className="w-full max-w-md"
-                            src={mediaBlobUrl}
+                            src={previewFile.assetSrc}
                         >
                             {t('sftp.preview.audio_unsupported')}
                         </audio>
@@ -1955,7 +1928,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 {/* PDF Preview */}
                 {!previewLoading && previewFile?.type === 'pdf' && (
                     <PdfViewer
-                        data={previewFile.data}
+                        url={previewFile.assetSrc}
                         name={previewFile.name}
                         zoom={sftpPdfZoom}
                         onZoomChange={setSftpPdfZoom}
@@ -1966,7 +1939,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 {/* Office Document Preview */}
                 {!previewLoading && previewFile?.type === 'office' && (
                     <OfficePreview
-                        data={previewFile.data}
+                        url={previewFile.assetSrc}
                         mimeType={previewFile.mimeType || 'application/octet-stream'}
                         filename={previewFile.name}
                         className="h-full"

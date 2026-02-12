@@ -1270,6 +1270,10 @@ export const nodeSftpStat = (nodeId: string, path: string): Promise<FileInfo> =>
 export const nodeSftpPreview = (nodeId: string, path: string, maxSize?: number): Promise<PreviewContent> =>
   invoke('node_sftp_preview', { nodeId, path, maxSize });
 
+/** 清理 SFTP 预览产生的临时文件。传 path 删单个，不传删整个目录 */
+export const cleanupSftpPreviewTemp = (path?: string): Promise<void> =>
+  invoke('cleanup_sftp_preview_temp', { path: path ?? null });
+
 /** 写入远程文件内容 */
 export const nodeSftpWrite = (nodeId: string, path: string, content: string, encoding?: string): Promise<{ mtime: number | null; size: number | null; encodingUsed: string }> =>
   invoke('node_sftp_write', { nodeId, path, content, encoding });

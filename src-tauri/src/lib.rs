@@ -387,6 +387,15 @@ pub fn run() {
         app.manage(reconnect_service);
         tracing::info!("Auto reconnect service initialized");
 
+        // Sweep leftover SFTP preview temp files from previous sessions
+        {
+            let temp_dir = std::env::temp_dir().join("oxideterm-sftp-preview");
+            if temp_dir.exists() {
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                tracing::info!("Cleaned up SFTP preview temp dir");
+            }
+        }
+
         write_startup_log("Tauri setup complete");
         Ok(())
     });
@@ -550,6 +559,8 @@ pub fn run() {
         commands::sftp_resume_transfer,
         commands::sftp_transfer_stats,
         commands::sftp_update_settings,
+        // SFTP preview temp cleanup
+        commands::cleanup_sftp_preview_temp,
         // Network and reconnect commands
         commands::network_status_changed,
         commands::cancel_reconnect,
@@ -783,6 +794,8 @@ pub fn run() {
         commands::sftp_resume_transfer,
         commands::sftp_transfer_stats,
         commands::sftp_update_settings,
+        // SFTP preview temp cleanup
+        commands::cleanup_sftp_preview_temp,
         // Network and reconnect commands
         commands::network_status_changed,
         commands::cancel_reconnect,

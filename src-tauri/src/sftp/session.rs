@@ -489,7 +489,60 @@ impl SftpSession {
         })
     }
 
+    /// Stream a remote file into a local temp file without buffering the entire
+    /// content in memory.  Returns the canonical path of the temp file.
+    async fn download_to_temp(&self, remote_path: &str) -> Result<PathBuf, SftpError> {
+        use tokio::io::AsyncReadExt;
+
+        let ext = Path::new(remote_path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("bin");
+
+        let temp_dir = std::env::temp_dir().join("oxideterm-sftp-preview");
+        tokio::fs::create_dir_all(&temp_dir)
+            .await
+            .map_err(SftpError::IoError)?;
+
+        let temp_name = format!("{}.{}", uuid::Uuid::new_v4(), ext);
+        let temp_path = temp_dir.join(temp_name);
+
+        let mut remote_file = self
+            .sftp
+            .open(remote_path)
+            .await
+            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+
+        let mut local_file = tokio::fs::File::create(&temp_path)
+            .await
+            .map_err(SftpError::IoError)?;
+
+        // Stream in 256 KB chunks — never hold more than this in memory
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = remote_file.read(&mut buf).await.map_err(SftpError::IoError)?;
+            if n == 0 {
+                break;
+            }
+            local_file
+                .write_all(&buf[..n])
+                .await
+                .map_err(SftpError::IoError)?;
+        }
+        local_file.flush().await.map_err(SftpError::IoError)?;
+        drop(local_file);
+
+        // Return canonical path for the asset protocol
+        let canonical = std::fs::canonicalize(&temp_path)
+            .map_err(|e| SftpError::IoError(e))?;
+
+        Ok(canonical)
+    }
+
     /// Preview image files
+    ///
+    /// Small images (≤ 512 KB) are inlined as base64 for snappy display.
+    /// Larger images are streamed to a temp file and served via `asset://`.
     async fn preview_image(
         &self,
         path: &str,
@@ -504,20 +557,31 @@ impl SftpSession {
             });
         }
 
-        let content = self
-            .sftp
-            .read(path)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+        // Small images: inline base64 (fast, negligible memory)
+        const INLINE_THRESHOLD: u64 = 512 * 1024;
+        if size <= INLINE_THRESHOLD {
+            let content = self
+                .sftp
+                .read(path)
+                .await
+                .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+            let data = base64::engine::general_purpose::STANDARD.encode(&content);
+            return Ok(PreviewContent::Image {
+                data,
+                mime_type: mime_type.to_string(),
+            });
+        }
 
-        let data = base64::engine::general_purpose::STANDARD.encode(&content);
-        Ok(PreviewContent::Image {
-            data,
+        // Large images: stream to temp file
+        let temp_path = self.download_to_temp(path).await?;
+        Ok(PreviewContent::AssetFile {
+            path: temp_path.to_string_lossy().to_string(),
             mime_type: mime_type.to_string(),
+            kind: AssetFileKind::Image,
         })
     }
 
-    /// Preview video files
+    /// Preview video files — always via temp file + asset:// protocol
     async fn preview_video(
         &self,
         path: &str,
@@ -532,13 +596,6 @@ impl SftpSession {
             });
         }
 
-        let content = self
-            .sftp
-            .read(path)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-
-        // Correct MIME type for common formats
         let actual_mime = match Path::new(path).extension().and_then(|s| s.to_str()) {
             Some("mp4") => "video/mp4",
             Some("webm") => "video/webm",
@@ -549,14 +606,15 @@ impl SftpSession {
             _ => mime_type,
         };
 
-        let data = base64::engine::general_purpose::STANDARD.encode(&content);
-        Ok(PreviewContent::Video {
-            data,
+        let temp_path = self.download_to_temp(path).await?;
+        Ok(PreviewContent::AssetFile {
+            path: temp_path.to_string_lossy().to_string(),
             mime_type: actual_mime.to_string(),
+            kind: AssetFileKind::Video,
         })
     }
 
-    /// Preview audio files
+    /// Preview audio files — always via temp file + asset:// protocol
     async fn preview_audio(
         &self,
         path: &str,
@@ -571,13 +629,6 @@ impl SftpSession {
             });
         }
 
-        let content = self
-            .sftp
-            .read(path)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-
-        // Correct MIME type for common formats
         let actual_mime = match Path::new(path).extension().and_then(|s| s.to_str()) {
             Some("mp3") => "audio/mpeg",
             Some("wav") => "audio/wav",
@@ -588,14 +639,15 @@ impl SftpSession {
             _ => mime_type,
         };
 
-        let data = base64::engine::general_purpose::STANDARD.encode(&content);
-        Ok(PreviewContent::Audio {
-            data,
+        let temp_path = self.download_to_temp(path).await?;
+        Ok(PreviewContent::AssetFile {
+            path: temp_path.to_string_lossy().to_string(),
             mime_type: actual_mime.to_string(),
+            kind: AssetFileKind::Audio,
         })
     }
 
-    /// Preview PDF files
+    /// Preview PDF files — always via temp file + asset:// protocol
     async fn preview_pdf(&self, path: &str, size: u64) -> Result<PreviewContent, SftpError> {
         if size > constants::MAX_PREVIEW_SIZE {
             return Ok(PreviewContent::TooLarge {
@@ -605,22 +657,16 @@ impl SftpSession {
             });
         }
 
-        let content = self
-            .sftp
-            .read(path)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-
-        let data = base64::engine::general_purpose::STANDARD.encode(&content);
-        Ok(PreviewContent::Pdf {
-            data,
-            original_mime: None,
+        let temp_path = self.download_to_temp(path).await?;
+        Ok(PreviewContent::AssetFile {
+            path: temp_path.to_string_lossy().to_string(),
+            mime_type: "application/pdf".to_string(),
+            kind: AssetFileKind::Pdf,
         })
     }
 
-    /// Preview Office documents (return raw data for frontend rendering)
+    /// Preview Office documents — always via temp file + asset:// protocol
     async fn preview_office(&self, path: &str, size: u64) -> Result<PreviewContent, SftpError> {
-        // Check size limit (increase to 50MB for frontend rendering)
         const MAX_OFFICE_SIZE: u64 = 50 * 1024 * 1024;
         if size > MAX_OFFICE_SIZE {
             return Ok(PreviewContent::TooLarge {
@@ -630,22 +676,16 @@ impl SftpSession {
             });
         }
 
-        // Get MIME type
         let mime_type = mime_guess::from_path(path)
             .first_or_octet_stream()
             .to_string();
 
-        // Download the file
-        let content = self
-            .sftp
-            .read(path)
-            .await
-            .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-
-        // Encode to base64 for frontend
-        let data = base64::engine::general_purpose::STANDARD.encode(&content);
-
-        Ok(PreviewContent::Office { data, mime_type })
+        let temp_path = self.download_to_temp(path).await?;
+        Ok(PreviewContent::AssetFile {
+            path: temp_path.to_string_lossy().to_string(),
+            mime_type,
+            kind: AssetFileKind::Office,
+        })
     }
 
     /// Preview binary files as hex dump (incremental)

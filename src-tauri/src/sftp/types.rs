@@ -48,6 +48,17 @@ impl FileType {
     }
 }
 
+/// What kind of media the asset file contains, so the frontend picks the right player.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AssetFileKind {
+    Image,
+    Video,
+    Audio,
+    Pdf,
+    Office,
+}
+
 /// File preview content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PreviewContent {
@@ -66,20 +77,19 @@ pub enum PreviewContent {
         #[serde(default)]
         has_bom: bool,
     },
-    /// Base64-encoded image content
+    /// Base64-encoded image content (small images only, ≤ 512 KB)
     Image { data: String, mime_type: String },
-    /// Base64-encoded video content (for small videos < 50MB)
-    Video { data: String, mime_type: String },
-    /// Base64-encoded audio content (for small audio < 50MB)
-    Audio { data: String, mime_type: String },
-    /// Base64-encoded PDF content (native or converted from Office)
-    Pdf {
-        data: String,
-        /// Original MIME type if converted from Office document
-        original_mime: Option<String>,
+    /// Local temp file served via `asset://` protocol.
+    /// Frontend should use `convertFileSrc(path)` to build the URL.
+    /// This avoids buffering the entire file through IPC.
+    AssetFile {
+        /// Canonical local path to the temp file (already allowed on asset scope)
+        path: String,
+        /// MIME type for the content
+        mime_type: String,
+        /// Kind hint so frontend knows which player/viewer to use
+        kind: AssetFileKind,
     },
-    /// Base64-encoded Office document for frontend rendering
-    Office { data: String, mime_type: String },
     /// Hex dump for binary files (incremental loading)
     Hex {
         /// Hex dump string

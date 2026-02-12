@@ -27,7 +27,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 interface PdfViewerProps {
   /** data:application/pdf;base64,... or raw base64 string */
-  data: string;
+  data?: string;
+  /** asset:// URL to stream PDF from disk (preferred over data) */
+  url?: string;
   /** Filename for accessibility */
   name?: string;
   /** Zoom level (1 = 100%) */
@@ -159,6 +161,7 @@ const PagePlaceholder: React.FC<{ width: number; height: number; zoom: number }>
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
   data,
+  url,
   name: _name,
   zoom = 1,
   onZoomChange,
@@ -172,8 +175,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set());
   const rafRef = useRef(0);
 
-  // Convert data to Uint8Array for pdf.js
+  // Convert data to Uint8Array for pdf.js (legacy base64 path only)
   const pdfData = useMemo(() => {
+    if (!data) return null;
     try {
       let base64 = data;
       const commaIdx = data.indexOf(',');
@@ -205,15 +209,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Load PDF document
   useEffect(() => {
-    if (!pdfData) {
+    // Determine how to load: url (direct streaming) or data (decoded base64)
+    if (!url && !pdfData) {
       setError('Failed to decode PDF data');
       return;
     }
 
+    setError(null);
     let cancelled = false;
-    const loadingTask = pdfjsLib.getDocument({
-      data: pdfData.slice(0), // copy — pdfjs transfers the buffer
-    });
+    const loadingTask = url
+      ? pdfjsLib.getDocument({ url })
+      : pdfjsLib.getDocument({ data: pdfData!.slice(0) });
 
     loadingTask.promise
       .then(async (doc) => {
@@ -248,7 +254,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       cancelled = true;
       loadingTask.destroy();
     };
-  }, [pdfData]);
+  }, [url, pdfData]);
 
   // IntersectionObserver — track which pages are in/near the viewport
   useEffect(() => {

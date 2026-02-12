@@ -42,6 +42,7 @@ import { AudioVisualizer } from './AudioVisualizer';
 import { VideoPlayer } from './VideoPlayer';
 import { PdfViewer } from './PdfViewer';
 import { ArchiveTreeView } from './ArchiveTreeView';
+import { ImageViewer } from './ImageViewer';
 import type { FilePreview, PreviewType, FileInfo } from './types';
 
 // Get file type icon
@@ -371,16 +372,15 @@ export const QuickLook: React.FC<QuickLookProps> = ({
         <div className="flex-1 overflow-auto min-h-0 flex flex-col bg-zinc-950">
           {/* Image Preview */}
           {preview.type === 'image' && (
-            <div className="flex-1 flex items-center justify-center min-h-[300px] p-4">
-              <img
-                src={preview.data}
-                alt={preview.name}
-                className="max-w-full max-h-full object-contain transition-transform duration-200"
-                style={{
-                  transform: `scale(${imageZoom}) rotate(${imageRotation}deg)`,
-                }}
-              />
-            </div>
+            <ImageViewer
+              src={preview.data}
+              alt={preview.name}
+              zoom={imageZoom}
+              onZoomChange={setImageZoom}
+              rotation={imageRotation}
+              showZoomBadge={false}
+              className="flex-1 min-h-[300px] p-4"
+            />
           )}
 
           {/* Markdown Preview */}

@@ -275,6 +275,20 @@ pub async fn read_plugin_file(plugin_id: String, relative_path: String) -> Resul
     }
 
     // Read the canonicalized path to avoid TOCTOU (symlink swap between check and read)
+    // Cap file size to 10 MB to prevent memory bloat from IPC Vec<u8> transfer
+    const MAX_PLUGIN_FILE: u64 = 10 * 1024 * 1024;
+    let meta = tokio::fs::metadata(&canonical)
+        .await
+        .map_err(|e| format!("Failed to stat plugin file '{}': {}", relative_path, e))?;
+    if meta.len() > MAX_PLUGIN_FILE {
+        return Err(format!(
+            "Plugin file '{}' is too large ({} bytes, max {} bytes)",
+            relative_path,
+            meta.len(),
+            MAX_PLUGIN_FILE
+        ));
+    }
+
     tokio::fs::read(&canonical)
         .await
         .map_err(|e| format!("Failed to read plugin file '{}': {}", relative_path, e))
