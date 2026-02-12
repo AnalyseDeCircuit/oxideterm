@@ -632,7 +632,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         
         // Apply theme update — must use transparent background when bg image is set
         const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
-        const hasBg = !!terminal.backgroundImage && enabledTabs.includes('terminal');
+        const hasBg = terminal.backgroundEnabled !== false && !!terminal.backgroundImage && enabledTabs.includes('terminal');
         const themeConfig = themes[terminal.theme] || themes.default;
         term.options.theme = hasBg
           ? { ...themeConfig, background: hexToRgba(themeConfig.background || '#09090b', 0.01) }
@@ -803,7 +803,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
       // After renderer restore, xterm re-renders viewport from theme —
       // re-force transparent if background image is active.
-      if (terminalSettings.backgroundImage
+      if (terminalSettings.backgroundEnabled !== false
+        && terminalSettings.backgroundImage
         && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal')) {
         forceViewportTransparent(containerRef.current);
       }
@@ -985,7 +986,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     // which is why we must use rgba() with an explicit near-zero alpha.
     // Alpha 0.01 (= 3/255 internally) avoids WebGL premultiplied-alpha
     // rendering artefacts that occur with exact-zero alpha on some GPUs.
-    const hasBgImage = !!terminalSettings.backgroundImage
+    const hasBgImage = terminalSettings.backgroundEnabled !== false
+      && !!terminalSettings.backgroundImage
       && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal');
     const baseTheme = themes[terminalSettings.theme] || themes.default;
     const xtermTheme = hasBgImage
@@ -1748,10 +1750,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Compute the asset:// URL and effective blur (capped on low-end GPU)
   const bgImageUrl = React.useMemo(
     () => {
+      const masterOn = terminalSettings.backgroundEnabled !== false;
       const enabled = (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal');
-      return terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
+      return masterOn && terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
     },
-    [terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
+    [terminalSettings.backgroundEnabled, terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
   );
   const effectiveBlur = React.useMemo(() => {
     if (!bgImageUrl) return 0;

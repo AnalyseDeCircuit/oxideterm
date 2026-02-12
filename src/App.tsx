@@ -116,16 +116,13 @@ function App() {
     const initBg = async () => {
       const { invoke } = await import('@tauri-apps/api/core');
       try {
-        const currentPath = await invoke<string | null>('init_terminal_background');
+        const allPaths = await invoke<string[]>('init_terminal_background');
         const { settings, updateTerminal } = useSettingsStore.getState();
         const storedPath = settings.terminal.backgroundImage;
 
-        if (storedPath && !currentPath) {
+        if (storedPath && !allPaths.includes(storedPath)) {
           // Stored path points to a file that no longer exists — clear setting
           updateTerminal('backgroundImage', null);
-        } else if (currentPath && storedPath !== currentPath) {
-          // File was renamed (e.g. after timestamp migration) — update setting
-          updateTerminal('backgroundImage', currentPath);
         }
       } catch (err) {
         console.error('Failed to init terminal background:', err);

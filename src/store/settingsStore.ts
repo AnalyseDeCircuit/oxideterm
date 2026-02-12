@@ -99,6 +99,7 @@ export interface TerminalSettings {
   pasteProtection: boolean; // Confirm before pasting multi-line content
   osc52Clipboard: boolean;  // Allow remote programs to write system clipboard via OSC 52
   // Background image settings
+  backgroundEnabled: boolean;        // Master toggle — false = no bg image anywhere
   backgroundImage: string | null;    // Stored image path (app_data_dir/backgrounds/...)
   backgroundOpacity: number;         // Image opacity 0.03-0.5 (default 0.15)
   backgroundBlur: number;            // Blur in px 0-20 (default 0)
@@ -240,6 +241,7 @@ const defaultTerminalSettings: TerminalSettings = {
   pasteProtection: true,  // Default enabled for safety
   osc52Clipboard: false,  // Opt-in: user must explicitly enable OSC 52 clipboard bridge
   // Background image defaults
+  backgroundEnabled: true,
   backgroundImage: null,
   backgroundOpacity: 0.15,
   backgroundBlur: 0,

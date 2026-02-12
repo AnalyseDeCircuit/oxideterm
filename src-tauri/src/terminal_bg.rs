@@ -4,7 +4,7 @@
 //! - Validates image format (PNG, JPEG, WebP, GIF/APNG)
 //! - Resizes oversized images (max 1920px on longest edge)
 //! - Converts to WebP for storage efficiency
-//! - Stores in `app_data_dir/backgrounds/`
+//! - Stores in `app_data_dir/backgrounds/` (supports multiple images)
 //! - Grants asset protocol scope for frontend `asset://` URL access
 
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ fn get_backgrounds_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir.join("backgrounds"))
 }
 
-/// Response from set_terminal_background.
+/// Response from upload_terminal_background.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundResult {
@@ -40,13 +40,13 @@ pub struct BackgroundResult {
     pub animated: bool,
 }
 
-/// Set a background image for the terminal.
+/// Upload a background image to the gallery.
 ///
-/// The source file is validated, optionally resized, and stored as WebP
+/// The source file is validated, optionally resized, and stored as WebP/JPEG
 /// (or kept as-is for animated GIF/APNG) in `app_data_dir/backgrounds/`.
-/// The backgrounds directory is granted on the asset protocol scope.
+/// Previous images are NOT deleted — the gallery can hold multiple images.
 #[tauri::command]
-pub async fn set_terminal_background(
+pub async fn upload_terminal_background(
     app: tauri::AppHandle,
     source_path: String,
 ) -> Result<BackgroundResult, String> {
@@ -91,12 +91,12 @@ pub async fn set_terminal_background(
     // For animated GIF: copy as-is (don't re-encode, preserve animation)
     // For static images: decode → resize if needed → lossy JPEG / lossless WebP
     //
-    // Use timestamp-based filenames (bg_{unix_secs}.{ext}) so that WebView's
-    // asset:// cache is naturally busted when the user changes their wallpaper.
+    // Use nanosecond-precision timestamps so that two updates within the same
+    // second produce distinct filenames, naturally busting the asset:// cache.
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_nanos();
 
     let dest_path = if is_animated {
         let dest = bg_dir.join(format!("bg_{}.gif", ts));
@@ -114,9 +114,6 @@ pub async fn set_terminal_background(
         .map_err(|e| format!("Image processing task failed: {}", e))??
     };
 
-    // Clean up any previous background file with different extension
-    clean_other_backgrounds(&bg_dir, &dest_path);
-
     // Grant the backgrounds directory on the asset protocol scope
     app.asset_protocol_scope()
         .allow_directory(&bg_dir, false)
@@ -129,7 +126,7 @@ pub async fn set_terminal_background(
     let path_str = dest_path.to_string_lossy().to_string();
 
     tracing::info!(
-        "Terminal background set: {} → {} ({:.0} KB → {:.0} KB, animated={})",
+        "Terminal background uploaded: {} → {} ({:.0} KB → {:.0} KB, animated={})",
         source_path,
         path_str,
         original_size as f64 / 1024.0,
@@ -176,11 +173,11 @@ fn process_static_image(source: &std::path::Path, bg_dir: &std::path::Path) -> R
         img
     };
 
-    // Timestamp for cache-busting filename
+    // Timestamp for cache-busting filename (nanosecond precision)
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_nanos();
 
     // Encode to an in-memory buffer, then write to disk once.
     let has_alpha = img.color().has_alpha();
@@ -214,33 +211,88 @@ fn process_static_image(source: &std::path::Path, bg_dir: &std::path::Path) -> R
     Ok(dest)
 }
 
-/// Remove all other files in the backgrounds directory except `keep`.
-/// This handles cleanup of old timestamp-named files when the user changes
-/// their wallpaper.
-fn clean_other_backgrounds(bg_dir: &std::path::Path, keep: &std::path::Path) {
-    if let Ok(entries) = std::fs::read_dir(bg_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path != keep {
-                let _ = std::fs::remove_file(&path);
-            }
+/// List all background images in the gallery.
+///
+/// Returns paths sorted by modification time (newest first).
+#[tauri::command]
+pub async fn list_terminal_backgrounds(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let bg_dir = get_backgrounds_dir(&app)?;
+
+    if !bg_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    // Grant scope so frontend can show previews
+    app.asset_protocol_scope()
+        .allow_directory(&bg_dir, false)
+        .map_err(|e| format!("Failed to grant backgrounds dir: {}", e))?;
+
+    let mut files: Vec<(PathBuf, std::time::SystemTime)> = vec![];
+    let entries = std::fs::read_dir(&bg_dir)
+        .map_err(|e| format!("Failed to read backgrounds directory: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+        if path.is_file() {
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            files.push((path, mtime));
         }
     }
+
+    // Sort newest first
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    Ok(files.into_iter().map(|(p, _)| p.to_string_lossy().to_string()).collect())
 }
 
-/// Clear the terminal background image.
+/// Delete a specific background image from the gallery.
+#[tauri::command]
+pub async fn delete_terminal_background(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<(), String> {
+    // Canonicalize both paths to prevent directory-traversal attacks
+    let bg_dir = get_backgrounds_dir(&app)?;
+    let canonical_dir = bg_dir.canonicalize()
+        .map_err(|e| format!("Cannot resolve backgrounds dir: {}", e))?;
+    let file = std::path::Path::new(&path);
+    let canonical_file = file.canonicalize()
+        .map_err(|e| format!("Cannot resolve target path: {}", e))?;
+
+    if !canonical_file.starts_with(&canonical_dir) {
+        return Err("Refusing to delete file outside the backgrounds directory".into());
+    }
+
+    if canonical_file.is_file() {
+        std::fs::remove_file(&canonical_file)
+            .map_err(|e| format!("Failed to delete background: {}", e))?;
+        tracing::info!("Deleted terminal background: {}", path);
+    }
+    Ok(())
+}
+
+/// Clear all terminal background images.
 #[tauri::command]
 pub async fn clear_terminal_background(app: tauri::AppHandle) -> Result<(), String> {
     let bg_dir = get_backgrounds_dir(&app)?;
     if bg_dir.exists() {
-        // Remove all background files (timestamp-named: bg_*.{ext})
-        if let Ok(entries) = std::fs::read_dir(&bg_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    let _ = std::fs::remove_file(&path);
+        let mut failures: Vec<String> = Vec::new();
+        let entries = std::fs::read_dir(&bg_dir)
+            .map_err(|e| format!("Failed to read backgrounds directory: {}", e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    failures.push(format!("{}: {}", path.display(), e));
                 }
             }
+        }
+        if !failures.is_empty() {
+            return Err(format!("Failed to remove {} file(s): {}", failures.len(), failures.join("; ")));
         }
     }
 
@@ -257,19 +309,15 @@ pub async fn clear_terminal_background(app: tauri::AppHandle) -> Result<(), Stri
 
 /// Initialize the terminal background on app startup.
 ///
-/// Re-grants the backgrounds directory on the asset protocol scope (the static
-/// scope in `tauri.conf.json` covers normal starts, but this handles edge cases
-/// like scope config changes) and returns the path of the current background
-/// file if one exists.  The frontend calls this once at mount time so that:
-/// 1. The runtime scope is always warm.
-/// 2. If the stored settings path is stale (file deleted externally), the
-///    frontend can clear the setting.
+/// Re-grants the backgrounds directory on the asset protocol scope and returns
+/// all background image paths (newest first). The frontend uses the stored
+/// `backgroundImage` setting to determine which one is active.
 #[tauri::command]
-pub async fn init_terminal_background(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn init_terminal_background(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let bg_dir = get_backgrounds_dir(&app)?;
 
     if !bg_dir.exists() {
-        return Ok(None);
+        return Ok(vec![]);
     }
 
     // Re-grant scope (idempotent — no error if already granted)
@@ -277,15 +325,22 @@ pub async fn init_terminal_background(app: tauri::AppHandle) -> Result<Option<St
         .allow_directory(&bg_dir, false)
         .map_err(|e| format!("Failed to grant backgrounds dir: {}", e))?;
 
-    // Find the current background file (should be exactly one after clean_other_backgrounds)
-    if let Ok(entries) = std::fs::read_dir(&bg_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                return Ok(Some(path.to_string_lossy().to_string()));
-            }
+    // Collect all background files, sorted newest first
+    let mut files: Vec<(PathBuf, std::time::SystemTime)> = vec![];
+    let entries = std::fs::read_dir(&bg_dir)
+        .map_err(|e| format!("Failed to read backgrounds directory: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+        if path.is_file() {
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            files.push((path, mtime));
         }
     }
 
-    Ok(None)
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(files.into_iter().map(|(p, _)| p.to_string_lossy().to_string()).collect())
 }

@@ -53,7 +53,7 @@ const StaleTabBanner = ({ type }: { type: string }) => (
 const TabBgWrapper: React.FC<{ tabType: string; children: React.ReactNode }> = ({ tabType, children }) => {
   const terminal = useSettingsStore(s => s.settings.terminal);
   const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
-  const active = !!terminal.backgroundImage && enabledTabs.includes(tabType);
+  const active = terminal.backgroundEnabled !== false && !!terminal.backgroundImage && enabledTabs.includes(tabType);
 
   const bgUrl = useMemo(
     () => active && terminal.backgroundImage ? convertFileSrc(terminal.backgroundImage) : null,

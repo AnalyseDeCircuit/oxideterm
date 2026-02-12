@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
@@ -525,7 +525,8 @@ interface BackgroundImageSectionProps {
 const BackgroundImageSection = ({ terminal, updateTerminal }: BackgroundImageSectionProps) => {
     const { t } = useTranslation();
     const [processing, setProcessing] = useState(false);
-    const [lastResult, setLastResult] = useState<{ originalSize: number; storedSize: number } | null>(null);
+    const [gallery, setGallery] = useState<string[]>([]);
+    const galleryGenRef = useRef(0); // generation token to discard stale async responses
 
     // Local slider state for smooth dragging (debounced commit to store)
     const [localOpacity, setLocalOpacity] = useState(() => Math.round(terminal.backgroundOpacity * 100));
@@ -549,19 +550,39 @@ const BackgroundImageSection = ({ terminal, updateTerminal }: BackgroundImageSec
         blurTimerRef.current = setTimeout(() => updateTerminal('backgroundBlur', val), 150);
     }, [updateTerminal]);
 
-    // Flush on unmount
+    // Flush on unmount — commit the last pending slider value before clearing timers
+    const localOpacityRef = useRef(localOpacity);
+    const localBlurRef = useRef(localBlur);
+    localOpacityRef.current = localOpacity;
+    localBlurRef.current = localBlur;
+
     useEffect(() => () => {
-        if (opacityTimerRef.current) clearTimeout(opacityTimerRef.current);
-        if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+        if (opacityTimerRef.current) {
+            clearTimeout(opacityTimerRef.current);
+            updateTerminal('backgroundOpacity', localOpacityRef.current / 100);
+        }
+        if (blurTimerRef.current) {
+            clearTimeout(blurTimerRef.current);
+            updateTerminal('backgroundBlur', localBlurRef.current);
+        }
     }, []);
 
-    // Asset URL for preview
-    const previewUrl = useMemo(
-        () => terminal.backgroundImage ? convertFileSrc(terminal.backgroundImage) : null,
-        [terminal.backgroundImage]
-    );
+    // Load gallery on mount
+    const refreshGallery = useCallback(async () => {
+        const gen = ++galleryGenRef.current;
+        try {
+            const paths = await invoke<string[]>('list_terminal_backgrounds');
+            // Discard if a newer refresh was issued while we were waiting
+            if (gen !== galleryGenRef.current) return;
+            setGallery(paths);
+        } catch (err) {
+            console.error('[Background] Failed to list:', err);
+        }
+    }, []);
 
-    const handleSelectImage = async () => {
+    useEffect(() => { refreshGallery(); }, [refreshGallery]);
+
+    const handleUploadImage = async () => {
         try {
             const selected = await openFileDialog({
                 multiple: false,
@@ -579,29 +600,46 @@ const BackgroundImageSection = ({ terminal, updateTerminal }: BackgroundImageSec
                 originalSize: number;
                 storedSize: number;
                 animated: boolean;
-            }>('set_terminal_background', { sourcePath: selected });
+            }>('upload_terminal_background', { sourcePath: selected });
 
+            // Auto-activate the newly uploaded image
             updateTerminal('backgroundImage', result.path);
-            setLastResult({ originalSize: result.originalSize, storedSize: result.storedSize });
+            await refreshGallery();
         } catch (err) {
-            console.error('[Background] Failed to set:', err);
+            console.error('[Background] Failed to upload:', err);
         } finally {
             setProcessing(false);
         }
     };
 
-    const handleClear = async () => {
-        try {
-            await invoke('clear_terminal_background');
-        } catch { /* best-effort */ }
-        updateTerminal('backgroundImage', null);
-        setLastResult(null);
+    const handleActivate = (path: string) => {
+        updateTerminal('backgroundImage', path);
     };
 
-    const formatSize = (bytes: number) => {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const handleDeleteImage = async (path: string) => {
+        try {
+            await invoke('delete_terminal_background', { path });
+            // If the deleted image was active, clear selection
+            if (terminal.backgroundImage === path) {
+                updateTerminal('backgroundImage', null);
+            }
+            await refreshGallery();
+        } catch (err) {
+            console.error('[Background] Failed to delete:', err);
+        }
+    };
+
+    const handleClearAll = async () => {
+        try {
+            await invoke('clear_terminal_background');
+            // Invalidate any in-flight gallery refresh before clearing local state
+            galleryGenRef.current++;
+            updateTerminal('backgroundImage', null);
+            setGallery([]);
+        } catch {
+            // Backend failed — re-fetch to show actual disk state
+            await refreshGallery();
+        }
     };
 
     return (
@@ -611,53 +649,84 @@ const BackgroundImageSection = ({ terminal, updateTerminal }: BackgroundImageSec
                 {t('settings_view.terminal.bg_title')}
             </h4>
 
-            {/* Image selection / preview */}
             <div className="space-y-4">
-                {previewUrl ? (
-                    <div className="relative group">
-                        {/* Preview thumbnail */}
-                        <div className="relative w-full h-32 rounded-md overflow-hidden border border-theme-border">
-                            <img
-                                src={previewUrl}
-                                alt="Background preview"
-                                className="w-full h-full object-cover opacity-60"
-                            />
-                            {/* Overlay with sample text */}
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <code className="text-green-400 text-sm font-mono bg-black/50 px-3 py-1 rounded">
-                                    $ echo &quot;Hello, OxideTerm&quot;
-                                </code>
-                            </div>
-                        </div>
-                        {/* Action buttons */}
-                        <div className="flex gap-2 mt-2">
-                            <Button variant="outline" size="sm" onClick={handleSelectImage} disabled={processing}>
-                                {t('settings_view.terminal.bg_change')}
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={handleClear} className="text-red-400 hover:text-red-300">
-                                <X className="h-3.5 w-3.5 mr-1" />
-                                {t('settings_view.terminal.bg_clear')}
-                            </Button>
-                        </div>
-                        {/* Compression stats */}
-                        {lastResult && (
-                            <p className="text-[11px] text-theme-text-muted mt-1">
-                                {formatSize(lastResult.originalSize)} → {formatSize(lastResult.storedSize)} (WebP)
-                            </p>
-                        )}
-                    </div>
-                ) : (
+                {/* Master toggle */}
+                {terminal.backgroundImage && (
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label className="text-theme-text">{t('settings_view.terminal.bg_label')}</Label>
-                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_hint')}</p>
+                            <Label className="text-theme-text">{t('settings_view.terminal.bg_enabled')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_enabled_hint')}</p>
                         </div>
-                        <Button variant="outline" size="sm" onClick={handleSelectImage} disabled={processing}>
-                            <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
-                            {processing ? '...' : t('settings_view.terminal.bg_select')}
-                        </Button>
+                        <Checkbox
+                            checked={terminal.backgroundEnabled !== false}
+                            onCheckedChange={(v) => updateTerminal('backgroundEnabled', !!v)}
+                        />
                     </div>
                 )}
+
+                {/* Gallery grid */}
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <Label className="text-theme-text">{t('settings_view.terminal.bg_gallery')}</Label>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={handleUploadImage} disabled={processing}>
+                                <Plus className="h-3.5 w-3.5 mr-1" />
+                                {processing ? '...' : t('settings_view.terminal.bg_add')}
+                            </Button>
+                            {gallery.length > 0 && (
+                                <Button variant="ghost" size="sm" onClick={handleClearAll} className="text-red-400 hover:text-red-300">
+                                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                    {t('settings_view.terminal.bg_clear_all')}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                    {gallery.length === 0 ? (
+                        <p className="text-xs text-theme-text-muted">{t('settings_view.terminal.bg_hint')}</p>
+                    ) : (
+                        <div className="grid grid-cols-4 gap-2">
+                            {gallery.map((path) => {
+                                const isActive = terminal.backgroundImage === path;
+                                const url = convertFileSrc(path);
+                                return (
+                                    <div
+                                        key={path}
+                                        className={cn(
+                                            "relative group rounded-md overflow-hidden border-2 cursor-pointer transition-all aspect-video",
+                                            isActive
+                                                ? "border-theme-accent ring-1 ring-theme-accent/50"
+                                                : "border-theme-border hover:border-theme-accent/50"
+                                        )}
+                                        onClick={() => handleActivate(path)}
+                                    >
+                                        <img
+                                            src={url}
+                                            alt=""
+                                            className="w-full h-full object-cover"
+                                            draggable={false}
+                                        />
+                                        {/* Active badge */}
+                                        {isActive && (
+                                            <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-theme-accent text-white text-[10px] rounded font-medium">
+                                                {t('settings_view.terminal.bg_active')}
+                                            </div>
+                                        )}
+                                        {/* Delete button */}
+                                        <button
+                                            className="absolute top-1 right-1 p-0.5 rounded bg-black/60 text-white/80 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteImage(path);
+                                            }}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
 
                 {/* Opacity slider */}
                 {terminal.backgroundImage && (

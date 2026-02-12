@@ -9,5 +9,5 @@ import { useSettingsStore } from '../store/settingsStore';
 export function useTabBgActive(tabType: string): boolean {
   const terminal = useSettingsStore((s) => s.settings.terminal);
   const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
-  return !!terminal.backgroundImage && enabledTabs.includes(tabType);
+  return terminal.backgroundEnabled !== false && !!terminal.backgroundImage && enabledTabs.includes(tabType);
 }

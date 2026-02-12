@@ -292,7 +292,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         
         // Apply theme — use transparent background when bg image is set
         const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
-        const hasBg = !!terminal.backgroundImage && enabledTabs.includes('local_terminal');
+        const hasBg = terminal.backgroundEnabled !== false && !!terminal.backgroundImage && enabledTabs.includes('local_terminal');
         const themeConfig = themes[terminal.theme] || themes.default;
         term.options.theme = hasBg
           ? { ...themeConfig, background: hexToRgba(themeConfig.background || '#09090b', 0.01) }
@@ -456,7 +456,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       rendererSuspendedRef.current = false;
 
       // Re-force transparent after renderer restore
-      if (terminalSettings.backgroundImage
+      if (terminalSettings.backgroundEnabled !== false
+        && terminalSettings.backgroundImage
         && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal')) {
         forceViewportTransparent(containerRef.current);
       }
@@ -484,7 +485,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     
     isMountedRef.current = true;
 
-    const hasBgImage = !!terminalSettings.backgroundImage
+    const hasBgImage = terminalSettings.backgroundEnabled !== false
+      && !!terminalSettings.backgroundImage
       && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal');
     const baseTheme = themes[terminalSettings.theme] || themes.default;
     const xtermTheme = hasBgImage
@@ -1270,10 +1272,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const currentTheme = themes[terminalSettings.theme] || themes.default;
   const bgImageUrl = React.useMemo(
     () => {
+      const masterOn = terminalSettings.backgroundEnabled !== false;
       const enabled = (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal');
-      return terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
+      return masterOn && terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
     },
-    [terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
+    [terminalSettings.backgroundEnabled, terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
   );
   const effectiveBlur = React.useMemo(() => {
     if (!bgImageUrl) return 0;

@@ -638,7 +638,9 @@ pub fn run() {
         launcher::launcher_wsl_launch,
         launcher::launcher_clear_cache,
         // Terminal background image commands
-        terminal_bg::set_terminal_background,
+        terminal_bg::upload_terminal_background,
+        terminal_bg::list_terminal_backgrounds,
+        terminal_bg::delete_terminal_background,
         terminal_bg::clear_terminal_background,
         terminal_bg::init_terminal_background,
     ]);
@@ -869,7 +871,9 @@ pub fn run() {
         launcher::launcher_wsl_launch,
         launcher::launcher_clear_cache,
         // Terminal background image commands
-        terminal_bg::set_terminal_background,
+        terminal_bg::upload_terminal_background,
+        terminal_bg::list_terminal_backgrounds,
+        terminal_bg::delete_terminal_background,
         terminal_bg::clear_terminal_background,
         terminal_bg::init_terminal_background,
     ]);
