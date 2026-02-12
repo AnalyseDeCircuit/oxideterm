@@ -18,6 +18,7 @@ import { cn } from '../../lib/utils';
 import { platform } from '../../lib/platform';
 import { useLauncherStore } from '../../store/launcherStore';
 import type { AppEntry, WslDistro } from '../../store/launcherStore';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 
 // ── macOS App Icon ──────────────────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ const WslDistroRow: React.FC<{
 
 export const LauncherView: React.FC = () => {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('launcher');
   const {
     enabled,
     apps,
@@ -181,7 +183,7 @@ export const LauncherView: React.FC = () => {
     // ── Consent screen: shown before first scan ───────────────────────────
     if (!enabled) {
       return (
-        <div className="flex flex-col h-full bg-theme-bg">
+        <div className={`flex flex-col h-full ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
           <div className="flex-1 flex items-center justify-center px-8">
             <div className="max-w-sm w-full space-y-6 text-center">
               <div className="mx-auto w-14 h-14 rounded-2xl bg-theme-accent/10 flex items-center justify-center">
@@ -234,7 +236,7 @@ export const LauncherView: React.FC = () => {
     }
 
     return (
-      <div className="flex flex-col h-full bg-theme-bg">
+      <div className={`flex flex-col h-full ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
         {/* Search bar — centered at top, like native Launchpad */}
         <div className="flex items-center justify-center px-6 pt-5 pb-3 shrink-0">
           <div className="relative w-full max-w-xs">

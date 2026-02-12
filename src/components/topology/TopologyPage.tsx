@@ -16,9 +16,11 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { TopologyViewEnhanced } from './TopologyViewEnhanced';
 import { buildTopologyTreeCached } from '../../lib/topologyUtils';
 import type { TopologyNode } from '../../lib/topologyUtils';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 
 export const TopologyPage: React.FC = () => {
     const { t } = useTranslation();
+    const bgActive = useTabBgActive('topology');
     const containerRef = useRef<HTMLDivElement>(null);
     const [tree, setTree] = useState<TopologyNode[]>([]);
     const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -60,8 +62,8 @@ export const TopologyPage: React.FC = () => {
     }, [rawNodes]);
 
     return (
-        <div className="h-full w-full bg-theme-bg overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-theme-border bg-theme-bg-panel/50">
+        <div className={`h-full w-full overflow-hidden flex flex-col ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
+            <div className="p-6 border-b border-theme-border bg-theme-bg-panel topo-header">
                 <h1 className="text-2xl font-bold text-theme-text mb-2">{t('topology.page.title')}</h1>
                 <p className="text-theme-text-muted text-sm">{t('topology.page.description')}</p>
             </div>

@@ -27,7 +27,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": []
+        "scope": ["$APPDATA/backgrounds/**"]
       }
     }
   },

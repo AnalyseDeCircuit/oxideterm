@@ -453,8 +453,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
-    // nodeId is required for SFTP/IDE tabs — auto-migrate from sessionId if missing
-    if ((type === 'sftp' || type === 'ide') && !options?.nodeId && sessionId) {
+    // nodeId is required for SFTP/IDE/Forwards tabs — auto-migrate from sessionId if missing
+    if ((type === 'sftp' || type === 'ide' || type === 'forwards') && !options?.nodeId && sessionId) {
       const node = useSessionTreeStore.getState().getNodeByTerminalId(sessionId);
       if (node) {
         console.info(`[AppStore] Auto-migrated ${type} tab: sessionId=${sessionId} → nodeId=${node.id}`);
@@ -593,11 +593,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const nodeId = options?.nodeId;
 
-    // Dedup by nodeId (canonical for sftp) — sessionId fallback only for legacy tabs
+    // Dedup by nodeId (canonical for sftp/forwards) — sessionId fallback only for legacy tabs
     const existingTab = get().tabs.find(t => {
       if (t.type !== type) return false;
-      if (type === 'sftp' && nodeId) return t.nodeId === nodeId;
-      if (type === 'sftp') return !t.nodeId && t.sessionId === sessionId;
+      if ((type === 'sftp' || type === 'forwards') && nodeId) return t.nodeId === nodeId;
+      if ((type === 'sftp' || type === 'forwards')) return !t.nodeId && t.sessionId === sessionId;
       return t.sessionId === sessionId;
     });
     if (existingTab) {
@@ -610,7 +610,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       id: crypto.randomUUID(),
       type,
       sessionId,
-      ...(type === 'sftp' && nodeId ? { nodeId } : {}),
+      ...(((type === 'sftp' || type === 'forwards') && nodeId) ? { nodeId } : {}),
       title: type === 'terminal' ? session.name : `${type === 'sftp' ? i18n.t('tabs.sftp_prefix') : i18n.t('tabs.forwards_prefix')}: ${session.name}`,
       icon: type === 'terminal' ? '>_' : type === 'sftp' ? '📁' : '🔀'
     };

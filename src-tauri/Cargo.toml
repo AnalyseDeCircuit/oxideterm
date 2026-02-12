@@ -100,6 +100,9 @@ lofty = "0.22"
 # macOS app launcher (Info.plist parsing)
 plist = "1"
 
+# Image processing (background image validation, resize, WebP conversion)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
 # System info (disk/volume detection)
 sysinfo = { version = "0.33", default-features = false, features = ["disk"] }
 

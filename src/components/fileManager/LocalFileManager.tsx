@@ -10,6 +10,7 @@ import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { FileList, formatFileSize } from './FileList';
 import { QuickLook } from './QuickLook';
 import { BookmarksPanel } from './BookmarksPanel';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import { FilePropertiesDialog } from './FilePropertiesDialog';
 import { useLocalFiles, useFileSelection, useBookmarks, useFileClipboard, useFileArchive } from './hooks';
 import { useToast } from '../../hooks/useToast';
@@ -140,6 +141,7 @@ export interface LocalFileManagerProps {
 export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className }) => {
   const { t } = useTranslation();
   const { success: toastSuccess, error: toastError } = useToast();
+  const bgActive = useTabBgActive('file_manager');
   
   // Stores
   const createTerminal = useLocalTerminalStore(s => s.createTerminal);
@@ -705,7 +707,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   }, [handleCopy, handleCut, handlePaste]);
   
   return (
-    <div className={cn("flex h-full", className)}>
+    <div className={cn("flex h-full", bgActive ? '' : 'bg-theme-bg', className)} data-bg-active={bgActive || undefined}>
       {/* Sidebar - Bookmarks */}
       <div className={cn(
         "border-r border-theme-border bg-zinc-900/30 transition-all duration-200 flex flex-col",

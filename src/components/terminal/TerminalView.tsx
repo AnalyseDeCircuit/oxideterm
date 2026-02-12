@@ -20,6 +20,7 @@ import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { SearchMatch, SessionInfo } from '../../types';
 import { listen } from '@tauri-apps/api/event';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { Lock, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
@@ -32,8 +33,85 @@ import {
 import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
+import type { BackgroundFit } from '../../store/settingsStore';
 
 const PREFILL_REPLAY_LINE_COUNT = 50; // Keep aligned with backend replay count
+
+// ── Background Image Helpers ─────────────────────────────────────────────
+
+/**
+ * Convert 6-digit hex (#RRGGBB) to rgba() string.
+ * xterm.js only parses #hex and rgba() formats — CSS keywords like
+ * 'transparent' are NOT recognised and silently fall back to opaque black.
+ */
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Map BackgroundFit to CSS properties */
+function getBackgroundFitStyles(fit: BackgroundFit): React.CSSProperties {
+  switch (fit) {
+    case 'cover':
+      return { objectFit: 'cover', width: '100%', height: '100%' };
+    case 'contain':
+      return { objectFit: 'contain', width: '100%', height: '100%' };
+    case 'fill':
+      return { objectFit: 'fill', width: '100%', height: '100%' };
+    case 'tile':
+      return {}; // tile uses background-image CSS instead of <img>
+  }
+}
+
+/**
+ * Detect if the GPU is low-end (integrated graphics).
+ * Returns true if we should cap blur to ≤5px for performance.
+ * Uses WEBGL_debug_renderer_info when available.
+ */
+let _gpuDetectionResult: boolean | null = null;
+function isLowEndGPU(): boolean {
+  if (_gpuDetectionResult !== null) return _gpuDetectionResult;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl && gl instanceof WebGLRenderingContext) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string;
+        const low = /Intel|Mesa|SwiftShader|llvmpipe|Apple GPU/i.test(renderer);
+        _gpuDetectionResult = low;
+        return low;
+      }
+    }
+  } catch { /* noop */ }
+  _gpuDetectionResult = false;
+  return false;
+}
+
+/**
+ * Force xterm's internal DOM elements to transparent background.
+ * Must be called after `term.open()`, after renderer restore, and after
+ * any `term.options.theme = ...` assignment — xterm re-renders the
+ * viewport from the parsed theme color on all of these occasions.
+ */
+function forceViewportTransparent(container: HTMLElement | null): void {
+  if (!container) return;
+  const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (viewport) viewport.style.backgroundColor = 'transparent';
+  const xtermEl = container.querySelector('.xterm') as HTMLElement | null;
+  if (xtermEl) xtermEl.style.backgroundColor = 'transparent';
+}
+
+/** Clear DOM-level transparency overrides so xterm reverts to theme-driven background. */
+function clearViewportTransparent(container: HTMLElement | null): void {
+  if (!container) return;
+  const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (viewport) viewport.style.backgroundColor = '';
+  const xtermEl = container.querySelector('.xterm') as HTMLElement | null;
+  if (xtermEl) xtermEl.style.backgroundColor = '';
+}
 
 interface TerminalViewProps {
   sessionId: string;
@@ -552,9 +630,20 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         term.options.cursorBlink = terminal.cursorBlink;
         term.options.lineHeight = terminal.lineHeight;
         
-        // Apply theme update
+        // Apply theme update — must use transparent background when bg image is set
+        const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
+        const hasBg = !!terminal.backgroundImage && enabledTabs.includes('terminal');
         const themeConfig = themes[terminal.theme] || themes.default;
-        term.options.theme = themeConfig;
+        term.options.theme = hasBg
+          ? { ...themeConfig, background: hexToRgba(themeConfig.background || '#09090b', 0.01) }
+          : themeConfig;
+
+        // Sync DOM-level transparency with background image state
+        if (hasBg) {
+          forceViewportTransparent(containerRef.current);
+        } else {
+          clearViewportTransparent(containerRef.current);
+        }
         
         term.refresh(0, term.rows - 1);
         fitAddonRef.current?.fit();
@@ -711,6 +800,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
       if (isStale()) return;
       rendererSuspendedRef.current = false;
+
+      // After renderer restore, xterm re-renders viewport from theme —
+      // re-force transparent if background image is active.
+      if (terminalSettings.backgroundImage
+        && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal')) {
+        forceViewportTransparent(containerRef.current);
+      }
+
       fitRaf1 = requestAnimationFrame(() => {
         fitRaf2 = requestAnimationFrame(() => {
           if (!isStale()) {
@@ -881,15 +978,33 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     isMountedRef.current = true; // Reset mount state
 
     // Initialize xterm.js
+    // Build theme — if background image is set, make xterm background near-
+    // transparent so the GPU-composited background layer shows through.
+    // IMPORTANT: xterm.js only parses #hex and rgba() — the CSS keyword
+    // 'transparent' is NOT recognised and silently falls back to opaque black,
+    // which is why we must use rgba() with an explicit near-zero alpha.
+    // Alpha 0.01 (= 3/255 internally) avoids WebGL premultiplied-alpha
+    // rendering artefacts that occur with exact-zero alpha on some GPUs.
+    const hasBgImage = !!terminalSettings.backgroundImage
+      && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal');
+    const baseTheme = themes[terminalSettings.theme] || themes.default;
+    const xtermTheme = hasBgImage
+      ? { ...baseTheme, background: hexToRgba(baseTheme.background || '#09090b', 0.01) }
+      : baseTheme;
+
     const term = new Terminal({
       cursorBlink: terminalSettings.cursorBlink,
       cursorStyle: terminalSettings.cursorStyle,
       fontFamily: getFontFamily(terminalSettings.fontFamily, terminalSettings.customFontFamily),
       fontSize: terminalSettings.fontSize,
       lineHeight: terminalSettings.lineHeight,
-      theme: themes[terminalSettings.theme] || themes.default,
+      theme: xtermTheme,
       scrollback: terminalSettings.scrollback || 5000,
       allowProposedApi: true,
+      // Always enable transparency so we can toggle background images at
+      // runtime without remounting (and destroying) the terminal instance.
+      // The performance cost of allowTransparency is negligible on modern GPUs.
+      allowTransparency: true,
     });
 
     const fitAddon = new FitAddon();
@@ -1031,6 +1146,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     loadRenderer();
 
     term.open(containerRef.current);
+
+    // Force xterm internal DOM elements transparent when bg image is set.
+    if (hasBgImage) {
+      forceViewportTransparent(containerRef.current);
+    }
+
     fitAddon.fit();
     term.focus(); // Focus immediately after opening
 
@@ -1557,7 +1678,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         term.dispose();
         terminalRef.current = null;
     };
-  }, [sessionId]); // Only re-mount if sessionId changes absolutely
+  }, [sessionId]); // Only remount on session change — bg image is handled dynamically
 
   // Listen for AI insert command events (only when this terminal is active and connected)
   useEffect(() => {
@@ -1622,6 +1743,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   };
 
   const currentTheme = themes[terminalSettings.theme] || themes.default;
+
+  // ── Background Image ──────────────────────────────────────────────────
+  // Compute the asset:// URL and effective blur (capped on low-end GPU)
+  const bgImageUrl = React.useMemo(
+    () => {
+      const enabled = (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('terminal');
+      return terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
+    },
+    [terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
+  );
+  const effectiveBlur = React.useMemo(() => {
+    if (!bgImageUrl) return 0;
+    const raw = terminalSettings.backgroundBlur;
+    return isLowEndGPU() ? Math.min(raw, 5) : raw;
+  }, [bgImageUrl, terminalSettings.backgroundBlur]);
 
   // === SearchAddon API for SearchBar ===
   const handleSearch = useCallback((query: string, options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean }) => {
@@ -1997,12 +2133,48 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       }}
       onClick={handleContainerClick}
     >
+       {/* Background Image Layer — GPU-composited, sits below xterm canvas.
+           Uses will-change: transform to promote to its own compositor layer,
+           so scrolling/typing only repaints the xterm canvas above, not this layer. */}
+       {bgImageUrl && (
+         terminalSettings.backgroundFit === 'tile' ? (
+           <div
+             className="absolute inset-0 pointer-events-none"
+             style={{
+               zIndex: 0,
+               backgroundImage: `url(${bgImageUrl})`,
+               backgroundRepeat: 'repeat',
+               backgroundSize: 'auto',
+               opacity: terminalSettings.backgroundOpacity,
+               filter: effectiveBlur > 0 ? `blur(${effectiveBlur}px)` : undefined,
+               willChange: 'transform',
+             }}
+           />
+         ) : (
+           <img
+             src={bgImageUrl}
+             alt=""
+             draggable={false}
+             className="absolute inset-0 pointer-events-none select-none"
+             style={{
+               zIndex: 0,
+               opacity: terminalSettings.backgroundOpacity,
+               filter: effectiveBlur > 0 ? `blur(${effectiveBlur}px)` : undefined,
+               willChange: 'transform',
+               ...getBackgroundFitStyles(terminalSettings.backgroundFit),
+             }}
+           />
+         )
+       )}
+
        <div 
          ref={containerRef} 
          className="h-full w-full"
          style={{
            contain: 'strict',
-           isolation: 'isolate'
+           isolation: 'isolate',
+           position: 'relative',
+           zIndex: 1,
          }}
        />
 

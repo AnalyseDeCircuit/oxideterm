@@ -110,6 +110,29 @@ function App() {
     };
     syncSftpSettings();
   }, []);
+
+  // Initialize terminal background: re-grant asset scope & reconcile stored path
+  useEffect(() => {
+    const initBg = async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      try {
+        const currentPath = await invoke<string | null>('init_terminal_background');
+        const { settings, updateTerminal } = useSettingsStore.getState();
+        const storedPath = settings.terminal.backgroundImage;
+
+        if (storedPath && !currentPath) {
+          // Stored path points to a file that no longer exists — clear setting
+          updateTerminal('backgroundImage', null);
+        } else if (currentPath && storedPath !== currentPath) {
+          // File was renamed (e.g. after timestamp migration) — update setting
+          updateTerminal('backgroundImage', currentPath);
+        }
+      } catch (err) {
+        console.error('Failed to init terminal background:', err);
+      }
+    };
+    initBg();
+  }, []);
   
   // Handle creating local terminal with default shell
   const handleCreateLocalTerminal = useCallback(async () => {

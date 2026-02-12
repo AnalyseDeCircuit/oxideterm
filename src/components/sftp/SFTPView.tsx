@@ -27,6 +27,7 @@ import {
 import { useAppStore } from '../../store/appStore';
 import { useTransferStore } from '../../store/transferStore';
 import { useToast } from '../../hooks/useToast';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { cn } from '../../lib/utils';
@@ -581,6 +582,7 @@ const FileList = ({
 
 export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('sftp');
   const { getSession } = useAppStore();
 
   // Memory key: always nodeId for path persistence across reconnects
@@ -1680,7 +1682,7 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-theme-bg p-2 gap-2">
+    <div className={`flex flex-col h-full w-full p-2 gap-2 ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       {initError && (
         <div className="flex items-center justify-between rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-theme-text">
           <span>SFTP waiting for connection sync: {initError}</span>

@@ -38,6 +38,7 @@ import {
   savePluginGlobalConfig,
 } from '../../lib/plugin/pluginLoader';
 import { clearPluginStorage } from '../../lib/plugin/pluginStorage';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import type { PluginState, PluginInfo, RegistryEntry } from '../../types/plugin';
 
 /** Status indicator dot + label */
@@ -330,6 +331,7 @@ function RegistryNotConfigured() {
 /** Plugin Manager main view — uses SettingsView panel style */
 export function PluginManagerView() {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('plugin_manager');
   const plugins = usePluginStore((s) => s.plugins);
   const registryEntries = usePluginStore((s) => s.registryEntries);
   const availableUpdates = usePluginStore((s) => s.availableUpdates);
@@ -516,7 +518,7 @@ export function PluginManagerView() {
   }, []);
 
   return (
-    <div className="h-full overflow-auto">
+    <div className={`h-full overflow-auto ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       <div className="max-w-4xl mx-auto p-10">
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
           {/* Page Header — matches SettingsView */}

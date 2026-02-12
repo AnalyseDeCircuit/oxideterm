@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../../store/appStore';
-import { useSettingsStore, type RendererType, type FontFamily, type CursorStyle, type Language } from '../../store/settingsStore';
+import { useSettingsStore, type RendererType, type FontFamily, type CursorStyle, type Language, type BackgroundFit } from '../../store/settingsStore';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
@@ -26,7 +29,7 @@ import {
     SelectLabel,
     SelectSeparator
 } from '../ui/select';
-import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInput, Sparkles, Square, HardDrive, HelpCircle, Github, ExternalLink, Keyboard, RefreshCw } from 'lucide-react';
+import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInput, Sparkles, Square, HardDrive, HelpCircle, Github, ExternalLink, Keyboard, RefreshCw, ImageIcon, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { SshKeyInfo, SshHostInfo } from '../../types';
@@ -510,8 +513,268 @@ const HelpAboutSection = () => {
     );
 };
 
+// ── Background Image Settings Sub-Component ────────────────────────────────
+
+interface BackgroundImageSectionProps {
+    terminal: import('../../store/settingsStore').TerminalSettings;
+    updateTerminal: <K extends keyof import('../../store/settingsStore').TerminalSettings>(
+        key: K, value: import('../../store/settingsStore').TerminalSettings[K]
+    ) => void;
+}
+
+const BackgroundImageSection = ({ terminal, updateTerminal }: BackgroundImageSectionProps) => {
+    const { t } = useTranslation();
+    const [processing, setProcessing] = useState(false);
+    const [lastResult, setLastResult] = useState<{ originalSize: number; storedSize: number } | null>(null);
+
+    // Local slider state for smooth dragging (debounced commit to store)
+    const [localOpacity, setLocalOpacity] = useState(() => Math.round(terminal.backgroundOpacity * 100));
+    const [localBlur, setLocalBlur] = useState(() => terminal.backgroundBlur);
+    const opacityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Sync local state when store value changes externally
+    useEffect(() => { setLocalOpacity(Math.round(terminal.backgroundOpacity * 100)); }, [terminal.backgroundOpacity]);
+    useEffect(() => { setLocalBlur(terminal.backgroundBlur); }, [terminal.backgroundBlur]);
+
+    const handleOpacityChange = useCallback((val: number) => {
+        setLocalOpacity(val);
+        if (opacityTimerRef.current) clearTimeout(opacityTimerRef.current);
+        opacityTimerRef.current = setTimeout(() => updateTerminal('backgroundOpacity', val / 100), 150);
+    }, [updateTerminal]);
+
+    const handleBlurChange = useCallback((val: number) => {
+        setLocalBlur(val);
+        if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+        blurTimerRef.current = setTimeout(() => updateTerminal('backgroundBlur', val), 150);
+    }, [updateTerminal]);
+
+    // Flush on unmount
+    useEffect(() => () => {
+        if (opacityTimerRef.current) clearTimeout(opacityTimerRef.current);
+        if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    }, []);
+
+    // Asset URL for preview
+    const previewUrl = useMemo(
+        () => terminal.backgroundImage ? convertFileSrc(terminal.backgroundImage) : null,
+        [terminal.backgroundImage]
+    );
+
+    const handleSelectImage = async () => {
+        try {
+            const selected = await openFileDialog({
+                multiple: false,
+                directory: false,
+                title: t('settings_view.terminal.bg_select_title'),
+                filters: [
+                    { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }
+                ],
+            });
+            if (!selected || typeof selected !== 'string') return;
+
+            setProcessing(true);
+            const result = await invoke<{
+                path: string;
+                originalSize: number;
+                storedSize: number;
+                animated: boolean;
+            }>('set_terminal_background', { sourcePath: selected });
+
+            updateTerminal('backgroundImage', result.path);
+            setLastResult({ originalSize: result.originalSize, storedSize: result.storedSize });
+        } catch (err) {
+            console.error('[Background] Failed to set:', err);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleClear = async () => {
+        try {
+            await invoke('clear_terminal_background');
+        } catch { /* best-effort */ }
+        updateTerminal('backgroundImage', null);
+        setLastResult(null);
+    };
+
+    const formatSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    return (
+        <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
+            <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider flex items-center gap-2">
+                <ImageIcon className="h-4 w-4" />
+                {t('settings_view.terminal.bg_title')}
+            </h4>
+
+            {/* Image selection / preview */}
+            <div className="space-y-4">
+                {previewUrl ? (
+                    <div className="relative group">
+                        {/* Preview thumbnail */}
+                        <div className="relative w-full h-32 rounded-md overflow-hidden border border-theme-border">
+                            <img
+                                src={previewUrl}
+                                alt="Background preview"
+                                className="w-full h-full object-cover opacity-60"
+                            />
+                            {/* Overlay with sample text */}
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <code className="text-green-400 text-sm font-mono bg-black/50 px-3 py-1 rounded">
+                                    $ echo &quot;Hello, OxideTerm&quot;
+                                </code>
+                            </div>
+                        </div>
+                        {/* Action buttons */}
+                        <div className="flex gap-2 mt-2">
+                            <Button variant="outline" size="sm" onClick={handleSelectImage} disabled={processing}>
+                                {t('settings_view.terminal.bg_change')}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={handleClear} className="text-red-400 hover:text-red-300">
+                                <X className="h-3.5 w-3.5 mr-1" />
+                                {t('settings_view.terminal.bg_clear')}
+                            </Button>
+                        </div>
+                        {/* Compression stats */}
+                        {lastResult && (
+                            <p className="text-[11px] text-theme-text-muted mt-1">
+                                {formatSize(lastResult.originalSize)} → {formatSize(lastResult.storedSize)} (WebP)
+                            </p>
+                        )}
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-theme-text">{t('settings_view.terminal.bg_label')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_hint')}</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={handleSelectImage} disabled={processing}>
+                            <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
+                            {processing ? '...' : t('settings_view.terminal.bg_select')}
+                        </Button>
+                    </div>
+                )}
+
+                {/* Opacity slider */}
+                {terminal.backgroundImage && (
+                    <>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <Label className="text-theme-text">{t('settings_view.terminal.bg_opacity')}</Label>
+                                <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_opacity_hint')}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="range"
+                                    min={3}
+                                    max={50}
+                                    value={localOpacity}
+                                    onChange={(e) => handleOpacityChange(parseInt(e.target.value))}
+                                    className="w-28 accent-orange-500"
+                                />
+                                <span className="text-xs text-theme-text-muted w-10 text-right">
+                                    {localOpacity}%
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Blur slider */}
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <Label className="text-theme-text">{t('settings_view.terminal.bg_blur')}</Label>
+                                <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_blur_hint')}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={20}
+                                    value={localBlur}
+                                    onChange={(e) => handleBlurChange(parseInt(e.target.value))}
+                                    className="w-28 accent-orange-500"
+                                />
+                                <span className="text-xs text-theme-text-muted w-10 text-right">
+                                    {localBlur}px
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Fit mode */}
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <Label className="text-theme-text">{t('settings_view.terminal.bg_fit')}</Label>
+                                <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.bg_fit_hint')}</p>
+                            </div>
+                            <Select
+                                value={terminal.backgroundFit}
+                                onValueChange={(val) => updateTerminal('backgroundFit', val as BackgroundFit)}
+                            >
+                                <SelectTrigger className="w-32">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="cover">{t('settings_view.terminal.bg_fit_cover')}</SelectItem>
+                                    <SelectItem value="contain">{t('settings_view.terminal.bg_fit_contain')}</SelectItem>
+                                    <SelectItem value="fill">{t('settings_view.terminal.bg_fit_fill')}</SelectItem>
+                                    <SelectItem value="tile">{t('settings_view.terminal.bg_fit_tile')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* Tab type toggles */}
+                        <div>
+                            <Label className="text-theme-text">{t('settings_view.terminal.bg_tabs')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5 mb-2">{t('settings_view.terminal.bg_tabs_hint')}</p>
+                            <div className="flex flex-col gap-1.5">
+                                {([
+                                    ['terminal', t('settings_view.terminal.bg_tab_terminal')],
+                                    ['local_terminal', t('settings_view.terminal.bg_tab_local')],
+                                    ['sftp', t('settings_view.terminal.bg_tab_sftp')],
+                                    ['forwards', t('settings_view.terminal.bg_tab_forwards')],
+                                    ['settings', t('settings_view.terminal.bg_tab_settings')],
+                                    ['ide', t('settings_view.terminal.bg_tab_ide')],
+                                    ['connection_monitor', t('settings_view.terminal.bg_tab_monitor')],
+                                    ['connection_pool', t('settings_view.terminal.bg_tab_connections')],
+                                    ['topology', t('settings_view.terminal.bg_tab_topology')],
+                                    ['file_manager', t('settings_view.terminal.bg_tab_files')],
+                                    ['session_manager', t('settings_view.terminal.bg_tab_sessions')],
+                                    // Launcher: only macOS has a transparent-capable launcher; Windows uses WSLg (opaque VNC canvas)
+                                    ...(platform.isMac ? [['launcher', t('settings_view.terminal.bg_tab_launcher')] as const] : []),
+                                    ['plugin_manager', t('settings_view.terminal.bg_tab_plugins')],
+                                ] as const).map(([type, label]) => {
+                                    const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
+                                    const checked = enabledTabs.includes(type);
+                                    return (
+                                        <label key={type} className="flex items-center gap-2 text-sm text-theme-text cursor-pointer hover:text-theme-text-bright py-0.5">
+                                            <Checkbox
+                                                checked={checked}
+                                                onCheckedChange={(v) => {
+                                                    const next = v
+                                                        ? [...enabledTabs, type]
+                                                        : enabledTabs.filter((t: string) => t !== type);
+                                                    updateTerminal('backgroundEnabledTabs', next);
+                                                }}
+                                            />
+                                            {label}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 export const SettingsView = () => {
     const { t } = useTranslation();
+    const bgActive = useTabBgActive('settings');
     const [activeTab, setActiveTab] = useState('general');
 
     // Use unified settings store
@@ -592,7 +855,7 @@ export const SettingsView = () => {
     };
 
     return (
-        <div className="flex h-full w-full bg-theme-bg text-theme-text">
+        <div className={`flex h-full w-full text-theme-text ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
             {/* Sidebar */}
             <div className="w-56 bg-theme-bg-panel border-r border-theme-border flex flex-col pt-6 pb-4 min-h-0">
                 <div className="px-5 mb-6">
@@ -1021,6 +1284,9 @@ export const SettingsView = () => {
                                     {t('settings_view.appearance.layout_hint')}
                                 </p>
                             </div>
+
+                            {/* Background Image Section */}
+                            <BackgroundImageSection terminal={terminal} updateTerminal={updateTerminal} />
                         </div>
                     )}
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback } from 'react';
+import { lazy, Suspense, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './Sidebar';
 import { AiSidebar } from './AiSidebar';
@@ -14,6 +14,9 @@ import { ConnectionPoolMonitor } from '../connections/ConnectionPoolMonitor';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { SystemHealthPanel } from './SystemHealthPanel';
 import { Plus } from 'lucide-react';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { useSettingsStore } from '../../store/settingsStore';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 
 // Lazy load non-critical views (only loaded when user opens SFTP/Forwards tab)
 const SettingsView = lazy(() => import('../settings/SettingsView').then(m => ({ default: m.SettingsView })));
@@ -46,9 +49,43 @@ const StaleTabBanner = ({ type }: { type: string }) => (
   </div>
 );
 
+// Background image wrapper for non-terminal tabs
+const TabBgWrapper: React.FC<{ tabType: string; children: React.ReactNode }> = ({ tabType, children }) => {
+  const terminal = useSettingsStore(s => s.settings.terminal);
+  const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
+  const active = !!terminal.backgroundImage && enabledTabs.includes(tabType);
+
+  const bgUrl = useMemo(
+    () => active && terminal.backgroundImage ? convertFileSrc(terminal.backgroundImage) : null,
+    [active, terminal.backgroundImage]
+  );
+
+  if (!bgUrl) return <>{children}</>;
+
+  const fit = terminal.backgroundFit || 'cover';
+
+  return (
+    <div className="relative h-full w-full">
+      <div
+        className="absolute inset-0 z-0 pointer-events-none"
+        style={{
+          backgroundImage: `url(${bgUrl})`,
+          backgroundSize: fit === 'tile' ? 'auto' : fit,
+          backgroundRepeat: fit === 'tile' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+          opacity: terminal.backgroundOpacity ?? 0.15,
+          filter: terminal.backgroundBlur ? `blur(${terminal.backgroundBlur}px)` : undefined,
+        }}
+      />
+      <div className="relative z-[1] h-full w-full">{children}</div>
+    </div>
+  );
+};
+
 export const AppLayout = () => {
   const { t } = useTranslation();
   const { tabs, activeTabId, toggleModal, setActivePaneId, closePane } = useAppStore();
+  const monitorBgActive = useTabBgActive('connection_monitor');
 
   // Handlers for split pane interactions
   const handlePaneFocus = useCallback((tabId: string, paneId: string) => {
@@ -118,64 +155,88 @@ export const AppLayout = () => {
                     </div>
                   )}
                   {tab.type === 'sftp' && (
-                    tab.nodeId ? (
-                      <Suspense fallback={<ViewLoader />}>
-                        <SFTPView 
-                          key={`sftp-${tab.nodeId}`}
-                          nodeId={tab.nodeId}
-                        />
-                      </Suspense>
-                    ) : (
-                      <StaleTabBanner type="sftp" />
-                    )
+                    <TabBgWrapper tabType="sftp">
+                      {tab.nodeId ? (
+                        <Suspense fallback={<ViewLoader />}>
+                          <SFTPView 
+                            key={`sftp-${tab.nodeId}`}
+                            nodeId={tab.nodeId}
+                          />
+                        </Suspense>
+                      ) : (
+                        <StaleTabBanner type="sftp" />
+                      )}
+                    </TabBgWrapper>
                   )}
                   {tab.type === 'forwards' && tab.nodeId && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <ForwardsView 
-                        key={`forwards-${tab.nodeId}`} 
-                        nodeId={tab.nodeId} 
-                      />
-                    </Suspense>
-                  )}
-                  {tab.type === 'settings' && <SettingsView />}
-                  {tab.type === 'connection_monitor' && (
-                    <div className="h-full w-full bg-theme-bg p-8 overflow-auto">
-                      <div className="max-w-5xl mx-auto space-y-8">
-                        <div>
-                          <h2 className="text-2xl font-bold mb-6 text-zinc-200">{t('layout.connection_monitor.title')}</h2>
-                          <ConnectionPoolMonitor />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-bold mb-4 text-zinc-200">{t('sidebar.panels.system_health')}</h2>
-                          <SystemHealthPanel />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {tab.type === 'connection_pool' && <ConnectionsPanel />}
-                  {tab.type === 'topology' && <TopologyPage />}
-                  {tab.type === 'ide' && (
-                    tab.nodeId ? (
+                    <TabBgWrapper tabType="forwards">
                       <Suspense fallback={<ViewLoader />}>
-                        <IdeWorkspace
-                          key={`ide-${tab.nodeId}`}
-                          nodeId={tab.nodeId}
-                          rootPath="~"
+                        <ForwardsView 
+                          key={`forwards-${tab.nodeId}`} 
+                          nodeId={tab.nodeId} 
                         />
                       </Suspense>
-                    ) : (
-                      <StaleTabBanner type="ide" />
-                    )
+                    </TabBgWrapper>
+                  )}
+                  {tab.type === 'settings' && (
+                    <TabBgWrapper tabType="settings">
+                      <SettingsView />
+                    </TabBgWrapper>
+                  )}
+                  {tab.type === 'connection_monitor' && (
+                    <TabBgWrapper tabType="connection_monitor">
+                      <div className={`h-full w-full p-8 overflow-auto ${monitorBgActive ? '' : 'bg-theme-bg'}`} data-bg-active={monitorBgActive || undefined}>
+                        <div className="max-w-5xl mx-auto space-y-8">
+                          <div>
+                            <h2 className="text-2xl font-bold mb-6 text-zinc-200">{t('layout.connection_monitor.title')}</h2>
+                            <ConnectionPoolMonitor />
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-bold mb-4 text-zinc-200">{t('sidebar.panels.system_health')}</h2>
+                            <SystemHealthPanel />
+                          </div>
+                        </div>
+                      </div>
+                    </TabBgWrapper>
+                  )}
+                  {tab.type === 'connection_pool' && (
+                    <TabBgWrapper tabType="connection_pool">
+                      <ConnectionsPanel />
+                    </TabBgWrapper>
+                  )}
+                  {tab.type === 'topology' && (
+                    <TabBgWrapper tabType="topology">
+                      <TopologyPage />
+                    </TabBgWrapper>
+                  )}
+                  {tab.type === 'ide' && (
+                    <TabBgWrapper tabType="ide">
+                      {tab.nodeId ? (
+                        <Suspense fallback={<ViewLoader />}>
+                          <IdeWorkspace
+                            key={`ide-${tab.nodeId}`}
+                            nodeId={tab.nodeId}
+                            rootPath="~"
+                          />
+                        </Suspense>
+                      ) : (
+                        <StaleTabBanner type="ide" />
+                      )}
+                    </TabBgWrapper>
                   )}
                   {tab.type === 'file_manager' && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <LocalFileManager />
-                    </Suspense>
+                    <TabBgWrapper tabType="file_manager">
+                      <Suspense fallback={<ViewLoader />}>
+                        <LocalFileManager />
+                      </Suspense>
+                    </TabBgWrapper>
                   )}
                   {tab.type === 'session_manager' && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <SessionManagerPanel />
-                    </Suspense>
+                    <TabBgWrapper tabType="session_manager">
+                      <Suspense fallback={<ViewLoader />}>
+                        <SessionManagerPanel />
+                      </Suspense>
+                    </TabBgWrapper>
                   )}
                   {tab.type === 'plugin' && tab.pluginTabId && (
                     <Suspense fallback={<ViewLoader />}>
@@ -183,9 +244,11 @@ export const AppLayout = () => {
                     </Suspense>
                   )}
                   {tab.type === 'plugin_manager' && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <PluginManagerView />
-                    </Suspense>
+                    <TabBgWrapper tabType="plugin_manager">
+                      <Suspense fallback={<ViewLoader />}>
+                        <PluginManagerView />
+                      </Suspense>
+                    </TabBgWrapper>
                   )}
                   {tab.type === 'graphics' && (
                     <Suspense fallback={<ViewLoader />}>
@@ -193,9 +256,11 @@ export const AppLayout = () => {
                     </Suspense>
                   )}
                   {tab.type === 'launcher' && (
-                    <Suspense fallback={<ViewLoader />}>
-                      <LauncherView />
-                    </Suspense>
+                    <TabBgWrapper tabType="launcher">
+                      <Suspense fallback={<ViewLoader />}>
+                        <LauncherView />
+                      </Suspense>
+                    </TabBgWrapper>
                   )}
                 </div>
                 );

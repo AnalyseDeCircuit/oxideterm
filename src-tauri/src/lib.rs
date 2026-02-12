@@ -16,6 +16,7 @@ pub mod graphics;
 pub mod local;
 pub mod launcher;
 pub mod oxide_file;
+pub mod terminal_bg;
 pub mod router;
 pub mod session;
 pub mod sftp;
@@ -636,6 +637,10 @@ pub fn run() {
         launcher::launcher_launch_app,
         launcher::launcher_wsl_launch,
         launcher::launcher_clear_cache,
+        // Terminal background image commands
+        terminal_bg::set_terminal_background,
+        terminal_bg::clear_terminal_background,
+        terminal_bg::init_terminal_background,
     ]);
     #[cfg(not(feature = "local-terminal"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -863,6 +868,10 @@ pub fn run() {
         launcher::launcher_launch_app,
         launcher::launcher_wsl_launch,
         launcher::launcher_clear_cache,
+        // Terminal background image commands
+        terminal_bg::set_terminal_background,
+        terminal_bg::clear_terminal_background,
+        terminal_bg::init_terminal_background,
     ]);
 
     builder

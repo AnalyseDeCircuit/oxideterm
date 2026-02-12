@@ -486,7 +486,7 @@ export const TopologyViewEnhanced: React.FC<TopologyViewEnhancedProps> = ({
   }
 
   return (
-    <div className="w-full h-full overflow-hidden bg-theme-bg rounded-lg relative">
+    <div className="w-full h-full overflow-hidden bg-theme-bg rounded-lg relative topo-content">
       {/* Zoom controls */}
       <div className="absolute top-4 right-4 z-10 flex gap-2">
         <div className="px-2 py-1 bg-theme-bg-panel/80 border border-theme-border rounded text-xs text-theme-text-muted font-mono shadow-sm">
@@ -520,8 +520,8 @@ export const TopologyViewEnhanced: React.FC<TopologyViewEnhancedProps> = ({
         </defs>
 
         {/* Background */}
-        <rect width="100%" height="100%" fill="url(#cyber-bg-enhanced)" />
-        <rect width="100%" height="100%" fill="url(#cyber-grid-enhanced)" />
+        <rect className="topo-bg-fill" width="100%" height="100%" fill="url(#cyber-bg-enhanced)" />
+        <rect className="topo-bg-fill" width="100%" height="100%" fill="url(#cyber-grid-enhanced)" />
 
         {/* Zoomable group */}
         <g ref={gRef}>

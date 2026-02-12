@@ -14,6 +14,7 @@ import { useAppStore } from '../../store/appStore';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 import { SshConnectionInfo, SshConnectionState } from '../../types';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 
 // Format connection state
 const useFormatState = () => {
@@ -146,6 +147,7 @@ const ConnectionCard: React.FC<{
 // Connection Management Panel Main Component
 export const ConnectionsPanel: React.FC = () => {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('connection_pool');
   const { 
     connections, 
     refreshConnections, 
@@ -180,7 +182,7 @@ export const ConnectionsPanel: React.FC = () => {
     .filter(conn => conn.state !== 'disconnected');
   
   return (
-    <div className="h-full flex flex-col bg-theme-bg">
+    <div className={`h-full flex flex-col ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-theme-border bg-theme-bg-panel/50">
         <div>

@@ -417,7 +417,7 @@ export const Sidebar = () => {
     // 如果节点有终端，用第一个
     if (terminalIds.length > 0) {
       const sessionId = terminalIds[0];
-      createTab('forwards', sessionId);
+      createTab('forwards', sessionId, { nodeId });
       return;
     }
 
@@ -425,7 +425,7 @@ export const Sidebar = () => {
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
       try {
         const terminalId = await createTerminalForNode(nodeId, 80, 24);
-        createTab('forwards', terminalId);
+        createTab('forwards', terminalId, { nodeId });
       } catch (err) {
         console.error('Failed to create session for forwards:', err);
       }

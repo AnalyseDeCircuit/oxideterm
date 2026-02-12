@@ -11,11 +11,13 @@ import { connectToSaved } from '../../lib/connectToSaved';
 import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 import { api } from '../../lib/api';
 import type { ConnectionInfo } from '../../types';
 
 export const SessionManagerPanel = () => {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('session_manager');
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const createTab = useAppStore(s => s.createTab);
@@ -115,7 +117,7 @@ export const SessionManagerPanel = () => {
   }, [refresh]);
 
   return (
-    <div className="h-full w-full flex flex-col bg-theme-bg text-theme-text">
+    <div className={`h-full w-full flex flex-col text-theme-text ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       {/* Toolbar */}
       <ManagerToolbar
         searchQuery={searchQuery}

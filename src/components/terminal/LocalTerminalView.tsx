@@ -17,7 +17,9 @@ import { AiInlinePanel, type CursorPosition } from './AiInlinePanel';
 import { PasteConfirmOverlay, shouldConfirmPaste } from './PasteConfirmOverlay';
 import { terminalLinkHandler } from '../../lib/safeUrl';
 import { listen } from '@tauri-apps/api/event';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
+import type { BackgroundFit } from '../../store/settingsStore';
 import { 
   registerTerminalBuffer, 
   unregisterTerminalBuffer,
@@ -39,6 +41,70 @@ interface LocalTerminalViewProps {
 }
 
 const PREFILL_REPLAY_LINE_COUNT = 50; // Keep aligned with backend replay count
+
+// ── Background Image Helpers (shared with TerminalView) ─────────────────────────
+
+/**
+ * Convert 6-digit hex (#RRGGBB) to rgba() string.
+ * xterm.js only parses #hex and rgba() — 'transparent' is NOT recognised.
+ */
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Map BackgroundFit to CSS properties */
+function getBackgroundFitStyles(fit: BackgroundFit): React.CSSProperties {
+  switch (fit) {
+    case 'cover':
+      return { objectFit: 'cover', width: '100%', height: '100%' };
+    case 'contain':
+      return { objectFit: 'contain', width: '100%', height: '100%' };
+    case 'fill':
+      return { objectFit: 'fill', width: '100%', height: '100%' };
+    case 'tile':
+      return {};
+  }
+}
+
+let _localGpuDetectionResult: boolean | null = null;
+function isLowEndGPU(): boolean {
+  if (_localGpuDetectionResult !== null) return _localGpuDetectionResult;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl && gl instanceof WebGLRenderingContext) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string;
+        _localGpuDetectionResult = /Intel|Mesa|SwiftShader|llvmpipe|Apple GPU/i.test(renderer);
+        return _localGpuDetectionResult;
+      }
+    }
+  } catch { /* noop */ }
+  _localGpuDetectionResult = false;
+  return false;
+}
+
+/** Force xterm DOM elements transparent (must be called after each viewport reset) */
+function forceViewportTransparent(container: HTMLElement | null): void {
+  if (!container) return;
+  const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (viewport) viewport.style.backgroundColor = 'transparent';
+  const xtermEl = container.querySelector('.xterm') as HTMLElement | null;
+  if (xtermEl) xtermEl.style.backgroundColor = 'transparent';
+}
+
+/** Clear DOM-level transparency overrides so xterm reverts to theme-driven background. */
+function clearViewportTransparent(container: HTMLElement | null): void {
+  if (!container) return;
+  const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (viewport) viewport.style.backgroundColor = '';
+  const xtermEl = container.querySelector('.xterm') as HTMLElement | null;
+  if (xtermEl) xtermEl.style.backgroundColor = '';
+}
 
 export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({ 
   sessionId, 
@@ -224,8 +290,19 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         term.options.cursorBlink = terminal.cursorBlink;
         term.options.lineHeight = terminal.lineHeight;
         
+        // Apply theme — use transparent background when bg image is set
+        const enabledTabs = terminal.backgroundEnabledTabs ?? ['terminal', 'local_terminal'];
+        const hasBg = !!terminal.backgroundImage && enabledTabs.includes('local_terminal');
         const themeConfig = themes[terminal.theme] || themes.default;
-        term.options.theme = themeConfig;
+        term.options.theme = hasBg
+          ? { ...themeConfig, background: hexToRgba(themeConfig.background || '#09090b', 0.01) }
+          : themeConfig;
+
+        if (hasBg) {
+          forceViewportTransparent(containerRef.current);
+        } else {
+          clearViewportTransparent(containerRef.current);
+        }
         
         term.refresh(0, term.rows - 1);
         fitAddonRef.current?.fit();
@@ -377,6 +454,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
       if (isStale()) return;
       rendererSuspendedRef.current = false;
+
+      // Re-force transparent after renderer restore
+      if (terminalSettings.backgroundImage
+        && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal')) {
+        forceViewportTransparent(containerRef.current);
+      }
+
       fitRaf1 = requestAnimationFrame(() => {
         fitRaf2 = requestAnimationFrame(() => {
           if (!isStale()) {
@@ -400,15 +484,24 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     
     isMountedRef.current = true;
 
+    const hasBgImage = !!terminalSettings.backgroundImage
+      && (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal');
+    const baseTheme = themes[terminalSettings.theme] || themes.default;
+    const xtermTheme = hasBgImage
+      ? { ...baseTheme, background: hexToRgba(baseTheme.background || '#09090b', 0.01) }
+      : baseTheme;
+
     const term = new Terminal({
       cursorBlink: terminalSettings.cursorBlink,
       cursorStyle: terminalSettings.cursorStyle,
       fontFamily: getFontFamily(terminalSettings.fontFamily, terminalSettings.customFontFamily),
       fontSize: terminalSettings.fontSize,
       lineHeight: terminalSettings.lineHeight,
-      theme: themes[terminalSettings.theme] || themes.default,
+      theme: xtermTheme,
       scrollback: terminalSettings.scrollback || 5000,
       allowProposedApi: true,
+      // Always enable so bg image can be toggled without remounting
+      allowTransparency: true,
     });
 
     const fitAddon = new FitAddon();
@@ -520,6 +613,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     };
 
     term.open(containerRef.current);
+
+    // Force xterm DOM elements transparent for bg image
+    if (hasBgImage) {
+      forceViewportTransparent(containerRef.current);
+    }
+
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
 
@@ -742,7 +841,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       // PTY cleanup is handled ONLY by appStore.closeTab() when the tab is closed.
       console.debug(`[LocalTerminalView] Unmount cleanup for ${sessionId} (PTY kept alive)`);
     };
-  }, [sessionId]);
+  }, [sessionId]); // Only remount on session change — bg image is handled dynamically
 
   // Listen for terminal data events from backend
   useEffect(() => {
@@ -1167,11 +1266,59 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     }
   }, [searchOpen, aiPanelOpen, effectivePaneId, onFocus]);
 
+  // ── Background Image ──────────────────────────────────────────────────────────
+  const currentTheme = themes[terminalSettings.theme] || themes.default;
+  const bgImageUrl = React.useMemo(
+    () => {
+      const enabled = (terminalSettings.backgroundEnabledTabs ?? ['terminal', 'local_terminal']).includes('local_terminal');
+      return terminalSettings.backgroundImage && enabled ? convertFileSrc(terminalSettings.backgroundImage) : null;
+    },
+    [terminalSettings.backgroundImage, terminalSettings.backgroundEnabledTabs]
+  );
+  const effectiveBlur = React.useMemo(() => {
+    if (!bgImageUrl) return 0;
+    const raw = terminalSettings.backgroundBlur;
+    return isLowEndGPU() ? Math.min(raw, 5) : raw;
+  }, [bgImageUrl, terminalSettings.backgroundBlur]);
+
   return (
     <div 
-      className="relative flex-1 w-full h-full flex flex-col"
+      className="relative flex-1 w-full h-full flex flex-col overflow-hidden"
+      style={{ backgroundColor: currentTheme.background }}
       onClick={handleContainerClick}
     >
+      {/* Background Image Layer */}
+      {bgImageUrl && (
+        terminalSettings.backgroundFit === 'tile' ? (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              zIndex: 0,
+              backgroundImage: `url(${bgImageUrl})`,
+              backgroundRepeat: 'repeat',
+              backgroundSize: 'auto',
+              opacity: terminalSettings.backgroundOpacity,
+              filter: effectiveBlur > 0 ? `blur(${effectiveBlur}px)` : undefined,
+              willChange: 'transform',
+            }}
+          />
+        ) : (
+          <img
+            src={bgImageUrl}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 pointer-events-none select-none"
+            style={{
+              zIndex: 0,
+              opacity: terminalSettings.backgroundOpacity,
+              filter: effectiveBlur > 0 ? `blur(${effectiveBlur}px)` : undefined,
+              willChange: 'transform',
+              ...getBackgroundFitStyles(terminalSettings.backgroundFit),
+            }}
+          />
+        )
+      )}
+
       {/* Search Bar - no deep search for local terminal */}
       {searchOpen && (
         <SearchBar
@@ -1212,7 +1359,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       <div 
         ref={containerRef}
         className="flex-1 w-full"
-        style={{ minHeight: 0 }}
+        style={{
+          minHeight: 0,
+          position: 'relative',
+          zIndex: 1,
+          contain: 'strict',
+          isolation: 'isolate',
+        }}
       />
       
       {/* Mouse mode indicator */}

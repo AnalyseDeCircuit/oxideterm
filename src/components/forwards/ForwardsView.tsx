@@ -13,6 +13,7 @@ import { ForwardRule, ForwardType } from '../../types';
 import { useToast } from '../../hooks/useToast';
 import { useForwardEvents, ForwardStatus as EventForwardStatus } from '../../hooks/useForwardEvents';
 import { useNodeState } from '../../hooks/useNodeState';
+import { useTabBgActive } from '../../hooks/useTabBackground';
 
 // Type guard for ForwardType using const type parameter (TS 5.0+)
 const FORWARD_TYPES = ['local', 'remote', 'dynamic'] as const;
@@ -35,6 +36,7 @@ const formatBytes = (bytes: number): string => {
 
 export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
+  const bgActive = useTabBgActive('forwards');
   const { toast } = useToast();
   const { state: nodeState } = useNodeState(nodeId);
   // State Gating: only allow IO when node is ready
@@ -212,7 +214,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   };
 
   return (
-    <div className="h-full w-full bg-theme-bg p-4 overflow-y-auto">
+    <div className={`h-full w-full p-4 overflow-y-auto ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       <div className="max-w-4xl mx-auto space-y-6">
         
         {/* Quick Actions */}

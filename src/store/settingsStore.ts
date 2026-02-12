@@ -82,6 +82,9 @@ export interface GeneralSettings {
   language: Language;
 }
 
+/** Terminal background image fit mode */
+export type BackgroundFit = 'cover' | 'contain' | 'fill' | 'tile';
+
 /** Terminal settings */
 export interface TerminalSettings {
   theme: string;
@@ -95,6 +98,12 @@ export interface TerminalSettings {
   renderer: RendererType;
   pasteProtection: boolean; // Confirm before pasting multi-line content
   osc52Clipboard: boolean;  // Allow remote programs to write system clipboard via OSC 52
+  // Background image settings
+  backgroundImage: string | null;    // Stored image path (app_data_dir/backgrounds/...)
+  backgroundOpacity: number;         // Image opacity 0.03-0.5 (default 0.15)
+  backgroundBlur: number;            // Blur in px 0-20 (default 0)
+  backgroundFit: BackgroundFit;      // How the image fills the terminal area
+  backgroundEnabledTabs: string[];   // Which tab types show the background image
 }
 
 /** Buffer settings (used by backend) */
@@ -230,6 +239,12 @@ const defaultTerminalSettings: TerminalSettings = {
   renderer: isWindows ? 'canvas' : 'auto',
   pasteProtection: true,  // Default enabled for safety
   osc52Clipboard: false,  // Opt-in: user must explicitly enable OSC 52 clipboard bridge
+  // Background image defaults
+  backgroundImage: null,
+  backgroundOpacity: 0.15,
+  backgroundBlur: 0,
+  backgroundFit: 'cover',
+  backgroundEnabledTabs: ['terminal', 'local_terminal'],
 };
 
 const defaultBufferSettings: BufferSettings = {
