@@ -7,6 +7,7 @@ pub mod path_utils;
 pub mod progress;
 pub mod retry;
 pub mod session;
+pub mod tar_transfer;
 pub mod transfer;
 pub mod types;
 

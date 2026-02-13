@@ -375,8 +375,10 @@ pub async fn node_sftp_download_dir(
     node_id: String,
     remote_path: String,
     local_path: String,
+    transfer_id: Option<String>,
     app: AppHandle,
     router: State<'_, Arc<NodeRouter>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
     let sftp = router.acquire_sftp(&node_id).await?;
 
@@ -389,10 +391,29 @@ pub async fn node_sftp_download_dir(
         }
     });
 
+    // Register with TransferManager for cancel support
+    let tid = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let control = transfer_manager.register(&tid);
+    // Build a lightweight AtomicBool cancel flag bridged from TransferControl
+    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_clone = cancel_flag.clone();
+    let mut cancel_rx = control.subscribe_cancellation();
+    tokio::spawn(async move {
+        // When TransferControl is cancelled, flip the flag
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                flag_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
     let sftp = sftp.lock().await;
-    sftp.download_dir(&remote_path, &local_path, Some(tx))
+    let result = sftp.download_dir(&remote_path, &local_path, Some(tx), Some(cancel_flag))
         .await
-        .map_err(RouteError::from)
+        .map_err(RouteError::from);
+    transfer_manager.unregister(&tid);
+    result
 }
 
 /// 递归上传目录
@@ -401,8 +422,10 @@ pub async fn node_sftp_upload_dir(
     node_id: String,
     local_path: String,
     remote_path: String,
+    transfer_id: Option<String>,
     app: AppHandle,
     router: State<'_, Arc<NodeRouter>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
     let sftp = router.acquire_sftp(&node_id).await?;
 
@@ -415,10 +438,27 @@ pub async fn node_sftp_upload_dir(
         }
     });
 
+    // Register with TransferManager for cancel support
+    let tid = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let control = transfer_manager.register(&tid);
+    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_clone = cancel_flag.clone();
+    let mut cancel_rx = control.subscribe_cancellation();
+    tokio::spawn(async move {
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                flag_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
     let sftp = sftp.lock().await;
-    sftp.upload_dir(&local_path, &remote_path, Some(tx))
+    let result = sftp.upload_dir(&local_path, &remote_path, Some(tx), Some(cancel_flag))
         .await
-        .map_err(RouteError::from)
+        .map_err(RouteError::from);
+    transfer_manager.unregister(&tid);
+    result
 }
 
 /// 十六进制预览（支持静默重建）
@@ -679,10 +719,11 @@ pub async fn node_ide_batch_stat(
     let sftp = sftp.lock().await;
 
     let mut results = Vec::with_capacity(paths.len());
-    for path in paths {
-        let stat = sftp
-            .stat(&path)
-            .await
+    // Parallel stat: launch all requests concurrently
+    let futs: Vec<_> = paths.iter().map(|path| sftp.stat(path)).collect();
+    let stats = futures_util::future::join_all(futs).await;
+    for stat_result in stats {
+        let stat = stat_result
             .ok()
             .map(|info| crate::commands::ide::FileStatInfo {
                 size: info.size,
@@ -693,4 +734,136 @@ pub async fn node_ide_batch_stat(
     }
 
     Ok(results)
+}
+
+// ============================================================================
+// Tar streaming transfer commands
+// ============================================================================
+
+/// Probe whether the remote host supports `tar` command.
+/// Result should be cached per session on the frontend.
+#[tauri::command]
+pub async fn node_sftp_tar_probe(
+    node_id: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<bool, RouteError> {
+    let resolved = router.resolve_connection(&node_id).await?;
+    Ok(crate::sftp::tar_transfer::probe_tar_support(&resolved.handle_controller).await)
+}
+
+/// Upload a local directory to remote via tar streaming.
+/// Falls through to SFTP if tar is not available — caller should check probe first.
+#[tauri::command]
+pub async fn node_sftp_tar_upload(
+    node_id: String,
+    local_path: String,
+    remote_path: String,
+    transfer_id: Option<String>,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
+) -> Result<u64, RouteError> {
+    let resolved = router.resolve_connection(&node_id).await?;
+    let sftp = router.acquire_sftp(&node_id).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    // Register with TransferManager for cancel support
+    let tid = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let control = transfer_manager.register(&tid);
+    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_clone = cancel_flag.clone();
+    let mut cancel_rx = control.subscribe_cancellation();
+    tokio::spawn(async move {
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                flag_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
+    // Recursively create target directory via SFTP (portable `mkdir -p`).
+    // Walk path prefixes and create each level; "already exists" errors are ignored.
+    // This is O(path_depth), NOT O(file_count) — tar itself creates all internal subdirs.
+    {
+        let sftp = sftp.lock().await;
+        let components: Vec<&str> = remote_path.split('/').filter(|s| !s.is_empty()).collect();
+        for i in 0..components.len() {
+            let prefix = format!("/{}", components[..=i].join("/"));
+            let _ = sftp.mkdir(&prefix).await;
+        }
+    }
+
+    let result = crate::sftp::tar_transfer::tar_upload_directory(
+        &resolved.handle_controller,
+        &local_path,
+        &remote_path,
+        &tid,
+        Some(tx),
+        Some(cancel_flag),
+    )
+    .await
+    .map_err(RouteError::from);
+
+    transfer_manager.unregister(&tid);
+    result
+}
+
+/// Download a remote directory to local via tar streaming.
+#[tauri::command]
+pub async fn node_sftp_tar_download(
+    node_id: String,
+    remote_path: String,
+    local_path: String,
+    transfer_id: Option<String>,
+    app: AppHandle,
+    router: State<'_, Arc<NodeRouter>>,
+    transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
+) -> Result<u64, RouteError> {
+    let resolved = router.resolve_connection(&node_id).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
+    let app_clone = app.clone();
+    let node_id_clone = node_id.clone();
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = app_clone.emit(&format!("sftp:progress:{}", node_id_clone), &progress);
+        }
+    });
+
+    let tid = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let control = transfer_manager.register(&tid);
+    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_clone = cancel_flag.clone();
+    let mut cancel_rx = control.subscribe_cancellation();
+    tokio::spawn(async move {
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                flag_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
+    let result = crate::sftp::tar_transfer::tar_download_directory(
+        &resolved.handle_controller,
+        &remote_path,
+        &local_path,
+        &tid,
+        Some(tx),
+        Some(cancel_flag),
+    )
+    .await
+    .map_err(RouteError::from);
+
+    transfer_manager.unregister(&tid);
+    result
 }

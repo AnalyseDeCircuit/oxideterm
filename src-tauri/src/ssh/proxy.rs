@@ -199,6 +199,8 @@ async fn direct_connect(
         inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
+        window_size: 32 * 1024 * 1024,
+        maximum_packet_size: 256 * 1024,
         ..Default::default()
     };
 
@@ -321,6 +323,8 @@ async fn connect_via_stream(
         inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
+        window_size: 32 * 1024 * 1024,
+        maximum_packet_size: 256 * 1024,
         ..Default::default()
     };
 

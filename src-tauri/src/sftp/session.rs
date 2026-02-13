@@ -349,14 +349,14 @@ impl SftpSession {
         // Priority 1: Check by extension first (more reliable for scripts/configs)
         if is_text_extension(&extension) {
             return self
-                .preview_text(&canonical_path, &extension, &mime_type)
+                .preview_text(&canonical_path, &extension, &mime_type, file_size)
                 .await;
         }
 
         // Priority 1.5: Dotfiles without extension are usually text configs
         // e.g., .gitignore, .env, .htaccess (these have no extension when parsed)
         if file_name.starts_with('.') && extension.is_empty() {
-            return self.preview_text(&canonical_path, "conf", &mime_type).await;
+            return self.preview_text(&canonical_path, "conf", &mime_type, file_size).await;
         }
         // Priority 2: PDF files
         if is_pdf_extension(&extension) || mime_type == "application/pdf" {
@@ -409,7 +409,7 @@ impl SftpSession {
 
         if is_text_mime {
             return self
-                .preview_text(&canonical_path, &extension, &mime_type)
+                .preview_text(&canonical_path, &extension, &mime_type, file_size)
                 .await;
         }
 
@@ -423,7 +423,7 @@ impl SftpSession {
                 if let Ok(sample) = self.read_sample(&canonical_path, sample_size).await {
                     if is_likely_text_content(&sample) {
                         return self
-                            .preview_text(&canonical_path, "txt", "text/plain")
+                            .preview_text(&canonical_path, "txt", "text/plain", file_size)
                             .await;
                     }
                 }
@@ -457,13 +457,12 @@ impl SftpSession {
         path: &str,
         extension: &str,
         mime_type: &str,
+        file_size: u64,
     ) -> Result<PreviewContent, SftpError> {
-        let info = self.stat(path).await?;
-
-        // Check size limit for text
-        if info.size > constants::MAX_TEXT_PREVIEW_SIZE {
+        // Check size limit for text (file_size passed from caller to avoid redundant stat)
+        if file_size > constants::MAX_TEXT_PREVIEW_SIZE {
             return Ok(PreviewContent::TooLarge {
-                size: info.size,
+                size: file_size,
                 max_size: constants::MAX_TEXT_PREVIEW_SIZE,
                 recommend_download: true,
             });
@@ -750,6 +749,7 @@ impl SftpSession {
         remote_path: &str,
         local_path: &str,
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
+        cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<u64, SftpError> {
         let canonical_path = self.resolve_path(remote_path).await?;
         info!("Downloading directory {} to {}", canonical_path, local_path);
@@ -769,6 +769,7 @@ impl SftpSession {
                 &transfer_id,
                 &progress_tx,
                 &start_time,
+                &cancel_flag,
             )
             .await?;
 
@@ -784,7 +785,30 @@ impl SftpSession {
         transfer_id: &str,
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         start_time: &std::time::Instant,
+        cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<u64, SftpError> {
+        self.download_dir_inner_depth(remote_path, local_path, transfer_id, progress_tx, start_time, 0, cancel_flag)
+            .await
+    }
+
+    /// Internal recursive directory download with depth guard
+    async fn download_dir_inner_depth(
+        &self,
+        remote_path: &str,
+        local_path: &str,
+        transfer_id: &str,
+        progress_tx: &Option<mpsc::Sender<TransferProgress>>,
+        start_time: &std::time::Instant,
+        depth: u32,
+        cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Result<u64, SftpError> {
+        // Guard against symlink cycles
+        const MAX_DEPTH: u32 = 64;
+        if depth >= MAX_DEPTH {
+            warn!("download_dir_inner: max recursion depth {} reached at {}, likely symlink cycle", MAX_DEPTH, remote_path);
+            return Ok(0);
+        }
+
         let entries = self
             .list_dir(
                 remote_path,
@@ -799,42 +823,117 @@ impl SftpSession {
         let mut count = 0u64;
 
         for entry in entries {
+            // Check cancellation before processing each entry
+            if let Some(ref flag) = cancel_flag {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    info!("Download directory cancelled at {} files", count);
+                    return Err(SftpError::TransferCancelled);
+                }
+            }
+
             let local_entry_path = join_local_path(local_path, &entry.name);
 
-            if entry.file_type == FileType::Directory {
+            // Resolve symlinks: stat follows symlinks, so we get the target type
+            let is_dir = match entry.file_type {
+                FileType::Directory => true,
+                FileType::Symlink => {
+                    // SFTP stat follows symlinks, giving us the target's type
+                    self.stat(&entry.path)
+                        .await
+                        .map(|info| info.file_type == FileType::Directory)
+                        .unwrap_or(false) // Broken symlink → treat as file (will fail gracefully)
+                }
+                _ => false,
+            };
+
+            if is_dir {
                 // Create local directory
                 tokio::fs::create_dir_all(&local_entry_path)
                     .await
                     .map_err(SftpError::IoError)?;
 
                 // Recurse into subdirectory (boxed to avoid infinite future size)
-                count += Box::pin(self.download_dir_inner(
+                count += Box::pin(self.download_dir_inner_depth(
                     &entry.path,
                     &local_entry_path,
                     transfer_id,
                     progress_tx,
                     start_time,
+                    depth + 1,
+                    cancel_flag,
                 ))
                 .await?;
             } else {
-                // Download file
-                let content = self
+                // Download file using streaming chunks instead of full-file buffering
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut remote_file = self
                     .sftp
-                    .read(&entry.path)
+                    .open(&entry.path)
                     .await
                     .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-
-                tokio::fs::write(&local_entry_path, &content)
+                let mut local_file = tokio::fs::File::create(&local_entry_path)
                     .await
                     .map_err(SftpError::IoError)?;
+                let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
+                let mut buf = vec![0u8; chunk_size];
+                let mut file_transferred: u64 = 0;
+                let file_start = std::time::Instant::now();
+                let mut last_file_progress = std::time::Instant::now();
+                // For symlinks, entry.size is the symlink size, not the target's.
+                // Pre-fetch the real file size for accurate progress reporting.
+                let real_size = if entry.file_type == FileType::Symlink {
+                    self.stat(&entry.path).await.map(|info| info.size).unwrap_or(entry.size)
+                } else {
+                    entry.size
+                };
+                loop {
+                    let n = remote_file.read(&mut buf).await
+                        .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+                    if n == 0 { break; }
+                    local_file.write_all(&buf[..n]).await.map_err(SftpError::IoError)?;
+                    file_transferred += n as u64;
+
+                    // Per-chunk progress for large files (throttled to 200ms)
+                    if last_file_progress.elapsed().as_millis() >= 200 {
+                        if let Some(ref tx) = progress_tx {
+                            let elapsed = file_start.elapsed().as_secs_f64();
+                            let speed = if elapsed > 0.0 {
+                                (file_transferred as f64 / elapsed) as u64
+                            } else {
+                                0
+                            };
+                            let eta = if speed > 0 && real_size > file_transferred {
+                                Some(((real_size - file_transferred) as f64 / speed as f64) as u64)
+                            } else {
+                                None
+                            };
+                            let _ = tx
+                                .send(TransferProgress {
+                                    id: transfer_id.to_string(),
+                                    remote_path: entry.path.clone(),
+                                    local_path: local_entry_path.clone(),
+                                    direction: TransferDirection::Download,
+                                    state: TransferState::InProgress,
+                                    total_bytes: real_size,
+                                    transferred_bytes: file_transferred,
+                                    speed,
+                                    eta_seconds: eta,
+                                    error: None,
+                                })
+                                .await;
+                            last_file_progress = std::time::Instant::now();
+                        }
+                    }
+                }
+                local_file.flush().await.map_err(SftpError::IoError)?;
 
                 count += 1;
 
-                // Send progress
+                // Final file progress (ensure 100%)
                 if let Some(ref tx) = progress_tx {
-                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let elapsed = file_start.elapsed().as_secs_f64();
                     let speed = if elapsed > 0.0 {
-                        (content.len() as f64 / elapsed) as u64
+                        (file_transferred as f64 / elapsed) as u64
                     } else {
                         0
                     };
@@ -846,10 +945,10 @@ impl SftpSession {
                             local_path: local_entry_path.clone(),
                             direction: TransferDirection::Download,
                             state: TransferState::InProgress,
-                            total_bytes: entry.size,
-                            transferred_bytes: entry.size,
+                            total_bytes: real_size,
+                            transferred_bytes: file_transferred,
                             speed,
-                            eta_seconds: None,
+                            eta_seconds: Some(0),
                             error: None,
                         })
                         .await;
@@ -866,6 +965,7 @@ impl SftpSession {
         local_path: &str,
         remote_path: &str,
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
+        cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<u64, SftpError> {
         let canonical_path = if is_absolute_remote_path(remote_path) {
             remote_path.to_string()
@@ -877,8 +977,43 @@ impl SftpSession {
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let start_time = std::time::Instant::now();
 
-        // Create remote directory
-        let _ = self.mkdir(&canonical_path).await; // Ignore error if exists
+        // Phase 1: Pre-scan local directory tree and batch-create all remote directories.
+        // This eliminates serial mkdir round-trips (N dirs × RTT → 1 parallel batch).
+        let mut dir_queue = vec![(local_path.to_string(), canonical_path.clone())];
+        let mut all_remote_dirs: Vec<String> = vec![canonical_path.clone()];
+        while let Some((local_dir, remote_dir)) = dir_queue.pop() {
+            // Check cancellation during scan
+            if let Some(ref flag) = cancel_flag {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    info!("Upload directory cancelled during pre-scan");
+                    return Err(SftpError::TransferCancelled);
+                }
+            }
+            let mut entries = tokio::fs::read_dir(&local_dir)
+                .await
+                .map_err(SftpError::IoError)?;
+            while let Some(entry) = entries.next_entry().await.map_err(SftpError::IoError)? {
+                let metadata = match tokio::fs::metadata(entry.path()).await {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if metadata.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let child_remote = join_remote_path(&remote_dir, &name);
+                    all_remote_dirs.push(child_remote.clone());
+                    dir_queue.push((entry.path().to_string_lossy().to_string(), child_remote));
+                }
+            }
+        }
+
+        // Batch create all remote directories (parallel, ignoring "already exists" errors)
+        let mkdir_futs: Vec<_> = all_remote_dirs.iter().map(|d| self.mkdir(d)).collect();
+        let mkdir_results = futures_util::future::join_all(mkdir_futs).await;
+        for (i, result) in mkdir_results.iter().enumerate() {
+            if let Err(e) = result {
+                debug!("mkdir {:?} (may already exist): {}", all_remote_dirs[i], e);
+            }
+        }
 
         let total_count = self
             .upload_dir_inner(
@@ -887,6 +1022,7 @@ impl SftpSession {
                 &transfer_id,
                 &progress_tx,
                 &start_time,
+                &cancel_flag,
             )
             .await?;
 
@@ -902,7 +1038,30 @@ impl SftpSession {
         transfer_id: &str,
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         start_time: &std::time::Instant,
+        cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<u64, SftpError> {
+        self.upload_dir_inner_depth(local_path, remote_path, transfer_id, progress_tx, start_time, 0, cancel_flag)
+            .await
+    }
+
+    /// Internal recursive directory upload with depth guard
+    async fn upload_dir_inner_depth(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        transfer_id: &str,
+        progress_tx: &Option<mpsc::Sender<TransferProgress>>,
+        start_time: &std::time::Instant,
+        depth: u32,
+        cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Result<u64, SftpError> {
+        // Guard against symlink cycles
+        const MAX_DEPTH: u32 = 64;
+        if depth >= MAX_DEPTH {
+            warn!("upload_dir_inner: max recursion depth {} reached at {:?}, likely symlink cycle", MAX_DEPTH, local_path);
+            return Ok(0);
+        }
+
         let mut entries = tokio::fs::read_dir(local_path)
             .await
             .map_err(SftpError::IoError)?;
@@ -910,43 +1069,113 @@ impl SftpSession {
         let mut count = 0u64;
 
         while let Some(entry) = entries.next_entry().await.map_err(SftpError::IoError)? {
+            // Check cancellation before processing each entry
+            if let Some(ref flag) = cancel_flag {
+                if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    info!("Upload directory cancelled at {} files", count);
+                    return Err(SftpError::TransferCancelled);
+                }
+            }
+
             let name = entry.file_name().to_string_lossy().to_string();
             let local_entry_path = entry.path();
             let remote_entry_path = join_remote_path(remote_path, &name);
 
-            let metadata = entry.metadata().await.map_err(SftpError::IoError)?;
+            // Use tokio::fs::metadata (stat) instead of entry.metadata (lstat)
+            // so that symlinks to directories are correctly identified as directories.
+            let metadata = match tokio::fs::metadata(&local_entry_path).await {
+                Ok(m) => m,
+                Err(e) => {
+                    // Broken symlink or inaccessible entry — skip with warning
+                    warn!("Skipping inaccessible entry {:?}: {}", local_entry_path, e);
+                    continue;
+                }
+            };
 
             if metadata.is_dir() {
-                // Create remote directory
-                let _ = self.mkdir(&remote_entry_path).await;
-
-                // Recurse into subdirectory (boxed to avoid infinite future size)
-                count += Box::pin(self.upload_dir_inner(
+                // Directory already created in batch phase; just recurse
+                count += Box::pin(self.upload_dir_inner_depth(
                     local_entry_path.to_string_lossy().as_ref(),
                     &remote_entry_path,
                     transfer_id,
                     progress_tx,
                     start_time,
+                    depth + 1,
+                    cancel_flag,
                 ))
                 .await?;
+            } else if !metadata.is_file() {
+                // Skip special files (named pipes, sockets, devices)
+                warn!("Skipping special file {:?} (not regular file or directory)", local_entry_path);
+                continue;
             } else {
-                // Upload file
-                let content = tokio::fs::read(&local_entry_path)
+                // Upload file using streaming chunks instead of full-file buffering
+                use tokio::io::AsyncReadExt;
+                let mut local_file = tokio::fs::File::open(&local_entry_path)
                     .await
                     .map_err(SftpError::IoError)?;
+                let file_size = local_file.metadata().await.map_err(SftpError::IoError)?.len();
+                let mut remote_file = self
+                    .sftp
+                    .create(&remote_entry_path)
+                    .await
+                    .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+                let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
+                let mut buf = vec![0u8; chunk_size];
+                let mut file_transferred: u64 = 0;
+                let file_start = std::time::Instant::now();
+                let mut last_file_progress = std::time::Instant::now();
+                loop {
+                    let n = local_file.read(&mut buf).await.map_err(SftpError::IoError)?;
+                    if n == 0 { break; }
+                    tokio::io::AsyncWriteExt::write_all(&mut remote_file, &buf[..n])
+                        .await
+                        .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+                    file_transferred += n as u64;
 
-                self.sftp
-                    .write(&remote_entry_path, &content)
+                    // Per-chunk progress for large files (throttled to 200ms)
+                    if last_file_progress.elapsed().as_millis() >= 200 {
+                        if let Some(ref tx) = progress_tx {
+                            let elapsed = file_start.elapsed().as_secs_f64();
+                            let speed = if elapsed > 0.0 {
+                                (file_transferred as f64 / elapsed) as u64
+                            } else {
+                                0
+                            };
+                            let eta = if speed > 0 && file_size > file_transferred {
+                                Some(((file_size - file_transferred) as f64 / speed as f64) as u64)
+                            } else {
+                                None
+                            };
+                            let _ = tx
+                                .send(TransferProgress {
+                                    id: transfer_id.to_string(),
+                                    remote_path: remote_entry_path.clone(),
+                                    local_path: local_entry_path.to_string_lossy().to_string(),
+                                    direction: TransferDirection::Upload,
+                                    state: TransferState::InProgress,
+                                    total_bytes: file_size,
+                                    transferred_bytes: file_transferred,
+                                    speed,
+                                    eta_seconds: eta,
+                                    error: None,
+                                })
+                                .await;
+                            last_file_progress = std::time::Instant::now();
+                        }
+                    }
+                }
+                tokio::io::AsyncWriteExt::flush(&mut remote_file)
                     .await
                     .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
 
                 count += 1;
 
-                // Send progress
+                // Final file progress (ensure 100%)
                 if let Some(ref tx) = progress_tx {
-                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let elapsed = file_start.elapsed().as_secs_f64();
                     let speed = if elapsed > 0.0 {
-                        (content.len() as f64 / elapsed) as u64
+                        (file_transferred as f64 / elapsed) as u64
                     } else {
                         0
                     };
@@ -958,10 +1187,10 @@ impl SftpSession {
                             local_path: local_entry_path.to_string_lossy().to_string(),
                             direction: TransferDirection::Upload,
                             state: TransferState::InProgress,
-                            total_bytes: content.len() as u64,
-                            transferred_bytes: content.len() as u64,
+                            total_bytes: file_size,
+                            transferred_bytes: file_transferred,
                             speed,
-                            eta_seconds: None,
+                            eta_seconds: Some(0),
                             error: None,
                         })
                         .await;
@@ -977,14 +1206,28 @@ impl SftpSession {
         let canonical_path = self.resolve_path(path).await?;
         info!("Deleting: {}", canonical_path);
 
-        let info = self.stat(&canonical_path).await?;
+        // Use symlink_metadata (lstat) first to detect symlinks.
+        // If the path is a symlink (even to a directory), we must use remove_file,
+        // because remove_dir on a symlink fails on POSIX systems.
+        let lstat_meta = self
+            .sftp
+            .symlink_metadata(&canonical_path)
+            .await
+            .map_err(|e| self.map_sftp_error(e, &canonical_path))?;
 
-        if info.file_type == FileType::Directory {
+        if lstat_meta.is_symlink() || lstat_meta.is_regular() {
+            // Symlinks and regular files
+            self.sftp
+                .remove_file(&canonical_path)
+                .await
+                .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
+        } else if lstat_meta.is_dir() {
             self.sftp
                 .remove_dir(&canonical_path)
                 .await
                 .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
         } else {
+            // Unknown type — try remove_file as fallback
             self.sftp
                 .remove_file(&canonical_path)
                 .await
@@ -1004,11 +1247,18 @@ impl SftpSession {
 
     /// Internal recursive delete implementation
     async fn delete_recursive_inner(&self, path: &str) -> Result<u64, SftpError> {
-        let info = self.stat(path).await?;
+        // Use symlink_metadata (lstat) to check the entry itself, not the target.
+        // Symlinks (even to directories) should be removed with remove_file,
+        // not recursed into — otherwise we'd delete the target directory's contents.
+        let lstat_meta = self
+            .sftp
+            .symlink_metadata(path)
+            .await
+            .map_err(|e| self.map_sftp_error(e, path))?;
         let mut deleted_count = 0u64;
 
-        if info.file_type == FileType::Directory {
-            // List directory contents
+        if lstat_meta.is_dir() {
+            // Real directory — recurse
             let entries = self
                 .list_dir(
                     path,
@@ -1032,7 +1282,7 @@ impl SftpSession {
                 .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
             deleted_count += 1;
         } else {
-            // Delete file
+            // File, symlink, or anything else — remove_file
             self.sftp
                 .remove_file(path)
                 .await
@@ -1293,9 +1543,18 @@ impl SftpSession {
         }
 
         // Transfer loop with cooperative cancellation and timeout protection
-        let chunk_size = 65536; // 64 KB chunks
+        let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
         let mut buffer = vec![0u8; chunk_size];
         let mut transferred = ctx.offset;
+
+        // Progress throttling: emit at most every 200ms to reduce IPC overhead
+        let mut last_progress_time = std::time::Instant::now();
+        const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+        // Speed calculation: sliding window over the last 2 seconds
+        let transfer_start = std::time::Instant::now();
+        let mut speed_window_bytes: u64 = 0;
+        let mut speed_window_start = std::time::Instant::now();
+        let mut current_speed: u64 = 0;
 
         loop {
             // Check for cancellation before each read/write cycle
@@ -1355,24 +1614,72 @@ impl SftpSession {
             }
 
             transferred += bytes_read as u64;
+            speed_window_bytes += bytes_read as u64;
 
-            // Send progress update
-            if let Some(ref tx) = progress_tx {
-                let _ = tx
-                    .send(TransferProgress {
-                        id: ctx.transfer_id.clone(),
-                        remote_path: remote_path.to_string(),
-                        local_path: local_path.to_string(),
-                        direction: TransferDirection::Download,
-                        state: TransferState::InProgress,
-                        total_bytes, // Use actual total_bytes
-                        transferred_bytes: transferred,
-                        speed: 0,
-                        eta_seconds: None,
-                        error: None,
-                    })
-                    .await;
+            // Update speed calculation (sliding window)
+            let window_elapsed = speed_window_start.elapsed();
+            if window_elapsed.as_secs_f64() >= 2.0 {
+                current_speed = (speed_window_bytes as f64 / window_elapsed.as_secs_f64()) as u64;
+                speed_window_bytes = 0;
+                speed_window_start = std::time::Instant::now();
             }
+
+            // Send progress update (throttled to reduce IPC overhead)
+            if last_progress_time.elapsed() >= PROGRESS_INTERVAL {
+                if let Some(ref tx) = progress_tx {
+                    // Use sliding window speed; fall back to overall average during cold start (<2s)
+                    let effective_speed = if current_speed > 0 {
+                        current_speed
+                    } else {
+                        let elapsed = transfer_start.elapsed().as_secs_f64();
+                        if elapsed > 0.0 { ((transferred - ctx.offset) as f64 / elapsed) as u64 } else { 0 }
+                    };
+                    let eta = if effective_speed > 0 && total_bytes > transferred {
+                        Some(((total_bytes - transferred) as f64 / effective_speed as f64) as u64)
+                    } else {
+                        None
+                    };
+                    let _ = tx
+                        .send(TransferProgress {
+                            id: ctx.transfer_id.clone(),
+                            remote_path: remote_path.to_string(),
+                            local_path: local_path.to_string(),
+                            direction: TransferDirection::Download,
+                            state: TransferState::InProgress,
+                            total_bytes,
+                            transferred_bytes: transferred,
+                            speed: effective_speed,
+                            eta_seconds: eta,
+                            error: None,
+                        })
+                        .await;
+                }
+                last_progress_time = std::time::Instant::now();
+            }
+        }
+
+        // Final progress update to ensure 100% is reported
+        if let Some(ref tx) = progress_tx {
+            let total_elapsed = transfer_start.elapsed().as_secs_f64();
+            let avg_speed = if total_elapsed > 0.0 {
+                ((transferred - ctx.offset) as f64 / total_elapsed) as u64
+            } else {
+                0
+            };
+            let _ = tx
+                .send(TransferProgress {
+                    id: ctx.transfer_id.clone(),
+                    remote_path: remote_path.to_string(),
+                    local_path: local_path.to_string(),
+                    direction: TransferDirection::Download,
+                    state: TransferState::InProgress,
+                    total_bytes,
+                    transferred_bytes: transferred,
+                    speed: avg_speed,
+                    eta_seconds: Some(0),
+                    error: None,
+                })
+                .await;
         }
 
         local_file.flush().await.map_err(SftpError::IoError)?;
@@ -1675,9 +1982,18 @@ impl SftpSession {
         };
 
         // Transfer loop with cooperative cancellation and timeout protection
-        let chunk_size = 65536; // 64 KB chunks
+        let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
         let mut buffer = vec![0u8; chunk_size];
         let mut transferred = ctx.offset;
+
+        // Progress throttling: emit at most every 200ms to reduce IPC overhead
+        let mut last_progress_time = std::time::Instant::now();
+        const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+        // Speed calculation: sliding window over the last 2 seconds
+        let transfer_start = std::time::Instant::now();
+        let mut speed_window_bytes: u64 = 0;
+        let mut speed_window_start = std::time::Instant::now();
+        let mut current_speed: u64 = 0;
 
         loop {
             // Check for cancellation before each read/write cycle
@@ -1728,24 +2044,72 @@ impl SftpSession {
             }
 
             transferred += bytes_read as u64;
+            speed_window_bytes += bytes_read as u64;
 
-            // Send progress update
-            if let Some(ref tx) = progress_tx {
-                let _ = tx
-                    .send(TransferProgress {
-                        id: ctx.transfer_id.clone(),
-                        remote_path: remote_path.to_string(),
-                        local_path: local_path.to_string(),
-                        direction: TransferDirection::Upload,
-                        state: TransferState::InProgress,
-                        total_bytes,
-                        transferred_bytes: transferred,
-                        speed: 0,
-                        eta_seconds: None,
-                        error: None,
-                    })
-                    .await;
+            // Update speed calculation (sliding window)
+            let window_elapsed = speed_window_start.elapsed();
+            if window_elapsed.as_secs_f64() >= 2.0 {
+                current_speed = (speed_window_bytes as f64 / window_elapsed.as_secs_f64()) as u64;
+                speed_window_bytes = 0;
+                speed_window_start = std::time::Instant::now();
             }
+
+            // Send progress update (throttled to reduce IPC overhead)
+            if last_progress_time.elapsed() >= PROGRESS_INTERVAL {
+                if let Some(ref tx) = progress_tx {
+                    // Use sliding window speed; fall back to overall average during cold start (<2s)
+                    let effective_speed = if current_speed > 0 {
+                        current_speed
+                    } else {
+                        let elapsed = transfer_start.elapsed().as_secs_f64();
+                        if elapsed > 0.0 { ((transferred - ctx.offset) as f64 / elapsed) as u64 } else { 0 }
+                    };
+                    let eta = if effective_speed > 0 && total_bytes > transferred {
+                        Some(((total_bytes - transferred) as f64 / effective_speed as f64) as u64)
+                    } else {
+                        None
+                    };
+                    let _ = tx
+                        .send(TransferProgress {
+                            id: ctx.transfer_id.clone(),
+                            remote_path: remote_path.to_string(),
+                            local_path: local_path.to_string(),
+                            direction: TransferDirection::Upload,
+                            state: TransferState::InProgress,
+                            total_bytes,
+                            transferred_bytes: transferred,
+                            speed: effective_speed,
+                            eta_seconds: eta,
+                            error: None,
+                        })
+                        .await;
+                }
+                last_progress_time = std::time::Instant::now();
+            }
+        }
+
+        // Final progress update to ensure 100% is reported
+        if let Some(ref tx) = progress_tx {
+            let total_elapsed = transfer_start.elapsed().as_secs_f64();
+            let avg_speed = if total_elapsed > 0.0 {
+                ((transferred - ctx.offset) as f64 / total_elapsed) as u64
+            } else {
+                0
+            };
+            let _ = tx
+                .send(TransferProgress {
+                    id: ctx.transfer_id.clone(),
+                    remote_path: remote_path.to_string(),
+                    local_path: local_path.to_string(),
+                    direction: TransferDirection::Upload,
+                    state: TransferState::InProgress,
+                    total_bytes,
+                    transferred_bytes: transferred,
+                    speed: avg_speed,
+                    eta_seconds: Some(0),
+                    error: None,
+                })
+                .await;
         }
 
         // Flush remote file (with timeout)

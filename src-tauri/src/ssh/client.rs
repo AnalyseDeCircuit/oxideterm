@@ -45,6 +45,10 @@ impl SshClient {
             inactivity_timeout: None, // Disabled: app-level heartbeat handles liveness
             keepalive_interval: Some(Duration::from_secs(30)),
             keepalive_max: 3,
+            // Increase window/packet sizes for high-throughput SFTP transfers
+            // Default: window_size=2MB, maximum_packet_size=32KB
+            window_size: 32 * 1024 * 1024,   // 32 MB — eliminates WINDOW_ADJUST stalls
+            maximum_packet_size: 256 * 1024,  // 256 KB — matches SFTP chunk size
             ..Default::default()
         };
 

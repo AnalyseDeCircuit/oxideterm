@@ -1021,6 +1021,8 @@ impl SshConnectionRegistry {
             inactivity_timeout: None,
             keepalive_interval: Some(std::time::Duration::from_secs(30)),
             keepalive_max: 3,
+            window_size: 32 * 1024 * 1024,
+            maximum_packet_size: 256 * 1024,
             ..Default::default()
         };
 

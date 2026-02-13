@@ -170,6 +170,8 @@ async fn run_kbi_flow(
         inactivity_timeout: Some(Duration::from_secs(300)),
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
+        window_size: 32 * 1024 * 1024,
+        maximum_packet_size: 256 * 1024,
         ..Default::default()
     });
 

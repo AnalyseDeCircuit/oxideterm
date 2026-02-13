@@ -89,6 +89,8 @@ chardetng = "0.1"
 # Archive (compression/extraction)
 zip = "2.0"
 walkdir = "2"
+tar = "0.4"
+flate2 = "1"
 
 # File type detection (magic bytes)
 infer = "0.16"

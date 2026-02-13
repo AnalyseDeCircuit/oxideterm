@@ -40,7 +40,7 @@ import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
 import { PdfViewer } from '../fileManager/PdfViewer';
 import { ImageViewer } from '../fileManager/ImageViewer';
-import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename, cleanupSftpPreviewTemp } from '../../lib/api';
+import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpTarProbe, nodeSftpTarUpload, nodeSftpTarDownload, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename, cleanupSftpPreviewTemp } from '../../lib/api';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -609,6 +609,17 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const [initRetryTick, setInitRetryTick] = useState(0);
   const initializingRef = useRef(false);
   const guardErrorNotifiedRef = useRef(false);
+
+  // Tar capability cache: null = not probed, true/false = result
+  const tarSupportRef = useRef<boolean | null>(null);
+  const tarProbingRef = useRef(false);
+  const tarProbePromiseRef = useRef<Promise<boolean> | null>(null);
+
+  useEffect(() => {
+    tarSupportRef.current = null;
+    tarProbingRef.current = false;
+    tarProbePromiseRef.current = null;
+  }, [nodeId]);
 
   // Path input state for editable path bars
   const [localPathInput, setLocalPathInput] = useState('');
@@ -1184,6 +1195,53 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
     return newName;
   };
 
+  // Try tar streaming for directory transfer; fall back to SFTP if unavailable
+  const transferDirWithTarFallback = async (
+    nid: string,
+    localFile: string,
+    remoteFile: string,
+    tid: string,
+    dir: 'upload' | 'download'
+  ) => {
+    // Lazy-probe tar support (deduplicated for concurrent transfers)
+    if (tarSupportRef.current === null) {
+      if (!tarProbePromiseRef.current) {
+        tarProbingRef.current = true;
+        tarProbePromiseRef.current = nodeSftpTarProbe(nid)
+          .then((supported) => {
+            tarSupportRef.current = supported;
+            return supported;
+          })
+          .catch(() => {
+            tarSupportRef.current = false;
+            return false;
+          })
+          .finally(() => {
+            tarProbingRef.current = false;
+            tarProbePromiseRef.current = null;
+          });
+      }
+
+      tarSupportRef.current = await tarProbePromiseRef.current;
+    }
+
+    if (tarSupportRef.current) {
+      // Tar fast path
+      if (dir === 'upload') {
+        await nodeSftpTarUpload(nid, localFile, remoteFile, tid);
+      } else {
+        await nodeSftpTarDownload(nid, remoteFile, localFile, tid);
+      }
+    } else {
+      // SFTP fallback
+      if (dir === 'upload') {
+        await nodeSftpUploadDir(nid, localFile, remoteFile, tid);
+      } else {
+        await nodeSftpDownloadDir(nid, remoteFile, localFile, tid);
+      }
+    }
+  };
+
   // Execute single file transfer
   const executeTransfer = async (
     file: string,
@@ -1215,13 +1273,13 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
     try {
       if (direction === 'upload') {
         if (isDirectory) {
-          await nodeSftpUploadDir(nodeId, localFilePath, remoteFilePath);
+          await transferDirWithTarFallback(nodeId, localFilePath, remoteFilePath, transferId, 'upload');
         } else {
           await nodeSftpUpload(nodeId, localFilePath, remoteFilePath, transferId);
         }
       } else {
         if (isDirectory) {
-          await nodeSftpDownloadDir(nodeId, remoteFilePath, localFilePath);
+          await transferDirWithTarFallback(nodeId, localFilePath, remoteFilePath, transferId, 'download');
         } else {
           await nodeSftpDownload(nodeId, remoteFilePath, localFilePath, transferId);
         }

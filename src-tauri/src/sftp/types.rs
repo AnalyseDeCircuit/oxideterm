@@ -232,8 +232,8 @@ pub struct ListFilter {
 
 /// Constants for SFTP operations
 pub mod constants {
-    /// Default chunk size for file transfers (64 KB)
-    pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
+    /// Default chunk size for file transfers (256 KB)
+    pub const DEFAULT_CHUNK_SIZE: usize = 256 * 1024;
 
     /// Maximum file size for preview (10 MB)
     pub const MAX_PREVIEW_SIZE: u64 = 10 * 1024 * 1024;

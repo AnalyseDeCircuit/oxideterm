@@ -1303,12 +1303,24 @@ export const nodeSftpRename = (nodeId: string, oldPath: string, newPath: string)
   invoke('node_sftp_rename', { nodeId, oldPath, newPath });
 
 /** 递归下载目录 */
-export const nodeSftpDownloadDir = (nodeId: string, remotePath: string, localPath: string): Promise<number> =>
-  invoke('node_sftp_download_dir', { nodeId, remotePath, localPath });
+export const nodeSftpDownloadDir = (nodeId: string, remotePath: string, localPath: string, transferId?: string): Promise<number> =>
+  invoke('node_sftp_download_dir', { nodeId, remotePath, localPath, transferId });
 
 /** 递归上传目录 */
-export const nodeSftpUploadDir = (nodeId: string, localPath: string, remotePath: string): Promise<number> =>
-  invoke('node_sftp_upload_dir', { nodeId, localPath, remotePath });
+export const nodeSftpUploadDir = (nodeId: string, localPath: string, remotePath: string, transferId?: string): Promise<number> =>
+  invoke('node_sftp_upload_dir', { nodeId, localPath, remotePath, transferId });
+
+/** 探测远端是否支持 tar 命令（结果应缓存） */
+export const nodeSftpTarProbe = (nodeId: string): Promise<boolean> =>
+  invoke('node_sftp_tar_probe', { nodeId });
+
+/** Tar 流式上传目录（远端需支持 tar） */
+export const nodeSftpTarUpload = (nodeId: string, localPath: string, remotePath: string, transferId?: string): Promise<number> =>
+  invoke('node_sftp_tar_upload', { nodeId, localPath, remotePath, transferId });
+
+/** Tar 流式下载目录（远端需支持 tar） */
+export const nodeSftpTarDownload = (nodeId: string, remotePath: string, localPath: string, transferId?: string): Promise<number> =>
+  invoke('node_sftp_tar_download', { nodeId, remotePath, localPath, transferId });
 
 /** 十六进制预览 */
 export const nodeSftpPreviewHex = (nodeId: string, path: string, offset: number): Promise<PreviewContent> =>
