@@ -532,6 +532,98 @@
   --theme-accent-hover: #c20061;
 }
 
+/* 
+  Spring Rice Theme
+  春稻主题
+  
+  White·Gold·Blue gradient core:
+  - White: Moonwhite #f0eeed / Frost white #f5f5fa (silver clouds)
+  - Gold: Wheat gold #b49b64 / #c3aa73 (ripe grain)
+  - Blue: Indigo #191978 / Navy #1e2350 / Sky blue #8ca0b4 (water and sky)
+  
+  Spring yellow-green #dcde78 as visual center, tricolor as structural accents
+  Creating \"seedlings under skylight\" spring atmosphere
+*/
+
+[data-theme="spring-rice"] {
+  /* ===== 背景层级 (春日梯田层次) ===== */
+  /* 主背景：春日秧田，明确的青黄调 */
+  --theme-bg: #e8ead0;
+  /* 面板：阳光秧田，饱满的春芽黄绿 */
+  --theme-bg-panel: #e6e8b8;
+  /* 次级面板：水光映绿，带青调的淡绿 */
+  --theme-bg-secondary: #dce8e0;
+  /* 悬停：麦穗金晕，暖黄 */
+  --theme-bg-hover: #e8dd98;
+  /* 选中/激活：天水淡蓝 */
+  --theme-bg-active: #d8e6f0;
+  
+  /* ===== 文字层级 (白金蓝渐变) ===== */
+  /* 主文字：深藏蓝 */
+  --theme-text: #1e2350;
+  /* 次要文字：靛蓝灰 */
+  --theme-text-secondary: #3a4080;
+  /* 弱化文字：天青灰 */
+  --theme-text-muted: #8ca0b4;
+  /* 反白文字 (用于有色背景) */
+  --theme-text-inverse: #fefefe;
+  
+  /* ===== 强调色 (春之华彩) ===== */
+  /* 主强调：春芽黄 */
+  --theme-accent: #dcde78;
+  /* 强调悬停：淡麦金 */
+  --theme-accent-hover: #d4c86e;
+  /* 强调文字：深春芽 (降饱和) */
+  --theme-accent-text: #5c5d2e;
+  /* 次要强调：天青 */
+  --theme-accent-secondary: #8ca0b4;
+  /* 辅助强调：麦穗金 */
+  --theme-accent-tertiary: #c3aa73;
+  
+  /* ===== 边框与分隔 (白金蓝水线) ===== */
+  /* 主边框：天青水线 */
+  --theme-border: #a8bcd0;
+  /* 强边框：深靛蓝 */
+  --theme-border-strong: #191978;
+  /* 分隔线：麦田金 */
+  --theme-divider: #d8d0a0;
+  
+  /* ===== 功能色 (五行配色) ===== */
+  /* 成功：秧苗青 */
+  --theme-success: #7db9a8;
+  /* 警告：麦芒黄 */
+  --theme-warning: #e6c888;
+  /* 错误：土壤赭 (低饱和红) */
+  --theme-error: #c97b63;
+  /* 信息：深靛蓝 */
+  --theme-info: #191978;
+  
+  /* ===== 特殊元素 ===== */
+  /* 阴影：靛蓝冷调 */
+  --theme-shadow: rgba(25, 25, 120, 0.06);
+  --theme-shadow-colored: rgba(25, 25, 120, 0.15);
+  
+  /* 渐变：白·金·蓝 三色渐变 (用于 Hero/Header) */
+  --theme-gradient-primary: linear-gradient(135deg, 
+    #f5f5fa 0%,        /* 霜白 */
+    #c3aa73 45%,       /* 麦金 */
+    #191978 100%       /* 深靛蓝 */
+  );
+  
+  /* 渐变：天光梯田 (用于 Card/Panel) */
+  --theme-gradient-secondary: linear-gradient(180deg,
+    #e6e8b8 0%,        /* 春芽黄绿 */
+    #a8bcd0 100%       /* 天青蓝 */
+  );
+  
+  /* 渐变：麦穗映蓝天 (用于 Button/Hover) */
+  --theme-gradient-accent: linear-gradient(90deg,
+    #dcde78 0%,        /* 春芽黄 */
+    #c3aa73 50%,       /* 麦金 */
+    #8ca0b4 100%       /* 天青 */
+  );
+}
+
 /* Spring Green Theme - Light/Fresh Variant (Refined) */
 [data-theme="spring-green"] {
   --theme-bg: #e2f5e9;

@@ -640,6 +640,31 @@ export const themes: Record<string, ITheme> = {
     brightCyan: '#33ccdd',
     brightWhite: '#401020',
   },
+  // ── Spring Rice Theme ──────────────────────────────────────
+  // White·Gold·Blue gradient with spring yellow-green as visual center
+  // Indigo #191978 / Navy #1e2350 / Sky blue #8ca0b4 / Wheat gold #b49b64 / Spring yellow #dcde78
+  'spring-rice': {
+    background: '#e8ead0',     // 春日秧田（青黄底）
+    foreground: '#1e2350',     // 深藏蓝
+    cursor: '#dcde78',         // 春芽黄
+    selectionBackground: 'rgba(25, 25, 120, 0.15)', // 靛蓝选区
+    black: '#1e2350',          // 深藏蓝
+    red: '#a05a3e',            // 深赭
+    green: '#3a7a5e',          // 深秧青
+    yellow: '#8a8520',         // 深麦黄
+    blue: '#191978',           // 深靛蓝
+    magenta: '#4a4d8a',        // 深靛紫
+    cyan: '#3a6a72',           // 深土青
+    white: '#4a6a5a',          // 土青
+    brightBlack: '#3a4080',    // 靛灰
+    brightRed: '#b86a4a',      // 赭红
+    brightGreen: '#4a8a6a',    // 秧苗青
+    brightYellow: '#9a9030',   // 麦黄
+    brightBlue: '#4a5098',     // 亮靛蓝
+    brightMagenta: '#5a5aa0',  // 靛紫
+    brightCyan: '#4a7a85',     // 土青
+    brightWhite: '#5a7a6a',    // 深土青
+  },
   'spring-green': {
     background: '#e2f5e9', // Warmer/Softer Mint
     foreground: '#1a4d33', // Softer Dark Green
