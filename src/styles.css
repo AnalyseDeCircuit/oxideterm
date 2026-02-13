@@ -365,6 +365,124 @@
   --theme-accent-hover: #F97316;
 }
 
+/* Tokyo Night Theme */
+[data-theme="tokyo-night"] {
+  --theme-bg: #1a1b26;
+  --theme-bg-panel: #16161e;
+  /* Slightly darker than bg */
+  --theme-bg-hover: #24283b;
+  /* Lighter selection */
+  --theme-border: #24283b;
+  --theme-text: #c0caf5;
+  --theme-text-muted: #565f89;
+  --theme-accent: #7aa2f7;
+  --theme-accent-hover: #bb9af7;
+}
+
+/* Gruvbox Dark Theme */
+[data-theme="gruvbox-dark"] {
+  --theme-bg: #282828;
+  --theme-bg-panel: #1d2021;
+  /* Hard dark */
+  --theme-bg-hover: #3c3836;
+  --theme-border: #3c3836;
+  --theme-text: #ebdbb2;
+  --theme-text-muted: #928374;
+  --theme-accent: #d79921;
+  /* Yellow */
+  --theme-accent-hover: #fabd2f;
+}
+
+/* Rose Piné Theme */
+[data-theme="rose-pine"] {
+  --theme-bg: #191724;
+  --theme-bg-panel: #1f1d2e;
+  --theme-bg-hover: #26233a;
+  --theme-border: #26233a;
+  --theme-text: #e0def4;
+  --theme-text-muted: #908caa;
+  --theme-accent: #c4a7e7;
+  /* Iris/Rose */
+  --theme-accent-hover: #ebbcba;
+}
+
+/* Kanagawa Theme */
+[data-theme="kanagawa"] {
+  --theme-bg: #1F1F28;
+  --theme-bg-panel: #16161D;
+  --theme-bg-hover: #2A2A37;
+  --theme-border: #2A2A37;
+  --theme-text: #DCD7BA;
+  --theme-text-muted: #727169;
+  --theme-accent: #7E9CD8;
+  /* Blue */
+  --theme-accent-hover: #7FB4CA;
+}
+
+/* Synthwave '84 Theme */
+[data-theme="synthwave-84"] {
+  --theme-bg: #2b213a;
+  /* Deep purple */
+  --theme-bg-panel: #241b30;
+  --theme-bg-hover: #453655;
+  /* Lighter purple */
+  --theme-border: #453655;
+  --theme-text: #ffffff;
+  --theme-text-muted: #8e83a3;
+  --theme-accent: #ff7edb;
+  /* Neon pink */
+  --theme-accent-hover: #03edf9;
+  /* Neon Cyan */
+}
+
+/* Azurite Theme */
+[data-theme="azurite"] {
+  --theme-bg: #091A2E;
+  --theme-bg-panel: #0D2238;
+  --theme-bg-hover: #163250;
+  --theme-border: #163250;
+  --theme-text: #C0D8F0;
+  --theme-text-muted: #5D9CEC;
+  --theme-accent: #0066CC;
+  --theme-accent-hover: #4FC1E9;
+}
+
+/* Malachite Theme */
+[data-theme="malachite"] {
+  --theme-bg: #0B231A;
+  --theme-bg-panel: #064E3B;
+  --theme-bg-hover: #086047;
+  --theme-border: #086047;
+  --theme-text: #E0F2E9;
+  --theme-text-muted: #34D399;
+  --theme-accent: #10B981;
+  --theme-accent-hover: #6EE7B7;
+}
+
+/* Hematite Theme */
+[data-theme="hematite"] {
+  --theme-bg: #1C1C1E;
+  --theme-bg-panel: #2C2C2E;
+  --theme-bg-hover: #3A3A3C;
+  --theme-border: #3A3A3C;
+  --theme-text: #D1D1D6;
+  --theme-text-muted: #8E8E93;
+  --theme-accent: #FF3B30;
+  --theme-accent-hover: #FF453A;
+}
+
+/* Bismuth Theme */
+[data-theme="bismuth"] {
+  --theme-bg: #120F1D;
+  --theme-bg-panel: #2E1065;
+  --theme-bg-hover: #4C1D95;
+  --theme-border: #4C1D95;
+  --theme-text: #E9D5FF;
+  --theme-text-muted: #A78BFA;
+  --theme-accent: #D946EF;
+  --theme-accent-hover: #E879F9;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
@@ -524,8 +642,13 @@ html {
 
 /* Vinyl record rotation */
 @keyframes vinyl-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .audio-vinyl-disk {
@@ -544,8 +667,17 @@ html {
 
 /* Subtle outer glow ring — uses theme accent via CSS var */
 @keyframes vinyl-glow {
-  0%, 100% { opacity: 0.2; box-shadow: 0 0 16px 3px var(--theme-accent, #ea580c); }
-  50%      { opacity: 0.4; box-shadow: 0 0 24px 6px var(--theme-accent, #ea580c); }
+
+  0%,
+  100% {
+    opacity: 0.2;
+    box-shadow: 0 0 16px 3px var(--theme-accent, #ea580c);
+  }
+
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 24px 6px var(--theme-accent, #ea580c);
+  }
 }
 
 .audio-vinyl-glow {
@@ -561,6 +693,7 @@ html {
   border-radius: 9999px;
   outline: none;
 }
+
 .audio-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -570,8 +703,10 @@ html {
   background: var(--theme-accent, #ea580c);
   cursor: pointer;
   border: none;
-  margin-top: -3px; /* centre 10px thumb on 4px track */
+  margin-top: -3px;
+  /* centre 10px thumb on 4px track */
 }
+
 .audio-volume-slider::-moz-range-thumb {
   width: 10px;
   height: 10px;
@@ -580,11 +715,13 @@ html {
   cursor: pointer;
   border: none;
 }
+
 .audio-volume-slider::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 9999px;
   background: var(--theme-border, #27272a);
 }
+
 .audio-volume-slider::-moz-range-track {
   height: 4px;
   border-radius: 9999px;
@@ -597,28 +734,58 @@ html {
 
 /* Node enter animation — spring-like scale from 0 */
 @keyframes topo-enter {
-  0% { transform: scale(0); opacity: 0; }
-  70% { transform: scale(1.05); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+
+  70% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
+
 .topo-node-enter {
   animation: topo-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 /* Connecting state — pulsing glow on box-shadow */
 @keyframes topo-glow-pulse {
-  0%, 100% { box-shadow: 0 0 10px currentColor; }
-  50% { box-shadow: 0 0 25px currentColor; }
+
+  0%,
+  100% {
+    box-shadow: 0 0 10px currentColor;
+  }
+
+  50% {
+    box-shadow: 0 0 25px currentColor;
+  }
 }
+
 .topo-connecting-glow {
   animation: topo-glow-pulse 1.5s ease-in-out infinite;
 }
 
 /* Status dot pulse (scale + opacity) */
 @keyframes topo-dot-pulse-kf {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.4); opacity: 0.5; }
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
 }
+
 .topo-dot-pulse {
   animation: topo-dot-pulse-kf infinite ease-in-out;
   /* animation-duration set via inline style */
@@ -626,31 +793,69 @@ html {
 
 /* Error shake */
 @keyframes topo-shake-kf {
-  0%, 80%, 100% { transform: translateX(0); }
-  10% { transform: translateX(-2px); }
-  30% { transform: translateX(2px); }
-  50% { transform: translateX(-2px); }
-  70% { transform: translateX(0); }
+
+  0%,
+  80%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10% {
+    transform: translateX(-2px);
+  }
+
+  30% {
+    transform: translateX(2px);
+  }
+
+  50% {
+    transform: translateX(-2px);
+  }
+
+  70% {
+    transform: translateX(0);
+  }
 }
+
 .topo-shake {
   animation: topo-shake-kf 2.5s ease-in-out infinite;
 }
 
 /* Success flash */
 @keyframes topo-flash-kf {
-  0% { opacity: 0; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1.1); }
-  100% { opacity: 0; transform: scale(1); }
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  40% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
 }
+
 .topo-success-flash {
   animation: topo-flash-kf 0.8s ease-out forwards;
 }
 
 /* Menu enter */
 @keyframes topo-menu-enter-kf {
-  0% { opacity: 0; transform: scale(0.9) translateY(-10px); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
+  0% {
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
+
 .topo-menu-enter {
   animation: topo-menu-enter-kf 0.15s ease-out forwards;
 }
@@ -660,6 +865,7 @@ html {
   0% {
     transform: translateX(-100%);
   }
+
   100% {
     transform: translateX(200%);
   }
@@ -702,8 +908,7 @@ html {
   z-index: 50;
   /* Three subtle diagonal lines */
   background:
-    linear-gradient(
-      -45deg,
+    linear-gradient(-45deg,
       transparent 0%,
       transparent 30%,
       var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 30%,
@@ -716,8 +921,7 @@ html {
       transparent 70%,
       var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 70%,
       var(--theme-text-muted, rgba(161, 161, 170, 0.4)) 75%,
-      transparent 75%
-    );
+      transparent 75%);
   opacity: 0.5;
   transition: opacity 0.2s ease;
 }
@@ -738,47 +942,60 @@ html {
   --color-theme-bg-hover: color-mix(in srgb, var(--theme-bg-hover) 50%, transparent);
   --color-theme-border: color-mix(in srgb, var(--theme-border) 75%, transparent);
 }
+
 /* Hardcoded bg-zinc-* used in FileList, ForwardsView etc. — same 40% alpha */
 [data-bg-active] .bg-zinc-900 {
   background-color: rgb(24 24 27 / 0.4) !important;
 }
+
 [data-bg-active] .bg-zinc-900\/50 {
   background-color: rgb(24 24 27 / 0.25) !important;
 }
+
 [data-bg-active] .bg-zinc-900\/30 {
   background-color: rgb(24 24 27 / 0.15) !important;
 }
+
 [data-bg-active] .bg-zinc-800\/50 {
   background-color: rgb(39 39 42 / 0.25) !important;
 }
+
 [data-bg-active] .bg-zinc-950 {
   background-color: rgb(9 9 11 / 0.4) !important;
 }
+
 [data-bg-active] .bg-zinc-950\/50 {
   background-color: rgb(9 9 11 / 0.25) !important;
 }
+
 [data-bg-active] .bg-zinc-700 {
   background-color: rgb(63 63 70 / 0.4) !important;
 }
+
 [data-bg-active] .bg-black {
   background-color: rgb(0 0 0 / 0.4) !important;
 }
+
 /* CodeMirror: gutters, active line gutter, and status bar use raw CSS vars
    that bypass Tailwind mapping — override them directly. */
 [data-bg-active] .cm-gutters {
   background-color: color-mix(in srgb, var(--theme-bg-panel) 30%, transparent) !important;
 }
+
 [data-bg-active] .cm-activeLineGutter {
   background-color: color-mix(in srgb, var(--theme-accent) 40%, transparent) !important;
 }
+
 /* Topology SVG background rects */
 [data-bg-active] .topo-bg-fill {
   opacity: 0.15;
 }
+
 /* Topology page: header should be less transparent, content more transparent */
 [data-bg-active] .topo-header {
   background-color: color-mix(in srgb, var(--theme-bg-panel) 70%, transparent) !important;
 }
+
 [data-bg-active] .topo-content {
   background-color: color-mix(in srgb, var(--theme-bg) 20%, transparent) !important;
 }

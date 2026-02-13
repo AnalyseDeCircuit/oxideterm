@@ -342,7 +342,7 @@ const HelpAboutSection = () => {
     }, []);
 
     const isMac = platform.isMac;
-    
+
     // Define shortcuts by category with platform-specific keys
     const shortcutCategories = [
         {
@@ -1103,20 +1103,20 @@ export const SettingsView = () => {
                                     {/* 字体预览 */}
                                     <div className="rounded-md border border-theme-border bg-zinc-950 p-4">
                                         <p className="text-xs text-theme-text-muted mb-2">{t('settings_view.terminal.font_preview')}</p>
-                                        <div 
+                                        <div
                                             className="text-theme-text leading-relaxed"
-                                            style={{ 
-                                                fontFamily: terminal.fontFamily === 'custom' && terminal.customFontFamily 
-                                                    ? (terminal.customFontFamily.toLowerCase().includes('monospace') 
+                                            style={{
+                                                fontFamily: terminal.fontFamily === 'custom' && terminal.customFontFamily
+                                                    ? (terminal.customFontFamily.toLowerCase().includes('monospace')
                                                         ? terminal.customFontFamily.replace(/,?\s*monospace\s*$/, ', "Maple Mono NF CN (Subset)", monospace')
                                                         : `${terminal.customFontFamily}, "Maple Mono NF CN (Subset)", monospace`)
                                                     : terminal.fontFamily === 'jetbrains' ? '"JetBrainsMono Nerd Font", "JetBrains Mono NF (Subset)", "Maple Mono NF CN (Subset)", monospace'
-                                                    : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF (Subset)", "Maple Mono NF CN (Subset)", monospace'
-                                                    : terminal.fontFamily === 'maple' ? '"Maple Mono NF CN (Subset)", "Maple Mono NF", monospace'
-                                                    : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", "Maple Mono NF CN (Subset)", monospace'
-                                                    : terminal.fontFamily === 'consolas' ? 'Consolas, "Maple Mono NF CN (Subset)", monospace'
-                                                    : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, "Maple Mono NF CN (Subset)", monospace'
-                                                    : '"Maple Mono NF CN (Subset)", monospace',
+                                                        : terminal.fontFamily === 'meslo' ? '"MesloLGM Nerd Font", "MesloLGM NF (Subset)", "Maple Mono NF CN (Subset)", monospace'
+                                                            : terminal.fontFamily === 'maple' ? '"Maple Mono NF CN (Subset)", "Maple Mono NF", monospace'
+                                                                : terminal.fontFamily === 'cascadia' ? '"Cascadia Code NF", "Cascadia Code", "Maple Mono NF CN (Subset)", monospace'
+                                                                    : terminal.fontFamily === 'consolas' ? 'Consolas, "Maple Mono NF CN (Subset)", monospace'
+                                                                        : terminal.fontFamily === 'menlo' ? 'Menlo, Monaco, "Maple Mono NF CN (Subset)", monospace'
+                                                                            : '"Maple Mono NF CN (Subset)", monospace',
                                                 fontSize: `${terminal.fontSize}px`,
                                                 lineHeight: terminal.lineHeight,
                                             }}
@@ -1320,7 +1320,11 @@ export const SettingsView = () => {
                                             <SelectContent className="bg-theme-bg-panel border-theme-border max-h-[300px]">
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_oxide')}</SelectLabel>
-                                                    {['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide'].map((key) => (
+                                                    {[
+                                                        'oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre',
+                                                        'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide',
+                                                        'azurite', 'malachite', 'hematite', 'bismuth'
+                                                    ].map((key) => (
                                                         <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                             {formatThemeName(key)}
                                                         </SelectItem>
@@ -1332,7 +1336,11 @@ export const SettingsView = () => {
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_classic')}</SelectLabel>
                                                     {Object.keys(themes)
-                                                        .filter(key => !['oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre', 'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide'].includes(key))
+                                                        .filter(key => ![
+                                                            'oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre',
+                                                            'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide',
+                                                            'azurite', 'malachite', 'hematite', 'bismuth'
+                                                        ].includes(key))
                                                         .map(key => (
                                                             <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                                 {formatThemeName(key)}
@@ -1562,7 +1570,7 @@ export const SettingsView = () => {
                                                                 className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-7 w-7 p-0"
                                                                 onClick={() => {
                                                                     if (confirm(t('settings_view.ai.remove_provider_confirm', { name: provider.name }))) {
-                                                                        api.deleteAiProviderApiKey(provider.id).catch(() => {});
+                                                                        api.deleteAiProviderApiKey(provider.id).catch(() => { });
                                                                         removeProvider(provider.id);
                                                                     }
                                                                 }}
