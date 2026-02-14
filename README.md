@@ -434,6 +434,7 @@ OxideTerm/
 - [x] WSL Graphics — desktop mode + app mode VNC viewer (⚠️ Experimental)
 - [x] Background image gallery — multi-image upload, per-tab control, master toggle
 - [x] Enhanced media preview — audio/video playback in SFTP browser
+- [x] Session recording & playback
 
 ### 🚧 In Progress
 
@@ -443,8 +444,6 @@ OxideTerm/
 ### 📋 Planned
 
 - [ ] SSH Agent forwarding
-- [ ] Session recording & playback
-- [ ] Mobile adaptation (iOS / Android)
 
 ---
 

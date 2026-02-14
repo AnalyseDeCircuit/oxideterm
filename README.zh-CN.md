@@ -431,6 +431,7 @@ OxideTerm/
 - [x] WSL 图形 — 桌面模式 + 应用模式 VNC 查看器（⚠️ 实验性）
 - [x] 背景图片画廊 — 多图上传、按标签页控制、总开关
 - [x] 增强媒体预览 — SFTP 浏览器内音频/视频播放
+- [x] Enregistrement & lecture de sessions
 
 ### 🚧 进行中
 
@@ -440,8 +441,6 @@ OxideTerm/
 ### 📋 计划中
 
 - [ ] SSH Agent 转发
-- [ ] 会话录制与回放
-- [ ] 移动端适配 (iOS / Android)
 
 ---
 

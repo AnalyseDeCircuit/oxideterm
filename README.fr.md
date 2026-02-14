@@ -430,6 +430,7 @@ OxideTerm/
 - [x] WSL Graphics — mode bureau + mode application VNC (⚠️ Expérimental)
 - [x] Galerie d'images d'arrière-plan — téléversement multi-images, contrôle par onglet, interrupteur principal
 - [x] Aperçu multimédia amélioré — lecture audio/vidéo dans le navigateur SFTP
+- [x] Enregistrement & lecture de sessions
 
 ### 🚧 En cours
 
@@ -439,8 +440,6 @@ OxideTerm/
 ### 📋 Planifié
 
 - [ ] Transfert SSH Agent
-- [ ] Enregistrement & lecture de sessions
-- [ ] Adaptation mobile (iOS / Android)
 
 ---
 
