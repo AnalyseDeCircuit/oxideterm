@@ -295,12 +295,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
     el.addEventListener('progress', onProgress);
 
     return () => {
+      el.pause();
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('loadedmetadata', onMeta);
       el.removeEventListener('ended', onEnd);
       el.removeEventListener('play', onPlay);
       el.removeEventListener('pause', onPause);
       el.removeEventListener('progress', onProgress);
+      // Release browser-buffered decoded video data to prevent memory leaks
+      el.removeAttribute('src');
+      el.load();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

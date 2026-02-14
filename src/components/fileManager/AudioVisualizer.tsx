@@ -186,6 +186,9 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       el.removeEventListener('loadedmetadata', onMeta);
       el.removeEventListener('ended', onEnd);
       el.removeEventListener('error', onError);
+      // Release browser-buffered decoded audio data to prevent memory leaks
+      el.removeAttribute('src');
+      el.load();
     };
   }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -583,6 +583,50 @@ const FileList = ({
   );
 }
 
+/**
+ * Tiny wrapper for SFTP media previews (audio / video) that properly releases
+ * browser-buffered decoded media data on unmount to prevent memory leaks.
+ */
+const SFTPMediaPreview: React.FC<{
+  type: 'audio' | 'video';
+  src: string;
+  name: string;
+  fallbackText: string;
+}> = ({ type, src, name, fallbackText }) => {
+  const ref = useRef<HTMLAudioElement & HTMLVideoElement>(null);
+
+  useEffect(() => {
+    return () => {
+      const el = ref.current;
+      if (el) {
+        el.pause();
+        el.removeAttribute('src');
+        el.load();
+      }
+    };
+  }, []);
+
+  if (type === 'video') {
+    return (
+      <div className="flex items-center justify-center h-full p-4">
+        <video ref={ref} controls className="max-w-full max-h-full" src={src}>
+          {fallbackText}
+        </video>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-4 gap-4">
+      <div className="text-6xl">🎵</div>
+      <div className="text-zinc-400">{name}</div>
+      <audio ref={ref} controls className="w-full max-w-md" src={src}>
+        {fallbackText}
+      </audio>
+    </div>
+  );
+};
+
 export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
   const bgActive = useTabBgActive('sftp');
@@ -1957,30 +2001,12 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
                 
                 {/* Video Preview */}
                 {!previewLoading && previewFile?.type === 'video' && previewFile.assetSrc && (
-                    <div className="flex items-center justify-center h-full p-4">
-                        <video 
-                            controls
-                            className="max-w-full max-h-full"
-                            src={previewFile.assetSrc}
-                        >
-                            {t('sftp.preview.video_unsupported')}
-                        </video>
-                    </div>
+                    <SFTPMediaPreview type="video" src={previewFile.assetSrc} name={previewFile.name} fallbackText={t('sftp.preview.video_unsupported')} />
                 )}
                 
                 {/* Audio Preview */}
                 {!previewLoading && previewFile?.type === 'audio' && previewFile.assetSrc && (
-                    <div className="flex flex-col items-center justify-center h-full p-4 gap-4">
-                        <div className="text-6xl">🎵</div>
-                        <div className="text-zinc-400">{previewFile.name}</div>
-                        <audio 
-                            controls
-                            className="w-full max-w-md"
-                            src={previewFile.assetSrc}
-                        >
-                            {t('sftp.preview.audio_unsupported')}
-                        </audio>
-                    </div>
+                    <SFTPMediaPreview type="audio" src={previewFile.assetSrc} name={previewFile.name} fallbackText={t('sftp.preview.audio_unsupported')} />
                 )}
                 
                 {/* PDF Preview */}
