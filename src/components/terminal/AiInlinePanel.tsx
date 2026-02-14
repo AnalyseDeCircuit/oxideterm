@@ -424,6 +424,10 @@ export const AiInlinePanel: React.FC<AiInlinePanelProps> = ({
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     e.stopPropagation();
 
+    // Ignore keydown during IME composition (Chinese/Japanese/Korean input).
+    // Without this, pressing Enter to confirm a candidate word sends the message.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     // Esc: Close panel
     if (e.key === 'Escape') {
       e.preventDefault();
