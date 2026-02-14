@@ -34,6 +34,7 @@ import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import type { BackgroundFit } from '../../store/settingsStore';
+import { installTerminalClipboardSupport } from '../../lib/clipboardSupport';
 
 const PREFILL_REPLAY_LINE_COUNT = 50; // Keep aligned with backend replay count
 
@@ -176,6 +177,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
+  const clipboardAddonRef = useRef<{ dispose: () => void } | null>(null);
   const rendererAddonRef = useRef<{ dispose: () => void } | null>(null);
   const rendererSuspendedRef = useRef(false);
   const rendererTransitionTokenRef = useRef(0);
@@ -977,6 +979,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     if (!containerRef.current || terminalRef.current) return;
     
     isMountedRef.current = true; // Reset mount state
+    let clipboardInitCancelled = false;
 
     // Initialize xterm.js
     // Build theme — if background image is set, make xterm background near-
@@ -1025,38 +1028,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     
     webLinksAddonRef.current = webLinksAddon;
 
-    // OSC 52 clipboard write support
-    // Allows remote programs (tmux, vim, etc.) to write to the local system clipboard
-    // Format: ESC ] 52 ; <target> ; <base64-content> ST
-    // Security: only clipboard write is supported; read requests ('?') are ignored
-    term.parser.registerOscHandler(52, (data: string) => {
-      const osc52Enabled = useSettingsStore.getState().settings.terminal.osc52Clipboard;
-      if (!osc52Enabled) return true;
-
-      const semicolonIdx = data.indexOf(';');
-      if (semicolonIdx === -1) return true;
-
-      const payload = data.slice(semicolonIdx + 1);
-      // '?' = read request → deny for security
-      if (!payload || payload === '?') return true;
-
-      // Reject oversized payloads (1 MB base64 ≈ 768 KB decoded)
-      if (payload.length > 1_048_576) {
-        console.warn('[OSC 52] Payload too large, ignored');
-        return true;
+    void installTerminalClipboardSupport(term).then((addon) => {
+      if (clipboardInitCancelled) {
+        addon.dispose();
+        return;
       }
-
-      try {
-        // Decode base64 → bytes → UTF-8 (atob alone mangles non-ASCII)
-        const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
-        const text = new TextDecoder('utf-8').decode(bytes);
-        navigator.clipboard.writeText(text).catch((err) => {
-          console.warn('[OSC 52] Clipboard write failed:', err);
-        });
-      } catch {
-        console.warn('[OSC 52] Invalid base64 payload');
-      }
-      return true;
+      clipboardAddonRef.current = addon;
     });
 
     // Detect mouse tracking mode changes (tmux, vim, etc.)
@@ -1573,6 +1550,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       
       // Unregister from Terminal Registry
       unregisterTerminalBuffer(effectivePaneId);
+      clipboardInitCancelled = true;
       
       // Cleanup resize handling
       if (resizeDebounceTimer) {
@@ -1620,6 +1598,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         }
 
         // Dispose plugins (image/search/weblinks/fit) before terminal
+        if (clipboardAddonRef.current) {
+          try {
+            clipboardAddonRef.current.dispose();
+          } catch (e) {
+            // Ignore errors during addon disposal
+          }
+          clipboardAddonRef.current = null;
+        }
+
         if (imageAddonRef.current) {
           try {
             imageAddonRef.current.dispose();

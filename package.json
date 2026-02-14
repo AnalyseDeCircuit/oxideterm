@@ -1,7 +1,7 @@
 {
   "name": "tauri-app",
   "private": true,
-  "version": "1.10.1",
+  "version": "1.10.2",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
@@ -61,6 +61,7 @@
     "@tauri-apps/plugin-shell": "^2.3.4",
     "@xterm/addon-attach": "^0.12.0",
     "@xterm/addon-canvas": "0.8.0-beta.48",
+    "@xterm/addon-clipboard": "0.1.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-image": "^0.9.0",
     "@xterm/addon-search": "^0.16.0",
