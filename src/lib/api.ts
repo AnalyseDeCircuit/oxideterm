@@ -43,6 +43,22 @@ import type { PluginManifest } from '../types/plugin';
 // Toggle this for development without a backend
 const USE_MOCK = false;
 
+// ---------------------------------------------------------------------------
+// In-flight Promise dedup — prevents StrictMode double-mount from issuing
+// duplicate IPC calls (especially OS keychain access which can trigger macOS
+// permission dialogs).
+// ---------------------------------------------------------------------------
+const _inflight = new Map<string, Promise<unknown>>();
+
+/** Return the in-flight promise for `key`, or start a new one via `fn`. */
+function dedup<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = _inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const p = fn().finally(() => _inflight.delete(key));
+  _inflight.set(key, p);
+  return p;
+}
+
 // --- API Implementation ---
 
 export const api = {
@@ -970,19 +986,25 @@ export const api = {
   },
 
   /**
-   * Get API key for a specific AI provider — from OS keychain
+   * Get API key for a specific AI provider — from OS keychain.
+   * Deduped: concurrent calls for the same provider share one IPC round-trip.
    */
   getAiProviderApiKey: async (providerId: string): Promise<string | null> => {
     if (USE_MOCK) return null;
-    return invoke('get_ai_provider_api_key', { providerId });
+    return dedup(`get-ai-key:${providerId}`, () =>
+      invoke('get_ai_provider_api_key', { providerId }),
+    );
   },
 
   /**
-   * Check if API key exists for a specific AI provider — checks keychain + legacy vault
+   * Check if API key exists for a specific AI provider — checks keychain + legacy vault.
+   * Deduped: concurrent calls for the same provider share one IPC round-trip.
    */
   hasAiProviderApiKey: async (providerId: string): Promise<boolean> => {
     if (USE_MOCK) return false;
-    return invoke('has_ai_provider_api_key', { providerId });
+    return dedup(`has-ai-key:${providerId}`, () =>
+      invoke('has_ai_provider_api_key', { providerId }),
+    );
   },
 
   /**
