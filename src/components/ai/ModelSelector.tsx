@@ -141,7 +141,7 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
     return (
       <button
         onClick={onOpenSettings}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-400/10 transition-colors"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-400/10"
       >
         <Circle className="w-1.5 h-1.5 fill-current" />
         <span>{t('ai.model_selector.no_provider')}</span>
@@ -154,7 +154,7 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors min-w-0",
+          "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-0",
           "text-theme-text-muted hover:text-theme-text hover:bg-theme-accent/10",
           open && "bg-theme-accent/10 text-theme-text"
         )}
@@ -169,92 +169,92 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-theme-bg-panel border border-theme-border rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="absolute left-0 bottom-full mb-0.5 w-64 bg-theme-bg-panel border border-theme-border shadow-lg z-50 overflow-hidden">
           <div className="max-h-80 overflow-y-auto py-1">
             {aiSettings.providers
               .filter((p) => p.enabled)
-                .map((provider) => {
+              .map((provider) => {
                 const hasKey = provider.type === 'ollama' || !!keyStatus[provider.id];
                 const isOnline = provider.type !== 'ollama' || providerOnline[provider.id] !== false;
                 return (
-                <div key={provider.id}>
-                  {/* Provider header */}
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg/50">
-                    <span className={cn(
-                      "text-[10px] font-bold tracking-wider uppercase",
-                      hasKey ? "text-theme-text-muted" : "text-theme-text-muted/50"
-                    )}>
-                      {provider.name}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {hasKey && isOnline && (
-                        <button
-                          onClick={(e) => handleRefresh(provider.id, e)}
-                          className="p-0.5 text-theme-text-muted hover:text-theme-text transition-colors"
-                          title={t('ai.model_selector.refresh_models')}
-                          disabled={refreshing === provider.id}
-                        >
-                          <RefreshCw className={cn("w-2.5 h-2.5", refreshing === provider.id && "animate-spin")} />
-                        </button>
-                      )}
-                      {provider.type === 'ollama' && (
-                        <span className={cn(
-                          "text-[9px] flex items-center gap-0.5",
-                          isOnline ? "text-emerald-400" : "text-theme-text-muted"
-                        )}>
-                          <Circle className="w-2 h-2 fill-current" />
-                          {isOnline ? 'OK' : t('ai.model_selector.offline')}
-                        </span>
-                      )}
-                      {provider.type !== 'ollama' && (
-                        <span className={cn(
-                          "text-[9px] flex items-center gap-0.5",
-                          hasKey ? "text-emerald-400" : "text-amber-400"
-                        )}>
-                          <Key className="w-2.5 h-2.5" />
-                          {hasKey ? 'OK' : t('ai.model_selector.no_key')}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* No API key: show configure hint instead of models */}
-                  {provider.type === 'ollama' && !isOnline ? (
-                    <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
-                      {t('ai.model_selector.offline')}
-                    </div>
-                  ) : !hasKey ? (
-                    <button
-                      onClick={() => { onOpenSettings?.(); setOpen(false); }}
-                      className="w-full px-3 py-2 text-[10px] text-amber-400/80 italic text-left hover:bg-theme-bg-hover transition-colors"
-                    >
-                      {t('ai.model_selector.no_key_warning')}
-                    </button>
-                  ) : provider.models.length === 0 ? (
-                    <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
-                      {t('ai.model_selector.refresh_models')}
-                    </div>
-                  ) : (
-                    provider.models.map((model) => {
-                      const isActive = provider.id === aiSettings.activeProviderId && model === activeModel;
-                      return (
-                        <button
-                          key={`${provider.id}-${model}`}
-                          onClick={() => handleSelect(provider, model)}
-                          className={cn(
-                            "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
-                            "text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover"
-                          )}
-                        >
-                          {isActive && <Check className="w-3 h-3 flex-shrink-0" />}
-                          <span className={cn("truncate", isActive ? "font-medium" : "", !isActive && "ml-5")}>
-                            {model}
+                  <div key={provider.id}>
+                    {/* Provider header */}
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg/50">
+                      <span className={cn(
+                        "text-[10px] font-bold tracking-wider uppercase",
+                        hasKey ? "text-theme-text-muted" : "text-theme-text-muted/50"
+                      )}>
+                        {provider.name}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {hasKey && isOnline && (
+                          <button
+                            onClick={(e) => handleRefresh(provider.id, e)}
+                            className="p-0.5 text-theme-text-muted hover:text-theme-text"
+                            title={t('ai.model_selector.refresh_models')}
+                            disabled={refreshing === provider.id}
+                          >
+                            <RefreshCw className={cn("w-2.5 h-2.5", refreshing === provider.id && "animate-spin")} />
+                          </button>
+                        )}
+                        {provider.type === 'ollama' && (
+                          <span className={cn(
+                            "text-[9px] flex items-center gap-0.5",
+                            isOnline ? "text-emerald-400" : "text-theme-text-muted"
+                          )}>
+                            <Circle className="w-2 h-2 fill-current" />
+                            {isOnline ? 'OK' : t('ai.model_selector.offline')}
                           </span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
+                        )}
+                        {provider.type !== 'ollama' && (
+                          <span className={cn(
+                            "text-[9px] flex items-center gap-0.5",
+                            hasKey ? "text-emerald-400" : "text-amber-400"
+                          )}>
+                            <Key className="w-2.5 h-2.5" />
+                            {hasKey ? 'OK' : t('ai.model_selector.no_key')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* No API key: show configure hint instead of models */}
+                    {provider.type === 'ollama' && !isOnline ? (
+                      <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
+                        {t('ai.model_selector.offline')}
+                      </div>
+                    ) : !hasKey ? (
+                      <button
+                        onClick={() => { onOpenSettings?.(); setOpen(false); }}
+                        className="w-full px-3 py-2 text-[10px] text-amber-400/80 italic text-left hover:bg-theme-bg-hover"
+                      >
+                        {t('ai.model_selector.no_key_warning')}
+                      </button>
+                    ) : provider.models.length === 0 ? (
+                      <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
+                        {t('ai.model_selector.refresh_models')}
+                      </div>
+                    ) : (
+                      provider.models.map((model) => {
+                        const isActive = provider.id === aiSettings.activeProviderId && model === activeModel;
+                        return (
+                          <button
+                            key={`${provider.id}-${model}`}
+                            onClick={() => handleSelect(provider, model)}
+                            className={cn(
+                              "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left",
+                              "text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover"
+                            )}
+                          >
+                            {isActive && <Check className="w-3 h-3 flex-shrink-0" />}
+                            <span className={cn("truncate", isActive ? "font-medium" : "", !isActive && "ml-5")}>
+                              {model}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 );
               })}
           </div>
@@ -264,7 +264,7 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
             <div className="border-t border-theme-border/30">
               <button
                 onClick={() => { onOpenSettings(); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover"
               >
                 <Settings className="w-3 h-3" />
                 {t('ai.model_selector.manage_providers')}

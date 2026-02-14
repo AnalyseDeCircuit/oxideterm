@@ -141,12 +141,12 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
       className="flex items-center gap-1.5 sm:gap-2 cursor-help group shrink-0"
       title={tooltipText}
     >
-      <Info className={`w-3 h-3 shrink-0 ${textColor} opacity-50 group-hover:opacity-100 transition-opacity`} />
+      <Info className={`w-3 h-3 shrink-0 ${textColor} opacity-50 group-hover:opacity-100`} />
       
       {/* Mini progress bar */}
       <div className="w-10 sm:w-16 h-1 bg-theme-border/20 rounded-full overflow-hidden">
         <div 
-          className={`h-full ${barColor} transition-all duration-300`}
+          className={`h-full ${barColor}`}
           style={{ width: `${percentage}%` }}
         />
       </div>

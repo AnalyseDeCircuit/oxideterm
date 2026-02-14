@@ -118,11 +118,10 @@ function PluginRow({ info, onToggle, onReload }: {
 
           <button
             onClick={() => onToggle(manifest.id, !isActive && !isDisabled ? false : isDisabled)}
-            className={`p-1.5 rounded transition-colors ${
-              isActive
-                ? 'text-green-400 hover:text-red-400 hover:bg-red-400/10'
-                : 'text-theme-text-muted hover:text-green-400 hover:bg-green-400/10'
-            }`}
+            className={`p-1.5 rounded transition-colors ${isActive
+              ? 'text-green-400 hover:text-red-400 hover:bg-red-400/10'
+              : 'text-theme-text-muted hover:text-green-400 hover:bg-green-400/10'
+              }`}
             title={isActive ? t('plugin.disable') : t('plugin.enable')}
           >
             {isActive ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
@@ -572,40 +571,36 @@ export function PluginManagerView() {
             </div>
           </div>
 
-          {/* Tab buttons */}
-          <div className="flex items-center gap-1 p-1 rounded-lg bg-theme-bg-panel/30 border border-theme-border w-fit">
+          {/* Tab buttons - Pill Style */}
+          <div className="flex items-center gap-2 mb-6">
             <button
               onClick={() => setActiveTab('installed')}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md transition-colors ${
-                activeTab === 'installed'
-                  ? 'bg-theme-accent text-white'
-                  : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
-              }`}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all border ${activeTab === 'installed'
+                ? 'bg-theme-bg-panel text-theme-text border-theme-border shadow-sm'
+                : 'bg-transparent border-transparent text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
+                }`}
             >
-              <Puzzle className="h-4 w-4" />
+              <Puzzle className={`h-4 w-4 ${activeTab === 'installed' ? 'text-theme-accent' : ''}`} />
               {t('plugin.tab_installed')}
               {pluginList.length > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded ${
-                  activeTab === 'installed' ? 'bg-white/20' : 'bg-theme-accent/20 text-theme-accent'
-                }`}>
+                <span className={`text-xs px-1.5 py-0.5 rounded ml-1 ${activeTab === 'installed' ? 'bg-theme-accent/10 text-theme-accent' : 'bg-theme-bg-panel border border-theme-border/50'
+                  }`}>
                   {pluginList.length}
                 </span>
               )}
             </button>
             <button
               onClick={() => setActiveTab('browse')}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md transition-colors ${
-                activeTab === 'browse'
-                  ? 'bg-theme-accent text-white'
-                  : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
-              }`}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all border ${activeTab === 'browse'
+                ? 'bg-theme-bg-panel text-theme-text border-theme-border shadow-sm'
+                : 'bg-transparent border-transparent text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel/50'
+                }`}
             >
-              <Globe className="h-4 w-4" />
+              <Globe className={`h-4 w-4 ${activeTab === 'browse' ? 'text-theme-accent' : ''}`} />
               {t('plugin.tab_browse')}
               {availableUpdates.length > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded ${
-                  activeTab === 'browse' ? 'bg-yellow-400/30 text-yellow-200' : 'bg-yellow-500/20 text-yellow-400'
-                }`}>
+                <span className={`text-xs px-1.5 py-0.5 rounded ml-1 ${activeTab === 'browse' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-theme-bg-panel border border-theme-border/50'
+                  }`}>
                   {availableUpdates.length} {t('plugin.updates')}
                 </span>
               )}
@@ -665,77 +660,77 @@ export function PluginManagerView() {
               {/* Registry is configured — show normal browse UI */}
               {registryConfigured === true && (
                 <>
-              {/* Search and refresh */}
-              <div className="flex items-center gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-text-muted" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t('plugin.search_placeholder')}
-                    className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-theme-border bg-theme-bg-panel/50 text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50"
-                  />
-                </div>
-                <button
-                  onClick={handleFetchRegistry}
-                  disabled={fetchingRegistry}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-theme-border text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw className={`h-4 w-4 ${fetchingRegistry ? 'animate-spin' : ''}`} />
-                  {t('plugin.refresh')}
-                </button>
-              </div>
+                  {/* Search and refresh */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-text-muted" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder={t('plugin.search_placeholder')}
+                        className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-theme-border bg-theme-bg-panel/50 text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50"
+                      />
+                    </div>
+                    <button
+                      onClick={handleFetchRegistry}
+                      disabled={fetchingRegistry}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-theme-border text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${fetchingRegistry ? 'animate-spin' : ''}`} />
+                      {t('plugin.refresh')}
+                    </button>
+                  </div>
 
-              {/* Registry error */}
-              {registryError && (
-                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-                  <p className="text-sm text-red-400 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
-                    {t('plugin.registry_error')}: {registryError}
-                  </p>
-                </div>
-              )}
+                  {/* Registry error */}
+                  {registryError && (
+                    <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <p className="text-sm text-red-400 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        {t('plugin.registry_error')}: {registryError}
+                      </p>
+                    </div>
+                  )}
 
-              {/* Loading state */}
-              {fetchingRegistry && registryEntries.length === 0 && (
-                <div className="text-center py-16 text-theme-text-muted">
-                  <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin opacity-50" />
-                  <p className="text-sm">{t('plugin.loading_registry')}</p>
-                </div>
-              )}
+                  {/* Loading state */}
+                  {fetchingRegistry && registryEntries.length === 0 && (
+                    <div className="text-center py-16 text-theme-text-muted">
+                      <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin opacity-50" />
+                      <p className="text-sm">{t('plugin.loading_registry')}</p>
+                    </div>
+                  )}
 
-              {/* Empty state */}
-              {!fetchingRegistry && registryEntries.length === 0 && !registryError && (
-                <div className="text-center py-16 text-theme-text-muted">
-                  <Globe className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">{t('plugin.registry_empty')}</p>
-                </div>
-              )}
+                  {/* Empty state */}
+                  {!fetchingRegistry && registryEntries.length === 0 && !registryError && (
+                    <div className="text-center py-16 text-theme-text-muted">
+                      <Globe className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                      <p className="text-sm">{t('plugin.registry_empty')}</p>
+                    </div>
+                  )}
 
-              {/* No search results */}
-              {!fetchingRegistry && registryEntries.length > 0 && filteredRegistry.length === 0 && (
-                <div className="text-center py-16 text-theme-text-muted">
-                  <Search className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">{t('plugin.no_search_results')}</p>
-                </div>
-              )}
+                  {/* No search results */}
+                  {!fetchingRegistry && registryEntries.length > 0 && filteredRegistry.length === 0 && (
+                    <div className="text-center py-16 text-theme-text-muted">
+                      <Search className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                      <p className="text-sm">{t('plugin.no_search_results')}</p>
+                    </div>
+                  )}
 
-              {/* Registry plugin cards */}
-              {filteredRegistry.length > 0 && (
-                <div className="grid gap-3">
-                  {filteredRegistry.map((entry) => (
-                    <RegistryPluginCard
-                      key={entry.id}
-                      entry={entry}
-                      isInstalled={installedIds.has(entry.id)}
-                      hasUpdate={updateIds.has(entry.id)}
-                      onInstall={handleInstall}
-                      onUpdate={handleUpdate}
-                    />
-                  ))}
-                </div>
-              )}
+                  {/* Registry plugin cards */}
+                  {filteredRegistry.length > 0 && (
+                    <div className="grid gap-3">
+                      {filteredRegistry.map((entry) => (
+                        <RegistryPluginCard
+                          key={entry.id}
+                          entry={entry}
+                          isInstalled={installedIds.has(entry.id)}
+                          hasUpdate={updateIds.has(entry.id)}
+                          onInstall={handleInstall}
+                          onUpdate={handleUpdate}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>

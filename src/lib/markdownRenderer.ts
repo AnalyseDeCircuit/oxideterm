@@ -26,11 +26,11 @@ let katexCssLoaded = false;
  */
 async function getKaTeX(): Promise<KaTeXModule> {
   if (katexInstance) return katexInstance;
-  
+
   if (!katexLoadPromise) {
     katexLoadPromise = import('katex').then((module) => {
       katexInstance = module;
-      
+
       // Load KaTeX CSS if not already loaded
       if (!katexCssLoaded) {
         const link = document.createElement('link');
@@ -40,11 +40,11 @@ async function getKaTeX(): Promise<KaTeXModule> {
         document.head.appendChild(link);
         katexCssLoaded = true;
       }
-      
+
       return module;
     });
   }
-  
+
   return katexLoadPromise;
 }
 
@@ -80,7 +80,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 
 // Shell-like languages that support "RUN" button
 const SHELL_LANGUAGES = new Set([
-  'bash', 'sh', 'zsh', 'shell', 'console', 'terminal', 
+  'bash', 'sh', 'zsh', 'shell', 'console', 'terminal',
   'powershell', 'ps1', 'cmd', ''
 ]);
 
@@ -115,7 +115,7 @@ export function isShellLanguage(lang: string): boolean {
  */
 function highlightCode(code: string, lang: string): string {
   const normalized = normalizeLanguage(lang);
-  
+
   // Check if Prism has this language
   if (Prism.languages[normalized]) {
     try {
@@ -125,7 +125,7 @@ function highlightCode(code: string, lang: string): string {
       return escapeHtml(code);
     }
   }
-  
+
   // Fallback: escape HTML
   return escapeHtml(code);
 }
@@ -179,7 +179,7 @@ function createRenderer(): Partial<Renderer> {
     // Code blocks with syntax highlighting and action buttons
     code({ text, lang }: Tokens.Code): string {
       const language = lang || '';
-      
+
       // Handle Mermaid diagrams specially
       if (isMermaidLanguage(language)) {
         const mermaidId = generateMermaidId();
@@ -201,17 +201,17 @@ function createRenderer(): Partial<Renderer> {
           </div>
         `;
       }
-      
+
       const displayLang = language || 'text';
       const normalized = normalizeLanguage(language);
       const highlighted = highlightCode(text, language);
       const isShell = isShellLanguage(language);
       const blockId = generateCodeBlockId();
-      
+
       // Get current options
       const showRun = currentRenderOptions.showRunButton !== false && isShell;
       const showCopy = currentRenderOptions.showCopyButton !== false;
-      
+
       // Escape code for data attribute
       const escapedCode = text
         .replace(/&/g, '&amp;')
@@ -292,7 +292,7 @@ function createRenderer(): Partial<Renderer> {
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
       const isExternal = href.startsWith('http://') || href.startsWith('https://');
       const isFilePath = href.startsWith('/') || href.startsWith('~') || /^[a-zA-Z]:[\\/]/.test(href);
-      
+
       if (isFilePath) {
         // File path - emit event to open in terminal
         return `<a href="#" class="md-link md-file-link" data-file-path="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
@@ -404,19 +404,19 @@ marked.use({
 export function renderMarkdown(content: string, options: RenderOptions = {}): string {
   // Set current options for the renderer to use
   currentRenderOptions = options;
-  
+
   // Pre-process: protect math formulas from markdown parsing
   const { processed, mathBlocks } = protectMathFormulas(content);
-  
+
   // Parse markdown
   const html = marked.parse(processed, { async: false }) as string;
-  
+
   // Reset options
   currentRenderOptions = {};
-  
+
   // Post-process: restore math formula placeholders with KaTeX markup
   const htmlWithMath = restoreMathFormulas(html, mathBlocks);
-  
+
   // Sanitize HTML
   const clean = DOMPurify.sanitize(htmlWithMath, {
     ALLOWED_TAGS: [
@@ -446,7 +446,7 @@ export function renderMarkdown(content: string, options: RenderOptions = {}): st
     ],
     ADD_ATTR: ['target', 'rel'],
   });
-  
+
   return clean;
 }
 
@@ -470,28 +470,28 @@ let mathBlockCounter = 0;
 function protectMathFormulas(content: string): { processed: string; mathBlocks: MathBlock[] } {
   const mathBlocks: MathBlock[] = [];
   let processed = content;
-  
+
   // Step 1: Temporarily protect code blocks and inline code
   // This prevents math regex from matching inside code
   const codeBlockPlaceholders: { placeholder: string; content: string }[] = [];
   let codeBlockCounter = 0;
-  
+
   // Protect fenced code blocks (```...```)
   processed = processed.replace(/```[\s\S]*?```/g, (match) => {
     const placeholder = `%%CODE_BLOCK_${++codeBlockCounter}%%`;
     codeBlockPlaceholders.push({ placeholder, content: match });
     return placeholder;
   });
-  
+
   // Protect inline code (`...`) - but not escaped backticks
   processed = processed.replace(/(?<!\\)`[^`\n]+`/g, (match) => {
     const placeholder = `%%CODE_INLINE_${++codeBlockCounter}%%`;
     codeBlockPlaceholders.push({ placeholder, content: match });
     return placeholder;
   });
-  
+
   // Step 2: Now handle math formulas (code is protected)
-  
+
   // Handle display math ($$...$$) - must be done before inline math
   // Match $$ at start of line or after whitespace, and $$ at end or before whitespace
   const displayMathRegex = /\$\$([\s\S]*?)\$\$/g;
@@ -500,7 +500,7 @@ function protectMathFormulas(content: string): { processed: string; mathBlocks: 
     mathBlocks.push({ placeholder, formula: formula.trim(), isDisplay: true });
     return placeholder;
   });
-  
+
   // Then, handle inline math ($...$)
   // Must not match $$ (already replaced) and must have non-space after opening $ and before closing $
   // Also avoid matching things like $10 or prices
@@ -508,17 +508,17 @@ function protectMathFormulas(content: string): { processed: string; mathBlocks: 
   processed = processed.replace(inlineMathRegex, (_match, formula) => {
     // Skip if it looks like a price (e.g., $10, $5.99)
     if (/^\d/.test(formula)) return _match;
-    
+
     const placeholder = `%%MATH_INLINE_${++mathBlockCounter}%%`;
     mathBlocks.push({ placeholder, formula: formula.trim(), isDisplay: false });
     return placeholder;
   });
-  
+
   // Step 3: Restore code block placeholders
   for (const { placeholder, content } of codeBlockPlaceholders) {
     processed = processed.replace(placeholder, content);
   }
-  
+
   return { processed, mathBlocks };
 }
 
@@ -528,7 +528,7 @@ function protectMathFormulas(content: string): { processed: string; mathBlocks: 
  */
 function restoreMathFormulas(html: string, mathBlocks: MathBlock[]): string {
   let result = html;
-  
+
   for (const block of mathBlocks) {
     // Escape HTML entities in the formula for the data attribute
     const escapedFormula = block.formula
@@ -536,7 +536,7 @@ function restoreMathFormulas(html: string, mathBlocks: MathBlock[]): string {
       .replace(/"/g, '&quot;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
-    
+
     if (block.isDisplay) {
       // Display math (block level)
       result = result.replace(
@@ -551,7 +551,7 @@ function restoreMathFormulas(html: string, mathBlocks: MathBlock[]): string {
       );
     }
   }
-  
+
   return result;
 }
 
@@ -561,18 +561,18 @@ function restoreMathFormulas(html: string, mathBlocks: MathBlock[]): string {
  */
 export async function renderMathInElement(container: HTMLElement): Promise<void> {
   const mathElements = container.querySelectorAll<HTMLElement>('.md-math:not(.rendered)');
-  
+
   if (mathElements.length === 0) return;
-  
+
   // Load KaTeX dynamically
   const katex = await getKaTeX();
-  
+
   for (const element of mathElements) {
     const formula = element.getAttribute('data-math');
     if (!formula) continue;
-    
+
     const isDisplay = element.getAttribute('data-math-display') === 'true';
-    
+
     try {
       // Decode the formula
       const decodedFormula = formula
@@ -580,7 +580,7 @@ export async function renderMathInElement(container: HTMLElement): Promise<void>
         .replace(/&quot;/g, '"')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>');
-      
+
       // Render with KaTeX
       const rendered = katex.default.renderToString(decodedFormula, {
         displayMode: isDisplay,
@@ -589,7 +589,7 @@ export async function renderMathInElement(container: HTMLElement): Promise<void>
         trust: false,
         strict: false,
       });
-      
+
       element.innerHTML = rendered;
       element.classList.add('rendered');
     } catch (error) {
@@ -607,7 +607,7 @@ export const markdownStyles = `
 /* Markdown Base Styles */
 .md-content {
   font-size: 13.5px;
-  line-height: 1.65;
+  line-height: 1.5;
   color: var(--theme-text-secondary, rgba(255, 255, 255, 0.9));
 }
 
@@ -676,26 +676,27 @@ export const markdownStyles = `
   margin: 0 0.1em;
   font-size: 0.9em;
   font-family: var(--terminal-font-family, 'JetBrains Mono', monospace) !important;
-  background: var(--theme-bg-panel, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.1));
+  background: var(--theme-bg-panel, rgba(128, 128, 128, 0.1));
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.2));
   border-radius: 3px;
-  color: var(--theme-accent, #22d3ee);
+  color: var(--theme-text, inherit);
 }
 
-/* Code blocks */
+/* Code blocks — flat, sharp, utilitarian */
 .md-code-block {
-  margin: 1em 0;
-  border-radius: 4px;
+  margin: 0.75em -12px;  /* Negative margin to break out of container padding */
+  width: calc(100% + 24px);
+  border-radius: 2px;
   overflow: hidden;
-  background: var(--theme-bg-darker, #09090b);
-  border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.08));
+  background: var(--theme-bg-panel, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.2));
 }
 
 .md-code-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.4em 0.75em;
+  padding: 4px 8px;
   background: var(--theme-bg-panel, rgba(255, 255, 255, 0.03));
   border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.05));
 }
@@ -769,7 +770,7 @@ export const markdownStyles = `
   font-family: inherit !important;
 }
 
-/* Blockquote */
+/* Prism.js syntax highlighting - Dark theme (default) */
 .md-blockquote {
   margin: 1em 0;
   padding: 0.5em 0 0.5em 1em;
@@ -905,6 +906,102 @@ del {
 .md-code .token.important,
 .md-code .token.variable {
   color: #ffab70;
+}
+
+/* Prism.js syntax highlighting - Light theme override */
+/* Detect light themes by checking if background is lighter (simplified approach) */
+[data-theme="hot-pink"] .md-code .token.comment,
+[data-theme="spring-green"] .md-code .token.comment,
+[data-theme="paper-oxide"] .md-code .token.comment,
+.md-code .token.prolog,
+.md-code .token.doctype,
+.md-code .token.cdata {
+  color: #6a737d;
+}
+[data-theme="hot-pink"] .md-code .token.punctuation,
+[data-theme="spring-green"] .md-code .token.punctuation,
+[data-theme="paper-oxide"] .md-code .token.punctuation {
+  color: #24292e;
+}
+[data-theme="hot-pink"] .md-code .token.property,
+[data-theme="hot-pink"] .md-code .token.tag,
+[data-theme="hot-pink"] .md-code .token.boolean,
+[data-theme="hot-pink"] .md-code .token.number,
+[data-theme="hot-pink"] .md-code .token.constant,
+[data-theme="hot-pink"] .md-code .token.symbol,
+[data-theme="spring-green"] .md-code .token.property,
+[data-theme="spring-green"] .md-code .token.tag,
+[data-theme="spring-green"] .md-code .token.boolean,
+[data-theme="spring-green"] .md-code .token.number,
+[data-theme="spring-green"] .md-code .token.constant,
+[data-theme="spring-green"] .md-code .token.symbol,
+[data-theme="paper-oxide"] .md-code .token.property,
+[data-theme="paper-oxide"] .md-code .token.tag,
+[data-theme="paper-oxide"] .md-code .token.boolean,
+[data-theme="paper-oxide"] .md-code .token.number,
+[data-theme="paper-oxide"] .md-code .token.constant,
+[data-theme="paper-oxide"] .md-code .token.symbol,
+.md-code .token.deleted {
+  color: #005cc5;
+}
+[data-theme="hot-pink"] .md-code .token.selector,
+[data-theme="hot-pink"] .md-code .token.attr-name,
+[data-theme="hot-pink"] .md-code .token.string,
+[data-theme="hot-pink"] .md-code .token.char,
+[data-theme="hot-pink"] .md-code .token.builtin,
+[data-theme="spring-green"] .md-code .token.selector,
+[data-theme="spring-green"] .md-code .token.attr-name,
+[data-theme="spring-green"] .md-code .token.string,
+[data-theme="spring-green"] .md-code .token.char,
+[data-theme="spring-green"] .md-code .token.builtin,
+[data-theme="paper-oxide"] .md-code .token.selector,
+[data-theme="paper-oxide"] .md-code .token.attr-name,
+[data-theme="paper-oxide"] .md-code .token.string,
+[data-theme="paper-oxide"] .md-code .token.char,
+[data-theme="paper-oxide"] .md-code .token.builtin,
+.md-code .token.inserted {
+  color: #22863a;
+}
+[data-theme="hot-pink"] .md-code .token.operator,
+[data-theme="hot-pink"] .md-code .token.entity,
+[data-theme="hot-pink"] .md-code .token.url,
+[data-theme="spring-green"] .md-code .token.operator,
+[data-theme="spring-green"] .md-code .token.entity,
+[data-theme="spring-green"] .md-code .token.url,
+[data-theme="paper-oxide"] .md-code .token.operator,
+[data-theme="paper-oxide"] .md-code .token.entity,
+[data-theme="paper-oxide"] .md-code .token.url {
+  color: #d73a49;
+}
+[data-theme="hot-pink"] .md-code .token.atrule,
+[data-theme="hot-pink"] .md-code .token.attr-value,
+[data-theme="hot-pink"] .md-code .token.keyword,
+[data-theme="spring-green"] .md-code .token.atrule,
+[data-theme="spring-green"] .md-code .token.attr-value,
+[data-theme="spring-green"] .md-code .token.keyword,
+[data-theme="paper-oxide"] .md-code .token.atrule,
+[data-theme="paper-oxide"] .md-code .token.attr-value,
+[data-theme="paper-oxide"] .md-code .token.keyword {
+  color: #d73a49;
+}
+[data-theme="hot-pink"] .md-code .token.function,
+[data-theme="hot-pink"] .md-code .token.class-name,
+[data-theme="spring-green"] .md-code .token.function,
+[data-theme="spring-green"] .md-code .token.class-name,
+[data-theme="paper-oxide"] .md-code .token.function,
+[data-theme="paper-oxide"] .md-code .token.class-name {
+  color: #6f42c1;
+}
+[data-theme="hot-pink"] .md-code .token.regex,
+[data-theme="hot-pink"] .md-code .token.important,
+[data-theme="hot-pink"] .md-code .token.variable,
+[data-theme="spring-green"] .md-code .token.regex,
+[data-theme="spring-green"] .md-code .token.important,
+[data-theme="spring-green"] .md-code .token.variable,
+[data-theme="paper-oxide"] .md-code .token.regex,
+[data-theme="paper-oxide"] .md-code .token.important,
+[data-theme="paper-oxide"] .md-code .token.variable {
+  color: #e36209;
 }
 
 /* Mermaid Diagram Styles */

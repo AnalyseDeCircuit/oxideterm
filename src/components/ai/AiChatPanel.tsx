@@ -40,7 +40,7 @@ export function AiChatPanel() {
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   const activeConversation = getActiveConversation();
-  
+
   // Find the last assistant message index for regenerate button
   const lastAssistantIndex = activeConversation?.messages
     .map((msg, i) => msg.role === 'assistant' ? i : -1)
@@ -114,18 +114,18 @@ export function AiChatPanel() {
   if (!aiEnabled) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-6 text-center bg-theme-bg">
-        <div className="w-16 h-16 rounded-2xl bg-theme-accent/5 flex items-center justify-center mb-6">
-          <MessageSquare className="w-8 h-8 text-theme-text-muted opacity-40" />
+        <div className="w-12 h-12 bg-theme-accent/5 flex items-center justify-center mb-4">
+          <MessageSquare className="w-6 h-6 text-theme-text-muted opacity-40" />
         </div>
-        <h3 className="text-lg font-bold text-theme-text mb-2">{t('ai.chat.title')}</h3>
-        <p className="text-sm text-theme-text-muted mb-6 max-w-[240px] leading-relaxed">
+        <h3 className="text-[13px] font-bold text-theme-text mb-1">{t('ai.chat.title')}</h3>
+        <p className="text-[12px] text-theme-text-muted mb-4 max-w-[220px] leading-relaxed">
           {t('ai.chat.disabled_message')}
         </p>
         <button
           onClick={() => createTab('settings')}
-          className="flex items-center gap-2 px-6 py-2.5 bg-theme-accent hover:opacity-90 rounded-xl text-theme-bg text-sm font-bold shadow-sm transition-all active:scale-95"
+          className="flex items-center gap-2 px-4 py-1.5 bg-theme-accent hover:opacity-90 text-theme-bg text-[12px] font-bold"
         >
-          <Settings className="w-4 h-4" />
+          <Settings className="w-3.5 h-3.5" />
           {t('ai.chat.open_settings')}
         </button>
       </div>
@@ -134,35 +134,28 @@ export function AiChatPanel() {
 
   return (
     <div className="h-full flex flex-col bg-theme-bg">
-      {/* Header - Strictly Utilitarian */}
-      <div className="flex-shrink-0 flex items-start justify-between px-3 py-2 border-b border-theme-border/30 bg-theme-bg gap-2">
-        <div className="flex flex-col gap-1.5 min-w-0">
-          <div className="flex items-center gap-2 min-w-0 pb-1 border-b border-theme-border/20">
-            <span className="text-[10px] font-bold tracking-[0.15em] text-theme-text-muted uppercase shrink-0">{t('ai.chat.header')}</span>
-            {activeConversation?.title && (
-              <>
-                <span className="w-1 h-1 rounded-full bg-theme-border/50 shrink-0" />
-                <button
-                  onClick={() => setShowConversations(!showConversations)}
-                  className="text-[11px] text-theme-text-muted/80 hover:text-theme-text truncate font-medium transition-colors min-w-0"
-                  title={activeConversation.title}
-                >
-                  {activeConversation.title}
-                </button>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-md border border-theme-border/30 bg-theme-bg/60 max-w-full">
-              <ModelSelector onOpenSettings={handleOpenSettings} />
-            </div>
-          </div>
+      {/* Header — Flat Utility Bar */}
+      <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-theme-border/30 bg-theme-bg gap-2 min-h-[36px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-bold tracking-[0.12em] text-theme-text-muted uppercase shrink-0">{t('ai.chat.header')}</span>
+          {activeConversation?.title && (
+            <>
+              <span className="text-theme-border/40 shrink-0">·</span>
+              <button
+                onClick={() => setShowConversations(!showConversations)}
+                className="text-[11px] text-theme-text-muted/60 hover:text-theme-text truncate min-w-0"
+                title={activeConversation.title}
+              >
+                {activeConversation.title}
+              </button>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-0.5 shrink-0 mt-[1px]">
+        <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={handleNewChat}
-            className="p-1 px-1.5 rounded-sm hover:bg-theme-accent/10 text-theme-text-muted hover:text-theme-accent transition-colors"
+            className="p-1 hover:bg-theme-border/10 text-theme-text-muted hover:text-theme-text"
             title={t('ai.chat.new_chat_tooltip')}
           >
             <Plus className="w-3.5 h-3.5" />
@@ -170,7 +163,7 @@ export function AiChatPanel() {
           <div className="relative">
             <button
               onClick={() => setShowMenu(!showMenu)}
-              className="p-1 px-1.5 rounded-sm hover:bg-theme-accent/10 text-theme-text-muted hover:text-theme-text transition-colors"
+              className="p-1 hover:bg-theme-border/10 text-theme-text-muted hover:text-theme-text"
               title={t('ai.chat.more_options')}
             >
               <MoreVertical className="w-3.5 h-3.5" />
@@ -178,19 +171,19 @@ export function AiChatPanel() {
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 w-40 py-1 bg-theme-bg-panel border border-theme-border shadow-xl z-20">
+                <div className="absolute right-0 top-full mt-0.5 w-40 py-0.5 bg-theme-bg-panel border border-theme-border shadow-lg z-20">
                   <button
                     onClick={handleOpenSettings}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-theme-text-muted hover:text-theme-text hover:bg-theme-accent/10 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-theme-text-muted hover:text-theme-text hover:bg-theme-border/10"
                   >
-                    <Settings className="w-4 h-4" />
+                    <Settings className="w-3.5 h-3.5" />
                     {t('ai.chat.settings')}
                   </button>
                   <button
                     onClick={handleClearAll}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-red-500 hover:bg-red-500/10"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                     {t('ai.chat.clear_all')}
                   </button>
                 </div>
@@ -204,7 +197,7 @@ export function AiChatPanel() {
       {showConversations && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setShowConversations(false)} />
-          <div className="absolute left-2 right-2 top-12 max-h-64 overflow-y-auto bg-theme-bg-panel border border-theme-border rounded-lg shadow-xl z-20">
+          <div className="absolute left-2 right-2 top-12 max-h-64 overflow-y-auto bg-theme-bg-panel border border-theme-border shadow-lg z-20">
             {conversations.length === 0 ? (
               <div className="p-4 text-center text-sm text-theme-text-muted">
                 {t('ai.chat.no_conversations')}
@@ -263,8 +256,8 @@ export function AiChatPanel() {
         ) : (
           <div className="flex flex-col">
             {activeConversation.messages.map((msg, index) => (
-              <ChatMessage 
-                key={msg.id} 
+              <ChatMessage
+                key={msg.id}
                 message={msg}
                 isLastAssistant={index === lastAssistantIndex}
                 onRegenerate={handleRegenerate}
@@ -282,6 +275,11 @@ export function AiChatPanel() {
           <p className="text-xs text-red-400 font-mono">{error}</p>
         </div>
       )}
+
+      {/* Model Selector - bottom position like VS Code */}
+      <div className="flex-shrink-0 px-3 py-1.5 border-t border-theme-border/20 bg-theme-bg">
+        <ModelSelector onOpenSettings={handleOpenSettings} />
+      </div>
 
       {/* Input */}
       <ChatInput
@@ -318,7 +316,7 @@ function ConversationItem({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => e.key === 'Enter' && onSelect()}
-      className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors group/item border-l-2 cursor-pointer ${isActive
+      className={`w-full flex items-center justify-between px-3 py-1.5 text-left group/item border-l-2 cursor-pointer ${isActive
         ? 'bg-theme-accent/5 border-theme-accent'
         : 'hover:bg-theme-bg-panel/40 border-transparent'
         }`}
@@ -333,7 +331,7 @@ function ConversationItem({
       </div>
       <button
         onClick={onDelete}
-        className="flex-shrink-0 p-1 opacity-0 group-hover/item:opacity-40 hover:opacity-100 text-theme-text-muted hover:text-red-500 transition-all"
+        className="flex-shrink-0 p-1 opacity-0 group-hover/item:opacity-40 hover:opacity-100 text-theme-text-muted hover:text-red-500"
         title={t('ai.chat.delete_conversation')}
       >
         <Trash2 className="w-3 h-3" />
@@ -362,12 +360,12 @@ function QuickPromptButton({
   return (
     <button
       onClick={handleClick}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-sm border border-transparent hover:border-theme-border/30 hover:bg-theme-bg-panel/20 text-left transition-colors group/btn active:opacity-70"
+      className="w-full flex items-center gap-3 px-3 py-1.5 border border-transparent hover:border-theme-border/20 hover:bg-theme-bg-panel/20 text-left group/btn"
     >
-      <div className="flex-shrink-0 text-theme-text-muted group-hover/btn:text-theme-accent transition-colors">
+      <div className="flex-shrink-0 text-theme-text-muted group-hover/btn:text-theme-accent">
         {icon}
       </div>
-      <span className="text-[13px] text-theme-text-muted group-hover/btn:text-theme-text transition-colors font-medium">
+      <span className="text-[12px] text-theme-text-muted group-hover/btn:text-theme-text font-medium">
         {label}
       </span>
     </button>

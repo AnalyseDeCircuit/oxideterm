@@ -135,18 +135,18 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
   );
 
   return (
-    <div className="bg-theme-bg border-t border-theme-border/50 p-4">
-      {/* Context Toggles - Copilot Style Minimalist Chips */}
+    <div className="bg-theme-bg border-t border-theme-border/40 px-3 py-2.5">
+      {/* Context Toggles — Flat Rectangular Chips */}
       {(hasActiveTerminal || hasSplitPanes) && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
           {hasActiveTerminal && (
             <button
               type="button"
               onClick={() => setIncludeContext(!includeContext)}
               disabled={fetchingContext}
-              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border shrink-0 ${includeContext
-                ? 'bg-theme-accent/10 border-theme-accent/40 text-theme-accent'
-                : 'bg-theme-bg-panel/20 text-theme-text-muted border-theme-border/30 hover:border-theme-border/60'
+              className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold tracking-tight uppercase border shrink-0 ${includeContext
+                ? 'bg-theme-accent/10 border-theme-accent/30 text-theme-accent'
+                : 'bg-transparent text-theme-text-muted border-theme-border/30 hover:border-theme-border/50'
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             >
               <Terminal className="w-3 h-3" />
@@ -159,9 +159,9 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
               type="button"
               onClick={() => setIncludeAllPanes(!includeAllPanes)}
               disabled={fetchingContext}
-              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tight uppercase transition-all border shrink-0 ${includeAllPanes
-                ? 'bg-blue-500/10 border-blue-500/40 text-blue-500'
-                : 'bg-theme-bg-panel/20 text-theme-text-muted border-theme-border/30 hover:border-theme-border/60'
+              className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold tracking-tight uppercase border shrink-0 ${includeAllPanes
+                ? 'bg-blue-500/10 border-blue-500/30 text-blue-500'
+                : 'bg-transparent text-theme-text-muted border-theme-border/30 hover:border-theme-border/50'
                 } ${fetchingContext ? 'opacity-50 cursor-wait' : ''}`}
             >
               <Layers className="w-3 h-3" />
@@ -171,25 +171,23 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
         </div>
       )}
 
-      {/* Input area - Strictly Flat and Integrated */}
-      <div className="flex flex-col bg-theme-bg-panel/20 border border-theme-border/60 rounded-sm focus-within:border-theme-accent/50 transition-all">
-        <div className="flex-1 min-w-0">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
-            disabled={disabled || isLoading}
-            rows={1}
-            className="w-full resize-none bg-transparent border-none rounded-none px-3 py-2 text-[13px] text-theme-text placeholder-theme-text-muted/40 focus:outline-none focus:ring-0 disabled:opacity-50 leading-relaxed min-h-[40px]"
-          />
-        </div>
+      {/* Input area — Flat, no rounded corners, integrated */}
+      <div className="flex flex-col bg-theme-bg-panel/15 border border-theme-border/40 focus-within:border-theme-accent/40">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => handleInputChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
+          disabled={disabled || isLoading}
+          rows={1}
+          className="w-full resize-none bg-transparent border-none px-3 py-2 text-[13px] text-theme-text placeholder-theme-text-muted/30 focus:outline-none focus:ring-0 disabled:opacity-50 leading-relaxed min-h-[36px]"
+        />
 
-        <div className="flex items-center justify-between px-2 py-1.5 bg-theme-bg-panel/10 border-t border-theme-border/10">
-          <div className="flex items-center gap-2 sm:gap-3 text-[9px] font-bold tracking-tight text-theme-text-muted opacity-40 uppercase min-w-0 overflow-hidden">
+        <div className="flex items-center justify-between px-2 py-1 border-t border-theme-border/10">
+          <div className="flex items-center gap-2 text-[9px] font-bold tracking-tight text-theme-text-muted/30 uppercase min-w-0 overflow-hidden">
             {isLoading ? (
-              <div className="flex items-center gap-1.5 text-theme-accent animate-pulse">
+              <div className="flex items-center gap-1 text-theme-accent">
                 <Sparkles className="w-3 h-3 shrink-0" />
                 <span className="truncate">{t('ai.input.thinking')}</span>
               </div>
@@ -198,23 +196,28 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {!isLoading && (
+              <span className="text-[9px] text-theme-text-muted/20 font-mono hidden sm:inline">
+                SHIFT+ENTER
+              </span>
+            )}
             {isLoading ? (
               <button
                 type="button"
                 onClick={onStop}
-                className="p-1 px-2 rounded-sm bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-all flex items-center gap-1"
+                className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 hover:bg-red-500/15 text-red-500 text-[10px] font-bold"
                 title={t('ai.input.stop_generation')}
               >
                 <StopCircle className="w-3 h-3" />
-                <span className="text-[10px] font-bold">{t('ai.input.stop')}</span>
+                {t('ai.input.stop')}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={!input.trim() || disabled}
-                className="p-1 px-3 rounded-sm bg-theme-accent text-theme-bg hover:opacity-90 transition-all disabled:opacity-20 disabled:grayscale font-bold text-[10px]"
+                className="px-2.5 py-0.5 bg-theme-accent text-theme-bg hover:opacity-90 disabled:opacity-20 disabled:grayscale font-bold text-[10px]"
                 title={t('ai.input.send')}
               >
                 {t('ai.input.send_btn')}

@@ -1,6 +1,6 @@
 import { memo, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { User, Bot, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { emit } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { AiChatMessage } from '../../types';
@@ -52,7 +52,7 @@ function arePropsEqual(prev: ChatMessageProps, next: ChatMessageProps): boolean 
   );
 }
 
-export const ChatMessage = memo(function ChatMessage({ 
+export const ChatMessage = memo(function ChatMessage({
   message,
   isLastAssistant = false,
   onRegenerate,
@@ -100,7 +100,7 @@ export const ChatMessage = memo(function ChatMessage({
     if (button) {
       const action = button.dataset.action;
       const targetId = button.dataset.target;
-      
+
       if (targetId) {
         const codeBlock = contentRef.current?.querySelector(`[data-code-id="${targetId}"]`);
         const code = codeBlock?.getAttribute('data-code')
@@ -134,7 +134,7 @@ export const ChatMessage = memo(function ChatMessage({
     // Handle links
     if (link) {
       e.preventDefault();
-      
+
       // File path link
       const filePath = link.dataset.filePath;
       if (filePath) {
@@ -153,63 +153,51 @@ export const ChatMessage = memo(function ChatMessage({
   }, []);
 
   return (
-    <div className="flex flex-col gap-2 px-4 py-6 border-b border-theme-border/5 last:border-0">
-      {/* Header - Avatar and Name on one line */}
-      <div className="flex items-center gap-2.5">
-        <div
-          className={`w-6 h-6 rounded-sm flex items-center justify-center border transition-all ${isUser
-            ? 'bg-theme-bg border-theme-border/60 text-theme-text-muted shadow-sm'
-            : 'bg-theme-accent/5 border-theme-accent/30 text-theme-accent'
-            }`}
-        >
-          {isUser ? (
-            <User className="w-3 h-3 opacity-60" />
-          ) : (
-            <Bot className="w-3.5 h-3.5" />
-          )}
-        </div>
-        <span className={`text-[12px] font-bold tracking-tight ${isUser ? 'text-theme-text-muted' : 'text-theme-text'}`}>
+    <div className="py-3 px-3">
+      {/* Header — user on right, AI on left */}
+      <div className={`flex items-center gap-1.5 mb-0.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+        <span className="text-[11px] font-semibold text-theme-text-muted/50">
           {isUser ? t('ai.message.you') : 'Copilot'}
         </span>
         {message.context && !isUser && (
-          <span className="text-[10px] text-theme-text-muted font-medium opacity-40">
+          <span className="text-[10px] text-theme-text-muted/40 font-medium">
             (used context)
           </span>
         )}
-        <span className="text-[10px] text-theme-text-muted font-medium opacity-20 ml-auto font-mono">
+        <span className={`text-[10px] text-theme-text-muted/25 font-mono shrink-0 ${isUser ? 'mr-auto' : 'ml-auto'}`}>
           {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>
       </div>
 
-      {/* Content - Indented to create a gutter layout */}
-      <div className="pl-[34.5px] pr-2">
-        {/* Thinking Block - show AI's reasoning process */}
+      {/* Content — user messages get prominent bubble with accent color */}
+      <div className={`mt-1 ${isUser ? 'bg-theme-accent/10 border border-theme-accent/30 px-3 py-2 rounded-md' : ''}`}>
+        {/* Thinking Block */}
         {!isUser && message.thinkingContent && (
           <ThinkingBlock
             content={message.thinkingContent}
             isStreaming={message.isThinkingStreaming}
           />
         )}
-        
+
         <div
           ref={contentRef}
-          className="md-content selection:bg-theme-accent/30"
+          className="md-content selection:bg-theme-accent/20"
           onClick={handleClick}
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
         {message.isStreaming && (
-          <span className="inline-block w-1.5 h-4 ml-1.5 bg-theme-accent/60 animate-pulse align-middle" />
+          <span className="inline-block w-1.5 h-4 ml-0.5 bg-theme-accent/60 animate-pulse align-middle" />
         )}
-        
-        {/* Regenerate Button - only show for last assistant message when not streaming */}
+
+        {/* Regenerate Button */}
         {!isUser && isLastAssistant && !message.isStreaming && onRegenerate && (
-          <div className="mt-2 flex items-center">
+          <div className="mt-1.5">
             <button
               onClick={onRegenerate}
               disabled={isRegenerating}
-              className="flex items-center gap-1.5 text-[11px] text-theme-text-muted/50 
-                hover:text-theme-text-muted transition-colors py-1 px-2 rounded-md 
-                hover:bg-theme-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 text-[11px] text-theme-text-muted/40 
+                hover:text-theme-text-muted py-0.5 px-1.5
+                hover:bg-theme-border/10 disabled:opacity-50 disabled:cursor-not-allowed"
               title={t('ai.message.regenerate')}
             >
               <RotateCcw className={`w-3 h-3 ${isRegenerating ? 'animate-spin' : ''}`} />

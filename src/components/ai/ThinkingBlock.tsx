@@ -46,8 +46,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
         onClick={toggleExpanded}
         className={cn(
           "flex items-center gap-1.5 text-[11px] text-theme-text-muted/60 hover:text-theme-text-muted",
-          "transition-colors py-1 px-2 rounded-md hover:bg-theme-bg-subtle",
-          isStreaming && "animate-pulse"
+          "py-1 px-2 hover:bg-theme-bg-subtle"
         )}
       >
         <Brain className="w-3 h-3" />
@@ -58,14 +57,14 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-theme-border/30 bg-theme-bg-subtle/50 overflow-hidden">
+    <div className="mb-3 border border-theme-border/20 bg-theme-bg-subtle/50 overflow-hidden">
       {/* Header - always visible */}
       <button
         onClick={toggleExpanded}
         className={cn(
-          "w-full flex items-center gap-2 px-3 py-2 text-left",
+          "w-full flex items-center gap-2 px-3 py-1.5 text-left",
           "text-[11px] text-theme-text-muted/70 hover:text-theme-text-muted",
-          "transition-colors hover:bg-theme-bg-subtle/80"
+          "hover:bg-theme-bg-subtle/80"
         )}
       >
         {isExpanded ? (
@@ -75,17 +74,13 @@ export const ThinkingBlock = memo(function ThinkingBlock({
         )}
         <Brain className={cn(
           "w-3.5 h-3.5 flex-shrink-0",
-          isStreaming && "animate-pulse text-theme-accent"
+          isStreaming && "text-theme-accent"
         )} />
         <span className="font-medium">
           {isStreaming ? t('ai.thinking.thinking') : t('ai.thinking.thought')}
         </span>
         {isStreaming && (
-          <span className="ml-auto flex items-center gap-1">
-            <span className="inline-block w-1 h-1 rounded-full bg-theme-accent animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="inline-block w-1 h-1 rounded-full bg-theme-accent animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="inline-block w-1 h-1 rounded-full bg-theme-accent animate-bounce" style={{ animationDelay: '300ms' }} />
-          </span>
+          <span className="ml-auto text-[10px] text-theme-accent/60 font-mono">...</span>
         )}
       </button>
 
@@ -94,32 +89,11 @@ export const ThinkingBlock = memo(function ThinkingBlock({
         <div className={cn(
           "px-3 pb-3 max-h-[300px] overflow-y-auto",
           "text-[12px] text-theme-text-muted/80 leading-relaxed",
-          "whitespace-pre-wrap font-mono",
-          // Shimmer effect during streaming
-          isStreaming && "relative overflow-hidden"
+          "whitespace-pre-wrap font-mono"
         )}>
           {content || (isStreaming ? t('ai.thinking.loading') : '')}
-          
-          {/* Shimmer overlay during streaming */}
-          {isStreaming && content && (
-            <div 
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                background: 'linear-gradient(90deg, transparent 0%, rgba(var(--theme-accent-rgb), 0.05) 50%, transparent 100%)',
-                animation: 'shimmer 2s infinite',
-              }}
-            />
-          )}
         </div>
       )}
-
-      {/* Shimmer animation keyframes - injected once */}
-      <style>{`
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-      `}</style>
     </div>
   );
 });

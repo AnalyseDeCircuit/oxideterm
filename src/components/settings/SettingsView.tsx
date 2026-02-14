@@ -1321,9 +1321,9 @@ export const SettingsView = () => {
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_oxide')}</SelectLabel>
                                                     {[
-                                                        'oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre',
-                                                        'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide',
-                                                        'azurite', 'malachite', 'hematite', 'bismuth'
+                                                        'azurite', 'bismuth', 'chromium-oxide', 'cobalt', 'cuprite',
+                                                        'hematite', 'malachite', 'magnetite', 'ochre', 'oxide',
+                                                        'paper-oxide', 'silver-oxide', 'verdigris'
                                                     ].map((key) => (
                                                         <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                             {formatThemeName(key)}
@@ -1337,10 +1337,11 @@ export const SettingsView = () => {
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_classic')}</SelectLabel>
                                                     {Object.keys(themes)
                                                         .filter(key => ![
-                                                            'oxide', 'verdigris', 'magnetite', 'cobalt', 'ochre',
-                                                            'silver-oxide', 'cuprite', 'chromium-oxide', 'paper-oxide',
-                                                            'azurite', 'malachite', 'hematite', 'bismuth'
+                                                            'azurite', 'bismuth', 'chromium-oxide', 'cobalt', 'cuprite',
+                                                            'hematite', 'malachite', 'magnetite', 'ochre', 'oxide',
+                                                            'paper-oxide', 'silver-oxide', 'verdigris'
                                                         ].includes(key))
+                                                        .sort()
                                                         .map(key => (
                                                             <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
                                                                 {formatThemeName(key)}
