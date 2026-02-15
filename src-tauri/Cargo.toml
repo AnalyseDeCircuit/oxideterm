@@ -66,7 +66,7 @@ dashmap = "6"
 dirs = "6"
 
 # Config & Keychain
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 whoami = "1"
 hostname = "0.4"
@@ -83,17 +83,16 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 
 # Archive (compression/extraction)
-zip = "2.0"
+zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
 walkdir = "2"
 tar = "0.4"
-flate2 = "1"
 
 # File type detection (magic bytes)
 infer = "0.16"
 md-5 = "0.10"
 
 # Audio metadata (ID3, Vorbis, FLAC, etc.)
-lofty = "0.22"
+lofty = { version = "0.22", default-features = false }
 
 # macOS app launcher (Info.plist parsing)
 plist = "1"
@@ -116,7 +115,7 @@ zstd = "0.13"
 
 # Encryption & Security
 chacha20poly1305 = "0.10"
-argon2 = { version = "0.5", features = ["std"] }
+argon2 = { version = "0.5", default-features = false, features = ["std"] }
 sha2 = "0.10"
 zeroize = "1.7"
 rand = "0.8"
@@ -129,11 +128,9 @@ strip-ansi-escapes = "0.2"
 
 # Unix process group management (for PTY cleanup)
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process"] }
+nix = { version = "0.29", features = ["signal"] }
 
-# Windows-specific dependencies
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.52", features = ["Win32_Media_Multimedia"] }
+# Windows-specific dependencies (winmm via raw FFI in lib.rs, no crate needed)
 
 [dev-dependencies]
 tempfile = "3"
