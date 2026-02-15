@@ -33,18 +33,23 @@ import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInp
 import { api } from '../../lib/api';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { SshKeyInfo, SshHostInfo } from '../../types';
-import { themes } from '../../lib/themes';
+import { themes, getTerminalTheme, getCustomThemes, isCustomTheme } from '../../lib/themes';
 import { platform } from '../../lib/platform';
 import { cn } from '../../lib/utils';
+import { ThemeEditorModal } from './ThemeEditorModal';
 
 const formatThemeName = (key: string) => {
+    if (isCustomTheme(key)) {
+        const custom = getCustomThemes()[key];
+        return custom ? custom.name : key.replace('custom:', '');
+    }
     return key.split('-')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
 };
 
 const ThemePreview = ({ themeName }: { themeName: string }) => {
-    const theme = themes[themeName] || themes.default;
+    const theme = getTerminalTheme(themeName);
 
     return (
         <div className="mt-2 p-3 rounded-md border border-theme-border" style={{ backgroundColor: theme.background }}>
@@ -854,6 +859,10 @@ export const SettingsView = () => {
     const [showAiConfirm, setShowAiConfirm] = useState(false);
     const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
 
+    // Custom theme editor state
+    const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+    const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
+
     // Data State
     const [keys, setKeys] = useState<SshKeyInfo[]>([]);
     const [groups, setGroups] = useState<string[]>([]);
@@ -1301,7 +1310,30 @@ export const SettingsView = () => {
 
                             {/* Theme Section */}
                             <div className="rounded-lg border border-theme-border bg-theme-bg-panel/50 p-5">
-                                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.appearance.theme')}</h4>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider">{t('settings_view.appearance.theme')}</h4>
+                                    <div className="flex gap-2">
+                                        {isCustomTheme(terminal.theme) && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 text-xs text-theme-text border-theme-border"
+                                                onClick={() => { setEditingThemeId(terminal.theme); setThemeEditorOpen(true); }}
+                                            >
+                                                {t('settings_view.custom_theme.edit')}
+                                            </Button>
+                                        )}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs text-theme-text border-theme-border"
+                                            onClick={() => { setEditingThemeId(null); setThemeEditorOpen(true); }}
+                                        >
+                                            <Plus className="w-3 h-3 mr-1" />
+                                            {t('settings_view.custom_theme.create')}
+                                        </Button>
+                                    </div>
+                                </div>
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -1318,6 +1350,22 @@ export const SettingsView = () => {
                                                 </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent className="bg-theme-bg-panel border-theme-border max-h-[300px]">
+                                                {/* Custom Themes Group */}
+                                                {Object.keys(getCustomThemes()).length > 0 && (
+                                                    <>
+                                                        <SelectGroup>
+                                                            <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_custom')}</SelectLabel>
+                                                            {Object.keys(getCustomThemes()).sort().map((key) => (
+                                                                <SelectItem key={key} value={key} className="text-theme-text focus:bg-theme-bg-hover focus:text-theme-text pl-4">
+                                                                    {formatThemeName(key)}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectGroup>
+                                                        <SelectSeparator className="bg-zinc-700 my-1" />
+                                                    </>
+                                                )}
+
+                                                {/* Oxide Themes Group */}
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_oxide')}</SelectLabel>
                                                     {[
@@ -1333,6 +1381,7 @@ export const SettingsView = () => {
 
                                                 <SelectSeparator className="bg-zinc-700 my-1" />
 
+                                                {/* Classic Themes Group */}
                                                 <SelectGroup>
                                                     <SelectLabel className="text-theme-text-muted text-xs uppercase tracking-wider px-2 py-1.5 font-bold whitespace-normal break-words">{t('settings_view.appearance.theme_group_classic')}</SelectLabel>
                                                     {Object.keys(themes)
@@ -1365,6 +1414,14 @@ export const SettingsView = () => {
 
                             {/* Background Image Section */}
                             <BackgroundImageSection terminal={terminal} updateTerminal={updateTerminal} />
+
+                            {/* Theme Editor Modal */}
+                            <ThemeEditorModal
+                                open={themeEditorOpen}
+                                onOpenChange={setThemeEditorOpen}
+                                editThemeId={editingThemeId}
+                                baseThemeId={isCustomTheme(terminal.theme) ? undefined : terminal.theme}
+                            />
                         </div>
                     )}
 

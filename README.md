@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -208,6 +208,19 @@ Multi-image background system with per-tab transparency control:
 - **Platform-aware**: macOS transparency support; Windows WSLg path excluded (opaque VNC canvas)
 - **Security**: path-canonicalized delete prevents directory traversal; full error propagation from Rust backend
 
+### 🎨 Custom Theme Engine
+
+Full-depth theme customization beyond preset palettes:
+
+- **30+ built-in themes**: Oxide, Dracula, Nord, Catppuccin, Spring Rice, Tokyo Night, and more
+- **Custom theme editor**: visual color picker + hex RGB input for every field
+- **Terminal colors**: all 22 xterm.js fields (background, foreground, cursor, selection, 16 ANSI colors)
+- **UI chrome colors**: 19 CSS variables across 5 categories — Background (5), Text (3), Borders (3), Accent (4), Semantic status colors (4)
+- **Auto-derive**: one-click generation of UI colors from terminal palette
+- **Live preview**: real-time mini terminal + UI chrome preview while editing
+- **Duplicate & extend**: create new themes by duplicating any built-in or custom theme
+- **Persistent**: custom themes saved to localStorage, survive app updates
+
 ### 🪟 Deep Windows Optimization
 
 - **Native ConPTY Integration**: directly invoking Windows Pseudo Console (ConPTY) API for perfect TrueColor and ANSI escape sequence support — no outdated WinPTY.
@@ -268,7 +281,7 @@ Despite different state sources, rendering logic is unified through `TerminalVie
 
 | Category | Features |
 |---|---|
-| **Terminal** | Local PTY, SSH remote, split panes (H/V), session recording/playback (asciicast v2), cross-pane AI context, WebGL rendering, background image gallery |
+| **Terminal** | Local PTY, SSH remote, split panes (H/V), session recording/playback (asciicast v2), cross-pane AI context, WebGL rendering, background image gallery, 30+ themes + custom theme editor |
 | **SSH** | Connection pool, multiplexing, ProxyJump (∞ hops), topology graph, auto-reconnect pipeline |
 | **Auth** | Password, SSH Key (RSA/Ed25519/ECDSA), SSH Agent, Certificate, Keyboard-Interactive (2FA), Known Hosts |
 | **Files** | Dual-pane SFTP browser, drag-drop, preview (images/video/audio/PDF/code/hex), transfer queue |
@@ -439,6 +452,7 @@ OxideTerm/
 - [x] Background image gallery — multi-image upload, per-tab control, master toggle
 - [x] Enhanced media preview — audio/video playback in SFTP browser
 - [x] Session recording & playback
+- [x] Custom theme engine — 30+ built-in themes, visual editor with hex input, 22 terminal + 19 UI color fields
 
 ### 🚧 In Progress
 

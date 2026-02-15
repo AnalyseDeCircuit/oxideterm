@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { themes } from '../lib/themes';
+import { themes, getTerminalTheme, isCustomTheme, applyCustomThemeCSS, clearCustomThemeCSS } from '../lib/themes';
 import { useToastStore } from '../hooks/useToast';
 import { getFontFamilyCSS } from '../components/fileManager/fontUtils';
 import i18n from '../i18n';
@@ -907,21 +907,29 @@ let previousRenderer: RendererType | null = null;
 useSettingsStore.subscribe(
   (state) => state.settings.terminal.theme,
   (themeName) => {
-    // Validate theme exists
-    if (!themes[themeName]) {
+    // Validate theme exists (built-in or custom)
+    const resolved = getTerminalTheme(themeName);
+    if (!resolved && !themes[themeName]) {
       console.warn(`[SettingsStore] Theme "${themeName}" not found, falling back to default`);
       themeName = 'default';
     }
 
     // Set data-theme attribute for CSS variables
-    document.documentElement.setAttribute('data-theme', themeName);
+    if (isCustomTheme(themeName)) {
+      // Custom themes use inline CSS variables
+      document.documentElement.setAttribute('data-theme', 'custom');
+      applyCustomThemeCSS(themeName);
+    } else {
+      clearCustomThemeCSS();
+      document.documentElement.setAttribute('data-theme', themeName);
+    }
 
     // Dispatch event for terminal components to update their xterm instances
     window.dispatchEvent(
       new CustomEvent('global-theme-changed', {
         detail: {
           themeName,
-          xtermTheme: themes[themeName],
+          xtermTheme: getTerminalTheme(themeName),
         },
       })
     );
@@ -976,8 +984,14 @@ export function initializeSettings(): void {
   const { settings } = useSettingsStore.getState();
 
   // Apply theme immediately
-  const themeName = themes[settings.terminal.theme] ? settings.terminal.theme : 'default';
-  document.documentElement.setAttribute('data-theme', themeName);
+  const currentTheme = settings.terminal.theme;
+  const themeName = (themes[currentTheme] || isCustomTheme(currentTheme)) ? currentTheme : 'default';
+  if (isCustomTheme(themeName)) {
+    document.documentElement.setAttribute('data-theme', 'custom');
+    applyCustomThemeCSS(themeName);
+  } else {
+    document.documentElement.setAttribute('data-theme', themeName);
+  }
 
   // Apply terminal font CSS variable globally
   const { fontFamily, customFontFamily } = settings.terminal;

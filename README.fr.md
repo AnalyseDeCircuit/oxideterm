@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -203,6 +203,19 @@ Système multi-images avec contrôle de transparence par onglet :
 - **Adapté aux plateformes** : transparence macOS ; chemin WSLg Windows exclu (canvas VNC opaque)
 - **Sécurité** : suppression canonicalisée empêchant la traversée de répertoire ; propagation complète des erreurs depuis le backend Rust
 
+### 🎨 Moteur de thèmes personnalisés
+
+Personnalisation thématique en profondeur au-delà des palettes prédéfinies :
+
+- **30+ thèmes intégrés** : Oxide, Dracula, Nord, Catppuccin, Spring Rice, Tokyo Night, et plus
+- **Éditeur visuel** : sélecteur de couleurs + saisie hexadécimale RGB pour chaque champ
+- **Couleurs terminal** : les 22 champs xterm.js (arrière-plan, premier plan, curseur, sélection, 16 couleurs ANSI)
+- **Couleurs interface** : 19 variables CSS en 5 catégories — Arrière-plan (5), Texte (3), Bordures (3), Accent (4), Couleurs d'état sémantiques (4)
+- **Dérivation auto** : génération en un clic des couleurs UI depuis la palette terminal
+- **Aperçu en direct** : mini terminal + aperçu chrome UI en temps réel pendant l'édition
+- **Dupliquer & étendre** : créer de nouveaux thèmes à partir de n'importe quel thème intégré ou personnalisé
+- **Persistant** : thèmes personnalisés sauvegardés en localStorage, survivent aux mises à jour
+
 ### 🪟 Optimisation Windows approfondie
 
 - **Intégration ConPTY native** : appel direct de l’API Windows Pseudo Console (ConPTY) pour un support parfait TrueColor et séquences ANSI — fini le WinPTY obsolète.
@@ -262,7 +275,7 @@ Malgré des sources d’état différentes, la logique de rendu est unifiée via
 
 | Catégorie | Fonctionnalités |
 |---|---|
-| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), enregistrement/lecture de session (asciicast v2), contexte IA cross-pane, rendu WebGL, galerie d'images d'arrière-plan |
+| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), enregistrement/lecture de session (asciicast v2), contexte IA cross-pane, rendu WebGL, galerie d'images d'arrière-plan, 30+ thèmes + éditeur de thèmes |
 | **SSH** | Pool de connexions, multiplexage, ProxyJump (∞ sauts), graphe topologique, pipeline auto-reconnexion |
 | **Auth** | Mot de passe, clé SSH (RSA/Ed25519/ECDSA), SSH Agent, certificat, Keyboard-Interactive (2FA), Known Hosts |
 | **Fichiers** | Navigateur SFTP double panneau, glisser-déposer, aperçu (images/vidéo/audio/PDF/code/hex), file de transfert |
@@ -431,6 +444,7 @@ OxideTerm/
 - [x] Galerie d'images d'arrière-plan — téléversement multi-images, contrôle par onglet, interrupteur principal
 - [x] Aperçu multimédia amélioré — lecture audio/vidéo dans le navigateur SFTP
 - [x] Enregistrement & lecture de sessions
+- [x] Moteur de thèmes personnalisés — 30+ thèmes intégrés, éditeur visuel avec saisie hex, 22 terminal + 19 champs couleur UI
 
 ### 🚧 En cours
 

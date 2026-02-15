@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -207,6 +207,19 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 - **平台感知**：macOS 透明支持；Windows WSLg 路径排除（VNC 画布不支持透明）
 - **安全**：路径规范化删除防止目录穿越；Rust 后端完整错误传播
 
+### 🎨 自定义主题引擎
+
+超越预设配色方案的全深度主题定制：
+
+- **30+ 内置主题**：Oxide、Dracula、Nord、Catppuccin、Spring Rice、Tokyo Night 等
+- **可视化编辑器**：颜色选取器 + RGB 十六进制输入，覆盖每个字段
+- **终端配色**：xterm.js 全部 22 个字段（背景、前景、光标、选区、16 ANSI 色）
+- **UI 界面色**：19 个 CSS 变量，分 5 大类——背景(5)、文字(3)、边框(3)、强调(4)、语义状态色(4)
+- **自动推导**：一键从终端配色生成全套 UI 颜色
+- **实时预览**：编辑时即时展示迷你终端 + UI 界面效果
+- **复制 & 扩展**：基于任意内置或自定义主题创建新主题
+- **持久存储**：自定义主题保存至 localStorage，跨更新保留
+
 ### 🪟 Windows 深度优化
 
 - **原生 ConPTY 集成**：直接调用 Windows Pseudo Console (ConPTY) API，完美支持 TrueColor 和 ANSI 转义序列——告别过时的 WinPTY。
@@ -266,7 +279,7 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 
 | 分类 | 功能 |
 |---|---|
-| **终端** | 本地 PTY、SSH 远程、分屏 (水平/垂直)、会话录制/回放 (asciicast v2)、跨分屏 AI 上下文、WebGL 渲染、背景图片画廊 |
+| **终端** | 本地 PTY、SSH 远程、分屏 (水平/垂直)、会话录制/回放 (asciicast v2)、跨分屏 AI 上下文、WebGL 渲染、背景图片画廊、30+ 主题 + 自定义主题编辑器 |
 | **SSH** | 连接池、多路复用、ProxyJump (∞ 跳)、拓扑图、自动重连管道 |
 | **认证** | 密码、SSH 密钥 (RSA/Ed25519/ECDSA)、SSH Agent、证书、Keyboard-Interactive (2FA)、Known Hosts |
 | **文件** | 双面板 SFTP 浏览器、拖放传输、预览 (图片/视频/音频/PDF/代码/Hex)、传输队列 |
@@ -435,7 +448,8 @@ OxideTerm/
 - [x] WSL 图形 — 桌面模式 + 应用模式 VNC 查看器（⚠️ 实验性）
 - [x] 背景图片画廊 — 多图上传、按标签页控制、总开关
 - [x] 增强媒体预览 — SFTP 浏览器内音频/视频播放
-- [x] Enregistrement & lecture de sessions
+- [x] 会话录制 & 回放
+- [x] 自定义主题引擎 — 30+ 内置主题、可视化编辑器支持十六进制输入、22 终端 + 19 UI 颜色字段
 
 ### 🚧 进行中
 

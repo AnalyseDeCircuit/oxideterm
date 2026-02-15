@@ -1,5 +1,239 @@
 import { ITheme } from '@xterm/xterm';
 
+// ============================================================================
+// Custom Theme Types
+// ============================================================================
+
+/** App UI variables that accompany each theme */
+export type AppUiColors = {
+  // ── Background Layer (背景层级) ──
+  bg: string;
+  bgPanel: string;
+  bgHover: string;
+  bgActive: string;
+  bgSecondary: string;
+  // ── Text Layer (文字层级) ──
+  text: string;
+  textMuted: string;
+  textSecondary: string;
+  // ── Border Layer (边框层级) ──
+  border: string;
+  borderStrong: string;
+  divider: string;
+  // ── Accent Layer (强调色) ──
+  accent: string;
+  accentHover: string;
+  accentText: string;
+  accentSecondary: string;
+  // ── Semantic Colors (功能色) ──
+  success: string;
+  warning: string;
+  error: string;
+  info: string;
+};
+
+/** A user-created custom theme (terminal colors + app UI colors) */
+export type CustomTheme = {
+  name: string;            // Display name
+  terminalColors: ITheme;  // xterm.js colors
+  uiColors: AppUiColors;   // App chrome colors
+};
+
+/** localStorage key for custom themes */
+const CUSTOM_THEMES_KEY = 'oxide-custom-themes';
+
+// ============================================================================
+// Custom Theme Persistence
+// ============================================================================
+
+/** Load custom themes from localStorage */
+function loadCustomThemes(): Record<string, CustomTheme> {
+  try {
+    const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, CustomTheme>;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist custom themes to localStorage */
+function saveCustomThemes(ct: Record<string, CustomTheme>): void {
+  try {
+    localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(ct));
+  } catch (e) {
+    console.error('[Themes] Failed to persist custom themes:', e);
+  }
+}
+
+/** In-memory registry (loaded once, mutated by CRUD helpers) */
+let customThemesRegistry: Record<string, CustomTheme> = loadCustomThemes();
+
+// ============================================================================
+// Custom Theme CRUD
+// ============================================================================
+
+/** Get all custom themes */
+export function getCustomThemes(): Record<string, CustomTheme> {
+  return customThemesRegistry;
+}
+
+/** Save/update a custom theme (id = slug key) */
+export function saveCustomTheme(id: string, theme: CustomTheme): void {
+  customThemesRegistry = { ...customThemesRegistry, [id]: theme };
+  saveCustomThemes(customThemesRegistry);
+}
+
+/** Delete a custom theme */
+export function deleteCustomTheme(id: string): void {
+  const { [id]: _, ...rest } = customThemesRegistry;
+  customThemesRegistry = rest;
+  saveCustomThemes(customThemesRegistry);
+}
+
+/** Check if a theme id belongs to custom themes */
+export function isCustomTheme(id: string): boolean {
+  return id.startsWith('custom:');
+}
+
+// ============================================================================
+// Unified Theme Resolution
+// ============================================================================
+
+/** Get the terminal ITheme for any theme (built-in or custom) */
+export function getTerminalTheme(themeId: string): ITheme {
+  if (isCustomTheme(themeId)) {
+    const ct = customThemesRegistry[themeId];
+    if (ct) return ct.terminalColors;
+  }
+  return themes[themeId] || themes.default;
+}
+
+/** Get the AppUiColors for a custom theme (returns null for built-in themes) */
+export function getCustomUiColors(themeId: string): AppUiColors | null {
+  if (isCustomTheme(themeId)) {
+    const ct = customThemesRegistry[themeId];
+    if (ct) return ct.uiColors;
+  }
+  return null;
+}
+
+/** Get all theme names: built-in + custom  */
+export function getAllThemeNames(): string[] {
+  return [...Object.keys(themes), ...Object.keys(customThemesRegistry)];
+}
+
+/**
+ * Derive AppUiColors from an ITheme's terminal colors.
+ * Used as default when creating a new custom theme from a built-in base.
+ */
+export function deriveUiColorsFromTerminal(t: ITheme): AppUiColors {
+  const bg = (t.background as string) || '#09090b';
+  const fg = (t.foreground as string) || '#f4f4f5';
+  const cursor = (t.cursor as string) || '#ea580c';
+  const muted = (t.brightBlack as string) || '#a1a1aa';
+
+  // Lighten/darken helper
+  const shift = (hex: string, amount: number): string => {
+    const clamp = (v: number) => Math.max(0, Math.min(255, v));
+    const r = clamp(parseInt(hex.slice(1, 3), 16) + amount);
+    const g = clamp(parseInt(hex.slice(3, 5), 16) + amount);
+    const b = clamp(parseInt(hex.slice(5, 7), 16) + amount);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  };
+
+  // Mix two hex colors
+  const mix = (c1: string, c2: string, ratio = 0.5): string => {
+    const r = Math.round(parseInt(c1.slice(1, 3), 16) * ratio + parseInt(c2.slice(1, 3), 16) * (1 - ratio));
+    const g = Math.round(parseInt(c1.slice(3, 5), 16) * ratio + parseInt(c2.slice(3, 5), 16) * (1 - ratio));
+    const b = Math.round(parseInt(c1.slice(5, 7), 16) * ratio + parseInt(c2.slice(5, 7), 16) * (1 - ratio));
+    return `#${Math.min(255,r).toString(16).padStart(2, '0')}${Math.min(255,g).toString(16).padStart(2, '0')}${Math.min(255,b).toString(16).padStart(2, '0')}`;
+  };
+
+  return {
+    // Background
+    bg,
+    bgPanel: shift(bg, 15),
+    bgHover: shift(bg, 30),
+    bgActive: shift(bg, 40),
+    bgSecondary: shift(bg, 10),
+    // Text
+    text: fg,
+    textMuted: muted,
+    textSecondary: mix(fg, muted, 0.5),
+    // Border
+    border: shift(bg, 30),
+    borderStrong: mix(cursor, fg, 0.6),
+    divider: shift(bg, 20),
+    // Accent
+    accent: cursor,
+    accentHover: shift(cursor, -20),
+    accentText: mix(cursor, bg, 0.7),
+    accentSecondary: muted,
+    // Semantic
+    success: (t.green as string) || '#22c55e',
+    warning: (t.yellow as string) || '#eab308',
+    error: (t.red as string) || '#ef4444',
+    info: (t.blue as string) || '#3b82f6',
+  };
+}
+
+/** All CSS custom properties mapped from AppUiColors */
+const UI_CSS_PROPS: [keyof AppUiColors, string][] = [
+  // Background
+  ['bg', '--theme-bg'],
+  ['bgPanel', '--theme-bg-panel'],
+  ['bgHover', '--theme-bg-hover'],
+  ['bgActive', '--theme-bg-active'],
+  ['bgSecondary', '--theme-bg-secondary'],
+  // Text
+  ['text', '--theme-text'],
+  ['textMuted', '--theme-text-muted'],
+  ['textSecondary', '--theme-text-secondary'],
+  // Border
+  ['border', '--theme-border'],
+  ['borderStrong', '--theme-border-strong'],
+  ['divider', '--theme-divider'],
+  // Accent
+  ['accent', '--theme-accent'],
+  ['accentHover', '--theme-accent-hover'],
+  ['accentText', '--theme-accent-text'],
+  ['accentSecondary', '--theme-accent-secondary'],
+  // Semantic
+  ['success', '--theme-success'],
+  ['warning', '--theme-warning'],
+  ['error', '--theme-error'],
+  ['info', '--theme-info'],
+];
+
+/**
+ * Apply custom theme CSS variables to the document.
+ * For custom themes, we inject CSS variables dynamically.
+ */
+export function applyCustomThemeCSS(themeId: string): void {
+  const uiColors = getCustomUiColors(themeId);
+  if (!uiColors) return;
+  
+  const root = document.documentElement;
+  for (const [key, prop] of UI_CSS_PROPS) {
+    if (uiColors[key]) {
+      root.style.setProperty(prop, uiColors[key]);
+    }
+  }
+}
+
+/** Clear any inline custom theme CSS variables */
+export function clearCustomThemeCSS(): void {
+  const root = document.documentElement;
+  for (const [, prop] of UI_CSS_PROPS) {
+    root.style.removeProperty(prop);
+  }
+}
+
+// ============================================================================
+// Built-in Themes
+// ============================================================================
+
 export const themes: Record<string, ITheme> = {
   default: {
     background: '#09090b', // Neutral deep void
