@@ -1,6 +1,6 @@
 # Reconnect Orchestrator (Frontend-Only)
 
-> **状态**: ✅ 已完整实现（v1.6.2），当前版本 v1.9.1。下文保留原始设计文档作为架构参考。
+> **状态**: ✅ 已完整实现（v1.6.2），当前版本 v1.11.1。v1.11.1 新增 Grace Period 阶段和主动探测机制。下文保留原始设计文档作为架构参考。
 
 ## Summary
 Introduce a frontend-only reconnect orchestrator to replace the current debounce+retry logic in `useConnectionEvents`. The orchestrator owns reconnection state, queues per node, and runs a deterministic recovery pipeline for SSH, port forwards, SFTP transfers, and IDE state. No backend changes. Terminal recovery is handled automatically by React Key-Driven Reset and is NOT part of the pipeline.
@@ -16,11 +16,11 @@ Introduce a frontend-only reconnect orchestrator to replace the current debounce
 ## Goals
 1. A single reconnect brain: queueing, throttling, retries, and observability live in one store.
 2. Idempotent, cancellable pipeline: one node → one job, no duplicate work.
-3. Deterministic recovery sequence: **Snapshot → SSH → Forwards → SFTP → IDE**.
+3. Deterministic recovery sequence: **Snapshot → Grace Period → SSH → Forwards → SFTP → IDE**.
 4. Preserve user intent: do not restart user-stopped forwards; do not restore unsaved file contents.
 
 ## Non-Goals
-1. No backend changes or new Tauri commands.
+1. ~~No backend changes or new Tauri commands.~~ **(Updated v1.11.1)**: Added `probe_connections` and `probe_single_connection` IPC commands for Grace Period support.
 2. No automatic recovery for "disconnected" (hard close) events — only "link_down".
 3. No content-level IDE restore (only reopen file tabs).
 4. No terminal session management (handled by Key-Driven Reset).
@@ -41,6 +41,7 @@ Create `src/store/reconnectOrchestratorStore.ts` (Zustand).
 type ReconnectPhase =
   | 'queued'
   | 'snapshot'        // Capture pre-reset data
+  | 'grace-period'    // (v1.11.1) Attempt to recover existing connection
   | 'ssh-connect'     // reconnectCascade
   | 'await-terminal'  // Wait for Key-Driven Reset to recreate terminals
   | 'restore-forwards'
@@ -124,6 +125,31 @@ Core methods:
 6. Store snapshot in job with `snapshotAt` timestamp (used for user intent detection in Phase 5).
 
 **Why this works**: `listPortForwards` and `nodeSftpListIncompleteTransfers` query the backend which still exists at this point. `resetNodeState` hasn't been called yet.
+
+### Phase 0.5: `grace-period` (v1.11.1 — NEW)
+
+**Before executing destructive reconnect, attempt to recover the existing connection.**
+
+This phase was introduced to solve the "焦土模式" problem: immediate reconnect kills TUI applications (yazi, vim, htop) by destroying the old SSH session.
+
+**Logic**:
+1. Collect `oldConnectionIds` from snapshot (connectionId for each affected node).
+2. Loop every `GRACE_PROBE_INTERVAL_MS` (3s) for up to `GRACE_PERIOD_MS` (30s):
+   a. Call `api.probeSingleConnection(oldConnectionId)` — sends SSH keepalive ping.
+   b. If result is `"alive"`:
+      - Clear `link_down` state for each affected node.
+      - Recover child node states.
+      - Show "connection recovered — session preserved" toast.
+      - Return `true` → **skip all subsequent phases** (no destructive reconnect needed).
+   c. If result is `"dead"` or API error: continue probing until timeout.
+3. After 30s timeout: return `false` → proceed to `ssh-connect` (destructive reconnect).
+
+**Why this matters**: If network interruption is < 30s (common for Wi-Fi switching, sleep/wake, brief outages), the SSH TCP connection may still be alive on the server side. Probing recovers it without killing any running programs.
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `GRACE_PERIOD_MS` | 30,000 | Maximum time to wait for recovery |
+| `GRACE_PROBE_INTERVAL_MS` | 3,000 | Probe interval within grace period |
 
 ### Phase 1: `ssh-connect`
 

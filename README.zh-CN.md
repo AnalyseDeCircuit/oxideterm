@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.11.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -33,7 +33,7 @@ OxideTerm 是一款**跨平台终端应用**，将本地 Shell、远程 SSH 会�
 | 痛点 | OxideTerm 的解答 |
 |---|---|
 | SSH 客户端不支持本地 Shell | 混合引擎：本地 PTY + 远程 SSH 在同一窗口 |
-| 断线重连 = 丢失一切 | **Node-first 架构**：自动重连恢复转发、传输、IDE 状态 |
+| 断线重连 = 丢失一切 | **Node-first 架构**：自动重连带宽限期保护 TUI 应用；恢复转发、传输、IDE 状态 |
 | 远程编辑需要 VS Code Remote | **内置 IDE 模式**：CodeMirror 6 基于 SFTP，服务器零安装 |
 | SSH 连接不可复用 | **SSH 多路复用**：终端、SFTP、转发共享一条连接 |
 | SSH 库依赖 OpenSSL | **russh 0.54**：纯 Rust SSH，`ring` 密码学后端，无 C 依赖 |
@@ -137,6 +137,8 @@ impl Signer for AgentSigner { /* 通过 Agent IPC 完成挑战-响应签名 */ }
 - 每连接独立状态机（connecting → active → idle → link_down → reconnecting）
 - 空闲超时 (30 分钟)、心跳保活 (15 秒)、心跳驱动的故障检测
 - 级联传播：跳板机断连 → 所有下游节点标记 `link_down`
+- **智能感知**：`visibilitychange` + `online` 事件 → 主动 SSH 探测（~2 秒 vs 被动 15-30 秒）
+- **宽限期**：30 秒窗口尝试恢复现有连接，避免破坏性重连杀死 TUI 应用（yazi/vim/htop）
 
 ### 🔀 端口转发 — 无锁 I/O
 
@@ -225,7 +227,7 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任�
 | **AppStore** | 事实层 — 通过 `connections` Map 管理实际 SSH 连接状态，从 SessionTreeStore 同步 |
 | **IdeStore** | IDE 模式 — 远程文件编辑、Git 状态跟踪、多标签编辑器 |
 | **LocalTerminalStore** | 本地 PTY 生命周期、Shell 进程监控、独立 I/O |
-| **ReconnectOrchestratorStore** | 自动重连管道（snapshot → ssh-connect → await-terminal → restore） |
+| **ReconnectOrchestratorStore** | 自动重连管道（snapshot → grace-period → ssh-connect → await-terminal → restore） |
 | **TransferStore** | SFTP 传输队列与进度 |
 | **PluginStore** | 插件运行时状态和 UI 注册表 |
 | **ProfilerStore** | 资源监控指标 |
@@ -415,7 +417,7 @@ OxideTerm/
 - [x] SSH 连接池 & 多路复用
 - [x] SSH Agent 认证 (AgentSigner)
 - [x] Node-first 架构 (NodeRouter + 事件)
-- [x] 自动重连编排器 (6 阶段管道)
+- [x] 自动重连编排器 (8 阶段管道，含宽限期)
 - [x] ProxyJump 无限跳板机链
 - [x] 端口转发 — 本地 / 远程 / 动态 SOCKS5
 - [x] SFTP 双面板文件管理 + 预览

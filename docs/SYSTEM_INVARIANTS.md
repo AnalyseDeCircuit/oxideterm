@@ -320,8 +320,15 @@ fn good_example() {
 
 **Orchestrator 管道阶段**：
 ```
-queued → snapshot → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done
+queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done
 ```
+
+**v1.11.1 新增 — Grace Period 不变量**：
+- **Grace Period 必须在 snapshot 之后、ssh-connect 之前执行**
+- **Grace Period 内仅发送 SSH keepalive 探测，不执行任何破坏性操作**
+- **探测成功（`"alive"`）必须清除 `link_down` 状态并跳过后续所有破坏性阶段**
+- **探测超时（30 秒）后才允许进入 `ssh-connect` 阶段（焦土重连）**
+- **`probe_single_connection` 必须支持 `LinkDown` 状态连接的恢复（IoError → Timeout 均可重试）**
 
 **Orchestrator 常量**：
 | 常量 | 值 | 说明 |
@@ -334,6 +341,8 @@ queued → snapshot → ssh-connect → await-terminal → restore-forwards → 
 | `MAX_RETAINED_JOBS` | 200 | 终态 Job 硬上限（LRU 淘汰）|
 | `AUTO_CLEANUP_DELAY_MS` | 30,000 | 终态 Job 自动清理延迟 |
 | `MAX_PHASE_HISTORY` | 64 | 阶段历史环形缓冲区上限 |
+| `GRACE_PERIOD_MS` | 30,000 | 宽限期最大等待时间 |
+| `GRACE_PROBE_INTERVAL_MS` | 3,000 | 宽限期内探测间隔 |
 
 - Snapshot 必须在 `reconnectCascade` 之前执行（`resetNodeState` 会销毁 forward 规则）
 - Terminal 恢复由 Key-Driven Reset 自动处理，不在管道内

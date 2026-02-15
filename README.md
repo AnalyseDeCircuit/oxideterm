@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.11.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blueviolet" alt="License">
   <img src="https://img.shields.io/badge/rust-1.75+-orange" alt="Rust">
@@ -33,7 +33,7 @@ OxideTerm is a **cross-platform terminal application** that unifies local shells
 | Pain Point | OxideTerm's Answer |
 |---|---|
 | SSH clients that can't do local shells | Hybrid engine: local PTY + remote SSH in one window |
-| Reconnect = lose everything | **Node-first architecture**: auto-reconnect restores forwards, transfers, IDE state |
+| Reconnect = lose everything | **Node-first architecture**: auto-reconnect with Grace Period preserves TUI apps; restores forwards, transfers, IDE state |
 | Remote file editing needs VS Code Remote | **Built-in IDE mode**: CodeMirror 6 editor over SFTP, zero server install |
 | No SSH connection reuse | **SSH multiplexing**: terminal, SFTP, forwards share one connection |
 | SSH libraries depend on OpenSSL | **russh 0.54**: pure Rust SSH, `ring` crypto backend, no C deps |
@@ -137,6 +137,8 @@ Reference-counted `SshConnectionRegistry` with DashMap:
 - Independent state machines per connection (connecting → active → idle → link_down → reconnecting)
 - Idle timeout (30 min), keep-alive (15s), heartbeat failure detection
 - Cascade propagation: jump host down → all downstream nodes marked `link_down`
+- **Intelligent detection**: `visibilitychange` + `online` event → proactive SSH probe (~2s vs 15-30s passive)
+- **Grace Period**: 30s window to recover existing connection before destructive reconnect (preserves TUI apps like yazi/vim)
 
 ### 🔀 Port Forwarding — Lock-Free I/O
 
@@ -226,7 +228,7 @@ Frontend adopts a **Multi-Store** pattern (10 stores) to handle drastically diff
 | **AppStore** | Fact layer — actual SSH connection state via `connections` Map, synced from SessionTreeStore |
 | **IdeStore** | IDE mode — remote file editing, Git status, multi-tab editor |
 | **LocalTerminalStore** | Local PTY lifecycle, Shell process monitoring, independent I/O |
-| **ReconnectOrchestratorStore** | Auto-reconnect pipeline (snapshot → ssh-connect → await-terminal → restore) |
+| **ReconnectOrchestratorStore** | Auto-reconnect pipeline (snapshot → grace-period → ssh-connect → await-terminal → restore) |
 | **TransferStore** | SFTP transfer queue and progress |
 | **PluginStore** | Plugin runtime state and UI registry |
 | **ProfilerStore** | Resource profiler metrics |
@@ -418,7 +420,7 @@ OxideTerm/
 - [x] SSH connection pool & multiplexing
 - [x] SSH Agent authentication (AgentSigner)
 - [x] Node-first architecture (NodeRouter + events)
-- [x] Auto-reconnect orchestrator (6-phase pipeline)
+- [x] Auto-reconnect orchestrator (8-phase pipeline with Grace Period)
 - [x] ProxyJump unlimited bastion chain
 - [x] Port forwarding — local / remote / dynamic SOCKS5
 - [x] SFTP dual-pane file manager with preview

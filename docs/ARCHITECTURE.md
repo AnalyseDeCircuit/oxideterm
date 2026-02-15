@@ -321,6 +321,8 @@ classDiagram
         +register_existing(id, controller)
         +start_heartbeat(conn_id)
         +start_reconnect(conn_id) [NO-OP: 前端驱动]
+        +probe_active_connections() [v1.11.1]
+        +probe_single_connection(conn_id) [v1.11.1]
     }
 
     class ConnectionEntry {
@@ -867,7 +869,7 @@ graph TD
 
     subgraph Hooks["自定义 Hooks"]
         UseConnEvents["useConnectionEvents<br/>连接事件"]
-        UseNetwork["useNetworkStatus<br/>网络状态"]
+        UseNetwork["useNetworkStatus<br/>网络状态 + 主动探测"]
         UseToast["useToast<br/>提示消息"]
         UseTermKb["useTerminalKeyboard<br/>终端快捷键"]
     end
@@ -1060,7 +1062,7 @@ src/
 ├── hooks/                  # 自定义 Hooks
 │   ├── useConnectionEvents.ts  # 连接生命周期事件
 │   ├── useForwardEvents.ts     # 端口转发事件
-│   ├── useNetworkStatus.ts     # 网络状态检测
+│   ├── useNetworkStatus.ts     # 网络状态检测 + visibilitychange 主动探测 (v1.11.1)
 │   ├── useTerminalKeyboard.ts  # 终端快捷键
 │   ├── useSplitPaneShortcuts.ts # 分屏快捷键
 │   ├── useTauriListener.ts     # Tauri 事件监听
@@ -1378,20 +1380,21 @@ const connectionKey = `${sessionId}-${connectionId}`; // 复合 Key
 
 此模式比手动编写 `useEffect` 来重置几十个状态变量要健壮得多 (Robustness through Destruction)。
 
-### Reconnect Orchestrator (v1.6.2)
+### Reconnect Orchestrator (v1.6.2, Grace Period v1.11.1)
 
-v1.6.2 引入了统一的前端重连编排器 (`reconnectOrchestratorStore`)，替代了 `useConnectionEvents` 中分散的防抖/重试逻辑。
+v1.6.2 引入了统一的前端重连编排器 (`reconnectOrchestratorStore`)，替代了 `useConnectionEvents` 中分散的防抖/重试逻辑。v1.11.1 新增 Grace Period 阶段以保护 TUI 应用。
 
 **管道阶段**:
 ```
-snapshot → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → done
+snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → done
 ```
 
 **关键设计决策**:
 1. **Snapshot-Before-Reset**: `resetNodeState` 会销毁 forwarding manager，因此必须在调用 `reconnectCascade` 之前捕获 forward 规则快照。
-2. **Terminal 不在管道内**: Key-Driven Reset 自动处理终端重建，orchestrator 只需等待新 `terminalSessionId` 出现。
-3. **Forward 重建而非恢复**: 旧 forward 规则被销毁后，使用 `createPortForward` 从快照重新创建，而非 `restartPortForward`。
-4. **用户意图保护**: 用户手动停止的 forward（`status === 'stopped'`）不会被恢复。
+2. **Grace Period (v1.11.1)**: 在破坏性重连之前，先花 30 秒尝试恢复旧连接。若 SSH keepalive 探测成功，则跳过所有破坏性阶段，保留 TUI 应用。
+3. **Terminal 不在管道内**: Key-Driven Reset 自动处理终端重建，orchestrator 只需等待新 `terminalSessionId` 出现。
+4. **Forward 重建而非恢复**: 旧 forward 规则被销毁后，使用 `createPortForward` 从快照重新创建，而非 `restartPortForward`。
+5. **用户意图保护**: 用户手动停止的 forward（`status === 'stopped'`）不会被恢复。
 
 **文件**: `src/store/reconnectOrchestratorStore.ts`
 
