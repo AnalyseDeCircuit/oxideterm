@@ -579,6 +579,38 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     return () => window.removeEventListener('online', handleOnline);
   }, [sessionId, recoverWebSocket]);
 
+  // Recover broken WebSocket when page becomes visible again (App Nap / sleep wake)
+  // The local WsBridge may have timed out while JS was paused, even though
+  // the SSH connection is still alive (keep-alive). Detect this and reconnect.
+  useEffect(() => {
+    let lastHiddenAt = 0;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        lastHiddenAt = Date.now();
+        return;
+      }
+
+      // Page became visible — check if we were hidden long enough for WsBridge to time out
+      const hiddenDuration = lastHiddenAt > 0 ? Date.now() - lastHiddenAt : 0;
+      if (hiddenDuration < 5_000) return; // Ignore brief tab switches
+
+      const ws = wsRef.current;
+      const wsBroken = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING;
+
+      if (wsBroken && connectionStatusRef.current === 'connected') {
+        console.log(
+          `[TerminalView ${sessionId}] Page visible after ${Math.round(hiddenDuration / 1000)}s, WS is broken — recovering`
+        );
+        wsRecoveryAttemptsRef.current = 0; // Reset attempts for fresh recovery
+        recoverWebSocket('wake-ws-broken');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [sessionId, recoverWebSocket]);
+
   // Get terminal settings from unified store
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
 
