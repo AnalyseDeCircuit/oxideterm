@@ -23,7 +23,11 @@ use crate::ssh::{
 /// Heartbeat interval (seconds)
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 /// Heartbeat timeout - consider connection dead if no response (seconds)
-const HEARTBEAT_TIMEOUT_SECS: u64 = 90;
+/// This is a LOCAL WebSocket (localhost), not over the network.
+/// Raised from 90s to 300s (5 min) to tolerate macOS App Nap, system sleep,
+/// and background tab throttling that can pause JS execution.
+/// Real connection liveness is monitored by SSH heartbeat (15s interval).
+const HEARTBEAT_TIMEOUT_SECS: u64 = 300;
 /// WebSocket send timeout - disconnect if a single frame cannot be delivered (seconds)
 /// Raised from 5s to tolerate mobile/VPN network jitter
 const WS_SEND_TIMEOUT_SECS: u64 = 15;

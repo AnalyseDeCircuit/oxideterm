@@ -1480,6 +1480,7 @@ impl SshConnectionRegistry {
         let conn_clone = conn.clone();
         let connections = self.connections.clone();
         let node_emitter = self.node_emitter();
+        let app_handle = self.app_handle.read().await.clone();
 
         let handle = tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
@@ -1495,6 +1496,36 @@ impl SshConnectionRegistry {
                 conn_clone.clear_sftp().await; // Oxide-Next Phase 1.5: 清理 SFTP
                 conn_clone.handle_controller.disconnect().await;
                 conn_clone.set_state(ConnectionState::Disconnected).await;
+
+                // 🔴 关键修复：发送 connection_status_changed 事件通知前端
+                // 之前只发了 node:state 事件，前端 useConnectionEvents 收不到
+                if let Some(ref handle) = app_handle {
+                    use tauri::Emitter;
+
+                    #[derive(Clone, serde::Serialize)]
+                    struct ConnectionStatusEvent {
+                        connection_id: String,
+                        status: String,
+                        affected_children: Vec<String>,
+                        timestamp: u64,
+                    }
+
+                    let event = ConnectionStatusEvent {
+                        connection_id: connection_id.clone(),
+                        status: "disconnected".to_string(),
+                        affected_children: vec![],
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    };
+
+                    if let Err(e) = handle.emit("connection_status_changed", event) {
+                        error!("Failed to emit connection_status_changed for idle timeout: {}", e);
+                    } else {
+                        info!("Emitted connection_status_changed: {} -> disconnected (idle timeout)", connection_id);
+                    }
+                }
 
                 // Oxide-Next Phase 2: 空闲超时 → Disconnected 事件
                 if let Some(ref emitter) = node_emitter {
