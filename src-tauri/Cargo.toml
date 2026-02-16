@@ -125,6 +125,7 @@ subtle = "2.5"  # Constant-time comparison for security tokens
 vte = "0.14"
 regex = "1.10"
 strip-ansi-escapes = "0.2"
+flate2 = "1.1.9"
 
 # Unix process group management (for PTY cleanup)
 [target.'cfg(unix)'.dependencies]

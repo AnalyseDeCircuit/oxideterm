@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use base64::Engine;
@@ -750,6 +751,7 @@ impl SftpSession {
         local_path: &str,
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         let canonical_path = self.resolve_path(remote_path).await?;
         info!("Downloading directory {} to {}", canonical_path, local_path);
@@ -770,6 +772,7 @@ impl SftpSession {
                 &progress_tx,
                 &start_time,
                 &cancel_flag,
+                &speed_limit_bps,
             )
             .await?;
 
@@ -786,8 +789,9 @@ impl SftpSession {
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         start_time: &std::time::Instant,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
-        self.download_dir_inner_depth(remote_path, local_path, transfer_id, progress_tx, start_time, 0, cancel_flag)
+        self.download_dir_inner_depth(remote_path, local_path, transfer_id, progress_tx, start_time, 0, cancel_flag, speed_limit_bps)
             .await
     }
 
@@ -801,6 +805,7 @@ impl SftpSession {
         start_time: &std::time::Instant,
         depth: u32,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         // Guard against symlink cycles
         const MAX_DEPTH: u32 = 64;
@@ -861,6 +866,7 @@ impl SftpSession {
                     start_time,
                     depth + 1,
                     cancel_flag,
+                    speed_limit_bps,
                 ))
                 .await?;
             } else {
@@ -874,8 +880,8 @@ impl SftpSession {
                 let mut local_file = tokio::fs::File::create(&local_entry_path)
                     .await
                     .map_err(SftpError::IoError)?;
-                let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
-                let mut buf = vec![0u8; chunk_size];
+                let mut chunk_sizer = super::types::AdaptiveChunkSizer::new();
+                let mut buf = vec![0u8; super::types::AdaptiveChunkSizer::MAX_CHUNK];
                 let mut file_transferred: u64 = 0;
                 let file_start = std::time::Instant::now();
                 let mut last_file_progress = std::time::Instant::now();
@@ -887,11 +893,24 @@ impl SftpSession {
                     entry.size
                 };
                 loop {
-                    let n = remote_file.read(&mut buf).await
+                    let n = remote_file.read(&mut buf[..chunk_sizer.chunk_size()]).await
                         .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
                     if n == 0 { break; }
                     local_file.write_all(&buf[..n]).await.map_err(SftpError::IoError)?;
                     file_transferred += n as u64;
+                    chunk_sizer.record(n);
+
+                    // Speed limit throttle (token-bucket style)
+                    if let Some(ref limit) = speed_limit_bps {
+                        let bps = limit.load(std::sync::atomic::Ordering::Relaxed);
+                        if bps > 0 {
+                            let elapsed = file_start.elapsed().as_secs_f64();
+                            let expected_secs = file_transferred as f64 / bps as f64;
+                            if expected_secs > elapsed {
+                                tokio::time::sleep(std::time::Duration::from_secs_f64(expected_secs - elapsed)).await;
+                            }
+                        }
+                    }
 
                     // Per-chunk progress for large files (throttled to 200ms)
                     if last_file_progress.elapsed().as_millis() >= 200 {
@@ -966,6 +985,7 @@ impl SftpSession {
         remote_path: &str,
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         let canonical_path = if is_absolute_remote_path(remote_path) {
             remote_path.to_string()
@@ -1023,6 +1043,7 @@ impl SftpSession {
                 &progress_tx,
                 &start_time,
                 &cancel_flag,
+                &speed_limit_bps,
             )
             .await?;
 
@@ -1039,8 +1060,9 @@ impl SftpSession {
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         start_time: &std::time::Instant,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
-        self.upload_dir_inner_depth(local_path, remote_path, transfer_id, progress_tx, start_time, 0, cancel_flag)
+        self.upload_dir_inner_depth(local_path, remote_path, transfer_id, progress_tx, start_time, 0, cancel_flag, speed_limit_bps)
             .await
     }
 
@@ -1054,6 +1076,7 @@ impl SftpSession {
         start_time: &std::time::Instant,
         depth: u32,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         // Guard against symlink cycles
         const MAX_DEPTH: u32 = 64;
@@ -1102,6 +1125,7 @@ impl SftpSession {
                     start_time,
                     depth + 1,
                     cancel_flag,
+                    speed_limit_bps,
                 ))
                 .await?;
             } else if !metadata.is_file() {
@@ -1120,18 +1144,31 @@ impl SftpSession {
                     .create(&remote_entry_path)
                     .await
                     .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
-                let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
-                let mut buf = vec![0u8; chunk_size];
+                let mut chunk_sizer = super::types::AdaptiveChunkSizer::new();
+                let mut buf = vec![0u8; super::types::AdaptiveChunkSizer::MAX_CHUNK];
                 let mut file_transferred: u64 = 0;
                 let file_start = std::time::Instant::now();
                 let mut last_file_progress = std::time::Instant::now();
                 loop {
-                    let n = local_file.read(&mut buf).await.map_err(SftpError::IoError)?;
+                    let n = local_file.read(&mut buf[..chunk_sizer.chunk_size()]).await.map_err(SftpError::IoError)?;
                     if n == 0 { break; }
                     tokio::io::AsyncWriteExt::write_all(&mut remote_file, &buf[..n])
                         .await
                         .map_err(|e| SftpError::ProtocolError(e.to_string()))?;
                     file_transferred += n as u64;
+                    chunk_sizer.record(n);
+
+                    // Speed limit throttle (token-bucket style)
+                    if let Some(ref limit) = speed_limit_bps {
+                        let bps = limit.load(std::sync::atomic::Ordering::Relaxed);
+                        if bps > 0 {
+                            let elapsed = file_start.elapsed().as_secs_f64();
+                            let expected_secs = file_transferred as f64 / bps as f64;
+                            if expected_secs > elapsed {
+                                tokio::time::sleep(std::time::Duration::from_secs_f64(expected_secs - elapsed)).await;
+                            }
+                        }
+                    }
 
                     // Per-chunk progress for large files (throttled to 200ms)
                     if last_file_progress.elapsed().as_millis() >= 200 {
@@ -1469,6 +1506,7 @@ impl SftpSession {
                     total_bytes, // Pass total_bytes for progress updates
                     progress_tx.clone(),
                     control.clone(),
+                    transfer_manager.as_ref().map(|tm| tm.speed_limit_bps_ref()),
                 )
             },
             RetryConfig::default(),
@@ -1498,6 +1536,7 @@ impl SftpSession {
         total_bytes: u64, // Total bytes for progress display
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         control: Option<std::sync::Arc<super::transfer::TransferControl>>,
+        speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -1543,8 +1582,8 @@ impl SftpSession {
         }
 
         // Transfer loop with cooperative cancellation and timeout protection
-        let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
-        let mut buffer = vec![0u8; chunk_size];
+        let mut chunk_sizer = super::types::AdaptiveChunkSizer::new();
+        let mut buffer = vec![0u8; super::types::AdaptiveChunkSizer::MAX_CHUNK];
         let mut transferred = ctx.offset;
 
         // Progress throttling: emit at most every 200ms to reduce IPC overhead
@@ -1579,7 +1618,7 @@ impl SftpSession {
 
             // Read with timeout to prevent zombie transfers on SSH disconnect
             let bytes_read =
-                match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_file.read(&mut buffer)).await {
+                match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_file.read(&mut buffer[..chunk_sizer.chunk_size()])).await {
                     Ok(Ok(n)) => n,
                     Ok(Err(e)) => return Err(SftpError::ProtocolError(e.to_string())),
                     Err(_) => {
@@ -1615,6 +1654,7 @@ impl SftpSession {
 
             transferred += bytes_read as u64;
             speed_window_bytes += bytes_read as u64;
+            chunk_sizer.record(bytes_read);
 
             // Update speed calculation (sliding window)
             let window_elapsed = speed_window_start.elapsed();
@@ -1622,6 +1662,19 @@ impl SftpSession {
                 current_speed = (speed_window_bytes as f64 / window_elapsed.as_secs_f64()) as u64;
                 speed_window_bytes = 0;
                 speed_window_start = std::time::Instant::now();
+            }
+
+            // Speed limit throttle (token-bucket style)
+            if let Some(ref limit) = speed_limit_bps {
+                let bps = limit.load(std::sync::atomic::Ordering::Relaxed);
+                if bps > 0 {
+                    let elapsed = transfer_start.elapsed().as_secs_f64();
+                    let bytes_since_start = (transferred - ctx.offset) as f64;
+                    let expected_secs = bytes_since_start / bps as f64;
+                    if expected_secs > elapsed {
+                        tokio::time::sleep(std::time::Duration::from_secs_f64(expected_secs - elapsed)).await;
+                    }
+                }
             }
 
             // Send progress update (throttled to reduce IPC overhead)
@@ -1851,6 +1904,7 @@ impl SftpSession {
                     total_bytes,
                     progress_tx.clone(),
                     control.clone(),
+                    transfer_manager.as_ref().map(|tm| tm.speed_limit_bps_ref()),
                 )
             },
             RetryConfig::default(),
@@ -1942,6 +1996,7 @@ impl SftpSession {
         total_bytes: u64,
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         control: Option<std::sync::Arc<super::transfer::TransferControl>>,
+        speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
     ) -> Result<u64, SftpError> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -1982,8 +2037,8 @@ impl SftpSession {
         };
 
         // Transfer loop with cooperative cancellation and timeout protection
-        let chunk_size = super::types::constants::DEFAULT_CHUNK_SIZE;
-        let mut buffer = vec![0u8; chunk_size];
+        let mut chunk_sizer = super::types::AdaptiveChunkSizer::new();
+        let mut buffer = vec![0u8; super::types::AdaptiveChunkSizer::MAX_CHUNK];
         let mut transferred = ctx.offset;
 
         // Progress throttling: emit at most every 200ms to reduce IPC overhead
@@ -2014,7 +2069,7 @@ impl SftpSession {
             }
 
             let bytes_read = local_file
-                .read(&mut buffer)
+                .read(&mut buffer[..chunk_sizer.chunk_size()])
                 .await
                 .map_err(SftpError::IoError)?;
 
@@ -2045,6 +2100,7 @@ impl SftpSession {
 
             transferred += bytes_read as u64;
             speed_window_bytes += bytes_read as u64;
+            chunk_sizer.record(bytes_read);
 
             // Update speed calculation (sliding window)
             let window_elapsed = speed_window_start.elapsed();
@@ -2052,6 +2108,19 @@ impl SftpSession {
                 current_speed = (speed_window_bytes as f64 / window_elapsed.as_secs_f64()) as u64;
                 speed_window_bytes = 0;
                 speed_window_start = std::time::Instant::now();
+            }
+
+            // Speed limit throttle (token-bucket style)
+            if let Some(ref limit) = speed_limit_bps {
+                let bps = limit.load(std::sync::atomic::Ordering::Relaxed);
+                if bps > 0 {
+                    let elapsed = transfer_start.elapsed().as_secs_f64();
+                    let bytes_since_start = (transferred - ctx.offset) as f64;
+                    let expected_secs = bytes_since_start / bps as f64;
+                    if expected_secs > elapsed {
+                        tokio::time::sleep(std::time::Duration::from_secs_f64(expected_secs - elapsed)).await;
+                    }
+                }
             }
 
             // Send progress update (throttled to reduce IPC overhead)

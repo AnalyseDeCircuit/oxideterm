@@ -79,6 +79,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   src, name, filePath, mimeType,
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const playRequestTokenRef = useRef(0);
 
   // State
   const [playing, setPlaying] = useState(false);
@@ -112,13 +113,31 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     const el = audioRef.current;
     if (!el || loadError) return;
     if (el.paused) {
-      el.play().catch((err) => {
-        console.warn('Audio play failed:', err);
-        setLoadError(`Playback failed: ${err.message || err}`);
-        setPlaying(false);
-      });
-      setPlaying(true);
+      const token = ++playRequestTokenRef.current;
+      const playPromise = el.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch((err: unknown) => {
+          if (token !== playRequestTokenRef.current) return;
+
+          const abortError = err && typeof err === 'object' && 'name' in err
+            ? String((err as { name?: unknown }).name) === 'AbortError'
+            : false;
+
+          if (abortError) {
+            setPlaying(false);
+            return;
+          }
+
+          const message = err && typeof err === 'object' && 'message' in err
+            ? String((err as { message?: unknown }).message)
+            : String(err);
+          console.warn('Audio play failed:', err);
+          setLoadError(`Playback failed: ${message}`);
+          setPlaying(false);
+        });
+      }
     } else {
+      playRequestTokenRef.current += 1;
       el.pause();
       setPlaying(false);
     }
@@ -164,6 +183,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     el.load();
     const onTime = () => setCurrent(el.currentTime);
     const onMeta = () => setDuration(el.duration);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
     const onEnd = () => setPlaying(false);
     const onError = () => {
       const code = el.error?.code;
@@ -178,12 +199,17 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     };
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('loadedmetadata', onMeta);
+    el.addEventListener('play', onPlay);
+    el.addEventListener('pause', onPause);
     el.addEventListener('ended', onEnd);
     el.addEventListener('error', onError);
     return () => {
+      playRequestTokenRef.current += 1;
       el.pause();
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('loadedmetadata', onMeta);
+      el.removeEventListener('play', onPlay);
+      el.removeEventListener('pause', onPause);
       el.removeEventListener('ended', onEnd);
       el.removeEventListener('error', onError);
       // Release browser-buffered decoded audio data to prevent memory leaks
@@ -228,7 +254,9 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   return (
     <div className="flex-1 flex min-h-[320px] select-none overflow-hidden relative bg-theme-bg">
       {/* Hidden audio */}
-      <audio ref={audioRef} src={src} preload="metadata" {...(mimeType ? { type: mimeType } : {})} />
+      <audio ref={audioRef} preload="metadata">
+        <source src={src} type={mimeType || 'audio/mpeg'} />
+      </audio>
 
       {/* Load error banner */}
       {loadError && (

@@ -40,7 +40,7 @@ import { CodeHighlight } from '../fileManager/CodeHighlight';
 import { OfficePreview } from '../fileManager/OfficePreview';
 import { PdfViewer } from '../fileManager/PdfViewer';
 import { ImageViewer } from '../fileManager/ImageViewer';
-import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpTarProbe, nodeSftpTarUpload, nodeSftpTarDownload, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename, cleanupSftpPreviewTemp } from '../../lib/api';
+import { api, nodeSftpInit, nodeSftpListDir, nodeSftpPreview, nodeSftpPreviewHex, nodeSftpDownload, nodeSftpUpload, nodeSftpDownloadDir, nodeSftpUploadDir, nodeSftpTarProbe, nodeSftpTarCompressionProbe, nodeSftpTarUpload, nodeSftpTarDownload, nodeSftpDelete, nodeSftpDeleteRecursive, nodeSftpMkdir, nodeSftpRename, cleanupSftpPreviewTemp } from '../../lib/api';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -659,10 +659,17 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   const tarProbingRef = useRef(false);
   const tarProbePromiseRef = useRef<Promise<boolean> | null>(null);
 
+  // Tar compression capability cache: null = not probed
+  type TarCompressionKind = 'zstd' | 'gzip' | 'none';
+  const tarCompressionRef = useRef<TarCompressionKind | null>(null);
+  const tarCompressionProbePromiseRef = useRef<Promise<TarCompressionKind> | null>(null);
+
   useEffect(() => {
     tarSupportRef.current = null;
     tarProbingRef.current = false;
     tarProbePromiseRef.current = null;
+    tarCompressionRef.current = null;
+    tarCompressionProbePromiseRef.current = null;
   }, [nodeId]);
 
   // Path input state for editable path bars
@@ -1270,11 +1277,31 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
     }
 
     if (tarSupportRef.current) {
-      // Tar fast path
+      // Lazy-probe best compression (deduplicated)
+      if (tarCompressionRef.current === null) {
+        if (!tarCompressionProbePromiseRef.current) {
+          tarCompressionProbePromiseRef.current = nodeSftpTarCompressionProbe(nid)
+            .then((comp) => {
+              tarCompressionRef.current = comp;
+              return comp;
+            })
+            .catch(() => {
+              tarCompressionRef.current = 'none';
+              return 'none' as TarCompressionKind;
+            })
+            .finally(() => {
+              tarCompressionProbePromiseRef.current = null;
+            });
+        }
+        tarCompressionRef.current = await tarCompressionProbePromiseRef.current;
+      }
+
+      const comp = tarCompressionRef.current;
+      // Tar fast path (with compression)
       if (dir === 'upload') {
-        await nodeSftpTarUpload(nid, localFile, remoteFile, tid);
+        await nodeSftpTarUpload(nid, localFile, remoteFile, tid, comp);
       } else {
-        await nodeSftpTarDownload(nid, remoteFile, localFile, tid);
+        await nodeSftpTarDownload(nid, remoteFile, localFile, tid, comp);
       }
     } else {
       // SFTP fallback

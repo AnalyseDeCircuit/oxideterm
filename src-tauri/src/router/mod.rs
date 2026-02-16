@@ -181,6 +181,29 @@ impl NodeRouter {
         Ok(sftp)
     }
 
+    /// 创建独立的 SFTP session 用于文件传输。
+    ///
+    /// 每次调用创建新的 SSH channel + SftpSession，调用方独占。
+    /// 多个并发传输各自持有独立 session，不与浏览操作互斥。
+    /// session 在传输完成后 drop，自动关闭底层 SSH channel。
+    pub async fn acquire_transfer_sftp(
+        &self,
+        node_id: &str,
+    ) -> Result<SftpSession, RouteError> {
+        let resolved = self.resolve_connection(node_id).await?;
+
+        let entry = self
+            .connection_registry
+            .get_connection(&resolved.connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.into()))?;
+
+        let sftp = entry.acquire_transfer_sftp().await.map_err(|e| {
+            RouteError::CapabilityUnavailable(format!("Transfer SFTP init failed: {}", e))
+        })?;
+
+        Ok(sftp)
+    }
+
     /// 失效并重新获取 SFTP session（静默重建入口）
     ///
     /// 工作流程：

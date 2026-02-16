@@ -448,12 +448,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, name, mimeType, f
       >
         <video
           ref={videoRef}
-          src={src}
           preload="metadata"
           className="block"
           style={videoStyle}
-          {...(mimeType ? { type: mimeType } : {})}
-        />
+        >
+          <source src={src} type={mimeType || 'video/mp4'} />
+        </video>
 
         {/* Big play overlay when paused */}
         {!playing && (

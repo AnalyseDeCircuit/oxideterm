@@ -257,6 +257,79 @@ pub mod constants {
     pub const STREAM_BUFFER_SIZE: usize = 256 * 1024;
 }
 
+/// Adaptive chunk size calculator for SFTP transfers.
+///
+/// Adjusts read/write buffer size based on measured throughput over
+/// a 1-second sliding window:
+///
+/// | Throughput        | Chunk Size |
+/// |-------------------|------------|
+/// | < 256 KB/s        | 64 KB      |
+/// | 256 KB – 1 MB/s   | 128 KB     |
+/// | 1 – 10 MB/s       | 256 KB     |
+/// | 10 – 50 MB/s      | 1 MB       |
+/// | > 50 MB/s         | 2 MB       |
+///
+/// The buffer is always allocated at [`MAX_CHUNK`] size; only the
+/// slice passed to read/write varies.
+pub struct AdaptiveChunkSizer {
+    current: usize,
+    window_bytes: u64,
+    window_start: std::time::Instant,
+}
+
+impl AdaptiveChunkSizer {
+    /// Smallest allowed chunk (64 KB)
+    pub const MIN_CHUNK: usize = 64 * 1024;
+    /// Largest allowed chunk (2 MB)
+    pub const MAX_CHUNK: usize = 2 * 1024 * 1024;
+    /// Measurement window (1 second)
+    const ADAPT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+    /// Create a new sizer starting at [`DEFAULT_CHUNK_SIZE`](constants::DEFAULT_CHUNK_SIZE).
+    pub fn new() -> Self {
+        Self {
+            current: constants::DEFAULT_CHUNK_SIZE,
+            window_bytes: 0,
+            window_start: std::time::Instant::now(),
+        }
+    }
+
+    /// Current chunk size to use for the next read/write.
+    #[inline]
+    pub fn chunk_size(&self) -> usize {
+        self.current
+    }
+
+    /// Record `bytes` transferred; recalculates chunk size once per window.
+    pub fn record(&mut self, bytes: usize) {
+        self.window_bytes += bytes as u64;
+
+        if self.window_start.elapsed() >= Self::ADAPT_INTERVAL {
+            let elapsed = self.window_start.elapsed().as_secs_f64();
+            if elapsed > 0.0 {
+                let throughput = self.window_bytes as f64 / elapsed;
+                self.current = Self::throughput_to_chunk(throughput as u64);
+            }
+            // Reset window
+            self.window_bytes = 0;
+            self.window_start = std::time::Instant::now();
+        }
+    }
+
+    /// Deterministic mapping from bytes/sec → chunk size.
+    #[inline]
+    fn throughput_to_chunk(bytes_per_sec: u64) -> usize {
+        match bytes_per_sec {
+            0..=262_144 => Self::MIN_CHUNK,            // < 256 KB/s
+            262_145..=1_048_576 => 128 * 1024,         // 256 KB/s – 1 MB/s
+            1_048_577..=10_485_760 => 256 * 1024,      // 1 – 10 MB/s
+            10_485_761..=52_428_800 => 1_048_576,       // 10 – 50 MB/s
+            _ => Self::MAX_CHUNK,                       // > 50 MB/s
+        }
+    }
+}
+
 /// Map file extension to syntax highlighting language
 pub fn extension_to_language(ext: &str) -> Option<String> {
     let lang = match ext.to_lowercase().as_str() {

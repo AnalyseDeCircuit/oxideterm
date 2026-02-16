@@ -225,7 +225,12 @@ pub async fn node_sftp_download(
     progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<(), RouteError> {
-    let sftp = router.acquire_sftp(&node_id).await?;
+    // Gate concurrency: acquire permit BEFORE opening SSH channel
+    // to prevent MaxSessions exhaustion under parallel transfers.
+    let _permit = transfer_manager.acquire_permit().await;
+
+    // 使用独立的传输 SFTP session，不阻塞浏览操作
+    let sftp = router.acquire_transfer_sftp(&node_id).await?;
 
     // 进度通道
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
@@ -239,7 +244,6 @@ pub async fn node_sftp_download(
         }
     });
 
-    let sftp = sftp.lock().await;
     sftp.download_with_resume(
         &remote_path,
         &local_path,
@@ -265,7 +269,11 @@ pub async fn node_sftp_upload(
     progress_store: State<'_, Arc<dyn crate::sftp::ProgressStore>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<(), RouteError> {
-    let sftp = router.acquire_sftp(&node_id).await?;
+    // Gate concurrency: acquire permit BEFORE opening SSH channel
+    let _permit = transfer_manager.acquire_permit().await;
+
+    // 使用独立的传输 SFTP session，不阻塞浏览操作
+    let sftp = router.acquire_transfer_sftp(&node_id).await?;
 
     // 进度通道
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
@@ -278,7 +286,6 @@ pub async fn node_sftp_upload(
         }
     });
 
-    let sftp = sftp.lock().await;
     sftp.upload_with_resume(
         &local_path,
         &remote_path,
@@ -380,7 +387,9 @@ pub async fn node_sftp_download_dir(
     router: State<'_, Arc<NodeRouter>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
-    let sftp = router.acquire_sftp(&node_id).await?;
+    // Gate concurrency: acquire permit BEFORE opening SSH channel
+    let _permit = transfer_manager.acquire_permit().await;
+    let sftp = router.acquire_transfer_sftp(&node_id).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
     let app_clone = app.clone();
@@ -408,8 +417,7 @@ pub async fn node_sftp_download_dir(
         }
     });
 
-    let sftp = sftp.lock().await;
-    let result = sftp.download_dir(&remote_path, &local_path, Some(tx), Some(cancel_flag))
+    let result = sftp.download_dir(&remote_path, &local_path, Some(tx), Some(cancel_flag), Some(transfer_manager.speed_limit_bps_ref()))
         .await
         .map_err(RouteError::from);
     transfer_manager.unregister(&tid);
@@ -427,7 +435,9 @@ pub async fn node_sftp_upload_dir(
     router: State<'_, Arc<NodeRouter>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
-    let sftp = router.acquire_sftp(&node_id).await?;
+    // Gate concurrency: acquire permit BEFORE opening SSH channel
+    let _permit = transfer_manager.acquire_permit().await;
+    let sftp = router.acquire_transfer_sftp(&node_id).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
     let app_clone = app.clone();
@@ -453,8 +463,7 @@ pub async fn node_sftp_upload_dir(
         }
     });
 
-    let sftp = sftp.lock().await;
-    let result = sftp.upload_dir(&local_path, &remote_path, Some(tx), Some(cancel_flag))
+    let result = sftp.upload_dir(&local_path, &remote_path, Some(tx), Some(cancel_flag), Some(transfer_manager.speed_limit_bps_ref()))
         .await
         .map_err(RouteError::from);
     transfer_manager.unregister(&tid);
@@ -546,7 +555,9 @@ pub async fn node_sftp_resume_transfer(
             RouteError::SftpOperationError("Transfer not found in progress store".to_string())
         })?;
 
-    let sftp = router.acquire_sftp(&node_id).await?;
+    // Gate concurrency: acquire permit BEFORE opening SSH channel
+    let _permit = transfer_manager.acquire_permit().await;
+    let sftp = router.acquire_transfer_sftp(&node_id).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
     let app_clone = app.clone();
@@ -557,7 +568,6 @@ pub async fn node_sftp_resume_transfer(
         }
     });
 
-    let sftp = sftp.lock().await;
     let progress_store_arc = (*progress_store).clone();
     let transfer_manager_arc = (*transfer_manager).clone();
 
@@ -751,6 +761,17 @@ pub async fn node_sftp_tar_probe(
     Ok(crate::sftp::tar_transfer::probe_tar_support(&resolved.handle_controller).await)
 }
 
+/// Probe the best compression method supported by remote `tar`.
+/// Returns "zstd", "gzip", or "none". Result should be cached per session.
+#[tauri::command]
+pub async fn node_sftp_tar_compression_probe(
+    node_id: String,
+    router: State<'_, Arc<NodeRouter>>,
+) -> Result<crate::sftp::tar_transfer::TarCompression, RouteError> {
+    let resolved = router.resolve_connection(&node_id).await?;
+    Ok(crate::sftp::tar_transfer::probe_tar_compression(&resolved.handle_controller).await)
+}
+
 /// Upload a local directory to remote via tar streaming.
 /// Falls through to SFTP if tar is not available — caller should check probe first.
 #[tauri::command]
@@ -759,10 +780,12 @@ pub async fn node_sftp_tar_upload(
     local_path: String,
     remote_path: String,
     transfer_id: Option<String>,
+    compression: Option<crate::sftp::tar_transfer::TarCompression>,
     app: AppHandle,
     router: State<'_, Arc<NodeRouter>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
+    let _permit = transfer_manager.acquire_permit().await;
     let resolved = router.resolve_connection(&node_id).await?;
     let sftp = router.acquire_sftp(&node_id).await?;
 
@@ -809,6 +832,8 @@ pub async fn node_sftp_tar_upload(
         &tid,
         Some(tx),
         Some(cancel_flag),
+        compression,
+        Some(transfer_manager.speed_limit_bps_ref()),
     )
     .await
     .map_err(RouteError::from);
@@ -824,10 +849,12 @@ pub async fn node_sftp_tar_download(
     remote_path: String,
     local_path: String,
     transfer_id: Option<String>,
+    compression: Option<crate::sftp::tar_transfer::TarCompression>,
     app: AppHandle,
     router: State<'_, Arc<NodeRouter>>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<u64, RouteError> {
+    let _permit = transfer_manager.acquire_permit().await;
     let resolved = router.resolve_connection(&node_id).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
@@ -860,6 +887,8 @@ pub async fn node_sftp_tar_download(
         &tid,
         Some(tx),
         Some(cancel_flag),
+        compression,
+        Some(transfer_manager.speed_limit_bps_ref()),
     )
     .await
     .map_err(RouteError::from);

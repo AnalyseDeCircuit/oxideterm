@@ -70,6 +70,29 @@ impl Default for TransferControl {
     }
 }
 
+/// RAII permit that decrements [`TransferManager::active_count`] on drop.
+///
+/// Wraps the underlying `OwnedSemaphorePermit` so the semaphore slot is also
+/// released automatically.
+pub struct TransferPermit {
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    active_count: Arc<AtomicUsize>,
+}
+
+impl Drop for TransferPermit {
+    fn drop(&mut self) {
+        let result = self.active_count.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |n| n.checked_sub(1),
+        );
+        match result {
+            Ok(prev) => debug!("TransferPermit dropped, active count: {}", prev - 1),
+            Err(_) => warn!("TransferPermit dropped with active_count already 0"),
+        }
+    }
+}
+
 /// RAII guard that automatically unregisters a transfer from [`TransferManager`] on drop.
 ///
 /// This prevents `controls` HashMap entry leaks on **any** early-return path
@@ -112,12 +135,12 @@ pub struct TransferManager {
     semaphore: Arc<Semaphore>,
     /// Active transfer controls
     controls: RwLock<HashMap<String, Arc<TransferControl>>>,
-    /// Active transfer count
-    active_count: AtomicUsize,
+    /// Active transfer count (Arc so TransferPermit can decrement on drop)
+    active_count: Arc<AtomicUsize>,
     /// Current configured max concurrent (can be changed at runtime)
     max_concurrent: AtomicUsize,
-    /// Speed limit in bytes per second (0 = unlimited)
-    speed_limit_bps: AtomicUsize,
+    /// Speed limit in bytes per second (0 = unlimited, Arc for sharing with transfer loops)
+    speed_limit_bps: Arc<AtomicUsize>,
 }
 
 impl TransferManager {
@@ -125,9 +148,9 @@ impl TransferManager {
         Self {
             semaphore: Arc::new(Semaphore::new(MAX_POSSIBLE_CONCURRENT)),
             controls: RwLock::new(HashMap::new()),
-            active_count: AtomicUsize::new(0),
+            active_count: Arc::new(AtomicUsize::new(0)),
             max_concurrent: AtomicUsize::new(DEFAULT_CONCURRENT_TRANSFERS),
-            speed_limit_bps: AtomicUsize::new(0),
+            speed_limit_bps: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -154,6 +177,11 @@ impl TransferManager {
         self.speed_limit_bps.load(Ordering::SeqCst)
     }
 
+    /// Get a shared reference to the speed limit atomic for passing to transfer loops
+    pub fn speed_limit_bps_ref(&self) -> Arc<AtomicUsize> {
+        self.speed_limit_bps.clone()
+    }
+
     /// Register a new transfer and get its control handle
     pub fn register(&self, transfer_id: &str) -> Arc<TransferControl> {
         let control = Arc::new(TransferControl::new());
@@ -177,13 +205,16 @@ impl TransferManager {
 
     /// Acquire a permit for concurrent transfer (blocks if at limit)
     ///
+    /// Returns a [`TransferPermit`] that automatically decrements `active_count`
+    /// and releases the semaphore slot when dropped.
+    ///
     /// Uses a soft limit approach: the semaphore has MAX_POSSIBLE_CONCURRENT permits,
     /// but we wait until active_count < max_concurrent before acquiring.
     ///
     /// # Panics
     /// This function will panic if the semaphore is closed, which should never happen
     /// in normal operation as the semaphore lives for the lifetime of the TransferManager.
-    pub async fn acquire_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
+    pub async fn acquire_permit(&self) -> TransferPermit {
         // Wait until we're below the configured limit
         loop {
             let current = self.active_count.load(Ordering::Acquire);
@@ -210,7 +241,10 @@ impl TransferManager {
             new_count,
             self.max_concurrent.load(Ordering::SeqCst)
         );
-        permit
+        TransferPermit {
+            _permit: permit,
+            active_count: self.active_count.clone(),
+        }
     }
 
     /// Get current active transfer count
@@ -221,6 +255,11 @@ impl TransferManager {
     /// Get maximum concurrent transfers
     pub fn max_concurrent(&self) -> usize {
         self.max_concurrent.load(Ordering::SeqCst)
+    }
+
+    /// Get the number of currently registered (tracked) transfers
+    pub fn registered_count(&self) -> usize {
+        self.controls.read().len()
     }
 
     /// Cancel a specific transfer

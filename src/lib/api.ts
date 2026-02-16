@@ -1362,13 +1362,17 @@ export const nodeSftpUploadDir = (nodeId: string, localPath: string, remotePath:
 export const nodeSftpTarProbe = (nodeId: string): Promise<boolean> =>
   invoke('node_sftp_tar_probe', { nodeId });
 
+/** 探测远端 tar 支持的最佳压缩方式（返回 "zstd" | "gzip" | "none"，结果应缓存） */
+export const nodeSftpTarCompressionProbe = (nodeId: string): Promise<'zstd' | 'gzip' | 'none'> =>
+  invoke('node_sftp_tar_compression_probe', { nodeId });
+
 /** Tar 流式上传目录（远端需支持 tar） */
-export const nodeSftpTarUpload = (nodeId: string, localPath: string, remotePath: string, transferId?: string): Promise<number> =>
-  invoke('node_sftp_tar_upload', { nodeId, localPath, remotePath, transferId });
+export const nodeSftpTarUpload = (nodeId: string, localPath: string, remotePath: string, transferId?: string, compression?: 'zstd' | 'gzip' | 'none'): Promise<number> =>
+  invoke('node_sftp_tar_upload', { nodeId, localPath, remotePath, transferId, compression });
 
 /** Tar 流式下载目录（远端需支持 tar） */
-export const nodeSftpTarDownload = (nodeId: string, remotePath: string, localPath: string, transferId?: string): Promise<number> =>
-  invoke('node_sftp_tar_download', { nodeId, remotePath, localPath, transferId });
+export const nodeSftpTarDownload = (nodeId: string, remotePath: string, localPath: string, transferId?: string, compression?: 'zstd' | 'gzip' | 'none'): Promise<number> =>
+  invoke('node_sftp_tar_download', { nodeId, remotePath, localPath, transferId, compression });
 
 /** 十六进制预览 */
 export const nodeSftpPreviewHex = (nodeId: string, path: string, offset: number): Promise<PreviewContent> =>

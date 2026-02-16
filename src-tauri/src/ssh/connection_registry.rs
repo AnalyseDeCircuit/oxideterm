@@ -433,6 +433,30 @@ impl ConnectionEntry {
         Ok(arc)
     }
 
+    /// 创建一个独立的 SFTP session 用于文件传输。
+    ///
+    /// 与 `acquire_sftp()` 不同，此方法 **每次调用都创建新的 SSH channel**，
+    /// 返回的 `SftpSession` 不共享，由调用方独占。当传输完成后 session
+    /// 自动 drop，关闭底层 SSH channel。
+    ///
+    /// 这样多个并发传输各自持有独立的 SFTP session，不互斥，
+    /// 浏览操作（list_dir/stat/preview）仍走共享的 `acquire_sftp()`。
+    ///
+    /// 注意远端 OpenSSH 默认 `MaxSessions=10`，调用方应通过
+    /// `TransferManager` 的并发上限控制总 session 数量。
+    pub async fn acquire_transfer_sftp(&self) -> Result<SftpSession, SftpError> {
+        info!(
+            "Creating dedicated transfer SFTP session for connection {}",
+            self.id
+        );
+        let sftp = SftpSession::new(self.handle_controller.clone(), self.id.clone()).await?;
+        debug!(
+            "Dedicated transfer SFTP session created for connection {}",
+            self.id
+        );
+        Ok(sftp)
+    }
+
     /// 清除 SFTP session（连接断开时调用）。
     ///
     /// SFTP session 随连接自动释放，无僵尸通道。

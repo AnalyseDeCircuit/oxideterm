@@ -40,15 +40,28 @@ pub async fn sftp_resume_transfer(
     Ok(transfer_manager.resume(&transfer_id))
 }
 
+/// Transfer stats returned to the frontend
+#[derive(serde::Serialize)]
+pub struct TransferStatsResponse {
+    pub active: usize,
+    pub queued: usize,
+    pub completed: usize,
+}
+
 /// Get transfer manager stats
 #[tauri::command]
 pub async fn sftp_transfer_stats(
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
-) -> Result<(usize, usize), SftpError> {
-    Ok((
-        transfer_manager.active_count(),
-        transfer_manager.max_concurrent(),
-    ))
+) -> Result<TransferStatsResponse, SftpError> {
+    let active = transfer_manager.active_count();
+    // Queued = registered transfers minus active (clamped to 0)
+    let registered = transfer_manager.registered_count();
+    let queued = registered.saturating_sub(active);
+    Ok(TransferStatsResponse {
+        active,
+        queued,
+        completed: 0, // Not tracked currently; reserved for future use
+    })
 }
 
 /// Update transfer settings (concurrent limit and speed limit)
