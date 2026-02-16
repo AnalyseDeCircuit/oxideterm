@@ -196,7 +196,7 @@ pub struct ConnectionPoolStats {
 /// 4. `sftp_session_id` (RwLock)
 /// 5. `sftp` (tokio::sync::Mutex) — Oxide-Next Phase 1.5
 /// 6. `forward_ids` (RwLock)
-/// 7. `last_emitted_status` (RwLock)
+/// 7. `last_emitted_status` (parking_lot::Mutex)
 /// 8. `idle_timer` (Mutex)
 /// 9. `heartbeat_task` (Mutex)
 /// 10. `reconnect_task` (Mutex)
@@ -223,7 +223,7 @@ pub struct ConnectionEntry {
     last_active: AtomicU64,
 
     /// 是否保持连接（用户设置）
-    keep_alive: RwLock<bool>,
+    keep_alive: AtomicBool,
 
     /// 创建时间
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -270,15 +270,15 @@ pub struct ConnectionEntry {
     current_attempt_id: AtomicU64,
 
     /// 最后一次发送的状态事件（用于状态守卫，避免重复发送）
-    last_emitted_status: RwLock<Option<String>>,
+    last_emitted_status: parking_lot::Mutex<Option<String>>,
 
     /// 父连接 ID（用于隧道连接，通过父连接的 direct-tcpip 建立）
     /// None = 直连本地
     /// Some(id) = 通过父连接的隧道建立
     parent_connection_id: Option<String>,
 
-    /// 远程环境信息（异步检测结果，可能为 None 表示检测中或失败）
-    remote_env: RwLock<Option<RemoteEnvInfo>>,
+    /// 远程环境信息（异步检测结果，一次性写入）
+    remote_env: std::sync::OnceLock<RemoteEnvInfo>,
 }
 
 impl ConnectionEntry {
@@ -347,13 +347,13 @@ impl ConnectionEntry {
     }
 
     /// 获取 keep_alive 标志
-    pub async fn is_keep_alive(&self) -> bool {
-        *self.keep_alive.read().await
+    pub fn is_keep_alive(&self) -> bool {
+        self.keep_alive.load(Ordering::Acquire)
     }
 
     /// 设置 keep_alive 标志
-    pub async fn set_keep_alive(&self, keep_alive: bool) {
-        *self.keep_alive.write().await = keep_alive;
+    pub fn set_keep_alive(&self, keep_alive: bool) {
+        self.keep_alive.store(keep_alive, Ordering::Release);
     }
 
     /// 取消空闲计时器
@@ -501,13 +501,20 @@ impl ConnectionEntry {
     }
 
     /// 获取远程环境信息
-    pub async fn remote_env(&self) -> Option<RemoteEnvInfo> {
-        self.remote_env.read().await.clone()
+    pub fn remote_env(&self) -> Option<RemoteEnvInfo> {
+        self.remote_env.get().cloned()
     }
 
-    /// 设置远程环境信息
-    pub async fn set_remote_env(&self, env: RemoteEnvInfo) {
-        *self.remote_env.write().await = Some(env);
+    /// 设置远程环境信息（仅允许设置一次）
+    /// OnceLock 语义：首次 set 生效，后续调用静默忽略并打日志。
+    /// 若需刷新，应在连接重建时通过新 ConnectionEntry 实现。
+    pub fn set_remote_env(&self, env: RemoteEnvInfo) {
+        if self.remote_env.set(env).is_err() {
+            warn!(
+                "[{}] set_remote_env called but value already set, ignoring",
+                self.id
+            );
+        }
     }
 
     /// 转换为 ConnectionInfo
@@ -519,7 +526,7 @@ impl ConnectionEntry {
             username: self.config.username.clone(),
             state: self.state().await,
             ref_count: self.ref_count(),
-            keep_alive: self.is_keep_alive().await,
+            keep_alive: self.is_keep_alive(),
             created_at: self.created_at.to_rfc3339(),
             last_active: chrono::DateTime::from_timestamp(self.last_active(), 0)
                 .unwrap_or_default()
@@ -528,7 +535,7 @@ impl ConnectionEntry {
             sftp_session_id: self.sftp_session_id().await,
             forward_ids: self.forward_ids().await,
             parent_connection_id: self.parent_connection_id.clone(),
-            remote_env: self.remote_env().await,
+            remote_env: self.remote_env(),
         }
     }
 
@@ -902,7 +909,7 @@ impl SshConnectionRegistry {
             state: RwLock::new(ConnectionState::Active),
             ref_count: AtomicU32::new(0),
             last_active: AtomicU64::new(Utc::now().timestamp() as u64),
-            keep_alive: RwLock::new(false),
+            keep_alive: AtomicBool::new(false),
             created_at: Utc::now(),
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
@@ -915,9 +922,9 @@ impl SshConnectionRegistry {
             is_reconnecting: AtomicBool::new(false),
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
-            last_emitted_status: RwLock::new(None),
+            last_emitted_status: parking_lot::Mutex::new(None),
             parent_connection_id: None,    // 直连，无父连接
-            remote_env: RwLock::new(None), // 待异步检测
+            remote_env: std::sync::OnceLock::new(), // 待异步检测
         });
 
         self.connections.insert(connection_id.clone(), entry);
@@ -1177,7 +1184,7 @@ impl SshConnectionRegistry {
             state: RwLock::new(ConnectionState::Active),
             ref_count: AtomicU32::new(0),
             last_active: AtomicU64::new(Utc::now().timestamp() as u64),
-            keep_alive: RwLock::new(false),
+            keep_alive: AtomicBool::new(false),
             created_at: Utc::now(),
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
@@ -1190,9 +1197,9 @@ impl SshConnectionRegistry {
             is_reconnecting: AtomicBool::new(false),
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
-            last_emitted_status: RwLock::new(None),
+            last_emitted_status: parking_lot::Mutex::new(None),
             parent_connection_id: Some(parent_connection_id.to_string()), // 隧道连接，记录父连接
-            remote_env: RwLock::new(None),                                // 待异步检测
+            remote_env: std::sync::OnceLock::new(),                                // 待异步检测
         });
 
         self.connections.insert(connection_id.clone(), entry);
@@ -1431,7 +1438,7 @@ impl SshConnectionRegistry {
 
         // 如果引用计数归零，启动空闲计时器
         if new_count == 0 {
-            let keep_alive = conn.is_keep_alive().await;
+            let keep_alive = conn.is_keep_alive();
             if keep_alive {
                 info!(
                     "Connection {} idle but keep_alive=true, not starting timer",
@@ -1804,7 +1811,7 @@ impl SshConnectionRegistry {
             state: RwLock::new(ConnectionState::Active),
             ref_count: AtomicU32::new(1), // 初始引用计数为 1（对应 terminal）
             last_active: AtomicU64::new(Utc::now().timestamp() as u64),
-            keep_alive: RwLock::new(false),
+            keep_alive: AtomicBool::new(false),
             created_at: Utc::now(),
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(vec![session_id]),
@@ -1817,9 +1824,9 @@ impl SshConnectionRegistry {
             is_reconnecting: AtomicBool::new(false),
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
-            last_emitted_status: RwLock::new(None),
+            last_emitted_status: parking_lot::Mutex::new(None),
             parent_connection_id: None,    // 从旧连接注册，无父连接
-            remote_env: RwLock::new(None), // 待异步检测
+            remote_env: std::sync::OnceLock::new(), // 待异步检测
         });
 
         self.connections
@@ -1856,7 +1863,7 @@ impl SshConnectionRegistry {
             .ok_or_else(|| ConnectionRegistryError::NotFound(connection_id.to_string()))?;
 
         let conn = entry.value();
-        conn.set_keep_alive(keep_alive).await;
+        conn.set_keep_alive(keep_alive);
 
         info!(
             "Connection {} keep_alive set to {}",
@@ -2169,7 +2176,7 @@ impl SshConnectionRegistry {
             );
 
             // Cache result in ConnectionEntry
-            conn.set_remote_env(env_info.clone()).await;
+            conn.set_remote_env(env_info.clone());
 
             // Emit event to frontend
             let app_handle = registry.app_handle.read().await;
@@ -2233,7 +2240,7 @@ impl SshConnectionRegistry {
                 connection_id, env_info.os_type
             );
 
-            conn.set_remote_env(env_info.clone()).await;
+            conn.set_remote_env(env_info.clone());
 
             if let Some(handle) = app_handle {
                 #[derive(Clone, serde::Serialize)]
@@ -2331,7 +2338,7 @@ impl SshConnectionRegistry {
         // === 状态守卫：检查是否需要发送 ===
         if let Some(entry) = self.connections.get(connection_id) {
             let conn = entry.value();
-            let mut last_status = conn.last_emitted_status.write().await;
+            let mut last_status = conn.last_emitted_status.lock();
 
             // 如果状态未变化，跳过发送
             if let Some(ref prev) = *last_status {
@@ -2664,7 +2671,7 @@ mod tests {
             state: RwLock::new(ConnectionState::Active),
             ref_count: AtomicU32::new(0),
             last_active: AtomicU64::new(0),
-            keep_alive: RwLock::new(false),
+            keep_alive: AtomicBool::new(false),
             created_at: Utc::now(),
             idle_timer: Mutex::new(None),
             terminal_ids: RwLock::new(Vec::new()),
@@ -2677,9 +2684,9 @@ mod tests {
             is_reconnecting: AtomicBool::new(false),
             reconnect_attempts: AtomicU32::new(0),
             current_attempt_id: AtomicU64::new(0),
-            last_emitted_status: RwLock::new(None),
+            last_emitted_status: parking_lot::Mutex::new(None),
             parent_connection_id: None,
-            remote_env: RwLock::new(None),
+            remote_env: std::sync::OnceLock::new(),
         };
 
         assert_eq!(entry.ref_count(), 0);

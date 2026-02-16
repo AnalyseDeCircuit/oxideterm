@@ -4,7 +4,7 @@
 //! Example: Local SOCKS5 proxy on 127.0.0.1:1080 -> SSH tunnel -> any destination
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,6 +27,30 @@ pub struct ForwardStats {
     pub bytes_sent: u64,
     /// Total bytes received (from remote)
     pub bytes_received: u64,
+}
+
+/// Atomic (lock-free) version of ForwardStats for concurrent updates
+#[derive(Debug, Default)]
+pub struct ForwardStatsAtomic {
+    pub connection_count: AtomicU64,
+    pub active_connections: AtomicU64,
+    pub bytes_sent: AtomicU64,
+    pub bytes_received: AtomicU64,
+}
+
+impl ForwardStatsAtomic {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn to_stats(&self) -> ForwardStats {
+        ForwardStats {
+            connection_count: self.connection_count.load(Ordering::Relaxed),
+            active_connections: self.active_connections.load(Ordering::Relaxed),
+            bytes_sent: self.bytes_sent.load(Ordering::Relaxed),
+            bytes_received: self.bytes_received.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// SOCKS5 protocol constants
@@ -92,7 +116,7 @@ pub struct DynamicForwardHandle {
     /// Channel to signal stop
     stop_tx: mpsc::Sender<()>,
     /// Stats tracking
-    stats: Arc<parking_lot::RwLock<ForwardStats>>,
+    stats: Arc<ForwardStatsAtomic>,
 }
 
 impl DynamicForwardHandle {
@@ -105,11 +129,11 @@ impl DynamicForwardHandle {
         // 等待所有活跃连接关闭（最多等待 5 秒）
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(5);
-        while self.stats.read().active_connections > 0 {
+        while self.stats.active_connections.load(Ordering::Relaxed) > 0 {
             if start.elapsed() > timeout {
                 warn!(
                     "Timeout waiting for {} active connections to close on {}",
-                    self.stats.read().active_connections,
+                    self.stats.active_connections.load(Ordering::Relaxed),
                     self.bound_addr
                 );
                 break;
@@ -125,7 +149,7 @@ impl DynamicForwardHandle {
 
     /// Get current stats
     pub fn stats(&self) -> ForwardStats {
-        self.stats.read().clone()
+        self.stats.to_stats()
     }
 }
 
@@ -185,7 +209,7 @@ pub async fn start_dynamic_forward_with_disconnect(
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
-    let stats = Arc::new(parking_lot::RwLock::new(ForwardStats::default()));
+    let stats = Arc::new(ForwardStatsAtomic::new());
     let stats_clone = stats.clone();
 
     // Create a broadcast channel for notifying child tasks of shutdown
@@ -233,11 +257,8 @@ pub async fn start_dynamic_forward_with_disconnect(
                             debug!("SOCKS5: Accepted connection from {}", peer_addr);
 
                             // Update stats
-                            {
-                                let mut s = stats_clone.write();
-                                s.connection_count += 1;
-                                s.active_connections += 1;
-                            }
+                            stats_clone.connection_count.fetch_add(1, Ordering::Relaxed);
+                            stats_clone.active_connections.fetch_add(1, Ordering::Relaxed);
 
                             let controller = handle_controller.clone();
                             let stats_for_conn = stats_clone.clone();
@@ -253,11 +274,12 @@ pub async fn start_dynamic_forward_with_disconnect(
                                     &mut child_shutdown_rx,
                                 ).await;
 
-                                // Decrement active connections when done
-                                {
-                                    let mut s = stats_for_conn.write();
-                                    s.active_connections = s.active_connections.saturating_sub(1);
-                                }
+                                // Decrement active connections when done (saturating)
+                                let _ = stats_for_conn.active_connections.fetch_update(
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                    |n| n.checked_sub(1),
+                                );
 
                                 if let Err(e) = result {
                                     warn!("SOCKS5 connection error from {}: {}", peer_addr, e);
@@ -318,7 +340,7 @@ pub async fn start_dynamic_forward_with_disconnect(
 async fn handle_socks5_connection(
     handle_controller: HandleController,
     mut stream: TcpStream,
-    stats: Arc<parking_lot::RwLock<ForwardStats>>,
+    stats: Arc<ForwardStatsAtomic>,
     shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), SshError> {
     // Phase 1: Authentication negotiation
@@ -503,7 +525,7 @@ const SOCKS5_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 async fn bridge_socks5_connection(
     mut local_stream: TcpStream,
     mut channel: russh::Channel<russh::client::Msg>,
-    stats: Arc<parking_lot::RwLock<ForwardStats>>,
+    stats: Arc<ForwardStatsAtomic>,
     shutdown_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), SshError> {
     let (mut local_read, mut local_write) = local_stream.split();
@@ -539,7 +561,7 @@ async fn bridge_socks5_connection(
                             break;
                         }
                         Ok(Ok(n)) => {
-                            stats_for_send.write().bytes_sent += n as u64;
+                            stats_for_send.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
                             if local_to_ssh_tx.send(buf[..n].to_vec()).await.is_err() {
                                 debug!("SOCKS5 local reader: channel closed");
                                 break;
@@ -616,7 +638,7 @@ async fn bridge_socks5_connection(
                     match result {
                         Ok(Some(russh::ChannelMsg::Data { data })) => {
                             let data_len = data.len();
-                            stats_for_recv.write().bytes_received += data_len as u64;
+                            stats_for_recv.bytes_received.fetch_add(data_len as u64, Ordering::Relaxed);
                             if ssh_to_local_tx.send(data.to_vec()).await.is_err() {
                                 debug!("SOCKS5 SSH I/O: local writer closed");
                                 break;

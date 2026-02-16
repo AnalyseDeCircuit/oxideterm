@@ -113,7 +113,7 @@ pub struct TransferManager {
     /// Active transfer controls
     controls: RwLock<HashMap<String, Arc<TransferControl>>>,
     /// Active transfer count
-    active_count: RwLock<usize>,
+    active_count: AtomicUsize,
     /// Current configured max concurrent (can be changed at runtime)
     max_concurrent: AtomicUsize,
     /// Speed limit in bytes per second (0 = unlimited)
@@ -125,7 +125,7 @@ impl TransferManager {
         Self {
             semaphore: Arc::new(Semaphore::new(MAX_POSSIBLE_CONCURRENT)),
             controls: RwLock::new(HashMap::new()),
-            active_count: RwLock::new(0),
+            active_count: AtomicUsize::new(0),
             max_concurrent: AtomicUsize::new(DEFAULT_CONCURRENT_TRANSFERS),
             speed_limit_bps: AtomicUsize::new(0),
         }
@@ -186,7 +186,7 @@ impl TransferManager {
     pub async fn acquire_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
         // Wait until we're below the configured limit
         loop {
-            let current = *self.active_count.read();
+            let current = self.active_count.load(Ordering::Acquire);
             let max = self.max_concurrent.load(Ordering::SeqCst);
             if current < max {
                 break;
@@ -204,10 +204,10 @@ impl TransferManager {
                 // This should never happen as we own the semaphore and never close it
                 panic!("TransferManager semaphore was unexpectedly closed - this is a bug")
             });
-        *self.active_count.write() += 1;
+        let new_count = self.active_count.fetch_add(1, Ordering::SeqCst) + 1;
         debug!(
             "Acquired transfer permit, active count: {}/{}",
-            *self.active_count.read(),
+            new_count,
             self.max_concurrent.load(Ordering::SeqCst)
         );
         permit
@@ -215,7 +215,7 @@ impl TransferManager {
 
     /// Get current active transfer count
     pub fn active_count(&self) -> usize {
-        *self.active_count.read()
+        self.active_count.load(Ordering::Acquire)
     }
 
     /// Get maximum concurrent transfers
@@ -270,11 +270,15 @@ impl TransferManager {
 
     /// Decrement active count (called when transfer completes)
     pub fn on_transfer_complete(&self) {
-        let mut count = self.active_count.write();
-        if *count > 0 {
-            *count -= 1;
+        let result = self.active_count.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |n| n.checked_sub(1),
+        );
+        match result {
+            Ok(prev) => debug!("Transfer complete, active count: {}", prev - 1),
+            Err(_) => warn!("on_transfer_complete called with active_count already 0"),
         }
-        debug!("Transfer complete, active count: {}", *count);
     }
 }
 

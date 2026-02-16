@@ -4,10 +4,10 @@
 //! When a connection drops, the system will attempt to reconnect
 //! automatically while preserving the terminal state.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::time::Duration;
 
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
@@ -42,19 +42,34 @@ impl Default for ReconnectConfig {
 
 /// Reconnection state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ReconnectState {
     /// Not attempting reconnection
-    Idle,
+    Idle = 0,
     /// Waiting before next attempt
-    Waiting,
+    Waiting = 1,
     /// Currently attempting to reconnect
-    Attempting,
+    Attempting = 2,
     /// Successfully reconnected
-    Reconnected,
+    Reconnected = 3,
     /// All attempts exhausted
-    Failed,
+    Failed = 4,
     /// Reconnection cancelled by user
-    Cancelled,
+    Cancelled = 5,
+}
+
+impl ReconnectState {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Idle,
+            1 => Self::Waiting,
+            2 => Self::Attempting,
+            3 => Self::Reconnected,
+            4 => Self::Failed,
+            5 => Self::Cancelled,
+            _ => Self::Idle,
+        }
+    }
 }
 
 /// Events emitted during reconnection
@@ -102,7 +117,7 @@ pub struct SessionReconnector {
     /// Current attempt number
     attempt_count: AtomicU32,
     /// Current state
-    state: RwLock<ReconnectState>,
+    state: AtomicU8,
     /// Flag to cancel reconnection
     cancelled: AtomicBool,
     /// Event sender
@@ -121,7 +136,7 @@ impl SessionReconnector {
             config,
             reconnect_config,
             attempt_count: AtomicU32::new(0),
-            state: RwLock::new(ReconnectState::Idle),
+            state: AtomicU8::new(ReconnectState::Idle as u8),
             cancelled: AtomicBool::new(false),
             event_tx: None,
         }
@@ -134,8 +149,8 @@ impl SessionReconnector {
     }
 
     /// Get current state
-    pub async fn state(&self) -> ReconnectState {
-        *self.state.read().await
+    pub fn state(&self) -> ReconnectState {
+        ReconnectState::from_u8(self.state.load(Ordering::Acquire))
     }
 
     /// Get current attempt count
@@ -155,10 +170,10 @@ impl SessionReconnector {
     }
 
     /// Reset reconnector for reuse
-    pub async fn reset(&self) {
+    pub fn reset(&self) {
         self.attempt_count.store(0, Ordering::SeqCst);
         self.cancelled.store(false, Ordering::SeqCst);
-        *self.state.write().await = ReconnectState::Idle;
+        self.state.store(ReconnectState::Idle as u8, Ordering::Release);
     }
 
     /// Calculate delay for current attempt using exponential backoff
@@ -194,7 +209,7 @@ impl SessionReconnector {
         }
 
         // Reset state
-        *self.state.write().await = ReconnectState::Idle;
+        self.state.store(ReconnectState::Idle as u8, Ordering::Release);
         self.attempt_count.store(0, Ordering::SeqCst);
         self.cancelled.store(false, Ordering::SeqCst);
 
@@ -208,7 +223,7 @@ impl SessionReconnector {
         for attempt in 1..=max_attempts {
             // Check if cancelled
             if self.is_cancelled() {
-                *self.state.write().await = ReconnectState::Cancelled;
+                self.state.store(ReconnectState::Cancelled as u8, Ordering::Release);
                 self.emit_event(ReconnectEvent::Cancelled {
                     session_id: self.session_id.clone(),
                 })
@@ -219,7 +234,7 @@ impl SessionReconnector {
             // Calculate and apply delay (except for first attempt)
             if attempt > 1 {
                 let delay_ms = self.calculate_delay(attempt);
-                *self.state.write().await = ReconnectState::Waiting;
+                self.state.store(ReconnectState::Waiting as u8, Ordering::Release);
 
                 self.emit_event(ReconnectEvent::Waiting {
                     session_id: self.session_id.clone(),
@@ -240,7 +255,7 @@ impl SessionReconnector {
 
                 while elapsed < delay_duration {
                     if self.is_cancelled() {
-                        *self.state.write().await = ReconnectState::Cancelled;
+                        self.state.store(ReconnectState::Cancelled as u8, Ordering::Release);
                         return Err(ReconnectError::Cancelled);
                     }
                     sleep(check_interval.min(delay_duration - elapsed)).await;
@@ -250,7 +265,7 @@ impl SessionReconnector {
 
             // Attempt connection
             self.attempt_count.store(attempt, Ordering::SeqCst);
-            *self.state.write().await = ReconnectState::Attempting;
+            self.state.store(ReconnectState::Attempting as u8, Ordering::Release);
 
             self.emit_event(ReconnectEvent::Attempting {
                 session_id: self.session_id.clone(),
@@ -266,7 +281,7 @@ impl SessionReconnector {
 
             match connect_fn(&self.config).await {
                 Ok(()) => {
-                    *self.state.write().await = ReconnectState::Reconnected;
+                    self.state.store(ReconnectState::Reconnected as u8, Ordering::Release);
 
                     self.emit_event(ReconnectEvent::Success {
                         session_id: self.session_id.clone(),
@@ -298,7 +313,7 @@ impl SessionReconnector {
         }
 
         // All attempts exhausted
-        *self.state.write().await = ReconnectState::Failed;
+        self.state.store(ReconnectState::Failed as u8, Ordering::Release);
 
         self.emit_event(ReconnectEvent::Failed {
             session_id: self.session_id.clone(),

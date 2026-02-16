@@ -4,7 +4,7 @@
 //! Uses SSH keepalive responses to track connection quality.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -142,8 +142,8 @@ pub struct HealthTracker {
     session_id: String,
     /// Connection start time
     connected_at: Instant,
-    /// Last response time
-    last_response: RwLock<Option<Instant>>,
+    /// Last response time (ms offset from connected_at; u64::MAX = no response received yet)
+    last_response_offset_ms: AtomicU64,
     /// Recent latency samples (circular buffer)
     latency_samples: RwLock<Vec<u64>>,
     /// Packets sent counter
@@ -162,7 +162,7 @@ impl HealthTracker {
         Self {
             session_id,
             connected_at: Instant::now(),
-            last_response: RwLock::new(Some(Instant::now())),
+            last_response_offset_ms: AtomicU64::new(u64::MAX), // sentinel: no response yet
             latency_samples: RwLock::new(Vec::new()),
             packets_sent: AtomicU64::new(0),
             packets_received: AtomicU64::new(0),
@@ -176,7 +176,7 @@ impl HealthTracker {
         Self {
             session_id,
             connected_at: Instant::now(),
-            last_response: RwLock::new(Some(Instant::now())),
+            last_response_offset_ms: AtomicU64::new(u64::MAX), // sentinel: no response yet
             latency_samples: RwLock::new(Vec::new()),
             packets_sent: AtomicU64::new(0),
             packets_received: AtomicU64::new(0),
@@ -198,7 +198,11 @@ impl HealthTracker {
     /// Record a keepalive response received with latency
     pub async fn record_response(&self, latency_ms: u64) {
         self.packets_received.fetch_add(1, Ordering::SeqCst);
-        *self.last_response.write().await = Some(Instant::now());
+        let offset = Instant::now()
+            .duration_since(self.connected_at)
+            .as_millis() as u64;
+        self.last_response_offset_ms
+            .store(offset, Ordering::Release);
 
         // Add to latency samples (circular buffer)
         let mut samples = self.latency_samples.write().await;
@@ -225,7 +229,7 @@ impl HealthTracker {
 
     /// Get current health metrics
     pub async fn metrics(&self) -> HealthMetrics {
-        let last_response = self.last_response.read().await;
+        let last_response_offset = self.last_response_offset_ms.load(Ordering::Acquire);
         let samples = self.latency_samples.read().await;
 
         let packets_sent = self.packets_sent.load(Ordering::SeqCst);
@@ -248,8 +252,13 @@ impl HealthTracker {
         // Latest latency
         let latency_ms = samples.last().copied();
 
-        // Time since last response
-        let last_response_ago_ms = last_response.map(|t| t.elapsed().as_millis() as u64);
+        // Time since last response (u64::MAX sentinel = no response received yet)
+        let last_response_ago_ms = if last_response_offset == u64::MAX {
+            None
+        } else {
+            let last_resp = self.connected_at + Duration::from_millis(last_response_offset);
+            Some(last_resp.elapsed().as_millis() as u64)
+        };
 
         // Uptime
         let uptime_secs = self.connected_at.elapsed().as_secs();

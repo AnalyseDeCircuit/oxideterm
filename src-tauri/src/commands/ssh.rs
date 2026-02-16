@@ -1045,6 +1045,6 @@ pub async fn get_remote_env(
         .get_connection(&connection_id)
         .ok_or_else(|| format!("Connection not found: {}", connection_id))?;
 
-    let env = entry.remote_env().await;
+    let env = entry.remote_env();
     Ok(env)
 }
