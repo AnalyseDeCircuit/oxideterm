@@ -203,47 +203,86 @@ export const TabBar = () => {
   const orchestratorCancel = useReconnectOrchestratorStore((s) => s.cancel);
   const [closing, setClosing] = React.useState<string | null>(null);
 
-  // Drag-and-drop state
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // ── Pointer-based tab drag reorder (Tauri intercepts HTML5 DnD) ──────────
+  const [dragState, setDragState] = useState<{
+    tabId: string;
+    fromIndex: number;
+    startX: number;
+    currentX: number;
+    tabRects: DOMRect[];
+  } | null>(null);
+  const tabRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
+  const dropTargetIndex = useRef<number | null>(null);
 
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDragIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(index));
-    // Make drag image slightly transparent
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '0.5';
+  // Compute drop target from current pointer X
+  const computeDropTarget = useCallback((clientX: number, state: NonNullable<typeof dragState>) => {
+    const { tabRects, fromIndex } = state;
+    for (let i = 0; i < tabRects.length; i++) {
+      const rect = tabRects[i];
+      const mid = rect.left + rect.width / 2;
+      if (clientX < mid) {
+        return i <= fromIndex ? i : i;
+      }
     }
+    return tabRects.length - 1;
   }, []);
 
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1';
-    }
-    setDragIndex(null);
-    setDropIndex(null);
-  }, []);
+  const handlePointerDown = useCallback((e: React.PointerEvent, tabId: string, index: number) => {
+    // Only left button, ignore buttons inside tab (close, reconnect)
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) return;
 
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    // Capture pointer for tracking
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+    // Snapshot all tab rects
+    const rects: DOMRect[] = [];
+    tabs.forEach((tab) => {
+      const el = tabRefsMap.current.get(tab.id);
+      if (el) rects.push(el.getBoundingClientRect());
+      else rects.push(new DOMRect());
+    });
+
+    setDragState({
+      tabId,
+      fromIndex: index,
+      startX: e.clientX,
+      currentX: e.clientX,
+      tabRects: rects,
+    });
+    dropTargetIndex.current = index;
+  }, [tabs]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragState) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDropIndex(index);
-  }, []);
+    const newX = e.clientX;
+    const target = computeDropTarget(newX, dragState);
+    dropTargetIndex.current = target;
+    setDragState(prev => prev ? { ...prev, currentX: newX } : null);
+  }, [dragState, computeDropTarget]);
 
-  const handleDrop = useCallback((e: React.DragEvent, toIndex: number) => {
-    e.preventDefault();
-    const fromIndex = dragIndex;
-    if (fromIndex !== null && fromIndex !== toIndex) {
-      moveTab(fromIndex, toIndex);
+  const handlePointerUp = useCallback(() => {
+    if (!dragState) return;
+    const toIndex = dropTargetIndex.current;
+    if (toIndex !== null && toIndex !== dragState.fromIndex) {
+      moveTab(dragState.fromIndex, toIndex);
     }
-    setDragIndex(null);
-    setDropIndex(null);
-  }, [dragIndex, moveTab]);
+    setDragState(null);
+    dropTargetIndex.current = null;
+  }, [dragState, moveTab]);
 
-  const handleDragLeave = useCallback(() => {
-    setDropIndex(null);
+  // Also reset on pointer cancel
+  const handlePointerCancel = useCallback(() => {
+    setDragState(null);
+    dropTargetIndex.current = null;
   }, []);
+
+  // Is a given tab the current drop target (but not the source)?
+  const isDragging = dragState !== null;
+  const dragDelta = dragState ? dragState.currentX - dragState.startX : 0;
+  const isActuallyDragging = isDragging && Math.abs(dragDelta) > 4;
 
   // Scroll container ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -356,27 +395,35 @@ export const TabBar = () => {
             const showReconnectProgress = !!isOrchestratorActive;
 
             const tabIndex = tabs.indexOf(tab);
-            const isDragOver = dropIndex === tabIndex && dragIndex !== null && dragIndex !== tabIndex;
+            const isBeingDragged = dragState?.tabId === tab.id;
+            const currentDropTarget = dropTargetIndex.current;
+            const showDropIndicator = isActuallyDragging && currentDropTarget === tabIndex && dragState?.fromIndex !== tabIndex;
 
             return (
               // 每个 Tab 必须 flex-shrink-0，防止被挤压
               <div
                 key={tab.id}
-                draggable
-                onDragStart={(e) => handleDragStart(e, tabIndex)}
-                onDragEnd={handleDragEnd}
-                onDragOver={(e) => handleDragOver(e, tabIndex)}
-                onDrop={(e) => handleDrop(e, tabIndex)}
-                onDragLeave={handleDragLeave}
-                onClick={() => setActiveTab(tab.id)}
+                ref={(el) => {
+                  if (el) tabRefsMap.current.set(tab.id, el);
+                  else tabRefsMap.current.delete(tab.id);
+                }}
+                onPointerDown={(e) => handlePointerDown(e, tab.id, tabIndex)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
+                onClick={() => {
+                  if (!isActuallyDragging) setActiveTab(tab.id);
+                }}
                 className={cn(
                   "flex-shrink-0 group flex items-center gap-2 px-3 h-full min-w-[120px] max-w-[240px] border-r border-theme-border cursor-pointer select-none text-sm transition-colors",
                   isActive
                     ? "bg-theme-bg-panel text-theme-text border-t-2 border-t-theme-accent"
                     : "bg-theme-bg text-theme-text-muted hover:bg-theme-bg-hover border-t-2 border-t-transparent",
                   showReconnectProgress && "border-t-amber-500",
-                  isDragOver && "border-l-2 border-l-theme-accent"
+                  isBeingDragged && isActuallyDragging && "opacity-50",
+                  showDropIndicator && "border-l-2 border-l-theme-accent"
                 )}
+                style={isBeingDragged && isActuallyDragging ? { cursor: 'grabbing' } : undefined}
               >
                 {tab.type === 'plugin' && tab.icon ? <PluginTabIcon iconName={tab.icon} /> : <TabIcon type={tab.type} />}
                 <span className="truncate flex-1">{getTabTitle(tab, sessions, t)}</span>
