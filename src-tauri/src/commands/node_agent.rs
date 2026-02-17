@@ -22,8 +22,9 @@ use tauri::{AppHandle, Emitter, State};
 use tracing::{debug, info, warn};
 
 use crate::agent::{
-    AgentDeployer, AgentRegistry, AgentSession, AgentStatus, FileEntry, GitStatusResult,
-    GrepMatch, ReadFileResult, WriteFileResult,
+    AgentDeployer, AgentRegistry, AgentSession, AgentStatus, GitStatusResult,
+    GrepMatch, ListTreeResult, ReadFileResult, SymbolIndexResult, SymbolInfo,
+    WriteFileResult,
 };
 use crate::router::NodeRouter;
 
@@ -160,7 +161,7 @@ pub async fn node_agent_write_file(
         .map_err(|e| e.to_string())
 }
 
-/// List directory tree (recursive) via agent.
+/// List directory tree (recursive) via agent — returns entries + truncation metadata.
 #[tauri::command]
 pub async fn node_agent_list_tree(
     node_id: String,
@@ -169,7 +170,7 @@ pub async fn node_agent_list_tree(
     max_entries: Option<u32>,
     router: State<'_, Arc<NodeRouter>>,
     agent_registry: State<'_, Arc<AgentRegistry>>,
-) -> Result<Vec<FileEntry>, String> {
+) -> Result<ListTreeResult, String> {
     let resolved = router
         .resolve_connection(&node_id)
         .await
@@ -330,4 +331,84 @@ pub async fn node_agent_start_watch_relay(
     });
 
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Symbol Operations (code intelligence)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Index symbols in a project directory via agent.
+#[tauri::command]
+pub async fn node_agent_symbol_index(
+    node_id: String,
+    path: String,
+    max_files: Option<u32>,
+    router: State<'_, Arc<NodeRouter>>,
+    agent_registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<SymbolIndexResult, String> {
+    let resolved = router
+        .resolve_connection(&node_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session = agent_registry
+        .get(&resolved.connection_id)
+        .ok_or_else(|| "Agent not deployed".to_string())?;
+
+    let result: SymbolIndexResult = session
+        .symbol_index(&path, max_files)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+/// Autocomplete a symbol prefix via agent.
+#[tauri::command]
+pub async fn node_agent_symbol_complete(
+    node_id: String,
+    path: String,
+    prefix: String,
+    limit: Option<u32>,
+    router: State<'_, Arc<NodeRouter>>,
+    agent_registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<Vec<SymbolInfo>, String> {
+    let resolved = router
+        .resolve_connection(&node_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session = agent_registry
+        .get(&resolved.connection_id)
+        .ok_or_else(|| "Agent not deployed".to_string())?;
+
+    let result: Vec<SymbolInfo> = session
+        .symbol_complete(&path, &prefix, limit)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+/// Find symbol definitions by name via agent.
+#[tauri::command]
+pub async fn node_agent_symbol_definitions(
+    node_id: String,
+    path: String,
+    name: String,
+    router: State<'_, Arc<NodeRouter>>,
+    agent_registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<Vec<SymbolInfo>, String> {
+    let resolved = router
+        .resolve_connection(&node_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session = agent_registry
+        .get(&resolved.connection_id)
+        .ok_or_else(|| "Agent not deployed".to_string())?;
+
+    let result: Vec<SymbolInfo> = session
+        .symbol_definitions(&path, &name)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result)
 }

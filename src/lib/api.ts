@@ -1438,9 +1438,11 @@ import type {
   AgentStatus,
   AgentReadFileResult,
   AgentWriteFileResult,
-  AgentFileEntry,
+  AgentListTreeResult,
   AgentGrepMatch,
   AgentGitStatusResult,
+  AgentSymbolInfo,
+  AgentSymbolIndexResult,
 } from '@/types';
 
 /** Deploy the agent to a remote host */
@@ -1461,10 +1463,10 @@ export const nodeAgentWriteFile = (
 ): Promise<AgentWriteFileResult> =>
   invoke('node_agent_write_file', { nodeId, path, content, expectHash });
 
-/** List directory tree (recursive) via agent */
+/** List directory tree (recursive) via agent — returns entries + truncation metadata */
 export const nodeAgentListTree = (
   nodeId: string, path: string, maxDepth?: number, maxEntries?: number
-): Promise<AgentFileEntry[]> =>
+): Promise<AgentListTreeResult> =>
   invoke('node_agent_list_tree', { nodeId, path, maxDepth, maxEntries });
 
 /** Search files for pattern via agent */
@@ -1489,6 +1491,24 @@ export const nodeAgentWatchStop = (nodeId: string, path: string): Promise<void> 
 /** Start relaying agent watch events to Tauri frontend events */
 export const nodeAgentStartWatchRelay = (nodeId: string): Promise<void> =>
   invoke('node_agent_start_watch_relay', { nodeId });
+
+/** Index symbols in a remote project directory via agent */
+export const nodeAgentSymbolIndex = (
+  nodeId: string, path: string, maxFiles?: number
+): Promise<AgentSymbolIndexResult> =>
+  invoke('node_agent_symbol_index', { nodeId, path, maxFiles });
+
+/** Autocomplete symbols by prefix via agent */
+export const nodeAgentSymbolComplete = (
+  nodeId: string, path: string, prefix: string, limit?: number
+): Promise<AgentSymbolInfo[]> =>
+  invoke('node_agent_symbol_complete', { nodeId, path, prefix, limit });
+
+/** Find symbol definitions by exact name via agent */
+export const nodeAgentSymbolDefinitions = (
+  nodeId: string, path: string, name: string
+): Promise<AgentSymbolInfo[]> =>
+  invoke('node_agent_symbol_definitions', { nodeId, path, name });
 
 
 // --- Mock Data Helpers ---

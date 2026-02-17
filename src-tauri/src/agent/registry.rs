@@ -10,8 +10,8 @@ use dashmap::DashMap;
 use tracing::info;
 
 use super::protocol::{
-    AgentStatus, FileEntry, GitStatusResult, GrepMatch, ReadFileResult, StatResult,
-    SysInfoResult, WatchEvent, WriteFileResult,
+    AgentStatus, FileEntry, GitStatusResult, GrepMatch, ListTreeResult, ReadFileResult,
+    StatResult, SymbolIndexResult, SymbolInfo, SysInfoResult, WatchEvent, WriteFileResult,
 };
 use super::transport::{AgentTransport, TransportError};
 
@@ -59,7 +59,7 @@ impl AgentSession {
     // fs/* operations
     // ═══════════════════════════════════════════════════════════════════
 
-    /// Read a file with content hash.
+    /// Read a file with content hash (auto-decompresses zstd+base64 responses).
     pub async fn read_file(&self, path: &str) -> Result<ReadFileResult, TransportError> {
         let result = self
             .transport
@@ -69,20 +69,51 @@ impl AgentSession {
             )
             .await?;
 
-        serde_json::from_value(result)
-            .map_err(|e| TransportError::DeserializeError(e.to_string()))
+        let mut file_result: ReadFileResult = serde_json::from_value(result)
+            .map_err(|e| TransportError::DeserializeError(e.to_string()))?;
+
+        // Transparently decompress zstd+base64 encoded content
+        if file_result.encoding == "zstd+base64" {
+            use base64::Engine;
+            let compressed = base64::engine::general_purpose::STANDARD
+                .decode(&file_result.content)
+                .map_err(|e| TransportError::DeserializeError(format!("Base64 decode error: {}", e)))?;
+            let decompressed = zstd::stream::decode_all(compressed.as_slice())
+                .map_err(|e| TransportError::DeserializeError(format!("Zstd decompress error: {}", e)))?;
+            file_result.content = String::from_utf8_lossy(&decompressed).into_owned();
+            file_result.encoding = "plain".to_string();
+        }
+
+        Ok(file_result)
     }
 
-    /// Atomic write with optional optimistic locking.
+    /// Atomic write with optional optimistic locking (auto-compresses large content).
     pub async fn write_file(
         &self,
         path: &str,
         content: &str,
         expect_hash: Option<&str>,
     ) -> Result<WriteFileResult, TransportError> {
+        const COMPRESS_THRESHOLD: usize = 32 * 1024;
+
+        let (send_content, encoding) = if content.len() > COMPRESS_THRESHOLD {
+            // Try zstd compression
+            match zstd::stream::encode_all(content.as_bytes(), 3) {
+                Ok(compressed) if compressed.len() < content.len() => {
+                    use base64::Engine;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&compressed);
+                    (encoded, "zstd+base64")
+                }
+                _ => (content.to_string(), "plain"),
+            }
+        } else {
+            (content.to_string(), "plain")
+        };
+
         let mut params = serde_json::json!({
             "path": path,
-            "content": content,
+            "content": send_content,
+            "encoding": encoding,
         });
 
         if let Some(hash) = expect_hash {
@@ -117,13 +148,13 @@ impl AgentSession {
             .map_err(|e| TransportError::DeserializeError(e.to_string()))
     }
 
-    /// List directory tree (recursive).
+    /// List directory tree (recursive) — returns entries + truncation metadata.
     pub async fn list_tree(
         &self,
         path: &str,
         max_depth: Option<u32>,
         max_entries: Option<u32>,
-    ) -> Result<Vec<FileEntry>, TransportError> {
+    ) -> Result<ListTreeResult, TransportError> {
         let mut params = serde_json::json!({ "path": path });
         if let Some(d) = max_depth {
             params["max_depth"] = serde_json::json!(d);
@@ -256,6 +287,58 @@ impl AgentSession {
         &self,
     ) -> Option<tokio::sync::mpsc::Receiver<WatchEvent>> {
         self.transport.take_watch_rx().await
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // symbols/* operations
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Index all symbols in a directory (recursive).
+    pub async fn symbol_index(
+        &self,
+        path: &str,
+        max_files: Option<u32>,
+    ) -> Result<SymbolIndexResult, TransportError> {
+        let mut params = serde_json::json!({ "path": path });
+        if let Some(mf) = max_files {
+            params["max_files"] = serde_json::json!(mf);
+        }
+        let result = self.transport.call("symbols/index", params).await?;
+        serde_json::from_value(result)
+            .map_err(|e| TransportError::DeserializeError(e.to_string()))
+    }
+
+    /// Autocomplete a symbol prefix.
+    pub async fn symbol_complete(
+        &self,
+        path: &str,
+        prefix: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<SymbolInfo>, TransportError> {
+        let mut params = serde_json::json!({ "path": path, "prefix": prefix });
+        if let Some(l) = limit {
+            params["limit"] = serde_json::json!(l);
+        }
+        let result = self.transport.call("symbols/complete", params).await?;
+        serde_json::from_value(result)
+            .map_err(|e| TransportError::DeserializeError(e.to_string()))
+    }
+
+    /// Find all definitions of a symbol by name.
+    pub async fn symbol_definitions(
+        &self,
+        path: &str,
+        name: &str,
+    ) -> Result<Vec<SymbolInfo>, TransportError> {
+        let result = self
+            .transport
+            .call(
+                "symbols/definitions",
+                serde_json::json!({ "path": path, "name": name }),
+            )
+            .await?;
+        serde_json::from_value(result)
+            .map_err(|e| TransportError::DeserializeError(e.to_string()))
     }
 
     // ═══════════════════════════════════════════════════════════════════

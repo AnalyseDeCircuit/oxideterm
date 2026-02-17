@@ -20,11 +20,13 @@
 
 mod protocol;
 mod fs_ops;
+mod symbols;
 mod watcher;
 
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
+use std::collections::HashMap;
 
 use protocol::*;
 use watcher::Watcher;
@@ -44,6 +46,10 @@ fn main() {
 
     let watcher = Watcher::new();
     let shutdown_flag = Arc::new(AtomicBool::new(false));
+    
+    // Symbol index cache: root_path → Vec<SymbolInfo>
+    let symbol_cache: Arc<Mutex<HashMap<String, Vec<SymbolInfo>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     // Channel for serialized JSON responses/notifications → stdout writer thread
     let (out_tx, out_rx) = mpsc::channel::<String>();
@@ -121,7 +127,7 @@ fn main() {
         // Wait for next request (with timeout to check watch events periodically)
         match req_rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Some(request)) => {
-                let response = dispatch(&request, &watcher, &shutdown_flag);
+                let response = dispatch(&request, &watcher, &shutdown_flag, &symbol_cache);
                 if let Ok(json) = serde_json::to_string(&response) {
                     let _ = out_tx.send(json);
                 }
@@ -156,7 +162,12 @@ fn main() {
 }
 
 /// Route a JSON-RPC request to the appropriate handler.
-fn dispatch(req: &Request, watcher: &Watcher, shutdown_flag: &Arc<AtomicBool>) -> Response {
+fn dispatch(
+    req: &Request,
+    watcher: &Watcher,
+    shutdown_flag: &Arc<AtomicBool>,
+    symbol_cache: &Arc<Mutex<HashMap<String, Vec<SymbolInfo>>>>,
+) -> Response {
     match req.method.as_str() {
         // ─── fs/* ────────────────────────────────────────────────────
         "fs/readFile" => match serde_json::from_value::<ReadFileParams>(req.params.clone()) {
@@ -266,6 +277,66 @@ fn dispatch(req: &Request, watcher: &Watcher, shutdown_flag: &Arc<AtomicBool>) -
             Err(e) => Response::err(req.id, ERR_INVALID_PARAMS, e.to_string()),
         },
 
+        // ─── symbols/* ────────────────────────────────────────────
+        "symbols/index" => match serde_json::from_value::<SymbolIndexParams>(req.params.clone()) {
+            Ok(params) => {
+                let root = std::path::Path::new(&params.path);
+                let syms = symbols::index_directory(root, params.max_files);
+                let file_count = syms.len() as u32;
+                // Cache the index for subsequent complete/definitions calls
+                if let Ok(mut cache) = symbol_cache.lock() {
+                    cache.insert(params.path.clone(), syms.clone());
+                }
+                let result = SymbolIndexResult {
+                    symbols: syms,
+                    file_count,
+                };
+                Response::ok(req.id, serde_json::to_value(result).unwrap())
+            }
+            Err(e) => Response::err(req.id, ERR_INVALID_PARAMS, e.to_string()),
+        },
+
+        "symbols/complete" => match serde_json::from_value::<SymbolCompleteParams>(req.params.clone()) {
+            Ok(params) => {
+                let cache = symbol_cache.lock().unwrap();
+                if let Some(syms) = cache.get(&params.path) {
+                    let completions = symbols::complete(syms, &params.prefix, params.limit);
+                    Response::ok(req.id, serde_json::to_value(completions).unwrap())
+                } else {
+                    // Not indexed yet — index on demand
+                    drop(cache);
+                    let root = std::path::Path::new(&params.path);
+                    let syms = symbols::index_directory(root, 500);
+                    let completions = symbols::complete(&syms, &params.prefix, params.limit);
+                    if let Ok(mut cache) = symbol_cache.lock() {
+                        cache.insert(params.path.clone(), syms);
+                    }
+                    Response::ok(req.id, serde_json::to_value(completions).unwrap())
+                }
+            }
+            Err(e) => Response::err(req.id, ERR_INVALID_PARAMS, e.to_string()),
+        },
+
+        "symbols/definitions" => match serde_json::from_value::<SymbolDefinitionsParams>(req.params.clone()) {
+            Ok(params) => {
+                let cache = symbol_cache.lock().unwrap();
+                if let Some(syms) = cache.get(&params.path) {
+                    let defs = symbols::find_definitions(syms, &params.name);
+                    Response::ok(req.id, serde_json::to_value(defs).unwrap())
+                } else {
+                    drop(cache);
+                    let root = std::path::Path::new(&params.path);
+                    let syms = symbols::index_directory(root, 500);
+                    let defs = symbols::find_definitions(&syms, &params.name);
+                    if let Ok(mut cache) = symbol_cache.lock() {
+                        cache.insert(params.path.clone(), syms);
+                    }
+                    Response::ok(req.id, serde_json::to_value(defs).unwrap())
+                }
+            }
+            Err(e) => Response::err(req.id, ERR_INVALID_PARAMS, e.to_string()),
+        },
+
         // ─── sys/* ──────────────────────────────────────────────────
         "sys/info" => {
             let info = SysInfoResult {
@@ -273,6 +344,7 @@ fn dispatch(req: &Request, watcher: &Watcher, shutdown_flag: &Arc<AtomicBool>) -
                 arch: std::env::consts::ARCH.to_string(),
                 os: std::env::consts::OS.to_string(),
                 pid: std::process::id(),
+                capabilities: vec!["zstd".to_string()],
             };
             Response::ok(req.id, serde_json::to_value(info).unwrap())
         }

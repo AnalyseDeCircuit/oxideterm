@@ -661,6 +661,9 @@ pub fn run() {
         commands::node_agent_watch_start,
         commands::node_agent_watch_stop,
         commands::node_agent_start_watch_relay,
+        commands::node_agent_symbol_index,
+        commands::node_agent_symbol_complete,
+        commands::node_agent_symbol_definitions,
         // WSL Graphics commands (stub on non-Windows platforms)
         graphics::commands::wsl_graphics_list_distros,
         graphics::commands::wsl_graphics_start,
@@ -916,6 +919,9 @@ pub fn run() {
         commands::node_agent_watch_start,
         commands::node_agent_watch_stop,
         commands::node_agent_start_watch_relay,
+        commands::node_agent_symbol_index,
+        commands::node_agent_symbol_complete,
+        commands::node_agent_symbol_definitions,
         // WSL Graphics commands (stub on non-Windows platforms)
         graphics::commands::wsl_graphics_list_distros,
         graphics::commands::wsl_graphics_start,

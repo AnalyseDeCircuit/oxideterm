@@ -14,6 +14,77 @@ use std::time::SystemTime;
 use crate::protocol::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Base64 decoder (minimal, no external crate)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Decode standard base64 (RFC 4648) to bytes.
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const TABLE: [u8; 256] = {
+        let mut t = [0xFFu8; 256];
+        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut i = 0;
+        while i < 64 {
+            t[alphabet[i] as usize] = i as u8;
+            i += 1;
+        }
+        t
+    };
+
+    let bytes: Vec<u8> = input.bytes().filter(|&b| b != b'\n' && b != b'\r' && b != b' ').collect();
+    if bytes.len() % 4 != 0 {
+        return Err("Invalid base64 length".into());
+    }
+
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        let mut buf = [0u8; 4];
+        let mut pad = 0;
+        for (i, &b) in chunk.iter().enumerate() {
+            if b == b'=' {
+                buf[i] = 0;
+                pad += 1;
+            } else {
+                let val = TABLE[b as usize];
+                if val == 0xFF {
+                    return Err(format!("Invalid base64 character: {}", b as char));
+                }
+                buf[i] = val;
+            }
+        }
+        let triple = ((buf[0] as u32) << 18) | ((buf[1] as u32) << 12) | ((buf[2] as u32) << 6) | (buf[3] as u32);
+        out.push((triple >> 16) as u8);
+        if pad < 2 { out.push((triple >> 8) as u8); }
+        if pad < 1 { out.push(triple as u8); }
+    }
+    Ok(out)
+}
+
+/// Encode bytes to standard base64 (RFC 4648).
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[(triple >> 18 & 0x3F) as usize] as char);
+        out.push(ALPHABET[(triple >> 12 & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[(triple >> 6 & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -185,14 +256,33 @@ pub fn read_file(params: ReadFileParams) -> Result<ReadFileResult, (i32, String)
         .map_err(|e| map_io_error(&e))?;
 
     let hash = sha256_hex(&content_bytes);
-    let content = String::from_utf8_lossy(&content_bytes).into_owned();
     let mtime = mtime_secs(&metadata);
+
+    // Compress large files (>32KB) with zstd for faster transfer over SSH
+    const COMPRESS_THRESHOLD: u64 = 32 * 1024;
+    if size > COMPRESS_THRESHOLD {
+        if let Ok(compressed) = zstd::stream::encode_all(content_bytes.as_slice(), 3) {
+            // Only use compression if it actually saves space
+            if compressed.len() < content_bytes.len() {
+                return Ok(ReadFileResult {
+                    content: base64_encode(&compressed),
+                    hash,
+                    size,
+                    mtime,
+                    encoding: "zstd+base64".to_string(),
+                });
+            }
+        }
+    }
+
+    let content = String::from_utf8_lossy(&content_bytes).into_owned();
 
     Ok(ReadFileResult {
         content,
         hash,
         size,
         mtime,
+        encoding: "plain".to_string(),
     })
 }
 
@@ -239,7 +329,22 @@ pub fn write_file(params: WriteFileParams) -> Result<WriteFileResult, (i32, Stri
         }
     }
 
-    let content_bytes = params.content.as_bytes();
+    // Decode content based on encoding
+    let content_bytes = match params.encoding.as_str() {
+        "zstd+base64" => {
+            let compressed = base64_decode(&params.content)
+                .map_err(|e| (ERR_INVALID_PARAMS, format!("Base64 decode error: {}", e)))?;
+            zstd::stream::decode_all(compressed.as_slice())
+                .map_err(|e| (ERR_IO, format!("Zstd decompress error: {}", e)))?
+        }
+        "plain" | "" => params.content.into_bytes(),
+        other => {
+            return Err((
+                ERR_INVALID_PARAMS,
+                format!("Unsupported encoding: {}", other),
+            ));
+        }
+    };
 
     // Write to temp file in the same directory (same filesystem for rename)
     let parent = path.parent().unwrap_or(Path::new("/"));
@@ -255,7 +360,7 @@ pub fn write_file(params: WriteFileParams) -> Result<WriteFileResult, (i32, Stri
     // Write content to temp file
     {
         let mut file = fs::File::create(&temp_path).map_err(|e| map_io_error(&e))?;
-        file.write_all(content_bytes)
+        file.write_all(&content_bytes)
             .map_err(|e| map_io_error(&e))?;
         file.sync_all().map_err(|e| map_io_error(&e))?;
     }
@@ -274,7 +379,7 @@ pub fn write_file(params: WriteFileParams) -> Result<WriteFileResult, (i32, Stri
 
     // Read back metadata
     let metadata = fs::metadata(path).map_err(|e| map_io_error(&e))?;
-    let hash = sha256_hex(content_bytes);
+    let hash = sha256_hex(&content_bytes);
 
     Ok(WriteFileResult {
         hash,
@@ -355,10 +460,16 @@ pub fn list_dir(params: ListDirParams) -> Result<Vec<FileEntry>, (i32, String)> 
 }
 
 /// Recursive directory listing with depth and count limits.
-pub fn list_tree(params: ListTreeParams) -> Result<Vec<FileEntry>, (i32, String)> {
+pub fn list_tree(params: ListTreeParams) -> Result<ListTreeResult, (i32, String)> {
     let path = Path::new(&params.path);
     let mut count: u32 = 0;
-    list_tree_recursive(path, 0, params.max_depth, params.max_entries, &mut count)
+    let entries = list_tree_recursive(path, 0, params.max_depth, params.max_entries, &mut count)?;
+    let truncated = count >= params.max_entries;
+    Ok(ListTreeResult {
+        entries,
+        truncated,
+        total_scanned: count,
+    })
 }
 
 fn list_tree_recursive(

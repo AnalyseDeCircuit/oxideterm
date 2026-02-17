@@ -93,6 +93,13 @@ pub struct ReadFileResult {
     pub hash: String,
     pub size: u64,
     pub mtime: u64,
+    /// Content encoding: "plain" or "zstd+base64".
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
+}
+
+fn default_encoding() -> String {
+    "plain".to_string()
 }
 
 /// fs/writeFile result
@@ -124,6 +131,16 @@ pub struct FileEntry {
     pub mtime: Option<u64>,
     pub permissions: Option<String>,
     pub children: Option<Vec<FileEntry>>,
+}
+
+/// fs/listTree result — entries + truncation metadata
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ListTreeResult {
+    pub entries: Vec<FileEntry>,
+    /// True if max_entries was reached and results are incomplete.
+    pub truncated: bool,
+    /// Total number of entries scanned.
+    pub total_scanned: u32,
 }
 
 /// search/grep match
@@ -162,6 +179,46 @@ pub struct SysInfoResult {
 pub struct WatchEvent {
     pub path: String,
     pub kind: String,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// symbols/* types (mirror of agent/src/protocol.rs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Symbol kind classification.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SymbolKind {
+    Function,
+    Class,
+    Struct,
+    Interface,
+    Enum,
+    Trait,
+    TypeAlias,
+    Constant,
+    Variable,
+    Module,
+    Method,
+}
+
+/// A single symbol definition.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+}
+
+/// symbols/index result
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SymbolIndexResult {
+    pub symbols: Vec<SymbolInfo>,
+    pub file_count: u32,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

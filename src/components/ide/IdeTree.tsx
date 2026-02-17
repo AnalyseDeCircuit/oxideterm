@@ -426,12 +426,16 @@ export function IdeTree() {
   // Prefetch cache for deep tree loading (agent only)
   const [prefetchCache] = useState<PrefetchCache>(() => new Map());
   
+  // Truncation state: tree was too large for full prefetch
+  const [treeTruncated, setTreeTruncated] = useState(false);
+  
   // 加载根目录
   const loadRoot = useCallback(async () => {
     if (!project || !nodeId) return;
     
     setIsLoading(true);
     setError(null);
+    setTreeTruncated(false);
     
     try {
       const result = await agentService.listDir(nodeId, project.rootPath);
@@ -439,13 +443,20 @@ export function IdeTree() {
       
       // Deep prefetch: if agent is available, load 3 levels in background
       agentService.listTree(nodeId, project.rootPath, 3, 5000)
-        .then(treeEntries => {
-          if (treeEntries) {
+        .then(treeResult => {
+          if (treeResult) {
             prefetchCache.clear();
-            buildPrefetchCache(treeEntries, prefetchCache);
+            buildPrefetchCache(treeResult.entries, prefetchCache);
+            if (treeResult.truncated) {
+              setTreeTruncated(true);
+            }
           }
         })
         .catch(() => { /* ignore — prefetch is best-effort */ });
+
+      // Background symbol indexing for completion + go-to-definition
+      agentService.symbolIndex(nodeId, project.rootPath)
+        .catch(() => { /* ignore — symbol indexing is best-effort */ });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -803,6 +814,16 @@ export function IdeTree() {
               onInlineInputCancel={handleInlineInputCancel}
             />
           ))}
+          
+          {/* 树截断提示 — 条目数超过上限时显示 */}
+          {treeTruncated && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 mt-1 mx-2 rounded bg-theme-accent/8 border border-theme-accent/15">
+              <AlertCircle className="w-3 h-3 text-theme-accent flex-shrink-0" />
+              <span className="text-[10px] text-theme-text-muted leading-tight">
+                {t('ide.tree_truncated', 'File tree is large — some entries are not shown. Expand folders to load on demand.')}
+              </span>
+            </div>
+          )}
           
           {/* 根目录新建输入框（当在根目录下新建时） */}
           {inlineInput && (inlineInput.type === 'newFile' || inlineInput.type === 'newFolder') 

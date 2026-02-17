@@ -103,6 +103,9 @@ pub struct ReadFileResult {
     pub hash: String,
     pub size: u64,
     pub mtime: u64,
+    /// Content encoding: "plain" or "zstd+base64".
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
 }
 
 /// fs/writeFile params
@@ -113,6 +116,13 @@ pub struct WriteFileParams {
     /// If provided, only write if remote hash matches (optimistic lock).
     #[serde(default)]
     pub expect_hash: Option<String>,
+    /// Content encoding: "plain" (default) or "zstd+base64" (compressed).
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
+}
+
+fn default_encoding() -> String {
+    "plain".to_string()
 }
 
 /// fs/writeFile result
@@ -171,6 +181,16 @@ fn default_max_entries() -> u32 {
     5000
 }
 
+/// fs/listTree result — wraps entries with truncation metadata.
+#[derive(Debug, Serialize)]
+pub struct ListTreeResult {
+    pub entries: Vec<FileEntry>,
+    /// True if max_entries was reached and results are incomplete.
+    pub truncated: bool,
+    /// Total number of entries scanned (may exceed entries.len() if truncated).
+    pub total_scanned: u32,
+}
+
 /// A single file/directory entry.
 #[derive(Debug, Serialize)]
 pub struct FileEntry {
@@ -218,6 +238,83 @@ pub struct ChmodParams {
     pub path: String,
     /// Octal permission string, e.g. "755".
     pub mode: String,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// symbols/* params & results
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Symbol kind (language-agnostic classification).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum SymbolKind {
+    Function,
+    Class,
+    Struct,
+    Interface,
+    Enum,
+    Trait,
+    TypeAlias,
+    Constant,
+    Variable,
+    Module,
+    Method,
+}
+
+/// A single symbol definition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    /// Containing class/struct name (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+}
+
+/// symbols/index params — scan a directory for all symbols.
+#[derive(Debug, Deserialize)]
+pub struct SymbolIndexParams {
+    pub path: String,
+    /// Maximum files to scan (default: 500).
+    #[serde(default = "default_max_files")]
+    pub max_files: u32,
+}
+
+fn default_max_files() -> u32 {
+    500
+}
+
+/// symbols/index result
+#[derive(Debug, Serialize)]
+pub struct SymbolIndexResult {
+    pub symbols: Vec<SymbolInfo>,
+    pub file_count: u32,
+}
+
+/// symbols/complete params — autocomplete a symbol prefix.
+#[derive(Debug, Deserialize)]
+pub struct SymbolCompleteParams {
+    pub prefix: String,
+    /// Root path for context (must have been indexed first).
+    pub path: String,
+    /// Max results (default: 20).
+    #[serde(default = "default_complete_limit")]
+    pub limit: u32,
+}
+
+fn default_complete_limit() -> u32 {
+    20
+}
+
+/// symbols/definitions params — find all definitions of a symbol.
+#[derive(Debug, Deserialize)]
+pub struct SymbolDefinitionsParams {
+    pub name: String,
+    /// Root path for context (must have been indexed first).
+    pub path: String,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -314,4 +411,7 @@ pub struct SysInfoResult {
     pub arch: String,
     pub os: String,
     pub pid: u32,
+    /// Supported capabilities: ["zstd"]
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }

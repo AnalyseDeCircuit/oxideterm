@@ -18,6 +18,9 @@ import {
   nodeAgentWatchStart,
   nodeAgentWatchStop,
   nodeAgentStartWatchRelay,
+  nodeAgentSymbolIndex,
+  nodeAgentSymbolComplete,
+  nodeAgentSymbolDefinitions,
   nodeSftpListDir,
   nodeSftpPreview,
   nodeSftpWrite,
@@ -25,9 +28,12 @@ import {
 import type {
   AgentStatus,
   AgentFileEntry,
+  AgentListTreeResult,
   AgentGrepMatch,
   AgentGitStatusResult,
   AgentWatchEvent,
+  AgentSymbolInfo,
+  AgentSymbolIndexResult,
   FileInfo,
 } from '../types';
 
@@ -171,8 +177,8 @@ export async function listDir(
 ): Promise<FileInfo[]> {
   if (await isAgentReady(nodeId)) {
     try {
-      const entries = await nodeAgentListTree(nodeId, path, 1, 5000);
-      return agentEntriesToFileInfoList(entries);
+      const result = await nodeAgentListTree(nodeId, path, 1, 5000);
+      return agentEntriesToFileInfoList(result.entries);
     } catch {
       agentReadyCache.set(nodeId, false);
     }
@@ -184,14 +190,14 @@ export async function listDir(
 
 /**
  * Recursive directory tree listing (agent only, no SFTP equivalent).
- * Falls back to null if agent unavailable.
+ * Returns entries + truncation flag. Falls back to null if agent unavailable.
  */
 export async function listTree(
   nodeId: string,
   path: string,
   maxDepth?: number,
   maxEntries?: number,
-): Promise<AgentFileEntry[] | null> {
+): Promise<AgentListTreeResult | null> {
   if (await isAgentReady(nodeId)) {
     try {
       return await nodeAgentListTree(nodeId, path, maxDepth, maxEntries);
@@ -294,6 +300,62 @@ export async function watchDirectory(
     };
   } catch {
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Symbol Operations — agent only (lightweight code intelligence)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Index symbols in a project directory (agent only).
+ * Returns indexed symbols + file count, or null if agent unavailable.
+ */
+export async function symbolIndex(
+  nodeId: string,
+  path: string,
+  maxFiles?: number,
+): Promise<AgentSymbolIndexResult | null> {
+  if (!(await isAgentReady(nodeId))) return null;
+  try {
+    return await nodeAgentSymbolIndex(nodeId, path, maxFiles);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Autocomplete symbol prefix (agent only).
+ * Returns matching symbols sorted by relevance, or empty array.
+ */
+export async function symbolComplete(
+  nodeId: string,
+  path: string,
+  prefix: string,
+  limit?: number,
+): Promise<AgentSymbolInfo[]> {
+  if (!(await isAgentReady(nodeId))) return [];
+  try {
+    return await nodeAgentSymbolComplete(nodeId, path, prefix, limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Find symbol definitions by exact name (agent only).
+ * Returns all definitions matching the name.
+ */
+export async function symbolDefinitions(
+  nodeId: string,
+  path: string,
+  name: string,
+): Promise<AgentSymbolInfo[]> {
+  if (!(await isAgentReady(nodeId))) return [];
+  try {
+    return await nodeAgentSymbolDefinitions(nodeId, path, name);
+  } catch {
+    return [];
   }
 }
 

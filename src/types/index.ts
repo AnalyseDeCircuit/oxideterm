@@ -1264,6 +1264,8 @@ export type AgentReadFileResult = {
   hash: string;
   size: number;
   mtime: number;
+  /** Content encoding: "plain" or "zstd+base64" (decompressed by backend) */
+  encoding?: string;
 };
 
 /** Agent fs/writeFile result */
@@ -1283,6 +1285,15 @@ export type AgentFileEntry = {
   mtime?: number;
   permissions?: string;
   children?: AgentFileEntry[];
+};
+
+/** Agent fs/listTree result — entries + truncation metadata */
+export type AgentListTreeResult = {
+  entries: AgentFileEntry[];
+  /** True if max_entries was reached and results are incomplete */
+  truncated: boolean;
+  /** Total scanned entry count */
+  total_scanned: number;
 };
 
 /** Agent search/grep match */
@@ -1306,4 +1317,34 @@ export type AgentGitStatusResult = {
 export type AgentWatchEvent = {
   path: string;
   kind: 'create' | 'modify' | 'delete' | 'rename';
+};
+
+/** Symbol kind classification (mirrors Rust SymbolKind) */
+export type AgentSymbolKind =
+  | 'function'
+  | 'class'
+  | 'struct'
+  | 'interface'
+  | 'enum'
+  | 'trait'
+  | 'typeAlias'
+  | 'constant'
+  | 'variable'
+  | 'module'
+  | 'method';
+
+/** A single symbol definition */
+export type AgentSymbolInfo = {
+  name: string;
+  kind: AgentSymbolKind;
+  path: string;
+  line: number;
+  column: number;
+  container?: string;
+};
+
+/** symbols/index result */
+export type AgentSymbolIndexResult = {
+  symbols: AgentSymbolInfo[];
+  file_count: number;
 };

@@ -14,8 +14,10 @@ interface IdeEditorProps {
 
 export function IdeEditor({ tab }: IdeEditorProps) {
   const { t } = useTranslation();
-  const { updateTabContent, updateTabCursor, saveFile, clearPendingScroll } = useIdeStore();
+  const { updateTabContent, updateTabCursor, saveFile, clearPendingScroll, openFile, setPendingScroll } = useIdeStore();
   const pendingScroll = useIdeStore(s => s.pendingScroll);
+  const nodeId = useIdeStore(s => s.nodeId);
+  const projectRoot = useIdeStore(s => s.project?.rootPath);
   const { toast } = useToast();
 
   // 搜索栏状态
@@ -54,6 +56,21 @@ export function IdeEditor({ tab }: IdeEditorProps) {
     updateTabCursor(tab.id, line, col);
   }, [tab.id, updateTabCursor]);
 
+  // Go-to-definition: open file and scroll to position
+  const handleGoToDefinition = useCallback(async (path: string, line: number, col?: number) => {
+    try {
+      await openFile(path);
+      // After the file is opened, find its tab and set pending scroll
+      const tabs = useIdeStore.getState().tabs;
+      const targetTab = tabs.find(t => t.path === path);
+      if (targetTab) {
+        setPendingScroll(targetTab.id, line, col);
+      }
+    } catch {
+      // Silently ignore — file may not exist
+    }
+  }, [openFile, setPendingScroll]);
+
   // CodeMirror hook - 使用空字符串初始化，内容加载后通过 setContent 设置
   const {
     containerRef,
@@ -69,6 +86,9 @@ export function IdeEditor({ tab }: IdeEditorProps) {
     onSave: handleSave,
     onCursorChange: handleCursorChange,
     onSearchOpen: () => setIsSearchOpen(true),
+    nodeId: nodeId ?? undefined,
+    projectRoot: projectRoot ?? undefined,
+    onGoToDefinition: handleGoToDefinition,
   });
 
   // 快捷键处理
