@@ -10,11 +10,12 @@ IDE 模式是 OxideTerm 的核心特性之一，让你无需安装 VS Code Remot
 
 | 特性 | 说明 |
 |------|------|
-| **零配置** | 无需在远程服务器安装任何 Agent 或插件 |
-| **轻量快速** | 基于 SFTP 协议，复用现有 SSH 连接 |
+| **双模式** | Agent 模式（高性能）和 SFTP 模式（零配置）自动选择 |
+| **轻量快速** | Agent 仅 ~600KB 静态二进制，SFTP 模式复用现有连接 |
 | **原生体验** | CodeMirror 6 编辑器，支持语法高亮、自动补全 |
 | **Git 集成** | 实时显示文件修改状态和分支信息 |
 | **自愈连接** | Orchestrator 统一管理断网重连，不丢失上下文 |
+| **纯按需加载** | 文件树不做深度预取，所有子目录仅在用户展开时加载 |
 
 ## 🚀 快速开始
 
@@ -143,6 +144,31 @@ graph TD
 
 ## 🌳 文件树功能
 
+### 按需加载架构 (v0.13.2)
+
+文件树采用纯按需加载策略，不做任何深度预取：
+
+- **根目录**：打开项目时仅加载根目录的直接子项
+- **子目录**：用户点击展开时才发起 `listDir` 请求
+- **竞态保护**：每个目录使用 `AbortController` 防止并发请求冲突 — 新请求自动取消旧请求
+- **大目录保护**：超过 500 项的目录自动截断，避免 DOM 爆炸
+
+```
+用户展开目录 → FetchLockContext 检查并取消旧请求 
+  → agentService.listDir(nodeId, path)
+    → Agent 模式: JSON-RPC fs/list (零 shell 开销)
+    → SFTP 模式: nodeSftpListDir (跨平台兼容)
+  → 排序 + 截断保护 → 渲染子节点
+```
+
+### 路径规范化
+
+所有路径在进入系统前会被规范化，确保跨平台兼容：
+
+- **后端**：`node_ide_open_project` 使用 SFTP `canonicalize` 将 `~`、相对路径、符号链接解析为绝对路径
+- **Agent**：所有文件操作经过 `resolve_path()` 展开 `~` 为 `$HOME`（Linux 内核不认识 `~`）
+- **Windows SSH**：自动检测并归一化 `C:\` 反斜杠路径为 `/` 分隔符
+
 ### Git 状态指示
 
 文件树中的文件会根据 Git 状态显示不同颜色：
@@ -243,4 +269,4 @@ set({
 
 ---
 
-*文档版本: v1.9.1 | 适配架构: Strong Sync + Key-Driven Reset + Oxide-Next*
+*文档版本: v0.13.2 | 适配架构: Strong Sync + Key-Driven Reset + Oxide-Next + On-Demand Loading*

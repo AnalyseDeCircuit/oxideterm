@@ -208,3 +208,49 @@ kill_tree() {
 ---
 
 *文档版本：v0.3.0 | 最后更新：2026-02-11*
+Wayland Compositor（长线高差异化）
+
+### 5.1 为什么要超越 VNC
+
+路径 B（VNC）的根本限制：
+
+- **每个应用一个 VNC 实例** —— 资源浪费（每个应用独占 Xtigervnc 进程）
+- **软件渲染** —— VNC 本质是位图传输，无法硬件加速
+- **延迟** —— RFB 协议多一层编解码
+- **分辨率固定** —— VNC 窗口大小 ≠ 应用窗口大小
+
+真正的解决方案是**OxideTerm 自己成为 Wayland Compositor**：通过 smithay 框架直接接收应用的 `wl_surface` 帧，X11 应用经 XWayland 桥接透明接入。
+
+### 5.2 ~~X11 直连路径~~（已降级为 Phase 4 备选）
+
+> 早期设计考虑过直接实现 X11 Server，但 X11 协议包含 **120+ 个核心请求** +
+> **数十个扩展**（RENDER、COMPOSITE、SHM、GLX、XInput2…），工作量 6+ 月。
+> 相比之下，Wayland Compositor + XWayland 路径更现实（见 §5.6），
+> 因此 X11 直连**降级为 Phase 4 备选**，不在近期计划中。
+>
+> <details><summary>点击展开 X11 直连的架构蓝图（仅存档）</summary>
+>
+> ```
+> WSL GUI App → libX11.so → X11 Wire Protocol (Unix Socket) → OxideTerm X11 Proxy (Rust)
+>   → Window mgmt / Pixmap rendering / Input forwarding → Canvas/WebGL → Tauri Webview
+> ```
+>
+> 简化策略：核心子集（~30 请求）、`x11rb` 协议解析、MIT-SHM pixmap 直传、
+> 代理而非实现、借鉴 xpra 的协议子集选择。
+> </details>
+
+### 5.3 可参考的开源项目
+
+| 项目 | 语言 | 许可证 | 用法 | 参考价值 |
+|-----|------|--------|------|--------|
+| **[smithay](https://github.com/Smithay/smithay)** | Rust | MIT | ✅ 直接依赖 | Wayland compositor 框架，v0.7.0，2.7k⭐，内建 XWayland |
+| **[wprs](https://github.com/wayland-transpositor/wprs)** | Rust | Apache-2.0 | ✅ 架构参考 | 基于 smithay 的 rootless 远程 Wayland，SIMD 压缩 |
+| [x11rb](https://github.com/psychon/x11rb) | Rust | Apache-2.0 / MIT | ✅ Phase 4 备用 | X11 协议 Rust 绑定 |
+| [x11docker](https://github.com/mviereck/x11docker) | Shell | MIT | ✅ 参考 | X11 容器隔离方案 |
+| [xpra](https://github.com/Xpra-org/xpra) | Python | **GPL-2.0** | ⚠️ **仅参考** | 无桌面 X11/Wayland 转发，HTML5 客户端 |
+| [Xephyr](https://freedesktop.org/wiki/Software/Xephyr/) | C | MIT | ✅ 参考 | 嵌套 X Server（参考意义） |
+
+> **⚠️ xpra 许可证警告**：xpra 使用 **GPL-2.0**（copyleft）。OxideTerm 仅将其作为
+> **协议设计参考**（借鉴其 rootless 转发的协议子集选择策略），
+> **绝对不引入其代码、不 fork、不 linking**。如果未来需要从 xpra 移植任何算法，
+> 必须基于协议规范重新实现（clean-room），不得参考其源码。

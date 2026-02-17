@@ -230,9 +230,15 @@ const results = await agentService.grep(nodeId, 'pattern', '/path', options);
 const tree = await agentService.listTree(nodeId, '/root', depth);
 ```
 
-### 深层目录预取
+### 按需加载
 
-打开 IDE 文件树时，自动在后台预取 3 层目录结构，缓存在 `PrefetchCacheContext` 中。展开子目录时优先从缓存读取，消除网络延迟。
+文件树采用纯按需加载策略（不做深度预取）。每次展开目录时调用 `agentService.listDir()`，该方法内部使用 `fs/listTree`（depth=0）获取单层目录内容。并发展开同一目录时，`AbortController` 自动取消旧请求。
+
+### 路径解析
+
+Agent 内置 `resolve_path()` 函数，自动将 `~` 和 `~/...` 展开为 `$HOME` 绝对路径。所有文件系统操作（readFile、writeFile、stat、listDir、listTree、mkdir、remove、rename、chmod、grep、git_status）以及符号操作（symbols/index、symbols/complete、symbols/definitions）均经过此函数处理。
+
+> ⚠️ Linux 内核不认识 `~`，只有 Shell 认识。`Path::new("~/file")` 会被解析为当前目录下名为 `~` 的子目录，导致静默失败。
 
 ## 故障排查
 
