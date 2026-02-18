@@ -34,7 +34,7 @@ OxideTerm est une **application terminal multiplateforme** qui unifie shells loc
 |---|---|
 | Les clients SSH ne font pas de shell local | Moteur hybride : PTY local + SSH distant dans une fenêtre |
 | Reconnexion = tout perdre | **Architecture Node-first** : reconnexion auto restaure redirections, transferts, état IDE |
-| L'édition distante nécessite VS Code Remote | **Mode IDE intégré** : éditeur CodeMirror 6 via SFTP, zéro install serveur |
+| L'édition distante nécessite VS Code Remote | **Mode IDE intégré** : éditeur CodeMirror 6 via SFTP, zéro install serveur par défaut ; agent distant optionnel sous Linux |
 | Pas de réutilisation de connexion SSH | **Multiplexage SSH** : terminal, SFTP, redirections partagent une connexion |
 | Les bibliothèques SSH dépendent d'OpenSSL | **russh 0.54** : SSH pur Rust, backend crypto `ring`, zéro deps C |
 
@@ -157,15 +157,16 @@ IA dual-mode, priorité à la vie privée :
 - **Compatible** : OpenAI, Ollama, DeepSeek, OneAPI, tout endpoint `/v1/chat/completions`
 - **Sécurisé** : clés API dans le trousseau système
 
-### 💻 Mode IDE — Édition distante zéro-install
+### 💻 Mode IDE — Édition distante
 
-Éditeur CodeMirror 6 via SFTP — aucun agent côté serveur requis :
+Éditeur CodeMirror 6 via SFTP — aucune installation côté serveur requise par défaut ; Linux prend en charge un agent distant optionnel pour des capacités étendues :
 
 - **Arborescence** : chargement paresseux SFTP avec indicateurs de statut Git
 - **30+ modes de langage** : 16 packs CodeMirror natifs + modes legacy
 - **Résolution de conflits** : verrouillage optimiste par `mtime`
 - **Git piloté par événements** : rafraîchissement auto sur sauvegarde, création, suppression, renommage
 - **State Gating** : IO bloqué si `readiness !== 'ready'`, Key-Driven Reset à la reconnexion
+- **Agent distant Linux (optionnel)** : déployez un agent léger sur l'hôte distant pour une surveillance de fichiers plus fine et une meilleure intégration Git
 
 ### 🔐 Export chiffré .oxide
 

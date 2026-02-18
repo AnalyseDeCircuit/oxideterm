@@ -34,7 +34,7 @@ OxideTerm 是一款**跨平台终端应用**，将本地 Shell、远程 SSH 会�
 |---|---|
 | SSH 客户端不支持本地 Shell | 混合引擎：本地 PTY + 远程 SSH 在同一窗口 |
 | 断线重连 = 丢失一切 | **Node-first 架构**：自动重连带宽限期保护 TUI 应用；恢复转发、传输、IDE 状态 |
-| 远程编辑需要 VS Code Remote | **内置 IDE 模式**：CodeMirror 6 基于 SFTP，服务器零安装 |
+| 远程编辑需要 VS Code Remote | **内置 IDE 模式**：CodeMirror 6 基于 SFTP，默认零安装；Linux 可选部署远端 Agent 增强体验 |
 | SSH 连接不可复用 | **SSH 多路复用**：终端、SFTP、转发共享一条连接 |
 | SSH 库依赖 OpenSSL | **russh 0.54**：纯 Rust SSH，`ring` 密码学后端，无 C 依赖 |
 
@@ -161,15 +161,16 @@ impl Signer for AgentSigner { /* 通过 Agent IPC 完成挑战-响应签名 */ }
 - **广泛兼容**：OpenAI、Ollama、DeepSeek、OneAPI，任意 `/v1/chat/completions` 端点
 - **安全存储**：API Key 存于系统钥匙串（macOS Keychain / Windows Credential Manager）
 
-### 💻 IDE 模式 — 零安装远程编辑
+### 💻 IDE 模式 — 远程编辑
 
-CodeMirror 6 编辑器通过 SFTP 操作远程文件——服务器端无需任何安装：
+CodeMirror 6 编辑器通过 SFTP 操作远程文件——默认无需服务器端安装，Linux 上可选部署轻量远端 Agent 以获得增强体验：
 
 - **文件树**：SFTP 懒加载 + Git 状态指示器
 - **30+ 语言模式**：16 个原生 CodeMirror 语言包 + legacy modes
 - **冲突解决**：基于 `mtime` 的乐观锁
 - **事件驱动 Git**：保存/创建/删除/重命名/终端回车后自动刷新状态
 - **状态门禁**：`readiness !== 'ready'` 时阻断所有 IO，重连时 Key-Driven Reset
+- **Linux 远端 Agent（可选）**：在远程主机部署轻量 Agent，解锁更精细的文件监控与 Git 集成
 
 ### 🔐 .oxide 加密导出
 

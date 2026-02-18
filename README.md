@@ -34,7 +34,7 @@ OxideTerm is a **cross-platform terminal application** that unifies local shells
 |---|---|
 | SSH clients that can't do local shells | Hybrid engine: local PTY + remote SSH in one window |
 | Reconnect = lose everything | **Node-first architecture**: auto-reconnect with Grace Period preserves TUI apps; restores forwards, transfers, IDE state |
-| Remote file editing needs VS Code Remote | **Built-in IDE mode**: CodeMirror 6 editor over SFTP, zero server install |
+| Remote file editing needs VS Code Remote | **Built-in IDE mode**: CodeMirror 6 editor over SFTP, zero server install by default; optional remote agent on Linux |
 | No SSH connection reuse | **SSH multiplexing**: terminal, SFTP, forwards share one connection |
 | SSH libraries depend on OpenSSL | **russh 0.54**: pure Rust SSH, `ring` crypto backend, no C deps |
 
@@ -161,15 +161,16 @@ Dual-mode AI with privacy-first design:
 - **Compatible**: OpenAI, Ollama, DeepSeek, OneAPI, any `/v1/chat/completions` endpoint
 - **Secure**: API keys in OS keychain (macOS Keychain / Windows Credential Manager)
 
-### 💻 IDE Mode — Zero-Install Remote Editing
+### 💻 IDE Mode — Remote Editing
 
-CodeMirror 6 editor over SFTP — no server-side agent required:
+CodeMirror 6 editor over SFTP — no server-side installation required by default; Linux supports an optional lightweight remote agent for enhanced capabilities:
 
 - **File tree**: lazy-loaded with Git status indicators
 - **30+ language modes**: 16 native CodeMirror + legacy modes
 - **Conflict resolution**: optimistic mtime locking
 - **Event-driven Git**: auto-refresh on save, create, delete, rename, terminal Enter
 - **State Gating**: IO blocked when `readiness !== 'ready'`, Key-Driven Reset on reconnect
+- **Linux remote agent (optional)**: deploy a lightweight agent on the remote host for finer-grained file watching and Git integration
 
 ### 🔐 .oxide Encrypted Export
 
