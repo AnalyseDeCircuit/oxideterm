@@ -54,7 +54,7 @@
     "open_failed": "打开项目失败",
     "disconnected_overlay": "连接已断开，等待重新连接…",
     "agent_optin_title": "是否启用远程代理？",
-    "agent_optin_desc": "OxideTerm 可以将一个轻量级代理（约 600 KB）部署到远程主机，以增强 IDE 功能。代理运行在现有 SSH 连接内，不会进行任何外部网络调用。",
+    "agent_optin_desc": "OxideTerm 可以将一个轻量级代理（约 1 MB）部署到远程主机，以增强 IDE 功能。代理运行在现有 SSH 连接内，不会进行任何外部网络调用。",
     "agent_optin_benefit_watch": "实时文件监控（外部更改时立即刷新文件树）",
     "agent_optin_benefit_git": "原生 Git 状态集成",
     "agent_optin_benefit_atomic": "原子文件写入与基于哈希的冲突检测",

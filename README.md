@@ -170,7 +170,7 @@ CodeMirror 6 editor over SFTP — no server-side installation required by defaul
 - **Conflict resolution**: optimistic mtime locking
 - **Event-driven Git**: auto-refresh on save, create, delete, rename, terminal Enter
 - **State Gating**: IO blocked when `readiness !== 'ready'`, Key-Driven Reset on reconnect
-- **Linux remote agent (optional)**: deploy a lightweight agent on the remote host for finer-grained file watching and Git integration
+- **Linux remote agent (optional)**: ~1 MB Rust binary, auto-deployed on x86_64/aarch64. Extra architectures (ARMv7, RISC-V64, LoongArch64, s390x, etc.) available in `agents/extra/` for manual upload
 
 ### 🔐 .oxide Encrypted Export
 

@@ -54,7 +54,7 @@
     "open_failed": "プロジェクトを開くのに失敗しました",
     "disconnected_overlay": "接続が切断されました。再接続を待っています…",
     "agent_optin_title": "リモートエージェントを有効にしますか？",
-    "agent_optin_desc": "OxideTerm はリモートホストに軽量エージェント（約 600 KB）をデプロイして、IDE 機能を強化できます。エージェントは既存の SSH 接続内で動作し、外部ネットワーク接続は行いません。",
+    "agent_optin_desc": "OxideTerm はリモートホストに軽量エージェント（約 1 MB）をデプロイして、IDE 機能を強化できます。エージェントは既存の SSH 接続内で動作し、外部ネットワーク接続は行いません。",
     "agent_optin_benefit_watch": "リアルタイムファイル監視（外部変更時にファイルツリーを即時更新）",
     "agent_optin_benefit_git": "ネイティブ Git ステータス統合",
     "agent_optin_benefit_atomic": "ハッシュベースの競合検出によるアトミックファイル書き込み",

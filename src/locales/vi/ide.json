@@ -54,7 +54,7 @@
     "open_failed": "Không thể mở dự án",
     "disconnected_overlay": "Mất kết nối. Đang chờ kết nối lại…",
     "agent_optin_title": "Kích hoạt tác vụ từ xa?",
-    "agent_optin_desc": "OxideTerm có thể triển khai một tác vụ (~600 KB) đến máy chủ từ xa để nâng cao các tính năng IDE. Tác vụ hoạt động trong kết nối SSH hiện có và không thực hiện bất kỳ cuộc gọi mạng bên ngoài nào.",
+    "agent_optin_desc": "OxideTerm có thể triển khai một tác vụ (~1 MB) đến máy chủ từ xa để nâng cao các tính năng IDE. Tác vụ hoạt động trong kết nối SSH hiện có và không thực hiện bất kỳ cuộc gọi mạng bên ngoài nào.",
     "agent_optin_benefit_watch": "Giám sát tệp thời gian thực (làm mới cây tệp ngay lập tức khi có thay đổi bên ngoài)",
     "agent_optin_benefit_git": "Tích hợp trạng thái Git gốc",
     "agent_optin_benefit_atomic": "Ghi tệp nguyên tử với phát hiện xung đột dựa trên hash",

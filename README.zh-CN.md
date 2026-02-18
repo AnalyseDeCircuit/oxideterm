@@ -170,7 +170,7 @@ CodeMirror 6 编辑器通过 SFTP 操作远程文件——默认无需服务器�
 - **冲突解决**：基于 `mtime` 的乐观锁
 - **事件驱动 Git**：保存/创建/删除/重命名/终端回车后自动刷新状态
 - **状态门禁**：`readiness !== 'ready'` 时阻断所有 IO，重连时 Key-Driven Reset
-- **Linux 远端 Agent（可选）**：在远程主机部署轻量 Agent，解锁更精细的文件监控与 Git 集成
+- **Linux 远端 Agent（可选）**：~1 MB Rust 二进制，x86_64/aarch64 自动部署；ARMv7、RISC-V64、LoongArch64、s390x 等额外架构可从 `agents/extra/` 手动下载上传
 
 ### 🔐 .oxide 加密导出
 

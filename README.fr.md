@@ -166,7 +166,7 @@ IA dual-mode, priorité à la vie privée :
 - **Résolution de conflits** : verrouillage optimiste par `mtime`
 - **Git piloté par événements** : rafraîchissement auto sur sauvegarde, création, suppression, renommage
 - **State Gating** : IO bloqué si `readiness !== 'ready'`, Key-Driven Reset à la reconnexion
-- **Agent distant Linux (optionnel)** : déployez un agent léger sur l'hôte distant pour une surveillance de fichiers plus fine et une meilleure intégration Git
+- **Agent distant Linux (optionnel)** : binaire Rust ~1 Mo, déploiement auto sur x86_64/aarch64. Architectures supplémentaires (ARMv7, RISC-V64, LoongArch64, s390x, etc.) disponibles dans `agents/extra/` pour téléchargement manuel
 
 ### 🔐 Export chiffré .oxide
 

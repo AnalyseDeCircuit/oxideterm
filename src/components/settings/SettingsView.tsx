@@ -2029,7 +2029,7 @@ export const SettingsView = () => {
                                             <p className="text-xs text-theme-text-muted mt-0.5">x86_64, aarch64 (Linux)</p>
                                         </div>
                                         <span className="text-xs text-theme-text-muted bg-theme-bg-panel px-2 py-1 rounded border border-theme-border/50">
-                                            ~600 KB
+                                            ~1 MB
                                         </span>
                                     </div>
                                 </div>

@@ -54,7 +54,7 @@
     "open_failed": "Projekt konnte nicht geöffnet werden",
     "disconnected_overlay": "Verbindung verloren. Warten auf Wiederverbindung…",
     "agent_optin_title": "Remote-Agent aktivieren?",
-    "agent_optin_desc": "OxideTerm kann einen leichtgewichtigen Agenten (~600 KB) auf dem Remote-Host bereitstellen, um die IDE-Funktionen zu verbessern. Der Agent läuft innerhalb Ihrer bestehenden SSH-Verbindung und führt keine externen Netzwerkaufrufe durch.",
+    "agent_optin_desc": "OxideTerm kann einen leichtgewichtigen Agenten (~1 MB) auf dem Remote-Host bereitstellen, um die IDE-Funktionen zu verbessern. Der Agent läuft innerhalb Ihrer bestehenden SSH-Verbindung und führt keine externen Netzwerkaufrufe durch.",
     "agent_optin_benefit_watch": "Echtzeit-Dateiüberwachung (sofortige Aktualisierung bei externen Änderungen)",
     "agent_optin_benefit_git": "Native Git-Status-Integration",
     "agent_optin_benefit_atomic": "Atomare Dateischreibvorgänge mit Hash-basierter Konflikterkennung",
