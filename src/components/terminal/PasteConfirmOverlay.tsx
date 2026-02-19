@@ -54,6 +54,7 @@ export const PasteConfirmOverlay: React.FC<PasteConfirmOverlayProps> = ({
   
   // 处理键盘事件：Enter 确认，Escape 取消
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!document.hasFocus()) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();

@@ -105,6 +105,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
+      if (!document.hasFocus()) return;
 
       // Esc to close
       if (e.key === 'Escape') {

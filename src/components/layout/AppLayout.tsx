@@ -10,6 +10,7 @@ import { SplitTerminalContainer } from '../terminal/SplitTerminalContainer';
 import { Button } from '../ui/button';
 import { NewConnectionModal } from '../modals/NewConnectionModal';
 import { ConnectionPoolMonitor } from '../connections/ConnectionPoolMonitor';
+import { TabActiveProvider } from '../../hooks/useTabActive';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { SystemHealthPanel } from './SystemHealthPanel';
 import { Plus } from 'lucide-react';
@@ -126,6 +127,7 @@ export const AppLayout = () => {
                   key={tab.id}
                   className={`absolute inset-0 ${isActive ? 'z-10 block' : 'z-0 hidden'}`}
                 >
+                <TabActiveProvider value={isActive}>
                   {/* Terminal tabs: Support split panes via rootPane, fallback to single terminal */}
                   {(tab.type === 'terminal' || tab.type === 'local_terminal') && (
                     <div className="relative h-full w-full group/terminal">
@@ -258,6 +260,7 @@ export const AppLayout = () => {
                       </Suspense>
                     </TabBgWrapper>
                   )}
+                </TabActiveProvider>
                 </div>
                 );
               })}

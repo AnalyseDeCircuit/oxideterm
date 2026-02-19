@@ -162,6 +162,7 @@ export const QuickLook: React.FC<QuickLookProps> = ({
     if (!preview) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
       // Only VideoPlayer has its own scoped keyboard handler;
       // AudioVisualizer does not, so we only suppress for video.
       const isVideo = preview.type === 'video';

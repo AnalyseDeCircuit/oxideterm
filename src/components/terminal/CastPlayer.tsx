@@ -201,6 +201,7 @@ export const CastPlayer: React.FC<CastPlayerProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
       if (e.target instanceof HTMLInputElement) return;
 
       switch (e.key) {

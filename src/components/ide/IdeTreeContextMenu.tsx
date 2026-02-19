@@ -65,6 +65,7 @@ export function IdeTreeContextMenu({
   // ESC 关闭
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();

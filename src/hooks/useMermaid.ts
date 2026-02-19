@@ -268,6 +268,7 @@ export function useMermaid(
         
         // Escape key
         const handleEscape = (e: KeyboardEvent) => {
+          if (!document.hasFocus()) return;
           if (e.key === 'Escape') {
             closeModal();
           }

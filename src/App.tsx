@@ -182,6 +182,9 @@ function App() {
   // Additional keyboard handling for terminal-reserved keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if window lost OS-level focus
+      if (!document.hasFocus()) return;
+
       // If terminal is active and this is a terminal-reserved key, don't interfere
       if (isTerminalActive && isTerminalReservedKey(e)) {
         // Let the event propagate to the terminal

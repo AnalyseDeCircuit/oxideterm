@@ -127,6 +127,9 @@ export function useSplitPaneShortcuts({ enabled }: UseSplitPaneShortcutsOptions)
     if (!enabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if window lost OS-level focus
+      if (!document.hasFocus()) return;
+
       const isMac = platform.isMac;
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
       const altOrOption = e.altKey;

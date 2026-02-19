@@ -109,6 +109,9 @@ export function useAppShortcuts(
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if window lost OS-level focus (e.g. another app in front)
+      if (!document.hasFocus()) return;
+
       // Built-in shortcuts take priority
       for (const shortcut of shortcuts) {
         if (matchesShortcut(e, shortcut)) {
@@ -168,6 +171,8 @@ export function useTerminalViewShortcuts(
     const handleKeyDown = (e: KeyboardEvent) => {
       // 只有活跃终端才处理
       if (!isActive) return;
+      // Skip if window lost OS-level focus
+      if (!document.hasFocus()) return;
       
       const h = handlersRef.current;
       

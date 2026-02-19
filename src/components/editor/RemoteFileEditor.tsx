@@ -517,6 +517,7 @@ export function RemoteFileEditor({
   // 处理 Escape 键
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
       if (e.key === 'Escape' && open) {
         e.preventDefault();
         handleClose();

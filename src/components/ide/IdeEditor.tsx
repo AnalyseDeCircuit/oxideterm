@@ -7,6 +7,7 @@ import { useCodeMirrorEditor } from './hooks/useCodeMirrorEditor';
 import { CodeEditorSearchBar } from './CodeEditorSearchBar';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../hooks/useToast';
+import { useIsTabActive } from '../../hooks/useTabActive';
 
 interface IdeEditorProps {
   tab: IdeTab;
@@ -92,8 +93,13 @@ export function IdeEditor({ tab }: IdeEditorProps) {
   });
 
   // 快捷键处理
+  const isTabActive = useIsTabActive();
   useEffect(() => {
+    if (!isTabActive) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
+
       // Cmd/Ctrl + F: 打开搜索
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault();
@@ -106,7 +112,7 @@ export function IdeEditor({ tab }: IdeEditorProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isTabActive]);
 
   // 当文件内容加载完成或切换文件时，更新编辑器内容
   useEffect(() => {

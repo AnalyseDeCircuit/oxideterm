@@ -5,6 +5,7 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 import { useIdeStore, useIdeProject } from '../../store/ideStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useTabBgActive } from '../../hooks/useTabBackground';
+import { useIsTabActive } from '../../hooks/useTabActive';
 import { useNodeState } from '../../hooks/useNodeState';
 import * as agentService from '../../lib/agentService';
 import { IdeTree } from './IdeTree';
@@ -22,6 +23,7 @@ interface IdeWorkspaceProps {
 export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   const { t } = useTranslation();
   const bgActive = useTabBgActive('ide');
+  const isTabActive = useIsTabActive();
   const project = useIdeProject();
   const { state: nodeState } = useNodeState(nodeId);
   const isDisconnected = nodeState.readiness !== 'ready' && nodeState.readiness !== 'connecting';
@@ -93,7 +95,12 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
   
   // 全局快捷键
   useEffect(() => {
+    if (!isTabActive) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Guard: skip if window lost focus (e.g. native dialog overlay)
+      if (!document.hasFocus()) return;
+
       // Ctrl+` 切换终端
       if (e.ctrlKey && e.key === '`') {
         e.preventDefault();
@@ -109,7 +116,7 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleTerminal, toggleSearch]);
+  }, [isTabActive, toggleTerminal, toggleSearch]);
   
   // 加载中状态
   if (!project && !initError) {

@@ -11,6 +11,7 @@ import { FileList, formatFileSize } from './FileList';
 import { QuickLook } from './QuickLook';
 import { BookmarksPanel } from './BookmarksPanel';
 import { useTabBgActive } from '../../hooks/useTabBackground';
+import { useIsTabActive } from '../../hooks/useTabActive';
 import { FilePropertiesDialog } from './FilePropertiesDialog';
 import { useLocalFiles, useFileSelection, useBookmarks, useFileClipboard, useFileArchive } from './hooks';
 import { useToast } from '../../hooks/useToast';
@@ -142,6 +143,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   const { t } = useTranslation();
   const { success: toastSuccess, error: toastError } = useToast();
   const bgActive = useTabBgActive('file_manager');
+  const isTabActive = useIsTabActive();
   
   // Stores
   const createTerminal = useLocalTerminalStore(s => s.createTerminal);
@@ -394,7 +396,11 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   
   // Handle keyboard shortcuts (global)
   useEffect(() => {
+    if (!isTabActive) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
+
       // Space key for Quick Look (when file selected and no dialog open)
       if (e.key === ' ' && !previewFile && !newFolderDialog && !renameDialog && !deleteConfirm) {
         const selectedFiles = Array.from(selection.selected);
@@ -410,7 +416,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection.selected, localFiles.displayFiles, previewFile, newFolderDialog, renameDialog, deleteConfirm, handlePreview]);
+  }, [isTabActive, selection.selected, localFiles.displayFiles, previewFile, newFolderDialog, renameDialog, deleteConfirm, handlePreview]);
   
   // Handle show drives
   const handleShowDrives = useCallback(async () => {
@@ -681,7 +687,11 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
   
   // Keyboard shortcuts for clipboard operations
   useEffect(() => {
+    if (!isTabActive) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!document.hasFocus()) return;
+
       // Only handle if not in an input field
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
@@ -704,7 +714,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleCopy, handleCut, handlePaste]);
+  }, [isTabActive, handleCopy, handleCut, handlePaste]);
   
   return (
     <div className={cn("flex h-full", bgActive ? '' : 'bg-theme-bg', className)} data-bg-active={bgActive || undefined}>
