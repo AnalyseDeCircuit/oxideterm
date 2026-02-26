@@ -282,7 +282,7 @@ Despite different state sources, rendering logic is unified through `TerminalVie
 
 | Category | Features |
 |---|---|
-| **Terminal** | Local PTY, SSH remote, split panes (H/V), session recording/playback (asciicast v2), cross-pane AI context, WebGL rendering, background image gallery, 30+ themes + custom theme editor |
+| **Terminal** | Local PTY, SSH remote, split panes (H/V), session recording/playback (asciicast v2), cross-pane AI context, WebGL rendering, background image gallery, 30+ themes + custom theme editor, command palette (`⌘K`), zen mode (`⌘⇧Z`), font size shortcuts (`⌘+`/`⌘-`) |
 | **SSH** | Connection pool, multiplexing, ProxyJump (∞ hops), topology graph, auto-reconnect pipeline |
 | **Auth** | Password, SSH Key (RSA/Ed25519/ECDSA), SSH Agent, Certificate, Keyboard-Interactive (2FA), Known Hosts |
 | **Files** | Dual-pane SFTP browser, drag-drop, preview (images/video/audio/PDF/code/hex), transfer queue |
@@ -430,7 +430,7 @@ OxideTerm/
 
 ## Roadmap
 
-### ✅ Shipped (v1.8.0)
+### ✅ Shipped (v0.14.0)
 
 - [x] Local terminal (PTY) with feature gating
 - [x] SSH connection pool & multiplexing
@@ -454,10 +454,12 @@ OxideTerm/
 - [x] Enhanced media preview — audio/video playback in SFTP browser
 - [x] Session recording & playback
 - [x] Custom theme engine — 30+ built-in themes, visual editor with hex input, 22 terminal + 19 UI color fields
+- [x] Command palette (`⌘K`) — fuzzy search across connections, actions, and settings
+- [x] Zen mode (`⌘⇧Z`) — distraction-free full-screen terminal, hides sidebar and tab bar
+- [x] Terminal font size shortcuts (`⌘+` / `⌘-` / `⌘0`) with live PTY refit
 
 ### 🚧 In Progress
 
-- [ ] Command palette (`⌘K`)
 - [ ] Session search & quick-switch
 
 ### 📋 Planned

@@ -276,7 +276,7 @@ Malgré des sources d’état différentes, la logique de rendu est unifiée via
 
 | Catégorie | Fonctionnalités |
 |---|---|
-| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), enregistrement/lecture de session (asciicast v2), contexte IA cross-pane, rendu WebGL, galerie d'images d'arrière-plan, 30+ thèmes + éditeur de thèmes |
+| **Terminal** | PTY local, SSH distant, panneaux divisés (H/V), enregistrement/lecture de session (asciicast v2), contexte IA cross-pane, rendu WebGL, galerie d'images d'arrière-plan, 30+ thèmes + éditeur de thèmes, palette de commandes (`⌘K`), mode zen (`⌘⇧Z`), raccourcis taille de police (`⌘+`/`⌘-`) |
 | **SSH** | Pool de connexions, multiplexage, ProxyJump (∞ sauts), graphe topologique, pipeline auto-reconnexion |
 | **Auth** | Mot de passe, clé SSH (RSA/Ed25519/ECDSA), SSH Agent, certificat, Keyboard-Interactive (2FA), Known Hosts |
 | **Fichiers** | Navigateur SFTP double panneau, glisser-déposer, aperçu (images/vidéo/audio/PDF/code/hex), file de transfert |
@@ -422,13 +422,13 @@ OxideTerm/
 
 ## Feuille de route
 
-### ✅ Livré (v1.8.0)
+### ✅ Livré (v0.14.0)
 
 - [x] Terminal local (PTY) avec feature gating
 - [x] Pool de connexions SSH & multiplexage
 - [x] Authentification SSH Agent (AgentSigner)
 - [x] Architecture Node-first (NodeRouter + événements)
-- [x] Orchestrateur auto-reconnexion (pipeline 6 phases)
+- [x] Orchestrateur auto-reconnexion (pipeline 8 phases avec Grace Period)
 - [x] Chaîne ProxyJump bastion illimitée
 - [x] Redirection de ports — locale / distante / SOCKS5 dynamique
 - [x] Gestionnaire de fichiers SFTP double panneau avec aperçu
@@ -446,10 +446,12 @@ OxideTerm/
 - [x] Aperçu multimédia amélioré — lecture audio/vidéo dans le navigateur SFTP
 - [x] Enregistrement & lecture de sessions
 - [x] Moteur de thèmes personnalisés — 30+ thèmes intégrés, éditeur visuel avec saisie hex, 22 terminal + 19 champs couleur UI
+- [x] Palette de commandes (`⌘K`) — recherche floue connexions, actions et paramètres
+- [x] Mode zen (`⌘⇧Z`) — terminal plein écran sans distraction, masque barre latérale et onglets
+- [x] Raccourcis taille de police terminal (`⌘+` / `⌘-` / `⌘0`) avec réétalonnage PTY en temps réel
 
 ### 🚧 En cours
 
-- [ ] Palette de commandes (`⌘K`)
 - [ ] Recherche & changement rapide de sessions
 
 ### 📋 Planifié
