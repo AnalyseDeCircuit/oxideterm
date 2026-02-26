@@ -12,6 +12,7 @@ import { resolvePluginIcon } from '../../lib/plugin/pluginIconResolver';
 import { ReconnectTimeline } from '../connections/ReconnectTimeline';
 import { TabBarTerminalActions } from './TabBarTerminalActions';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 
 /** Count leaf panes in a pane tree */
 function countPanes(node: PaneNode): number {
@@ -195,13 +196,17 @@ const ReconnectIndicator = ({
         {t(`connections.reconnect.phase.${job.status.replace(/-/g, '_')}`)}
         {job.attempt > 1 && ` (${job.attempt}/${job.maxAttempts})`}
       </span>
-      <button
-        onClick={(e) => onCancel(e, nodeId)}
-        className="hover:bg-theme-bg-hover rounded p-0.5"
-        title={t('tabbar.cancel_reconnect')}
-      >
-        <XCircle className="h-3 w-3" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={(e) => onCancel(e, nodeId)}
+            className="hover:bg-theme-bg-hover rounded p-0.5"
+          >
+            <XCircle className="h-3 w-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t('tabbar.cancel_reconnect')}</TooltipContent>
+      </Tooltip>
 
       {/* Hover popover with timeline */}
       {showTimeline && (
@@ -541,31 +546,39 @@ export const TabBar = () => {
                   <div className="flex items-center gap-0.5">
                     {/* Refresh button for terminal tabs */}
                     {tab.type === 'terminal' && (
-                      <button
-                        onClick={(e) => tab.sessionId && handleReconnect(e, tab.sessionId)}
-                        disabled={isManualReconnecting}
-                        className={cn(
-                          "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
-                          isActive && "opacity-100",
-                          isManualReconnecting && "opacity-100"
-                        )}
-                        title={t('tabbar.reconnect')}
-                      >
-                        <RefreshCw className={cn("h-3 w-3", isManualReconnecting && "animate-spin")} />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={(e) => tab.sessionId && handleReconnect(e, tab.sessionId)}
+                            disabled={isManualReconnecting}
+                            className={cn(
+                              "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
+                              isActive && "opacity-100",
+                              isManualReconnecting && "opacity-100"
+                            )}
+                          >
+                            <RefreshCw className={cn("h-3 w-3", isManualReconnecting && "animate-spin")} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{t('tabbar.reconnect')}</TooltipContent>
+                      </Tooltip>
                     )}
-                    <button
-                      onClick={(e) => handleCloseTab(e, tab.id, tab.sessionId, tab.type)}
-                      disabled={tab.sessionId ? closing === tab.sessionId : false}
-                      className={cn(
-                        "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
-                        isActive && "opacity-100",
-                        (tab.sessionId && closing === tab.sessionId) && "opacity-100"
-                      )}
-                      title={t('tabbar.close_tab')}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={(e) => handleCloseTab(e, tab.id, tab.sessionId, tab.type)}
+                          disabled={tab.sessionId ? closing === tab.sessionId : false}
+                          className={cn(
+                            "opacity-0 group-hover:opacity-100 hover:bg-theme-bg-hover rounded p-0.5 transition-opacity",
+                            isActive && "opacity-100",
+                            (tab.sessionId && closing === tab.sessionId) && "opacity-100"
+                          )}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t('tabbar.close_tab')}</TooltipContent>
+                    </Tooltip>
                   </div>
                 )}
               </div>

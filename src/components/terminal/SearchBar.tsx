@@ -4,6 +4,7 @@ import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
 import { Label } from '../ui/label';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { SearchMatch } from '../../types';
 import { useTranslation } from 'react-i18next';
 
@@ -237,7 +238,6 @@ export const SearchBar: React.FC<SearchBarProps> = ({
                 : 'text-theme-text-muted hover:text-theme-text'
             }`}
             onClick={() => handleModeChange('deep')}
-            title={t('terminal.search.deep_history_tooltip')}
           >
             <History className="w-3 h-3 inline mr-1" />
             {t('terminal.search.deep_history')}
@@ -281,57 +281,73 @@ export const SearchBar: React.FC<SearchBarProps> = ({
         {/* Navigation Buttons - only show in active mode */}
         {searchMode === 'active' && (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onFindPrevious}
-              disabled={resultCount === 0}
-              title={t('terminal.search.previous_match')}
-            >
-              <ChevronUp className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onFindNext}
-              disabled={resultCount === 0}
-              title={t('terminal.search.next_match')}
-            >
-              <ChevronDown className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onFindPrevious}
+                  disabled={resultCount === 0}
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.search.previous_match')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onFindNext}
+                  disabled={resultCount === 0}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.search.next_match')}</TooltipContent>
+            </Tooltip>
           </>
         )}
         
         {/* Deep Search Button - only show in deep mode when available */}
         {searchMode === 'deep' && canDeepSearch && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={handleDeepSearchClick}
-            disabled={!query.trim() || deepSearchState?.loading}
-            title={t('terminal.search.search_full_history')}
-          >
-            {deepSearchState?.loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              t('terminal.search.search_button')
-            )}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleDeepSearchClick}
+                disabled={!query.trim() || deepSearchState?.loading}
+              >
+                {deepSearchState?.loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  t('terminal.search.search_button')
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.search.search_full_history')}</TooltipContent>
+          </Tooltip>
         )}
 
         {/* Close Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0"
-          onClick={onClose}
-          title={t('terminal.search.close')}
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('terminal.search.close')}</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Options Row */}
@@ -343,14 +359,18 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             checked={caseSensitive}
             onCheckedChange={(checked: boolean) => setCaseSensitive(checked === true)}
           />
-          <Label 
-            htmlFor="case-sensitive" 
-            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
-            title={t('terminal.search.case_sensitive')}
-          >
-            <CaseSensitive className="w-3.5 h-3.5" />
-            <span>Aa</span>
-          </Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Label 
+                htmlFor="case-sensitive" 
+                className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
+              >
+              <CaseSensitive className="w-3.5 h-3.5" />
+              <span>Aa</span>
+              </Label>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.search.case_sensitive')}</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Regex */}
@@ -360,14 +380,18 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             checked={useRegex}
             onCheckedChange={(checked: boolean) => setUseRegex(checked === true)}
           />
-          <Label 
-            htmlFor="regex" 
-            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
-            title={t('terminal.search.regex')}
-          >
-            <Regex className="w-3.5 h-3.5" />
-            <span>.*</span>
-          </Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Label 
+                htmlFor="regex" 
+                className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
+              >
+                <Regex className="w-3.5 h-3.5" />
+                <span>.*</span>
+              </Label>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.search.regex')}</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Whole Word */}
@@ -377,14 +401,18 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             checked={wholeWord}
             onCheckedChange={(checked: boolean) => setWholeWord(checked === true)}
           />
-          <Label 
-            htmlFor="whole-word" 
-            className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
-            title={t('terminal.search.whole_word')}
-          >
-            <WholeWord className="w-3.5 h-3.5" />
-            <span>Word</span>
-          </Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Label 
+                htmlFor="whole-word" 
+                className="text-xs cursor-pointer flex items-center gap-1 text-theme-text-muted"
+              >
+                <WholeWord className="w-3.5 h-3.5" />
+                <span>Word</span>
+              </Label>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.search.whole_word')}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       

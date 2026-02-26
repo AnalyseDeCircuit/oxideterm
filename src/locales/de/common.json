@@ -42,7 +42,11 @@
     "close_tab": "Tab schließen",
     "close_other_tabs": "Andere Tabs schließen",
     "close_tabs_to_right": "Tabs rechts schließen",
-    "close_all_tabs": "Alle Tabs schließen"
+    "close_all_tabs": "Alle Tabs schließen",
+    "confirm_close_all_title": "Alle Tabs schließen",
+    "confirm_close_all_desc": "Alle {{count}} Tabs schließen? Aktive Verbindungen werden getrennt.",
+    "confirm_close_other_title": "Andere Tabs schließen",
+    "confirm_close_other_desc": "{{count}} andere Tabs schließen? Aktive Verbindungen werden getrennt."
   },
   "tabs": {
     "settings": "Einstellungen",
@@ -115,7 +119,8 @@
     "go": "Los",
     "no_subfolders": "Keine Unterordner in diesem Verzeichnis",
     "selected_path": "Ausgewählt",
-    "open_folder": "Ordner öffnen"
+    "open_folder": "Ordner öffnen",
+    "empty_directory": "(leer)"
   },
   "command_palette": {
     "title": "Befehlspalette",

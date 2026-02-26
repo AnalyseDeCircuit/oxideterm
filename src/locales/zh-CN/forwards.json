@@ -33,7 +33,9 @@
       "restart": "重启转发",
       "edit": "编辑转发",
       "delete": "删除转发",
-      "will_recover": "重连后自动恢复"
+      "will_recover": "重连后自动恢复",
+      "confirm_delete_title": "删除转发规则",
+      "confirm_delete_desc": "确定要删除此端口转发规则吗？"
     },
     "form": {
       "new_title": "新建转发规则",

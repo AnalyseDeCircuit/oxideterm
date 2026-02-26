@@ -18,6 +18,7 @@ import { useToast } from '../../hooks/useToast';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { useAppStore } from '../../store/appStore';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { Input } from '../ui/input';
 import { 
   Dialog, 
@@ -725,15 +726,19 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
       )}>
         {/* Sidebar toggle */}
         <div className="flex items-center justify-end p-1 border-b border-theme-border">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            title={sidebarOpen ? t('fileManager.collapseSidebar') : t('fileManager.expandSidebar')}
-          >
-            {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+              >
+                {sidebarOpen ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{sidebarOpen ? t('fileManager.collapseSidebar') : t('fileManager.expandSidebar')}</TooltipContent>
+          </Tooltip>
         </div>
         
         {/* Bookmarks Panel */}
@@ -777,22 +782,26 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
           <div className="flex-1" />
           
           {/* Bookmark toggle for current path */}
-          <Button
-            size="sm"
-            variant="ghost"
-            className={cn("h-7 px-2", bookmarksHook.isBookmarked(localFiles.path) && "text-yellow-500")}
-            onClick={() => {
-              if (bookmarksHook.isBookmarked(localFiles.path)) {
-                const bookmark = bookmarksHook.getBookmark(localFiles.path);
-                if (bookmark) bookmarksHook.removeBookmark(bookmark.id);
-              } else {
-                bookmarksHook.addBookmark(localFiles.path);
-              }
-            }}
-            title={bookmarksHook.isBookmarked(localFiles.path) ? t('fileManager.removeBookmark') : t('fileManager.addBookmark')}
-          >
-            <Star className={cn("h-3.5 w-3.5", bookmarksHook.isBookmarked(localFiles.path) && "fill-current")} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={cn("h-7 px-2", bookmarksHook.isBookmarked(localFiles.path) && "text-yellow-500")}
+                onClick={() => {
+                  if (bookmarksHook.isBookmarked(localFiles.path)) {
+                    const bookmark = bookmarksHook.getBookmark(localFiles.path);
+                    if (bookmark) bookmarksHook.removeBookmark(bookmark.id);
+                  } else {
+                    bookmarksHook.addBookmark(localFiles.path);
+                  }
+                }}
+              >
+                <Star className={cn("h-3.5 w-3.5", bookmarksHook.isBookmarked(localFiles.path) && "fill-current")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{bookmarksHook.isBookmarked(localFiles.path) ? t('fileManager.removeBookmark') : t('fileManager.addBookmark')}</TooltipContent>
+          </Tooltip>
           
           <Button 
             size="sm" 
@@ -810,67 +819,87 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
           {/* Clipboard operations */}
           <div className="h-4 w-px bg-theme-border mx-1" />
           
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleCopy}
-            disabled={selection.selected.size === 0}
-            title={t('fileManager.copy')}
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={handleCopy}
+                disabled={selection.selected.size === 0}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('fileManager.copy')}</TooltipContent>
+          </Tooltip>
           
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleCut}
-            disabled={selection.selected.size === 0}
-            title={t('fileManager.cut')}
-          >
-            <Scissors className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={handleCut}
+                disabled={selection.selected.size === 0}
+              >
+                <Scissors className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('fileManager.cut')}</TooltipContent>
+          </Tooltip>
           
-          <Button
-            size="icon"
-            variant="ghost"
-            className={cn("h-7 w-7", fileClipboard.hasClipboard && "text-theme-accent")}
-            onClick={handlePaste}
-            disabled={!fileClipboard.hasClipboard}
-            title={t('fileManager.paste')}
-          >
-            <ClipboardPaste className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn("h-7 w-7", fileClipboard.hasClipboard && "text-theme-accent")}
+                onClick={handlePaste}
+                disabled={!fileClipboard.hasClipboard}
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('fileManager.paste')}</TooltipContent>
+          </Tooltip>
           
           {/* Archive operations */}
           <div className="h-4 w-px bg-theme-border mx-1" />
           
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleCompress}
-            disabled={selection.selected.size === 0 || fileArchive.compressing}
-            title={t('fileManager.compress')}
-          >
-            <Archive className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={handleCompress}
+                disabled={selection.selected.size === 0 || fileArchive.compressing}
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('fileManager.compress')}</TooltipContent>
+          </Tooltip>
           
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={handleExtract}
-            disabled={
-              selection.selected.size !== 1 || 
-              fileArchive.extracting ||
-              !getSelectedFiles().some(f => fileArchive.canExtract(f.name))
-            }
-            title={t('fileManager.extract')}
-          >
-            <FolderArchive className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={handleExtract}
+                disabled={
+                  selection.selected.size !== 1 || 
+                  fileArchive.extracting ||
+                  !getSelectedFiles().some(f => fileArchive.canExtract(f.name))
+                }
+              >
+                <FolderArchive className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('fileManager.extract')}</TooltipContent>
+          </Tooltip>
         </div>
         
         {/* File List */}

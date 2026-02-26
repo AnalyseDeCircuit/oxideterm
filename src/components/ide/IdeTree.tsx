@@ -374,10 +374,11 @@ function TreeNode({
           ) : children.length === 0 && !error ? (
             /* 空目录 */
             <div
-              className="py-1 text-xs text-theme-text-muted italic"
+              className="flex items-center gap-1 py-1 text-xs text-theme-text-muted italic"
               style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
             >
-              (empty)
+              <Folder className="w-3 h-3 opacity-40" />
+              {t('ide.empty_directory')}
             </div>
           ) : children.map(child => (
             <TreeNode

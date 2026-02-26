@@ -42,7 +42,11 @@
     "close_tab": "Close tab",
     "close_other_tabs": "Close other tabs",
     "close_tabs_to_right": "Close tabs to the right",
-    "close_all_tabs": "Close all tabs"
+    "close_all_tabs": "Close all tabs",
+    "confirm_close_all_title": "Close All Tabs",
+    "confirm_close_all_desc": "Close all {{count}} tabs? Active connections will be disconnected.",
+    "confirm_close_other_title": "Close Other Tabs",
+    "confirm_close_other_desc": "Close {{count}} other tabs? Active connections will be disconnected."
   },
   "tabs": {
     "settings": "Settings",
@@ -115,7 +119,8 @@
     "go": "Go",
     "no_subfolders": "No subfolders in this directory",
     "selected_path": "Selected",
-    "open_folder": "Open Folder"
+    "open_folder": "Open Folder",
+    "empty_directory": "(empty)"
   },
   "command_palette": {
     "title": "Command Palette",

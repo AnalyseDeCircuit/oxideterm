@@ -42,7 +42,11 @@
     "close_tab": "탭 닫기",
     "close_other_tabs": "다른 탭 닫기",
     "close_tabs_to_right": "오른쪽 탭 닫기",
-    "close_all_tabs": "모든 탭 닫기"
+    "close_all_tabs": "모든 탭 닫기",
+    "confirm_close_all_title": "모든 탭 닫기",
+    "confirm_close_all_desc": "{{count}}개의 탭을 모두 닫으시겠습니까? 활성 연결이 끊어집니다.",
+    "confirm_close_other_title": "다른 탭 닫기",
+    "confirm_close_other_desc": "다른 {{count}}개의 탭을 닫으시겠습니까? 활성 연결이 끊어집니다."
   },
   "tabs": {
     "settings": "설정",
@@ -115,7 +119,8 @@
     "go": "이동",
     "no_subfolders": "이 디렉토리에 하위 폴더가 없습니다",
     "selected_path": "선택됨",
-    "open_folder": "폴더 열기"
+    "open_folder": "폴더 열기",
+    "empty_directory": "(비어 있음)"
   },
   "command_palette": {
     "title": "명령 팔레트",

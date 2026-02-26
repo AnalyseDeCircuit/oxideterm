@@ -42,7 +42,11 @@
     "close_tab": "Fermer l'onglet",
     "close_other_tabs": "Fermer les autres onglets",
     "close_tabs_to_right": "Fermer les onglets à droite",
-    "close_all_tabs": "Fermer tous les onglets"
+    "close_all_tabs": "Fermer tous les onglets",
+    "confirm_close_all_title": "Fermer tous les onglets",
+    "confirm_close_all_desc": "Fermer les {{count}} onglets ? Les connexions actives seront déconnectées.",
+    "confirm_close_other_title": "Fermer les autres onglets",
+    "confirm_close_other_desc": "Fermer les {{count}} autres onglets ? Les connexions actives seront déconnectées."
   },
   "tabs": {
     "settings": "Paramètres",
@@ -115,7 +119,8 @@
     "go": "Aller",
     "no_subfolders": "Aucun sous-dossier dans ce répertoire",
     "selected_path": "Sélectionné",
-    "open_folder": "Ouvrir le dossier"
+    "open_folder": "Ouvrir le dossier",
+    "empty_directory": "(vide)"
   },
   "command_palette": {
     "title": "Palette de commandes",

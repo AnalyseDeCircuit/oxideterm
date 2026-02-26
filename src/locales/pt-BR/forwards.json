@@ -33,7 +33,9 @@
       "restart": "Reiniciar encaminhamento",
       "edit": "Editar encaminhamento",
       "delete": "Excluir encaminhamento",
-      "will_recover": "Recuperação automática ao reconectar"
+      "will_recover": "Recuperação automática ao reconectar",
+      "confirm_delete_title": "Excluir redirecionamento",
+      "confirm_delete_desc": "Tem certeza de que deseja excluir esta regra de redirecionamento de porta?"
     },
     "form": {
       "new_title": "Nova regra de encaminhamento",

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, RefreshCcw, Plus, Trash2, ArrowRight, Pencil, Activity, X, Loader2, Radio } from 'lucide-react';
+import { Play, Square, RefreshCcw, Plus, Trash2, ArrowRight, Pencil, Activity, X, Loader2, Radio, ArrowUpDown } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { Separator } from '../ui/separator';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -13,6 +14,7 @@ import { ForwardRule, ForwardType } from '../../types';
 import { useToast } from '../../hooks/useToast';
 import { useForwardEvents, ForwardStatus as EventForwardStatus } from '../../hooks/useForwardEvents';
 import { useNodeState } from '../../hooks/useNodeState';
+import { useConfirm } from '../../hooks/useConfirm';
 import { useTabBgActive } from '../../hooks/useTabBackground';
 import { usePortDetection } from '../../hooks/usePortDetection';
 import { PortDetectionBanner } from './PortDetectionBanner';
@@ -41,6 +43,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const { t } = useTranslation();
   const bgActive = useTabBgActive('forwards');
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const { state: nodeState } = useNodeState(nodeId);
   // State Gating: only allow IO when node is ready
   const nodeReady = nodeState.readiness === 'ready';
@@ -299,8 +302,20 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                <tbody className="divide-y divide-oxide-border bg-zinc-950/50">
                  {forwards.length === 0 ? (
                      <tr>
-                         <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
-                             {t('forwards.table.no_forwards')}
+                         <td colSpan={5} className="px-4 py-12 text-center">
+                             <div className="flex flex-col items-center gap-3">
+                               <ArrowUpDown className="h-10 w-10 text-theme-text-muted opacity-30" />
+                               <p className="text-sm text-theme-text-muted">{t('forwards.table.no_forwards')}</p>
+                               <Button
+                                 size="sm"
+                                 variant="outline"
+                                 className="mt-1"
+                                 onClick={() => setShowNewForm(true)}
+                               >
+                                 <Plus className="h-3 w-3 mr-1" />
+                                 {t('forwards.actions.new_forward')}
+                               </Button>
+                             </div>
                          </td>
                      </tr>
                  ) : (
@@ -351,15 +366,19 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         {fw.status === 'active' ? (
                           // Active forward: show Stop button
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="h-7 w-7 text-zinc-400 hover:text-yellow-400"
-                            title={t('forwards.actions.stop')}
-                            onClick={() => api.nodeStopForward(nodeId, fw.id).then(fetchForwards)}
-                          >
-                            <Square className="h-3 w-3 fill-current" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                size="icon" 
+                                variant="ghost" 
+                                className="h-7 w-7 text-zinc-400 hover:text-yellow-400"
+                                onClick={() => api.nodeStopForward(nodeId, fw.id).then(fetchForwards)}
+                              >
+                                <Square className="h-3 w-3 fill-current" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">{t('forwards.actions.stop')}</TooltipContent>
+                          </Tooltip>
                         ) : fw.status === 'suspended' ? (
                           // Suspended forward: show hint that it will auto-recover
                           <span className="text-xs text-orange-400/70 px-2">
@@ -368,44 +387,65 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                         ) : (
                           // Stopped forward: show Restart and Edit buttons
                           <>
-                            <Button 
-                              size="icon" 
-                              variant="ghost" 
-                              className="h-7 w-7 text-zinc-400 hover:text-green-400"
-                              title={t('forwards.actions.restart')}
-                              onClick={() => api.nodeRestartForward(nodeId, fw.id).then(fetchForwards)}
-                            >
-                              <Play className="h-3 w-3 fill-current" />
-                            </Button>
-                            <Button 
-                              size="icon" 
-                              variant="ghost" 
-                              className="h-7 w-7 text-zinc-400 hover:text-blue-400"
-                              title={t('forwards.actions.edit')}
-                              onClick={() => {
-                                setEditingForward(fw);
-                                // 使用独立的编辑状态，不影响创建表单
-                                setEditBindAddress(fw.bind_address);
-                                setEditBindPort(fw.bind_port.toString());
-                                setEditTargetHost(fw.target_host);
-                                setEditTargetPort(fw.target_port.toString());
-                                setEditError(null);
-                              }}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-7 w-7 text-zinc-400 hover:text-green-400"
+                                  onClick={() => api.nodeRestartForward(nodeId, fw.id).then(fetchForwards)}
+                                >
+                                  <Play className="h-3 w-3 fill-current" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">{t('forwards.actions.restart')}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  size="icon" 
+                                  variant="ghost" 
+                                  className="h-7 w-7 text-zinc-400 hover:text-blue-400"
+                                  onClick={() => {
+                                    setEditingForward(fw);
+                                    // 使用独立的编辑状态，不影响创建表单
+                                    setEditBindAddress(fw.bind_address);
+                                    setEditBindPort(fw.bind_port.toString());
+                                    setEditTargetHost(fw.target_host);
+                                    setEditTargetPort(fw.target_port.toString());
+                                    setEditError(null);
+                                  }}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">{t('forwards.actions.edit')}</TooltipContent>
+                            </Tooltip>
                           </>
                         )}
                         {/* Delete button - always available */}
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-7 w-7 text-zinc-400 hover:text-red-400"
-                          title={t('forwards.actions.delete')}
-                          onClick={() => api.nodeDeleteForward(nodeId, fw.id).then(fetchForwards)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-7 w-7 text-zinc-400 hover:text-red-400"
+                              onClick={async () => {
+                                const confirmed = await confirm({
+                                  title: t('forwards.actions.confirm_delete_title'),
+                                  description: t('forwards.actions.confirm_delete_desc'),
+                                  variant: 'danger',
+                                });
+                                if (confirmed) {
+                                  api.nodeDeleteForward(nodeId, fw.id).then(fetchForwards);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{t('forwards.actions.delete')}</TooltipContent>
+                        </Tooltip>
                       </div>
                     </td>
                   </tr>
@@ -719,6 +759,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
           </div>
         </div>
       </div>
+      {ConfirmDialog}
     </div>
   );
 };

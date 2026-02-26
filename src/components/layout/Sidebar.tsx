@@ -33,6 +33,7 @@ import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { EditConnectionModal } from '../modals/EditConnectionModal';
 import { SessionTree } from '../sessions/SessionTree';
 import { Breadcrumb } from '../sessions/Breadcrumb';
@@ -691,15 +692,19 @@ export const Sidebar = () => {
   const renderSidebarButton = (def: SidebarButtonDef, collapsed: boolean) => {
     const Icon = def.icon;
     const btn = (
-      <Button
-        variant={getButtonVariant(def)}
-        size="icon"
-        onClick={() => handleButtonClick(def, collapsed)}
-        title={t(def.titleKey)}
-        className="rounded-md h-9 w-9"
-      >
-        <Icon className="h-5 w-5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={getButtonVariant(def)}
+            size="icon"
+            onClick={() => handleButtonClick(def, collapsed)}
+            className="rounded-md h-9 w-9"
+          >
+            <Icon className="h-5 w-5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{t(def.titleKey)}</TooltipContent>
+      </Tooltip>
     );
 
     if (def.badge !== undefined) {
@@ -724,73 +729,51 @@ export const Sidebar = () => {
     );
   };
 
-  // Collapsed state: only show activity bar
-  if (sidebarCollapsed) {
-    return (
-      <div className="flex h-full border-r border-theme-border bg-theme-bg-panel flex-row">
-        {/* Activity Bar Only (Collapsed) */}
-        <div className="flex flex-col items-center py-2 gap-2 w-12 bg-theme-bg shrink-0">
-          {/* Expand Button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleSidebar}
-            title={t('sidebar.actions.expand')}
-            className="rounded-md h-9 w-9"
-          >
-            <PanelLeft className="h-5 w-5" />
-          </Button>
-
-          {/* Top + middle: scrollable when plugins overflow */}
-          <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none self-stretch">
-            {topButtons.map(def => renderSidebarButton(def, true))}
-          </div>
-
-          {/* Bottom: fixed */}
-          <div className="flex flex-col items-center gap-2 shrink-0">
-            <div className="w-6 h-px bg-theme-border" />
-            {bottomButtons.map(def => renderSidebarButton(def, true))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const sessionList = Array.from(sessions.values());
   void sessionList; // For future use
 
   return (
     <div
       ref={sidebarRef}
-      className="flex h-full border-r border-theme-border bg-theme-bg-panel flex-row relative"
-      style={{ width: sidebarWidth }}
+      className="flex h-full border-r border-theme-border bg-theme-bg-panel flex-row relative overflow-hidden"
+      style={{ width: sidebarCollapsed ? 48 : sidebarWidth }}
     >
       {/* Activity Bar (Vertical Left) */}
-      <div className="flex flex-col items-center py-2 gap-2 border-r border-theme-border w-12 bg-theme-bg shrink-0">
-        {/* Collapse Button */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleSidebar}
-          title={t('sidebar.actions.collapse')}
-          className="rounded-md h-9 w-9"
-        >
-          <PanelLeftClose className="h-5 w-5" />
-        </Button>
+      <div className={cn(
+        "flex flex-col items-center py-2 gap-2 w-12 bg-theme-bg shrink-0",
+        !sidebarCollapsed && "border-r border-theme-border"
+      )}>
+        {/* Toggle Button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSidebar}
+              className="rounded-md h-9 w-9"
+            >
+              {sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {sidebarCollapsed ? t('sidebar.actions.expand') : t('sidebar.actions.collapse')}
+          </TooltipContent>
+        </Tooltip>
 
         {/* Top + middle: scrollable when plugins overflow */}
         <div className="flex-1 flex flex-col items-center gap-2 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none self-stretch">
-          {topButtons.map(def => renderSidebarButton(def, false))}
+          {topButtons.map(def => renderSidebarButton(def, sidebarCollapsed))}
         </div>
 
         {/* Bottom: fixed */}
         <div className="flex flex-col items-center gap-2 shrink-0">
           <div className="w-6 h-px bg-theme-border" />
-          {bottomButtons.map(def => renderSidebarButton(def, false))}
+          {bottomButtons.map(def => renderSidebarButton(def, sidebarCollapsed))}
         </div>
       </div>
 
       {/* Content Area */}
+      {!sidebarCollapsed && (
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <div className="flex-1 overflow-y-auto p-2">
           {sidebarActiveSection === 'sessions' && (
@@ -799,37 +782,49 @@ export const Sidebar = () => {
                 <span className="text-xs font-semibold text-theme-text-muted uppercase tracking-wider truncate">{t('sidebar.panels.sessions')}</span>
                 <div className="flex items-center gap-1">
                   {/* 视图模式切换 */}
-                  <Button
-                    variant={viewMode === 'focus' ? 'secondary' : 'ghost'}
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => setViewMode(viewMode === 'focus' ? 'tree' : 'focus')}
-                    title={viewMode === 'focus' ? t('sidebar.tooltips.switch_tree') : t('sidebar.tooltips.switch_focus')}
-                  >
-                    {viewMode === 'focus' ? (
-                      <ListChecks className="h-3 w-3" />
-                    ) : (
-                      <Folder className="h-3 w-3" />
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => toggleModal('autoRoute', true)}
-                    title={t('sidebar.tooltips.auto_route')}
-                  >
-                    <Network className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => toggleModal('newConnection', true)}
-                    title={t('sidebar.tooltips.new_connection')}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={viewMode === 'focus' ? 'secondary' : 'ghost'}
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setViewMode(viewMode === 'focus' ? 'tree' : 'focus')}
+                      >
+                        {viewMode === 'focus' ? (
+                          <ListChecks className="h-3 w-3" />
+                        ) : (
+                          <Folder className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{viewMode === 'focus' ? t('sidebar.tooltips.switch_tree') : t('sidebar.tooltips.switch_focus')}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => toggleModal('autoRoute', true)}
+                      >
+                        <Network className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('sidebar.tooltips.auto_route')}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => toggleModal('newConnection', true)}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('sidebar.tooltips.new_connection')}</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -981,6 +976,7 @@ export const Sidebar = () => {
 
         </div>
       </div>
+      )}
 
       {/* Edit Connection Modal */}
       <EditConnectionModal
@@ -1024,13 +1020,15 @@ export const Sidebar = () => {
       />
 
       {/* Resize Handle */}
-      <div
-        className={cn(
-          "absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-theme-accent/50 transition-colors z-10",
-          isResizing && "bg-theme-accent"
-        )}
-        onMouseDown={handleMouseDown}
-      />
+      {!sidebarCollapsed && (
+        <div
+          className={cn(
+            "absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-theme-accent/50 transition-colors z-10",
+            isResizing && "bg-theme-accent"
+          )}
+          onMouseDown={handleMouseDown}
+        />
+      )}
       {ConfirmDialog}
     </div>
   );

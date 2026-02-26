@@ -33,7 +33,9 @@
       "restart": "Restart forward",
       "edit": "Edit forward",
       "delete": "Delete forward",
-      "will_recover": "Auto-recover on reconnect"
+      "will_recover": "Auto-recover on reconnect",
+      "confirm_delete_title": "Delete Forward",
+      "confirm_delete_desc": "Are you sure you want to delete this port forwarding rule?"
     },
     "form": {
       "new_title": "New Forward Rule",

@@ -33,7 +33,9 @@
       "restart": "Weiterleitung neu starten",
       "edit": "Weiterleitung bearbeiten",
       "delete": "Weiterleitung löschen",
-      "will_recover": "Auto-Wiederherstellung bei Wiederverbindung"
+      "will_recover": "Auto-Wiederherstellung bei Wiederverbindung",
+      "confirm_delete_title": "Weiterleitung löschen",
+      "confirm_delete_desc": "Möchten Sie diese Portweiterleitungsregel wirklich löschen?"
     },
     "form": {
       "new_title": "Neue Weiterleitungsregel",

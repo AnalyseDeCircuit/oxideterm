@@ -181,7 +181,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled, externalValue, 
           placeholder={disabled ? t('ai.input.placeholder_disabled') : t('ai.input.placeholder')}
           disabled={disabled || isLoading}
           rows={1}
-          className="w-full resize-none bg-transparent border-none px-3 py-2 text-[13px] text-theme-text placeholder-theme-text-muted/30 focus:outline-none focus:ring-0 disabled:opacity-50 leading-relaxed min-h-[36px]"
+          className="w-full resize-none bg-transparent border-none px-3 py-2 text-[13px] text-theme-text placeholder-theme-text-muted/30 focus-visible:outline-none focus-visible:ring-0 disabled:opacity-50 leading-relaxed min-h-[36px]"
         />
 
         <div className="flex items-center justify-between px-2 py-1 border-t border-theme-border/10">

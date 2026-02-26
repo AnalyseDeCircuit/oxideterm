@@ -33,7 +33,9 @@
       "restart": "Redémarrer le transfert",
       "edit": "Modifier le transfert",
       "delete": "Supprimer le transfert",
-      "will_recover": "Récupération auto à la reconnexion"
+      "will_recover": "Récupération auto à la reconnexion",
+      "confirm_delete_title": "Supprimer la redirection",
+      "confirm_delete_desc": "Voulez-vous vraiment supprimer cette règle de redirection de port ?"
     },
     "form": {
       "new_title": "Nouvelle règle de transfert",

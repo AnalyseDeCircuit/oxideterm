@@ -42,7 +42,11 @@
     "close_tab": "Chiudi scheda",
     "close_other_tabs": "Chiudi altre schede",
     "close_tabs_to_right": "Chiudi schede a destra",
-    "close_all_tabs": "Chiudi tutte le schede"
+    "close_all_tabs": "Chiudi tutte le schede",
+    "confirm_close_all_title": "Chiudi tutte le schede",
+    "confirm_close_all_desc": "Chiudere tutte le {{count}} schede? Le connessioni attive verranno disconnesse.",
+    "confirm_close_other_title": "Chiudi le altre schede",
+    "confirm_close_other_desc": "Chiudere le altre {{count}} schede? Le connessioni attive verranno disconnesse."
   },
   "tabs": {
     "settings": "Impostazioni",
@@ -115,7 +119,8 @@
     "go": "Vai",
     "no_subfolders": "Nessuna sottocartella in questa directory",
     "selected_path": "Selezionato",
-    "open_folder": "Apri cartella"
+    "open_folder": "Apri cartella",
+    "empty_directory": "(vuoto)"
   },
   "command_palette": {
     "title": "Tavolozza comandi",

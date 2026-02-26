@@ -33,7 +33,9 @@
       "restart": "重啟轉發",
       "edit": "編輯轉發",
       "delete": "刪除轉發",
-      "will_recover": "重連後自動恢復"
+      "will_recover": "重連後自動恢復",
+      "confirm_delete_title": "刪除轉發規則",
+      "confirm_delete_desc": "確定要刪除此端口轉發規則嗎？"
     },
     "form": {
       "new_title": "新增轉發規則",

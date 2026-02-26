@@ -33,7 +33,9 @@
       "restart": "Riavvia inoltro",
       "edit": "Modifica inoltro",
       "delete": "Elimina inoltro",
-      "will_recover": "Recupero automatico alla riconnessione"
+      "will_recover": "Recupero automatico alla riconnessione",
+      "confirm_delete_title": "Elimina inoltro",
+      "confirm_delete_desc": "Sei sicuro di voler eliminare questa regola di inoltro porta?"
     },
     "form": {
       "new_title": "Nuova Regola Inoltro",

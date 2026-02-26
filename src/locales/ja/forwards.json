@@ -33,7 +33,9 @@
       "restart": "転送を再起動",
       "edit": "転送を編集",
       "delete": "転送を削除",
-      "will_recover": "再接続時に自動復旧"
+      "will_recover": "再接続時に自動復旧",
+      "confirm_delete_title": "転送ルールを削除",
+      "confirm_delete_desc": "このポート転送ルールを削除しますか？"
     },
     "form": {
       "new_title": "新規転送ルール",

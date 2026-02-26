@@ -42,7 +42,11 @@
     "close_tab": "Fechar aba",
     "close_other_tabs": "Fechar outras abas",
     "close_tabs_to_right": "Fechar abas à direita",
-    "close_all_tabs": "Fechar todas as abas"
+    "close_all_tabs": "Fechar todas as abas",
+    "confirm_close_all_title": "Fechar todas as guias",
+    "confirm_close_all_desc": "Fechar todas as {{count}} guias? As conexões ativas serão desconectadas.",
+    "confirm_close_other_title": "Fechar outras guias",
+    "confirm_close_other_desc": "Fechar as outras {{count}} guias? As conexões ativas serão desconectadas."
   },
   "tabs": {
     "settings": "Configurações",
@@ -115,7 +119,8 @@
     "go": "Ir",
     "no_subfolders": "Nenhuma subpasta neste diretório",
     "selected_path": "Selecionado",
-    "open_folder": "Abrir pasta"
+    "open_folder": "Abrir pasta",
+    "empty_directory": "(vazio)"
   },
   "command_palette": {
     "title": "Paleta de comandos",

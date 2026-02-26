@@ -42,7 +42,11 @@
     "close_tab": "關閉分頁",
     "close_other_tabs": "關閉其他分頁",
     "close_tabs_to_right": "關閉右側分頁",
-    "close_all_tabs": "關閉所有分頁"
+    "close_all_tabs": "關閉所有分頁",
+    "confirm_close_all_title": "關閉所有標籤頁",
+    "confirm_close_all_desc": "關閉全部 {{count}} 個標籤頁？活動連接將被斷開。",
+    "confirm_close_other_title": "關閉其他標籤頁",
+    "confirm_close_other_desc": "關閉其他 {{count}} 個標籤頁？活動連接將被斷開。"
   },
   "tabs": {
     "settings": "設定",
@@ -115,7 +119,8 @@
     "go": "前往",
     "no_subfolders": "此目錄下沒有子資料夾",
     "selected_path": "已選擇",
-    "open_folder": "開啟資料夾"
+    "open_folder": "開啟資料夾",
+    "empty_directory": "（空）"
   },
   "command_palette": {
     "title": "命令面板",

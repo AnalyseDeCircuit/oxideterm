@@ -204,7 +204,7 @@ export const ConnectionsPanel: React.FC = () => {
       {/* Connection List */}
       <div className="flex-1 overflow-y-auto p-6">
         {connectionList.length === 0 ? (
-          <div className="text-center text-zinc-500 py-16">
+          <div className="text-center text-theme-text-muted py-16">
             <Server className="h-16 w-16 mx-auto mb-4 opacity-30" />
             <p className="text-lg">{t('connections.panel.no_connections')}</p>
             <p className="text-sm mt-2 opacity-70">{t('connections.panel.no_connections_hint')}</p>

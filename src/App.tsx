@@ -21,6 +21,8 @@ import { CommandPalette } from './components/command-palette/CommandPalette';
 import { CastPlayer } from './components/terminal/CastPlayer';
 import { OnboardingModal } from './components/modals/OnboardingModal';
 import { KeyboardShortcutsModal } from './components/modals/KeyboardShortcutsModal';
+import { TooltipProvider } from './components/ui/tooltip';
+import { useFontSizeHUD } from './components/ui/FontSizeHUD';
 import { useRecordingStore } from './store/recordingStore';
 
 function App() {
@@ -43,6 +45,9 @@ function App() {
 
   // Keyboard shortcuts modal state
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+
+  // Font size HUD
+  const { showFontSize, FontSizeHUD } = useFontSizeHUD();
 
   // Determine if a terminal is currently active
   const isTerminalActive = useMemo(() => {
@@ -231,7 +236,8 @@ function App() {
       action: () => {
         const s = useSettingsStore.getState();
         const cur = s.settings.terminal.fontSize;
-        if (cur < 32) s.updateTerminal('fontSize', Math.min(32, cur + 1));
+        const next = Math.min(32, cur + 1);
+        if (cur < 32) { s.updateTerminal('fontSize', next); showFontSize(next); }
       },
       description: 'Increase font size',
       terminalBehavior: 'always' as const,
@@ -243,7 +249,8 @@ function App() {
       action: () => {
         const s = useSettingsStore.getState();
         const cur = s.settings.terminal.fontSize;
-        if (cur > 8) s.updateTerminal('fontSize', Math.max(8, cur - 1));
+        const next = Math.max(8, cur - 1);
+        if (cur > 8) { s.updateTerminal('fontSize', next); showFontSize(next); }
       },
       description: 'Decrease font size',
       terminalBehavior: 'always' as const,
@@ -254,6 +261,7 @@ function App() {
       shift: false,
       action: () => {
         useSettingsStore.getState().updateTerminal('fontSize', 14);
+        showFontSize(14);
       },
       description: 'Reset font size',
       terminalBehavior: 'always' as const,
@@ -338,19 +346,22 @@ function App() {
           e.preventDefault();
           const s = useSettingsStore.getState();
           const cur = s.settings.terminal.fontSize;
-          if (cur < 32) s.updateTerminal('fontSize', Math.min(32, cur + 1));
+          const next = Math.min(32, cur + 1);
+          if (cur < 32) { s.updateTerminal('fontSize', next); showFontSize(next); }
           return;
         }
         if (e.key === '-' && !e.shiftKey) {
           e.preventDefault();
           const s = useSettingsStore.getState();
           const cur = s.settings.terminal.fontSize;
-          if (cur > 8) s.updateTerminal('fontSize', Math.max(8, cur - 1));
+          const next = Math.max(8, cur - 1);
+          if (cur > 8) { s.updateTerminal('fontSize', next); showFontSize(next); }
           return;
         }
         if (e.key === '0' && !e.shiftKey) {
           e.preventDefault();
           useSettingsStore.getState().updateTerminal('fontSize', 14);
+          showFontSize(14);
           return;
         }
         // Cmd+K — Command palette
@@ -397,24 +408,27 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <AppLayout />
-      <Toaster />
-      <AutoRouteModal />
-      <OnboardingModal />
-      <PluginConfirmDialog />
-      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} onOpenShortcuts={() => setShortcutsModalOpen(true)} />
-      <KeyboardShortcutsModal open={shortcutsModalOpen} onOpenChange={setShortcutsModalOpen} />
-      <LocalShellLauncher 
-        open={shellLauncherOpen} 
-        onOpenChange={setShellLauncherOpen} 
-      />
-      {playerModal.open && playerModal.content && (
-        <CastPlayer
-          content={playerModal.content}
-          fileName={playerModal.fileName}
-          onClose={closePlayer}
+      <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+        <AppLayout />
+        <Toaster />
+        <AutoRouteModal />
+        <OnboardingModal />
+        <PluginConfirmDialog />
+        <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} onOpenShortcuts={() => setShortcutsModalOpen(true)} />
+        <KeyboardShortcutsModal open={shortcutsModalOpen} onOpenChange={setShortcutsModalOpen} />
+        <LocalShellLauncher 
+          open={shellLauncherOpen} 
+          onOpenChange={setShellLauncherOpen} 
         />
-      )}
+        {playerModal.open && playerModal.content && (
+          <CastPlayer
+            content={playerModal.content}
+            fileName={playerModal.fileName}
+            onClose={closePlayer}
+          />
+        )}
+        <FontSizeHUD />
+      </TooltipProvider>
     </ErrorBoundary>
   );
 }

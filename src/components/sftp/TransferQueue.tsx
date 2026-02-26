@@ -2,6 +2,7 @@ import { X, Check, AlertCircle, RotateCcw, History, RefreshCw, Pause, Play } fro
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { Progress } from '../ui/progress';
 import { useTransferStore, formatBytes, formatSpeed, calculateSpeed, TransferItem } from '../../store/transferStore';
 import { nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer } from '../../lib/api';
@@ -207,15 +208,19 @@ export const TransferQueue = ({ nodeId }: { nodeId: string }) => {
                   {transfer.status === 'Failed' && t('sftp.queue.status_error')}
                 </div>
                 {transfer.can_resume && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6 text-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10"
-                    onClick={() => handleResumeIncomplete(transfer)}
-                    title={t('sftp.queue.resume_tooltip')}
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6 text-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10"
+                        onClick={() => handleResumeIncomplete(transfer)}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">{t('sftp.queue.resume_tooltip')}</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             ))}
@@ -277,47 +282,59 @@ export const TransferQueue = ({ nodeId }: { nodeId: string }) => {
                      
                      {/* Pause/Resume button for active transfers */}
                      {(item.state === 'active' || item.state === 'pending') && (
-                       <Button 
-                         size="icon" 
-                         variant="ghost" 
-                         className="h-6 w-6 hover:text-yellow-500"
-                         onClick={() => handlePause(item)}
-                         title={t('sftp.queue.pause_tooltip')}
-                       >
-                         <Pause className="h-3 w-3" />
-                       </Button>
+                       <Tooltip>
+                         <TooltipTrigger asChild>
+                           <Button 
+                             size="icon" 
+                             variant="ghost" 
+                             className="h-6 w-6 hover:text-yellow-500"
+                             onClick={() => handlePause(item)}
+                           >
+                             <Pause className="h-3 w-3" />
+                           </Button>
+                         </TooltipTrigger>
+                         <TooltipContent side="top">{t('sftp.queue.pause_tooltip')}</TooltipContent>
+                       </Tooltip>
                      )}
                      
                      {item.state === 'paused' && (
-                       <Button 
-                         size="icon" 
-                         variant="ghost" 
-                         className="h-6 w-6 hover:text-green-500"
-                         onClick={() => handleResume(item)}
-                         title={t('sftp.queue.resume_tooltip')}
-                       >
-                         <Play className="h-3 w-3" />
-                       </Button>
+                       <Tooltip>
+                         <TooltipTrigger asChild>
+                           <Button 
+                             size="icon" 
+                             variant="ghost" 
+                             className="h-6 w-6 hover:text-green-500"
+                             onClick={() => handleResume(item)}
+                           >
+                             <Play className="h-3 w-3" />
+                           </Button>
+                         </TooltipTrigger>
+                         <TooltipContent side="top">{t('sftp.queue.resume_tooltip')}</TooltipContent>
+                       </Tooltip>
                      )}
                      
                      {/* Cancel button (X): cancel during transfer, remove when finished */}
-                     <Button 
-                       size="icon" 
-                       variant="ghost" 
-                       className={`h-6 w-6 ${
-                         (item.state === 'active' || item.state === 'pending' || item.state === 'paused') 
-                         ? 'hover:text-red-400' 
-                         : ''
-                       }`}
-                       onClick={() => handleCancel(item)}
-                       title={
-                         (item.state === 'active' || item.state === 'pending' || item.state === 'paused')
-                         ? t('sftp.queue.cancel_tooltip')
-                         : t('sftp.queue.remove_tooltip')
-                       }
-                     >
-                       <X className="h-3 w-3" />
-                     </Button>
+                     <Tooltip>
+                       <TooltipTrigger asChild>
+                         <Button 
+                           size="icon" 
+                           variant="ghost" 
+                           className={`h-6 w-6 ${
+                             (item.state === 'active' || item.state === 'pending' || item.state === 'paused') 
+                             ? 'hover:text-red-400' 
+                             : ''
+                           }`}
+                           onClick={() => handleCancel(item)}
+                         >
+                           <X className="h-3 w-3" />
+                         </Button>
+                       </TooltipTrigger>
+                       <TooltipContent side="top">
+                         {(item.state === 'active' || item.state === 'pending' || item.state === 'paused')
+                           ? t('sftp.queue.cancel_tooltip')
+                           : t('sftp.queue.remove_tooltip')}
+                       </TooltipContent>
+                     </Tooltip>
                  </div>
              </div>
          ))

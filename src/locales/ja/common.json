@@ -42,7 +42,11 @@
     "close_tab": "タブを閉じる",
     "close_other_tabs": "他のタブを閉じる",
     "close_tabs_to_right": "右のタブを閉じる",
-    "close_all_tabs": "すべてのタブを閉じる"
+    "close_all_tabs": "すべてのタブを閉じる",
+    "confirm_close_all_title": "すべてのタブを閉じる",
+    "confirm_close_all_desc": "{{count}} 個のタブをすべて閉じますか？アクティブな接続は切断されます。",
+    "confirm_close_other_title": "他のタブを閉じる",
+    "confirm_close_other_desc": "他の {{count}} 個のタブを閉じますか？アクティブな接続は切断されます。"
   },
   "tabs": {
     "settings": "設定",
@@ -115,7 +119,8 @@
     "go": "移動",
     "no_subfolders": "このディレクトリにサブフォルダーはありません",
     "selected_path": "選択済み",
-    "open_folder": "フォルダーを開く"
+    "open_folder": "フォルダーを開く",
+    "empty_directory": "（空）"
   },
   "command_palette": {
     "title": "コマンドパレット",

@@ -42,7 +42,11 @@
     "close_tab": "Cerrar pestaña",
     "close_other_tabs": "Cerrar otras pestañas",
     "close_tabs_to_right": "Cerrar pestañas a la derecha",
-    "close_all_tabs": "Cerrar todas las pestañas"
+    "close_all_tabs": "Cerrar todas las pestañas",
+    "confirm_close_all_title": "Cerrar todas las pestañas",
+    "confirm_close_all_desc": "¿Cerrar las {{count}} pestañas? Las conexiones activas se desconectarán.",
+    "confirm_close_other_title": "Cerrar otras pestañas",
+    "confirm_close_other_desc": "¿Cerrar las otras {{count}} pestañas? Las conexiones activas se desconectarán."
   },
   "tabs": {
     "settings": "Configuración",
@@ -115,7 +119,8 @@
     "go": "Ir",
     "no_subfolders": "No hay subcarpetas en este directorio",
     "selected_path": "Seleccionado",
-    "open_folder": "Abrir carpeta"
+    "open_folder": "Abrir carpeta",
+    "empty_directory": "(vacío)"
   },
   "command_palette": {
     "title": "Paleta de comandos",

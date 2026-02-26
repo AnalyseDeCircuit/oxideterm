@@ -482,8 +482,9 @@ export const FileList: React.FC<FileListProps> = ({
         
         {/* Empty state */}
         {files.length === 0 && !loading && (
-          <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">
-            {t('fileManager.empty')}
+          <div className="flex flex-col items-center justify-center h-32 text-theme-text-muted gap-2">
+            <FolderOpen className="h-8 w-8 opacity-30" />
+            <span className="text-sm">{t('fileManager.empty')}</span>
           </div>
         )}
       </div>

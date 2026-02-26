@@ -33,7 +33,9 @@
       "restart": "Reiniciar reenvío",
       "edit": "Editar reenvío",
       "delete": "Eliminar reenvío",
-      "will_recover": "Recuperación automática al reconectar"
+      "will_recover": "Recuperación automática al reconectar",
+      "confirm_delete_title": "Eliminar reenvío",
+      "confirm_delete_desc": "¿Está seguro de que desea eliminar esta regla de reenvío de puertos?"
     },
     "form": {
       "new_title": "Nueva regla de reenvío",
