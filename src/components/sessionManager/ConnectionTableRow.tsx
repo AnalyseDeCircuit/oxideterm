@@ -3,6 +3,7 @@ import { Play, Pencil, MoreHorizontal, Copy, Trash2, KeyRound, Lock, Bot, Shield
 import { cn } from '../../lib/utils';
 import { Checkbox } from '../ui/checkbox';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,24 +140,32 @@ export const ConnectionTableRow = ({
 
       {/* Actions */}
       <div className="w-[84px] shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={() => onConnect(conn.id)}
-          title={t('sessionManager.actions.connect')}
-        >
-          <Play className="h-3 w-3 text-green-400" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={() => onEdit(conn.id)}
-          title={t('sessionManager.actions.edit')}
-        >
-          <Pencil className="h-3 w-3" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => onConnect(conn.id)}
+            >
+              <Play className="h-3 w-3 text-green-400" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t('sessionManager.actions.connect')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => onEdit(conn.id)}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t('sessionManager.actions.edit')}</TooltipContent>
+        </Tooltip>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7">

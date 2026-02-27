@@ -43,6 +43,7 @@
     "close_other_tabs": "Fechar outras abas",
     "close_tabs_to_right": "Fechar abas à direita",
     "close_all_tabs": "Fechar todas as abas",
+    "copy_title": "Copiar título",
     "confirm_close_all_title": "Fechar todas as guias",
     "confirm_close_all_desc": "Fechar todas as {{count}} guias? As conexões ativas serão desconectadas.",
     "confirm_close_other_title": "Fechar outras guias",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Alternar barra lateral",
     "cmd_zen_mode": "Alternar modo Zen",
     "cmd_close_tab": "Fechar aba atual",
+    "cmd_split_horizontal": "Dividir horizontalmente",
+    "cmd_split_vertical": "Dividir verticalmente",
     "cmd_show_shortcuts": "Atalhos de teclado",
     "cmd_show_welcome": "Mostrar boas-vindas",
     "section_help": "Ajuda"

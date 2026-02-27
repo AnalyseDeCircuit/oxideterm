@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Terminal, FolderOpen, GitFork, RefreshCw, XCircle, WifiOff, Settings, Activity, Network, Plug, Square, HardDrive, LayoutList, Puzzle, Monitor } from 'lucide-react';
+import { X, Terminal, FolderOpen, GitFork, RefreshCw, XCircle, WifiOff, Settings, Activity, Network, Plug, Square, HardDrive, LayoutList, Puzzle, Monitor, Copy } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useReconnectOrchestratorStore } from '../../store/reconnectOrchestratorStore';
@@ -584,6 +584,14 @@ export const TabBar = () => {
               </div>
               </ContextMenuTrigger>
               <ContextMenuContent>
+                <ContextMenuItem onSelect={() => {
+                  const title = getTabTitle(tab, sessions, t);
+                  navigator.clipboard.writeText(title);
+                }}>
+                  <Copy className="h-3.5 w-3.5 mr-2" />
+                  {t('tabbar.copy_title')}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
                 <ContextMenuItem onSelect={() => handleCloseTab(null, tab.id, tab.sessionId, tab.type)}>
                   {t('tabbar.close_tab')}
                 </ContextMenuItem>

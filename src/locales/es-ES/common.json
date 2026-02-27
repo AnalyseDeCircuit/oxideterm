@@ -43,6 +43,7 @@
     "close_other_tabs": "Cerrar otras pestañas",
     "close_tabs_to_right": "Cerrar pestañas a la derecha",
     "close_all_tabs": "Cerrar todas las pestañas",
+    "copy_title": "Copiar título",
     "confirm_close_all_title": "Cerrar todas las pestañas",
     "confirm_close_all_desc": "¿Cerrar las {{count}} pestañas? Las conexiones activas se desconectarán.",
     "confirm_close_other_title": "Cerrar otras pestañas",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Alternar barra lateral",
     "cmd_zen_mode": "Alternar modo Zen",
     "cmd_close_tab": "Cerrar pestaña actual",
+    "cmd_split_horizontal": "Dividir horizontalmente",
+    "cmd_split_vertical": "Dividir verticalmente",
     "cmd_show_shortcuts": "Atajos de teclado",
     "cmd_show_welcome": "Mostrar bienvenida",
     "section_help": "Ayuda"

@@ -43,6 +43,7 @@
     "close_other_tabs": "Chiudi altre schede",
     "close_tabs_to_right": "Chiudi schede a destra",
     "close_all_tabs": "Chiudi tutte le schede",
+    "copy_title": "Copia titolo",
     "confirm_close_all_title": "Chiudi tutte le schede",
     "confirm_close_all_desc": "Chiudere tutte le {{count}} schede? Le connessioni attive verranno disconnesse.",
     "confirm_close_other_title": "Chiudi le altre schede",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Attiva/disattiva barra laterale",
     "cmd_zen_mode": "Attiva/disattiva modalità Zen",
     "cmd_close_tab": "Chiudi scheda corrente",
+    "cmd_split_horizontal": "Dividi orizzontalmente",
+    "cmd_split_vertical": "Dividi verticalmente",
     "cmd_show_shortcuts": "Scorciatoie da tastiera",
     "cmd_show_welcome": "Mostra benvenuto",
     "section_help": "Aiuto"

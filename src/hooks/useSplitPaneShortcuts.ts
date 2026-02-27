@@ -199,4 +199,16 @@ export function useSplitPaneShortcuts({ enabled }: UseSplitPaneShortcutsOptions)
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [enabled, handleSplit, handleClosePane, handleNavigate]);
+
+  // Listen for split commands dispatched by the Command Palette
+  useEffect(() => {
+    const handleSplitEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ direction: SplitDirection }>).detail;
+      if (detail?.direction) {
+        handleSplit(detail.direction);
+      }
+    };
+    window.addEventListener('oxideterm:split', handleSplitEvent);
+    return () => window.removeEventListener('oxideterm:split', handleSplitEvent);
+  }, [handleSplit]);
 }

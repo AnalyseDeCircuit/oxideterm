@@ -43,6 +43,7 @@
     "close_other_tabs": "다른 탭 닫기",
     "close_tabs_to_right": "오른쪽 탭 닫기",
     "close_all_tabs": "모든 탭 닫기",
+    "copy_title": "제목 복사",
     "confirm_close_all_title": "모든 탭 닫기",
     "confirm_close_all_desc": "{{count}}개의 탭을 모두 닫으시겠습니까? 활성 연결이 끊어집니다.",
     "confirm_close_other_title": "다른 탭 닫기",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "사이드바 전환",
     "cmd_zen_mode": "Zen 모드 전환",
     "cmd_close_tab": "현재 탭 닫기",
+    "cmd_split_horizontal": "수평 분할",
+    "cmd_split_vertical": "수직 분할",
     "cmd_show_shortcuts": "키보드 단축키",
     "cmd_show_welcome": "시작 화면 표시",
     "section_help": "도움말"

@@ -43,6 +43,7 @@
     "close_other_tabs": "Andere Tabs schließen",
     "close_tabs_to_right": "Tabs rechts schließen",
     "close_all_tabs": "Alle Tabs schließen",
+    "copy_title": "Titel kopieren",
     "confirm_close_all_title": "Alle Tabs schließen",
     "confirm_close_all_desc": "Alle {{count}} Tabs schließen? Aktive Verbindungen werden getrennt.",
     "confirm_close_other_title": "Andere Tabs schließen",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Seitenleiste umschalten",
     "cmd_zen_mode": "Zen-Modus umschalten",
     "cmd_close_tab": "Aktuellen Tab schließen",
+    "cmd_split_horizontal": "Horizontal teilen",
+    "cmd_split_vertical": "Vertikal teilen",
     "cmd_show_shortcuts": "Tastaturkürzel",
     "cmd_show_welcome": "Willkommen anzeigen",
     "section_help": "Hilfe"

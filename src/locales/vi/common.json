@@ -43,6 +43,7 @@
     "close_other_tabs": "Đóng các tab khác",
     "close_tabs_to_right": "Đóng các tab bên phải",
     "close_all_tabs": "Đóng tất cả tab",
+    "copy_title": "Sao chép tiêu đề",
     "confirm_close_all_title": "Đóng tất cả tab",
     "confirm_close_all_desc": "Đóng tất cả {{count}} tab? Các kết nối đang hoạt động sẽ bị ngắt.",
     "confirm_close_other_title": "Đóng các tab khác",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Chuyển đổi thanh bên",
     "cmd_zen_mode": "Chuyển đổi chế độ Zen",
     "cmd_close_tab": "Đóng tab hiện tại",
+    "cmd_split_horizontal": "Chia ngang",
+    "cmd_split_vertical": "Chia dọ",
     "cmd_show_shortcuts": "Phím tắt bàn phím",
     "cmd_show_welcome": "Hiển thị chào mừng",
     "section_help": "Trợ giúp"

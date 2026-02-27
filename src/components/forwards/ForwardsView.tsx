@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, RefreshCcw, Plus, Trash2, ArrowRight, Pencil, Activity, X, Loader2, Radio, ArrowUpDown } from 'lucide-react';
+import { Play, Square, RefreshCcw, Plus, Trash2, ArrowRight, Pencil, Activity, X, Loader2, Radio, ArrowUpDown, Copy, Check } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { Separator } from '../ui/separator';
@@ -55,6 +55,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   const [forwards, setForwards] = useState<ForwardRule[]>([]);
   const [forwardStats, setForwardStats] = useState<Record<string, ForwardStats>>({});
   const [loading, setLoading] = useState(false);
+  const [copiedForwardId, setCopiedForwardId] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [editingForward, setEditingForward] = useState<ForwardRule | null>(null);
 
@@ -330,7 +331,28 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                        </span>
                     </td>
                     <td className="px-4 py-2 font-mono text-zinc-300">
-                        {fw.forward_type === 'remote' ? `${fw.target_host}:${fw.target_port}` : `${fw.bind_address}:${fw.bind_port}`}
+                        {fw.forward_type !== 'remote' && fw.status === 'active' ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                className="inline-flex items-center gap-1 hover:text-theme-accent transition-colors group/copy"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`${fw.bind_address}:${fw.bind_port}`);
+                                  setCopiedForwardId(fw.id);
+                                  setTimeout(() => setCopiedForwardId(null), 2000);
+                                }}
+                              >
+                                {`${fw.bind_address}:${fw.bind_port}`}
+                                {copiedForwardId === fw.id
+                                  ? <Check className="h-3 w-3 text-green-400" />
+                                  : <Copy className="h-3 w-3 opacity-0 group-hover/copy:opacity-60" />}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">{copiedForwardId === fw.id ? t('forwards.copied') : t('forwards.copy_address')}</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          fw.forward_type === 'remote' ? `${fw.target_host}:${fw.target_port}` : `${fw.bind_address}:${fw.bind_port}`
+                        )}
                     </td>
                     <td className="px-4 py-2 font-mono text-zinc-300">
                         {fw.forward_type === 'remote' ? `${fw.bind_address}:${fw.bind_port}` : `${fw.target_host}:${fw.target_port}`}

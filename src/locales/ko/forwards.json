@@ -1,4 +1,6 @@
 {
+  "copy_address": "주소 복사",
+  "copied": "복사됨!",
   "forwards": {
     "quick": {
       "title": "빠른 포워딩",

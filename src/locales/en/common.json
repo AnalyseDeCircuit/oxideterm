@@ -43,6 +43,7 @@
     "close_other_tabs": "Close other tabs",
     "close_tabs_to_right": "Close tabs to the right",
     "close_all_tabs": "Close all tabs",
+    "copy_title": "Copy Title",
     "confirm_close_all_title": "Close All Tabs",
     "confirm_close_all_desc": "Close all {{count}} tabs? Active connections will be disconnected.",
     "confirm_close_other_title": "Close Other Tabs",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "Toggle Sidebar",
     "cmd_zen_mode": "Toggle Zen Mode",
     "cmd_close_tab": "Close Current Tab",
+    "cmd_split_horizontal": "Split Pane Horizontally",
+    "cmd_split_vertical": "Split Pane Vertically",
     "cmd_show_shortcuts": "Keyboard Shortcuts",
     "cmd_show_welcome": "Show Welcome",
     "section_help": "Help"

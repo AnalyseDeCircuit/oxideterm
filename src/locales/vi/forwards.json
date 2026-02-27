@@ -1,4 +1,6 @@
 {
+  "copy_address": "Sao chép địa chỉ",
+  "copied": "Đã sao chép!",
   "forwards": {
     "quick": {
       "title": "Chuyển tiếp nhanh",

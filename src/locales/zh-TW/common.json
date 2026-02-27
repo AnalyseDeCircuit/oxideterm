@@ -43,6 +43,7 @@
     "close_other_tabs": "關閉其他分頁",
     "close_tabs_to_right": "關閉右側分頁",
     "close_all_tabs": "關閉所有分頁",
+    "copy_title": "複製標題",
     "confirm_close_all_title": "關閉所有標籤頁",
     "confirm_close_all_desc": "關閉全部 {{count}} 個標籤頁？活動連接將被斷開。",
     "confirm_close_other_title": "關閉其他標籤頁",
@@ -135,8 +136,8 @@
     "cmd_settings": "開啟設定",
     "cmd_toggle_sidebar": "切換側邊欄",
     "cmd_zen_mode": "切換 Zen 模式",
-    "cmd_close_tab": "關閉當前分頁",
-    "cmd_show_shortcuts": "鍵盤快捷鍵",
+    "cmd_close_tab": "關閉當前分頁",    "cmd_split_horizontal": "水平分割面板",
+    "cmd_split_vertical": "垂直分割面板",    "cmd_show_shortcuts": "鍵盤快捷鍵",
     "cmd_show_welcome": "顯示歡迎頁",
     "section_help": "幫助"
   },

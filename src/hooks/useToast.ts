@@ -22,10 +22,11 @@ export const useToastStore = create<ToastStore>((set, get) => ({
   
   addToast: (toast) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const defaultDuration = toast.variant === 'error' ? 8000 : toast.variant === 'warning' ? 7000 : 5000;
     const newToast: ToastData = {
       ...toast,
       id,
-      duration: toast.duration ?? 5000,
+      duration: toast.duration ?? defaultDuration,
     };
     
     set((state) => ({

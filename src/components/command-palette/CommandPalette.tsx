@@ -12,6 +12,8 @@ import {
   Server,
   Keyboard,
   Hand,
+  Columns2,
+  Rows,
 } from 'lucide-react';
 import {
   Dialog,
@@ -146,6 +148,26 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onOpenChan
         action: async () => {
           const { activeTabId: tabId, closeTab } = useAppStore.getState();
           if (tabId) await closeTab(tabId);
+        },
+      },
+      {
+        id: 'cmd:split_horizontal',
+        label: t('command_palette.cmd_split_horizontal'),
+        section: 'commands',
+        icon: <Rows className="h-4 w-4" />,
+        action: () => {
+          // Trigger Cmd/Ctrl+Shift+E via keyboard event simulation is not reliable;
+          // dispatch a custom event that useSplitPaneShortcuts can listen to.
+          window.dispatchEvent(new CustomEvent('oxideterm:split', { detail: { direction: 'horizontal' } }));
+        },
+      },
+      {
+        id: 'cmd:split_vertical',
+        label: t('command_palette.cmd_split_vertical'),
+        section: 'commands',
+        icon: <Columns2 className="h-4 w-4" />,
+        action: () => {
+          window.dispatchEvent(new CustomEvent('oxideterm:split', { detail: { direction: 'vertical' } }));
         },
       },
       // ---- Help commands ----

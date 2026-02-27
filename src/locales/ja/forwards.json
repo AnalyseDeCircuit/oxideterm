@@ -1,4 +1,6 @@
 {
+  "copy_address": "アドレスをコピー",
+  "copied": "コピーしました",
   "forwards": {
     "quick": {
       "title": "クイック転送",

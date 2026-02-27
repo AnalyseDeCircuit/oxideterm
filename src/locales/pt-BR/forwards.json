@@ -1,4 +1,6 @@
 {
+  "copy_address": "Copiar endereço",
+  "copied": "Copiado!",
   "forwards": {
     "quick": {
       "title": "Encaminhamento rápido",

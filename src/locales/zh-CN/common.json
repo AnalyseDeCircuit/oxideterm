@@ -43,6 +43,7 @@
     "close_other_tabs": "关闭其他标签页",
     "close_tabs_to_right": "关闭右侧标签页",
     "close_all_tabs": "关闭所有标签页",
+    "copy_title": "复制标题",
     "confirm_close_all_title": "关闭所有标签页",
     "confirm_close_all_desc": "关闭全部 {{count}} 个标签页？活动连接将被断开。",
     "confirm_close_other_title": "关闭其他标签页",
@@ -136,6 +137,8 @@
     "cmd_toggle_sidebar": "切换侧边栏",
     "cmd_zen_mode": "切换 Zen 模式",
     "cmd_close_tab": "关闭当前标签页",
+    "cmd_split_horizontal": "水平分屏",
+    "cmd_split_vertical": "垂直分屏",
     "cmd_show_shortcuts": "键盘快捷键",
     "cmd_show_welcome": "显示欢迎页",
     "section_help": "帮助"

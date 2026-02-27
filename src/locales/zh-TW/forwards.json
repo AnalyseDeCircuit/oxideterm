@@ -1,4 +1,6 @@
 {
+  "copy_address": "複製地址",
+  "copied": "已複製",
   "forwards": {
     "quick": {
       "title": "快速轉發",
