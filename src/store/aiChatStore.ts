@@ -460,7 +460,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       }
     }
 
-    // Create assistant message placeholder
+    // Create assistant message placeholder (local only — persisted after streaming completes)
     const assistantMessage: AiChatMessage = {
       id: generateId(),
       role: 'assistant',
@@ -468,7 +468,14 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       timestamp: Date.now(),
       isStreaming: true,
     };
-    await _addMessage(convId, assistantMessage, null);
+    // Add to frontend state only — do NOT persist empty placeholder to backend.
+    // Backend persistence happens after streaming completes (success or abort-with-content).
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== convId) return c;
+        return { ...c, messages: [...c.messages, assistantMessage], updatedAt: Date.now() };
+      }),
+    }));
 
     // Prepare messages for API
     const apiMessages: ChatCompletionMessage[] = [];
@@ -606,11 +613,17 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         }),
       }));
 
-      // Persist final content to backend (store original fullContent for recovery)
+      // Persist final content to backend (first persist — placeholder was local-only)
       try {
-        await invoke('ai_chat_update_message', {
-          messageId: assistantMessage.id,
-          content: fullContent, // Store full content including thinking tags
+        await invoke('ai_chat_save_message', {
+          request: {
+            id: assistantMessage.id,
+            conversationId: convId,
+            role: 'assistant',
+            content: fullContent, // Store full content including thinking tags
+            timestamp: assistantMessage.timestamp,
+            contextSnapshot: null,
+          },
         });
       } catch (e) {
         console.warn('[AiChatStore] Failed to persist final message content:', e);
@@ -621,6 +634,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           .find((c) => c.id === convId)
           ?.messages.find((m) => m.id === assistantMessage.id);
         if (!currentMsg?.content) {
+          // No content generated — remove placeholder from frontend (never persisted to backend)
           set((state) => ({
             conversations: state.conversations.map((c) =>
               c.id === convId
@@ -629,11 +643,27 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
             ),
           }));
         } else {
+          // Partial content — keep it and persist to backend
           _setStreaming(convId, assistantMessage.id, false);
+          try {
+            await invoke('ai_chat_save_message', {
+              request: {
+                id: assistantMessage.id,
+                conversationId: convId,
+                role: 'assistant',
+                content: currentMsg.content,
+                timestamp: assistantMessage.timestamp,
+                contextSnapshot: null,
+              },
+            });
+          } catch (persistErr) {
+            console.warn('[AiChatStore] Failed to persist aborted message:', persistErr);
+          }
         }
       } else {
         const errorMessage = e instanceof Error ? e.message : String(e);
         set({ error: errorMessage });
+        // Remove failed placeholder from frontend (never persisted to backend)
         set((state) => ({
           conversations: state.conversations.map((c) =>
             c.id === convId

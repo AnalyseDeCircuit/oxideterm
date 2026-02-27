@@ -17,7 +17,6 @@ import { api, nodeSftpListIncompleteTransfers, nodeSftpResumeTransfer, nodeGetSt
 import { useSessionTreeStore } from './sessionTreeStore';
 import { useIdeStore } from './ideStore';
 import { useToastStore } from '../hooks/useToast';
-import { topologyResolver } from '../lib/topologyResolver';
 import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
 import type { ForwardRule, IncompleteTransferInfo } from '../types';
@@ -170,7 +169,7 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Pipeline execution lock */
 let isRunning = false;
-const MAX_REQUEUE = 30;
+const MAX_REQUEUE = 120;
 const requeueCount = new Map<string, number>();
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -477,8 +476,9 @@ async function runPipeline(nodeId: string) {
   if (isRunning) {
     const count = (requeueCount.get(nodeId) ?? 0) + 1;
     if (count > MAX_REQUEUE) {
-      console.warn(`[Orchestrator] Max re-queue (${MAX_REQUEUE}) reached for ${nodeId}, dropping`);
+      console.warn(`[Orchestrator] Max re-queue (${MAX_REQUEUE}) reached for ${nodeId}, marking failed`);
       requeueCount.delete(nodeId);
+      updateJob(nodeId, { status: 'failed', error: 'Pipeline queue exhausted', endedAt: Date.now() });
       return;
     }
     requeueCount.set(nodeId, count);
@@ -1209,11 +1209,10 @@ async function phaseRestoreIde(nodeId: string) {
   console.log(`[Orchestrator] Phase: restore-ide for ${nodeId}`);
 
   const { ideSnapshot } = job.snapshot;
-  const ideNodeId = topologyResolver.getNodeId(ideSnapshot.connectionId);
-
-  // Find the new connectionId and sftpSessionId for the IDE node
+  // ideSnapshot.connectionId actually stores nodeId (see phaseSnapshot),
+  // so use it directly instead of resolving through topologyResolver
+  const targetNodeId = ideSnapshot.connectionId;
   const treeStore = useSessionTreeStore.getState();
-  const targetNodeId = ideNodeId ?? nodeId;
   const ideNode = treeStore.getNode(targetNodeId);
 
   if (!ideNode) {

@@ -8,6 +8,7 @@ use crate::config::{
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Manager, State};
 
@@ -20,6 +21,11 @@ pub struct ConfigState {
     config: RwLock<ConfigFile>,
     keychain: Keychain,
     ai_keychain: Keychain,
+    /// In-memory cache for AI provider API keys.
+    /// Populated after the first successful Touch ID authentication so
+    /// subsequent `get_ai_provider_api_key` calls within the same app
+    /// session do not re-trigger the biometric prompt.
+    api_key_cache: RwLock<HashMap<String, String>>,
 }
 
 impl ConfigState {
@@ -33,6 +39,7 @@ impl ConfigState {
             config: RwLock::new(config),
             keychain: Keychain::new(),
             ai_keychain: Keychain::with_biometrics(AI_KEYCHAIN_SERVICE),
+            api_key_cache: RwLock::new(HashMap::new()),
         })
     }
 
@@ -1006,11 +1013,15 @@ pub async fn set_ai_provider_api_key(
             .ai_keychain
             .delete(&provider_id)
             .map_err(|e| format!("Failed to delete provider key: {}", e))?;
+        // Evict from session cache
+        state.api_key_cache.write().remove(&provider_id);
     } else {
         state
             .ai_keychain
             .store(&provider_id, &api_key)
             .map_err(|e| format!("Failed to save provider key to keychain: {}", e))?;
+        // Update session cache so next read doesn't re-trigger Touch ID
+        state.api_key_cache.write().insert(provider_id.clone(), api_key);
     }
     tracing::info!(
         "AI provider key for {} saved to system keychain",
@@ -1026,7 +1037,18 @@ pub async fn get_ai_provider_api_key(
     state: State<'_, Arc<ConfigState>>,
     provider_id: String,
 ) -> Result<Option<String>, String> {
-    // Step 1: Try keychain first
+    // Step 0: Check in-memory cache — avoids repeated Touch ID prompts within
+    // the same app session. The cache is populated after the first successful
+    // keychain read (which may require biometric authentication on macOS).
+    {
+        let cache = state.api_key_cache.read();
+        if let Some(cached_key) = cache.get(&provider_id) {
+            tracing::debug!("AI provider key for {} served from session cache", provider_id);
+            return Ok(Some(cached_key.clone()));
+        }
+    }
+
+    // Step 1: Try keychain (may trigger Touch ID on macOS)
     match state.ai_keychain.get(&provider_id) {
         Ok(key) => {
             tracing::debug!(
@@ -1034,6 +1056,8 @@ pub async fn get_ai_provider_api_key(
                 provider_id,
                 key.len()
             );
+            // Populate cache so subsequent calls skip Touch ID
+            state.api_key_cache.write().insert(provider_id, key.clone());
             return Ok(Some(key));
         }
         Err(e) => {
@@ -1049,6 +1073,7 @@ pub async fn get_ai_provider_api_key(
     // Step 2: Try lazy migration from vault
     if let Some(key) = try_migrate_vault_to_keychain(&app_handle, &state.ai_keychain, &provider_id)
     {
+        state.api_key_cache.write().insert(provider_id, key.clone());
         return Ok(Some(key));
     }
 
