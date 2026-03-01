@@ -143,7 +143,13 @@
     "cmd_broadcast_toggle": "切換廣播輸入",
     "cmd_show_shortcuts": "鍵盤快捷鍵",
     "cmd_show_welcome": "顯示歡迎頁",
-    "section_help": "幫助"
+    "section_help": "幫助",
+    "placeholder_commands": "搜尋命令...",
+    "placeholder_sessions": "搜尋已開啟的標籤頁...",
+    "placeholder_connections": "搜尋已儲存的連線...",
+    "section_recent": "最近使用",
+    "section_plugins": "外掛命令",
+    "mode_hint": "輸入 > 命令, @ 標籤頁, # 連線"
   },
   "zen_mode": {
     "hint": "Zen 模式 — 按 ⌘⇧Z 退出",

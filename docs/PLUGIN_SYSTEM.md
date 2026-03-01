@@ -262,6 +262,7 @@ interface PluginEventsAPI {
 interface PluginUIAPI {
   registerTabView(tabId: string, component: React.ComponentType<PluginTabProps>): Disposable;
   registerSidebarPanel(panelId: string, component: React.ComponentType): Disposable;
+  registerCommand(id: string, opts: { label: string; icon?: string; shortcut?: string; section?: string }, handler: () => void): Disposable;
   openTab(tabId: string): void;
   showToast(opts: { title: string; description?: string; variant?: 'default' | 'success' | 'error' | 'warning' }): void;
   showConfirm(opts: { title: string; description: string }): Promise<boolean>;

@@ -242,6 +242,8 @@ export interface PersistedSettingsV2 {
   experimental?: ExperimentalSettings;
   /** Whether the first-run onboarding wizard has been completed or dismissed */
   onboardingCompleted?: boolean;
+  /** Command palette MRU — most recently used command IDs (max 20) */
+  commandPaletteMru?: string[];
 }
 
 /** Experimental feature flags */
@@ -423,6 +425,7 @@ function mergeWithDefaults(saved: Partial<PersistedSettingsV2>): PersistedSettin
       ? { ...defaults.experimental, ...saved.experimental }
       : defaults.experimental,
     onboardingCompleted: saved.onboardingCompleted ?? defaults.onboardingCompleted,
+    commandPaletteMru: saved.commandPaletteMru ?? defaults.commandPaletteMru,
   };
 }
 
@@ -571,6 +574,9 @@ interface SettingsStore {
   // Onboarding
   completeOnboarding: () => void;
   resetOnboarding: () => void;
+
+  // Command palette MRU
+  recordCommandMru: (commandId: string) => void;
 
   // Actions - Bulk operations
   resetToDefaults: () => void;
@@ -912,6 +918,21 @@ export const useSettingsStore = create<SettingsStore>()(
         const newSettings: PersistedSettingsV2 = {
           ...state.settings,
           onboardingCompleted: false,
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
+    },
+
+    // ========== Command Palette MRU ==========
+    recordCommandMru: (commandId: string) => {
+      set((state) => {
+        const prev = state.settings.commandPaletteMru ?? [];
+        // Move to front, deduplicate, cap at 20
+        const next = [commandId, ...prev.filter((id) => id !== commandId)].slice(0, 20);
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          commandPaletteMru: next,
         };
         persistSettings(newSettings);
         return { settings: newSettings };

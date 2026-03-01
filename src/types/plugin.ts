@@ -203,6 +203,12 @@ export type PluginTabProps = {
 export type PluginUIAPI = {
   registerTabView(tabId: string, component: React.ComponentType<PluginTabProps>): Disposable;
   registerSidebarPanel(panelId: string, component: React.ComponentType): Disposable;
+  registerCommand(id: string, opts: {
+    label: string;
+    icon?: string;
+    shortcut?: string;
+    section?: string;
+  }, handler: () => void): Disposable;
   openTab(tabId: string): void;
   showToast(opts: {
     title: string;
@@ -210,6 +216,17 @@ export type PluginUIAPI = {
     variant?: 'default' | 'success' | 'error' | 'warning';
   }): void;
   showConfirm(opts: { title: string; description: string }): Promise<boolean>;
+};
+
+/** Plugin command entry stored in pluginStore */
+export type PluginCommandEntry = {
+  pluginId: string;
+  id: string;
+  label: string;
+  icon?: string;
+  shortcut?: string;
+  section?: string;
+  handler: () => void;
 };
 
 /** ctx.terminal — terminal hooks and utilities */

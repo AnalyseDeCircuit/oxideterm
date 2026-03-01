@@ -1070,6 +1070,26 @@ function MyPanel() {
 ctx.ui.registerSidebarPanel('myPanel', MyPanel);
 ```
 
+#### `ctx.ui.registerCommand(id, opts, handler)`
+
+注册一条命令到全局命令面板（⌘K / Ctrl+K）。
+
+```typescript
+const disposable = ctx.ui.registerCommand('my-command', {
+  label: 'My Plugin Action',
+  icon: 'Zap',        // Lucide icon name (optional)
+  shortcut: '⌘⇧P',   // Display shortcut hint (optional)
+  section: 'tools',   // Custom section label (optional)
+}, () => {
+  console.log('Command executed!');
+});
+
+// Unregister when no longer needed
+disposable.dispose();
+```
+
+命令在插件卸载时自动清理（通过 Disposable 机制）。
+
 #### `openTab(tabId)`
 
 ```typescript
@@ -3460,6 +3480,7 @@ export type PluginEventsAPI = {
 export type PluginUIAPI = {
   registerTabView(tabId: string, component: React.ComponentType<PluginTabProps>): Disposable;
   registerSidebarPanel(panelId: string, component: React.ComponentType): Disposable;
+  registerCommand(id: string, opts: { label: string; icon?: string; shortcut?: string; section?: string }, handler: () => void): Disposable;
   openTab(tabId: string): void;
   showToast(opts: {
     title: string;

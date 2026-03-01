@@ -256,6 +256,14 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
       // Use the toast system from useToast hook via a global event
       pluginEventBridge.emit('plugin:toast', opts);
     },
+    registerCommand(id: string, opts: { label: string; icon?: string; shortcut?: string; section?: string }, handler: () => void) {
+      store().registerCommand(pluginId, { id, label: opts.label, icon: opts.icon, shortcut: opts.shortcut, section: opts.section, handler });
+      return createDisposable(pluginId, () => {
+        const commands = new Map(usePluginStore.getState().commands);
+        commands.delete(`${pluginId}:${id}`);
+        usePluginStore.setState({ commands });
+      });
+    },
     async showConfirm(opts) {
       return new Promise<boolean>((resolve) => {
         // Emit to PluginConfirmDialog via event bridge; the component

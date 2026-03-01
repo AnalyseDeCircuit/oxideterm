@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Bật/tắt phát đầu vào",
     "cmd_show_shortcuts": "Phím tắt bàn phím",
     "cmd_show_welcome": "Hiển thị chào mừng",
-    "section_help": "Trợ giúp"
+    "section_help": "Trợ giúp",
+    "placeholder_commands": "Tìm kiếm lệnh...",
+    "placeholder_sessions": "Tìm kiếm tab đang mở...",
+    "placeholder_connections": "Tìm kiếm kết nối đã lưu...",
+    "section_recent": "Sử dụng gần đây",
+    "section_plugins": "Lệnh plugin",
+    "mode_hint": "Nhập > lệnh, @ tab, # kết nối"
   },
   "zen_mode": {
     "hint": "Chế độ Zen — Nhấn ⌘⇧Z để thoát",

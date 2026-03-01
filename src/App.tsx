@@ -364,12 +364,6 @@ function App() {
           showFontSize(14);
           return;
         }
-        // Cmd+K — Command palette
-        if (key === 'k' && !e.shiftKey) {
-          e.preventDefault();
-          setCommandPaletteOpen(true);
-          return;
-        }
         // Cmd+Shift+Z — Zen Mode
         if (key === 'z' && e.shiftKey) {
           e.preventDefault();

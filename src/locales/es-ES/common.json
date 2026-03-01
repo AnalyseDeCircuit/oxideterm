@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Alternar entrada de difusión",
     "cmd_show_shortcuts": "Atajos de teclado",
     "cmd_show_welcome": "Mostrar bienvenida",
-    "section_help": "Ayuda"
+    "section_help": "Ayuda",
+    "placeholder_commands": "Buscar comandos...",
+    "placeholder_sessions": "Buscar pestañas abiertas...",
+    "placeholder_connections": "Buscar conexiones guardadas...",
+    "section_recent": "Usados recientemente",
+    "section_plugins": "Comandos de plugins",
+    "mode_hint": "Escriba > comandos, @ pestañas, # conexiones"
   },
   "zen_mode": {
     "hint": "Modo Zen — Pulsa ⌘⇧Z para salir",

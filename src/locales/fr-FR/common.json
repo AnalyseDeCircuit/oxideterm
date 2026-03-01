@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Basculer la diffusion d'entrée",
     "cmd_show_shortcuts": "Raccourcis clavier",
     "cmd_show_welcome": "Afficher l'accueil",
-    "section_help": "Aide"
+    "section_help": "Aide",
+    "placeholder_commands": "Rechercher des commandes...",
+    "placeholder_sessions": "Rechercher les onglets ouverts...",
+    "placeholder_connections": "Rechercher les connexions enregistrées...",
+    "section_recent": "Récemment utilisés",
+    "section_plugins": "Commandes de plugins",
+    "mode_hint": "Tapez > commandes, @ onglets, # connexions"
   },
   "zen_mode": {
     "hint": "Mode Zen — Appuyez sur ⌘⇧Z pour quitter",

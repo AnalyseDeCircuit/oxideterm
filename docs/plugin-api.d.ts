@@ -187,6 +187,13 @@ export type PluginEventsAPI = {
 export type PluginUIAPI = {
   registerTabView(tabId: string, component: React.ComponentType<PluginTabProps>): Disposable;
   registerSidebarPanel(panelId: string, component: React.ComponentType): Disposable;
+  /** Register a command in the global command palette */
+  registerCommand(id: string, opts: {
+    label: string;
+    icon?: string;
+    shortcut?: string;
+    section?: string;
+  }, handler: () => void): Disposable;
   openTab(tabId: string): void;
   showToast(opts: {
     title: string;

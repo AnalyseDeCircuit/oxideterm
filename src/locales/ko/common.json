@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "브로드캐스트 입력 전환",
     "cmd_show_shortcuts": "키보드 단축키",
     "cmd_show_welcome": "시작 화면 표시",
-    "section_help": "도움말"
+    "section_help": "도움말",
+    "placeholder_commands": "명령 검색...",
+    "placeholder_sessions": "열린 탭 검색...",
+    "placeholder_connections": "저장된 연결 검색...",
+    "section_recent": "최근 사용",
+    "section_plugins": "플러그인 명령",
+    "mode_hint": "> 명령, @ 탭, # 연결 입력"
   },
   "zen_mode": {
     "hint": "Zen 모드 — ⌘⇧Z를 눌러 종료",

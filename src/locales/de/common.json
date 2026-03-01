@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Broadcast-Eingabe umschalten",
     "cmd_show_shortcuts": "Tastaturkürzel",
     "cmd_show_welcome": "Willkommen anzeigen",
-    "section_help": "Hilfe"
+    "section_help": "Hilfe",
+    "placeholder_commands": "Befehle suchen...",
+    "placeholder_sessions": "Geöffnete Tabs suchen...",
+    "placeholder_connections": "Gespeicherte Verbindungen suchen...",
+    "section_recent": "Zuletzt verwendet",
+    "section_plugins": "Plugin-Befehle",
+    "mode_hint": "> Befehle, @ Tabs, # Verbindungen eingeben"
   },
   "zen_mode": {
     "hint": "Zen-Modus — Drücken Sie ⌘⇧Z zum Beenden",

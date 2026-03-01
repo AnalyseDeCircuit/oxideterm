@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Toggle Broadcast Input",
     "cmd_show_shortcuts": "Keyboard Shortcuts",
     "cmd_show_welcome": "Show Welcome",
-    "section_help": "Help"
+    "section_help": "Help",
+    "placeholder_commands": "Search commands...",
+    "placeholder_sessions": "Search open tabs...",
+    "placeholder_connections": "Search saved connections...",
+    "section_recent": "Recently Used",
+    "section_plugins": "Plugin Commands",
+    "mode_hint": "Type > commands, @ tabs, # connections"
   },
   "zen_mode": {
     "hint": "Zen Mode — Press ⌘⇧Z to exit",

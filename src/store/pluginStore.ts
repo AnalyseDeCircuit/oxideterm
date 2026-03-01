@@ -17,6 +17,7 @@ import type {
   PluginTabProps,
   RegistryEntry,
   InstallState,
+  PluginCommandEntry,
 } from '../types/plugin';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -84,6 +85,8 @@ interface PluginStore {
   outputProcessors: OutputProcessorEntry[];
   /** Shortcuts: key = normalized key combo (e.g. "ctrl+shift+a") */
   shortcuts: Map<string, ShortcutEntry>;
+  /** Plugin commands for command palette: key = "pluginId:commandId" */
+  commands: Map<string, PluginCommandEntry>;
   /** Disposables per plugin: key = pluginId */
   disposables: Map<string, Disposable[]>;
 
@@ -131,6 +134,10 @@ interface PluginStore {
    */
   registerShortcut: (pluginId: string, command: string, key: string, handler: () => void) => void;
 
+  // ── Command Palette Commands ─────────────────────────────────────
+  /** Register a command for the command palette */
+  registerCommand: (pluginId: string, entry: Omit<PluginCommandEntry, 'pluginId'>) => void;
+
   // ── Disposable Tracking ─────────────────────────────────────────────
   /** Track a disposable for a plugin (auto-cleanup on unload) */
   trackDisposable: (pluginId: string, disposable: Disposable) => void;
@@ -174,6 +181,7 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   inputInterceptors: [],
   outputProcessors: [],
   shortcuts: new Map(),
+  commands: new Map(),
   disposables: new Map(),
   registryEntries: [],
   installProgress: new Map(),
@@ -261,6 +269,15 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
     });
   },
 
+  registerCommand: (pluginId, entry) => {
+    const compositeKey = `${pluginId}:${entry.id}`;
+    set((state) => {
+      const commands = new Map(state.commands);
+      commands.set(compositeKey, { ...entry, pluginId });
+      return { commands };
+    });
+  },
+
   // ── Disposable Tracking ─────────────────────────────────────────────
 
   trackDisposable: (pluginId, disposable) => {
@@ -309,10 +326,15 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
         if (entry.pluginId === pluginId) shortcuts.delete(key);
       }
 
+      const commands = new Map(prev.commands);
+      for (const [key, entry] of commands) {
+        if (entry.pluginId === pluginId) commands.delete(key);
+      }
+
       const disposables = new Map(prev.disposables);
       disposables.delete(pluginId);
 
-      return { tabViews, sidebarPanels, inputInterceptors, outputProcessors, shortcuts, disposables };
+      return { tabViews, sidebarPanels, inputInterceptors, outputProcessors, shortcuts, commands, disposables };
     });
   },
 

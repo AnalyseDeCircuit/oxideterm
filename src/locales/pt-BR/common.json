@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Alternar entrada de difusão",
     "cmd_show_shortcuts": "Atalhos de teclado",
     "cmd_show_welcome": "Mostrar boas-vindas",
-    "section_help": "Ajuda"
+    "section_help": "Ajuda",
+    "placeholder_commands": "Pesquisar comandos...",
+    "placeholder_sessions": "Pesquisar abas abertas...",
+    "placeholder_connections": "Pesquisar conexões salvas...",
+    "section_recent": "Usados recentemente",
+    "section_plugins": "Comandos de plugins",
+    "mode_hint": "Digite > comandos, @ abas, # conexões"
   },
   "zen_mode": {
     "hint": "Modo Zen — Pressione ⌘⇧Z para sair",

@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "切换广播输入",
     "cmd_show_shortcuts": "键盘快捷键",
     "cmd_show_welcome": "显示欢迎页",
-    "section_help": "帮助"
+    "section_help": "帮助",
+    "placeholder_commands": "搜索命令...",
+    "placeholder_sessions": "搜索已打开的标签页...",
+    "placeholder_connections": "搜索已保存的连接...",
+    "section_recent": "最近使用",
+    "section_plugins": "插件命令",
+    "mode_hint": "输入 > 命令, @ 标签页, # 连接"
   },
   "zen_mode": {
     "hint": "Zen 模式 — 按 ⌘⇧Z 退出",

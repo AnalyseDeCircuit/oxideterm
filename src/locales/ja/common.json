@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "ブロードキャスト入力の切替",
     "cmd_show_shortcuts": "キーボードショートカット",
     "cmd_show_welcome": "ウェルカムを表示",
-    "section_help": "ヘルプ"
+    "section_help": "ヘルプ",
+    "placeholder_commands": "コマンドを検索...",
+    "placeholder_sessions": "開いているタブを検索...",
+    "placeholder_connections": "保存済み接続を検索...",
+    "section_recent": "最近使用",
+    "section_plugins": "プラグインコマンド",
+    "mode_hint": "> コマンド, @ タブ, # 接続"
   },
   "zen_mode": {
     "hint": "Zen モード — ⌘⇧Z で終了",

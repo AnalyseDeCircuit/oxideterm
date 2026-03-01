@@ -144,7 +144,13 @@
     "cmd_broadcast_toggle": "Attiva/disattiva broadcast input",
     "cmd_show_shortcuts": "Scorciatoie da tastiera",
     "cmd_show_welcome": "Mostra benvenuto",
-    "section_help": "Aiuto"
+    "section_help": "Aiuto",
+    "placeholder_commands": "Cerca comandi...",
+    "placeholder_sessions": "Cerca schede aperte...",
+    "placeholder_connections": "Cerca connessioni salvate...",
+    "section_recent": "Usati di recente",
+    "section_plugins": "Comandi plugin",
+    "mode_hint": "Digita > comandi, @ schede, # connessioni"
   },
   "zen_mode": {
     "hint": "Modalità Zen — Premi ⌘⇧Z per uscire",
