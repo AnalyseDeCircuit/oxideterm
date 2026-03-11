@@ -129,7 +129,15 @@
         "get_detected_ports": "偵測連接埠",
         "get_connection_health": "健康檢查",
         "create_port_forward": "建立轉發",
-        "stop_port_forward": "停止轉發"
+        "stop_port_forward": "停止轉發",
+        "sftp_list_dir": "SFTP 列目錄",
+        "sftp_read_file": "SFTP 讀檔案",
+        "sftp_stat": "SFTP 資訊",
+        "sftp_get_cwd": "SFTP 路徑",
+        "ide_get_open_files": "開啟的檔案",
+        "ide_get_file_content": "檔案內容",
+        "ide_get_project_info": "專案資訊",
+        "ide_apply_edit": "套用編輯"
       }
     }
   }

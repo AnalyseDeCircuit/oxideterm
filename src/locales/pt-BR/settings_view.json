@@ -316,7 +316,7 @@
       "tool_use_enabled": "Ativar uso de ferramentas",
       "tool_use_enabled_hint": "Permitir que a IA execute comandos, leia arquivos e realize ações em servidores remotos via Function Calling.",
       "tool_use_auto_approve_read": "Aprovação auto. ferramentas somente leitura",
-      "tool_use_auto_approve_read_hint": "Aprovar automaticamente read_file, list_directory, grep_search e git_status sem confirmação.",
+      "tool_use_auto_approve_read_hint": "Aprovar automaticamente todas as ferramentas somente leitura (leitura de arquivos, listagem de diretórios, pesquisas, navegação SFTP, inspeção IDE, etc.) sem confirmação.",
       "tool_use_auto_approve_all": "Aprovação auto. todas as ferramentas (Perigoso)",
       "tool_use_auto_approve_all_hint": "Aprovar automaticamente TODAS as ferramentas incluindo terminal_exec e write_file. A IA terá acesso completo de execução de comandos no servidor remoto.",
       "tool_use_auto_approve_all_warning": "Isso concede à IA capacidade irrestrita de execução de comandos. Use apenas em servidores confiáveis e fora de produção."

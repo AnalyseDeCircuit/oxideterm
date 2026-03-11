@@ -1,5 +1,5 @@
 import { memo, useState, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitBranch, Pen, Loader2, CheckCircle2, XCircle, AlertTriangle, Package, Network, Radio, CirclePlus, CircleStop, Activity } from 'lucide-react';
+import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitBranch, Pen, Loader2, CheckCircle2, XCircle, AlertTriangle, Package, Network, Radio, CirclePlus, CircleStop, Activity, HardDrive, FolderSearch, FileCode, Code2, Info } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import type { AiToolCall } from '../../types';
@@ -26,6 +26,16 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   get_connection_health: Activity,
   create_port_forward: CirclePlus,
   stop_port_forward: CircleStop,
+  // SFTP tools
+  sftp_list_dir: FolderSearch,
+  sftp_read_file: HardDrive,
+  sftp_stat: Info,
+  sftp_get_cwd: HardDrive,
+  // IDE tools
+  ide_get_open_files: FileCode,
+  ide_get_file_content: FileCode,
+  ide_get_project_info: Code2,
+  ide_apply_edit: Pen,
 };
 
 function StatusIcon({ status }: { status: AiToolCall['status'] }) {

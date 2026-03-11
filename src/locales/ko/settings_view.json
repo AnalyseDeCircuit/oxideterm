@@ -316,7 +316,7 @@
       "tool_use_enabled": "도구 사용 활성화",
       "tool_use_enabled_hint": "AI가 Function Calling을 통해 원격 서버에서 명령 실행, 파일 읽기 및 작업을 수행할 수 있도록 허용합니다.",
       "tool_use_auto_approve_read": "읽기 전용 도구 자동 승인",
-      "tool_use_auto_approve_read_hint": "read_file, list_directory, grep_search, git_status를 확인 없이 자동 승인합니다.",
+      "tool_use_auto_approve_read_hint": "모든 읽기 전용 도구(파일 읽기, 디렉토리 목록, 검색, SFTP 탐색, IDE 파일 조회 등)를 확인 없이 자동 승인합니다.",
       "tool_use_auto_approve_all": "모든 도구 자동 승인 (위험)",
       "tool_use_auto_approve_all_hint": "terminal_exec 및 write_file을 포함한 모든 도구를 자동 승인합니다. AI가 원격 서버에서 전체 명령 실행 권한을 갖습니다.",
       "tool_use_auto_approve_all_warning": "이 설정은 AI에 무제한 명령 실행 기능을 부여합니다. 신뢰할 수 있는 비프로덕션 서버에서만 사용하세요."

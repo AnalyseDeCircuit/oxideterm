@@ -316,7 +316,7 @@
       "tool_use_enabled": "Werkzeugnutzung aktivieren",
       "tool_use_enabled_hint": "Erlaubt der KI, über Function Calling Befehle auszuführen, Dateien zu lesen und Aktionen auf Remote-Servern durchzuführen.",
       "tool_use_auto_approve_read": "Lesezugriff-Tools automatisch genehmigen",
-      "tool_use_auto_approve_read_hint": "read_file, list_directory, grep_search und git_status ohne Bestätigung automatisch genehmigen.",
+      "tool_use_auto_approve_read_hint": "Alle schreibgeschützten Werkzeuge (Datei lesen, Verzeichnis auflisten, Suche, SFTP-Durchsuchen, IDE-Dateiansicht usw.) ohne Bestätigung automatisch genehmigen.",
       "tool_use_auto_approve_all": "Alle Tools automatisch genehmigen (Gefährlich)",
       "tool_use_auto_approve_all_hint": "Alle Tools einschließlich terminal_exec und write_file automatisch genehmigen. Die KI erhält vollen Befehlszugriff auf dem Remote-Server.",
       "tool_use_auto_approve_all_warning": "Dies gibt der KI uneingeschränkte Befehlsausführung. Nur auf vertrauenswürdigen, nicht-produktiven Servern verwenden."

@@ -316,7 +316,7 @@
       "tool_use_enabled": "启用工具调用",
       "tool_use_enabled_hint": "允许 AI 通过 Function Calling 在远程服务器上执行命令、读取文件和执行操作。",
       "tool_use_auto_approve_read": "自动批准只读工具",
-      "tool_use_auto_approve_read_hint": "自动批准 read_file、list_directory、grep_search 和 git_status，无需确认。",
+      "tool_use_auto_approve_read_hint": "自动批准所有只读工具（文件读取、目录浏览、搜索、SFTP 浏览、IDE 文件查看等），无需确认。",
       "tool_use_auto_approve_all": "自动批准全部工具（危险）",
       "tool_use_auto_approve_all_hint": "自动批准所有工具，包括 terminal_exec 和 write_file。AI 将拥有远程服务器上的完整命令执行权限。",
       "tool_use_auto_approve_all_warning": "此选项将赋予 AI 无限制的命令执行能力。请仅在受信任的非生产环境服务器上使用。"

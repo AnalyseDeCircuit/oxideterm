@@ -316,7 +316,7 @@
       "tool_use_enabled": "Bật sử dụng công cụ",
       "tool_use_enabled_hint": "Cho phép AI thực thi lệnh, đọc tệp và thực hiện hành động trên máy chủ từ xa qua Function Calling.",
       "tool_use_auto_approve_read": "Tự động phê duyệt công cụ chỉ đọc",
-      "tool_use_auto_approve_read_hint": "Tự động phê duyệt read_file, list_directory, grep_search và git_status mà không cần xác nhận.",
+      "tool_use_auto_approve_read_hint": "Tự động phê duyệt tất cả công cụ chỉ đọc (đọc tệp, liệt kê thư mục, tìm kiếm, duyệt SFTP, xem tệp IDE, v.v.) mà không cần xác nhận.",
       "tool_use_auto_approve_all": "Tự động phê duyệt tất cả công cụ (Nguy hiểm)",
       "tool_use_auto_approve_all_hint": "Tự động phê duyệt TẤT CẢ công cụ bao gồm terminal_exec và write_file. AI sẽ có quyền thực thi lệnh đầy đủ trên máy chủ từ xa.",
       "tool_use_auto_approve_all_warning": "Điều này cấp cho AI khả năng thực thi lệnh không giới hạn. Chỉ sử dụng trên máy chủ đáng tin cậy, không phải môi trường sản xuất."

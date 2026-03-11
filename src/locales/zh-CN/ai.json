@@ -129,7 +129,15 @@
         "get_detected_ports": "检测端口",
         "get_connection_health": "健康检查",
         "create_port_forward": "创建转发",
-        "stop_port_forward": "停止转发"
+        "stop_port_forward": "停止转发",
+        "sftp_list_dir": "SFTP 列目录",
+        "sftp_read_file": "SFTP 读文件",
+        "sftp_stat": "SFTP 信息",
+        "sftp_get_cwd": "SFTP 路径",
+        "ide_get_open_files": "打开的文件",
+        "ide_get_file_content": "文件内容",
+        "ide_get_project_info": "项目信息",
+        "ide_apply_edit": "应用编辑"
       }
     }
   }

@@ -129,7 +129,15 @@
         "get_detected_ports": "Erkannte Ports",
         "get_connection_health": "Statusprüfung",
         "create_port_forward": "Weiterleitung erstellen",
-        "stop_port_forward": "Weiterleitung stoppen"
+        "stop_port_forward": "Weiterleitung stoppen",
+        "sftp_list_dir": "SFTP Auflisten",
+        "sftp_read_file": "SFTP Lesen",
+        "sftp_stat": "SFTP Info",
+        "sftp_get_cwd": "SFTP Pfad",
+        "ide_get_open_files": "Geöffnete Dateien",
+        "ide_get_file_content": "Dateiinhalt",
+        "ide_get_project_info": "Projektinfo",
+        "ide_apply_edit": "Bearbeitung anwenden"
       }
     }
   }

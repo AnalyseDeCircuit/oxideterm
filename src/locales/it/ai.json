@@ -129,7 +129,15 @@
         "get_detected_ports": "Porte rilevate",
         "get_connection_health": "Controllo stato",
         "create_port_forward": "Crea inoltro",
-        "stop_port_forward": "Ferma inoltro"
+        "stop_port_forward": "Ferma inoltro",
+        "sftp_list_dir": "SFTP Elenca",
+        "sftp_read_file": "SFTP Leggi",
+        "sftp_stat": "SFTP Info",
+        "sftp_get_cwd": "SFTP Percorso",
+        "ide_get_open_files": "File aperti",
+        "ide_get_file_content": "Contenuto file",
+        "ide_get_project_info": "Info progetto",
+        "ide_apply_edit": "Applica modifica"
       }
     }
   }

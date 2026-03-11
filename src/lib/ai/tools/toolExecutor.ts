@@ -19,12 +19,14 @@ import {
   nodeAgentGrep,
   nodeAgentGitStatus,
 } from '../../api';
+import { nodeSftpListDir, nodeSftpPreview, nodeSftpStat } from '../../api';
 import { api } from '../../api';
 import type { AiToolResult, AgentFileEntry } from '../../../types';
 import { isCommandDenied, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS } from './toolDefinitions';
 import { useSessionTreeStore } from '../../../store/sessionTreeStore';
 import { useAppStore } from '../../../store/appStore';
 import { useLocalTerminalStore } from '../../../store/localTerminalStore';
+import { useIdeStore } from '../../../store/ideStore';
 import { findPaneBySessionId, getTerminalBuffer } from '../../terminalRegistry';
 
 /** Max output size returned from a tool execution (bytes) */
@@ -103,6 +105,14 @@ export async function executeTool(
           return await execListConnections(startTime, toolCallId);
         case 'get_connection_health':
           return await execGetConnectionHealth(args, startTime, toolCallId);
+        case 'ide_get_open_files':
+          return execIdeGetOpenFiles(startTime, toolCallId);
+        case 'ide_get_file_content':
+          return execIdeGetFileContent(args, startTime, toolCallId);
+        case 'ide_get_project_info':
+          return execIdeGetProjectInfo(startTime, toolCallId);
+        case 'ide_apply_edit':
+          return await execIdeApplyEdit(args, startTime, toolCallId);
         default:
           return { toolCallId, toolName, success: false, output: '', error: `Unknown context-free tool: ${toolName}`, durationMs: Date.now() - startTime };
       }
@@ -154,6 +164,15 @@ export async function executeTool(
         return await execCreatePortForward(args, resolved, startTime, toolCallId);
       case 'stop_port_forward':
         return await execStopPortForward(args, resolved, startTime, toolCallId);
+      // SFTP tools
+      case 'sftp_list_dir':
+        return await execSftpListDir(args, resolved, startTime, toolCallId);
+      case 'sftp_read_file':
+        return await execSftpReadFile(args, resolved, startTime, toolCallId);
+      case 'sftp_stat':
+        return await execSftpStat(args, resolved, startTime, toolCallId);
+      case 'sftp_get_cwd':
+        return await execSftpGetCwd(resolved, startTime, toolCallId);
       default:
         return { toolCallId, toolName, success: false, output: '', error: `Unknown tool: ${toolName}`, durationMs: Date.now() - startTime };
     }
@@ -792,6 +811,210 @@ async function execStopPortForward(
     return { toolCallId, toolName: 'stop_port_forward', success: true, output: `Port forward ${forwardId} stopped.`, durationMs: Date.now() - startTime };
   } catch (e) {
     return { toolCallId, toolName: 'stop_port_forward', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to stop port forward', durationMs: Date.now() - startTime };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SFTP Tool Executors
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function execSftpListDir(
+  args: Record<string, unknown>,
+  resolved: ResolvedNode,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const path = typeof args.path === 'string' ? args.path : '';
+  if (!path) {
+    return { toolCallId, toolName: 'sftp_list_dir', success: false, output: '', error: 'Missing required argument: path', durationMs: Date.now() - startTime };
+  }
+
+  try {
+    const entries = await nodeSftpListDir(resolved.nodeId, path);
+    const lines = entries.map(e => {
+      const type = e.file_type === 'Directory' ? 'd' : e.file_type === 'Symlink' ? 'l' : '-';
+      const size = e.size != null ? ` ${e.size}B` : '';
+      const perm = e.permissions ?? '';
+      return `${type} ${perm} ${size} ${e.name}`;
+    });
+    const { text } = truncateOutput(lines.join('\n'));
+    return { toolCallId, toolName: 'sftp_list_dir', success: true, output: text, durationMs: Date.now() - startTime };
+  } catch (e) {
+    return { toolCallId, toolName: 'sftp_list_dir', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to list directory', durationMs: Date.now() - startTime };
+  }
+}
+
+async function execSftpReadFile(
+  args: Record<string, unknown>,
+  resolved: ResolvedNode,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const path = typeof args.path === 'string' ? args.path : '';
+  if (!path) {
+    return { toolCallId, toolName: 'sftp_read_file', success: false, output: '', error: 'Missing required argument: path', durationMs: Date.now() - startTime };
+  }
+
+  const maxSize = typeof args.max_size === 'number' ? args.max_size : undefined;
+
+  try {
+    const preview = await nodeSftpPreview(resolved.nodeId, path, maxSize);
+    if ('Text' in preview) {
+      const { data, language, encoding } = preview.Text;
+      const { text } = truncateOutput(data);
+      return { toolCallId, toolName: 'sftp_read_file', success: true, output: `Language: ${language ?? 'unknown'}\nEncoding: ${encoding ?? 'utf-8'}\n\n${text}`, durationMs: Date.now() - startTime };
+    } else if ('TooLarge' in preview) {
+      return { toolCallId, toolName: 'sftp_read_file', success: false, output: '', error: `File too large to preview (${preview.TooLarge.size} bytes, max ${preview.TooLarge.max_size})`, durationMs: Date.now() - startTime };
+    } else {
+      const contentType = Object.keys(preview)[0] ?? 'unknown';
+      return { toolCallId, toolName: 'sftp_read_file', success: false, output: '', error: `Cannot read file as text: content type is ${contentType}`, durationMs: Date.now() - startTime };
+    }
+  } catch (e) {
+    return { toolCallId, toolName: 'sftp_read_file', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to read file', durationMs: Date.now() - startTime };
+  }
+}
+
+async function execSftpStat(
+  args: Record<string, unknown>,
+  resolved: ResolvedNode,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const path = typeof args.path === 'string' ? args.path : '';
+  if (!path) {
+    return { toolCallId, toolName: 'sftp_stat', success: false, output: '', error: 'Missing required argument: path', durationMs: Date.now() - startTime };
+  }
+
+  try {
+    const info = await nodeSftpStat(resolved.nodeId, path);
+    const output = JSON.stringify({
+      name: info.name,
+      path: info.path,
+      type: info.file_type,
+      size: info.size,
+      modified: info.modified,
+      permissions: info.permissions,
+    }, null, 2);
+    return { toolCallId, toolName: 'sftp_stat', success: true, output, durationMs: Date.now() - startTime };
+  } catch (e) {
+    return { toolCallId, toolName: 'sftp_stat', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to stat file', durationMs: Date.now() - startTime };
+  }
+}
+
+async function execSftpGetCwd(
+  resolved: ResolvedNode,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  try {
+    const snapshot = await nodeGetState(resolved.nodeId);
+    const cwd = snapshot.state.sftpCwd ?? '/';
+    return { toolCallId, toolName: 'sftp_get_cwd', success: true, output: cwd, durationMs: Date.now() - startTime };
+  } catch (e) {
+    return { toolCallId, toolName: 'sftp_get_cwd', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to get SFTP cwd', durationMs: Date.now() - startTime };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IDE Tool Executors
+// ═══════════════════════════════════════════════════════════════════════════
+
+function execIdeGetOpenFiles(
+  startTime: number,
+  toolCallId: string,
+): AiToolResult {
+  const { tabs, activeTabId } = useIdeStore.getState();
+  const output = JSON.stringify(tabs.map(t => ({
+    tab_id: t.id,
+    path: t.path,
+    name: t.name,
+    language: t.language,
+    is_dirty: t.isDirty,
+    is_pinned: t.isPinned,
+    is_active: t.id === activeTabId,
+  })), null, 2);
+  return { toolCallId, toolName: 'ide_get_open_files', success: true, output, durationMs: Date.now() - startTime };
+}
+
+function execIdeGetFileContent(
+  args: Record<string, unknown>,
+  startTime: number,
+  toolCallId: string,
+): AiToolResult {
+  const tabId = typeof args.tab_id === 'string' ? args.tab_id : '';
+  if (!tabId) {
+    return { toolCallId, toolName: 'ide_get_file_content', success: false, output: '', error: 'Missing required argument: tab_id. Use ide_get_open_files to find tab IDs.', durationMs: Date.now() - startTime };
+  }
+
+  const { tabs } = useIdeStore.getState();
+  const tab = tabs.find(t => t.id === tabId);
+  if (!tab) {
+    return { toolCallId, toolName: 'ide_get_file_content', success: false, output: '', error: `Tab not found: ${tabId}. Use ide_get_open_files to list available tabs.`, durationMs: Date.now() - startTime };
+  }
+
+  if (tab.content === null) {
+    return { toolCallId, toolName: 'ide_get_file_content', success: false, output: '', error: `File content not yet loaded for tab: ${tabId}`, durationMs: Date.now() - startTime };
+  }
+
+  const { text } = truncateOutput(tab.content);
+  const output = JSON.stringify({
+    path: tab.path,
+    language: tab.language,
+    is_dirty: tab.isDirty,
+    cursor: tab.cursor ?? null,
+    content: text,
+  }, null, 2);
+  return { toolCallId, toolName: 'ide_get_file_content', success: true, output, durationMs: Date.now() - startTime };
+}
+
+function execIdeGetProjectInfo(
+  startTime: number,
+  toolCallId: string,
+): AiToolResult {
+  const { project, nodeId } = useIdeStore.getState();
+  if (!project) {
+    return { toolCallId, toolName: 'ide_get_project_info', success: false, output: '', error: 'No project is currently open in IDE mode.', durationMs: Date.now() - startTime };
+  }
+  const output = JSON.stringify({
+    root_path: project.rootPath,
+    name: project.name,
+    is_git_repo: project.isGitRepo,
+    git_branch: project.gitBranch ?? null,
+    node_id: nodeId,
+  }, null, 2);
+  return { toolCallId, toolName: 'ide_get_project_info', success: true, output, durationMs: Date.now() - startTime };
+}
+
+async function execIdeApplyEdit(
+  args: Record<string, unknown>,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const tabId = typeof args.tab_id === 'string' ? args.tab_id : '';
+  const content = typeof args.content === 'string' ? args.content : undefined;
+  const shouldSave = args.save === true;
+
+  if (!tabId) {
+    return { toolCallId, toolName: 'ide_apply_edit', success: false, output: '', error: 'Missing required argument: tab_id', durationMs: Date.now() - startTime };
+  }
+  if (content === undefined) {
+    return { toolCallId, toolName: 'ide_apply_edit', success: false, output: '', error: 'Missing required argument: content', durationMs: Date.now() - startTime };
+  }
+
+  const ideStore = useIdeStore.getState();
+  const tab = ideStore.tabs.find(t => t.id === tabId);
+  if (!tab) {
+    return { toolCallId, toolName: 'ide_apply_edit', success: false, output: '', error: `Tab not found: ${tabId}`, durationMs: Date.now() - startTime };
+  }
+
+  try {
+    ideStore.updateTabContent(tabId, content);
+    if (shouldSave) {
+      await ideStore.saveFile(tabId);
+    }
+    return { toolCallId, toolName: 'ide_apply_edit', success: true, output: `File ${tab.name} updated${shouldSave ? ' and saved' : ' (unsaved)'}. ${content.split('\n').length} lines.`, durationMs: Date.now() - startTime };
+  } catch (e) {
+    return { toolCallId, toolName: 'ide_apply_edit', success: false, output: '', error: e instanceof Error ? e.message : 'Failed to apply edit', durationMs: Date.now() - startTime };
   }
 }
 

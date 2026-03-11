@@ -5,6 +5,7 @@ import { Info, Shrink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAiChatStore } from '../../store/aiChatStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useAppStore } from '../../store/appStore';
 import { estimateTokens, estimateToolDefinitionsTokens, getModelContextWindow, responseReserve } from '../../lib/ai/tokenUtils';
 import { DEFAULT_SYSTEM_PROMPT, CONTEXT_WARNING_THRESHOLD, CONTEXT_DANGER_THRESHOLD } from '../../lib/ai/constants';
 import { getToolsForContext } from '../../lib/ai/tools';
@@ -33,6 +34,8 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
   const aiSettings = useSettingsStore((s) => s.settings.ai);
   const { activeConversationId, conversations, compactConversation } = useAiChatStore();
   const nodes = useSessionTreeStore((s) => s.nodes);
+  const activeTabId = useAppStore((s) => s.activeTabId);
+  const tabs = useAppStore((s) => s.tabs);
   const [showPopover, setShowPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +67,8 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
       const hasAnySSH = nodes.some(n =>
         n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
       );
-      const tools = getToolsForContext(null, hasAnySSH);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      const tools = getToolsForContext(activeTab?.type ?? null, hasAnySSH);
       toolDefinitions = estimateToolDefinitionsTokens(tools);
     }
 
@@ -97,7 +101,7 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
     const total = systemInstructions + toolDefinitions + reservedOutput + messages + toolResults;
     
     return { systemInstructions, toolDefinitions, reservedOutput, messages, toolResults, total, maxTokens };
-  }, [conversation?.messages, pendingInput, aiSettings.customSystemPrompt, aiSettings.toolUse?.enabled, maxTokens, nodes]);
+  }, [conversation?.messages, pendingInput, aiSettings.customSystemPrompt, aiSettings.toolUse?.enabled, maxTokens, nodes, activeTabId, tabs]);
   
   const percentage = Math.min((breakdown.total / maxTokens) * 100, 100);
   const isWarning = percentage > CONTEXT_WARNING_THRESHOLD * 100;
@@ -186,7 +190,7 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
       {showPopover && createPortal(
         <div
           ref={popoverRef}
-          className="fixed w-60 bg-theme-bg-secondary border border-theme-border/30 rounded-lg shadow-xl z-[9999] overflow-hidden"
+          className="fixed w-60 bg-theme-bg-panel border border-theme-border/30 rounded-lg shadow-xl z-[9999] overflow-hidden"
           style={{
             top: popoverPos.top,
             left: popoverPos.left,

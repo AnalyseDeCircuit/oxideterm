@@ -6,6 +6,7 @@
  */
 
 import type { AiToolDefinition } from '../providers';
+import type { TabType } from '../../../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tool Definitions
@@ -350,6 +351,151 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SFTP Tools — Available only when SFTP tab is active
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
+  {
+    name: 'sftp_list_dir',
+    description:
+      'List files and directories at the given path on the remote server via SFTP. Returns file names, types, sizes, permissions and modification times.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute path to the directory to list.',
+        },
+        node_id: {
+          type: 'string',
+          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'sftp_read_file',
+    description:
+      'Read the contents of a remote file via SFTP. Returns text content with detected encoding and language. Best for text files, config files, and source code.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute path to the file to read.',
+        },
+        max_size: {
+          type: 'number',
+          description: 'Maximum file size in bytes to read. Default: 1MB.',
+        },
+        node_id: {
+          type: 'string',
+          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'sftp_stat',
+    description:
+      'Get detailed information about a remote file or directory via SFTP. Returns name, type, size, permissions, and modification time.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute path to the file or directory.',
+        },
+        node_id: {
+          type: 'string',
+          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'sftp_get_cwd',
+    description:
+      'Get the current working directory of the SFTP file browser for the active node.',
+    parameters: {
+      type: 'object',
+      properties: {
+        node_id: {
+          type: 'string',
+          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+        },
+      },
+    },
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IDE Tools — Available only when IDE tab is active
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const IDE_TOOL_DEFS: AiToolDefinition[] = [
+  {
+    name: 'ide_get_open_files',
+    description:
+      'List all files currently open in the IDE editor. Returns tab IDs, file paths, language, dirty status, and pinned status.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'ide_get_file_content',
+    description:
+      'Get the current content of a file open in the IDE editor. Returns the content, language, dirty status, and cursor position.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: {
+          type: 'string',
+          description: 'The IDE tab ID (from ide_get_open_files) to read content from.',
+        },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'ide_get_project_info',
+    description:
+      'Get information about the currently open IDE project. Returns root path, project name, git repo status, and git branch.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'ide_apply_edit',
+    description:
+      'Apply a text edit to a file currently open in the IDE editor. Updates the content and optionally saves it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: {
+          type: 'string',
+          description: 'The IDE tab ID to edit.',
+        },
+        content: {
+          type: 'string',
+          description: 'The new full content for the file.',
+        },
+        save: {
+          type: 'boolean',
+          description: 'Whether to save the file after editing. Default: false.',
+        },
+      },
+      required: ['tab_id', 'content'],
+    },
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Safety Classification
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -366,6 +512,15 @@ export const READ_ONLY_TOOLS = new Set([
   'list_port_forwards',
   'get_detected_ports',
   'get_connection_health',
+  // SFTP (all read-only)
+  'sftp_list_dir',
+  'sftp_read_file',
+  'sftp_stat',
+  'sftp_get_cwd',
+  // IDE (read-only subset)
+  'ide_get_open_files',
+  'ide_get_file_content',
+  'ide_get_project_info',
 ]);
 
 /** Tools that modify state — require explicit user approval */
@@ -374,13 +529,19 @@ export const WRITE_TOOLS = new Set([
   'write_file',
   'create_port_forward',
   'stop_port_forward',
+  'ide_apply_edit',
 ]);
 
-/** Tools that do NOT require any node context — work globally */
+/** Tools that do NOT require any node context — work globally or read from local stores */
 export const CONTEXT_FREE_TOOLS = new Set([
   'list_sessions',
   'list_connections',
   'get_connection_health',
+  // IDE tools read from local Zustand store, no node resolution needed
+  'ide_get_open_files',
+  'ide_get_file_content',
+  'ide_get_project_info',
+  'ide_apply_edit',
 ]);
 
 /** Tools that use session_id parameter instead of node_id */
@@ -399,21 +560,51 @@ export const SSH_ONLY_TOOLS = new Set([
   'get_connection_health',
 ]);
 
+/** Tools only shown when SFTP tab is active */
+export const SFTP_ONLY_TOOLS = new Set([
+  'sftp_list_dir',
+  'sftp_read_file',
+  'sftp_stat',
+  'sftp_get_cwd',
+]);
+
+/** Tools only shown when IDE tab is active */
+export const IDE_ONLY_TOOLS = new Set([
+  'ide_get_open_files',
+  'ide_get_file_content',
+  'ide_get_project_info',
+  'ide_apply_edit',
+]);
+
 /**
- * Get relevant tool definitions based on current session context.
- * Trims SSH-only tools when only local terminals are active,
- * saving ~1000-1500 tokens per request.
+ * Get relevant tool definitions based on active tab type and session context.
+ * Completely hides tools irrelevant to the active tab, saving tokens and focus.
  */
 export function getToolsForContext(
-  terminalType: 'terminal' | 'local_terminal' | null,
+  activeTabType: TabType | null,
   hasAnySSHSession: boolean,
 ): AiToolDefinition[] {
-  // If the active session is local AND there are no SSH sessions anywhere,
-  // exclude SSH-only tools entirely
-  if (terminalType === 'local_terminal' && !hasAnySSHSession) {
-    return BUILTIN_TOOLS.filter(t => !SSH_ONLY_TOOLS.has(t.name));
-  }
-  return BUILTIN_TOOLS;
+  // Combine all tools into a single pool
+  const allTools = [...BUILTIN_TOOLS, ...SFTP_TOOL_DEFS, ...IDE_TOOL_DEFS];
+  
+  return allTools.filter(t => {
+    // SSH-only tools: hide when only local terminals and no SSH sessions
+    if (SSH_ONLY_TOOLS.has(t.name)) {
+      if (!hasAnySSHSession) return false;
+    }
+    
+    // SFTP-only tools: only show on SFTP tab
+    if (SFTP_ONLY_TOOLS.has(t.name)) {
+      return activeTabType === 'sftp';
+    }
+    
+    // IDE-only tools: only show on IDE tab
+    if (IDE_ONLY_TOOLS.has(t.name)) {
+      return activeTabType === 'ide';
+    }
+    
+    return true;
+  });
 }
 
 /**

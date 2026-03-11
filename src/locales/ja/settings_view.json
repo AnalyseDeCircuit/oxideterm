@@ -316,7 +316,7 @@
       "tool_use_enabled": "ツール使用を有効にする",
       "tool_use_enabled_hint": "AIがFunction Callingを通じてリモートサーバーでコマンド実行、ファイル読み取り、操作を行うことを許可します。",
       "tool_use_auto_approve_read": "読み取り専用ツールを自動承認",
-      "tool_use_auto_approve_read_hint": "read_file、list_directory、grep_search、git_status を確認なしで自動承認します。",
+      "tool_use_auto_approve_read_hint": "すべての読み取り専用ツール（ファイル読取、ディレクトリ一覧、検索、SFTP ブラウズ、IDE ファイル閲覧など）を確認なしで自動承認します。",
       "tool_use_auto_approve_all": "すべてのツールを自動承認（危険）",
       "tool_use_auto_approve_all_hint": "terminal_exec と write_file を含むすべてのツールを自動承認します。AIはリモートサーバーで完全なコマンド実行権限を持ちます。",
       "tool_use_auto_approve_all_warning": "この設定はAIに無制限のコマンド実行能力を付与します。信頼できる非本番環境のサーバーでのみ使用してください。"

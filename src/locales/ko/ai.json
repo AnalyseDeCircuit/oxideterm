@@ -129,7 +129,15 @@
         "get_detected_ports": "포트 감지",
         "get_connection_health": "상태 확인",
         "create_port_forward": "포워딩 생성",
-        "stop_port_forward": "포워딩 중지"
+        "stop_port_forward": "포워딩 중지",
+        "sftp_list_dir": "SFTP 목록",
+        "sftp_read_file": "SFTP 읽기",
+        "sftp_stat": "SFTP 정보",
+        "sftp_get_cwd": "SFTP 경로",
+        "ide_get_open_files": "열린 파일",
+        "ide_get_file_content": "파일 내용",
+        "ide_get_project_info": "프로젝트 정보",
+        "ide_apply_edit": "편집 적용"
       }
     }
   }

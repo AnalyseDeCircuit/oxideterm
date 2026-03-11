@@ -316,7 +316,7 @@
       "tool_use_enabled": "Abilita uso strumenti",
       "tool_use_enabled_hint": "Consenti all'IA di eseguire comandi, leggere file ed eseguire azioni sui server remoti tramite Function Calling.",
       "tool_use_auto_approve_read": "Approvazione auto. strumenti di sola lettura",
-      "tool_use_auto_approve_read_hint": "Approva automaticamente read_file, list_directory, grep_search e git_status senza conferma.",
+      "tool_use_auto_approve_read_hint": "Approva automaticamente tutti gli strumenti di sola lettura (lettura file, elenco directory, ricerche, navigazione SFTP, ispezione IDE, ecc.) senza conferma.",
       "tool_use_auto_approve_all": "Approvazione auto. tutti gli strumenti (Pericoloso)",
       "tool_use_auto_approve_all_hint": "Approva automaticamente TUTTI gli strumenti inclusi terminal_exec e write_file. L'IA avrà accesso completo all'esecuzione dei comandi sul server remoto.",
       "tool_use_auto_approve_all_warning": "Questo conferisce all'IA capacità di esecuzione comandi senza restrizioni. Utilizzare solo su server affidabili, non di produzione."

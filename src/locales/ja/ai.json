@@ -129,7 +129,15 @@
         "get_detected_ports": "ポート検出",
         "get_connection_health": "ヘルスチェック",
         "create_port_forward": "転送作成",
-        "stop_port_forward": "転送停止"
+        "stop_port_forward": "転送停止",
+        "sftp_list_dir": "SFTP 一覧",
+        "sftp_read_file": "SFTP 読取",
+        "sftp_stat": "SFTP 情報",
+        "sftp_get_cwd": "SFTP パス",
+        "ide_get_open_files": "開いたファイル",
+        "ide_get_file_content": "ファイル内容",
+        "ide_get_project_info": "プロジェクト情報",
+        "ide_apply_edit": "編集適用"
       }
     }
   }

@@ -129,7 +129,15 @@
         "get_detected_ports": "Cổng phát hiện",
         "get_connection_health": "Kiểm tra sức khỏe",
         "create_port_forward": "Tạo chuyển tiếp",
-        "stop_port_forward": "Dừng chuyển tiếp"
+        "stop_port_forward": "Dừng chuyển tiếp",
+        "sftp_list_dir": "SFTP Danh sách",
+        "sftp_read_file": "SFTP Đọc",
+        "sftp_stat": "SFTP Thông tin",
+        "sftp_get_cwd": "SFTP Đường dẫn",
+        "ide_get_open_files": "Tệp đang mở",
+        "ide_get_file_content": "Nội dung tệp",
+        "ide_get_project_info": "Thông tin dự án",
+        "ide_apply_edit": "Áp dụng chỉnh sửa"
       }
     }
   }

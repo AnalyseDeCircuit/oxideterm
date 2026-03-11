@@ -316,7 +316,7 @@
       "tool_use_enabled": "Enable Tool Use",
       "tool_use_enabled_hint": "Allow the AI to execute commands, read files, and perform actions on remote servers via function calling.",
       "tool_use_auto_approve_read": "Auto-Approve Read-Only Tools",
-      "tool_use_auto_approve_read_hint": "Automatically approve read_file, list_directory, grep_search, and git_status without confirmation.",
+      "tool_use_auto_approve_read_hint": "Automatically approve all read-only tools (file reads, directory listings, searches, SFTP browsing, IDE file inspection, etc.) without confirmation.",
       "tool_use_auto_approve_all": "Auto-Approve All Tools (Dangerous)",
       "tool_use_auto_approve_all_hint": "Automatically approve ALL tools including terminal_exec and write_file. The AI will have full command execution access on the remote server.",
       "tool_use_auto_approve_all_warning": "This gives AI unrestricted command execution capability. Use only on trusted, non-production servers."

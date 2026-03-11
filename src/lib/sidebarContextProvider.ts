@@ -18,7 +18,7 @@ import {
 } from './terminalRegistry';
 import { useAppStore } from '../store/appStore';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
-import type { RemoteEnvInfo } from '../types';
+import type { RemoteEnvInfo, TabType } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -30,6 +30,12 @@ export interface EnvironmentSnapshot {
   
   /** Terminal type: SSH or Local */
   terminalType: 'terminal' | 'local_terminal' | null;
+  
+  /** Currently active tab type (for tab-aware tool filtering) */
+  activeTabType: TabType | null;
+  
+  /** Node ID associated with the active tab (for SFTP/IDE context) */
+  activeNodeId: string | null;
   
   /** Session ID of the active terminal */
   sessionId: string | null;
@@ -166,9 +172,15 @@ export function gatherSidebarContext(config = DEFAULT_CONTEXT_CONFIG): SidebarCo
   
   // ─── Environment Snapshot ───────────────────────────────────────────────
   
+  // Resolve active tab type and nodeId
+  const appState = useAppStore.getState();
+  const activeTab = appState.tabs.find(t => t.id === appState.activeTabId);
+  
   const env: EnvironmentSnapshot = {
     localOS: getLocalOS(),
     terminalType: metadata?.terminalType ?? null,
+    activeTabType: activeTab?.type ?? null,
+    activeNodeId: activeTab?.nodeId ?? null,
     sessionId: metadata?.sessionId ?? null,
     connection: null,
     remoteEnv: undefined, // Will be set if SSH connection has detected env

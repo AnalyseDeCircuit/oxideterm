@@ -129,7 +129,15 @@
         "get_detected_ports": "Detected Ports",
         "get_connection_health": "Health Check",
         "create_port_forward": "Create Forward",
-        "stop_port_forward": "Stop Forward"
+        "stop_port_forward": "Stop Forward",
+        "sftp_list_dir": "SFTP List",
+        "sftp_read_file": "SFTP Read",
+        "sftp_stat": "SFTP Info",
+        "sftp_get_cwd": "SFTP Path",
+        "ide_get_open_files": "Open Files",
+        "ide_get_file_content": "File Content",
+        "ide_get_project_info": "Project Info",
+        "ide_apply_edit": "Apply Edit"
       }
     }
   }

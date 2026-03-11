@@ -129,7 +129,15 @@
         "get_detected_ports": "Puertos detectados",
         "get_connection_health": "Estado de salud",
         "create_port_forward": "Crear reenvío",
-        "stop_port_forward": "Detener reenvío"
+        "stop_port_forward": "Detener reenvío",
+        "sftp_list_dir": "SFTP Listar",
+        "sftp_read_file": "SFTP Leer",
+        "sftp_stat": "SFTP Info",
+        "sftp_get_cwd": "SFTP Ruta",
+        "ide_get_open_files": "Archivos abiertos",
+        "ide_get_file_content": "Contenido archivo",
+        "ide_get_project_info": "Info proyecto",
+        "ide_apply_edit": "Aplicar edición"
       }
     }
   }

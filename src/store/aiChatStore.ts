@@ -731,16 +731,16 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       const autoApproveReadOnly = aiSettings.toolUse?.autoApproveReadOnly !== false;
       const autoApproveAll = aiSettings.toolUse?.autoApproveAll === true;
 
-      // Dynamic tool trimming: only include tools relevant to current session type
+      // Dynamic tool trimming: only include tools relevant to current tab type
       let toolDefs = toolUseEnabled ? BUILTIN_TOOLS : undefined;
       if (toolUseEnabled) {
-        const terminalType = sidebarContext?.env.terminalType ?? null;
+        const activeTabType = sidebarContext?.env.activeTabType ?? null;
         // Check if any SSH session exists anywhere (not just active)
         const nodes = useSessionTreeStore.getState().nodes;
         const hasAnySSHSession = nodes.some(n =>
           n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
         );
-        toolDefs = getToolsForContext(terminalType, hasAnySSHSession);
+        toolDefs = getToolsForContext(activeTabType, hasAnySSHSession);
       }
 
       // Derive tool execution context from sidebar context
@@ -750,6 +750,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         let activeNodeId: string | null = null;
         let activeAgentAvailable = false;
 
+        // Try terminal session first (for terminal/local_terminal tabs)
         if (sidebarContext?.env.sessionId) {
           const node = useSessionTreeStore.getState().getNodeByTerminalId(sidebarContext.env.sessionId);
           if (node) {
@@ -763,6 +764,20 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
             } catch {
               // Node not ready — activeNodeId stays null, context-free tools still work
             }
+          }
+        }
+        
+        // Fallback: use activeNodeId from tab (for SFTP/IDE tabs that have nodeId but no terminal)
+        if (!activeNodeId && sidebarContext?.env.activeNodeId) {
+          try {
+            const nodeSnapshot = await nodeGetState(sidebarContext.env.activeNodeId);
+            if (nodeSnapshot.state.readiness === 'ready') {
+              activeNodeId = sidebarContext.env.activeNodeId;
+              const agentStatus = await nodeAgentStatus(activeNodeId);
+              activeAgentAvailable = agentStatus.type === 'ready';
+            }
+          } catch {
+            // Node not ready
           }
         }
 
