@@ -6,11 +6,11 @@ import { useSettingsStore } from './settingsStore';
 import { useSessionTreeStore } from './sessionTreeStore';
 import { gatherSidebarContext, type SidebarContext } from '../lib/sidebarContextProvider';
 import { getProvider } from '../lib/ai/providerRegistry';
-import { estimateTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
+import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
 import { DEFAULT_SYSTEM_PROMPT, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
-import { BUILTIN_TOOLS, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, isCommandDenied, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, isCommandDenied, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import i18n from '../i18n';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -645,9 +645,28 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       systemPrompt += `\n\n${sidebarContext.systemPromptSegment}`;
     }
 
-    // Tool use guidance — let AI know how to discover sessions
+    // Tool use guidance — instruct AI to actively use available tools
     if (aiSettings.toolUse?.enabled === true) {
-      systemPrompt += `\n\nYou have access to tools that can interact with multiple terminal sessions (SSH and local). Use list_sessions to discover open sessions. For node-scoped tools, pass node_id to target any SSH node — not just the currently active one. For terminal_exec, you may also pass session_id to send a command directly into an open SSH or local terminal session. Use get_terminal_buffer to read output from any session. Use list_connections for SSH connection health. Use list_port_forwards and get_detected_ports for port management.`;
+      systemPrompt += `\n\n## Tool Use Guidelines
+
+You have tools to interact with the user's terminal sessions and workspace. **Use them proactively** — if a question can be answered by running a command or reading data, use the appropriate tool rather than guessing.
+
+### Key Principles
+- **Act, don't guess**: When the user asks about system state, running processes, file contents, or connection status — use tools to get real data.
+- **Chain tools**: Combine tools in sequence. Example: \`list_sessions\` → find session → \`terminal_exec\` with session_id → \`await_terminal_output\` to read result.
+- **Observe output**: After sending a command via \`terminal_exec\` with session_id, use \`await_terminal_output\` to see the result. Don't assume success.
+- **Discover first**: Use \`list_tabs\` to see the workspace layout, \`list_sessions\` to find sessions, before operating on them.
+
+### Tool Categories
+- **Discovery**: \`list_tabs\`, \`list_sessions\`, \`list_connections\`
+- **Terminal I/O**: \`terminal_exec\` (run commands), \`get_terminal_buffer\` (read output), \`search_terminal\` (search output), \`await_terminal_output\` (wait for output after command)
+- **Files**: \`read_file\`, \`write_file\`, \`list_directory\`, \`grep_search\`
+- **Infrastructure**: \`get_connection_health\`, \`list_port_forwards\`, \`get_detected_ports\`, \`create_port_forward\`, \`stop_port_forward\`
+
+### Routing
+- Use \`node_id\` for direct remote execution on any SSH node (captured stdout/stderr).
+- Use \`session_id\` to send commands into an open terminal session (visible to user).
+- Context-free tools (\`list_sessions\`, \`list_tabs\`, etc.) work without any node or session.`;
     }
 
     apiMessages.push({
@@ -666,7 +685,20 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     // Token-Aware History Trimming (with compaction anchor awareness)
     // ════════════════════════════════════════════════════════════════════
 
-    const systemTokens = estimateTokens(systemPrompt) + estimateTokens(effectiveContext);
+    // Resolve tool definitions early so their token cost is included in the budget
+    const toolUseEnabled = aiSettings.toolUse?.enabled === true;
+    let toolDefs: ReturnType<typeof getToolsForContext> | undefined;
+    if (toolUseEnabled) {
+      const activeTabType = sidebarContext?.env.activeTabType ?? null;
+      const nodes = useSessionTreeStore.getState().nodes;
+      const hasAnySSHSession = nodes.some(n =>
+        n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
+      );
+      const effectiveDisabled = get().getEffectiveDisabledTools();
+      toolDefs = getToolsForContext(activeTabType, hasAnySSHSession, effectiveDisabled);
+    }
+
+    const systemTokens = estimateTokens(systemPrompt) + estimateTokens(effectiveContext) + estimateToolDefinitionsTokens(toolDefs);
     const contextWindow = getModelContextWindow(
       providerModel,
       aiSettings.modelContextWindows,
@@ -748,21 +780,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       const maxResponseTokens = userOverride ?? responseReserve(contextWindow);
 
       // Tool use configuration
-      const toolUseEnabled = aiSettings.toolUse?.enabled === true;
       const autoApproveTools = aiSettings.toolUse?.autoApproveTools ?? {};
-
-      // Dynamic tool trimming: only include tools relevant to current tab type
-      let toolDefs = toolUseEnabled ? BUILTIN_TOOLS : undefined;
-      if (toolUseEnabled) {
-        const activeTabType = sidebarContext?.env.activeTabType ?? null;
-        // Check if any SSH session exists anywhere (not just active)
-        const nodes = useSessionTreeStore.getState().nodes;
-        const hasAnySSHSession = nodes.some(n =>
-          n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
-        );
-        const effectiveDisabled = get().getEffectiveDisabledTools();
-        toolDefs = getToolsForContext(activeTabType, hasAnySSHSession, effectiveDisabled);
-      }
 
       // Derive tool execution context from sidebar context
       // activeNodeId can be null — context-free tools (list_sessions, etc.) still work
