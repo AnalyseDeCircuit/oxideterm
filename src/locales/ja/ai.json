@@ -114,6 +114,10 @@
       "output_truncated": "出力は切り詰められました",
       "condensed": "{{count}} 件の初期呼び出しが AI コンテキスト節約のため圧縮されました",
       "condensed_label": "初期呼び出し（圧縮済み）",
+      "deny_list_warning": "セキュリティ上注意が必要なコマンド",
+      "approval_required": "承認が必要",
+      "approve": "承認",
+      "reject": "拒否",
       "tool_names": {
         "terminal_exec": "コマンド実行",
         "read_file": "ファイル読取",
@@ -124,6 +128,7 @@
         "list_sessions": "セッション一覧",
         "get_terminal_buffer": "バッファ読取",
         "search_terminal": "ターミナル検索",
+        "await_terminal_output": "出力待機",
         "list_connections": "接続一覧",
         "list_port_forwards": "ポート転送",
         "get_detected_ports": "ポート検出",
@@ -153,6 +158,18 @@
         "get_session_tree": "セッションツリー",
         "list_plugins": "プラグイン一覧"
       }
+    },
+    "tool_selector": {
+      "title": "ツール",
+      "tooltip": "{{count}}/{{total}} ツール有効",
+      "session_override_active": "セッションオーバーライド有効",
+      "session_override_off": "グローバル設定を使用",
+      "session": "セッション",
+      "global": "グローバル",
+      "reset": "すべてリセット",
+      "enable_group": "グループを有効化",
+      "disable_group": "グループを無効化",
+      "active_summary": "{{active}}/{{total}} ツール有効"
     }
   }
 }

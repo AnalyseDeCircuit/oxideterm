@@ -114,6 +114,10 @@
       "output_truncated": "Ausgabe wurde abgeschnitten",
       "condensed": "{{count}} frühere(r) Aufruf(e) für den KI-Kontext komprimiert",
       "condensed_label": "Frühere Aufrufe (komprimiert)",
+      "deny_list_warning": "Sicherheitsrelevanter Befehl",
+      "approval_required": "Genehmigung erforderlich",
+      "approve": "Genehmigen",
+      "reject": "Ablehnen",
       "tool_names": {
         "terminal_exec": "Befehl ausführen",
         "read_file": "Datei lesen",
@@ -124,6 +128,7 @@
         "list_sessions": "Sitzungen auflisten",
         "get_terminal_buffer": "Puffer lesen",
         "search_terminal": "Terminal durchsuchen",
+        "await_terminal_output": "Ausgabe abwarten",
         "list_connections": "Verbindungen",
         "list_port_forwards": "Portweiterleitung",
         "get_detected_ports": "Erkannte Ports",
@@ -153,6 +158,18 @@
         "get_session_tree": "Sitzungsbaum",
         "list_plugins": "Plugins auflisten"
       }
+    },
+    "tool_selector": {
+      "title": "Werkzeuge",
+      "tooltip": "{{count}}/{{total}} Werkzeuge aktiv",
+      "session_override_active": "Sitzungsüberschreibung aktiv",
+      "session_override_off": "Globale Einstellungen",
+      "session": "Sitzung",
+      "global": "Global",
+      "reset": "Alle zurücksetzen",
+      "enable_group": "Gruppe aktivieren",
+      "disable_group": "Gruppe deaktivieren",
+      "active_summary": "{{active}}/{{total}} Werkzeuge aktiv"
     }
   }
 }

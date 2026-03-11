@@ -114,6 +114,10 @@
       "output_truncated": "Output was truncated",
       "condensed": "{{count}} earlier call(s) — condensed for AI context",
       "condensed_label": "Earlier calls (condensed for AI)",
+      "deny_list_warning": "Security-sensitive command",
+      "approval_required": "Requires approval",
+      "approve": "Approve",
+      "reject": "Reject",
       "tool_names": {
         "terminal_exec": "Run Command",
         "read_file": "Read File",
@@ -124,6 +128,7 @@
         "list_sessions": "List Sessions",
         "get_terminal_buffer": "Read Buffer",
         "search_terminal": "Search Terminal",
+        "await_terminal_output": "Await Output",
         "list_connections": "Connections",
         "list_port_forwards": "Port Forwards",
         "get_detected_ports": "Detected Ports",
@@ -153,6 +158,18 @@
         "get_session_tree": "Session Tree",
         "list_plugins": "List Plugins"
       }
+    },
+    "tool_selector": {
+      "title": "Tools",
+      "tooltip": "{{count}}/{{total}} tools active",
+      "session_override_active": "Session override active",
+      "session_override_off": "Using global settings",
+      "session": "Session",
+      "global": "Global",
+      "reset": "Reset all",
+      "enable_group": "Enable group",
+      "disable_group": "Disable group",
+      "active_summary": "{{active}}/{{total}} tools active"
     }
   }
 }

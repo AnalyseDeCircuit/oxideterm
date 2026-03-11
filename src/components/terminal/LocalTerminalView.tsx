@@ -25,7 +25,8 @@ import {
   registerTerminalBuffer, 
   unregisterTerminalBuffer,
   setActivePaneId as setRegistryActivePaneId,
-  touchTerminalEntry 
+  touchTerminalEntry,
+  notifyTerminalOutput 
 } from '../../lib/terminalRegistry';
 import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
 import { api } from '../../lib/api';
@@ -563,6 +564,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         prevMouseTracking = active;
         setMouseMode(active);
       }
+      notifyTerminalOutput(sessionId);
     });
 
 

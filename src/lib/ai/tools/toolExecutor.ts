@@ -22,14 +22,14 @@ import {
 import { nodeSftpListDir, nodeSftpPreview, nodeSftpStat } from '../../api';
 import { api } from '../../api';
 import type { AiToolResult, AgentFileEntry } from '../../../types';
-import { isCommandDenied, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS } from './toolDefinitions';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS } from './toolDefinitions';
 import { useSessionTreeStore } from '../../../store/sessionTreeStore';
 import { useAppStore } from '../../../store/appStore';
 import { useLocalTerminalStore } from '../../../store/localTerminalStore';
 import { useIdeStore } from '../../../store/ideStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { usePluginStore } from '../../../store/pluginStore';
-import { findPaneBySessionId, getTerminalBuffer, writeToTerminal } from '../../terminalRegistry';
+import { findPaneBySessionId, getTerminalBuffer, writeToTerminal, subscribeTerminalOutput } from '../../terminalRegistry';
 
 /** Max output size returned from a tool execution (bytes) */
 const MAX_OUTPUT_BYTES = 8192;
@@ -162,6 +162,8 @@ export async function executeTool(
           return await execGetTerminalBuffer(args, startTime, toolCallId);
         case 'search_terminal':
           return await execSearchTerminal(args, startTime, toolCallId);
+        case 'await_terminal_output':
+          return await execAwaitTerminalOutput(args, startTime, toolCallId);
         default:
           return { toolCallId, toolName, success: false, output: '', error: `Unknown session tool: ${toolName}`, durationMs: Date.now() - startTime };
       }
@@ -260,11 +262,6 @@ async function execTerminalCommand(
     return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
   }
 
-  // Safety: deny-list check
-  if (isCommandDenied(command)) {
-    return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Command rejected: matches security deny-list', durationMs: Date.now() - startTime };
-  }
-
   const cwd = args.cwd as string | undefined;
   const timeoutSecs = clamp(Number(args.timeout_secs) || 30, 1, MAX_COMMAND_TIMEOUT_SECS);
 
@@ -295,10 +292,6 @@ async function execTerminalCommandToSession(
   const command = typeof args.command === 'string' ? args.command.trim() : '';
   if (!command) {
     return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
-  }
-
-  if (isCommandDenied(command)) {
-    return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Command rejected: matches security deny-list', durationMs: Date.now() - startTime };
   }
 
   const paneId = findPaneBySessionId(sessionId);
@@ -758,6 +751,148 @@ async function execSearchTerminal(
   return { toolCallId, toolName: 'search_terminal', success: true, output: text, truncated, durationMs: Date.now() - startTime };
 }
 
+/**
+ * Wait for new output in a terminal session using event-driven notifications.
+ * Returns the delta (new lines) once output stabilizes, a pattern matches, or timeout is reached.
+ * Works for both SSH (remote) and local terminals via the unified notifyTerminalOutput hook.
+ */
+async function execAwaitTerminalOutput(
+  args: Record<string, unknown>,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const toolName = 'await_terminal_output';
+  const sessionId = args.session_id as string;
+  if (!sessionId) {
+    return { toolCallId, toolName, success: false, output: '', error: 'Missing required argument: session_id. Use list_sessions to find session IDs.', durationMs: Date.now() - startTime };
+  }
+
+  const timeoutSecs = clamp(Number(args.timeout_secs) || 15, 1, 120);
+  const stableSecs = clamp(Number(args.stable_secs) || 2, 0.5, 10);
+  const patternStr = typeof args.pattern === 'string' ? args.pattern.trim() : '';
+
+  let patternRe: RegExp | null = null;
+  if (patternStr) {
+    if (patternStr.length > MAX_PATTERN_LENGTH) {
+      return { toolCallId, toolName, success: false, output: '', error: `Pattern too long (max ${MAX_PATTERN_LENGTH} characters)`, durationMs: Date.now() - startTime };
+    }
+    if (hasPotentiallyCatastrophicRegex(patternStr)) {
+      return { toolCallId, toolName, success: false, output: '', error: 'Pattern rejected: potentially catastrophic regular expression', durationMs: Date.now() - startTime };
+    }
+    try {
+      patternRe = new RegExp(patternStr, 'i');
+    } catch {
+      return { toolCallId, toolName, success: false, output: '', error: `Invalid regex pattern: ${patternStr}`, durationMs: Date.now() - startTime };
+    }
+  }
+
+  // Snapshot current buffer line count
+  const initialLines = await readBufferLines(sessionId);
+  if (initialLines === null) {
+    return { toolCallId, toolName, success: false, output: '', error: 'Session not found or buffer unavailable. Use list_sessions to see available sessions.', durationMs: Date.now() - startTime };
+  }
+  const initialLineCount = initialLines.length;
+
+  const timeoutMs = timeoutSecs * 1000;
+  const stableMs = stableSecs * 1000;
+
+  // Event-driven wait: subscribe to terminal output notifications
+  const result = await new Promise<'pattern' | 'stable' | 'timeout' | 'lost'>((resolve) => {
+    let stableTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+
+    const done = (reason: 'pattern' | 'stable' | 'timeout' | 'lost') => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (stableTimer) clearTimeout(stableTimer);
+      unsubscribe();
+      resolve(reason);
+    };
+
+    // Timeout guard
+    const timeoutTimer = setTimeout(() => done('timeout'), Math.max(0, timeoutMs - (Date.now() - startTime)));
+
+    // On each terminal output event, check conditions
+    const onOutput = async () => {
+      if (settled) return;
+
+      let currentLines: string[] | null;
+      try {
+        currentLines = await readBufferLines(sessionId);
+      } catch {
+        if (!settled) done('lost');
+        return;
+      }
+      // Re-check after async gap — timeout or another callback may have settled
+      if (settled) return;
+
+      if (currentLines === null) {
+        done('lost');
+        return;
+      }
+
+      // Check pattern match on new lines
+      if (patternRe && currentLines.length > initialLineCount) {
+        const newLines = currentLines.slice(initialLineCount);
+        if (newLines.some(line => patternRe!.test(line))) {
+          done('pattern');
+          return;
+        }
+      }
+
+      // Reset stability timer on each new output
+      if (currentLines.length > initialLineCount) {
+        if (stableTimer) clearTimeout(stableTimer);
+        stableTimer = setTimeout(() => done('stable'), stableMs);
+      }
+    };
+
+    const unsubscribe = subscribeTerminalOutput(sessionId, onOutput);
+  });
+
+  // Read final buffer and extract delta
+  const finalLines = await readBufferLines(sessionId);
+  if (finalLines === null || result === 'lost') {
+    return { toolCallId, toolName, success: false, output: '', error: 'Session became unavailable during wait.', durationMs: Date.now() - startTime };
+  }
+
+  // Handle buffer shrink (e.g. terminal clear/reset)
+  if (finalLines.length < initialLineCount) {
+    const { text, truncated } = truncateOutput(finalLines.join('\n'));
+    return { toolCallId, toolName, success: true, output: `[Buffer was cleared during wait]\n${text}`, truncated, durationMs: Date.now() - startTime };
+  }
+
+  const newLines = finalLines.slice(initialLineCount);
+  if (newLines.length === 0) {
+    const msg = result === 'timeout'
+      ? `No new output after ${timeoutSecs}s. The command may be waiting for input or still running.`
+      : 'No new output detected.';
+    return { toolCallId, toolName, success: true, output: msg, durationMs: Date.now() - startTime };
+  }
+
+  const { text, truncated } = truncateOutput(newLines.join('\n'));
+  return { toolCallId, toolName, success: true, output: text, truncated, durationMs: Date.now() - startTime };
+}
+
+/** Read all buffer lines for a session (backend or frontend fallback). */
+async function readBufferLines(sessionId: string): Promise<string[] | null> {
+  // Path 1: Backend buffer (SSH terminals)
+  try {
+    const response = await api.getAllBufferLines(sessionId);
+    return response.lines.map(l => l.text);
+  } catch {
+    // fallback
+  }
+  // Path 2: Frontend registry (local terminals)
+  const paneId = findPaneBySessionId(sessionId);
+  if (paneId) {
+    const buffer = getTerminalBuffer(paneId);
+    if (buffer) return buffer.split('\n');
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Node-ID Tool Executors (new tools that require resolved node)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1155,10 +1290,6 @@ async function execLocalExec(args: Record<string, unknown>, startTime: number, t
   const command = args.command as string | undefined;
   if (!command) {
     return { toolCallId, toolName: 'local_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
-  }
-
-  if (isCommandDenied(command)) {
-    return { toolCallId, toolName: 'local_exec', success: false, output: '', error: 'Command denied by safety policy', durationMs: Date.now() - startTime };
   }
 
   try {

@@ -1,7 +1,9 @@
 import { memo, useState, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitBranch, Pen, Loader2, CheckCircle2, XCircle, AlertTriangle, Package, Network, Radio, CirclePlus, CircleStop, Activity, HardDrive, FolderSearch, FileCode, Code2, Info, ListTree, Settings, Puzzle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitBranch, Pen, Loader2, CheckCircle2, XCircle, AlertTriangle, Package, Network, Radio, CirclePlus, CircleStop, Activity, HardDrive, FolderSearch, FileCode, Code2, Info, ListTree, Settings, Puzzle, ShieldAlert, Check, X, Eye } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
+import { useAiChatStore } from '../../store/aiChatStore';
+import { isCommandDenied } from '../../lib/ai/tools';
 import type { AiToolCall } from '../../types';
 
 interface ToolCallBlockProps {
@@ -20,6 +22,7 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   list_sessions: Network,
   get_terminal_buffer: Terminal,
   search_terminal: Search,
+  await_terminal_output: Eye,
   list_connections: Network,
   list_port_forwards: Radio,
   get_detected_ports: Radio,
@@ -62,6 +65,8 @@ function StatusIcon({ status }: { status: AiToolCall['status'] }) {
   switch (status) {
     case 'pending':
       return <AlertTriangle className="w-3 h-3 text-yellow-500/70" />;
+    case 'pending_user_approval':
+      return <ShieldAlert className="w-3 h-3 text-amber-400 animate-pulse" />;
     case 'approved':
     case 'running':
       return <Loader2 className="w-3 h-3 text-theme-accent animate-spin" />;
@@ -88,17 +93,31 @@ function formatArgs(argsJson: string): string {
 }
 
 const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) {
-  const { t } = useTranslation('ai');
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const resolveToolApproval = useAiChatStore((s) => s.resolveToolApproval);
   const Icon = TOOL_ICONS[call.name] || Terminal;
 
   const toggleExpand = useCallback(() => setExpanded((v) => !v), []);
 
   const summary = formatArgs(call.arguments);
   const hasOutput = call.result && (call.result.output || call.result.error);
+  const isPendingApproval = call.status === 'pending_user_approval';
+
+  // Check if this is a deny-listed command for showing a stronger warning
+  const isDenyListCommand = isPendingApproval &&
+    (call.name === 'terminal_exec' || call.name === 'local_exec') &&
+    (() => { try { const p = JSON.parse(call.arguments); return typeof p.command === 'string' && isCommandDenied(p.command); } catch { return false; } })();
 
   return (
-    <div className="border border-theme-border/20 rounded overflow-hidden">
+    <div className={cn(
+      "border rounded overflow-hidden",
+      isPendingApproval
+        ? isDenyListCommand
+          ? "border-red-500/40 bg-red-500/5"
+          : "border-amber-500/40 bg-amber-500/5"
+        : "border-theme-border/20",
+    )}>
       {/* Header */}
       <button
         onClick={toggleExpand}
@@ -111,7 +130,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
         <StatusIcon status={call.status} />
         <Icon className="w-3 h-3 text-theme-text-muted/60 shrink-0" />
         <span className="font-medium text-theme-text-muted/70 shrink-0">
-          {t(`tool_use.tool_names.${call.name}`, { defaultValue: call.name })}
+          {t(`ai.tool_use.tool_names.${call.name}`, { defaultValue: call.name })}
         </span>
         <span className="text-theme-text-muted/40 truncate flex-1 ml-1 font-mono text-[10px]">
           {summary.length > 80 ? summary.slice(0, 80) + '…' : summary}
@@ -128,13 +147,44 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
           : <ChevronRight className="w-3 h-3 text-theme-text-muted/40 shrink-0" />}
       </button>
 
+      {/* Approval action bar */}
+      {isPendingApproval && (
+        <div className="flex items-center gap-2 px-2 py-1.5 border-t border-theme-border/15">
+          {isDenyListCommand && (
+            <span className="flex items-center gap-1 text-[10px] text-red-400 mr-auto">
+              <ShieldAlert className="w-3 h-3" />
+              {t('ai.tool_use.deny_list_warning')}
+            </span>
+          )}
+          {!isDenyListCommand && (
+            <span className="text-[10px] text-amber-400 mr-auto">
+              {t('ai.tool_use.approval_required')}
+            </span>
+          )}
+          <button
+            onClick={() => resolveToolApproval(call.id, true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors"
+          >
+            <Check className="w-3 h-3" />
+            {t('ai.tool_use.approve')}
+          </button>
+          <button
+            onClick={() => resolveToolApproval(call.id, false)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+          >
+            <X className="w-3 h-3" />
+            {t('ai.tool_use.reject')}
+          </button>
+        </div>
+      )}
+
       {/* Expanded details */}
       {expanded && (
         <div className="border-t border-theme-border/15 px-2 py-1.5 space-y-1.5">
           {/* Arguments */}
           <div>
             <div className="text-[9px] text-theme-text-muted/40 font-medium uppercase tracking-wider mb-0.5">
-              {t('tool_use.arguments', { defaultValue: 'Arguments' })}
+              {t('ai.tool_use.arguments')}
             </div>
             <pre className="text-[10px] text-theme-text-muted/60 font-mono bg-theme-bg/50 rounded px-1.5 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
               {(() => {
@@ -148,7 +198,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
           {hasOutput && (
             <div>
               <div className="text-[9px] text-theme-text-muted/40 font-medium uppercase tracking-wider mb-0.5">
-                {t('tool_use.output', { defaultValue: 'Output' })}
+                {t('ai.tool_use.output')}
               </div>
               {call.result!.error && (
                 <div className="text-[10px] text-red-400/80 font-mono bg-red-500/5 rounded px-1.5 py-1 mb-1">
@@ -162,7 +212,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
               )}
               {call.result!.truncated && (
                 <div className="text-[9px] text-yellow-500/60 mt-0.5">
-                  {t('tool_use.output_truncated', { defaultValue: 'Output was truncated' })}
+                  {t('ai.tool_use.output_truncated')}
                 </div>
               )}
             </div>
@@ -180,7 +230,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
  * reflecting that their results were condensed for the AI context window.
  */
 export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls }: ToolCallBlockProps) {
-  const { t } = useTranslation('ai');
+  const { t } = useTranslation();
   const [showEarly, setShowEarly] = useState(false);
 
   if (!toolCalls || toolCalls.length === 0) return null;
@@ -194,7 +244,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls }: ToolCall
   return (
     <div className="my-2 space-y-1">
       <div className="text-[10px] text-theme-text-muted/40 font-medium uppercase tracking-wider px-0.5">
-        {t('tool_use.heading', { defaultValue: 'Tool Calls' })} ({toolCalls.length})
+        {t('ai.tool_use.heading')} ({toolCalls.length})
       </div>
 
       {/* Condensed early calls toggle */}
@@ -206,7 +256,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls }: ToolCall
               className="flex items-center gap-1 text-[9px] text-theme-text-muted/30 hover:text-theme-text-muted/50 transition-colors px-0.5 mb-1"
             >
               <Package className="w-2.5 h-2.5" />
-              <span>{t('tool_use.condensed_label', { defaultValue: 'Earlier calls (condensed for AI)' })}</span>
+              <span>{t('ai.tool_use.condensed_label')}</span>
               <ChevronDown className="w-2.5 h-2.5" />
             </button>
             {earlyCalls.map((call) => (
@@ -225,9 +275,8 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls }: ToolCall
           >
             <Package className="w-3 h-3 shrink-0" />
             <span>
-              {t('tool_use.condensed', {
+              {t('ai.tool_use.condensed', {
                 count: earlyCalls.length,
-                defaultValue: '{{count}} earlier call(s) — condensed for AI context',
               })}
             </span>
             <ChevronRight className="w-3 h-3 shrink-0 ml-auto" />

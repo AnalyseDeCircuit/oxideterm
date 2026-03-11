@@ -114,6 +114,10 @@
       "output_truncated": "Kết quả đã bị cắt ngắn",
       "condensed": "{{count}} lệnh gọi trước đã được nén để tiết kiệm ngữ cảnh AI",
       "condensed_label": "Lệnh gọi trước (đã nén)",
+      "deny_list_warning": "Lệnh nhạy cảm bảo mật",
+      "approval_required": "Cần phê duyệt",
+      "approve": "Phê duyệt",
+      "reject": "Từ chối",
       "tool_names": {
         "terminal_exec": "Chạy lệnh",
         "read_file": "Đọc tệp",
@@ -124,6 +128,7 @@
         "list_sessions": "Danh sách phiên",
         "get_terminal_buffer": "Đọc bộ đệm",
         "search_terminal": "Tìm kiếm terminal",
+        "await_terminal_output": "Chờ đầu ra",
         "list_connections": "Kết nối",
         "list_port_forwards": "Chuyển tiếp cổng",
         "get_detected_ports": "Cổng phát hiện",
@@ -153,6 +158,18 @@
         "get_session_tree": "Cây phiên",
         "list_plugins": "Danh sách plugin"
       }
+    },
+    "tool_selector": {
+      "title": "Công cụ",
+      "tooltip": "{{count}}/{{total}} công cụ đang hoạt động",
+      "session_override_active": "Ghi đè phiên đang hoạt động",
+      "session_override_off": "Sử dụng cài đặt chung",
+      "session": "Phiên",
+      "global": "Chung",
+      "reset": "Đặt lại tất cả",
+      "enable_group": "Bật nhóm",
+      "disable_group": "Tắt nhóm",
+      "active_summary": "{{active}}/{{total}} công cụ đang hoạt động"
     }
   }
 }

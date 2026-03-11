@@ -236,6 +236,37 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
       required: ['session_id', 'query'],
     },
   },
+  {
+    name: 'await_terminal_output',
+    description:
+      'Wait for new output in a terminal session after sending a command. Polls the terminal buffer until new content appears and stabilizes, an optional regex pattern matches, or timeout is reached. Returns only the NEW output since invocation. Use this after terminal_exec with session_id to observe command results.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'The terminal session ID to watch. Get this from list_sessions.',
+        },
+        timeout_secs: {
+          type: 'number',
+          minimum: 1,
+          maximum: 120,
+          description: 'How long to wait for output. Default: 15. Max: 120.',
+        },
+        pattern: {
+          type: 'string',
+          description: 'Optional regex pattern — return immediately when matched in new output. Useful for waiting for a specific prompt, error, or completion marker.',
+        },
+        stable_secs: {
+          type: 'number',
+          minimum: 0.5,
+          maximum: 10,
+          description: 'Seconds of no new output before considering output stable and returning. Default: 2.',
+        },
+      },
+      required: ['session_id'],
+    },
+  },
 
   // ── Infrastructure Tools ──
   {
@@ -747,6 +778,7 @@ export const CONTEXT_FREE_TOOLS = new Set([
 export const SESSION_ID_TOOLS = new Set([
   'get_terminal_buffer',
   'search_terminal',
+  'await_terminal_output',
 ]);
 
 /** Tools that only make sense for SSH connections (remote nodes) */
@@ -826,7 +858,7 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
   },
   {
     groupKey: 'session',
-    readOnly: ['list_sessions', 'get_terminal_buffer', 'search_terminal'],
+    readOnly: ['list_sessions', 'get_terminal_buffer', 'search_terminal', 'await_terminal_output'],
     write: [],
   },
   {
@@ -883,6 +915,7 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
 export function getToolsForContext(
   activeTabType: TabType | null,
   hasAnySSHSession: boolean,
+  disabledTools?: Set<string>,
 ): AiToolDefinition[] {
   // Combine all tools into a single pool
   const allTools = [
@@ -898,6 +931,9 @@ export function getToolsForContext(
   ];
   
   return allTools.filter(t => {
+    // User-disabled tools: never sent to LLM
+    if (disabledTools?.has(t.name)) return false;
+
     // SSH-only tools: hide when only local terminals and no SSH sessions
     if (SSH_ONLY_TOOLS.has(t.name)) {
       if (!hasAnySSHSession) return false;

@@ -114,6 +114,10 @@
       "output_truncated": "출력이 잘렸습니다",
       "condensed": "{{count}}개의 이전 호출이 AI 컨텍스트 절약을 위해 압축되었습니다",
       "condensed_label": "이전 호출 (압축됨)",
+      "deny_list_warning": "보안 민감 명령",
+      "approval_required": "승인 필요",
+      "approve": "승인",
+      "reject": "거부",
       "tool_names": {
         "terminal_exec": "명령 실행",
         "read_file": "파일 읽기",
@@ -124,6 +128,7 @@
         "list_sessions": "세션 목록",
         "get_terminal_buffer": "버퍼 읽기",
         "search_terminal": "터미널 검색",
+        "await_terminal_output": "출력 대기",
         "list_connections": "연결 목록",
         "list_port_forwards": "포트 포워딩",
         "get_detected_ports": "포트 감지",
@@ -153,6 +158,18 @@
         "get_session_tree": "세션 트리",
         "list_plugins": "플러그인 목록"
       }
+    },
+    "tool_selector": {
+      "title": "도구",
+      "tooltip": "{{count}}/{{total}} 도구 활성화",
+      "session_override_active": "세션 재정의 활성화됨",
+      "session_override_off": "전역 설정 사용",
+      "session": "세션",
+      "global": "전역",
+      "reset": "모두 초기화",
+      "enable_group": "그룹 활성화",
+      "disable_group": "그룹 비활성화",
+      "active_summary": "{{active}}/{{total}} 도구 활성화"
     }
   }
 }

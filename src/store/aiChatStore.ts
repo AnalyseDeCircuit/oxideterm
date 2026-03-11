@@ -10,7 +10,7 @@ import { estimateTokens, trimHistoryToTokenBudget, getModelContextWindow, respon
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
 import { DEFAULT_SYSTEM_PROMPT, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
-import { BUILTIN_TOOLS, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { BUILTIN_TOOLS, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, isCommandDenied, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import i18n from '../i18n';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -77,6 +77,12 @@ interface AiChatStore {
   abortController: AbortController | null;
   /** Set when messages are trimmed from API context — UI shows notification */
   trimInfo: { count: number; timestamp: number } | null;
+  /**
+   * Session-level disabled tools override.
+   * null = use global settingsStore.disabledTools
+   * string[] = complete replacement for this session only
+   */
+  sessionDisabledTools: string[] | null;
 
   // Initialization
   init: () => Promise<void>;
@@ -97,6 +103,13 @@ interface AiChatStore {
   editAndResend: (messageId: string, newContent: string) => Promise<void>;
   switchBranch: (messageId: string, branchIndex: number) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
+
+  // Tool override actions
+  setSessionDisabledTools: (tools: string[] | null) => void;
+  getEffectiveDisabledTools: () => Set<string>;
+
+  // Tool approval actions
+  resolveToolApproval: (toolCallId: string, approved: boolean) => void;
 
   // Internal (persist to backend)
   _addMessage: (conversationId: string, message: AiChatMessage, sidebarContext?: SidebarContext | null) => Promise<void>;
@@ -329,6 +342,13 @@ type ChatCompletionMessage = ProviderChatMessage;
 // on the same conversation when multiple sendMessage finally blocks fire together.
 const compactingConversations = new Set<string>();
 
+/**
+ * Pending tool approval resolvers.
+ * Maps toolCallId → resolver function. When user approves/rejects,
+ * the resolver is called with boolean, unblocking the sendMessage loop.
+ */
+const pendingApprovalResolvers = new Map<string, (approved: boolean) => void>();
+
 export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   // Initial state
   conversations: [],
@@ -338,6 +358,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   error: null,
   abortController: null,
   trimInfo: null,
+  sessionDisabledTools: null,
 
   // Initialize store from backend
   init: async () => {
@@ -739,7 +760,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         const hasAnySSHSession = nodes.some(n =>
           n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
         );
-        toolDefs = getToolsForContext(activeTabType, hasAnySSHSession);
+        const effectiveDisabled = get().getEffectiveDisabledTools();
+        toolDefs = getToolsForContext(activeTabType, hasAnySSHSession, effectiveDisabled);
       }
 
       // Derive tool execution context from sidebar context
@@ -893,6 +915,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
         // Approve tools based on per-tool settings
         const availableToolNames = new Set(toolDefs?.map(t => t.name) ?? []);
+        const pendingApprovalIds: string[] = [];
+
         for (const tc of toolCallEntries) {
           if (!availableToolNames.has(tc.name)) {
             tc.status = 'rejected';
@@ -903,20 +927,84 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
               output: '',
               error: 'Tool not available in current context.',
             };
+            continue;
+          }
+
+          // Check if this is a command that matches the deny-list
+          const isDenyListed = (tc.name === 'terminal_exec' || tc.name === 'local_exec') && (() => {
+            try {
+              const parsed = JSON.parse(tc.arguments);
+              return typeof parsed.command === 'string' && isCommandDenied(parsed.command);
+            } catch { return false; }
+          })();
+
+          if (isDenyListed) {
+            // Deny-list commands always require explicit user approval
+            tc.status = 'pending_user_approval';
+            pendingApprovalIds.push(tc.id);
           } else if (autoApproveTools[tc.name] === true) {
             tc.status = 'approved';
           } else {
-            tc.status = 'rejected';
-            tc.result = {
-              toolCallId: tc.id,
-              toolName: tc.name,
-              success: false,
-              output: '',
-              error: 'Tool call requires explicit approval. Enable auto-approve for this tool in AI settings.',
-            };
+            // Non-auto-approved tools need user approval
+            tc.status = 'pending_user_approval';
+            pendingApprovalIds.push(tc.id);
           }
         }
         updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+
+        // Wait for user to approve/reject pending tools
+        if (pendingApprovalIds.length > 0) {
+          const approvalPromises = pendingApprovalIds.map((id) => {
+            return new Promise<{ id: string; approved: boolean }>((resolve) => {
+              pendingApprovalResolvers.set(id, (approved) => resolve({ id, approved }));
+            });
+          });
+
+          // Capture signal reference locally to avoid null-ref race if abortController is cleared
+          const signal = get().abortController?.signal;
+          const abortPromise = new Promise<null>((resolve) => {
+            if (!signal) { resolve(null); return; }
+            if (signal.aborted) { resolve(null); return; }
+            signal.addEventListener('abort', () => resolve(null), { once: true });
+          });
+
+          const results = await Promise.race([
+            Promise.all(approvalPromises),
+            abortPromise,
+          ]);
+
+          if (results === null) {
+            // Aborted — reject all pending
+            for (const id of pendingApprovalIds) {
+              const tc = toolCallEntries.find(t => t.id === id);
+              if (tc && tc.status === 'pending_user_approval') {
+                tc.status = 'rejected';
+                tc.result = {
+                  toolCallId: tc.id, toolName: tc.name,
+                  success: false, output: '',
+                  error: 'Generation was stopped.',
+                };
+              }
+              pendingApprovalResolvers.delete(id);
+            }
+          } else {
+            // Apply user decisions
+            for (const { id, approved } of results) {
+              const tc = toolCallEntries.find(t => t.id === id);
+              if (tc) {
+                tc.status = approved ? 'approved' : 'rejected';
+                if (!approved) {
+                  tc.result = {
+                    toolCallId: tc.id, toolName: tc.name,
+                    success: false, output: '',
+                    error: 'Tool call rejected by user.',
+                  };
+                }
+              }
+            }
+          }
+          updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+        }
 
         // Execute approved tools
         const toolResultMessages: ProviderChatMessage[] = [];
@@ -1110,6 +1198,12 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         }));
       }
     } finally {
+      // Clean up any stale pending approval resolvers (e.g. after unexpected errors)
+      for (const [, resolver] of pendingApprovalResolvers) {
+        resolver(false);
+      }
+      pendingApprovalResolvers.clear();
+
       set({ isLoading: false, abortController: null });
 
       // ── Auto-compaction ──
@@ -1505,6 +1599,44 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         ),
       }));
       set({ error: i18n.t('ai.message.delete_failed') });
+    }
+  },
+
+  // Tool override actions
+  setSessionDisabledTools: (tools) => {
+    set({ sessionDisabledTools: tools });
+  },
+
+  getEffectiveDisabledTools: () => {
+    const { sessionDisabledTools } = get();
+    if (sessionDisabledTools !== null) {
+      return new Set(sessionDisabledTools);
+    }
+    const global = useSettingsStore.getState().settings.ai.toolUse?.disabledTools ?? [];
+    return new Set(global);
+  },
+
+  resolveToolApproval: (toolCallId, approved) => {
+    const resolver = pendingApprovalResolvers.get(toolCallId);
+    if (resolver) {
+      resolver(approved);
+      pendingApprovalResolvers.delete(toolCallId);
+
+      // Immediately update tool call status in the UI
+      const { activeConversationId, conversations } = get();
+      if (activeConversationId) {
+        const conv = conversations.find(c => c.id === activeConversationId);
+        if (conv) {
+          const lastAssistantMsg = [...conv.messages].reverse().find(m => m.role === 'assistant');
+          if (lastAssistantMsg?.toolCalls) {
+            const tc = lastAssistantMsg.toolCalls.find(t => t.id === toolCallId);
+            if (tc) {
+              tc.status = approved ? 'approved' : 'rejected';
+              set({ conversations: [...conversations] });
+            }
+          }
+        }
+      }
     }
   },
 

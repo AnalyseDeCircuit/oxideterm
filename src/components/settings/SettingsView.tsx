@@ -2212,7 +2212,7 @@ export const SettingsView = () => {
                                             id="tool-use-enabled"
                                             checked={ai.toolUse?.enabled ?? false}
                                             onCheckedChange={(checked) => {
-                                                updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {} }), enabled: !!checked });
+                                                updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), enabled: !!checked });
                                             }}
                                         />
                                     </div>
@@ -2230,7 +2230,7 @@ export const SettingsView = () => {
                                                     for (const g of TOOL_GROUPS) {
                                                         for (const name of [...g.readOnly, ...g.write]) all[name] = true;
                                                     }
-                                                    updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {} }), autoApproveTools: all });
+                                                    updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: all });
                                                 }}
                                                 className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
                                             >
@@ -2243,7 +2243,7 @@ export const SettingsView = () => {
                                                     for (const g of TOOL_GROUPS) {
                                                         for (const name of [...g.readOnly, ...g.write]) none[name] = false;
                                                     }
-                                                    updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {} }), autoApproveTools: none });
+                                                    updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: none });
                                                 }}
                                                 className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
                                             >
@@ -2257,7 +2257,7 @@ export const SettingsView = () => {
                                             const approveTools = ai.toolUse?.autoApproveTools ?? {};
                                             const toggleTool = (toolName: string) => {
                                                 const next = { ...approveTools, [toolName]: !approveTools[toolName] };
-                                                updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {} }), autoApproveTools: next });
+                                                updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: next });
                                             };
                                             const renderToolButton = (toolName: string) => {
                                                 const Icon = TOOL_ICON_MAP[toolName] ?? Wrench;

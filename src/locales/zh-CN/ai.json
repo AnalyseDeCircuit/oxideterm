@@ -114,6 +114,10 @@
       "output_truncated": "输出已截断",
       "condensed": "{{count}} 个早期调用已压缩以节省 AI 上下文",
       "condensed_label": "早期调用（已压缩）",
+      "deny_list_warning": "安全敏感命令",
+      "approval_required": "需要审批",
+      "approve": "批准",
+      "reject": "拒绝",
       "tool_names": {
         "terminal_exec": "执行命令",
         "read_file": "读取文件",
@@ -124,6 +128,7 @@
         "list_sessions": "列出会话",
         "get_terminal_buffer": "读取缓冲区",
         "search_terminal": "搜索终端",
+        "await_terminal_output": "等待输出",
         "list_connections": "连接列表",
         "list_port_forwards": "端口转发",
         "get_detected_ports": "检测端口",
@@ -153,6 +158,18 @@
         "get_session_tree": "会话树",
         "list_plugins": "列出插件"
       }
+    },
+    "tool_selector": {
+      "title": "工具",
+      "tooltip": "{{count}}/{{total}} 个工具已启用",
+      "session_override_active": "会话覆盖已激活",
+      "session_override_off": "使用全局设置",
+      "session": "会话",
+      "global": "全局",
+      "reset": "全部重置",
+      "enable_group": "启用分组",
+      "disable_group": "禁用分组",
+      "active_summary": "{{active}}/{{total}} 个工具已启用"
     }
   }
 }

@@ -114,6 +114,10 @@
       "output_truncated": "La sortie a été tronquée",
       "condensed": "{{count}} appel(s) antérieur(s) condensé(s) pour le contexte IA",
       "condensed_label": "Appels antérieurs (condensés)",
+      "deny_list_warning": "Commande sensible à la sécurité",
+      "approval_required": "Approbation requise",
+      "approve": "Approuver",
+      "reject": "Rejeter",
       "tool_names": {
         "terminal_exec": "Exécuter commande",
         "read_file": "Lire fichier",
@@ -124,6 +128,7 @@
         "list_sessions": "Lister sessions",
         "get_terminal_buffer": "Lire tampon",
         "search_terminal": "Rechercher terminal",
+        "await_terminal_output": "Attendre la sortie",
         "list_connections": "Connexions",
         "list_port_forwards": "Transferts de port",
         "get_detected_ports": "Ports détectés",
@@ -153,6 +158,18 @@
         "get_session_tree": "Arbre sessions",
         "list_plugins": "Liste plugins"
       }
+    },
+    "tool_selector": {
+      "title": "Outils",
+      "tooltip": "{{count}}/{{total}} outils actifs",
+      "session_override_active": "Remplacement de session actif",
+      "session_override_off": "Paramètres globaux",
+      "session": "Session",
+      "global": "Global",
+      "reset": "Tout réinitialiser",
+      "enable_group": "Activer le groupe",
+      "disable_group": "Désactiver le groupe",
+      "active_summary": "{{active}}/{{total}} outils actifs"
     }
   }
 }

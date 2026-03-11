@@ -1318,7 +1318,7 @@ export type AiToolCall = {
   /** JSON-serialized arguments */
   arguments: string;
   /** Current execution status */
-  status: 'pending' | 'approved' | 'rejected' | 'running' | 'completed' | 'error';
+  status: 'pending' | 'pending_user_approval' | 'approved' | 'rejected' | 'running' | 'completed' | 'error';
   /** Execution result (populated after completion) */
   result?: AiToolResult;
 };

@@ -31,6 +31,63 @@ const registry = new Map<string, TerminalEntry>();
 // Track the currently active (focused) pane across the entire app
 let activePaneId: string | null = null;
 
+// ── Output notification system ──
+// Allows consumers (e.g. AI await_terminal_output) to be notified when new data
+// is written to a terminal, avoiding expensive polling.
+type OutputListener = () => void;
+const outputListeners = new Map<string, Set<OutputListener>>();
+
+// Microtask coalescing: prevents listener flood when terminal spews rapid output
+// (e.g. `find /`). Multiple synchronous notifyTerminalOutput() calls within the
+// same event loop turn are coalesced into a single listener invocation.
+const pendingNotify = new Set<string>();
+
+/**
+ * Subscribe to output notifications for a session.
+ * The callback fires each time the terminal receives new data (after xterm parses it).
+ * @returns Unsubscribe function
+ */
+export function subscribeTerminalOutput(sessionId: string, listener: OutputListener): () => void {
+  let listeners = outputListeners.get(sessionId);
+  if (!listeners) {
+    listeners = new Set();
+    outputListeners.set(sessionId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners!.delete(listener);
+    if (listeners!.size === 0) {
+      outputListeners.delete(sessionId);
+    }
+  };
+}
+
+/**
+ * Notify all listeners that new output arrived for a session.
+ * Called from TerminalView/LocalTerminalView onWriteParsed handlers.
+ * Uses microtask coalescing to avoid flooding listeners during rapid output bursts.
+ */
+export function notifyTerminalOutput(sessionId: string): void {
+  const listeners = outputListeners.get(sessionId);
+  if (!listeners || listeners.size === 0) return;
+  if (pendingNotify.has(sessionId)) return;
+
+  pendingNotify.add(sessionId);
+  queueMicrotask(() => {
+    pendingNotify.delete(sessionId);
+    const current = outputListeners.get(sessionId);
+    if (current) {
+      for (const listener of current) {
+        try {
+          listener();
+        } catch (e) {
+          console.error('[TerminalRegistry] Output listener error:', e);
+        }
+      }
+    }
+  });
+}
+
 // Entries older than 5 minutes are considered stale (safety net)
 const MAX_AGE_MS = 5 * 60 * 1000;
 

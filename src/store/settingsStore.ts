@@ -208,6 +208,11 @@ export interface AiSettings {
      * Tools not in the map require manual approval.
      */
     autoApproveTools: Record<string, boolean>;
+    /**
+     * Globally disabled tools — these are never sent to the LLM.
+     * Orthogonal to autoApproveTools (which controls auto-approval).
+     */
+    disabledTools: string[];
   };
 }
 
@@ -377,6 +382,7 @@ const defaultAiSettings: AiSettings = {
       list_sessions: true,
       get_terminal_buffer: true,
       search_terminal: true,
+      await_terminal_output: true,
       list_connections: true,
       list_port_forwards: true,
       get_detected_ports: true,
@@ -418,6 +424,7 @@ const defaultAiSettings: AiSettings = {
       // Connection pool (write)
       set_pool_config: false,
     },
+    disabledTools: [],
   },
 };
 
@@ -500,6 +507,7 @@ function mergeWithDefaults(saved: Partial<PersistedSettingsV2>): PersistedSettin
               ...defaults.ai.toolUse?.autoApproveTools,
               ...saved.ai.toolUse.autoApproveTools,
             },
+            disabledTools: saved.ai.toolUse.disabledTools ?? [],
           }
         : defaults.ai.toolUse,
     },
@@ -618,7 +626,7 @@ function migrateToolUseSettings(settings: PersistedSettingsV2): PersistedSetting
     ...settings,
     ai: {
       ...settings.ai,
-      toolUse: { enabled: toolUse.enabled, autoApproveTools },
+      toolUse: { enabled: toolUse.enabled, autoApproveTools, disabledTools: [] },
     },
   };
   persistSettings(newSettings);

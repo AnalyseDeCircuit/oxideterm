@@ -114,6 +114,10 @@
       "output_truncated": "輸出已截斷",
       "condensed": "{{count}} 個早期呼叫已壓縮以節省 AI 上下文",
       "condensed_label": "早期呼叫（已壓縮）",
+      "deny_list_warning": "安全敏感指令",
+      "approval_required": "需要核准",
+      "approve": "核准",
+      "reject": "拒絕",
       "tool_names": {
         "terminal_exec": "執行命令",
         "read_file": "讀取檔案",
@@ -124,6 +128,7 @@
         "list_sessions": "列出工作階段",
         "get_terminal_buffer": "讀取緩衝區",
         "search_terminal": "搜尋終端",
+        "await_terminal_output": "等待輸出",
         "list_connections": "連線列表",
         "list_port_forwards": "連接埠轉發",
         "get_detected_ports": "偵測連接埠",
@@ -153,6 +158,18 @@
         "get_session_tree": "工作階段樹",
         "list_plugins": "列出外掛"
       }
+    },
+    "tool_selector": {
+      "title": "工具",
+      "tooltip": "{{count}}/{{total}} 個工具已啟用",
+      "session_override_active": "工作階段覆寫已啟用",
+      "session_override_off": "使用全域設定",
+      "session": "工作階段",
+      "global": "全域",
+      "reset": "全部重設",
+      "enable_group": "啟用群組",
+      "disable_group": "停用群組",
+      "active_summary": "{{active}}/{{total}} 個工具已啟用"
     }
   }
 }
