@@ -105,13 +105,24 @@
       "arguments": "Arguments",
       "output": "Output",
       "output_truncated": "Output was truncated",
+      "condensed": "{{count}} earlier call(s) — condensed for AI context",
+      "condensed_label": "Earlier calls (condensed for AI)",
       "tool_names": {
         "terminal_exec": "Run Command",
         "read_file": "Read File",
         "write_file": "Write File",
         "list_directory": "List Directory",
         "grep_search": "Search",
-        "git_status": "Git Status"
+        "git_status": "Git Status",
+        "list_sessions": "List Sessions",
+        "get_terminal_buffer": "Read Buffer",
+        "search_terminal": "Search Terminal",
+        "list_connections": "Connections",
+        "list_port_forwards": "Port Forwards",
+        "get_detected_ports": "Detected Ports",
+        "get_connection_health": "Health Check",
+        "create_port_forward": "Create Forward",
+        "stop_port_forward": "Stop Forward"
       }
     }
   }

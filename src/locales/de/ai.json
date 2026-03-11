@@ -105,13 +105,24 @@
       "arguments": "Argumente",
       "output": "Ausgabe",
       "output_truncated": "Ausgabe wurde abgeschnitten",
+      "condensed": "{{count}} frühere(r) Aufruf(e) für den KI-Kontext komprimiert",
+      "condensed_label": "Frühere Aufrufe (komprimiert)",
       "tool_names": {
         "terminal_exec": "Befehl ausführen",
         "read_file": "Datei lesen",
         "write_file": "Datei schreiben",
         "list_directory": "Verzeichnis auflisten",
         "grep_search": "Suchen",
-        "git_status": "Git-Status"
+        "git_status": "Git-Status",
+        "list_sessions": "Sitzungen auflisten",
+        "get_terminal_buffer": "Puffer lesen",
+        "search_terminal": "Terminal durchsuchen",
+        "list_connections": "Verbindungen",
+        "list_port_forwards": "Portweiterleitung",
+        "get_detected_ports": "Erkannte Ports",
+        "get_connection_health": "Statusprüfung",
+        "create_port_forward": "Weiterleitung erstellen",
+        "stop_port_forward": "Weiterleitung stoppen"
       }
     }
   }

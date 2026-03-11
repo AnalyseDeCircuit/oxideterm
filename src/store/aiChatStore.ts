@@ -10,7 +10,7 @@ import { estimateTokens, trimHistoryToTokenBudget, getModelContextWindow, respon
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
 import { DEFAULT_SYSTEM_PROMPT, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
-import { BUILTIN_TOOLS, READ_ONLY_TOOLS, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { BUILTIN_TOOLS, READ_ONLY_TOOLS, CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import i18n from '../i18n';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -250,6 +250,67 @@ function decodeAnchorContent(content: string): { content: string; metadata: NonN
     return { content: realContent, metadata };
   } catch {
     return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool Result Condensation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Threshold for condensation: keep last N tool-result messages verbatim */
+const CONDENSE_KEEP_RECENT = 3;
+/** Max summary length per tool result */
+const CONDENSE_SUMMARY_MAX = 120;
+
+/**
+ * Condense early tool-result messages in the API message array **in-place**.
+ * Replaces verbose tool output from older rounds with compact one-line summaries,
+ * while preserving the message structure (role, tool_call_id) that APIs require.
+ *
+ * Strategy: find all `role: 'tool'` messages, keep the most recent ones verbatim,
+ * and compress the rest to `[condensed] tool_name → ok|error: <first line summary>`.
+ *
+ * NOTE: This mutates the `apiMessages` array objects directly.
+ */
+function condenseToolMessages(apiMessages: ChatCompletionMessage[]): void {
+  // Find indices of all tool-result messages
+  const toolIndices: number[] = [];
+  for (let i = 0; i < apiMessages.length; i++) {
+    if (apiMessages[i].role === 'tool') {
+      toolIndices.push(i);
+    }
+  }
+
+  // Only condense if we have enough tool messages
+  if (toolIndices.length <= CONDENSE_KEEP_RECENT) return;
+
+  // Condense all except the most recent CONDENSE_KEEP_RECENT
+  const toCondense = toolIndices.slice(0, -CONDENSE_KEEP_RECENT);
+  for (const idx of toCondense) {
+    const msg = apiMessages[idx];
+    const content = msg.content;
+    const toolName = msg.tool_name || 'tool';
+
+    // Already condensed — skip
+    if (content.startsWith('[condensed]')) continue;
+
+    // Detect error: check for JSON error wrapper or known error patterns
+    let isError = false;
+    try {
+      const parsed = JSON.parse(content);
+      isError = typeof parsed === 'object' && parsed !== null && 'error' in parsed && !!parsed.error;
+    } catch {
+      // Not JSON — plain text output (success case)
+    }
+
+    // Build a one-line summary from the first meaningful line
+    const firstLine = content.split('\n').find(l => l.trim().length > 0) || '';
+    const prefix = isError ? 'error' : 'ok';
+    const summary = firstLine.length > CONDENSE_SUMMARY_MAX
+      ? firstLine.slice(0, CONDENSE_SUMMARY_MAX) + '…'
+      : firstLine;
+
+    msg.content = `[condensed] ${toolName} → ${prefix}: ${summary}`;
   }
 }
 
@@ -669,7 +730,18 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       const toolUseEnabled = aiSettings.toolUse?.enabled === true;
       const autoApproveReadOnly = aiSettings.toolUse?.autoApproveReadOnly !== false;
       const autoApproveAll = aiSettings.toolUse?.autoApproveAll === true;
-      const toolDefs = toolUseEnabled ? BUILTIN_TOOLS : undefined;
+
+      // Dynamic tool trimming: only include tools relevant to current session type
+      let toolDefs = toolUseEnabled ? BUILTIN_TOOLS : undefined;
+      if (toolUseEnabled) {
+        const terminalType = sidebarContext?.env.terminalType ?? null;
+        // Check if any SSH session exists anywhere (not just active)
+        const nodes = useSessionTreeStore.getState().nodes;
+        const hasAnySSHSession = nodes.some(n =>
+          n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
+        );
+        toolDefs = getToolsForContext(terminalType, hasAnySSHSession);
+      }
 
       // Derive tool execution context from sidebar context
       // activeNodeId can be null — context-free tools (list_sessions, etc.) still work
@@ -838,7 +910,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
           toolResultMessages.push({
             role: 'tool',
-            content: result.success ? result.output : JSON.stringify({ error: result.error }),
+            content: result.success ? result.output : JSON.stringify({ error: result.error ?? 'Unknown error' }),
             tool_call_id: tc.id,
             tool_name: tc.name,
           });
@@ -857,6 +929,15 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         apiMessages.push(assistantMsg);
         for (const trm of toolResultMessages) {
           apiMessages.push(trm);
+        }
+
+        // ── Conversation Condensation ──
+        // After 5+ tool rounds, compress the earliest tool result messages into
+        // one-line summaries to prevent context bloat. This preserves the
+        // assistant→tool_calls structure (required by APIs) but replaces verbose
+        // tool output with compact digests.
+        if (round >= 5) {
+          condenseToolMessages(apiMessages);
         }
 
         // Accumulate content for UI display, reset for next API round

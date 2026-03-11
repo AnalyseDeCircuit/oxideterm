@@ -105,13 +105,24 @@
       "arguments": "인수",
       "output": "출력",
       "output_truncated": "출력이 잘렸습니다",
+      "condensed": "{{count}}개의 이전 호출이 AI 컨텍스트 절약을 위해 압축되었습니다",
+      "condensed_label": "이전 호출 (압축됨)",
       "tool_names": {
         "terminal_exec": "명령 실행",
         "read_file": "파일 읽기",
         "write_file": "파일 쓰기",
         "list_directory": "디렉토리 목록",
         "grep_search": "검색",
-        "git_status": "Git 상태"
+        "git_status": "Git 상태",
+        "list_sessions": "세션 목록",
+        "get_terminal_buffer": "버퍼 읽기",
+        "search_terminal": "터미널 검색",
+        "list_connections": "연결 목록",
+        "list_port_forwards": "포트 포워딩",
+        "get_detected_ports": "포트 감지",
+        "get_connection_health": "상태 확인",
+        "create_port_forward": "포워딩 생성",
+        "stop_port_forward": "포워딩 중지"
       }
     }
   }

@@ -105,13 +105,24 @@
       "arguments": "参数",
       "output": "输出",
       "output_truncated": "输出已截断",
+      "condensed": "{{count}} 个早期调用已压缩以节省 AI 上下文",
+      "condensed_label": "早期调用（已压缩）",
       "tool_names": {
         "terminal_exec": "执行命令",
         "read_file": "读取文件",
         "write_file": "写入文件",
         "list_directory": "列出目录",
         "grep_search": "搜索",
-        "git_status": "Git 状态"
+        "git_status": "Git 状态",
+        "list_sessions": "列出会话",
+        "get_terminal_buffer": "读取缓冲区",
+        "search_terminal": "搜索终端",
+        "list_connections": "连接列表",
+        "list_port_forwards": "端口转发",
+        "get_detected_ports": "检测端口",
+        "get_connection_health": "健康检查",
+        "create_port_forward": "创建转发",
+        "stop_port_forward": "停止转发"
       }
     }
   }

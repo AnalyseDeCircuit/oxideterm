@@ -389,6 +389,33 @@ export const SESSION_ID_TOOLS = new Set([
   'search_terminal',
 ]);
 
+/** Tools that only make sense for SSH connections (remote nodes) */
+export const SSH_ONLY_TOOLS = new Set([
+  'list_port_forwards',
+  'get_detected_ports',
+  'create_port_forward',
+  'stop_port_forward',
+  'list_connections',
+  'get_connection_health',
+]);
+
+/**
+ * Get relevant tool definitions based on current session context.
+ * Trims SSH-only tools when only local terminals are active,
+ * saving ~1000-1500 tokens per request.
+ */
+export function getToolsForContext(
+  terminalType: 'terminal' | 'local_terminal' | null,
+  hasAnySSHSession: boolean,
+): AiToolDefinition[] {
+  // If the active session is local AND there are no SSH sessions anywhere,
+  // exclude SSH-only tools entirely
+  if (terminalType === 'local_terminal' && !hasAnySSHSession) {
+    return BUILTIN_TOOLS.filter(t => !SSH_ONLY_TOOLS.has(t.name));
+  }
+  return BUILTIN_TOOLS;
+}
+
 /**
  * Command deny-list for terminal_exec safety.
  * These patterns are checked against the command string before execution.

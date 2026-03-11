@@ -105,13 +105,24 @@
       "arguments": "引数",
       "output": "出力",
       "output_truncated": "出力は切り詰められました",
+      "condensed": "{{count}} 件の初期呼び出しが AI コンテキスト節約のため圧縮されました",
+      "condensed_label": "初期呼び出し（圧縮済み）",
       "tool_names": {
         "terminal_exec": "コマンド実行",
         "read_file": "ファイル読取",
         "write_file": "ファイル書込",
         "list_directory": "ディレクトリ一覧",
         "grep_search": "検索",
-        "git_status": "Git ステータス"
+        "git_status": "Git ステータス",
+        "list_sessions": "セッション一覧",
+        "get_terminal_buffer": "バッファ読取",
+        "search_terminal": "ターミナル検索",
+        "list_connections": "接続一覧",
+        "list_port_forwards": "ポート転送",
+        "get_detected_ports": "ポート検出",
+        "get_connection_health": "ヘルスチェック",
+        "create_port_forward": "転送作成",
+        "stop_port_forward": "転送停止"
       }
     }
   }

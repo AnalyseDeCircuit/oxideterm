@@ -105,13 +105,24 @@
       "arguments": "Argomenti",
       "output": "Output",
       "output_truncated": "L'output è stato troncato",
+      "condensed": "{{count}} chiamata/e precedente/i condensata/e per il contesto IA",
+      "condensed_label": "Chiamate precedenti (condensate)",
       "tool_names": {
         "terminal_exec": "Esegui comando",
         "read_file": "Leggi file",
         "write_file": "Scrivi file",
         "list_directory": "Elenca directory",
         "grep_search": "Cerca",
-        "git_status": "Stato Git"
+        "git_status": "Stato Git",
+        "list_sessions": "Elenco sessioni",
+        "get_terminal_buffer": "Leggi buffer",
+        "search_terminal": "Cerca terminale",
+        "list_connections": "Connessioni",
+        "list_port_forwards": "Inoltro porte",
+        "get_detected_ports": "Porte rilevate",
+        "get_connection_health": "Controllo stato",
+        "create_port_forward": "Crea inoltro",
+        "stop_port_forward": "Ferma inoltro"
       }
     }
   }

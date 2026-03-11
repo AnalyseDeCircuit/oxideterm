@@ -257,7 +257,10 @@ export const ChatMessage = memo(function ChatMessage({
 
         {/* Tool Calls Block */}
         {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-          <ToolCallBlock toolCalls={message.toolCalls} />
+          <ToolCallBlock
+            toolCalls={message.toolCalls}
+            totalRounds={message.toolCalls.length}
+          />
         )}
 
         {/* Edit mode for user messages */}

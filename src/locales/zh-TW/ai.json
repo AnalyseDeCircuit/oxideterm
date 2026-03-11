@@ -105,13 +105,24 @@
       "arguments": "參數",
       "output": "輸出",
       "output_truncated": "輸出已截斷",
+      "condensed": "{{count}} 個早期呼叫已壓縮以節省 AI 上下文",
+      "condensed_label": "早期呼叫（已壓縮）",
       "tool_names": {
         "terminal_exec": "執行命令",
         "read_file": "讀取檔案",
         "write_file": "寫入檔案",
         "list_directory": "列出目錄",
         "grep_search": "搜尋",
-        "git_status": "Git 狀態"
+        "git_status": "Git 狀態",
+        "list_sessions": "列出工作階段",
+        "get_terminal_buffer": "讀取緩衝區",
+        "search_terminal": "搜尋終端",
+        "list_connections": "連線列表",
+        "list_port_forwards": "連接埠轉發",
+        "get_detected_ports": "偵測連接埠",
+        "get_connection_health": "健康檢查",
+        "create_port_forward": "建立轉發",
+        "stop_port_forward": "停止轉發"
       }
     }
   }
