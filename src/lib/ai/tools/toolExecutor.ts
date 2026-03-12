@@ -1853,15 +1853,41 @@ function execGetSettings(args: Record<string, unknown>, startTime: number, toolC
   const section = args.section as string | undefined;
   const settings = useSettingsStore.getState().settings;
 
+  // Sanitize: strip sensitive fields from AI provider config before returning
+  const sanitize = (obj: unknown): unknown => {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    const raw = obj as Record<string, unknown>;
+    // Filter AI providers to only expose safe fields
+    if ('providers' in raw && Array.isArray(raw.providers)) {
+      return {
+        ...raw,
+        providers: (raw.providers as Array<Record<string, unknown>>).map(p => ({
+          id: p.id,
+          name: p.name,
+          type: p.type,
+          enabled: p.enabled,
+          // baseUrl, apiKey, and other sensitive fields intentionally excluded
+        })),
+      };
+    }
+    return raw;
+  };
+
   if (section) {
     const sectionData = (settings as unknown as Record<string, unknown>)[section];
     if (sectionData === undefined) {
       return { toolCallId, toolName: 'get_settings', success: false, output: '', error: `Unknown settings section: ${section}`, durationMs: Date.now() - startTime };
     }
-    return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(sectionData, null, 2), durationMs: Date.now() - startTime };
+    const safe = section === 'ai' ? sanitize(sectionData) : sectionData;
+    return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safe, null, 2), durationMs: Date.now() - startTime };
   }
 
-  return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(settings, null, 2), durationMs: Date.now() - startTime };
+  // Sanitize the full settings object: filter the ai section
+  const safeSettings = { ...settings as unknown as Record<string, unknown> };
+  if (safeSettings.ai) {
+    safeSettings.ai = sanitize(safeSettings.ai);
+  }
+  return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safeSettings, null, 2), durationMs: Date.now() - startTime };
 }
 
 function execUpdateSetting(args: Record<string, unknown>, startTime: number, toolCallId: string): AiToolResult {

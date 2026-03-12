@@ -290,7 +290,15 @@ async function getApiKeyForProvider(providerId: string, providerType: string): P
 // Main Entry: Run Agent
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Concurrency guard — prevents overlapping runAgent() calls
+let _agentRunning = false;
+
 export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<void> {
+  if (_agentRunning) {
+    console.warn('[AgentOrchestrator] runAgent() called while another task is running. Ignoring.');
+    return;
+  }
+  _agentRunning = true;
   const store = useAgentStore.getState;
 
   try {
@@ -342,17 +350,27 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       tools,
     };
 
-    for await (const event of aiProvider.streamCompletion(planConfig, messages, signal)) {
-      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      if (event.type === 'content') {
-        planText += event.content;
+    try {
+      for await (const event of aiProvider.streamCompletion(planConfig, messages, signal)) {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        if (event.type === 'content') {
+          planText += event.content;
+        }
+        if (event.type === 'thinking') {
+          planThinking += event.content;
+        }
+        if (event.type === 'error') {
+          throw new Error(event.message);
+        }
       }
-      if (event.type === 'thinking') {
-        planThinking += event.content;
-      }
-      if (event.type === 'error') {
-        throw new Error(event.message);
-      }
+    } catch (planErr) {
+      // Ensure plan step is marked as error on failure
+      store().updateStep(planStep.id, {
+        status: 'error',
+        content: planText || (planErr instanceof Error ? planErr.message : String(planErr)),
+        durationMs: Date.now() - planStep.timestamp,
+      });
+      throw planErr;
     }
 
     // Parse plan
@@ -384,8 +402,16 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
     for (let round = 0; round < task.maxRounds; round++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-      // Wait if paused
+      // Wait if paused (with 30-minute safety timeout)
+      const pauseStart = Date.now();
+      const MAX_PAUSE_MS = 30 * 60 * 1000;
       while (store().activeTask?.status === 'paused') {
+        if (Date.now() - pauseStart > MAX_PAUSE_MS) {
+          store().setTaskSummary('Task auto-cancelled: paused for over 30 minutes.');
+          store().setTaskStatus('cancelled');
+          showToast('agent.toast.pause_timeout', 'warning');
+          return;
+        }
         await new Promise(r => setTimeout(r, 200));
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       }
@@ -553,27 +579,32 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
             status: 'pending',
           };
 
-          store().addApproval(approval);
-
-          // Wait for approval resolution
+          // Register resolver before exposing approval to the UI to avoid
+          // a race where the user clicks approval before the waiter exists.
+          let approvalAbortHandler: (() => void) | null = null;
           const approved = await new Promise<boolean>((resolve) => {
             let settled = false;
             const settle = (value: boolean) => {
               if (settled) return;
               settled = true;
-              signal.removeEventListener('abort', onAbort);
+              if (approvalAbortHandler) {
+                signal.removeEventListener('abort', approvalAbortHandler);
+                approvalAbortHandler = null;
+              }
               removeApprovalResolver(approval.id);
               resolve(value);
             };
-            const onAbort = () => settle(false);
-            signal.addEventListener('abort', onAbort);
+            approvalAbortHandler = () => settle(false);
+            signal.addEventListener('abort', approvalAbortHandler);
             registerApprovalResolver(approval.id, settle);
+            store().addApproval(approval);
           });
 
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
           if (!approved) {
             store().updateStep(toolStep.id, { status: 'skipped', content: `${tc.name} (rejected)` });
+            store().setTaskStatus('executing');
             toolResults.push({
               role: 'tool',
               content: 'User rejected this tool call.',
@@ -635,9 +666,6 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
         });
       }
 
-      // Clear approvals for this round
-      store().clearApprovals();
-
       // Add tool results to conversation
       messages.push(...toolResults);
 
@@ -674,5 +702,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
     }
     store().setTaskError(err instanceof Error ? err.message : String(err));
     showToast('agent.toast.task_failed', 'error');
+  } finally {
+    _agentRunning = false;
   }
 }

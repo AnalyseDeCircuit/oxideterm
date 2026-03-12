@@ -142,6 +142,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       current.abortController.abort();
     }
 
+    // Clear old approval resolvers to prevent cross-task pollution
+    clearApprovalResolvers();
+
     // Archive previous task if exists (mark interrupted tasks as cancelled)
     if (current.activeTask) {
       const taskToArchive = (current.activeTask.status === 'executing' || current.activeTask.status === 'planning')
@@ -288,6 +291,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   setTaskStatus: (status) => {
     const finished = status === 'completed' || status === 'failed' || status === 'cancelled';
+    // When task finishes, auto-reject any pending approvals to prevent orphans
+    if (finished && get().pendingApprovals.length > 0) {
+      clearApprovalResolvers();
+    }
     set((s) => {
       if (!s.activeTask) return s;
       return {
@@ -297,6 +304,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           completedAt: finished ? Date.now() : s.activeTask.completedAt,
         },
         isRunning: !finished && status !== 'paused' && status !== 'awaiting_approval',
+        ...(finished ? { pendingApprovals: [] } : {}),
       };
     });
   },
@@ -344,12 +352,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     if (resolver) {
       resolver(approved);
       approvalResolvers.delete(approvalId);
+    } else {
+      console.warn(`[AgentStore] No resolver found for approval ${approvalId}. Task may have been cancelled.`);
     }
 
     set((s) => ({
-      pendingApprovals: s.pendingApprovals.map((a) =>
-        a.id === approvalId ? { ...a, status: approved ? 'approved' : 'rejected' } : a
-      ),
+      pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId),
     }));
   },
 
@@ -362,12 +370,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       }
     }
 
-    set((s) => ({
-      pendingApprovals: s.pendingApprovals.map((a) => ({
-        ...a,
-        status: approved ? 'approved' : 'rejected',
-      })),
-    }));
+    set({ pendingApprovals: [] });
   },
 
   clearApprovals: () => {

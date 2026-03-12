@@ -1143,6 +1143,8 @@ export const COMMAND_DENY_LIST: RegExp[] = [
   /\brunuser\b/,                        // runuser (systemd)
   /\brun0\b/,                           // run0 (systemd)
   /\bsu\s+-?c\b/,                       // su -c "command"
+  /\bsu\s+-\s*$/,                       // su - (login as root)
+  /\bsudo\s+-i\b/,                      // sudo -i (interactive root)
 
   // ── System control ──
   /\bshutdown\b/,                       // shutdown
@@ -1165,6 +1167,28 @@ export const COMMAND_DENY_LIST: RegExp[] = [
   /\bbase64\b[^\n]*\|\s*(?:sh|bash|zsh)\b/, // base64 decode | sh
   /\bprintf\b[^\n]*\|\s*(?:sh|bash|zsh)\b/, // printf | sh
   /\becho\b[^\n]*\|\s*(?:sh|bash|zsh)\b/,   // echo ... | sh
+
+  // ── Command substitution piped to shell ──
+  /\$\([^)]*\)\s*\|\s*(?:sh|bash|zsh)\b/,   // $(cmd) | sh
+  /`[^`]*`\s*\|\s*(?:sh|bash|zsh)\b/,       // `cmd` | sh
+
+  // ── SSH key / credential exfiltration via redirect ──
+  />>?\s*~?\/?\.ssh\/authorized_keys/,       // >> ~/.ssh/authorized_keys
+  />>?\s*~?\/?\.ssh\/config/,                // >> ~/.ssh/config
+
+  // ── Cron persistence ──
+  /\bcrontab\b/,                             // crontab manipulation
+  /\/etc\/cron/,                             // cron directories
+
+  // ── History / audit evasion ──
+  /\bunset\s+HISTFILE\b/,                    // unset HISTFILE
+  /\bhistory\s+-c\b/,                        // history -c
+  /\bHISTSIZE=0\b/,                          // HISTSIZE=0 (with or without export)
+
+  // ── Reverse shells / port listening ──
+  /\bnc\s+.*-[elp]/,                         // netcat listener
+  /\bsocat\b.*TCP-LISTEN/i,                  // socat listener
+  /\/dev\/tcp\//,                             // bash /dev/tcp
 
   // ── Dangerous builtins ──
   /\beval\b/,                           // eval (arbitrary code execution)
