@@ -12,6 +12,7 @@ import type { McpServerConfig, McpTransport, McpServerStatus } from '../../lib/a
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Checkbox } from '../ui/checkbox';
 import { Separator } from '../ui/separator';
 import {
   Select,
@@ -28,7 +29,6 @@ import {
   DialogHeader,
   DialogFooter,
 } from '../ui/dialog';
-import { Switch } from '../ui/switch';
 import { Plus, Trash2, Radio, CircleStop, RefreshCw, Wrench, Loader2, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 function generateId(): string {
@@ -326,10 +326,10 @@ export function McpServersPanel() {
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="retry-toggle">{t('settings_view.mcp.retry_on_disconnect')}</Label>
-                  <Switch
+                  <Checkbox
                     id="retry-toggle"
                     checked={newServer.retryOnDisconnect ?? false}
-                    onCheckedChange={(v) => setNewServer(prev => ({ ...prev, retryOnDisconnect: v }))}
+                    onCheckedChange={(v) => setNewServer(prev => ({ ...prev, retryOnDisconnect: v === true }))}
                   />
                 </div>
               </>
