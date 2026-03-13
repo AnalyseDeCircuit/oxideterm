@@ -35,6 +35,8 @@ const MAX_EMPTY_ROUNDS = 3;
 const CONDENSE_AFTER_ROUND = 5;
 const CONDENSE_KEEP_RECENT = 3;
 const CONTEXT_OVERFLOW_RATIO = 0.9;
+/** Cache for resolveActiveToolContext — skip IPC if focused node hasn't changed */
+let _cachedToolContext: { nodeId: string; context: ToolExecutionContext } | null = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helper: Show toast notification from non-React context
@@ -124,17 +126,35 @@ function condenseToolMessages(messages: ChatMessage[]): void {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helper: Resolve active ToolExecutionContext for Agent mode
+//
+// Cached per focused node — if the user hasn't switched nodes between rounds,
+// we reuse the last result and skip both IPC calls (nodeGetState + nodeAgentStatus).
+// The cache is invalidated when the focused node changes or the task starts.
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function resolveActiveToolContext(): Promise<ToolExecutionContext> {
-  const context: ToolExecutionContext = {
+  const empty: ToolExecutionContext = {
     activeNodeId: null,
     activeAgentAvailable: false,
   };
 
   try {
     const focusedNodeId = useSessionTreeStore.getState().getFocusedNodeId();
-    if (!focusedNodeId) return context;
+    if (!focusedNodeId) {
+      _cachedToolContext = null;
+      return empty;
+    }
+
+    // Cache hit — same node as last round, skip IPC
+    if (_cachedToolContext && _cachedToolContext.nodeId === focusedNodeId) {
+      return _cachedToolContext.context;
+    }
+
+    // Cache miss — resolve from backend
+    const context: ToolExecutionContext = {
+      activeNodeId: null,
+      activeAgentAvailable: false,
+    };
 
     const snapshot = await nodeGetState(focusedNodeId);
     if (snapshot?.state?.readiness === 'ready') {
@@ -146,11 +166,13 @@ async function resolveActiveToolContext(): Promise<ToolExecutionContext> {
         console.warn('[AgentOrchestrator] nodeAgentStatus failed for', focusedNodeId, e);
       }
     }
+
+    _cachedToolContext = { nodeId: focusedNodeId, context };
+    return context;
   } catch (e) {
     console.warn('[AgentOrchestrator] resolveActiveToolContext failed:', e);
+    return empty;
   }
-
-  return context;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -304,6 +326,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
     return;
   }
   _agentRunning = true;
+  _cachedToolContext = null; // Reset cache for new task
   const store = useAgentStore.getState;
 
   try {

@@ -254,12 +254,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   updateStep: (stepId, updates) => {
     set((s) => {
       if (!s.activeTask) return s;
+      const steps = s.activeTask.steps;
+      const idx = steps.findIndex((step) => step.id === stepId);
+      if (idx === -1) return s;
+      // Shallow-copy array, splice in the updated step — avoids .map() over all elements
+      const newSteps = steps.slice();
+      newSteps[idx] = { ...steps[idx], ...updates };
       return {
         activeTask: {
           ...s.activeTask,
-          steps: s.activeTask.steps.map((step) =>
-            step.id === stepId ? { ...step, ...updates } : step
-          ),
+          steps: newSteps,
         },
       };
     });

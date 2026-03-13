@@ -2,31 +2,43 @@
 //!
 //! Manages MCP server processes that communicate via stdin/stdout JSON-RPC.
 //! Each server is spawned as a child process with configurable command, args, and env.
+//!
+//! # Concurrency Model
+//!
+//! Requests to the same MCP server can be sent concurrently. The stdin writer
+//! is serialized (necessary for stream ordering), but the response reader runs
+//! in a background task that dispatches responses to waiting callers via
+//! per-request oneshot channels, keyed by JSON-RPC request ID.
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Per-server I/O handles behind their own mutex so requests to different
-/// servers never block each other.
-struct McpProcessIo {
-    stdin: tokio::process::ChildStdin,
-    stdout_reader: BufReader<tokio::process::ChildStdout>,
-    next_id: u64,
-}
+/// Pending response waiters — maps request_id → oneshot sender.
+/// The reader task dispatches responses here.
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 
 struct McpProcess {
     child: Mutex<Child>,
-    io: Mutex<McpProcessIo>,
+    /// Stdin is serialized: writes must not interleave.
+    stdin: Mutex<tokio::process::ChildStdin>,
+    /// Monotonic request ID counter (lock-free).
+    next_id: AtomicU64,
+    /// Pending response waiters.
+    pending: PendingMap,
+    /// Background task reading stdout and dispatching responses.
+    reader_task: JoinHandle<()>,
+    /// Background task logging stderr.
     stderr_task: JoinHandle<()>,
 }
 
@@ -45,9 +57,97 @@ impl McpProcessRegistry {
         let mut procs = self.processes.lock().await;
         for (id, proc) in procs.drain() {
             tracing::info!("[MCP] Stopping server {}", id);
+            proc.reader_task.abort();
             proc.stderr_task.abort();
+            // Reject all pending waiters
+            {
+                let mut pending = proc.pending.lock().await;
+                for (_, tx) in pending.drain() {
+                    let _ = tx.send(Err("MCP server shutting down".to_string()));
+                }
+            }
             let _ = proc.child.lock().await.kill().await;
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Stdout Reader Task
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Background task that reads lines from MCP server stdout and dispatches
+/// JSON-RPC responses to the corresponding pending waiter by request ID.
+/// Notifications (no "id" field) are silently skipped.
+async fn stdout_reader_loop(
+    mut reader: BufReader<tokio::process::ChildStdout>,
+    pending: PendingMap,
+    server_id: String,
+) {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                tracing::info!("[MCP:{}] stdout closed", server_id);
+                break;
+            }
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<Value>(trimmed) {
+                    Ok(val) => {
+                        if let Some(id) = val.get("id").and_then(|v| v.as_u64()) {
+                            // This is a response — find and notify the waiter
+                            let tx = {
+                                let mut map = pending.lock().await;
+                                map.remove(&id)
+                            };
+                            if let Some(tx) = tx {
+                                // Check for error
+                                if let Some(error) = val.get("error") {
+                                    let msg = error
+                                        .get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("Unknown MCP error");
+                                    let _ = tx.send(Err(format!("MCP error: {}", msg)));
+                                } else {
+                                    let result =
+                                        val.get("result").cloned().unwrap_or(Value::Null);
+                                    let _ = tx.send(Ok(result));
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "[MCP:{}] Received response for unknown request id {}",
+                                    server_id,
+                                    id
+                                );
+                            }
+                        }
+                        // Notifications (no id) are silently skipped
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            "[MCP:{}] Non-JSON line from stdout: {} — {}",
+                            server_id,
+                            e,
+                            &trimmed[..trimmed.len().min(100)]
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("[MCP:{}] stdout read error: {}", server_id, e);
+                break;
+            }
+        }
+    }
+
+    // Reader exiting — reject all remaining pending waiters
+    let mut map = pending.lock().await;
+    for (_, tx) in map.drain() {
+        let _ = tx.send(Err("MCP server closed stdout".to_string()));
     }
 }
 
@@ -72,7 +172,9 @@ pub async fn mcp_spawn_server(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn MCP server '{}': {}", command, e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn MCP server '{}': {}", command, e))?;
 
     let stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
@@ -96,13 +198,26 @@ pub async fn mcp_spawn_server(
         tokio::spawn(async {})
     };
 
+    // Pending response map — shared between writer (registers) and reader (dispatches)
+    let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+
+    // Spawn the stdout reader task
+    let reader_task = {
+        let pending_clone = Arc::clone(&pending);
+        let sid = server_id.clone();
+        tokio::spawn(stdout_reader_loop(
+            BufReader::new(stdout),
+            pending_clone,
+            sid,
+        ))
+    };
+
     let proc = Arc::new(McpProcess {
         child: Mutex::new(child),
-        io: Mutex::new(McpProcessIo {
-            stdin,
-            stdout_reader: BufReader::new(stdout),
-            next_id: 1,
-        }),
+        stdin: Mutex::new(stdin),
+        next_id: AtomicU64::new(1),
+        pending,
+        reader_task,
         stderr_task,
     });
 
@@ -113,6 +228,12 @@ pub async fn mcp_spawn_server(
 }
 
 /// Send a JSON-RPC request to an MCP server and return the result.
+///
+/// Concurrent requests to the same server are now supported:
+/// - Stdin writes are serialized (short critical section)
+/// - Response reading is done by a background task
+/// - Each caller waits on its own oneshot channel, keyed by request ID
+///
 /// `params` is a JSON string to avoid Tauri serde issues with generic Value.
 #[tauri::command]
 pub async fn mcp_send_request(
@@ -130,19 +251,17 @@ pub async fn mcp_send_request(
             .ok_or_else(|| format!("MCP server {} not found", server_id))?
     };
 
-    // Lock only the per-server I/O — other servers are unaffected
-    let mut io = proc.io.lock().await;
-
-    let request_id = io.next_id;
-    io.next_id += 1;
-
     // Parse params — return error instead of silently falling back to null
-    let params_value: Value = serde_json::from_str(&params)
-        .map_err(|e| format!("Invalid MCP params JSON: {}", e))?;
+    let params_value: Value =
+        serde_json::from_str(&params).map_err(|e| format!("Invalid MCP params JSON: {}", e))?;
+
+    let is_notification = method.starts_with("notifications/");
+
+    // Allocate request ID (lock-free)
+    let request_id = proc.next_id.fetch_add(1, Ordering::Relaxed);
 
     // Build JSON-RPC request
-    let request = if method.starts_with("notifications/") {
-        // Notifications don't have an ID
+    let request = if is_notification {
         serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -157,77 +276,53 @@ pub async fn mcp_send_request(
         })
     };
 
-    // Write to stdin
     let request_str = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-    io.stdin
-        .write_all(request_str.as_bytes())
-        .await
-        .map_err(|e| format!("Failed to write to MCP server: {}", e))?;
-    io.stdin
-        .write_all(b"\n")
-        .await
-        .map_err(|e| format!("Failed to write newline: {}", e))?;
-    io.stdin
-        .flush()
-        .await
-        .map_err(|e| format!("Failed to flush: {}", e))?;
+
+    // For non-notifications, register the waiter BEFORE writing to stdin
+    // to avoid a race where the reader task dispatches before we register.
+    let rx = if !is_notification {
+        let (tx, rx) = oneshot::channel();
+        proc.pending.lock().await.insert(request_id, tx);
+        Some(rx)
+    } else {
+        None
+    };
+
+    // Write to stdin — short critical section, only serializes the write itself
+    {
+        let mut stdin = proc.stdin.lock().await;
+        stdin
+            .write_all(request_str.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to write to MCP server: {}", e))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| format!("Failed to write newline: {}", e))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush: {}", e))?;
+    }
+    // stdin lock released here — other requests can write immediately
 
     // For notifications, return immediately
-    if method.starts_with("notifications/") {
+    if is_notification {
         return Ok(Value::Null);
     }
 
-    // Read response line from stdout (with timeout)
-    let mut response_line = String::new();
-    let read_result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        read_next_response(&mut io.stdout_reader, &mut response_line, request_id),
-    )
-    .await
-    .map_err(|_| format!("MCP server {} timed out (30s)", server_id))?;
-
-    read_result?;
-
-    let response: Value = serde_json::from_str(&response_line)
-        .map_err(|e| format!("Invalid JSON from MCP server: {} — raw: {}", e, &response_line[..response_line.len().min(200)]))?;
-
-    // Check for error
-    if let Some(error) = response.get("error") {
-        let msg = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown MCP error");
-        return Err(format!("MCP error: {}", msg));
-    }
-
-    Ok(response.get("result").cloned().unwrap_or(Value::Null))
-}
-
-/// Read lines from stdout until we find a response matching our request ID.
-/// Skips notification lines (no "id" field).
-async fn read_next_response(
-    reader: &mut BufReader<tokio::process::ChildStdout>,
-    buf: &mut String,
-    expected_id: u64,
-) -> Result<(), String> {
-    loop {
-        buf.clear();
-        let n = reader
-            .read_line(buf)
-            .await
-            .map_err(|e| format!("Failed to read from MCP server: {}", e))?;
-        if n == 0 {
-            return Err("MCP server closed stdout".to_string());
+    // Wait for the response from the reader task (with timeout)
+    let rx = rx.unwrap(); // Safe: we created it above for non-notifications
+    match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => {
+            // oneshot dropped — reader task died or server closed
+            Err(format!("MCP server {} connection lost", server_id))
         }
-
-        // Try to parse and check if this is our response
-        if let Ok(val) = serde_json::from_str::<Value>(buf.trim()) {
-            if let Some(id) = val.get("id").and_then(|v| v.as_u64()) {
-                if id == expected_id {
-                    return Ok(());
-                }
-            }
-            // It's a notification or different request response — skip
+        Err(_) => {
+            // Timeout — clean up the pending entry
+            proc.pending.lock().await.remove(&request_id);
+            Err(format!("MCP server {} timed out (30s)", server_id))
         }
     }
 }
@@ -246,17 +341,26 @@ pub async fn mcp_close_server(
         tracing::info!("[MCP] Closing server {}", server_id);
         // Send shutdown notification, wait briefly, then force kill
         {
-            let mut io = proc.io.lock().await;
+            let mut stdin = proc.stdin.lock().await;
             let shutdown = b"{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n";
-            let _ = io.stdin.write_all(shutdown).await;
-            let _ = io.stdin.flush().await;
+            let _ = stdin.write_all(shutdown).await;
+            let _ = stdin.flush().await;
         }
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(3),
             proc.child.lock().await.wait(),
-        ).await;
+        )
+        .await;
         let _ = proc.child.lock().await.kill().await;
+        proc.reader_task.abort();
         proc.stderr_task.abort();
+        // Reject all remaining pending waiters
+        {
+            let mut pending = proc.pending.lock().await;
+            for (_, tx) in pending.drain() {
+                let _ = tx.send(Err("MCP server closed".to_string()));
+            }
+        }
     }
     Ok(())
 }
