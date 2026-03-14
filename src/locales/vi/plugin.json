@@ -48,6 +48,19 @@
       "loading": "Đang tải…",
       "error": "Lỗi",
       "disabled": "Đã tắt"
-    }
+    },
+    "create_plugin": "Plugin mới",
+    "create_plugin_title": "Tạo plugin mới",
+    "create_plugin_id": "ID Plugin",
+    "create_plugin_id_hint": "Chữ thường, số, gạch ngang (vd: my-plugin)",
+    "create_plugin_name": "Tên hiển thị",
+    "create_plugin_name_hint": "Tên hiển thị của plugin",
+    "create_plugin_submit": "Tạo",
+    "create_plugin_cancel": "Hủy",
+    "create_plugin_success": "Plugin \"{{name}}\" đã được tạo thành công",
+    "create_plugin_error": "Tạo plugin thất bại: {{error}}",
+    "view_logs": "Nhật ký",
+    "clear_logs": "Xóa",
+    "no_logs": "Chưa có nhật ký"
   }
 }

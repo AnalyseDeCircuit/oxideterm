@@ -657,6 +657,7 @@ pub fn run() {
         commands::read_plugin_file,
         commands::save_plugin_config,
         commands::load_plugin_config,
+        commands::scaffold_plugin,
         // Plugin file server commands
         commands::start_plugin_server,
         commands::get_plugin_server_port,
@@ -937,6 +938,7 @@ pub fn run() {
         commands::save_plugin_config,
         commands::load_plugin_config,
         // Plugin file server commands
+        commands::scaffold_plugin,
         commands::start_plugin_server,
         commands::get_plugin_server_port,
         commands::stop_plugin_server,

@@ -326,3 +326,82 @@ pub async fn load_plugin_config() -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to load plugin config: {}", e))
 }
+
+/// Scaffold a new plugin with minimal boilerplate files.
+/// Creates plugin directory, plugin.json manifest, and main.js entry point.
+#[tauri::command]
+pub async fn scaffold_plugin(plugin_id: String, name: String) -> Result<PluginManifest, String> {
+    validate_plugin_id(&plugin_id)?;
+
+    let dir = plugins_dir()?.join(&plugin_id);
+    if dir.exists() {
+        return Err(format!(
+            "Plugin directory already exists: {}",
+            dir.display()
+        ));
+    }
+
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("Failed to create plugin directory: {}", e))?;
+
+    // Generate plugin.json
+    let manifest_json = serde_json::json!({
+        "id": plugin_id,
+        "name": name,
+        "version": "0.1.0",
+        "description": "",
+        "author": "",
+        "main": "./main.js",
+        "engines": { "oxideterm": ">=1.6.2" },
+        "contributes": {
+            "tabs": [],
+            "settings": []
+        }
+    });
+    let manifest_str =
+        serde_json::to_string_pretty(&manifest_json).map_err(|e| format!("JSON error: {}", e))?;
+    tokio::fs::write(dir.join("plugin.json"), manifest_str.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to write plugin.json: {}", e))?;
+
+    // Generate main.js — minimal working example
+    let main_js = r#"// @ts-check
+/// <reference path="./oxideterm-plugin.d.ts" />
+
+/**
+ * Plugin entry point — called by OxideTerm when the plugin is loaded.
+ * @param {import('./oxideterm-plugin.d.ts').PluginContext} ctx
+ */
+export function activate(ctx) {
+  ctx.ui.showToast({
+    title: `${ctx.pluginId} activated!`,
+    variant: 'success',
+  });
+
+  // Example: listen for new connections
+  ctx.events.onConnect((conn) => {
+    console.log(`[${ctx.pluginId}] Connected: ${conn.username}@${conn.host}`);
+  });
+}
+
+/**
+ * Called when the plugin is unloaded. Clean up any global state here.
+ */
+export function deactivate() {
+  // Disposables registered via ctx are cleaned up automatically.
+}
+"#;
+    tokio::fs::write(dir.join("main.js"), main_js.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to write main.js: {}", e))?;
+
+    // Read back the manifest to return (ensures consistency)
+    let content = tokio::fs::read_to_string(dir.join("plugin.json"))
+        .await
+        .map_err(|e| format!("Failed to read back manifest: {}", e))?;
+    let manifest: PluginManifest =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse manifest: {}", e))?;
+
+    Ok(manifest)
+}

@@ -48,6 +48,19 @@
       "loading": "Chargement…",
       "error": "Erreur",
       "disabled": "Désactivé"
-    }
+    },
+    "create_plugin": "Nouveau plugin",
+    "create_plugin_title": "Créer un nouveau plugin",
+    "create_plugin_id": "ID du plugin",
+    "create_plugin_id_hint": "Lettres minuscules, chiffres, tirets (ex : my-plugin)",
+    "create_plugin_name": "Nom affiché",
+    "create_plugin_name_hint": "Nom lisible du plugin",
+    "create_plugin_submit": "Créer",
+    "create_plugin_cancel": "Annuler",
+    "create_plugin_success": "Plugin \"{{name}}\" créé avec succès",
+    "create_plugin_error": "Échec de création du plugin : {{error}}",
+    "view_logs": "Journaux",
+    "clear_logs": "Effacer",
+    "no_logs": "Aucun journal"
   }
 }

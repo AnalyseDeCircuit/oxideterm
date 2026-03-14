@@ -39,13 +39,28 @@
     "registry_error": "레지스트리 로드 실패",
     "loading_registry": "플러그인 레지스트리 로딩 중...",
     "registry_empty": "레지스트리에 사용 가능한 플러그인이 없습니다.",
-    "no_search_results": "검색과 일치하는 플러그인이 없습니다.",    "registry_coming_soon": "플러그인 마켓플레이스 곧 출시",
-    "registry_coming_soon_desc": "플러그인 마켓플레이스는 아직 이용할 수 없습니다. 플러그인 디렉토리에 수동으로 배치하여 설치할 수 있습니다.",    "status": {
+    "no_search_results": "검색과 일치하는 플러그인이 없습니다.",
+    "registry_coming_soon": "플러그인 마켓플레이스 곧 출시",
+    "registry_coming_soon_desc": "플러그인 마켓플레이스는 아직 이용할 수 없습니다. 플러그인 디렉토리에 수동으로 배치하여 설치할 수 있습니다.",
+    "status": {
       "active": "활성",
       "inactive": "비활성",
       "loading": "로딩 중…",
       "error": "오류",
       "disabled": "비활성화됨"
-    }
+    },
+    "create_plugin": "새 플러그인",
+    "create_plugin_title": "새 플러그인 만들기",
+    "create_plugin_id": "플러그인 ID",
+    "create_plugin_id_hint": "소문자, 숫자, 하이픈 (예: my-plugin)",
+    "create_plugin_name": "표시 이름",
+    "create_plugin_name_hint": "플러그인의 표시 이름",
+    "create_plugin_submit": "만들기",
+    "create_plugin_cancel": "취소",
+    "create_plugin_success": "플러그인 \"{{name}}\" 생성 완료",
+    "create_plugin_error": "플러그인 생성 실패: {{error}}",
+    "view_logs": "로그",
+    "clear_logs": "지우기",
+    "no_logs": "로그 없음"
   }
 }

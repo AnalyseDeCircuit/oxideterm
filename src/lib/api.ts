@@ -1293,6 +1293,12 @@ export const api = {
     return invoke('load_plugin_config');
   },
 
+  /** Scaffold a new plugin with boilerplate files */
+  pluginScaffold: async (pluginId: string, name: string): Promise<PluginManifest> => {
+    if (USE_MOCK) throw new Error('Mock mode does not support plugin scaffolding');
+    return invoke('scaffold_plugin', { pluginId, name });
+  },
+
   /** Start the plugin file server (for multi-file packages). Returns the port. */
   pluginStartServer: async (): Promise<number> => {
     if (USE_MOCK) return 0;

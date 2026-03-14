@@ -28,6 +28,11 @@ const ERROR_WINDOW_MS = 60_000;
 /** Per-plugin error tracking */
 const errorTrackers = new Map<string, { count: number; windowStart: number }>();
 
+/** Emit a log entry to the plugin store for UI display */
+function pluginLog(pluginId: string, level: 'info' | 'warn' | 'error', message: string): void {
+  usePluginStore.getState().addPluginLog(pluginId, level, message);
+}
+
 /**
  * Check if a plugin should be circuit-broken due to excessive errors.
  * Returns true if the plugin should be disabled.
@@ -44,7 +49,9 @@ export function trackPluginError(pluginId: string): boolean {
   tracker.count++;
 
   if (tracker.count >= MAX_ERRORS) {
+    const msg = `Auto-disabled: ${MAX_ERRORS} errors in ${ERROR_WINDOW_MS / 1000}s. Reload the plugin after fixing the issue, or disable it in Plugin Manager.`;
     console.error(`[PluginLoader] Plugin "${pluginId}" exceeded error limit (${MAX_ERRORS} in ${ERROR_WINDOW_MS / 1000}s), auto-disabling`);
+    pluginLog(pluginId, 'error', msg);
     errorTrackers.delete(pluginId);
 
     // Persist the disabled state so the plugin stays disabled across restarts
@@ -168,6 +175,7 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
   const validationError = validateManifest(manifest);
   if (validationError) {
     store.setPluginState(id, 'error', validationError);
+    pluginLog(id, 'error', `Manifest validation failed: ${validationError}`);
     console.error(`[PluginLoader] Plugin "${id}" validation failed: ${validationError}`);
     return;
   }
@@ -254,9 +262,22 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
     }
 
     store.setPluginState(id, 'active');
+    pluginLog(id, 'info', `Activated v${manifest.version}`);
     console.log(`[PluginLoader] Plugin "${id}" v${manifest.version} activated successfully`);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+
+    // Produce actionable error messages
+    let hint = '';
+    if (errorMsg.includes('timed out')) {
+      hint = ' (Hint: activate() must resolve within 5s. Use async patterns for long init work.)';
+    } else if (errorMsg.includes('activate')) {
+      hint = ' (Hint: ensure your main.js exports an activate() function.)';
+    } else if (errorMsg.includes('import') || errorMsg.includes('SyntaxError')) {
+      hint = ' (Hint: check that main.js is a valid ES module bundle.)';
+    }
+
+    const fullError = errorMsg + hint;
 
     // Clean up any partial state left by a failed activation:
     // - module reference (set before activate() was called)
@@ -267,7 +288,8 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
     removePluginI18n(id);
     cleanupPluginAssets(id);
 
-    store.setPluginState(id, 'error', errorMsg);
+    store.setPluginState(id, 'error', fullError);
+    pluginLog(id, 'error', `Load failed: ${fullError}`);
     console.error(`[PluginLoader] Failed to load plugin "${id}":`, errorMsg);
   }
 }
@@ -324,6 +346,7 @@ export async function unloadPlugin(pluginId: string): Promise<void> {
   if (currentState !== 'disabled') {
     store.setPluginState(pluginId, 'inactive');
   }
+  pluginLog(pluginId, 'info', 'Unloaded');
   console.log(`[PluginLoader] Plugin "${pluginId}" unloaded`);
 }
 

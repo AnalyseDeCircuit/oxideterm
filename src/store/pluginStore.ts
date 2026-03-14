@@ -67,6 +67,13 @@ type InstallProgress = {
   error?: string;
 };
 
+/** A single plugin log entry */
+export type PluginLogEntry = {
+  timestamp: number;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Store Interface
 // ═══════════════════════════════════════════════════════════════════════════
@@ -103,6 +110,9 @@ interface PluginStore {
   installProgress: Map<string, InstallProgress>;
   /** Plugins with available updates */
   availableUpdates: RegistryEntry[];
+
+  /** Plugin runtime logs: key = pluginId */
+  pluginLogs: Map<string, PluginLogEntry[]>;
 
   // ── Plugin Lifecycle ────────────────────────────────────────────────
   /** Register a discovered plugin (initially inactive) */
@@ -173,6 +183,12 @@ interface PluginStore {
   setAvailableUpdates: (updates: RegistryEntry[]) => void;
   /** Check if a plugin has an update available */
   hasUpdate: (pluginId: string) => boolean;
+
+  // ── Log Actions ────────────────────────────────────────────────────
+  /** Append a log entry for a plugin (capped at 200 per plugin) */
+  addPluginLog: (pluginId: string, level: PluginLogEntry['level'], message: string) => void;
+  /** Clear all logs for a plugin */
+  clearPluginLogs: (pluginId: string) => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -195,6 +211,7 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   registryEntries: [],
   installProgress: new Map(),
   availableUpdates: [],
+  pluginLogs: new Map(),
 
   // ── Plugin Lifecycle ────────────────────────────────────────────────
 
@@ -358,7 +375,10 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
       const disposables = new Map(prev.disposables);
       disposables.delete(pluginId);
 
-      return { tabViews, sidebarPanels, inputInterceptors, outputProcessors, shortcuts, commands, contextMenuItems, statusBarItems, keybindings, disposables };
+      const pluginLogs = new Map(prev.pluginLogs);
+      pluginLogs.delete(pluginId);
+
+      return { tabViews, sidebarPanels, inputInterceptors, outputProcessors, shortcuts, commands, contextMenuItems, statusBarItems, keybindings, disposables, pluginLogs };
     });
   },
 
@@ -413,5 +433,27 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
 
   hasUpdate: (pluginId) => {
     return get().availableUpdates.some((u) => u.id === pluginId);
+  },
+
+  // ── Log Actions ────────────────────────────────────────────────────
+
+  addPluginLog: (pluginId, level, message) => {
+    set((prev) => {
+      const pluginLogs = new Map(prev.pluginLogs);
+      const existing = pluginLogs.get(pluginId) ?? [];
+      const entry: PluginLogEntry = { timestamp: Date.now(), level, message };
+      // Keep last 200 entries
+      const updated = [...existing, entry].slice(-200);
+      pluginLogs.set(pluginId, updated);
+      return { pluginLogs };
+    });
+  },
+
+  clearPluginLogs: (pluginId) => {
+    set((prev) => {
+      const pluginLogs = new Map(prev.pluginLogs);
+      pluginLogs.delete(pluginId);
+      return { pluginLogs };
+    });
   },
 }));

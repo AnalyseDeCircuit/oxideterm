@@ -39,13 +39,28 @@
     "registry_error": "載入倉庫失敗",
     "loading_registry": "正在載入外掛倉庫...",
     "registry_empty": "倉庫中暫無可用外掛。",
-    "no_search_results": "沒有符合的外掛。",    "registry_coming_soon": "外掛市場即將推出",
-    "registry_coming_soon_desc": "外掛市場尚未開放。您仍然可以將外掛手動放置到外掛目錄中進行安裝。",    "status": {
+    "no_search_results": "沒有符合的外掛。",
+    "registry_coming_soon": "外掛市場即將推出",
+    "registry_coming_soon_desc": "外掛市場尚未開放。您仍然可以將外掛手動放置到外掛目錄中進行安裝。",
+    "status": {
       "active": "執行中",
       "inactive": "未啟用",
       "loading": "載入中…",
       "error": "錯誤",
       "disabled": "已停用"
-    }
+    },
+    "create_plugin": "新建外掛",
+    "create_plugin_title": "建立新外掛",
+    "create_plugin_id": "外掛 ID",
+    "create_plugin_id_hint": "小寫字母、數字、連字號（例如 my-plugin）",
+    "create_plugin_name": "顯示名稱",
+    "create_plugin_name_hint": "外掛的可讀名稱",
+    "create_plugin_submit": "建立",
+    "create_plugin_cancel": "取消",
+    "create_plugin_success": "外掛「{{name}}」建立成功",
+    "create_plugin_error": "建立外掛失敗：{{error}}",
+    "view_logs": "日誌",
+    "clear_logs": "清除",
+    "no_logs": "暫無日誌"
   }
 }

@@ -24,11 +24,15 @@ import {
   Globe,
   Loader2,
   ArrowUpCircle,
+  Plus,
+  ScrollText,
+  X,
 } from 'lucide-react';
 import { homeDir, join } from '@tauri-apps/api/path';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Separator } from '../ui/separator';
 import { usePluginStore } from '../../store/pluginStore';
+import type { PluginLogEntry } from '../../store/pluginStore';
 import { api } from '../../lib/api';
 import {
   loadPlugin,
@@ -64,13 +68,15 @@ function StatusBadge({ state }: { state: PluginState }) {
 }
 
 /** Single plugin row inside a settings-style card */
-function PluginRow({ info, onToggle, onReload }: {
+function PluginRow({ info, logs, onToggle, onReload }: {
   info: PluginInfo;
+  logs: PluginLogEntry[];
   onToggle: (id: string, enable: boolean) => void;
   onReload: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const { manifest } = info;
 
   const isActive = info.state === 'active';
@@ -106,6 +112,16 @@ function PluginRow({ info, onToggle, onReload }: {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {logs.length > 0 && (
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              className={`p-1.5 rounded transition-colors ${showLogs ? 'text-theme-accent bg-theme-accent/10' : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel'}`}
+              title={t('plugin.view_logs')}
+            >
+              <ScrollText className="h-3.5 w-3.5" />
+            </button>
+          )}
+
           {(isError || isActive) && (
             <button
               onClick={() => onReload(manifest.id)}
@@ -212,6 +228,37 @@ function PluginRow({ info, onToggle, onReload }: {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Log viewer panel */}
+      {showLogs && logs.length > 0 && (
+        <div className="ml-7 p-3 rounded bg-theme-bg-panel/30 border border-theme-border/50 space-y-1">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-theme-text">{t('plugin.view_logs')}</span>
+            <button
+              onClick={() => usePluginStore.getState().clearPluginLogs(manifest.id)}
+              className="text-[10px] text-theme-text-muted hover:text-theme-text transition-colors"
+            >
+              {t('plugin.clear_logs')}
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-0.5 font-mono text-[11px]">
+            {logs.map((log, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-theme-text-muted flex-shrink-0">
+                  {new Date(log.timestamp).toLocaleTimeString()}
+                </span>
+                <span className={`flex-shrink-0 uppercase w-10 ${
+                  log.level === 'error' ? 'text-red-400' :
+                  log.level === 'warn' ? 'text-yellow-400' : 'text-theme-text-muted'
+                }`}>
+                  {log.level}
+                </span>
+                <span className="text-theme-text break-all">{log.message}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -332,6 +379,7 @@ export function PluginManagerView() {
   const { t } = useTranslation();
   const bgActive = useTabBgActive('plugin_manager');
   const plugins = usePluginStore((s) => s.plugins);
+  const pluginLogs = usePluginStore((s) => s.pluginLogs);
   const registryEntries = usePluginStore((s) => s.registryEntries);
   const availableUpdates = usePluginStore((s) => s.availableUpdates);
   const [refreshing, setRefreshing] = useState(false);
@@ -340,6 +388,11 @@ export function PluginManagerView() {
   const [fetchingRegistry, setFetchingRegistry] = useState(false);
   const [registryError, setRegistryError] = useState<string | null>(null);
   const [registryConfigured, setRegistryConfigured] = useState<boolean | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [createId, setCreateId] = useState('');
+  const [createName, setCreateName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const pluginList = Array.from(plugins.values());
   const activeCount = pluginList.filter(p => p.state === 'active').length;
@@ -516,6 +569,25 @@ export function PluginManagerView() {
     }
   }, []);
 
+  const handleCreatePlugin = useCallback(async () => {
+    if (!createId.trim() || !createName.trim()) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const manifest = await api.pluginScaffold(createId.trim(), createName.trim());
+      // Register and show the new plugin
+      const store = usePluginStore.getState();
+      store.registerPlugin(manifest);
+      setShowCreateDialog(false);
+      setCreateId('');
+      setCreateName('');
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }, [createId, createName]);
+
   return (
     <div className={`h-full overflow-auto ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       <div className="max-w-4xl mx-auto p-10">
@@ -550,6 +622,15 @@ export function PluginManagerView() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowCreateDialog(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-theme-border text-theme-accent hover:bg-theme-accent/10 transition-colors"
+                  title={t('plugin.create_plugin')}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t('plugin.create_plugin')}
+                </button>
+
                 <button
                   onClick={handleOpenPluginsDir}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-theme-border text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel transition-colors"
@@ -627,6 +708,7 @@ export function PluginManagerView() {
                         <div className="flex-1">
                           <PluginRow
                             info={info}
+                            logs={pluginLogs.get(info.manifest.id) ?? []}
                             onToggle={handleToggle}
                             onReload={handleReload}
                           />
@@ -737,6 +819,82 @@ export function PluginManagerView() {
           )}
         </div>
       </div>
+
+      {/* Create Plugin Dialog */}
+      {showCreateDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowCreateDialog(false)}>
+          <div
+            className="w-full max-w-md rounded-lg border border-theme-border bg-theme-bg-panel p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-medium text-theme-text">{t('plugin.create_plugin_title')}</h3>
+              <button
+                onClick={() => setShowCreateDialog(false)}
+                className="p-1 rounded text-theme-text-muted hover:text-theme-text transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-theme-text mb-1">
+                  {t('plugin.create_plugin_id')}
+                </label>
+                <input
+                  type="text"
+                  value={createId}
+                  onChange={(e) => setCreateId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  placeholder="my-awesome-plugin"
+                  className="w-full px-3 py-2 text-sm rounded border border-theme-border bg-theme-bg text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50"
+                  autoFocus
+                />
+                <p className="text-[10px] text-theme-text-muted mt-1">{t('plugin.create_plugin_id_hint')}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-theme-text mb-1">
+                  {t('plugin.create_plugin_name')}
+                </label>
+                <input
+                  type="text"
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                  placeholder="My Awesome Plugin"
+                  className="w-full px-3 py-2 text-sm rounded border border-theme-border bg-theme-bg text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50"
+                />
+                <p className="text-[10px] text-theme-text-muted mt-1">{t('plugin.create_plugin_name_hint')}</p>
+              </div>
+            </div>
+
+            {createError && (
+              <div className="p-2.5 rounded bg-red-500/10 border border-red-500/20">
+                <p className="text-xs text-red-400 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                  <span>{createError}</span>
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowCreateDialog(false)}
+                className="px-3 py-1.5 text-xs rounded border border-theme-border text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-panel transition-colors"
+              >
+                {t('plugin.create_plugin_cancel')}
+              </button>
+              <button
+                onClick={handleCreatePlugin}
+                disabled={creating || !createId.trim() || !/^[a-z0-9][a-z0-9-]*$/.test(createId) || !createName.trim()}
+                className="px-3 py-1.5 text-xs rounded bg-theme-accent text-white hover:bg-theme-accent/80 transition-colors disabled:opacity-50"
+              >
+                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('plugin.create_plugin_submit')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
