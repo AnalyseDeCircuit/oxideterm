@@ -881,6 +881,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       fitRaf1 = requestAnimationFrame(() => {
         fitRaf2 = requestAnimationFrame(() => {
           if (!isStale()) {
+            // Flush any pending option changes (fontSize, theme, etc.) that
+            // were applied while the renderer was disposed.
+            const t = terminalRef.current;
+            if (t) t.refresh(0, t.rows - 1);
             fitAddonRef.current?.fit();
           }
         });
