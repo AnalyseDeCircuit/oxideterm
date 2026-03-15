@@ -194,7 +194,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
             <div className="text-[9px] text-theme-text-muted/40 font-medium uppercase tracking-wider mb-0.5">
               {t('ai.tool_use.arguments')}
             </div>
-            <pre className="text-[10px] text-theme-text-muted/60 font-mono bg-theme-bg/50 rounded px-1.5 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
+            <pre className="text-[10px] text-theme-text-muted/60 font-[family-name:var(--terminal-font-family)] bg-theme-bg/50 rounded px-1.5 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
               {(() => {
                 try { return JSON.stringify(JSON.parse(call.arguments), null, 2); }
                 catch { return call.arguments; }
@@ -209,12 +209,12 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
                 {t('ai.tool_use.output')}
               </div>
               {call.result!.error && (
-                <div className="text-[10px] text-red-400/80 font-mono bg-red-500/5 rounded px-1.5 py-1 mb-1">
+                <div className="text-[10px] text-red-400/80 font-[family-name:var(--terminal-font-family)] bg-red-500/5 rounded px-1.5 py-1 mb-1">
                   {call.result!.error}
                 </div>
               )}
               {call.result!.output && (
-                <pre className="text-[10px] text-theme-text-muted/60 font-mono bg-theme-bg/50 rounded px-1.5 py-1 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
+                <pre className="text-[10px] text-theme-text-muted/60 font-[family-name:var(--terminal-font-family)] bg-theme-bg/50 rounded px-1.5 py-1 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
                   {call.result!.output}
                 </pre>
               )}
