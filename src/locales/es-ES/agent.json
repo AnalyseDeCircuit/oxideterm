@@ -46,7 +46,8 @@
       "title": "{{count}} acción(es) esperando aprobación",
       "approve_all": "Aprobar todo",
       "reject_all": "Rechazar todo",
-      "skip": "Omitir"
+      "skip": "Omitir",
+      "viewArgs": "Ver argumentos"
     },
     "status": {
       "idle": "Inactivo",
@@ -62,7 +63,8 @@
       "pause": "Pausar",
       "resume": "Reanudar",
       "cancel": "Cancelar",
-      "round": "Ronda {{current}}/{{max}}"
+      "round": "Ronda {{current}}/{{max}}",
+      "switchAutonomy": "Cambiar autonomía (actual: {{level}})"
     },
     "summary": {
       "completed": "Tarea completada",
@@ -73,6 +75,7 @@
       "back": "Volver a la lista",
       "view": "Ver detalles",
       "rerun": "Volver a ejecutar",
+      "rerunWithPlan": "Reejecutar con el mismo plan",
       "delete": "Eliminar",
       "clear": "Borrar todo",
       "rounds": "{{count}} rondas",
@@ -86,6 +89,32 @@
       "max_rounds": "Máximo de rondas alcanzado, la tarea puede estar incompleta",
       "no_progress": "Agente detenido: sin progreso tras varias rondas",
       "reviewer_stopped": "El revisor detuvo la tarea"
+    },
+    "customRoles": {
+      "title": "Roles personalizados",
+      "add": "Nuevo rol",
+      "newRole": "Nuevo rol personalizado",
+      "editRole": "Editar rol",
+      "duplicate": "Duplicar",
+      "name": "Nombre",
+      "roleType": "Tipo",
+      "description": "Descripción",
+      "promptTemplate": "Plantilla de prompt del sistema",
+      "toolAccess": "Acceso a herramientas",
+      "toolAll": "Todas las herramientas",
+      "toolNone": "Sin herramientas",
+      "toolCustom": "Personalizado",
+      "toolList": "Herramientas permitidas (separadas por comas)",
+      "outputFormat": "Salida",
+      "maxRounds": "Rondas máximas",
+      "nameHint": "Mi rol personalizado",
+      "descriptionHint": "Qué hace este rol...",
+      "promptHint": "Prompt del sistema para este rol...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Seleccionar pipeline",
+      "default": "Pipeline predeterminado"
     }
   }
 }

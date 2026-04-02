@@ -46,7 +46,8 @@
       "title": "{{count}} action(s) awaiting approval",
       "approve_all": "Approve All",
       "reject_all": "Reject All",
-      "skip": "Skip"
+      "skip": "Skip",
+      "viewArgs": "View arguments"
     },
     "status": {
       "idle": "Idle",
@@ -62,7 +63,8 @@
       "pause": "Pause",
       "resume": "Resume",
       "cancel": "Cancel",
-      "round": "Round {{current}}/{{max}}"
+      "round": "Round {{current}}/{{max}}",
+      "switchAutonomy": "Switch autonomy (current: {{level}})"
     },
     "summary": {
       "completed": "Task Completed",
@@ -73,6 +75,7 @@
       "back": "Back to list",
       "view": "View details",
       "rerun": "Re-run task",
+      "rerunWithPlan": "Re-run with same plan",
       "delete": "Delete",
       "clear": "Clear all",
       "rounds": "{{count}} rounds",
@@ -86,6 +89,32 @@
       "max_rounds": "Max rounds reached, task may be incomplete",
       "no_progress": "Agent stopped: no progress after multiple rounds",
       "reviewer_stopped": "Reviewer stopped the task"
+    },
+    "customRoles": {
+      "title": "Custom Roles",
+      "add": "New Role",
+      "newRole": "New Custom Role",
+      "editRole": "Edit Role",
+      "duplicate": "Duplicate",
+      "name": "Name",
+      "nameHint": "My Custom Role",
+      "roleType": "Type",
+      "description": "Description",
+      "descriptionHint": "What this role does...",
+      "promptTemplate": "System Prompt Template",
+      "promptHint": "System prompt for this role...",
+      "toolAccess": "Tool Access",
+      "toolAll": "All tools",
+      "toolNone": "No tools",
+      "toolCustom": "Custom",
+      "toolList": "Allowed tools (comma-separated)",
+      "toolListHint": "terminal_exec, read_file, list_directory",
+      "outputFormat": "Output",
+      "maxRounds": "Max Rounds"
+    },
+    "pipeline": {
+      "select": "Select pipeline",
+      "default": "Default Pipeline"
     }
   }
 }

@@ -46,7 +46,8 @@
       "title": "{{count}} hành động đang chờ phê duyệt",
       "approve_all": "Phê duyệt tất cả",
       "reject_all": "Từ chối tất cả",
-      "skip": "Bỏ qua"
+      "skip": "Bỏ qua",
+      "viewArgs": "Xem tham số"
     },
     "status": {
       "idle": "Rảnh",
@@ -62,7 +63,8 @@
       "pause": "Tạm dừng",
       "resume": "Tiếp tục",
       "cancel": "Hủy",
-      "round": "Vòng {{current}}/{{max}}"
+      "round": "Vòng {{current}}/{{max}}",
+      "switchAutonomy": "Chuyển đổi tự chủ (hiện tại: {{level}})"
     },
     "summary": {
       "completed": "Nhiệm vụ hoàn thành",
@@ -73,6 +75,7 @@
       "back": "Quay lại danh sách",
       "view": "Xem chi tiết",
       "rerun": "Chạy lại",
+      "rerunWithPlan": "Chạy lại với cùng kế hoạch",
       "delete": "Xóa",
       "clear": "Xóa tất cả",
       "rounds": "{{count}} vòng",
@@ -86,6 +89,32 @@
       "max_rounds": "Đạt số vòng tối đa, nhiệm vụ có thể chưa hoàn thiện",
       "no_progress": "Đại lý đã dừng: không có tiến triển sau nhiều vòng",
       "reviewer_stopped": "Người đánh giá đã dừng tác vụ"
+    },
+    "customRoles": {
+      "title": "Vai trò tùy chỉnh",
+      "add": "Vai trò mới",
+      "newRole": "Vai trò tùy chỉnh mới",
+      "editRole": "Chỉnh sửa vai trò",
+      "duplicate": "Nhân bản",
+      "name": "Tên",
+      "roleType": "Loại",
+      "description": "Mô tả",
+      "promptTemplate": "Mẫu lệnh hệ thống",
+      "toolAccess": "Quyền truy cập công cụ",
+      "toolAll": "Tất cả công cụ",
+      "toolNone": "Không có công cụ",
+      "toolCustom": "Tùy chỉnh",
+      "toolList": "Các công cụ được phép (phân cách bằng dấu phẩy)",
+      "outputFormat": "Đầu ra",
+      "maxRounds": "Số vòng tối đa",
+      "nameHint": "Vai trò tùy chỉnh của tôi",
+      "descriptionHint": "Vai trò này làm gì...",
+      "promptHint": "Lệnh hệ thống cho vai trò này...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Chọn pipeline",
+      "default": "Pipeline mặc định"
     }
   }
 }

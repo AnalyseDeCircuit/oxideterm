@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import { api } from '../lib/api';
+import { MAX_STEPS } from '../lib/ai/agentConfig';
 import type { AgentTask, AgentStep, AgentApproval, AutonomyLevel, AgentTaskStatus, AgentPlan, TabType } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -43,8 +44,8 @@ interface AgentStore {
   abortController: AbortController | null;
 
   // ─── Task Lifecycle ─────────────────────────────────────────────────────
-  /** Start a new agent task. contextTabType inherits tool context from the last active tab. */
-  startTask: (goal: string, providerId: string, model: string, contextTabType?: TabType | null) => AgentTask;
+  /** Start a new agent task. contextTabType inherits tool context from the last active tab. seedPlan reuses a prior plan. */
+  startTask: (goal: string, providerId: string, model: string, contextTabType?: TabType | null, seedPlan?: AgentPlan | null) => AgentTask;
   /** Pause the current task */
   pauseTask: () => void;
   /** Resume a paused task */
@@ -147,7 +148,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   // ─── Task Lifecycle ─────────────────────────────────────────────────────
 
-  startTask: (goal, providerId, model, contextTabType) => {
+  startTask: (goal, providerId, model, contextTabType, seedPlan) => {
     // Cancel any running task first
     const current = get();
     if (current.isRunning && current.abortController) {
@@ -175,11 +176,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const task: AgentTask = {
       id: crypto.randomUUID(),
       goal,
-      status: 'planning',
+      status: seedPlan ? 'executing' : 'planning',
       autonomyLevel,
       providerId,
       model,
-      plan: null,
+      plan: seedPlan ? { ...seedPlan, currentStepIndex: 0 } : null,
       steps: [],
       currentRound: 0,
       maxRounds: MAX_ROUNDS[autonomyLevel],
@@ -333,16 +334,29 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   appendStep: (step) => {
     set((s) => {
       if (!s.activeTask) return s;
-      // Cap steps to prevent unbounded growth (keep last 200)
-      const MAX_STEPS = 200;
       const existingSteps = s.activeTask.steps;
-      const newSteps = existingSteps.length >= MAX_STEPS
-        ? [...existingSteps.slice(-(MAX_STEPS - 1)), step]
-        : [...existingSteps, step];
+      if (existingSteps.length >= MAX_STEPS) {
+        // Add a truncation marker so the user knows earlier steps were dropped
+        const marker: AgentStep = {
+          id: `truncation-${Date.now()}`,
+          roundIndex: step.roundIndex,
+          type: 'decision',
+          content: `[Earlier steps truncated — only the most recent ${MAX_STEPS} steps are retained]`,
+          timestamp: Date.now(),
+          status: 'completed',
+        };
+        const trimmed = existingSteps.slice(-(MAX_STEPS - 2));
+        return {
+          activeTask: {
+            ...s.activeTask,
+            steps: [...trimmed, marker, step],
+          },
+        };
+      }
       return {
         activeTask: {
           ...s.activeTask,
-          steps: newSteps,
+          steps: [...existingSteps, step],
         },
       };
     });
@@ -450,12 +464,21 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   setTaskError: (error) => {
+    // Clear pending resolvers to prevent orphans
+    clearApprovalResolvers();
+
     set((s) => {
       if (!s.activeTask) return s;
+      const finishedTask = { ...s.activeTask, error, status: 'failed' as const, completedAt: Date.now() };
+      // Persist failed task
+      api.agentHistorySave(finishedTask.id, JSON.stringify(finishedTask)).catch((e) => {
+        console.warn('[AgentStore] Failed to persist failed task:', e);
+      });
       return {
-        activeTask: { ...s.activeTask, error, status: 'failed', completedAt: Date.now() },
+        activeTask: finishedTask,
         isRunning: false,
         abortController: null,
+        pendingApprovals: [],
       };
     });
   },

@@ -46,7 +46,8 @@
       "title": "{{count}} action(s) en attente d'approbation",
       "approve_all": "Tout approuver",
       "reject_all": "Tout rejeter",
-      "skip": "Passer"
+      "skip": "Passer",
+      "viewArgs": "Voir les arguments"
     },
     "status": {
       "idle": "Inactif",
@@ -62,7 +63,8 @@
       "pause": "Pause",
       "resume": "Reprendre",
       "cancel": "Annuler",
-      "round": "Tour {{current}}/{{max}}"
+      "round": "Tour {{current}}/{{max}}",
+      "switchAutonomy": "Changer l'autonomie (actuel : {{level}})"
     },
     "summary": {
       "completed": "Tâche terminée",
@@ -73,6 +75,7 @@
       "back": "Retour à la liste",
       "view": "Voir les détails",
       "rerun": "Relancer",
+      "rerunWithPlan": "Relancer avec le même plan",
       "delete": "Supprimer",
       "clear": "Tout effacer",
       "rounds": "{{count}} tours",
@@ -86,6 +89,32 @@
       "max_rounds": "Nombre max de tours atteint, tâche peut être incomplète",
       "no_progress": "Agent arrêté : aucun progrès après plusieurs tours",
       "reviewer_stopped": "Le réviseur a arrêté la tâche"
+    },
+    "customRoles": {
+      "title": "Rôles personnalisés",
+      "add": "Nouveau rôle",
+      "newRole": "Nouveau rôle personnalisé",
+      "editRole": "Modifier le rôle",
+      "duplicate": "Dupliquer",
+      "name": "Nom",
+      "roleType": "Type",
+      "description": "Description",
+      "promptTemplate": "Modèle de prompt système",
+      "toolAccess": "Accès aux outils",
+      "toolAll": "Tous les outils",
+      "toolNone": "Aucun outil",
+      "toolCustom": "Personnalisé",
+      "toolList": "Outils autorisés (séparés par des virgules)",
+      "outputFormat": "Sortie",
+      "maxRounds": "Tours max",
+      "nameHint": "Mon rôle personnalisé",
+      "descriptionHint": "Ce que fait ce rôle...",
+      "promptHint": "Prompt système pour ce rôle...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Sélectionner un pipeline",
+      "default": "Pipeline par défaut"
     }
   }
 }

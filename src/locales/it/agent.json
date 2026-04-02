@@ -46,7 +46,8 @@
       "title": "{{count}} azione/i in attesa di approvazione",
       "approve_all": "Approva tutto",
       "reject_all": "Rifiuta tutto",
-      "skip": "Salta"
+      "skip": "Salta",
+      "viewArgs": "Visualizza argomenti"
     },
     "status": {
       "idle": "Inattivo",
@@ -62,7 +63,8 @@
       "pause": "Pausa",
       "resume": "Riprendi",
       "cancel": "Annulla",
-      "round": "Round {{current}}/{{max}}"
+      "round": "Round {{current}}/{{max}}",
+      "switchAutonomy": "Cambia autonomia (attuale: {{level}})"
     },
     "summary": {
       "completed": "Compito completato",
@@ -73,6 +75,7 @@
       "back": "Torna alla lista",
       "view": "Vedi dettagli",
       "rerun": "Riesegui",
+      "rerunWithPlan": "Riesegui con lo stesso piano",
       "delete": "Elimina",
       "clear": "Cancella tutto",
       "rounds": "{{count}} turni",
@@ -86,6 +89,32 @@
       "max_rounds": "Numero massimo di turni raggiunto, il compito potrebbe essere incompleto",
       "no_progress": "Agente fermato: nessun progresso dopo più turni",
       "reviewer_stopped": "Il revisore ha fermato l'attività"
+    },
+    "customRoles": {
+      "title": "Ruoli personalizzati",
+      "add": "Nuovo ruolo",
+      "newRole": "Nuovo ruolo personalizzato",
+      "editRole": "Modifica ruolo",
+      "duplicate": "Duplica",
+      "name": "Nome",
+      "roleType": "Tipo",
+      "description": "Descrizione",
+      "promptTemplate": "Modello di prompt di sistema",
+      "toolAccess": "Accesso agli strumenti",
+      "toolAll": "Tutti gli strumenti",
+      "toolNone": "Nessuno strumento",
+      "toolCustom": "Personalizzato",
+      "toolList": "Strumenti consentiti (separati da virgola)",
+      "outputFormat": "Output",
+      "maxRounds": "Turni massimi",
+      "nameHint": "Il mio ruolo personalizzato",
+      "descriptionHint": "Cosa fa questo ruolo...",
+      "promptHint": "Prompt di sistema per questo ruolo...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Seleziona pipeline",
+      "default": "Pipeline predefinita"
     }
   }
 }

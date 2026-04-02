@@ -13,15 +13,15 @@
  * Reuses existing toolExecutor and AI providers.
  */
 
-import { useAgentStore, registerApprovalResolver, removeApprovalResolver } from '../../store/agentStore';
+import { useAgentStore } from '../../store/agentStore';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getProvider } from './providerRegistry';
 import { buildAgentSystemPrompt } from './agentSystemPrompt';
 import { buildPlannerSystemPrompt } from './agentPlanner';
-import { buildReviewerSystemPrompt, buildReviewPrompt, parseReview, DEFAULT_REVIEW_INTERVAL } from './agentReviewer';
-import { getToolsForContext, isCommandDenied, executeTool, READ_ONLY_TOOLS } from './tools';
+import { buildReviewerSystemPrompt, buildReviewPrompt, parseReview } from './agentReviewer';
+import { getToolsForContext } from './tools';
 import { estimateTokens, getModelContextWindow, responseReserve } from './tokenUtils';
 import { getActiveCwd, getActivePaneMetadata } from '../terminalRegistry';
 import { platform } from '../platform';
@@ -29,20 +29,23 @@ import { nodeGetState, nodeAgentStatus } from '../api';
 import { api } from '../api';
 import i18n from '../../i18n';
 import { useToastStore } from '../../hooks/useToast';
+import {
+  MAX_OUTPUT_BYTES,
+  MAX_EMPTY_ROUNDS,
+  CONDENSE_AFTER_ROUND,
+  CONDENSE_KEEP_RECENT,
+  CONTEXT_OVERFLOW_RATIO,
+  DEFAULT_REVIEW_INTERVAL,
+} from './agentConfig';
+import {
+  streamCompletion,
+  runSingleShot,
+  processToolCalls,
+  createStep,
+} from './roles';
 import type { ChatMessage, AiStreamProvider } from './providers';
-import type { AgentTask, AgentStep, AgentApproval, AgentPlanStep, AiToolResult, AgentRoleConfig, AgentReviewerConfig } from '../../types';
+import type { AgentTask, AgentStep, AgentPlanStep, AgentRoleConfig, AgentReviewerConfig, TabType } from '../../types';
 import type { ToolExecutionContext } from './tools';
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Constants
-// ═══════════════════════════════════════════════════════════════════════════
-
-const MAX_TOOL_CALLS_PER_ROUND = 8;
-const MAX_OUTPUT_BYTES = 8192;
-const MAX_EMPTY_ROUNDS = 3;
-const CONDENSE_AFTER_ROUND = 2;
-const CONDENSE_KEEP_RECENT = 3;
-const CONTEXT_OVERFLOW_RATIO = 0.9;
 /** Cache for resolveActiveToolContext — skip IPC if focused node hasn't changed */
 let _cachedToolContext: { nodeId: string; context: ToolExecutionContext } | null = null;
 
@@ -184,27 +187,6 @@ async function resolveActiveToolContext(): Promise<ToolExecutionContext> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Create AgentStep
-// ═══════════════════════════════════════════════════════════════════════════
-
-function createStep(
-  roundIndex: number,
-  type: AgentStep['type'],
-  content: string,
-  toolCall?: AgentStep['toolCall'],
-): AgentStep {
-  return {
-    id: crypto.randomUUID(),
-    roundIndex,
-    type,
-    content,
-    toolCall,
-    timestamp: Date.now(),
-    status: 'pending',
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Helper: Rebuild LLM messages from prior agent steps (for task resume)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -341,41 +323,6 @@ async function getSessionsDescription(): Promise<string> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Should auto-approve a tool call
-// ═══════════════════════════════════════════════════════════════════════════
-
-function shouldAutoApprove(
-  toolName: string,
-  args: Record<string, unknown>,
-  autonomyLevel: AgentTask['autonomyLevel'],
-): boolean {
-  // Deny-listed commands always need approval regardless of level
-  if ((toolName === 'terminal_exec' || toolName === 'local_exec' || toolName === 'batch_exec') &&
-      typeof args.command === 'string' && isCommandDenied(args.command)) {
-    return false;
-  }
-  if (toolName === 'batch_exec') {
-    if (!Array.isArray(args.commands)) return false; // fail closed
-    for (const cmd of args.commands) {
-      if (typeof cmd === 'string' && isCommandDenied(cmd)) return false;
-    }
-  }
-
-  switch (autonomyLevel) {
-    case 'supervised':
-      return false; // Everything needs approval
-    case 'balanced': {
-      // Respect per-tool autoApproveTools setting from user preferences
-      const autoApproveTools = useSettingsStore.getState().settings.ai.toolUse?.autoApproveTools;
-      if (autoApproveTools?.[toolName] === true) return true;
-      return READ_ONLY_TOOLS.has(toolName);
-    }
-    case 'autonomous':
-      return true; // Only deny-list blocks (handled above)
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Helper: Get API key for provider
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -439,8 +386,7 @@ let _agentRunning = false;
 
 export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<void> {
   if (_agentRunning) {
-    console.warn('[AgentOrchestrator] runAgent() called while another task is running. Ignoring.');
-    return;
+    throw new Error('Agent task already running');
   }
   _agentRunning = true;
   _cachedToolContext = null; // Reset cache for new task
@@ -504,35 +450,41 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
     // Snapshot CWD at task creation, so it won't drift if user switches panes
     const cwd = getActiveCwd();
 
-    // Snapshot environment context at task creation
-    const paneMetadata = getActivePaneMetadata();
-    const appStateSnap = useAppStore.getState();
-    const activeTabSnap = appStateSnap.tabs.find(t => t.id === appStateSnap.activeTabId);
-    const activeTabType = activeTabSnap?.type ?? null;
-    const terminalType = paneMetadata?.terminalType ?? null;
-    const localOS = platform.isMac ? 'macOS' : platform.isWindows ? 'Windows' : 'Linux';
-
-    // Resolve connection info for SSH terminals
-    let connectionInfo: string | undefined;
-    let remoteEnvDesc: string | undefined;
-    if (terminalType === 'terminal' && paneMetadata?.sessionId) {
-      const session = appStateSnap.sessions.get(paneMetadata.sessionId);
-      if (session?.connectionId) {
-        const conn = appStateSnap.connections.get(session.connectionId);
-        if (conn) {
-          connectionInfo = `${conn.username}@${conn.host}`;
-          if (conn.remoteEnv) {
-            const { osType, osVersion, arch, kernel, shell } = conn.remoteEnv;
-            const parts: string[] = [osType];
-            if (osVersion) parts.push(osVersion);
-            if (arch) parts.push(arch);
-            if (kernel) parts.push(`kernel ${kernel}`);
-            if (shell) parts.push(`shell ${shell}`);
-            remoteEnvDesc = parts.join(', ');
+    // Snapshot environment context (refreshed per-round via snapshotEnvContext)
+    const snapshotEnvContext = () => {
+      const paneMetadata = getActivePaneMetadata();
+      const snap = useAppStore.getState();
+      const tab = snap.tabs.find(t => t.id === snap.activeTabId);
+      const result = {
+        activeTabType: (tab?.type ?? null) as TabType | null,
+        terminalType: (paneMetadata?.terminalType ?? null) as 'terminal' | 'local_terminal' | null,
+        connectionInfo: undefined as string | undefined,
+        remoteEnvDesc: undefined as string | undefined,
+        localOS: platform.isMac ? 'macOS' : platform.isWindows ? 'Windows' : 'Linux',
+      };
+      if (result.terminalType === 'terminal' && paneMetadata?.sessionId) {
+        const session = snap.sessions.get(paneMetadata.sessionId);
+        if (session?.connectionId) {
+          const conn = snap.connections.get(session.connectionId);
+          if (conn) {
+            result.connectionInfo = `${conn.username}@${conn.host}`;
+            if (conn.remoteEnv) {
+              const { osType, osVersion, arch, kernel, shell } = conn.remoteEnv;
+              const parts: string[] = [osType];
+              if (osVersion) parts.push(osVersion);
+              if (arch) parts.push(arch);
+              if (kernel) parts.push(`kernel ${kernel}`);
+              if (shell) parts.push(`shell ${shell}`);
+              result.remoteEnvDesc = parts.join(', ');
+            }
           }
         }
       }
-    }
+      return result;
+    };
+
+    const envCtx = snapshotEnvContext();
+    const { activeTabType, terminalType, connectionInfo, localOS, remoteEnvDesc } = envCtx;
 
     let systemPrompt = buildAgentSystemPrompt({
       autonomyLevel: task.autonomyLevel,
@@ -568,6 +520,18 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
 
       startRound = task.resumeFromRound;
       store().setTaskStatus('executing');
+    } else if (task.plan) {
+      // ── Seeded Plan (reuse from previous task) ─────────────────────────
+      // Plan already set by startTask with seedPlan — skip planning phase
+      const planStep = createStep(0, 'plan', task.plan.description ?? task.goal);
+      store().appendStep(planStep);
+      store().updateStep(planStep.id, {
+        content: task.plan.description ?? '',
+        status: 'completed',
+        durationMs: 0,
+      });
+      messages.push({ role: 'assistant', content: `Plan:\n${task.plan.steps.map((s, i) => `${i + 1}. ${s.description}`).join('\n')}` });
+      store().setTaskStatus('executing');
     } else {
       // ── Phase 1: Planning ──────────────────────────────────────────────
       // Use planner role if configured (may use a different, cheaper/faster model)
@@ -591,20 +555,15 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
           { role: 'system', content: plannerPrompt + (cwd ? `\nCurrent working directory: ${cwd}` : '') },
           { role: 'user', content: `Task: ${task.goal}` },
         ];
-        const planLlmConfig = {
-          baseUrl: plannerConfig.baseUrl,
-          model: plannerConfig.model,
-          apiKey: plannerConfig.apiKey,
-          tools: [], // Planner does not call tools
-        };
 
         try {
-          for await (const event of plannerConfig.provider.streamCompletion(planLlmConfig, plannerMessages, signal)) {
-            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            if (event.type === 'content') planText += event.content;
-            if (event.type === 'thinking') planThinking += event.content;
-            if (event.type === 'error') throw new Error(event.message);
-          }
+          const result = await runSingleShot(
+            { provider: plannerConfig.provider, baseUrl: plannerConfig.baseUrl, model: plannerConfig.model, apiKey: plannerConfig.apiKey },
+            plannerMessages,
+            signal,
+          );
+          planText = result.text;
+          planThinking = result.thinkingContent;
         } catch (planErr) {
           store().updateStep(planStep.id, {
             status: 'error',
@@ -615,20 +574,14 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
         }
       } else {
         // Default: executor model handles planning (existing behavior)
-        const planLlmConfig = {
-          baseUrl: provider.baseUrl,
-          model: task.model,
-          apiKey,
-          tools,
-        };
-
         try {
-          for await (const event of aiProvider.streamCompletion(planLlmConfig, messages, signal)) {
-            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            if (event.type === 'content') planText += event.content;
-            if (event.type === 'thinking') planThinking += event.content;
-            if (event.type === 'error') throw new Error(event.message);
-          }
+          const result = await runSingleShot(
+            { provider: aiProvider, baseUrl: provider.baseUrl, model: task.model, apiKey },
+            messages,
+            signal,
+          );
+          planText = result.text;
+          planThinking = result.thinkingContent;
         } catch (planErr) {
           store().updateStep(planStep.id, {
             status: 'error',
@@ -697,20 +650,20 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       tools = resolveTools();
 
       // Update system prompt with current round (refresh env context for tab switches)
-      const roundAppState = useAppStore.getState();
-      const roundActiveTab = roundAppState.tabs.find(t => t.id === roundAppState.activeTabId);
+      const roundEnv = snapshotEnvContext();
+      const liveAutonomyLevel = useAgentStore.getState().autonomyLevel;
       messages[0] = {
         role: 'system',
         content: buildAgentSystemPrompt({
-          autonomyLevel: task.autonomyLevel,
+          autonomyLevel: liveAutonomyLevel,
           maxRounds: task.maxRounds,
           currentRound: round,
           availableSessions: sessionsDesc,
-          activeTabType: roundActiveTab?.type ?? null,
-          terminalType,
-          connectionInfo,
-          localOS,
-          remoteEnvDesc,
+          activeTabType: roundEnv.activeTabType,
+          terminalType: roundEnv.terminalType,
+          connectionInfo: roundEnv.connectionInfo,
+          localOS: roundEnv.localOS,
+          remoteEnvDesc: roundEnv.remoteEnvDesc,
           cwd: cwd ?? undefined,
         }),
       };
@@ -719,58 +672,15 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       const budget = contextWindow - reserve;
       const trimmed = trimMessages(messages, budget);
 
-      // Stream LLM response
-      const config = {
-        baseUrl: provider.baseUrl,
-        model: task.model,
-        apiKey,
+      // Stream LLM response via RoleRunner
+      const streamResult = await streamCompletion(
+        { provider: aiProvider, baseUrl: provider.baseUrl, model: task.model, apiKey },
+        trimmed,
         tools,
-      };
+        signal,
+      );
 
-      let responseText = '';
-      let thinkingContent = '';
-      const toolCallMap = new Map<string, { id: string; name: string; arguments: string }>();
-
-      for await (const event of aiProvider.streamCompletion(config, trimmed, signal)) {
-        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-        switch (event.type) {
-          case 'content':
-            responseText += event.content;
-            break;
-          case 'thinking':
-            thinkingContent += event.content;
-            break;
-          case 'tool_call':
-            // Incremental update — upsert by id to avoid duplicates
-            if (!event.id) break;
-            {
-              const existing = toolCallMap.get(event.id);
-              if (existing) {
-                existing.arguments = event.arguments;
-              } else {
-                toolCallMap.set(event.id, { id: event.id, name: event.name, arguments: event.arguments });
-              }
-            }
-            break;
-          case 'tool_call_complete':
-            // Final update with complete arguments
-            if (!event.id) break;
-            {
-              const existing = toolCallMap.get(event.id);
-              if (existing) {
-                existing.arguments = event.arguments;
-              } else {
-                toolCallMap.set(event.id, { id: event.id, name: event.name, arguments: event.arguments });
-              }
-            }
-            break;
-          case 'error':
-            throw new Error(event.message);
-        }
-      }
-
-      const collectedToolCalls = [...toolCallMap.values()];
+      const { text: responseText, thinkingContent, toolCalls: collectedToolCalls } = streamResult;
 
       // Check if LLM returned a completion response (no tool calls)
       if (collectedToolCalls.length === 0) {
@@ -818,11 +728,6 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
         continue;
       }
 
-      // Guard: max tool calls per round
-      if (collectedToolCalls.length > MAX_TOOL_CALLS_PER_ROUND) {
-        collectedToolCalls.length = MAX_TOOL_CALLS_PER_ROUND;
-      }
-
       // Reset empty round counter — we got tool calls
       emptyRoundCount = 0;
 
@@ -838,156 +743,15 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       }
       messages.push(assistantMsg);
 
-      // ── Tool Approval & Execution ────────────────────────────────────
+      // ── Tool Approval & Execution (delegated to RoleRunner) ──────────
       const toolContext = await resolveActiveToolContext();
-
-      const toolResults: ChatMessage[] = [];
-
-      for (const tc of collectedToolCalls) {
-        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-        let parsedArgs: Record<string, unknown>;
-        try {
-          parsedArgs = JSON.parse(tc.arguments || '{}');
-        } catch {
-          // Malformed JSON from LLM — record error and skip
-          const errorStep = createStep(round, 'error', `Malformed tool arguments for ${tc.name}: ${tc.arguments.slice(0, 200)}`);
-          store().appendStep(errorStep);
-          store().updateStep(errorStep.id, { status: 'error' });
-          toolResults.push({
-            role: 'tool',
-            content: `Error: Invalid JSON arguments for ${tc.name}`,
-            tool_call_id: tc.id,
-            tool_name: tc.name,
-          });
-          continue;
-        }
-
-        // Create step for this tool call
-        const toolStep = createStep(round, 'tool_call', `${tc.name}`, {
-          name: tc.name,
-          arguments: tc.arguments,
-        });
-        store().appendStep(toolStep);
-
-        // Check approval
-        const autoApprove = shouldAutoApprove(tc.name, parsedArgs, task.autonomyLevel);
-
-        if (!autoApprove) {
-          // Need user approval
-          store().updateStep(toolStep.id, { status: 'pending' });
-          store().setTaskStatus('awaiting_approval');
-          showToast('agent.toast.approval_needed', 'warning');
-
-          const approval: AgentApproval = {
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            stepId: toolStep.id,
-            toolName: tc.name,
-            arguments: tc.arguments,
-            status: 'pending',
-            reasoning: responseText ? responseText.slice(0, 200) : undefined,
-          };
-
-          // Register resolver before exposing approval to the UI to avoid
-          // a race where the user clicks approval before the waiter exists.
-          // Resolves with: 'approved' | 'rejected' | 'skipped'
-          let approvalAbortHandler: (() => void) | null = null;
-          const resolution = await new Promise<'approved' | 'rejected' | 'skipped'>((resolve) => {
-            let settled = false;
-            const settle = (value: boolean | 'skipped') => {
-              if (settled) return;
-              settled = true;
-              if (approvalAbortHandler) {
-                signal.removeEventListener('abort', approvalAbortHandler);
-                approvalAbortHandler = null;
-              }
-              removeApprovalResolver(approval.id);
-              resolve(value === 'skipped' ? 'skipped' : value ? 'approved' : 'rejected');
-            };
-            approvalAbortHandler = () => settle(false);
-            signal.addEventListener('abort', approvalAbortHandler);
-            registerApprovalResolver(approval.id, settle);
-            store().addApproval(approval);
-          });
-
-          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-          if (resolution === 'rejected') {
-            store().updateStep(toolStep.id, { status: 'skipped', content: `${tc.name} (rejected)` });
-            store().setTaskStatus('executing');
-            toolResults.push({
-              role: 'tool',
-              content: 'User rejected this tool call.',
-              tool_call_id: tc.id,
-              tool_name: tc.name,
-            });
-            continue;
-          }
-
-          if (resolution === 'skipped') {
-            store().updateStep(toolStep.id, { status: 'skipped', content: `${tc.name} (skipped)` });
-            store().setTaskStatus('executing');
-            toolResults.push({
-              role: 'tool',
-              content: 'User skipped this tool call. Continue with remaining steps.',
-              tool_call_id: tc.id,
-              tool_name: tc.name,
-            });
-            continue;
-          }
-
-          store().setTaskStatus('executing');
-        }
-
-        // Execute tool
-        store().updateStep(toolStep.id, { status: 'running' });
-        const startTime = Date.now();
-
-        let result: AiToolResult;
-        try {
-          result = await executeTool(tc.name, parsedArgs, toolContext);
-        } catch (err) {
-          result = {
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: false,
-            output: '',
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-
-        const durationMs = Date.now() - startTime;
-
-        store().updateStep(toolStep.id, {
-          status: result.success ? 'completed' : 'error',
-          durationMs,
-          toolCall: {
-            name: tc.name,
-            arguments: tc.arguments,
-            result,
-          },
-        });
-
-        // Add observation step
-        const obsContent = result.success
-          ? result.output.slice(0, MAX_OUTPUT_BYTES)
-          : `Error: ${result.error || 'Unknown error'}`;
-        const obsStep = createStep(round, 'observation', obsContent);
-        store().appendStep(obsStep);
-        store().updateStep(obsStep.id, { status: 'completed' });
-
-        // Feed result back to LLM (truncate large outputs)
-        const truncatedOutput = result.success
-          ? (result.output.length > MAX_OUTPUT_BYTES ? result.output.slice(0, MAX_OUTPUT_BYTES) + '\n[output truncated]' : result.output)
-          : `Error: ${result.error}`;
-        toolResults.push({
-          role: 'tool',
-          content: truncatedOutput,
-          tool_call_id: tc.id,
-          tool_name: tc.name,
-        });
-      }
+      const { results: toolResults, allSucceeded } = await processToolCalls(
+        collectedToolCalls,
+        round,
+        task,
+        toolContext,
+        signal,
+      );
 
       // Add tool results to conversation
       messages.push(...toolResults);
@@ -1009,7 +773,6 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       }
 
       // Advance plan step only if all tools in this round succeeded
-      const allSucceeded = toolResults.every(tr => !tr.content?.startsWith('Error:') && !tr.content?.startsWith('User rejected'));
       if (allSucceeded && store().activeTask?.plan) {
         store().advancePlanStep();
       }
@@ -1034,19 +797,12 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
               { role: 'user', content: reviewContent },
             ];
 
-            const reviewLlmConfig = {
-              baseUrl: reviewerConfig.baseUrl,
-              model: reviewerConfig.model,
-              apiKey: reviewerConfig.apiKey,
-              tools: [], // Reviewer does not call tools
-            };
-
-            let reviewText = '';
-            for await (const event of reviewerConfig.provider.streamCompletion(reviewLlmConfig, reviewMessages, signal)) {
-              if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-              if (event.type === 'content') reviewText += event.content;
-              if (event.type === 'error') throw new Error(event.message);
-            }
+            const reviewResult = await runSingleShot(
+              { provider: reviewerConfig.provider, baseUrl: reviewerConfig.baseUrl, model: reviewerConfig.model, apiKey: reviewerConfig.apiKey },
+              reviewMessages,
+              signal,
+            );
+            const reviewText = reviewResult.text;
 
             // Record review step
             const reviewStep = createStep(round, 'review', reviewText);
@@ -1055,7 +811,10 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
 
             // Parse and act on review
             const review = parseReview(reviewText);
-            if (review) {
+            if (!review) {
+              // Record failed parse so user can see the raw response
+              store().updateStep(reviewStep.id, { status: 'error', content: `[Review parse failed] ${reviewText.slice(0, 500)}` });
+            } else if (review) {
               if (!review.shouldContinue) {
                 // Critical issue — stop execution
                 const p = store().activeTask?.plan;
@@ -1074,8 +833,11 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
             }
           }
         } catch (reviewErr) {
-          // Reviewer failure is non-fatal — log and continue
-          console.warn('[AgentOrchestrator] Reviewer failed:', reviewErr);
+          // Reviewer failure is non-fatal — record as visible error step and continue
+          const errMsg = reviewErr instanceof Error ? reviewErr.message : String(reviewErr);
+          const errStep = createStep(round, 'error', `Reviewer failed: ${errMsg}`);
+          store().appendStep(errStep);
+          store().updateStep(errStep.id, { status: 'error' });
         }
       }
     }

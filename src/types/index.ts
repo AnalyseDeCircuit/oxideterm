@@ -1519,6 +1519,45 @@ export type AutonomyLevel = 'supervised' | 'balanced' | 'autonomous';
 /** Agent role type — planner, executor, reviewer */
 export type AgentRoleType = 'planner' | 'executor' | 'reviewer';
 
+/** Declarative role definition — describes a role's prompt, tools, and constraints */
+export type AgentRoleDefinition = {
+  /** Unique role ID (e.g. 'builtin:planner', 'custom:my-auditor') */
+  id: string;
+  /** Display name (i18n key or plain text) */
+  name: string;
+  /** Description — used for discovery and UI display */
+  description: string;
+  /** Role type in the pipeline */
+  roleType: AgentRoleType;
+  /** System prompt template. Supports variables: {{context}}, {{tools}}, {{plan}}, {{steps}}, {{goal}} */
+  systemPromptTemplate: string;
+  /** Tool allowlist: '*' = all tools, string[] = only listed tools, [] = no tools */
+  toolAllowlist: '*' | string[];
+  /** Max rounds for this role (null = use pipeline default) */
+  maxRounds: number | null;
+  /** Expected output format */
+  outputSchema: 'json' | 'text' | 'structured';
+  /** Whether this is a builtin role (cannot be deleted) */
+  builtin: boolean;
+};
+
+/** A pipeline stage — pairs a role with its provider/model config */
+export type AgentPipelineStage = {
+  /** Role definition ID */
+  roleId: string;
+  /** Provider/model config for this stage */
+  config: AgentRoleConfig;
+};
+
+/** Named pipeline preset */
+export type AgentPipelinePreset = {
+  id: string;
+  name: string;
+  description: string;
+  stages: AgentPipelineStage[];
+  builtin: boolean;
+};
+
 /** Configuration for an agent role (allows separate provider/model per role) */
 export type AgentRoleConfig = {
   /** Whether this role uses a custom provider/model (false = use task default) */

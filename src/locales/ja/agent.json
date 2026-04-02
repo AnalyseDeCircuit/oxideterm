@@ -46,7 +46,8 @@
       "title": "{{count}} 件のアクションが承認待ち",
       "approve_all": "すべて承認",
       "reject_all": "すべて拒否",
-      "skip": "スキップ"
+      "skip": "スキップ",
+      "viewArgs": "引数を表示"
     },
     "status": {
       "idle": "アイドル",
@@ -62,7 +63,8 @@
       "pause": "一時停止",
       "resume": "再開",
       "cancel": "キャンセル",
-      "round": "ラウンド {{current}}/{{max}}"
+      "round": "ラウンド {{current}}/{{max}}",
+      "switchAutonomy": "自律レベルを切替（現在：{{level}}）"
     },
     "summary": {
       "completed": "タスク完了",
@@ -73,6 +75,7 @@
       "back": "一覧に戻る",
       "view": "詳細を見る",
       "rerun": "再実行",
+      "rerunWithPlan": "同じプランで再実行",
       "delete": "削除",
       "clear": "すべてクリア",
       "rounds": "{{count}} ラウンド",
@@ -86,6 +89,32 @@
       "max_rounds": "最大ラウンドに達しました。タスクが未完了の可能性があります",
       "no_progress": "エージェント停止：複数ラウンド進捗なし",
       "reviewer_stopped": "レビュアーがタスクを停止しました"
+    },
+    "customRoles": {
+      "title": "カスタムロール",
+      "add": "新規ロール",
+      "newRole": "新規カスタムロール",
+      "editRole": "ロールを編集",
+      "duplicate": "複製",
+      "name": "名前",
+      "roleType": "タイプ",
+      "description": "説明",
+      "promptTemplate": "システムプロンプトテンプレート",
+      "toolAccess": "ツールアクセス",
+      "toolAll": "すべてのツール",
+      "toolNone": "ツールなし",
+      "toolCustom": "カスタム",
+      "toolList": "許可するツール（カンマ区切り）",
+      "outputFormat": "出力",
+      "maxRounds": "最大ラウンド",
+      "nameHint": "マイカスタムロール",
+      "descriptionHint": "このロールの機能...",
+      "promptHint": "このロールのシステムプロンプト...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "パイプラインを選択",
+      "default": "デフォルトパイプライン"
     }
   }
 }

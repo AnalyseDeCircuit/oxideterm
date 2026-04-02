@@ -46,7 +46,8 @@
       "title": "{{count}} Aktion(en) warten auf Genehmigung",
       "approve_all": "Alle genehmigen",
       "reject_all": "Alle ablehnen",
-      "skip": "Überspringen"
+      "skip": "Überspringen",
+      "viewArgs": "Argumente anzeigen"
     },
     "status": {
       "idle": "Inaktiv",
@@ -62,7 +63,8 @@
       "pause": "Pause",
       "resume": "Fortsetzen",
       "cancel": "Abbrechen",
-      "round": "Runde {{current}}/{{max}}"
+      "round": "Runde {{current}}/{{max}}",
+      "switchAutonomy": "Autonomie wechseln (aktuell: {{level}})"
     },
     "summary": {
       "completed": "Aufgabe abgeschlossen",
@@ -73,6 +75,7 @@
       "back": "Zurück zur Liste",
       "view": "Details anzeigen",
       "rerun": "Erneut ausführen",
+      "rerunWithPlan": "Mit gleichem Plan erneut ausführen",
       "delete": "Löschen",
       "clear": "Alles löschen",
       "rounds": "{{count}} Runden",
@@ -86,6 +89,32 @@
       "max_rounds": "Max. Runden erreicht, Aufgabe möglicherweise unvollständig",
       "no_progress": "Agent gestoppt: Kein Fortschritt nach mehreren Runden",
       "reviewer_stopped": "Prüfer hat die Aufgabe gestoppt"
+    },
+    "customRoles": {
+      "title": "Benutzerdefinierte Rollen",
+      "add": "Neue Rolle",
+      "newRole": "Neue benutzerdefinierte Rolle",
+      "editRole": "Rolle bearbeiten",
+      "duplicate": "Duplizieren",
+      "name": "Name",
+      "roleType": "Typ",
+      "description": "Beschreibung",
+      "promptTemplate": "System-Prompt-Vorlage",
+      "toolAccess": "Werkzeugzugriff",
+      "toolAll": "Alle Werkzeuge",
+      "toolNone": "Keine Werkzeuge",
+      "toolCustom": "Benutzerdefiniert",
+      "toolList": "Erlaubte Werkzeuge (kommagetrennt)",
+      "outputFormat": "Ausgabe",
+      "maxRounds": "Max. Runden",
+      "nameHint": "Meine benutzerdefinierte Rolle",
+      "descriptionHint": "Was diese Rolle tut...",
+      "promptHint": "System-Prompt für diese Rolle...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Pipeline auswählen",
+      "default": "Standard-Pipeline"
     }
   }
 }

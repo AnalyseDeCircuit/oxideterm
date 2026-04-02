@@ -46,7 +46,8 @@
       "title": "{{count}} ação(ões) aguardando aprovação",
       "approve_all": "Aprovar tudo",
       "reject_all": "Rejeitar tudo",
-      "skip": "Pular"
+      "skip": "Pular",
+      "viewArgs": "Ver argumentos"
     },
     "status": {
       "idle": "Inativo",
@@ -62,7 +63,8 @@
       "pause": "Pausar",
       "resume": "Retomar",
       "cancel": "Cancelar",
-      "round": "Rodada {{current}}/{{max}}"
+      "round": "Rodada {{current}}/{{max}}",
+      "switchAutonomy": "Alternar autonomia (atual: {{level}})"
     },
     "summary": {
       "completed": "Tarefa concluída",
@@ -73,6 +75,7 @@
       "back": "Voltar à lista",
       "view": "Ver detalhes",
       "rerun": "Reexecutar",
+      "rerunWithPlan": "Reexecutar com o mesmo plano",
       "delete": "Excluir",
       "clear": "Limpar tudo",
       "rounds": "{{count}} rodadas",
@@ -86,6 +89,32 @@
       "max_rounds": "Máximo de rodadas atingido, tarefa pode estar incompleta",
       "no_progress": "Agente parado: sem progresso após várias rodadas",
       "reviewer_stopped": "Revisor interrompeu a tarefa"
+    },
+    "customRoles": {
+      "title": "Funções personalizadas",
+      "add": "Nova função",
+      "newRole": "Nova função personalizada",
+      "editRole": "Editar função",
+      "duplicate": "Duplicar",
+      "name": "Nome",
+      "roleType": "Tipo",
+      "description": "Descrição",
+      "promptTemplate": "Modelo de prompt do sistema",
+      "toolAccess": "Acesso a ferramentas",
+      "toolAll": "Todas as ferramentas",
+      "toolNone": "Sem ferramentas",
+      "toolCustom": "Personalizado",
+      "toolList": "Ferramentas permitidas (separadas por vírgula)",
+      "outputFormat": "Saída",
+      "maxRounds": "Rodadas máximas",
+      "nameHint": "Minha função personalizada",
+      "descriptionHint": "O que essa função faz...",
+      "promptHint": "Prompt do sistema para esta função...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "Selecionar pipeline",
+      "default": "Pipeline padrão"
     }
   }
 }

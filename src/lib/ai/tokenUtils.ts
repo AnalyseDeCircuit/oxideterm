@@ -25,10 +25,42 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * Per-model token coefficient table.
+ * Different tokenizers produce different token/char ratios.
+ * Applied as a multiplier to the base heuristic estimate.
+ */
+const MODEL_TOKEN_COEFFICIENTS: Array<[RegExp, number]> = [
+  // OpenAI cl100k_base / o200k_base — closely matches our default ratio
+  [/gpt-4|o[1-9]/, 1.0],
+  // Anthropic — slightly more tokens per char for code-heavy content
+  [/claude/, 1.05],
+  // DeepSeek — BPE tokenizer tends to run slightly higher for Latin
+  [/deepseek/, 1.08],
+  // Gemini — SentencePiece tokenizer; variable, close to default
+  [/gemini/, 1.0],
+  // Qwen — tiktoken-compatible; close to OpenAI ratio
+  [/qwen/, 1.02],
+  // Llama-based — SentencePiece; slightly higher for non-English
+  [/llama/, 1.05],
+  // Mistral — SentencePiece
+  [/mistral/, 1.03],
+];
+
+/** Get the token coefficient for a model (defaults to 1.0). */
+export function getModelTokenCoefficient(modelId: string): number {
+  const lower = modelId.toLowerCase();
+  for (const [pattern, coeff] of MODEL_TOKEN_COEFFICIENTS) {
+    if (pattern.test(lower)) return coeff;
+  }
+  return 1.0;
+}
+
+/**
  * Rough token estimation (1 token ≈ 4 chars for English, ~1.5 for CJK).
  * A ×1.15 safety margin is applied to compensate for heuristic imprecision.
+ * Optional modelId parameter applies per-model token coefficient.
  */
-export function estimateTokens(text: string): number {
+export function estimateTokens(text: string, modelId?: string): number {
   if (!text) return 0;
 
   // Count CJK characters (Chinese, Japanese, Korean)
@@ -41,7 +73,8 @@ export function estimateTokens(text: string): number {
 
   // CJK: ~1.5 tokens per char, Latin: ~0.25 tokens per char (1 token ≈ 4 chars)
   const raw = cjkCount * 1.5 + nonCjkLength * 0.25;
-  return Math.ceil(raw * TOKEN_SAFETY_MARGIN);
+  const coeff = modelId ? getModelTokenCoefficient(modelId) : 1.0;
+  return Math.ceil(raw * TOKEN_SAFETY_MARGIN * coeff);
 }
 
 /**

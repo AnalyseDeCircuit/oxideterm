@@ -15,8 +15,8 @@
 
 import type { AgentStep } from '../../types';
 
-/** Default review interval (rounds between reviews) */
-export const DEFAULT_REVIEW_INTERVAL = 5;
+// DEFAULT_REVIEW_INTERVAL is now in agentConfig.ts — kept as re-export for compatibility
+export { DEFAULT_REVIEW_INTERVAL } from './agentConfig';
 
 /** Build the reviewer system prompt */
 export function buildReviewerSystemPrompt(): string {

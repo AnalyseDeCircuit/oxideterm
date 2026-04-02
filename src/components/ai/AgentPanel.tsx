@@ -45,7 +45,8 @@ import { runAgent } from '../../lib/ai/agentOrchestrator';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
-import type { AgentTask, AgentStep, AutonomyLevel, AgentRolesConfig } from '../../types';
+import { CustomRolesSection, PipelineSelector } from './AgentRoleEditor';
+import type { AgentTask, AgentStep, AutonomyLevel, AgentRolesConfig, AgentPlan } from '../../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Autonomy Level Selector
@@ -535,6 +536,85 @@ StepLog.displayName = 'StepLog';
 // Approval Bar
 // ═══════════════════════════════════════════════════════════════════════════
 
+const ApprovalItem = memo(({ approval, onResolve, onSkip }: {
+  approval: { id: string; toolName: string; arguments: string; reasoning?: string };
+  onResolve: (id: string, approved: boolean) => void;
+  onSkip: (id: string) => void;
+}) => {
+  const { t } = useTranslation();
+  const [argsExpanded, setArgsExpanded] = useState(false);
+  const isLong = approval.arguments.length > 80;
+
+  return (
+    <div className="rounded-md bg-theme-bg-hover px-3 py-2 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <Terminal className="w-3.5 h-3.5 text-theme-text-muted flex-shrink-0" />
+        <code className="text-xs font-mono text-theme-text flex-1 truncate">
+          {approval.toolName}
+        </code>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onSkip(approval.id)}
+          className="h-6 px-1.5 text-theme-text-muted hover:text-theme-text"
+          title={t('agent.approval.skip')}
+        >
+          <span className="text-[10px]">{t('agent.approval.skip')}</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onResolve(approval.id, false)}
+          className="h-6 w-6 p-0 text-red-400 hover:text-red-300"
+          aria-label={t('agent.approval.reject_all')}
+        >
+          <X className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onResolve(approval.id, true)}
+          className="h-6 w-6 p-0 text-green-400 hover:text-green-300"
+          aria-label={t('agent.approval.approve_all')}
+        >
+          <Check className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+      {/* Expandable arguments */}
+      <div className="pl-5">
+        <button
+          onClick={() => setArgsExpanded(!argsExpanded)}
+          className="text-[10px] text-theme-text-muted hover:text-theme-text flex items-center gap-1"
+        >
+          {argsExpanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+          {t('agent.approval.viewArgs')}
+        </button>
+        {argsExpanded && (
+          <pre className="text-[10px] font-mono text-theme-text-muted mt-1 p-1.5 rounded bg-theme-bg whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+            {approval.arguments}
+          </pre>
+        )}
+        {!argsExpanded && isLong && (
+          <code className="text-[10px] font-mono text-theme-text-muted block truncate">
+            {approval.arguments.slice(0, 80)}...
+          </code>
+        )}
+        {!argsExpanded && !isLong && (
+          <code className="text-[10px] font-mono text-theme-text-muted block truncate">
+            {approval.arguments}
+          </code>
+        )}
+      </div>
+      {approval.reasoning && (
+        <p className="text-[11px] text-theme-text-muted pl-5 line-clamp-2">
+          {approval.reasoning}
+        </p>
+      )}
+    </div>
+  );
+});
+ApprovalItem.displayName = 'ApprovalItem';
+
 const ApprovalBar = memo(() => {
   const { t } = useTranslation();
   const pendingApprovals = useAgentStore((s) => s.pendingApprovals);
@@ -551,51 +631,12 @@ const ApprovalBar = memo(() => {
         {t('agent.approval.title', { count: pendingApprovals.length })}
       </div>
       {pendingApprovals.map((approval) => (
-        <div
+        <ApprovalItem
           key={approval.id}
-          className="rounded-md bg-theme-bg-hover px-3 py-2 space-y-1.5"
-        >
-          <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 text-theme-text-muted flex-shrink-0" />
-            <code className="text-xs font-mono text-theme-text flex-1 truncate">
-              {approval.toolName}({approval.arguments.length > 80
-                ? approval.arguments.slice(0, 80) + '...'
-                : approval.arguments})
-            </code>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => skipApproval(approval.id)}
-              className="h-6 px-1.5 text-theme-text-muted hover:text-theme-text"
-              title={t('agent.approval.skip')}
-            >
-              <span className="text-[10px]">{t('agent.approval.skip')}</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => resolveApproval(approval.id, false)}
-              className="h-6 w-6 p-0 text-red-400 hover:text-red-300"
-              aria-label={t('agent.approval.reject_all')}
-            >
-              <X className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => resolveApproval(approval.id, true)}
-              className="h-6 w-6 p-0 text-green-400 hover:text-green-300"
-              aria-label={t('agent.approval.approve_all')}
-            >
-              <Check className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-          {approval.reasoning && (
-            <p className="text-[11px] text-theme-text-muted pl-5 line-clamp-2">
-              {approval.reasoning}
-            </p>
-          )}
-        </div>
+          approval={approval}
+          onResolve={resolveApproval}
+          onSkip={skipApproval}
+        />
       ))}
       {pendingApprovals.length > 1 && (
         <div className="flex gap-2 justify-end">
@@ -632,83 +673,101 @@ const ControlBar = memo(() => {
   const pauseTask = useAgentStore((s) => s.pauseTask);
   const resumeTask = useAgentStore((s) => s.resumeTask);
   const cancelTask = useAgentStore((s) => s.cancelTask);
+  const autonomyLevel = useAgentStore((s) => s.autonomyLevel);
+  const setAutonomyLevel = useAgentStore((s) => s.setAutonomyLevel);
 
   if (!activeTask) return null;
 
   const isPaused = activeTask.status === 'paused';
   const isActive = activeTask.status === 'executing' || activeTask.status === 'planning' || activeTask.status === 'awaiting_approval';
+  const AutonomyIcon = AUTONOMY_CONFIG[autonomyLevel].icon;
 
   return (
-    <div className="flex items-center gap-3 pt-2 border-t border-theme-border">
-      {/* Progress */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between text-xs text-theme-text-muted mb-1">
-          <span>{t(`agent.status.${activeTask.status}`)}</span>
-          <span>
-            {t('agent.control.round', {
-              current: activeTask.currentRound,
-              max: activeTask.maxRounds,
-            })}
-          </span>
+    <div className="space-y-2 pt-2 border-t border-theme-border">
+      <div className="flex items-center gap-3">
+        {/* Progress */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between text-xs text-theme-text-muted mb-1">
+            <span>{t(`agent.status.${activeTask.status}`)}</span>
+            <span>
+              {t('agent.control.round', {
+                current: activeTask.currentRound,
+                max: activeTask.maxRounds,
+              })}
+            </span>
+          </div>
+          <div className="h-1 rounded-full bg-theme-bg-hover overflow-hidden">
+            <div
+              className={cn(
+                'h-full rounded-full transition-all',
+                activeTask.status === 'failed' ? 'bg-red-500' : 'bg-theme-accent',
+              )}
+              style={{
+                width: `${Math.min(100, (activeTask.currentRound / activeTask.maxRounds) * 100)}%`,
+              }}
+            />
+          </div>
         </div>
-        <div className="h-1 rounded-full bg-theme-bg-hover overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all',
-              activeTask.status === 'failed' ? 'bg-red-500' : 'bg-theme-accent',
-            )}
-            style={{
-              width: `${Math.min(100, (activeTask.currentRound / activeTask.maxRounds) * 100)}%`,
-            }}
-          />
-        </div>
-      </div>
 
-      {/* Actions */}
-      {isActive && (
-        <>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={pauseTask}
-            className="h-7 w-7 p-0"
-            title={t('agent.control.pause')}
-          >
-            <Pause className="w-4 h-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={cancelTask}
-            className="h-7 w-7 p-0 text-red-400"
-            title={t('agent.control.cancel')}
-          >
-            <Square className="w-4 h-4" />
-          </Button>
-        </>
-      )}
-      {isPaused && (
-        <>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={resumeTask}
-            className="h-7 w-7 p-0 text-green-400"
-            title={t('agent.control.resume')}
-          >
-            <Play className="w-4 h-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={cancelTask}
-            className="h-7 w-7 p-0 text-red-400"
-            title={t('agent.control.cancel')}
-          >
-            <Square className="w-4 h-4" />
-          </Button>
-        </>
-      )}
+        {/* Mid-task autonomy switch */}
+        <button
+          onClick={() => {
+            const levels: AutonomyLevel[] = ['supervised', 'balanced', 'autonomous'];
+            const idx = levels.indexOf(autonomyLevel);
+            setAutonomyLevel(levels[(idx + 1) % levels.length]);
+          }}
+          className={cn('h-7 w-7 p-0 flex items-center justify-center rounded', AUTONOMY_CONFIG[autonomyLevel].colorClass)}
+          title={t('agent.control.switchAutonomy', { level: t(`agent.autonomy.${autonomyLevel}`) })}
+        >
+          <AutonomyIcon className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Actions */}
+        {isActive && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={pauseTask}
+              className="h-7 w-7 p-0"
+              title={t('agent.control.pause')}
+            >
+              <Pause className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelTask}
+              className="h-7 w-7 p-0 text-red-400"
+              title={t('agent.control.cancel')}
+            >
+              <Square className="w-4 h-4" />
+            </Button>
+          </>
+        )}
+        {isPaused && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={resumeTask}
+              className="h-7 w-7 p-0 text-green-400"
+              title={t('agent.control.resume')}
+            >
+              <Play className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelTask}
+              className="h-7 w-7 p-0 text-red-400"
+              title={t('agent.control.cancel')}
+            >
+              <Square className="w-4 h-4" />
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 });
@@ -757,7 +816,7 @@ TaskSummary.displayName = 'TaskSummary';
 // Task History
 // ═══════════════════════════════════════════════════════════════════════════
 
-const TaskHistory = memo(({ onRerun, onResume }: { onRerun: (goal: string) => void; onResume: (taskId: string, fromRound?: number) => void }) => {
+const TaskHistory = memo(({ onRerun, onResume, onRerunWithPlan }: { onRerun: (goal: string) => void; onResume: (taskId: string, fromRound?: number) => void; onRerunWithPlan: (goal: string, plan: AgentPlan) => void }) => {
   const { t } = useTranslation();
   const taskHistory = useAgentStore((s) => s.taskHistory);
   const viewingTask = useAgentStore((s) => s.viewingTask);
@@ -828,6 +887,20 @@ const TaskHistory = memo(({ onRerun, onResume }: { onRerun: (goal: string) => vo
               >
                 <FastForward className="w-3 h-3" />
                 {t('agent.history.resume')}
+              </button>
+            )}
+            {viewingTask.plan && (
+              <button
+                onClick={() => {
+                  if (useAgentStore.getState().isRunning) return;
+                  setViewingTask(null);
+                  onRerunWithPlan(viewingTask.goal, viewingTask.plan!);
+                }}
+                className="flex items-center gap-1.5 text-xs text-theme-accent hover:text-theme-accent-hover transition-colors"
+                aria-label={t('agent.history.rerunWithPlan')}
+              >
+                <ListChecks className="w-3 h-3" />
+                {t('agent.history.rerunWithPlan')}
               </button>
             )}
           </div>
@@ -1056,6 +1129,24 @@ export const AgentPanel = () => {
     [],
   );
 
+  const handleRerunWithPlan = useCallback(
+    (goal: string, plan: AgentPlan) => {
+      if (!providerId || !model) return;
+      const contextTabType = useAppStore.getState().lastNonAgentTabType ?? 'terminal';
+      const task = startTask(goal, providerId, model, contextTabType, plan);
+      const controller = useAgentStore.getState().abortController;
+      if (controller) {
+        runAgent(task, controller.signal).catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          useAgentStore.getState().setTaskError(
+            err instanceof Error ? err.message : String(err),
+          );
+        });
+      }
+    },
+    [providerId, model, startTask],
+  );
+
   return (
     <div className="flex flex-col h-full bg-theme-bg">
       {/* Header */}
@@ -1078,6 +1169,8 @@ export const AgentPanel = () => {
       <div className="px-4 py-2 border-b border-theme-border space-y-2">
         <AutonomySelector />
         <AgentRolesPanel />
+        <PipelineSelector />
+        <CustomRolesSection />
       </div>
 
       {/* Scrollable Content */}
@@ -1085,7 +1178,7 @@ export const AgentPanel = () => {
         {activeTask && <PlanView task={activeTask} allowSkip />}
         <StepLog steps={activeTask?.steps ?? []} />
         {activeTask && <TaskSummary task={activeTask} />}
-        <TaskHistory onRerun={handleStart} onResume={handleResume} />
+        <TaskHistory onRerun={handleStart} onResume={handleResume} onRerunWithPlan={handleRerunWithPlan} />
       </div>
 
       {/* Footer */}

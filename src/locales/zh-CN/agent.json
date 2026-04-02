@@ -46,7 +46,8 @@
       "title": "{{count}} 个操作等待批准",
       "approve_all": "全部批准",
       "reject_all": "全部拒绝",
-      "skip": "跳过"
+      "skip": "跳过",
+      "viewArgs": "查看参数"
     },
     "status": {
       "idle": "空闲",
@@ -62,7 +63,8 @@
       "pause": "暂停",
       "resume": "继续",
       "cancel": "取消",
-      "round": "轮次 {{current}}/{{max}}"
+      "round": "轮次 {{current}}/{{max}}",
+      "switchAutonomy": "切换自主级别（当前：{{level}}）"
     },
     "summary": {
       "completed": "任务完成",
@@ -73,6 +75,7 @@
       "back": "返回列表",
       "view": "查看详情",
       "rerun": "重新运行",
+      "rerunWithPlan": "使用相同计划重新运行",
       "delete": "删除",
       "clear": "清空全部",
       "rounds": "{{count}} 轮",
@@ -86,6 +89,32 @@
       "max_rounds": "已达最大轮次，任务可能未完成",
       "no_progress": "Agent 已停止：多轮无进展",
       "reviewer_stopped": "审查器已停止任务"
+    },
+    "customRoles": {
+      "title": "自定义角色",
+      "add": "新建角色",
+      "newRole": "新建自定义角色",
+      "editRole": "编辑角色",
+      "duplicate": "复制",
+      "name": "名称",
+      "roleType": "类型",
+      "description": "描述",
+      "promptTemplate": "系统提示模板",
+      "toolAccess": "工具访问",
+      "toolAll": "所有工具",
+      "toolNone": "无工具",
+      "toolCustom": "自定义",
+      "toolList": "允许的工具（逗号分隔）",
+      "outputFormat": "输出",
+      "maxRounds": "最大轮次",
+      "nameHint": "我的自定义角色",
+      "descriptionHint": "这个角色的作用...",
+      "promptHint": "此角色的系统提示...",
+      "toolListHint": "terminal_exec, read_file, list_directory"
+    },
+    "pipeline": {
+      "select": "选择流水线",
+      "default": "默认流水线"
     }
   }
 }
