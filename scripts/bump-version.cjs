@@ -10,6 +10,8 @@
  *   - package.json
  *   - src-tauri/Cargo.toml
  *   - cli/Cargo.toml
+ *   - src-tauri/Cargo.lock
+ *   - cli/Cargo.lock
  *   - src-tauri/tauri.conf.json
  *   - README.md and docs/readme/README.*.md (optional badges)
  *   - website/index.html (hero badge, figcaption, footer)
@@ -95,6 +97,25 @@ function updateCliCargoToml(version) {
   }
   fs.writeFileSync(FILES.cliCargoToml, lines.join('\n'));
   return found;
+}
+
+function updateCargoLockVersion(lockfilePath, packageName, version) {
+  if (!fs.existsSync(lockfilePath)) {
+    return false;
+  }
+
+  const content = fs.readFileSync(lockfilePath, 'utf8');
+  const updatedContent = content.replace(
+    new RegExp(`(\\[\\[package\\]\\]\\nname = "${packageName}"\\nversion = ")[^"]+(\")`, 'm'),
+    `$1${version}$2`,
+  );
+
+  if (updatedContent === content) {
+    return false;
+  }
+
+  fs.writeFileSync(lockfilePath, updatedContent);
+  return true;
 }
 
 function updateTauriConf(version) {
@@ -185,12 +206,28 @@ Options:
   }
   updates.push({ file: 'src-tauri/Cargo.toml', status: '✅' });
 
+  // Update Cargo.lock for src-tauri
+  if (!dryRun) {
+    const updated = updateCargoLockVersion(path.join(ROOT_DIR, 'src-tauri', 'Cargo.lock'), 'oxideterm', version);
+    updates.push({ file: 'src-tauri/Cargo.lock', status: updated ? '✅' : '⏭️ (not found)' });
+  } else {
+    updates.push({ file: 'src-tauri/Cargo.lock', status: '🔍' });
+  }
+
   // Update CLI Cargo.toml
   if (!dryRun) {
     const updated = updateCliCargoToml(version);
     updates.push({ file: 'cli/Cargo.toml', status: updated ? '✅' : '⏭️ (not found)' });
   } else {
     updates.push({ file: 'cli/Cargo.toml', status: '🔍' });
+  }
+
+  // Update Cargo.lock for cli
+  if (!dryRun) {
+    const updated = updateCargoLockVersion(path.join(ROOT_DIR, 'cli', 'Cargo.lock'), 'oxide-cli', version);
+    updates.push({ file: 'cli/Cargo.lock', status: updated ? '✅' : '⏭️ (not found)' });
+  } else {
+    updates.push({ file: 'cli/Cargo.lock', status: '🔍' });
   }
 
   // Update tauri.conf.json
