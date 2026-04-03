@@ -338,7 +338,8 @@
       "cancel": "Cancel",
       "connect": "Connect",
       "connecting": "Connecting...",
-      "connect_failed": "Connection Failed"
+      "connect_failed": "Connection Failed",
+      "save_failed": "Failed to Save Connection"
     },
     "settings": {
       "title": "Settings",

@@ -338,7 +338,8 @@
       "cancel": "Abbrechen",
       "connect": "Verbinden",
       "connecting": "Verbindung wird hergestellt...",
-      "connect_failed": "Verbindung fehlgeschlagen"
+      "connect_failed": "Verbindung fehlgeschlagen",
+      "save_failed": "Verbindung speichern fehlgeschlagen"
     },
     "settings": {
       "title": "Einstellungen",

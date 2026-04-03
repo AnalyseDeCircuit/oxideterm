@@ -338,7 +338,8 @@
       "cancel": "取消",
       "connect": "連線",
       "connecting": "連線中...",
-      "connect_failed": "連線失敗"
+      "connect_failed": "連線失敗",
+      "save_failed": "儲存連線失敗"
     },
     "settings": {
       "title": "設定",

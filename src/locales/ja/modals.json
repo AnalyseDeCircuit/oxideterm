@@ -336,7 +336,8 @@
       "cancel": "キャンセル",
       "connect": "接続",
       "connecting": "接続中...",
-      "connect_failed": "接続に失敗しました"
+      "connect_failed": "接続に失敗しました",
+      "save_failed": "接続の保存に失敗しました"
     },
     "settings": {
       "title": "設定",

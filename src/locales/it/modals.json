@@ -338,7 +338,8 @@
       "cancel": "Annulla",
       "connect": "Connetti",
       "connecting": "Connessione...",
-      "connect_failed": "Connessione fallita"
+      "connect_failed": "Connessione fallita",
+      "save_failed": "Salvataggio connessione fallito"
     },
     "settings": {
       "title": "Impostazioni",

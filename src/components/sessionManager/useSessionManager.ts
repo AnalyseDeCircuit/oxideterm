@@ -77,6 +77,13 @@ export function useSessionManager() {
     }
   }, []);
 
+  // Listen for external save events (e.g. NewConnectionModal)
+  useEffect(() => {
+    const handler = () => { refresh(); };
+    window.addEventListener('saved-connections-changed', handler);
+    return () => window.removeEventListener('saved-connections-changed', handler);
+  }, [refresh]);
+
   // Build folder tree from groups
   const folderTree = useMemo((): FolderNode[] => {
     const root: FolderNode[] = [];

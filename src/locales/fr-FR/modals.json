@@ -336,7 +336,8 @@
       "cancel": "Annuler",
       "connect": "Connecter",
       "connecting": "Connexion en cours...",
-      "connect_failed": "Échec de la connexion"
+      "connect_failed": "Échec de la connexion",
+      "save_failed": "Échec de l'enregistrement"
     },
     "settings": {
       "title": "Paramètres",

@@ -336,7 +336,8 @@
       "cancel": "Cancelar",
       "connect": "Conectar",
       "connecting": "Conectando...",
-      "connect_failed": "Error de conexión"
+      "connect_failed": "Error de conexión",
+      "save_failed": "Error al guardar la conexión"
     },
     "settings": {
       "title": "Configuración",

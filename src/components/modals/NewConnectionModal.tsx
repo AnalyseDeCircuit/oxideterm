@@ -284,25 +284,35 @@ export const NewConnectionModal = () => {
       // 自动连接新创建的节点（与 Saved Connection 流程一致）
       await connectNode(nodeId);
       
-      // 如果需要保存连接配置
-      if (saveConnection) {
-        const saveAuthType = authType === 'default_key' ? 'key' : authType;
-        await api.saveConnection({
-          name: name || `${username}@${host}`,
-          group: group || null,
-          host,
-          port: parseInt(port) || 22,
-          username,
-          auth_type: saveAuthType as 'password' | 'key' | 'agent' | 'certificate',
-          password: (authType === 'password' && savePassword) ? password : undefined,
-          key_path: (authType === 'key' || authType === 'default_key' || authType === 'certificate') ? keyPath : undefined,
-          cert_path: authType === 'certificate' ? certPath : undefined,
-          tags: [],
-          proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
-        });
-      }
-      
       toggleModal('newConnection', false);
+
+      // 保存连接配置（独立 try-catch，连接已成功不应影响用户）
+      if (saveConnection) {
+        try {
+          const saveAuthType = authType === 'default_key' ? 'key' : authType;
+          await api.saveConnection({
+            name: name || `${username}@${host}`,
+            group: group === 'Ungrouped' ? null : (group || null),
+            host,
+            port: parseInt(port) || 22,
+            username,
+            auth_type: saveAuthType as 'password' | 'key' | 'agent' | 'certificate',
+            password: (authType === 'password' && savePassword) ? password : undefined,
+            key_path: (authType === 'key' || authType === 'default_key' || authType === 'certificate') ? keyPath : undefined,
+            cert_path: authType === 'certificate' ? certPath : undefined,
+            tags: [],
+            proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
+          });
+          // Notify session manager to refresh
+          window.dispatchEvent(new CustomEvent('saved-connections-changed'));
+        } catch (saveErr) {
+          console.error('Failed to save connection:', saveErr);
+          toastError(
+            t('modals.new_connection.save_failed'),
+            String(saveErr),
+          );
+        }
+      }
 
       // Reset sensitive fields if not saved
       setPassword('');

@@ -336,7 +336,8 @@
       "cancel": "取消",
       "connect": "连接",
       "connecting": "连接中...",
-      "connect_failed": "连接失败"
+      "connect_failed": "连接失败",
+      "save_failed": "保存连接失败"
     },
     "settings": {
       "title": "设置",

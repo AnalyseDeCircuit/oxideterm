@@ -336,7 +336,8 @@
       "cancel": "취소",
       "connect": "연결",
       "connecting": "연결 중...",
-      "connect_failed": "연결 실패"
+      "connect_failed": "연결 실패",
+      "save_failed": "연결 저장 실패"
     },
     "settings": {
       "title": "설정",
