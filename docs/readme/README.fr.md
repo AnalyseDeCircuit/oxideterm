@@ -386,3 +386,13 @@ Texte intégral : [Licence Publique Générale GNU v3.0](https://www.gnu.org/lic
 <p align="center">
   <sub>134 000+ lignes de Rust & TypeScript — construit avec ⚡ et ☕</sub>
 </p>
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=AnalyseDeCircuit%2Foxideterm&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&legend=top-left" />
+ </picture>
+</a>

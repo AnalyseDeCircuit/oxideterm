@@ -386,3 +386,13 @@ GPL-3.0 の条件のもとで、本ソフトウェアを自由に使用、修正
 <p align="center">
   <sub>134,000 行以上の Rust & TypeScript — ⚡ と ☕ で構築</sub>
 </p>
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=AnalyseDeCircuit%2Foxideterm&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=AnalyseDeCircuit/oxideterm&type=date&legend=top-left" />
+ </picture>
+</a>
