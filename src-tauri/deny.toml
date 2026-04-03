@@ -30,6 +30,10 @@ ignore = [
     { id = "RUSTSEC-2024-0370", reason = "unic-common; no known exploit" },
     # Historic advisory still referenced by some crates
     { id = "RUSTSEC-2017-0008", reason = "historic unmaintained notice; no active CVE" },
+    # rsa crate timing side-channel (Marvin Attack) — no patch available upstream;
+    # OxideTerm uses RSA only for client-side SSH key authentication (signing),
+    # not RSA decryption, limiting practical exploitability.
+    { id = "RUSTSEC-2023-0071", reason = "rsa crate Marvin Attack; client-side SSH auth signing only, no RSA decryption exposure" },
 ]
 
 [licenses]

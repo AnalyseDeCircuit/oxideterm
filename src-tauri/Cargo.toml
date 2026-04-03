@@ -1,6 +1,6 @@
 [package]
 name = "oxideterm"
-version = "1.0.8"
+version = "1.0.9"
 description = "A modern SSH terminal client built with Rust and Tauri"
 authors = ["OxideTerm Team"]
 license = "GPL-3.0-only"
@@ -42,7 +42,7 @@ mimalloc = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util", "process"] }
 
 # SSH Protocol
-russh = { version = "0.54", default-features = false, features = ["ring"] }
+russh = { version = "0.54", default-features = false, features = ["ring", "rsa", "flate2"] }
 russh-sftp = "2"
 
 # WebSocket

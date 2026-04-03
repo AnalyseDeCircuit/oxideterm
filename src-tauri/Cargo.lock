@@ -2416,6 +2416,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hmac",
+ "num-bigint-dig",
  "p256",
  "p384",
  "p521",
@@ -3410,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm"
-version = "1.0.8"
+version = "1.0.9"
 dependencies = [
  "argon2",
  "async-trait",
@@ -4567,6 +4568,7 @@ dependencies = [
  "ed25519-dalek",
  "elliptic-curve",
  "enum_dispatch",
+ "flate2",
  "futures",
  "generic-array",
  "getrandom 0.2.17",
@@ -4584,11 +4586,13 @@ dependencies = [
  "p521",
  "pageant",
  "pbkdf2",
+ "pkcs1",
  "pkcs5",
  "pkcs8",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "ring",
+ "rsa",
  "russh-cryptovec",
  "russh-util",
  "sec1",
