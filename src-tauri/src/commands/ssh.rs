@@ -472,7 +472,6 @@ pub async fn create_terminal(
     let registry_clone = session_registry.inner().clone();
     let conn_registry_clone = connection_registry.inner().clone();
     let conn_id_clone = request.connection_id.clone();
-    let node_emitter_ct = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!(
@@ -508,26 +507,12 @@ pub async fn create_terminal(
                         "Session {} WS accept timeout, removing from registries",
                         session_id_clone
                     );
-                    // 🔴 关键修复：发送 disconnected 事件通知前端
-                    // 这样前端可以清理掉对这个已失效 session 的引用
-                    conn_registry_clone
-                        .emit_connection_status_changed(&conn_id_clone, "disconnected")
-                        .await;
-
-                    // Oxide-Next Phase 2: node:state 事件
-                    if let Some(ref emitter) = node_emitter_ct {
-                        emitter.emit_state_from_connection(
-                            &conn_id_clone,
-                            &crate::ssh::ConnectionState::Disconnected,
-                            "WS accept timeout",
-                        );
-                    }
 
                     // 从连接的终端列表中移除
                     let _ = conn_registry_clone
                         .remove_terminal(&conn_id_clone, &session_id_clone)
                         .await;
-                    // 释放连接引用
+                    // 释放连接引用（release 会正确设置连接状态为 Idle 并发送 node:state）
                     let _ = conn_registry_clone.release(&conn_id_clone).await;
                     // 完全移除会话
                     let _ = registry_clone.disconnect_complete(&session_id_clone, true);
@@ -603,7 +588,6 @@ pub async fn close_terminal(
     sftp_registry: State<'_, Arc<SftpRegistry>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     health_registry: State<'_, HealthRegistry>,
-    profiler_registry: State<'_, ProfilerRegistry>,
 ) -> Result<(), String> {
     info!("Close terminal request: {}", session_id);
 
@@ -635,9 +619,9 @@ pub async fn close_terminal(
     // 移除 SFTP
     sftp_registry.remove(&session_id);
 
-    // 清理 health tracker 和 resource profiler
+    // 清理 health tracker
+    // Note: profiler is per-connection (not per-session), cleaned up by disconnect_ssh
     health_registry.remove(&session_id);
-    profiler_registry.remove(&session_id);
 
     // 释放连接引用
     if let Some(connection_id) = connection_id {
@@ -688,8 +672,10 @@ pub async fn recreate_terminal_pty(
                 stdout_rx: output_tx.subscribe(),
             };
 
-            let (_, port, token, _disconnect_rx) =
-                WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer, true)
+            // Bug fix: replay_on_connect = false — the frontend still has the old buffer content;
+            // replaying would cause duplicate output lines.
+            let (_, port, token, disconnect_rx) =
+                WsBridge::start_extended_with_disconnect(extended_handle, scroll_buffer, false)
                     .await
                     .map_err(|e| format!("Failed to start WebSocket bridge: {}", e))?;
 
@@ -698,6 +684,61 @@ pub async fn recreate_terminal_pty(
                 .map_err(|e| format!("Failed to update session: {}", e))?;
 
             let ws_url = format!("ws://localhost:{}", port);
+
+            // Bug fix: Monitor disconnect_rx to handle WS bridge lifecycle.
+            // Previously _disconnect_rx was dropped, leaking the cleanup chain.
+            let session_id_for_monitor = session_id.clone();
+            let registry_for_monitor = session_registry.inner().clone();
+            let conn_registry_for_monitor = connection_registry.inner().clone();
+            let conn_id_for_monitor = session_registry
+                .with_session(&session_id, |entry| entry.connection_id.clone())
+                .flatten()
+                .unwrap_or_default();
+            tokio::spawn(async move {
+                if let Ok(reason) = disconnect_rx.await {
+                    warn!(
+                        "Reattached session {} WS bridge disconnected: {:?}",
+                        session_id_for_monitor, reason
+                    );
+                    if reason.is_recoverable() {
+                        let conn_reg = conn_registry_for_monitor.clone();
+                        let sid = session_id_for_monitor.clone();
+                        let cid = conn_id_for_monitor.clone();
+                        let _ = registry_for_monitor.mark_ws_detached_with_cleanup(
+                            &session_id_for_monitor,
+                            std::time::Duration::from_secs(300),
+                            Some(move |_conn_id: String| {
+                                tokio::spawn(async move {
+                                    info!(
+                                        "Releasing connection {} ref after reattach WS detach timeout (session: {})",
+                                        cid, sid
+                                    );
+                                    let _ = conn_reg.remove_terminal(&cid, &sid).await;
+                                    let _ = conn_reg.release(&cid).await;
+                                });
+                            }),
+                        );
+                    } else if matches!(reason, crate::bridge::DisconnectReason::AcceptTimeout) {
+                        warn!(
+                            "Reattached session {} WS accept timeout, cleaning up",
+                            session_id_for_monitor
+                        );
+                        if !conn_id_for_monitor.is_empty() {
+                            let _ = conn_registry_for_monitor
+                                .remove_terminal(&conn_id_for_monitor, &session_id_for_monitor)
+                                .await;
+                            let _ = conn_registry_for_monitor
+                                .release(&conn_id_for_monitor)
+                                .await;
+                        }
+                        let _ =
+                            registry_for_monitor.disconnect_complete(&session_id_for_monitor, true);
+                    } else {
+                        let _ = registry_for_monitor
+                            .disconnect_complete(&session_id_for_monitor, false);
+                    }
+                }
+            });
 
             info!(
                 "Terminal WS reattached: session={}, ws_port={}",
@@ -855,7 +896,6 @@ pub async fn recreate_terminal_pty(
     let registry_clone = session_registry.inner().clone();
     let conn_registry_clone = connection_registry.inner().clone();
     let conn_id_clone = connection_id.clone();
-    let node_emitter_clone = conn_registry_clone.node_emitter(); // Oxide-Next Phase 2
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
             warn!(
@@ -886,18 +926,6 @@ pub async fn recreate_terminal_pty(
                         "Recreated session {} WS accept timeout, removing from registries",
                         session_id_clone
                     );
-                    // 🔴 关键修复：发送 disconnected 事件通知前端
-                    conn_registry_clone
-                        .emit_connection_status_changed(&conn_id_clone, "disconnected")
-                        .await;
-                    // Oxide-Next Phase 2: node:state 事件
-                    if let Some(ref emitter) = node_emitter_clone {
-                        emitter.emit_state_from_connection(
-                            &conn_id_clone,
-                            &crate::ssh::ConnectionState::Disconnected,
-                            "WS accept timeout (recreate)",
-                        );
-                    }
                     let _ = conn_registry_clone
                         .remove_terminal(&conn_id_clone, &session_id_clone)
                         .await;

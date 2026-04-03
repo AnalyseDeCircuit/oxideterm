@@ -1156,37 +1156,48 @@ impl WsBridge {
                         state.touch();
                         codec.feed(&data);
 
-                        while let Ok(Some(frame)) = codec.decode_next() {
-                            match frame {
-                                Frame::Data(payload) => {
-                                    if cmd_tx_clone
-                                        .send(SessionCommand::Data(payload.to_vec()))
-                                        .await
-                                        .is_err()
-                                    {
-                                        debug!("SSH cmd channel closed");
-                                        return;
+                        loop {
+                            match codec.decode_next() {
+                                Ok(Some(frame)) => match frame {
+                                    Frame::Data(payload) => {
+                                        if cmd_tx_clone
+                                            .send(SessionCommand::Data(payload.to_vec()))
+                                            .await
+                                            .is_err()
+                                        {
+                                            debug!("SSH cmd channel closed");
+                                            return;
+                                        }
                                     }
-                                }
-                                Frame::Resize { cols, rows } => {
-                                    info!(
-                                        "Resize request: {}x{} for session {}",
-                                        cols, rows, sid_in
+                                    Frame::Resize { cols, rows } => {
+                                        info!(
+                                            "Resize request: {}x{} for session {}",
+                                            cols, rows, sid_in
+                                        );
+                                        if cmd_tx_clone
+                                            .send(SessionCommand::Resize(cols, rows))
+                                            .await
+                                            .is_err()
+                                        {
+                                            debug!("SSH cmd channel closed");
+                                            return;
+                                        }
+                                    }
+                                    Frame::Heartbeat(seq) => {
+                                        debug!("Received heartbeat echo: seq={}", seq);
+                                    }
+                                    Frame::Error(msg) => {
+                                        error!("Error frame from client: {}", msg);
+                                    }
+                                },
+                                Ok(None) => break,
+                                Err(e) => {
+                                    warn!(
+                                        "Protocol decode error in v2 input: {} for session {}",
+                                        e, sid_in
                                     );
-                                    if cmd_tx_clone
-                                        .send(SessionCommand::Resize(cols, rows))
-                                        .await
-                                        .is_err()
-                                    {
-                                        debug!("SSH cmd channel closed");
-                                        return;
-                                    }
-                                }
-                                Frame::Heartbeat(seq) => {
-                                    debug!("Received heartbeat echo: seq={}", seq);
-                                }
-                                Frame::Error(msg) => {
-                                    error!("Error frame from client: {}", msg);
+                                    codec.clear();
+                                    break;
                                 }
                             }
                         }
@@ -1430,32 +1441,43 @@ impl WsBridge {
                         state.touch();
                         codec.feed(&data);
 
-                        while let Ok(Some(frame)) = codec.decode_next() {
-                            match frame {
-                                Frame::Data(payload) => {
-                                    if cmd_tx_clone
-                                        .send(SessionCommand::Data(payload.to_vec()))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return "ssh_closed";
+                        loop {
+                            match codec.decode_next() {
+                                Ok(Some(frame)) => match frame {
+                                    Frame::Data(payload) => {
+                                        if cmd_tx_clone
+                                            .send(SessionCommand::Data(payload.to_vec()))
+                                            .await
+                                            .is_err()
+                                        {
+                                            return "ssh_closed";
+                                        }
                                     }
-                                }
-                                Frame::Resize { cols, rows } => {
-                                    info!("Resize: {}x{} for session {}", cols, rows, sid_in);
-                                    if cmd_tx_clone
-                                        .send(SessionCommand::Resize(cols, rows))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return "ssh_closed";
+                                    Frame::Resize { cols, rows } => {
+                                        info!("Resize: {}x{} for session {}", cols, rows, sid_in);
+                                        if cmd_tx_clone
+                                            .send(SessionCommand::Resize(cols, rows))
+                                            .await
+                                            .is_err()
+                                        {
+                                            return "ssh_closed";
+                                        }
                                     }
-                                }
-                                Frame::Heartbeat(seq) => {
-                                    debug!("Received heartbeat echo: seq={}", seq);
-                                }
-                                Frame::Error(msg) => {
-                                    error!("Error frame from client: {}", msg);
+                                    Frame::Heartbeat(seq) => {
+                                        debug!("Received heartbeat echo: seq={}", seq);
+                                    }
+                                    Frame::Error(msg) => {
+                                        error!("Error frame from client: {}", msg);
+                                    }
+                                },
+                                Ok(None) => break,
+                                Err(e) => {
+                                    warn!(
+                                        "Protocol decode error in v2 reconnect input: {} for session {}",
+                                        e, sid_in
+                                    );
+                                    codec.clear();
+                                    break;
                                 }
                             }
                         }

@@ -91,6 +91,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiCursorPosition, setAiCursorPosition] = useState<CursorPosition | null>(null);
   const [isRunning, setIsRunning] = useState(true);
+  const isRunningRef = useRef(true);
 
   // Mouse tracking mode indicator (tmux/vim mouse capture)
   const [mouseMode, setMouseMode] = useState(false);
@@ -717,7 +718,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     // Handle terminal data input
     // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
     onDataDisposableRef.current = term.onData((data) => {
-      if (!isRunning) return;
+      if (!isRunningRef.current) return;
       // Notify adaptive renderer of user activity (exits idle tier)
       adaptiveRendererRef.current.notifyUserInput();
       // Feed recording (user input)
@@ -736,7 +737,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     // Handle terminal binary input (for special keys)
     // IMPORTANT: Save IDisposable for cleanup to prevent memory leaks
     onBinaryDisposableRef.current = term.onBinary((data) => {
-      if (!isRunning) return;
+      if (!isRunningRef.current) return;
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
@@ -925,6 +926,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       console.warn(`[LocalTerminalView] Session ${sessionId} closed, exitCode: ${exitCode}`);
       
       setIsRunning(false);
+      isRunningRef.current = false;
       updateTerminalState(sessionId, false);
       
       terminalRef.current.writeln('');

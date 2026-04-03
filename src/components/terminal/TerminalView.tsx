@@ -1178,6 +1178,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       getSelectionContent,  // Include selection getter
       // Writer function: encode and send via WebSocket
       (data: string) => {
+        if (inputLockedRef.current) return; // Respect standby mode
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
           const encoder = new TextEncoder();
@@ -1996,6 +1997,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   
   // Insert text at cursor
   const handleAiInsert = useCallback((text: string) => {
+    if (inputLockedRef.current) return; // Respect standby mode
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     
@@ -2008,6 +2010,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   
   // Execute command (insert + enter)
   const handleAiExecute = useCallback((command: string) => {
+    if (inputLockedRef.current) return; // Respect standby mode
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     
@@ -2026,6 +2029,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   // Paste protection: handle pending paste confirm
   const handlePasteConfirm = useCallback(() => {
+    if (inputLockedRef.current) return; // Respect standby mode
     if (pendingPaste) {
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
