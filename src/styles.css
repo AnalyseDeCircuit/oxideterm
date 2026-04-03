@@ -1482,6 +1482,7 @@ html {
   --color-theme-bg-hover: color-mix(in srgb, var(--theme-bg-hover) 50%, transparent);
   --color-theme-bg-elevated: color-mix(in srgb, var(--theme-bg-elevated) 45%, transparent);
   --color-theme-bg-sunken: color-mix(in srgb, var(--theme-bg-sunken) 35%, transparent);
+  --color-theme-bg-card: color-mix(in srgb, var(--theme-bg-card) 40%, transparent);
   --color-theme-border: color-mix(in srgb, var(--theme-border) 75%, transparent);
   --color-theme-border-strong: color-mix(in srgb, var(--theme-border-strong) 80%, transparent);
 }

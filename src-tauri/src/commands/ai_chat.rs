@@ -139,11 +139,21 @@ impl From<AiChatError> for String {
 // Tauri Commands
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Extract the AI chat store from optional state, returning an error if unavailable.
+fn require_ai_chat_store<'a>(
+    state: &'a State<'_, Option<Arc<AiChatStore>>>,
+) -> Result<&'a Arc<AiChatStore>, String> {
+    state
+        .as_ref()
+        .ok_or_else(|| "AI chat store not available. Chat persistence is disabled.".to_string())
+}
+
 /// List all conversations (metadata only, for sidebar display)
 #[tauri::command]
 pub async fn ai_chat_list_conversations(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
 ) -> Result<ConversationListResponse, String> {
+    let store = require_ai_chat_store(&store)?;
     let conversations = store.list_conversations().map_err(|e| e.to_string())?;
 
     let response = ConversationListResponse {
@@ -167,9 +177,10 @@ pub async fn ai_chat_list_conversations(
 /// Get a full conversation with all messages
 #[tauri::command]
 pub async fn ai_chat_get_conversation(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     conversation_id: String,
 ) -> Result<FullConversationResponse, String> {
+    let store = require_ai_chat_store(&store)?;
     let full = store
         .get_conversation(&conversation_id)
         .map_err(|e| e.to_string())?;
@@ -202,9 +213,10 @@ pub async fn ai_chat_get_conversation(
 /// Create a new conversation
 #[tauri::command]
 pub async fn ai_chat_create_conversation(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     request: CreateConversationRequest,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     let now = chrono::Utc::now().timestamp_millis();
 
     let meta = ConversationMeta {
@@ -223,10 +235,11 @@ pub async fn ai_chat_create_conversation(
 /// Update conversation metadata (e.g., title)
 #[tauri::command]
 pub async fn ai_chat_update_conversation(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     conversation_id: String,
     title: String,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     // Get existing conversation first
     let full = store
         .get_conversation(&conversation_id)
@@ -250,9 +263,10 @@ pub async fn ai_chat_update_conversation(
 /// Delete a conversation
 #[tauri::command]
 pub async fn ai_chat_delete_conversation(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     conversation_id: String,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     store
         .delete_conversation(&conversation_id)
         .map_err(|e| e.to_string())
@@ -261,9 +275,10 @@ pub async fn ai_chat_delete_conversation(
 /// Save a message to a conversation
 #[tauri::command]
 pub async fn ai_chat_save_message(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     request: SaveMessageRequest,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     let message = PersistedMessage {
         id: request.id,
         conversation_id: request.conversation_id,
@@ -288,10 +303,11 @@ pub async fn ai_chat_save_message(
 /// Update a message content (for streaming updates)
 #[tauri::command]
 pub async fn ai_chat_update_message(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     message_id: String,
     content: String,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     store
         .update_message(&message_id, &content)
         .map_err(|e| e.to_string())
@@ -300,10 +316,11 @@ pub async fn ai_chat_update_message(
 /// Delete messages after a certain message (for regeneration)
 #[tauri::command]
 pub async fn ai_chat_delete_messages_after(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     conversation_id: String,
     after_message_id: String,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     store
         .delete_messages_after(&conversation_id, &after_message_id)
         .map_err(|e| e.to_string())
@@ -311,7 +328,8 @@ pub async fn ai_chat_delete_messages_after(
 
 /// Clear all conversations
 #[tauri::command]
-pub async fn ai_chat_clear_all(store: State<'_, Arc<AiChatStore>>) -> Result<(), String> {
+pub async fn ai_chat_clear_all(store: State<'_, Option<Arc<AiChatStore>>>) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     store.clear_all().map_err(|e| e.to_string())
 }
 
@@ -320,9 +338,10 @@ pub async fn ai_chat_clear_all(store: State<'_, Arc<AiChatStore>>) -> Result<(),
 /// or the original data is preserved.
 #[tauri::command]
 pub async fn ai_chat_replace_conversation_messages(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
     request: ReplaceConversationMessagesRequest,
 ) -> Result<(), String> {
+    let store = require_ai_chat_store(&store)?;
     let message = PersistedMessage {
         id: request.message.id,
         // Always use the top-level conversation_id so the message record
@@ -352,8 +371,9 @@ pub async fn ai_chat_replace_conversation_messages(
 /// Get database statistics
 #[tauri::command]
 pub async fn ai_chat_get_stats(
-    store: State<'_, Arc<AiChatStore>>,
+    store: State<'_, Option<Arc<AiChatStore>>>,
 ) -> Result<AiChatStatsResponse, String> {
+    let store = require_ai_chat_store(&store)?;
     let stats = store.get_stats().map_err(|e| e.to_string())?;
 
     Ok(AiChatStatsResponse {

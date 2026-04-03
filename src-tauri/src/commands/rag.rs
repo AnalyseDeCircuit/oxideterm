@@ -171,11 +171,21 @@ pub struct SearchResultResponse {
 // Tauri Commands
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Extract the RAG store from optional state, returning an error if unavailable.
+fn require_rag_store<'a>(
+    state: &'a State<'_, Option<Arc<RagStore>>>,
+) -> Result<&'a Arc<RagStore>, String> {
+    state
+        .as_ref()
+        .ok_or_else(|| "RAG store not available. Knowledge base features are disabled.".to_string())
+}
+
 #[tauri::command]
 pub async fn rag_create_collection(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     request: CreateCollectionRequest,
 ) -> Result<CollectionResponse, String> {
+    let store = require_rag_store(&store)?;
     if request.name.len() > MAX_NAME_LENGTH {
         return Err("Collection name too long".to_string());
     }
@@ -210,9 +220,10 @@ pub async fn rag_create_collection(
 
 #[tauri::command]
 pub async fn rag_list_collections(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     scope_filter: Option<String>,
 ) -> Result<Vec<CollectionResponse>, String> {
+    let store = require_rag_store(&store)?;
     let collections = store
         .list_collections(scope_filter.as_deref())
         .map_err(|e| e.to_string())?;
@@ -231,9 +242,10 @@ pub async fn rag_list_collections(
 
 #[tauri::command]
 pub async fn rag_delete_collection(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     collection_id: String,
 ) -> Result<(), String> {
+    let store = require_rag_store(&store)?;
     store
         .delete_collection(&collection_id)
         .map_err(|e| e.to_string())?;
@@ -245,9 +257,10 @@ pub async fn rag_delete_collection(
 
 #[tauri::command]
 pub async fn rag_get_collection_stats(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     collection_id: String,
 ) -> Result<StatsResponse, String> {
+    let store = require_rag_store(&store)?;
     let stats = store
         .get_collection_stats(&collection_id)
         .map_err(|e| e.to_string())?;
@@ -262,9 +275,10 @@ pub async fn rag_get_collection_stats(
 
 #[tauri::command]
 pub async fn rag_add_document(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     request: AddDocumentRequest,
 ) -> Result<DocumentResponse, String> {
+    let store = require_rag_store(&store)?;
     if request.title.len() > MAX_NAME_LENGTH {
         return Err("Document title too long".to_string());
     }
@@ -359,9 +373,10 @@ pub async fn rag_add_document(
 
 #[tauri::command]
 pub async fn rag_remove_document(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     doc_id: String,
 ) -> Result<(), String> {
+    let store = require_rag_store(&store)?;
     store.remove_document(&doc_id).map_err(|e| e.to_string())?;
     // Rebuild global BM25 index to remove stale postings
     bm25::reindex_all(&store, None, None).map_err(|e| e.to_string())?;
@@ -378,11 +393,12 @@ pub struct PaginatedDocuments {
 
 #[tauri::command]
 pub async fn rag_list_documents(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     collection_id: String,
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<PaginatedDocuments, String> {
+    let store = require_rag_store(&store)?;
     let doc_ids = store
         .get_collection_doc_ids(&collection_id)
         .map_err(|e| e.to_string())?;
@@ -418,10 +434,11 @@ pub async fn rag_list_documents(
 
 #[tauri::command]
 pub async fn rag_get_pending_embeddings(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     collection_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<PendingEmbeddingResponse>, String> {
+    let store = require_rag_store(&store)?;
     let pending = embedding::get_pending_embeddings(&store, &collection_id, limit.unwrap_or(50))
         .map_err(|e| e.to_string())?;
 
@@ -433,9 +450,10 @@ pub async fn rag_get_pending_embeddings(
 
 #[tauri::command]
 pub async fn rag_store_embeddings(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     request: StoreEmbeddingsRequest,
 ) -> Result<usize, String> {
+    let store = require_rag_store(&store)?;
     let records: Vec<EmbeddingRecord> = request
         .embeddings
         .into_iter()
@@ -472,7 +490,7 @@ pub async fn rag_store_embeddings(
         std::sync::LazyLock::new(|| std::sync::atomic::AtomicBool::new(false));
 
     if !HNSW_REBUILD_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let store_clone = store.inner().clone();
+        let store_clone = store.clone();
         tokio::task::spawn_blocking(move || {
             let result = store_clone.rebuild_hnsw_index();
             HNSW_REBUILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -489,9 +507,10 @@ pub async fn rag_store_embeddings(
 
 #[tauri::command]
 pub async fn rag_search(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     request: SearchRequest,
 ) -> Result<Vec<SearchResultResponse>, String> {
+    let store = require_rag_store(&store)?;
     if request.query.len() > MAX_QUERY_LENGTH {
         return Err("Search query too long".to_string());
     }
@@ -534,9 +553,10 @@ pub async fn rag_search(
 #[tauri::command]
 pub async fn rag_reindex_collection(
     app: AppHandle,
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     collection_id: String,
 ) -> Result<usize, String> {
+    let store = require_rag_store(&store)?;
     // Prevent concurrent reindex
     if REINDEX_RUNNING.swap(true, Ordering::SeqCst) {
         return Err("Reindex already in progress".to_string());
@@ -581,9 +601,10 @@ pub async fn rag_cancel_reindex() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn rag_get_document_content(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     doc_id: String,
 ) -> Result<String, String> {
+    let store = require_rag_store(&store)?;
     store
         .get_raw_content(&doc_id)
         .map_err(|e| e.to_string())?
@@ -592,11 +613,12 @@ pub async fn rag_get_document_content(
 
 #[tauri::command]
 pub async fn rag_update_document(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     doc_id: String,
     content: String,
     expected_version: Option<u64>,
 ) -> Result<DocumentResponse, String> {
+    let store = require_rag_store(&store)?;
     if content.len() > MAX_CONTENT_SIZE {
         return Err("Document content too large".to_string());
     }
@@ -659,9 +681,10 @@ pub struct CreateBlankDocumentRequest {
 
 #[tauri::command]
 pub async fn rag_create_blank_document(
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     request: CreateBlankDocumentRequest,
 ) -> Result<DocumentResponse, String> {
+    let store = require_rag_store(&store)?;
     if request.title.len() > MAX_NAME_LENGTH {
         return Err("Document title too long".to_string());
     }
@@ -716,10 +739,11 @@ pub async fn rag_create_blank_document(
 #[tauri::command]
 pub async fn rag_open_document_external(
     app: tauri::AppHandle,
-    store: State<'_, Arc<RagStore>>,
+    store: State<'_, Option<Arc<RagStore>>>,
     doc_id: String,
 ) -> Result<String, String> {
     use tauri_plugin_opener::OpenerExt;
+    let store = require_rag_store(&store)?;
 
     // Validate doc_id is a valid UUID to prevent path traversal
     uuid::Uuid::parse_str(&doc_id).map_err(|_| "Invalid document ID".to_string())?;
@@ -776,8 +800,11 @@ pub async fn rag_open_document_external(
 }
 
 #[tauri::command]
-pub async fn rag_rebuild_hnsw_index(store: State<'_, Arc<RagStore>>) -> Result<String, String> {
-    let store_clone = store.inner().clone();
+pub async fn rag_rebuild_hnsw_index(
+    store: State<'_, Option<Arc<RagStore>>>,
+) -> Result<String, String> {
+    let store = require_rag_store(&store)?;
+    let store_clone = store.clone();
     tokio::task::spawn_blocking(move || store_clone.rebuild_hnsw_index())
         .await
         .map_err(|e| format!("spawn_blocking failed: {e}"))?

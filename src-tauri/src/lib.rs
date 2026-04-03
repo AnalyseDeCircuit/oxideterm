@@ -402,26 +402,14 @@ pub fn run() {
         .manage(Arc::new(commands::McpProcessRegistry::new()))
         .manage(commands::AiStreamCancelRegistry::default());
 
-    // Conditionally add AI chat store (may be None if initialization failed)
-    let builder = if let Some(ai_store) = ai_chat_store {
-        builder.manage(ai_store)
-    } else {
-        builder
-    };
+    // Always manage AI chat store (as Option) to avoid "state not managed" errors
+    let builder = builder.manage(ai_chat_store);
 
-    // Conditionally add agent history store
-    let builder = if let Some(agent_store) = agent_history_store {
-        builder.manage(agent_store)
-    } else {
-        builder
-    };
+    // Always manage agent history store (as Option) to avoid "state not managed" errors
+    let builder = builder.manage(agent_history_store);
 
-    // Conditionally add RAG store
-    let builder = if let Some(rag) = rag_store {
-        builder.manage(rag)
-    } else {
-        builder
-    };
+    // Always manage RAG store (as Option) to avoid "state not managed" errors
+    let builder = builder.manage(rag_store);
 
     // Conditionally add local terminal state
     #[cfg(feature = "local-terminal")]
