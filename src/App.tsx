@@ -46,7 +46,7 @@ function App() {
 
   // Shell launcher state
   const [shellLauncherOpen, setShellLauncherOpen] = useState(false);
-  const { createTerminal, loadShells, shellsLoaded } = useLocalTerminalStore();
+  const { createTerminal } = useLocalTerminalStore();
   const createTab = useAppStore(s => s.createTab);
   
   // Command palette state (lifted to store so other components can trigger it)
@@ -65,13 +65,6 @@ function App() {
     const tab = s.tabs.find(t => t.id === s.activeTabId);
     return tab?.type === 'terminal' || tab?.type === 'local_terminal';
   });
-
-  // Load shells on mount
-  useEffect(() => {
-    if (!shellsLoaded) {
-      loadShells();
-    }
-  }, [shellsLoaded, loadShells]);
 
   // Preload fonts based on user settings (lazy load CJK font)
   // Delayed 500ms to let Tauri window and PTY initialize first

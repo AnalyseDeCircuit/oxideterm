@@ -16,11 +16,26 @@ use tokio::time::{sleep, timeout};
 
 use super::WslDistro;
 
+/// The Windows `CREATE_NO_WINDOW` flag (0x08000000) prevents console windows
+/// from flashing when spawning `wsl.exe` subprocesses.
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Create a `wsl.exe` Command with `CREATE_NO_WINDOW` to suppress console flicker.
+fn wsl_command() -> Command {
+    let mut cmd = Command::new("wsl.exe");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// List WSL distributions by parsing `wsl.exe --list --verbose`.
 ///
 /// ⚠️ Some Windows versions output UTF-16LE with BOM — we handle both encodings.
 pub async fn list_distros() -> Result<Vec<WslDistro>, GraphicsError> {
-    let output = Command::new("wsl.exe")
+    let output = wsl_command()
         .args(["--list", "--verbose"])
         .output()
         .await
@@ -175,7 +190,7 @@ const PID_FILE: &str = "/tmp/oxideterm-desktop.pid";
 /// Check whether at least one desktop session command is installed in the distro.
 async fn has_desktop(distro: &str) -> bool {
     for de in DESKTOP_CANDIDATES {
-        let output = Command::new("wsl.exe")
+        let output = wsl_command()
             .args(["-d", distro, "--", "which", de.detect_bin])
             .output()
             .await;
@@ -194,7 +209,7 @@ async fn has_desktop(distro: &str) -> bool {
 /// Returns the command name if found, or `None` if neither is available.
 async fn detect_dbus(distro: &str) -> Option<&'static str> {
     for cmd in &["dbus-run-session", "dbus-launch"] {
-        let output = Command::new("wsl.exe")
+        let output = wsl_command()
             .args(["-d", distro, "--", "which", cmd])
             .output()
             .await;
@@ -215,7 +230,7 @@ pub async fn check_prerequisites(
     distro: &str,
 ) -> Result<(&'static str, &'static str, &'static str, &'static str), GraphicsError> {
     // 1. Check for Xtigervnc
-    let output = Command::new("wsl.exe")
+    let output = wsl_command()
         .args(["-d", distro, "--", "which", "Xtigervnc"])
         .output()
         .await;
@@ -227,7 +242,7 @@ pub async fn check_prerequisites(
     // 2. Check for a desktop environment
     let mut matched: Option<&DesktopCandidate> = None;
     for de in DESKTOP_CANDIDATES {
-        let output = Command::new("wsl.exe")
+        let output = wsl_command()
             .args(["-d", distro, "--", "which", de.detect_bin])
             .output()
             .await;
@@ -270,7 +285,7 @@ pub async fn check_prerequisites(
 async fn find_free_display(distro: &str) -> String {
     for n in 10..100 {
         let check = format!("test -e /tmp/.X11-unix/X{}", n);
-        let output = Command::new("wsl.exe")
+        let output = wsl_command()
             .args(["-d", distro, "--", "bash", "-c", &check])
             .output()
             .await;
@@ -307,7 +322,7 @@ pub async fn start_session(
     let disp = find_free_display(distro).await;
 
     // 1. Start Xtigervnc
-    let vnc_child = Command::new("wsl.exe")
+    let vnc_child = wsl_command()
         .args([
             "-d",
             distro,
@@ -408,7 +423,7 @@ trap cleanup EXIT
     );
 
     // Pipe script content into bash via stdin
-    let child = Command::new("wsl.exe")
+    let child = wsl_command()
         .args(["-d", distro, "--", "bash", "-s"])
         .env_remove("WAYLAND_DISPLAY")
         .kill_on_drop(true)
@@ -449,7 +464,7 @@ trap cleanup EXIT
 ///
 /// Used by app mode which doesn't need a desktop environment.
 pub async fn check_vnc_available(distro: &str) -> Result<(), GraphicsError> {
-    let output = Command::new("wsl.exe")
+    let output = wsl_command()
         .args(["-d", distro, "--", "which", "Xtigervnc"])
         .output()
         .await;
@@ -478,7 +493,7 @@ pub async fn start_app_session(
     let geo = geometry.unwrap_or("1280x720");
 
     // 1. Start Xtigervnc with smaller resolution (app mode)
-    let vnc_child = Command::new("wsl.exe")
+    let vnc_child = wsl_command()
         .args([
             "-d",
             distro,
@@ -574,7 +589,7 @@ async fn start_app_process(
     // wsl.exe -d Ubuntu -- bash -s -- gedit /home/user/file.txt
     //                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     //                                 These become $1, $2, ... executed by `exec "$@"`
-    let mut child = Command::new("wsl.exe")
+    let mut child = wsl_command()
         .args(["-d", distro, "--", "bash", "-s", "--"])
         .args(argv)
         // §11.4: Clear all inherited environment, inject only safe minimum
@@ -673,7 +688,7 @@ done"#,
         pid = PID_FILE,
     );
 
-    let _ = Command::new("wsl.exe")
+    let _ = wsl_command()
         .args(["-d", distro, "--", "bash", "-c", &cleanup_cmd])
         .output()
         .await;

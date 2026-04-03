@@ -12,6 +12,9 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::fs;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// Information about a detected shell
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShellInfo {
@@ -338,7 +341,11 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
     }
 
     // Also check if pwsh is in PATH
-    if let Ok(output) = std::process::Command::new("where").arg("pwsh.exe").output() {
+    if let Ok(output) = std::process::Command::new("where")
+        .arg("pwsh.exe")
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+    {
         if output.status.success() {
             let path_str = String::from_utf8_lossy(&output.stdout)
                 .lines()
@@ -392,6 +399,7 @@ fn scan_wsl_distributions(shells: &mut Vec<ShellInfo>) {
     // Try to get list of installed distributions
     let output = match std::process::Command::new(&wsl_path)
         .args(["--list", "--quiet"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
     {
         Ok(output) if output.status.success() => output,
