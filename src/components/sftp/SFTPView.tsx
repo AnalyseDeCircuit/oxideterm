@@ -2034,56 +2034,45 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
               {t('sftp.dialogs.select_drive_desc')}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1.5 py-2">
-            {availableDrives.map((drive) => {
-              const DriveIcon = drive.driveType === 'removable' ? Usb
-                : drive.driveType === 'network' ? Globe
-                : HardDrive;
-              const usedRatio = drive.totalSpace > 0
-                ? ((drive.totalSpace - drive.availableSpace) / drive.totalSpace) * 100
-                : 0;
-              return (
-                <button
-                  key={drive.path}
-                  className="group flex items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-accent active:scale-[0.99]"
-                  onClick={() => handleSelectDrive(drive.path)}
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
-                    <DriveIcon className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-medium">{drive.name}</span>
-                      {drive.isReadOnly && (
-                        <span className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                          {t('sftp.dialogs.readOnly')}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">{drive.path}</div>
-                    {drive.totalSpace > 0 && (
-                      <div className="mt-1">
-                        <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-full rounded-full transition-all",
-                              usedRatio > 90 ? "bg-red-500" : usedRatio > 70 ? "bg-amber-500" : "bg-primary"
-                            )}
-                            style={{ width: `${Math.min(usedRatio, 100)}%` }}
-                          />
-                        </div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">
+          <div className="px-4 py-2">
+            <div className="rounded-md border border-theme-border overflow-hidden">
+              {availableDrives.map((drive, index) => {
+                const DriveIcon = drive.driveType === 'removable' ? Usb
+                  : drive.driveType === 'network' ? Globe
+                  : HardDrive;
+                const usedRatio = drive.totalSpace > 0
+                  ? ((drive.totalSpace - drive.availableSpace) / drive.totalSpace) * 100
+                  : 0;
+                return (
+                  <button
+                    key={drive.path}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-theme-bg-hover active:scale-[0.99]",
+                      index < availableDrives.length - 1 && "border-b border-theme-border/50"
+                    )}
+                    onClick={() => handleSelectDrive(drive.path)}
+                  >
+                    <DriveIcon className="h-4 w-4 shrink-0 text-theme-text-muted" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-theme-text">{drive.name}</span>
+                        {drive.isReadOnly && (
+                          <span className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                            {t('sftp.dialogs.readOnly')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-theme-text-muted">{drive.path}</div>
+                      {drive.totalSpace > 0 && (
+                        <div className="text-[10px] text-theme-text-muted mt-0.5">
                           {formatFileSize(drive.availableSpace)} {t('sftp.dialogs.available')} / {formatFileSize(drive.totalSpace)}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                  <svg className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                </button>
-              );
-            })}
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

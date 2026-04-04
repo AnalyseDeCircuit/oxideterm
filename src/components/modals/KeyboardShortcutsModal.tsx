@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { Search, Keyboard } from 'lucide-react';
 import { platform } from '@/lib/platform';
 import { getShortcutCategories } from '@/lib/shortcuts';
+import { useSettingsStore } from '@/store/settingsStore';
+import { getFontFamilyCSS } from '@/components/fileManager/fontUtils';
 
 // ============================================================================
 // KeyboardShortcutsModal — ⌘/ (Ctrl+/) to open
@@ -24,6 +26,18 @@ export const KeyboardShortcutsModal = ({ open, onOpenChange }: KeyboardShortcuts
   const isMac = platform.isMac;
 
   const categories = useMemo(() => getShortcutCategories(t), [t]);
+
+  // Terminal font for shortcut key display
+  const { fontFamily, customFontFamily } = useSettingsStore(
+    (s) => s.settings.terminal
+  );
+  const terminalFontCSS = useMemo(
+    () =>
+      fontFamily === 'custom' && customFontFamily
+        ? customFontFamily
+        : getFontFamilyCSS(fontFamily),
+    [fontFamily, customFontFamily]
+  );
 
   // Filter by search query
   const filtered = useMemo(() => {
@@ -67,7 +81,7 @@ export const KeyboardShortcutsModal = ({ open, onOpenChange }: KeyboardShortcuts
             placeholder={t('shortcuts_modal.search_placeholder')}
             className="flex-1 h-11 px-3 bg-transparent text-sm text-theme-text placeholder:text-theme-text-muted outline-none border-0"
           />
-          <kbd className="px-1.5 py-0.5 rounded-sm bg-theme-bg border border-theme-border text-theme-text-muted font-mono text-[10px] shrink-0">
+          <kbd className="px-1.5 py-0.5 rounded-sm bg-theme-bg border border-theme-border text-theme-text-muted text-[10px] shrink-0" style={{ fontFamily: terminalFontCSS }}>
             {isMac ? '⌘/' : 'Ctrl+/'}
           </kbd>
         </div>
@@ -95,7 +109,7 @@ export const KeyboardShortcutsModal = ({ open, onOpenChange }: KeyboardShortcuts
                         }`}
                       >
                         <span className="text-sm text-theme-text">{shortcut.label}</span>
-                        <kbd className="px-2 py-0.5 rounded-sm bg-theme-bg-panel border border-theme-border text-theme-text-muted text-xs font-mono">
+                        <kbd className="px-2 py-0.5 rounded-sm bg-theme-bg-panel border border-theme-border text-theme-text-muted text-xs" style={{ fontFamily: terminalFontCSS }}>
                           {isMac ? shortcut.mac : shortcut.other}
                         </kbd>
                       </div>
@@ -110,7 +124,7 @@ export const KeyboardShortcutsModal = ({ open, onOpenChange }: KeyboardShortcuts
         {/* Footer hint */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-theme-border bg-theme-bg-panel text-[11px] text-theme-text-muted">
           <span>{t('shortcuts_modal.footer_hint')}</span>
-          <span className="font-mono">{filtered.reduce((n, c) => n + c.shortcuts.length, 0)} {t('shortcuts_modal.shortcut_count')}</span>
+          <span style={{ fontFamily: terminalFontCSS }}>{filtered.reduce((n, c) => n + c.shortcuts.length, 0)} {t('shortcuts_modal.shortcut_count')}</span>
         </div>
       </DialogContent>
     </Dialog>

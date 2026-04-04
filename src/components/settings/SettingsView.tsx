@@ -47,6 +47,7 @@ import { themes, getTerminalTheme, getCustomThemes, isCustomTheme, exportTheme, 
 import { platform } from '../../lib/platform';
 import { cn } from '../../lib/utils';
 import { getShortcutCategories } from '../../lib/shortcuts';
+import { getFontFamilyCSS } from '../fileManager/fontUtils';
 import { ThemeEditorModal } from './ThemeEditorModal';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -387,6 +388,12 @@ const HelpAboutSection = () => {
     // Use shared shortcuts data
     const shortcutCategories = getShortcutCategories(t);
 
+    // Terminal font for shortcut key display
+    const { fontFamily, customFontFamily } = useSettingsStore((s) => s.settings.terminal);
+    const terminalFontCSS = fontFamily === 'custom' && customFontFamily
+        ? customFontFamily
+        : getFontFamilyCSS(fontFamily);
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div>
@@ -628,7 +635,7 @@ const HelpAboutSection = () => {
                                 {category.shortcuts.map((shortcut, index) => (
                                     <div key={index} className={`flex items-center justify-between py-1.5 ${index < category.shortcuts.length - 1 ? 'border-b border-theme-border/30' : ''}`}>
                                         <span className="text-theme-text-muted">{shortcut.label}</span>
-                                        <kbd className="px-2 py-0.5 rounded bg-theme-bg text-theme-text text-xs font-mono">
+                                        <kbd className="px-2 py-0.5 rounded bg-theme-bg text-theme-text text-xs" style={{ fontFamily: terminalFontCSS }}>
                                             {isMac ? shortcut.mac : shortcut.other}
                                         </kbd>
                                     </div>

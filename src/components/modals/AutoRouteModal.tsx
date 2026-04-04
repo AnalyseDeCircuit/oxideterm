@@ -19,6 +19,7 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import {
   Dialog,
   DialogContent,
@@ -34,7 +35,6 @@ import {
   Server, 
   RefreshCw,
   AlertCircle,
-  CheckCircle2,
   Info
 } from 'lucide-react';
 
@@ -128,11 +128,12 @@ export const AutoRouteModal = () => {
           </DialogDescription>
         </DialogHeader>
 
+        <div className="px-4 py-2">
         {/* Loading state */}
         {loading && (
           <div className="flex items-center justify-center py-8">
-            <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">{t('modals.auto_route.loading')}</span>
+            <RefreshCw className="h-6 w-6 animate-spin text-theme-text-muted" />
+            <span className="ml-2 text-theme-text-muted">{t('modals.auto_route.loading')}</span>
           </div>
         )}
 
@@ -143,7 +144,7 @@ export const AutoRouteModal = () => {
               <Info className="h-5 w-5 text-blue-500 mt-0.5" />
               <div className="space-y-1">
                 <p className="text-sm font-medium">{t('modals.auto_route.no_connections')}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-theme-text-muted">
                   {t('modals.auto_route.no_connections_hint')}
                 </p>
               </div>
@@ -165,37 +166,43 @@ export const AutoRouteModal = () => {
             {/* Node selection */}
             <div className="space-y-2">
               <Label>{t('modals.auto_route.select_target')}</Label>
-              <div className="space-y-1 max-h-60 overflow-y-auto rounded-lg border bg-muted/30">
-                {nodes.map((node) => (
-                  <button
+              <RadioGroup
+                value={selectedNode?.id ?? ''}
+                onValueChange={(value) => {
+                  const node = nodes.find(n => n.id === value);
+                  if (node) handleSelectNode(node);
+                }}
+                className="max-h-60 overflow-y-auto rounded-md border border-theme-border"
+              >
+                {nodes.map((node, index) => (
+                  <label
                     key={node.id}
-                    onClick={() => handleSelectNode(node)}
-                    className={`w-full flex items-center gap-3 p-3 text-left transition-colors
-                      ${selectedNode?.id === node.id 
-                        ? 'bg-primary/20 border-l-2 border-primary' 
-                        : 'hover:bg-muted/50'
+                    htmlFor={`node-${node.id}`}
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors
+                      ${index < nodes.length - 1 ? 'border-b border-theme-border/50' : ''}
+                      ${selectedNode?.id === node.id
+                        ? 'bg-theme-accent/10'
+                        : 'hover:bg-theme-bg-hover'
                       }`}
                   >
-                    <Server className="h-4 w-4 text-muted-foreground" />
+                    <RadioGroupItem value={node.id} id={`node-${node.id}`} />
+                    <Server className="h-4 w-4 shrink-0 text-theme-text-muted" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
+                      <p className="text-sm font-medium truncate text-theme-text">
                         {node.displayName || node.id}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-xs text-theme-text-muted truncate">
                         {node.username}@{node.host}:{node.port}
                       </p>
                     </div>
-                    {selectedNode?.id === node.id && (
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
-                    )}
-                  </button>
+                  </label>
                 ))}
-              </div>
+              </RadioGroup>
             </div>
 
             {/* Selected node details */}
             {selectedNode && (
-              <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
+              <div className="space-y-4 p-4 rounded-md bg-theme-bg-panel border border-theme-border">
                 <div className="space-y-2">
                   <Label htmlFor="displayName">{t('modals.auto_route.display_name')}</Label>
                   <Input
@@ -207,15 +214,15 @@ export const AutoRouteModal = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">{t('modals.auto_route.connection_info')}</p>
-                  <div className="text-sm font-mono bg-background/50 rounded px-2 py-1">
+                  <p className="text-xs text-theme-text-muted">{t('modals.auto_route.connection_info')}</p>
+                  <div className="text-sm font-mono bg-theme-bg/50 rounded px-2 py-1 text-theme-text">
                     {selectedNode.username}@{selectedNode.host}:{selectedNode.port}
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">{t('modals.auto_route.authentication')}</p>
-                  <div className="text-sm flex items-center gap-2">
+                  <p className="text-xs text-theme-text-muted">{t('modals.auto_route.authentication')}</p>
+                  <div className="text-sm flex items-center gap-2 text-theme-text">
                     {selectedNode.authType === 'agent' && t('modals.auto_route.auth_agent')}
                     {selectedNode.authType === 'key' && t('modals.auto_route.auth_key')}
                     {selectedNode.authType === 'password' && (
@@ -227,12 +234,12 @@ export const AutoRouteModal = () => {
                 {/* Neighbors info */}
                 {selectedNode.neighbors && selectedNode.neighbors.length > 0 && (
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">{t('modals.auto_route.can_reach')}</p>
+                    <p className="text-xs text-theme-text-muted">{t('modals.auto_route.can_reach')}</p>
                     <div className="flex flex-wrap gap-1">
                       {selectedNode.neighbors.map((neighbor) => (
                         <span
                           key={neighbor}
-                          className="text-xs px-2 py-0.5 rounded bg-background/50"
+                          className="text-xs px-2 py-0.5 rounded bg-theme-bg/50 text-theme-text-muted"
                         >
                           {neighbor}
                         </span>
@@ -244,6 +251,7 @@ export const AutoRouteModal = () => {
             )}
           </div>
         )}
+        </div>
 
         <DialogFooter>
           <Button
