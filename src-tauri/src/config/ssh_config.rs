@@ -534,4 +534,119 @@ Host hpc
         let desc = host.proxy_jump_description().unwrap();
         assert_eq!(desc, "admin@jump1:22 → jump2:2222");
     }
+
+    // ====================================================================
+    // PortForwardRule::parse() tests
+    // ====================================================================
+
+    #[test]
+    fn test_port_forward_rule_parse_basic() {
+        // Simple: "port host:hostport"
+        let rule = PortForwardRule::parse("8080 localhost:80").unwrap();
+        assert_eq!(rule.bind_address, "localhost");
+        assert_eq!(rule.local_port, 8080);
+        assert_eq!(rule.remote_host, "localhost");
+        assert_eq!(rule.remote_port, 80);
+    }
+
+    #[test]
+    fn test_port_forward_rule_parse_with_bind_address() {
+        // With bind: "bind_address:port host:hostport"
+        let rule = PortForwardRule::parse("127.0.0.1:3000 db.internal:5432").unwrap();
+        assert_eq!(rule.bind_address, "127.0.0.1");
+        assert_eq!(rule.local_port, 3000);
+        assert_eq!(rule.remote_host, "db.internal");
+        assert_eq!(rule.remote_port, 5432);
+    }
+
+    #[test]
+    fn test_port_forward_rule_parse_invalid_single_part() {
+        assert!(PortForwardRule::parse("8080").is_none());
+    }
+
+    #[test]
+    fn test_port_forward_rule_parse_invalid_no_remote_port() {
+        assert!(PortForwardRule::parse("8080 localhost").is_none());
+    }
+
+    #[test]
+    fn test_port_forward_rule_parse_invalid_non_numeric_port() {
+        assert!(PortForwardRule::parse("abc localhost:80").is_none());
+    }
+
+    // ====================================================================
+    // ProxyJumpHost::parse() tests
+    // ====================================================================
+
+    #[test]
+    fn test_proxy_jump_host_parse_host_only() {
+        let pj = ProxyJumpHost::parse("bastion.example.com").unwrap();
+        assert_eq!(pj.user, None);
+        assert_eq!(pj.host, "bastion.example.com");
+        assert_eq!(pj.port, 22);
+    }
+
+    #[test]
+    fn test_proxy_jump_host_parse_user_and_host() {
+        let pj = ProxyJumpHost::parse("admin@bastion").unwrap();
+        assert_eq!(pj.user, Some("admin".to_string()));
+        assert_eq!(pj.host, "bastion");
+        assert_eq!(pj.port, 22);
+    }
+
+    #[test]
+    fn test_proxy_jump_host_parse_host_and_port() {
+        let pj = ProxyJumpHost::parse("jump.example.com:2222").unwrap();
+        assert_eq!(pj.user, None);
+        assert_eq!(pj.host, "jump.example.com");
+        assert_eq!(pj.port, 2222);
+    }
+
+    #[test]
+    fn test_proxy_jump_host_parse_full() {
+        let pj = ProxyJumpHost::parse("root@gateway.corp:10022").unwrap();
+        assert_eq!(pj.user, Some("root".to_string()));
+        assert_eq!(pj.host, "gateway.corp");
+        assert_eq!(pj.port, 10022);
+    }
+
+    #[test]
+    fn test_proxy_jump_host_parse_invalid_port_defaults() {
+        // Invalid port string falls back to 22
+        let pj = ProxyJumpHost::parse("host:notaport").unwrap();
+        assert_eq!(pj.host, "host");
+        assert_eq!(pj.port, 22);
+    }
+
+    // ====================================================================
+    // filter_importable_hosts() tests
+    // ====================================================================
+
+    #[test]
+    fn test_filter_importable_hosts_removes_wildcards() {
+        let hosts = vec![
+            SshConfigHost {
+                alias: "*".to_string(),
+                ..Default::default()
+            },
+            SshConfigHost {
+                alias: "prod".to_string(),
+                hostname: Some("prod.example.com".to_string()),
+                ..Default::default()
+            },
+            SshConfigHost {
+                alias: "dev-*".to_string(),
+                ..Default::default()
+            },
+        ];
+        let filtered = filter_importable_hosts(hosts);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].alias, "prod");
+    }
+
+    #[test]
+    fn test_filter_importable_hosts_empty() {
+        let filtered = filter_importable_hosts(vec![]);
+        assert!(filtered.is_empty());
+    }
 }

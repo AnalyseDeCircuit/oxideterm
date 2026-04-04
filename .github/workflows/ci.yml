@@ -48,6 +48,9 @@ jobs:
       - name: i18n completeness check
         run: node scripts/check-i18n.cjs
 
+      - name: Run tests
+        run: pnpm test
+
   # ── Rust: check + fmt + deny ────────────────────────────────────────
   rust:
     name: Rust (check + fmt)
@@ -95,6 +98,12 @@ jobs:
 
       - name: cargo fmt (cli)
         run: cd cli && cargo fmt --check
+
+      - name: cargo test (src-tauri)
+        run: cd src-tauri && cargo test --lib
+
+      - name: cargo test (cli)
+        run: cd cli && cargo test --lib
 
   # ── Security & license audit ────────────────────────────────────────
   # cargo deny reads the dependency graph only — no compilation, no Linux

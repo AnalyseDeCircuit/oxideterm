@@ -863,6 +863,7 @@ mod tests {
             updated_at: 1000,
             message_count: 0,
             session_id: None,
+            origin: "sidebar".to_string(),
         };
         store.create_conversation(&meta).unwrap();
 
@@ -889,6 +890,7 @@ mod tests {
             updated_at: 1000,
             message_count: 0,
             session_id: None,
+            origin: "sidebar".to_string(),
         };
         store.create_conversation(&meta).unwrap();
 
@@ -954,6 +956,7 @@ mod tests {
             updated_at: 1000,
             message_count: 0,
             session_id: None,
+            origin: "sidebar".to_string(),
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1008,6 +1011,7 @@ mod tests {
                 updated_at: 1000,
                 message_count: 0,
                 session_id: None,
+                origin: "sidebar".to_string(),
             };
             store.create_conversation(&meta).unwrap();
 

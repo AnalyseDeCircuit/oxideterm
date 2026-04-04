@@ -4,7 +4,7 @@
 //! Wire Protocol for OxideTerm Data Plane
 //!
 //! Protocol v1 Frame Format:
-//! ```
+//! ```text
 //! +--------+--------+--------+--------+--------+-- ... --+
 //! | Type   | Length (4 bytes, big-endian)      | Payload |
 //! +--------+--------+--------+--------+--------+-- ... --+

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// - Windows UNC paths: `\\server\share`, `\\?\C:\long\path`
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// assert!(is_absolute_local_path("/home/user"));
 /// assert!(is_absolute_local_path("C:\\Users"));
 /// assert!(is_absolute_local_path("D:/data"));
@@ -141,7 +141,9 @@ mod tests {
         assert!(is_absolute_remote_path("/home/user"));
         assert!(is_absolute_remote_path("/"));
         assert!(!is_absolute_remote_path("relative/path"));
-        assert!(!is_absolute_remote_path("C:\\Windows")); // Not a remote absolute path
+        // Windows SSH servers (OpenSSH for Windows) can return drive-letter paths
+        assert!(is_absolute_remote_path("C:\\Windows"));
+        assert!(is_absolute_remote_path("C:/Users"));
     }
 
     #[test]

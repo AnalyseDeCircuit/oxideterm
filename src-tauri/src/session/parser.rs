@@ -334,4 +334,34 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, "incomplete line");
     }
+
+    #[test]
+    fn test_extract_raw_terminal_lines_basic() {
+        let data = b"hello\nworld\n";
+        let lines = extract_raw_terminal_lines(data);
+        assert_eq!(lines, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn test_extract_raw_terminal_lines_crlf() {
+        let data = b"line1\r\nline2\r\n";
+        let lines = extract_raw_terminal_lines(data);
+        assert_eq!(lines, vec!["line1", "line2"]);
+    }
+
+    #[test]
+    fn test_extract_raw_terminal_lines_empty_filtered() {
+        let data = b"a\n\n\nb\n";
+        let lines = extract_raw_terminal_lines(data);
+        assert_eq!(lines, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_extract_raw_terminal_lines_ansi_only_line_filtered() {
+        // A line with ONLY ANSI codes (no visible text) should be filtered out
+        let data = b"\x1b[31m\x1b[0m\nvisible\n";
+        let lines = extract_raw_terminal_lines(data);
+        // The ANSI-only line is stripped to empty and filtered
+        assert_eq!(lines, vec!["visible"]);
+    }
 }

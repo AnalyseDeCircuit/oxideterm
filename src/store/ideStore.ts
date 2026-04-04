@@ -1082,7 +1082,7 @@ export const useIdeStore = create<IdeState & IdeActions>()(
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-function extensionToLanguage(ext: string): string {
+export function extensionToLanguage(ext: string): string {
   const map: Record<string, string> = {
     ts: 'typescript',
     tsx: 'typescript',
@@ -1174,7 +1174,7 @@ function extensionToLanguage(ext: string): string {
  * Detect language from a full file name.
  * Checks exact filename match first, then dotfile patterns, then extension.
  */
-function detectLanguage(fileName: string): string {
+export function detectLanguage(fileName: string): string {
   const lower = fileName.toLowerCase();
 
   // 1. Exact filename → language (case-insensitive)

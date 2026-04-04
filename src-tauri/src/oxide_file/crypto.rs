@@ -203,6 +203,7 @@ mod tests {
             tags: vec![],
             options: ConnectionOptions::default(),
             proxy_chain: vec![],
+            forwards: vec![],
         }
     }
 
