@@ -71,3 +71,42 @@ impl serde::Serialize for SshError {
         serializer.serialize_str(&self.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ssh_error_serializes_as_display_string() {
+        let json = serde_json::to_string(&SshError::AuthenticationFailed("bad credentials".into()))
+            .unwrap();
+
+        assert_eq!(json, "\"Authentication failed: bad credentials\"");
+    }
+
+    #[test]
+    fn test_ssh_error_from_io_preserves_message() {
+        let error: SshError =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope").into();
+
+        assert!(matches!(error, SshError::IoError(_)));
+        assert!(error.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn test_ssh_error_from_russh_maps_to_protocol_error() {
+        let error: SshError = russh::Error::CouldNotReadKey.into();
+
+        assert!(matches!(error, SshError::ProtocolError(_)));
+        assert_eq!(error.to_string(), "SSH protocol error: Could not read key");
+    }
+
+    #[test]
+    fn test_ssh_error_from_russh_keys_maps_to_key_error() {
+        let key_error = russh::keys::decode_secret_key("not-a-key", None).unwrap_err();
+        let error: SshError = key_error.into();
+
+        assert!(matches!(error, SshError::KeyError(_)));
+        assert!(error.to_string().starts_with("Key error: "));
+    }
+}

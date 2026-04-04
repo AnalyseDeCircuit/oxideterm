@@ -615,6 +615,107 @@ pub async fn clear_session_tree(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_auth_supports_password_authentication() {
+        let auth = build_auth("password", Some("secret".to_string()), None, None, None).unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Password { password } if password == "secret"
+        ));
+    }
+
+    #[test]
+    fn test_build_auth_supports_key_authentication() {
+        let auth = build_auth(
+            "key",
+            None,
+            Some("/tmp/id_ed25519".to_string()),
+            None,
+            Some("pp".to_string()),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Key { key_path, passphrase }
+                if key_path == "/tmp/id_ed25519" && passphrase.as_deref() == Some("pp")
+        ));
+    }
+
+    #[test]
+    fn test_build_auth_supports_certificate_authentication() {
+        let auth = build_auth(
+            "certificate",
+            None,
+            Some("/tmp/id_ed25519".to_string()),
+            Some("/tmp/id_ed25519-cert.pub".to_string()),
+            Some("pp".to_string()),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Certificate {
+                key_path,
+                cert_path,
+                passphrase,
+            } if key_path == "/tmp/id_ed25519"
+                && cert_path == "/tmp/id_ed25519-cert.pub"
+                && passphrase.as_deref() == Some("pp")
+        ));
+    }
+
+    #[test]
+    fn test_build_auth_supports_agent_authentication() {
+        let auth = build_auth("agent", None, None, None, None).unwrap();
+
+        assert!(matches!(auth, AuthMethod::Agent));
+    }
+
+    #[test]
+    fn test_build_auth_requires_password_for_password_authentication() {
+        let error = build_auth("password", None, None, None, None).unwrap_err();
+
+        assert_eq!(error, "Password required for password authentication");
+    }
+
+    #[test]
+    fn test_build_auth_requires_key_path_for_key_authentication() {
+        let error = build_auth("key", None, None, None, None).unwrap_err();
+
+        assert_eq!(error, "Key path required for key authentication");
+    }
+
+    #[test]
+    fn test_build_auth_requires_certificate_path_for_certificate_authentication() {
+        let error = build_auth(
+            "certificate",
+            None,
+            Some("/tmp/id_ed25519".to_string()),
+            None,
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "Certificate path required for certificate authentication"
+        );
+    }
+
+    #[test]
+    fn test_build_auth_rejects_unknown_authentication_type() {
+        let error = build_auth("keyboard_interactive", None, None, None, None).unwrap_err();
+
+        assert_eq!(error, "Unknown auth type: keyboard_interactive");
+    }
+}
+
 /// 连接会话树节点请求
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

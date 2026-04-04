@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
 
 // Mock Tauri APIs for test environment
 vi.mock('@tauri-apps/api/core', () => ({
@@ -38,3 +39,7 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: vi.fn(),
   readText: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});

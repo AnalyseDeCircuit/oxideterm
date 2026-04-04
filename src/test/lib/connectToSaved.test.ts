@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 
 const apiMocks = vi.hoisted(() => ({
   getSavedConnectionForConnect: vi.fn(),
@@ -20,24 +21,14 @@ const appStoreState = vi.hoisted(() => ({
   activeTabId: null as string | null,
 }));
 
-function createStore<T extends object>(state: T) {
-  return Object.assign(
-    (() => state) as unknown as { getState: () => T; setState: (patch: Record<string, unknown>) => void },
-    {
-      getState: () => state,
-      setState: (patch: Record<string, unknown>) => Object.assign(state, patch),
-    },
-  );
-}
-
 vi.mock('@/lib/api', () => ({ api: apiMocks }));
 
 vi.mock('@/store/sessionTreeStore', () => ({
-  useSessionTreeStore: createStore(sessionTreeState),
+  useSessionTreeStore: createMutableSelectorStore(sessionTreeState),
 }));
 
 vi.mock('@/store/appStore', () => ({
-  useAppStore: createStore(appStoreState),
+  useAppStore: createMutableSelectorStore(appStoreState),
 }));
 
 import { connectToSaved } from '@/lib/connectToSaved';

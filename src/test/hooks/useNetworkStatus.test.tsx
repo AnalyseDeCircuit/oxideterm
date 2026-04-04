@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSelectorStore } from '@/test/helpers/mockStore';
 
 const apiMocks = vi.hoisted(() => ({
   probeConnections: vi.fn().mockResolvedValue([]),
@@ -12,24 +13,12 @@ const appStoreState = vi.hoisted(() => ({
   setNetworkOnline: vi.fn(),
 }));
 
-function createMockStore<T extends object>(state: T) {
-  return Object.assign(
-    ((selector?: (value: T) => unknown) => (selector ? selector(state) : state)) as unknown as {
-      (selector?: (value: T) => unknown): unknown;
-      getState: () => T;
-    },
-    {
-      getState: () => state,
-    },
-  );
-}
-
 vi.mock('@/lib/api', () => ({ api: apiMocks }));
 
 vi.mock('@/lib/structuredLog', () => ({ slog: slogMock }));
 
 vi.mock('@/store/appStore', () => ({
-  useAppStore: createMockStore(appStoreState),
+  useAppStore: createSelectorStore(appStoreState),
 }));
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';

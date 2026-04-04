@@ -89,6 +89,39 @@ fn default_rows() -> u32 {
     40
 }
 
+fn build_session_auth(auth: AuthRequest) -> Result<AuthMethod, String> {
+    build_session_auth_with(auth, |passphrase| {
+        KeyAuth::from_default_locations(passphrase).map_err(|e| format!("No SSH key found: {}", e))
+    })
+}
+
+fn build_session_auth_with<F>(
+    auth: AuthRequest,
+    default_key_loader: F,
+) -> Result<AuthMethod, String>
+where
+    F: FnOnce(Option<&str>) -> Result<KeyAuth, String>,
+{
+    match auth {
+        AuthRequest::Password { password } => Ok(AuthMethod::Password { password }),
+        AuthRequest::Key {
+            key_path,
+            passphrase,
+        } => Ok(AuthMethod::Key {
+            key_path,
+            passphrase,
+        }),
+        AuthRequest::DefaultKey { passphrase } => {
+            let key_auth = default_key_loader(passphrase.as_deref())?;
+            Ok(AuthMethod::Key {
+                key_path: key_auth.key_path.to_string_lossy().to_string(),
+                passphrase,
+            })
+        }
+        AuthRequest::Agent => Ok(AuthMethod::Agent),
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Session Management Commands
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -300,25 +333,7 @@ pub async fn establish_connection(
     );
 
     // 构建配置用于查找/创建
-    let auth = match request.auth {
-        AuthRequest::Password { password } => AuthMethod::Password { password },
-        AuthRequest::Key {
-            key_path,
-            passphrase,
-        } => AuthMethod::Key {
-            key_path,
-            passphrase,
-        },
-        AuthRequest::DefaultKey { passphrase } => {
-            let key_auth = KeyAuth::from_default_locations(passphrase.as_deref())
-                .map_err(|e| format!("No SSH key found: {}", e))?;
-            AuthMethod::Key {
-                key_path: key_auth.key_path.to_string_lossy().to_string(),
-                passphrase,
-            }
-        }
-        AuthRequest::Agent => AuthMethod::Agent,
-    };
+    let auth = build_session_auth(request.auth)?;
 
     let config = SessionConfig {
         host: request.host.clone(),
@@ -391,4 +406,85 @@ pub async fn disconnect_connection(
         .disconnect(&connection_id)
         .await
         .map_err(|e| format!("Failed to disconnect: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::OsRng;
+    use russh::keys::{Algorithm, PrivateKey};
+    use std::path::PathBuf;
+
+    fn fake_key_auth(path: &str) -> KeyAuth {
+        let mut rng = OsRng;
+        KeyAuth {
+            key_path: PathBuf::from(path),
+            key_pair: PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap(),
+        }
+    }
+
+    #[test]
+    fn test_build_session_auth_password() {
+        let auth = build_session_auth(AuthRequest::Password {
+            password: "secret".to_string(),
+        })
+        .unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Password { password } if password == "secret"
+        ));
+    }
+
+    #[test]
+    fn test_build_session_auth_key() {
+        let auth = build_session_auth(AuthRequest::Key {
+            key_path: "/tmp/id_ed25519".to_string(),
+            passphrase: Some("pp".to_string()),
+        })
+        .unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Key { key_path, passphrase }
+                if key_path == "/tmp/id_ed25519" && passphrase.as_deref() == Some("pp")
+        ));
+    }
+
+    #[test]
+    fn test_build_session_auth_agent() {
+        let auth = build_session_auth(AuthRequest::Agent).unwrap();
+
+        assert!(matches!(auth, AuthMethod::Agent));
+    }
+
+    #[test]
+    fn test_build_session_auth_default_key_uses_resolved_key_path() {
+        let auth = build_session_auth_with(
+            AuthRequest::DefaultKey {
+                passphrase: Some("pp".to_string()),
+            },
+            |passphrase| {
+                assert_eq!(passphrase, Some("pp"));
+                Ok(fake_key_auth("/tmp/id_default"))
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Key { key_path, passphrase }
+                if key_path == "/tmp/id_default" && passphrase.as_deref() == Some("pp")
+        ));
+    }
+
+    #[test]
+    fn test_build_session_auth_default_key_propagates_lookup_errors() {
+        let error = build_session_auth_with(AuthRequest::DefaultKey { passphrase: None }, |_| {
+            Err("No SSH key found: missing key".to_string())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "No SSH key found: missing key");
+    }
 }

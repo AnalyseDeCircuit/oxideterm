@@ -3125,4 +3125,98 @@ mod tests {
         assert_eq!(info.forward_ids, vec!["fwd-1"]);
         assert!(info.keep_alive);
     }
+
+    #[tokio::test]
+    async fn test_sftp_lifecycle_noop_without_session() {
+        let entry = create_test_entry("sftp-lifecycle-test");
+
+        assert!(!entry.has_sftp().await);
+        assert_eq!(entry.sftp_cwd().await, None);
+        assert!(!entry.invalidate_sftp().await);
+
+        entry.clear_sftp().await;
+        assert!(!entry.has_sftp().await);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_counts_states_and_resources() {
+        let registry = SshConnectionRegistry::with_config(ConnectionPoolConfig {
+            idle_timeout_secs: 120,
+            max_connections: 9,
+            protect_on_exit: true,
+        });
+
+        let active = Arc::new(create_test_entry("active-1"));
+        active.set_state(ConnectionState::Active).await;
+        active.add_terminal("term-1".to_string()).await;
+        active.add_terminal("term-2".to_string()).await;
+        active.set_sftp_session(Some("sftp-1".to_string())).await;
+        active.add_forward("fwd-1".to_string()).await;
+        active.add_ref();
+        active.add_ref();
+
+        let idle = Arc::new(create_test_entry("idle-1"));
+        idle.set_state(ConnectionState::Idle).await;
+        idle.add_ref();
+
+        let link_down = Arc::new(create_test_entry("link-down-1"));
+        link_down.set_state(ConnectionState::LinkDown).await;
+
+        let reconnecting = Arc::new(create_test_entry("reconnecting-1"));
+        reconnecting.set_state(ConnectionState::Reconnecting).await;
+
+        registry.connections.insert("active-1".into(), active);
+        registry.connections.insert("idle-1".into(), idle);
+        registry.connections.insert("link-down-1".into(), link_down);
+        registry
+            .connections
+            .insert("reconnecting-1".into(), reconnecting);
+
+        let stats = registry.get_stats().await;
+
+        assert_eq!(stats.total_connections, 4);
+        assert_eq!(stats.active_connections, 1);
+        assert_eq!(stats.idle_connections, 1);
+        assert_eq!(stats.link_down_connections, 1);
+        assert_eq!(stats.reconnecting_connections, 1);
+        assert_eq!(stats.total_terminals, 2);
+        assert_eq!(stats.total_sftp_sessions, 1);
+        assert_eq!(stats.total_forwards, 1);
+        assert_eq!(stats.total_ref_count, 3);
+        assert_eq!(stats.pool_capacity, 9);
+        assert_eq!(stats.idle_timeout_secs, 120);
+    }
+
+    #[tokio::test]
+    async fn test_probe_active_connections_marks_dead_handles_link_down() {
+        let registry = Arc::new(SshConnectionRegistry::new());
+
+        let active = Arc::new(create_test_entry("active-dead"));
+        active.set_state(ConnectionState::Active).await;
+
+        let idle = Arc::new(create_test_entry("idle-dead"));
+        idle.set_state(ConnectionState::Idle).await;
+
+        let disconnected = Arc::new(create_test_entry("disconnected"));
+        disconnected.set_state(ConnectionState::Disconnected).await;
+
+        registry
+            .connections
+            .insert("active-dead".into(), Arc::clone(&active));
+        registry
+            .connections
+            .insert("idle-dead".into(), Arc::clone(&idle));
+        registry
+            .connections
+            .insert("disconnected".into(), Arc::clone(&disconnected));
+
+        let dead = registry.probe_active_connections().await;
+
+        assert_eq!(dead.len(), 2);
+        assert!(dead.contains(&"active-dead".to_string()));
+        assert!(dead.contains(&"idle-dead".to_string()));
+        assert_eq!(active.state().await, ConnectionState::LinkDown);
+        assert_eq!(idle.state().await, ConnectionState::LinkDown);
+        assert_eq!(disconnected.state().await, ConnectionState::Disconnected);
+    }
 }

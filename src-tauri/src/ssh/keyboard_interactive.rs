@@ -185,3 +185,126 @@ pub const EVENT_KBI_PROMPT: &str = "ssh_kbi_prompt";
 
 /// Event name for KBI results
 pub const EVENT_KBI_RESULT: &str = "ssh_kbi_result";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static TEST_MUTEX: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    fn reset_pending_requests() {
+        PENDING_REQUESTS.lock().clear();
+    }
+
+    #[tokio::test]
+    async fn test_complete_pending_delivers_responses() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let receiver = register_pending("flow-complete".to_string());
+        complete_pending("flow-complete", vec!["hunter2".to_string()]).unwrap();
+
+        let responses = receiver.await.unwrap().unwrap();
+        assert_eq!(responses, vec!["hunter2"]);
+        assert_eq!(pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_pending_delivers_cancelled_error() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let receiver = register_pending("flow-cancel".to_string());
+        cancel_pending("flow-cancel").unwrap();
+
+        let result = receiver.await.unwrap();
+        assert!(matches!(result, Err(KbiError::Cancelled)));
+        assert_eq!(pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_complete_pending_returns_flow_not_found_for_unknown_flow() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let error = complete_pending("missing-flow", vec!["otp".to_string()]).unwrap_err();
+
+        assert!(matches!(error, KbiError::FlowNotFound));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_pending_returns_flow_not_found_for_unknown_flow() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let error = cancel_pending("missing-flow").unwrap_err();
+
+        assert!(matches!(error, KbiError::FlowNotFound));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_pending_removes_registered_request() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let _receiver = register_pending("flow-cleanup".to_string());
+        assert_eq!(pending_count(), 1);
+
+        cleanup_pending("flow-cleanup");
+
+        assert_eq!(pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_pending_flows_stay_isolated() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let receiver_a = register_pending("flow-a".to_string());
+        let receiver_b = register_pending("flow-b".to_string());
+
+        complete_pending("flow-a", vec!["code-a".to_string()]).unwrap();
+        cancel_pending("flow-b").unwrap();
+
+        let result_a = receiver_a.await.unwrap().unwrap();
+        let result_b = receiver_b.await.unwrap();
+
+        assert_eq!(result_a, vec!["code-a"]);
+        assert!(matches!(result_b, Err(KbiError::Cancelled)));
+        assert_eq!(pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_complete_pending_succeeds_when_receiver_is_dropped() {
+        let _guard = TEST_MUTEX.lock().await;
+        reset_pending_requests();
+
+        let receiver = register_pending("flow-drop".to_string());
+        drop(receiver);
+
+        complete_pending("flow-drop", vec!["ignored".to_string()]).unwrap();
+        assert_eq!(pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_kbi_error_display_messages_are_stable() {
+        let _guard = TEST_MUTEX.lock().await;
+        assert_eq!(
+            KbiError::Cancelled.to_string(),
+            "Authentication cancelled by user"
+        );
+        assert_eq!(
+            KbiError::Timeout.to_string(),
+            "Authentication timeout (60s)"
+        );
+        assert_eq!(
+            KbiError::FlowNotFound.to_string(),
+            "Authentication flow not found"
+        );
+        assert_eq!(
+            KbiError::ChannelError("boom".to_string()).to_string(),
+            "Channel error: boom"
+        );
+    }
+}

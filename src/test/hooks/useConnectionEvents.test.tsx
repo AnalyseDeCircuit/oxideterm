@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSelectorStore } from '@/test/helpers/mockStore';
 
 const tauriEventMocks = vi.hoisted(() => {
   const listeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
@@ -55,36 +56,24 @@ const topologyResolverMock = vi.hoisted(() => ({
   handleLinkDown: vi.fn(),
 }));
 
-function createMockStore<T extends object>(state: T) {
-  return Object.assign(
-    ((selector?: (value: T) => unknown) => (selector ? selector(state) : state)) as unknown as {
-      (selector?: (value: T) => unknown): unknown;
-      getState: () => T;
-    },
-    {
-      getState: () => state,
-    },
-  );
-}
-
 vi.mock('@tauri-apps/api/event', () => ({
   listen: tauriEventMocks.listen,
 }));
 
 vi.mock('@/store/transferStore', () => ({
-  useTransferStore: createMockStore(transferStoreMock),
+  useTransferStore: createSelectorStore(transferStoreMock),
 }));
 
 vi.mock('@/store/sessionTreeStore', () => ({
-  useSessionTreeStore: createMockStore(treeStoreMock),
+  useSessionTreeStore: createSelectorStore(treeStoreMock),
 }));
 
 vi.mock('@/store/reconnectOrchestratorStore', () => ({
-  useReconnectOrchestratorStore: createMockStore(orchestratorStoreMock),
+  useReconnectOrchestratorStore: createSelectorStore(orchestratorStoreMock),
 }));
 
 vi.mock('@/store/profilerStore', () => ({
-  useProfilerStore: createMockStore(profilerStoreMock),
+  useProfilerStore: createSelectorStore(profilerStoreMock),
 }));
 
 vi.mock('@/lib/topologyResolver', () => ({

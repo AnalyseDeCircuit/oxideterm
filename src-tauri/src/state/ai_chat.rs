@@ -1427,11 +1427,7 @@ mod tests {
         };
 
         store
-            .replace_conversation_messages(
-                "conv-missing-summary",
-                "Recovered Summary",
-                replacement,
-            )
+            .replace_conversation_messages("conv-missing-summary", "Recovered Summary", replacement)
             .unwrap();
 
         let full = store.get_conversation("conv-missing-summary").unwrap();

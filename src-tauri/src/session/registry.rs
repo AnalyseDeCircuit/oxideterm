@@ -170,7 +170,10 @@ impl SessionRegistry {
                 .get_mut(session_id)
                 .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
 
-            if matches!(entry.state_machine.state(), SessionState::Disconnected | SessionState::Error) {
+            if matches!(
+                entry.state_machine.state(),
+                SessionState::Disconnected | SessionState::Error
+            ) {
                 let active_count = self.active_count();
                 let max = self.max_sessions();
 
@@ -973,10 +976,20 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(3));
 
         let first_id = registry
-            .create_session(SessionConfig::with_password("server1.com", 22, "user", "pass"))
+            .create_session(SessionConfig::with_password(
+                "server1.com",
+                22,
+                "user",
+                "pass",
+            ))
             .unwrap();
         let second_id = registry
-            .create_session(SessionConfig::with_password("server2.com", 22, "user", "pass"))
+            .create_session(SessionConfig::with_password(
+                "server2.com",
+                22,
+                "user",
+                "pass",
+            ))
             .unwrap();
 
         let registry_a = Arc::clone(&registry);
