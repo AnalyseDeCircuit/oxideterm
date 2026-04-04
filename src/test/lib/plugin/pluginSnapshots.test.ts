@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { freezeSnapshot, sanitizeForPlugin } from './pluginSnapshots';
+import { freezeSnapshot, sanitizeForPlugin } from '@/lib/plugin/pluginSnapshots';
 
 describe('freezeSnapshot', () => {
   it('deep freezes a nested object', () => {

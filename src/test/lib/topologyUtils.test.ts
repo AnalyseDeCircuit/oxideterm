@@ -4,8 +4,8 @@ import {
   getNodeColor,
   calculateTreeLayout,
   topologyCache,
-} from './topologyUtils';
-import type { FlatNode, TreeNodeState } from '../types';
+} from '@/lib/topologyUtils';
+import type { FlatNode, TreeNodeState } from '@/types';
 
 /** Helper to create a FlatNode test fixture */
 function makeFlatNode(

@@ -1574,4 +1574,101 @@ abc123	my-app	0.0.0.0:8080->80/tcp
         // ss result takes precedence (first seen)
         assert_eq!(ports[0].process_name.as_deref(), Some("docker-proxy"));
     }
+
+    // ─── build_sample_command Tests ────────────────────────────────────
+
+    #[test]
+    fn test_build_sample_command_linux() {
+        let cmd = build_sample_command("Linux");
+        assert!(cmd.contains("===STAT==="));
+        assert!(cmd.contains("ss -tlnp"));
+        assert!(cmd.contains("===END==="));
+        assert!(cmd.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_build_sample_command_linux_lowercase() {
+        let cmd = build_sample_command("linux");
+        assert!(cmd.contains("ss -tlnp"));
+    }
+
+    #[test]
+    fn test_build_sample_command_macos() {
+        let cmd = build_sample_command("macOS");
+        assert!(cmd.contains("lsof -iTCP"));
+        assert!(!cmd.contains("ss -tlnp"));
+    }
+
+    #[test]
+    fn test_build_sample_command_darwin() {
+        let cmd = build_sample_command("Darwin");
+        assert!(cmd.contains("lsof -iTCP"));
+    }
+
+    #[test]
+    fn test_build_sample_command_windows() {
+        let cmd = build_sample_command("Windows");
+        assert!(cmd.contains("Get-NetTCPConnection"));
+        assert!(!cmd.contains("ss -tlnp"));
+    }
+
+    #[test]
+    fn test_build_sample_command_freebsd() {
+        let cmd = build_sample_command("FreeBSD");
+        assert!(cmd.contains("sockstat"));
+    }
+
+    #[test]
+    fn test_build_sample_command_openbsd() {
+        let cmd = build_sample_command("OpenBSD");
+        assert!(cmd.contains("sockstat"));
+    }
+
+    #[test]
+    fn test_build_sample_command_mingw() {
+        let cmd = build_sample_command("Windows_MinGW");
+        // MinGW uses Linux-style commands
+        assert!(cmd.contains("ss -tlnp"));
+    }
+
+    #[test]
+    fn test_build_sample_command_unknown_fallback() {
+        let cmd = build_sample_command("SomeUnknownOS");
+        // Falls back to Linux commands
+        assert!(cmd.contains("ss -tlnp"));
+        assert!(cmd.contains("===END==="));
+    }
+
+    // ─── CpuSnapshot arithmetic Tests ──────────────────────────────────
+
+    #[test]
+    fn test_cpu_snapshot_total() {
+        let snap = CpuSnapshot {
+            user: 100,
+            nice: 10,
+            system: 50,
+            idle: 200,
+            iowait: 5,
+            irq: 2,
+            softirq: 3,
+            steal: 1,
+        };
+        assert_eq!(snap.total(), 371);
+    }
+
+    #[test]
+    fn test_cpu_snapshot_active() {
+        let snap = CpuSnapshot {
+            user: 100,
+            nice: 10,
+            system: 50,
+            idle: 200,
+            iowait: 5,
+            irq: 2,
+            softirq: 3,
+            steal: 1,
+        };
+        // active = total - idle - iowait = 371 - 200 - 5 = 166
+        assert_eq!(snap.active(), 166);
+    }
 }

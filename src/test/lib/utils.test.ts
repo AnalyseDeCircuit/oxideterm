@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { describe, it, expect } from 'vitest';
-import { cn, createTypeGuard } from './utils';
+import { cn, createTypeGuard } from '@/lib/utils';
 
 describe('cn', () => {
   it('merges class names', () => {

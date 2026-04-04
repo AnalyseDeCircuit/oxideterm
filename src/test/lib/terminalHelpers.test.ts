@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hexToRgba, getBackgroundFitStyles } from './terminalHelpers';
+import { hexToRgba, getBackgroundFitStyles } from '@/lib/terminalHelpers';
 
 describe('hexToRgba', () => {
   it('converts black', () => {

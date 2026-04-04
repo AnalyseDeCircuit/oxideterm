@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extensionToLanguage, detectLanguage } from './ideStore';
+import { extensionToLanguage, detectLanguage } from '@/store/ideStore';
 
 describe('extensionToLanguage', () => {
   it('maps TypeScript extensions', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { topologyResolver } from './topologyResolver';
+import { topologyResolver } from '@/lib/topologyResolver';
 
 describe('TopologyResolver', () => {
   beforeEach(() => {

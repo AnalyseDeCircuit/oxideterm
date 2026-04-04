@@ -4,7 +4,7 @@ import {
   formatSpeed,
   calculateSpeed,
   type TransferItem,
-} from './transferStore';
+} from '@/store/transferStore';
 
 /** Helper to create a minimal TransferItem for calculateSpeed testing */
 function makeTransfer(overrides: Partial<TransferItem> = {}): TransferItem {

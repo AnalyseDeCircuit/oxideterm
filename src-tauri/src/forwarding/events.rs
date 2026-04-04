@@ -143,4 +143,60 @@ mod tests {
         assert!(json.contains("statusChanged"));
         assert!(json.contains("fwd-1"));
     }
+
+    #[test]
+    fn test_event_serialization_with_error() {
+        let event = ForwardEvent::StatusChanged {
+            forward_id: "fwd-err".into(),
+            session_id: "sess-1".into(),
+            status: ForwardStatus::Error,
+            error: Some("connection refused".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("connection refused"));
+        assert!(json.contains("fwd-err"));
+    }
+
+    #[test]
+    fn test_stats_updated_serialization() {
+        let event = ForwardEvent::StatsUpdated {
+            forward_id: "fwd-1".into(),
+            session_id: "sess-1".into(),
+            stats: ForwardStats {
+                bytes_sent: 1024,
+                bytes_received: 2048,
+                active_connections: 3,
+                connection_count: 10,
+            },
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("statsUpdated"));
+        assert!(json.contains("1024"));
+    }
+
+    #[test]
+    fn test_session_suspended_serialization() {
+        let event = ForwardEvent::SessionSuspended {
+            session_id: "sess-1".into(),
+            forward_ids: vec!["fwd-1".into(), "fwd-2".into()],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("sessionSuspended"));
+        assert!(json.contains("fwd-1"));
+        assert!(json.contains("fwd-2"));
+    }
+
+    #[test]
+    fn test_noop_emitter_session_id() {
+        let emitter = ForwardEventEmitter::noop("test-session".into());
+        assert_eq!(emitter.session_id(), "test-session");
+    }
+
+    #[test]
+    fn test_noop_emitter_debug() {
+        let emitter = ForwardEventEmitter::noop("test".into());
+        let debug_str = format!("{:?}", emitter);
+        assert!(debug_str.contains("test"));
+        assert!(debug_str.contains("false")); // has_app_handle = false
+    }
 }

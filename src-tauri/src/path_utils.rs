@@ -41,3 +41,67 @@ pub fn expand_tilde_path(path: &Path) -> PathBuf {
 
     path.to_path_buf()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tilde_home_only() {
+        let result = expand_tilde("~");
+        let home = dirs::home_dir().unwrap().to_string_lossy().to_string();
+        assert_eq!(result, home);
+    }
+
+    #[test]
+    fn test_expand_tilde_with_subpath() {
+        let result = expand_tilde("~/Documents/test");
+        let home = dirs::home_dir().unwrap();
+        let expected = home.join("Documents/test").to_string_lossy().to_string();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_expand_tilde_no_tilde() {
+        assert_eq!(expand_tilde("/usr/local/bin"), "/usr/local/bin");
+    }
+
+    #[test]
+    fn test_expand_tilde_empty() {
+        assert_eq!(expand_tilde(""), "");
+    }
+
+    #[test]
+    fn test_expand_tilde_tilde_not_prefix() {
+        // ~ in the middle should NOT be expanded
+        assert_eq!(expand_tilde("/home/user/~stuff"), "/home/user/~stuff");
+    }
+
+    #[test]
+    fn test_expand_tilde_path_home_only() {
+        let result = expand_tilde_path(Path::new("~"));
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(result, home);
+    }
+
+    #[test]
+    fn test_expand_tilde_path_with_subpath() {
+        let result = expand_tilde_path(Path::new("~/Documents/test"));
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(result, home.join("Documents/test"));
+    }
+
+    #[test]
+    fn test_expand_tilde_path_absolute() {
+        let input = Path::new("/absolute/path");
+        let result = expand_tilde_path(input);
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn test_expand_tilde_path_relative() {
+        let input = Path::new("relative/path");
+        let result = expand_tilde_path(input);
+        assert_eq!(result, PathBuf::from("relative/path"));
+    }
+}

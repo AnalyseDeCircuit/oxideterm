@@ -268,4 +268,145 @@ mod tests {
         // Cannot go directly to Connected
         assert!(sm.connect_success().is_err());
     }
+
+    #[test]
+    fn test_error_to_connecting() {
+        let mut sm = SessionStateMachine::new();
+        sm.start_connecting().unwrap();
+        sm.connect_failed("timeout".into()).unwrap();
+        assert_eq!(sm.state(), SessionState::Error);
+
+        // Retry: Error → Connecting is allowed
+        sm.start_connecting().unwrap();
+        assert_eq!(sm.state(), SessionState::Connecting);
+        assert!(sm.error().is_none());
+    }
+
+    #[test]
+    fn test_cannot_connect_failed_from_disconnected() {
+        let mut sm = SessionStateMachine::new();
+        assert!(sm.connect_failed("err".into()).is_err());
+    }
+
+    #[test]
+    fn test_cannot_disconnect_from_disconnected() {
+        let mut sm = SessionStateMachine::new();
+        assert!(sm.start_disconnecting().is_err());
+    }
+
+    #[test]
+    fn test_cannot_disconnect_complete_from_connecting() {
+        let mut sm = SessionStateMachine::new();
+        sm.start_connecting().unwrap();
+        assert!(sm.disconnect_complete().is_err());
+    }
+
+    #[test]
+    fn test_disconnect_from_connecting() {
+        // Abort connection attempt
+        let mut sm = SessionStateMachine::new();
+        sm.start_connecting().unwrap();
+        sm.start_disconnecting().unwrap();
+        assert_eq!(sm.state(), SessionState::Disconnecting);
+    }
+
+    #[test]
+    fn test_abrupt_disconnect_from_connected() {
+        let mut sm = SessionStateMachine::new();
+        sm.start_connecting().unwrap();
+        sm.connect_success().unwrap();
+        // Direct disconnect_complete from Connected (abrupt)
+        sm.disconnect_complete().unwrap();
+        assert_eq!(sm.state(), SessionState::Disconnected);
+    }
+
+    #[test]
+    fn test_set_error_from_any_state() {
+        let mut sm = SessionStateMachine::new();
+        sm.set_error("fatal".into());
+        assert_eq!(sm.state(), SessionState::Error);
+        assert_eq!(sm.error(), Some("fatal"));
+
+        sm.start_connecting().unwrap();
+        sm.connect_success().unwrap();
+        sm.set_error("connection lost".into());
+        assert_eq!(sm.state(), SessionState::Error);
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut sm = SessionStateMachine::new();
+        sm.start_connecting().unwrap();
+        sm.connect_success().unwrap();
+        sm.set_error("lost".into());
+
+        sm.reset();
+        assert_eq!(sm.state(), SessionState::Disconnected);
+        assert!(sm.error().is_none());
+    }
+
+    #[test]
+    fn test_is_terminal() {
+        let mut sm = SessionStateMachine::new();
+        assert!(sm.is_terminal()); // Disconnected
+
+        sm.start_connecting().unwrap();
+        assert!(!sm.is_terminal());
+
+        sm.connect_success().unwrap();
+        assert!(!sm.is_terminal());
+
+        sm.set_error("err".into());
+        assert!(sm.is_terminal()); // Error
+    }
+
+    #[test]
+    fn test_is_active() {
+        let mut sm = SessionStateMachine::new();
+        assert!(!sm.is_active());
+
+        sm.start_connecting().unwrap();
+        assert!(sm.is_active()); // Connecting
+
+        sm.connect_success().unwrap();
+        assert!(sm.is_active()); // Connected
+
+        sm.start_disconnecting().unwrap();
+        assert!(!sm.is_active()); // Disconnecting
+    }
+
+    #[test]
+    fn test_transition_count() {
+        let mut sm = SessionStateMachine::new();
+        assert_eq!(sm.transition_count(), 0);
+
+        sm.start_connecting().unwrap();
+        assert_eq!(sm.transition_count(), 1);
+
+        sm.connect_success().unwrap();
+        assert_eq!(sm.transition_count(), 2);
+    }
+
+    #[test]
+    fn test_time_in_state() {
+        let sm = SessionStateMachine::new();
+        let d = sm.time_in_state();
+        // Should be very small (just created)
+        assert!(d.as_secs() < 1);
+    }
+
+    #[test]
+    fn test_session_state_display() {
+        assert_eq!(SessionState::Disconnected.to_string(), "disconnected");
+        assert_eq!(SessionState::Connecting.to_string(), "connecting");
+        assert_eq!(SessionState::Connected.to_string(), "connected");
+        assert_eq!(SessionState::Disconnecting.to_string(), "disconnecting");
+        assert_eq!(SessionState::Error.to_string(), "error");
+    }
+
+    #[test]
+    fn test_default_state() {
+        let sm = SessionStateMachine::default();
+        assert_eq!(sm.state(), SessionState::Disconnected);
+    }
 }

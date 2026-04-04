@@ -843,4 +843,110 @@ mod tests {
         store.delete_forward("forward1").unwrap();
         assert!(store.load_forward("forward1").is_err());
     }
+
+    #[test]
+    fn test_session_overwrite() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        store.save_session("s1", b"original").unwrap();
+        store.save_session("s1", b"updated").unwrap();
+
+        let loaded = store.load_session("s1").unwrap();
+        assert_eq!(loaded, b"updated");
+
+        let stats = store.stats().unwrap();
+        assert_eq!(stats.session_count, 1);
+    }
+
+    #[test]
+    fn test_load_nonexistent_session() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        assert!(store.load_session("nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_load_nonexistent_forward() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        assert!(store.load_forward("nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_multiple_sessions() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        for i in 0..5 {
+            store
+                .save_session(&format!("s{}", i), format!("data{}", i).as_bytes())
+                .unwrap();
+        }
+
+        let ids = store.list_sessions().unwrap();
+        assert_eq!(ids.len(), 5);
+
+        let stats = store.stats().unwrap();
+        assert_eq!(stats.session_count, 5);
+        assert_eq!(stats.forward_count, 0);
+    }
+
+    #[test]
+    fn test_delete_nonexistent_session() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        // Should not error when deleting non-existent key
+        store.delete_session("nonexistent").unwrap();
+    }
+
+    #[test]
+    fn test_session_and_forward_independent() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        store.save_session("id1", b"session").unwrap();
+        store.save_forward("id1", b"forward").unwrap();
+
+        // Same key in different tables should be independent
+        assert_eq!(store.load_session("id1").unwrap(), b"session");
+        assert_eq!(store.load_forward("id1").unwrap(), b"forward");
+
+        store.delete_session("id1").unwrap();
+        // Forward should still exist
+        assert_eq!(store.load_forward("id1").unwrap(), b"forward");
+    }
+
+    #[test]
+    fn test_forward_overwrite() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        store.save_forward("f1", b"v1").unwrap();
+        store.save_forward("f1", b"v2").unwrap();
+
+        assert_eq!(store.load_forward("f1").unwrap(), b"v2");
+        assert_eq!(store.stats().unwrap().forward_count, 1);
+    }
+
+    #[test]
+    fn test_empty_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = StateStore::new(db_path).unwrap();
+
+        store.save_session("empty", b"").unwrap();
+        let loaded = store.load_session("empty").unwrap();
+        assert!(loaded.is_empty());
+    }
 }

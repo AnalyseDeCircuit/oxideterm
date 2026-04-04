@@ -2849,4 +2849,173 @@ mod tests {
         assert_eq!(entry.release(), 1);
         assert_eq!(entry.release(), 0);
     }
+
+    /// Helper to create a test ConnectionEntry
+    fn create_test_entry(id: &str) -> ConnectionEntry {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        ConnectionEntry {
+            id: id.to_string(),
+            config: SessionConfig {
+                host: "localhost".to_string(),
+                port: 22,
+                username: "user".to_string(),
+                auth: AuthMethod::Password {
+                    password: "pass".to_string(),
+                },
+                name: None,
+                color: None,
+                cols: 80,
+                rows: 24,
+            },
+            handle_controller: HandleController::new(tx),
+            state: RwLock::new(ConnectionState::Active),
+            ref_count: AtomicU32::new(0),
+            last_active: AtomicU64::new(0),
+            keep_alive: AtomicBool::new(false),
+            created_at: Utc::now(),
+            idle_timer: Mutex::new(None),
+            terminal_ids: RwLock::new(Vec::new()),
+            sftp_session_id: RwLock::new(None),
+            sftp: tokio::sync::Mutex::new(None),
+            forward_ids: RwLock::new(Vec::new()),
+            heartbeat_task: Mutex::new(None),
+            heartbeat_failures: AtomicU32::new(0),
+            reconnect_task: Mutex::new(None),
+            is_reconnecting: AtomicBool::new(false),
+            reconnect_attempts: AtomicU32::new(0),
+            current_attempt_id: AtomicU64::new(0),
+            last_emitted_status: parking_lot::Mutex::new(None),
+            parent_connection_id: None,
+            remote_env: std::sync::OnceLock::new(),
+        }
+    }
+
+    #[test]
+    fn test_release_at_zero() {
+        let entry = create_test_entry("underflow-test");
+        // Release at 0 should not underflow
+        assert_eq!(entry.release(), 0);
+        assert_eq!(entry.ref_count(), 0);
+    }
+
+    #[test]
+    fn test_keep_alive() {
+        let entry = create_test_entry("ka-test");
+        assert!(!entry.is_keep_alive());
+        entry.set_keep_alive(true);
+        assert!(entry.is_keep_alive());
+        entry.set_keep_alive(false);
+        assert!(!entry.is_keep_alive());
+    }
+
+    #[test]
+    fn test_heartbeat_failures() {
+        let entry = create_test_entry("hb-test");
+        assert_eq!(entry.heartbeat_failures(), 0);
+
+        assert_eq!(entry.increment_heartbeat_failures(), 1);
+        assert_eq!(entry.increment_heartbeat_failures(), 2);
+        assert_eq!(entry.heartbeat_failures(), 2);
+
+        entry.reset_heartbeat_failures();
+        assert_eq!(entry.heartbeat_failures(), 0);
+    }
+
+    #[test]
+    fn test_reconnect_state() {
+        let entry = create_test_entry("rc-test");
+        assert!(!entry.is_reconnecting());
+        assert_eq!(entry.reconnect_attempts(), 0);
+
+        assert_eq!(entry.increment_reconnect_attempts(), 1);
+        assert_eq!(entry.increment_reconnect_attempts(), 2);
+
+        entry.reset_reconnect_state();
+        assert!(!entry.is_reconnecting());
+        assert_eq!(entry.reconnect_attempts(), 0);
+    }
+
+    #[test]
+    fn test_attempt_id() {
+        let entry = create_test_entry("aid-test");
+        assert_eq!(entry.current_attempt_id(), 0);
+
+        let id1 = entry.new_attempt_id();
+        assert!(id1 > 0);
+        let id2 = entry.new_attempt_id();
+        assert!(id2 > id1);
+        assert_eq!(entry.current_attempt_id(), id2);
+    }
+
+    #[test]
+    fn test_parent_connection_id() {
+        let entry = create_test_entry("parent-test");
+        assert!(entry.parent_connection_id().is_none());
+    }
+
+    #[test]
+    fn test_activity_tracking() {
+        let entry = create_test_entry("activity-test");
+        entry.update_activity();
+        let last = entry.last_active();
+        assert!(last > 0);
+    }
+
+    #[test]
+    fn test_auth_compatible_password() {
+        let a = AuthMethod::password("secret");
+        let b = AuthMethod::password("secret");
+        let c = AuthMethod::password("different");
+
+        assert!(SshConnectionRegistry::auth_compatible(&a, &b));
+        assert!(!SshConnectionRegistry::auth_compatible(&a, &c));
+    }
+
+    #[test]
+    fn test_auth_compatible_key() {
+        let a = AuthMethod::Key {
+            key_path: "/home/.ssh/id_ed25519".into(),
+            passphrase: None,
+        };
+        let b = AuthMethod::Key {
+            key_path: "/home/.ssh/id_ed25519".into(),
+            passphrase: Some("pass".into()),
+        };
+        let c = AuthMethod::Key {
+            key_path: "/home/.ssh/id_rsa".into(),
+            passphrase: None,
+        };
+
+        // Same key path = compatible (passphrase ignored for reuse)
+        assert!(SshConnectionRegistry::auth_compatible(&a, &b));
+        // Different key path = not compatible
+        assert!(!SshConnectionRegistry::auth_compatible(&a, &c));
+    }
+
+    #[test]
+    fn test_auth_compatible_agent() {
+        let a = AuthMethod::Agent;
+        let b = AuthMethod::Agent;
+        assert!(SshConnectionRegistry::auth_compatible(&a, &b));
+    }
+
+    #[test]
+    fn test_auth_compatible_different_types() {
+        let pw = AuthMethod::password("pass");
+        let agent = AuthMethod::Agent;
+        let key = AuthMethod::Key {
+            key_path: "/key".into(),
+            passphrase: None,
+        };
+
+        assert!(!SshConnectionRegistry::auth_compatible(&pw, &agent));
+        assert!(!SshConnectionRegistry::auth_compatible(&pw, &key));
+        assert!(!SshConnectionRegistry::auth_compatible(&agent, &key));
+    }
+
+    #[test]
+    fn test_registry_new() {
+        let registry = SshConnectionRegistry::new();
+        assert_eq!(registry.connections.len(), 0);
+    }
 }

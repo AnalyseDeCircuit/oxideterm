@@ -8,7 +8,7 @@ import {
   encodeHeartbeatFrame,
   encodeDataFrame,
   encodeResizeFrame,
-} from './wireProtocol';
+} from '@/lib/wireProtocol';
 
 describe('constants', () => {
   it('has correct message type values', () => {

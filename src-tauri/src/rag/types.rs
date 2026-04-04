@@ -158,3 +158,104 @@ pub fn is_cjk(c: char) -> bool {
         | '\u{AC00}'..='\u{D7AF}' // Hangul
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── CJK Unified ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_cjk_chinese_character() {
+        assert!(is_cjk('中')); // U+4E2D — CJK Unified
+        assert!(is_cjk('国')); // U+56FD
+    }
+
+    #[test]
+    fn test_is_cjk_cjk_extension_a() {
+        assert!(is_cjk('\u{3400}')); // first char of Extension A
+        assert!(is_cjk('\u{4DBF}')); // last char of Extension A
+    }
+
+    #[test]
+    fn test_is_cjk_compat_ideograph() {
+        assert!(is_cjk('\u{F900}')); // CJK Compat Ideographs start
+    }
+
+    // ─── CJK Symbols ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_cjk_symbols() {
+        assert!(is_cjk('〇')); // U+3007 — CJK Symbols & Punctuation
+        assert!(is_cjk('\u{3000}')); // Ideographic space
+    }
+
+    // ─── Hiragana / Katakana ──────────────────────────────────────────
+
+    #[test]
+    fn test_is_cjk_hiragana() {
+        assert!(is_cjk('あ')); // U+3042
+        assert!(is_cjk('ん')); // U+3093
+    }
+
+    #[test]
+    fn test_is_cjk_katakana() {
+        assert!(is_cjk('ア')); // U+30A2
+        assert!(is_cjk('ン')); // U+30F3
+    }
+
+    // ─── Hangul ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_cjk_hangul() {
+        assert!(is_cjk('가')); // U+AC00 — first Hangul syllable
+        assert!(is_cjk('힣')); // U+D7A3 — last Hangul syllable
+    }
+
+    // ─── Non-CJK ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_not_cjk_ascii() {
+        assert!(!is_cjk('A'));
+        assert!(!is_cjk('z'));
+        assert!(!is_cjk('0'));
+        assert!(!is_cjk(' '));
+    }
+
+    #[test]
+    fn test_is_not_cjk_latin_extended() {
+        assert!(!is_cjk('é')); // Latin
+        assert!(!is_cjk('ñ'));
+    }
+
+    #[test]
+    fn test_is_not_cjk_cyrillic() {
+        assert!(!is_cjk('Д')); // Cyrillic
+    }
+
+    #[test]
+    fn test_is_not_cjk_arabic() {
+        assert!(!is_cjk('ع')); // Arabic
+    }
+
+    // ─── DocScope equality ────────────────────────────────────────────
+
+    #[test]
+    fn test_doc_scope_equality() {
+        assert_eq!(DocScope::Global, DocScope::Global);
+        assert_eq!(
+            DocScope::Connection("abc".into()),
+            DocScope::Connection("abc".into())
+        );
+        assert_ne!(DocScope::Global, DocScope::Connection("abc".into()));
+    }
+
+    // ─── DocFormat equality ───────────────────────────────────────────
+
+    #[test]
+    fn test_doc_format_equality() {
+        assert_eq!(DocFormat::Markdown, DocFormat::Markdown);
+        assert_eq!(DocFormat::PlainText, DocFormat::PlainText);
+        assert_ne!(DocFormat::Markdown, DocFormat::PlainText);
+    }
+}

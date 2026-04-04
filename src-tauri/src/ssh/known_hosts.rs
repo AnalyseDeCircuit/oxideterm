@@ -390,4 +390,53 @@ mod tests {
             "[server.com]:2222"
         );
     }
+
+    #[test]
+    fn test_normalize_hostname_plain() {
+        assert_eq!(
+            KnownHostsStore::normalize_hostname("GITHUB.COM"),
+            "github.com"
+        );
+    }
+
+    #[test]
+    fn test_normalize_hostname_trailing_bracket() {
+        assert_eq!(KnownHostsStore::normalize_hostname("[host]"), "host");
+    }
+
+    #[test]
+    fn test_make_key_case_insensitive() {
+        assert_eq!(KnownHostsStore::make_key("GitHub.COM", 22), "github.com");
+        assert_eq!(
+            KnownHostsStore::make_key("Server.COM", 2222),
+            "[server.com]:2222"
+        );
+    }
+
+    #[test]
+    fn test_compute_fingerprint_from_b64_valid() {
+        // A known base64 value
+        let result = KnownHostsStore::compute_fingerprint_from_b64("dGVzdA==");
+        assert!(result.starts_with("SHA256:"));
+    }
+
+    #[test]
+    fn test_compute_fingerprint_from_b64_invalid() {
+        let result = KnownHostsStore::compute_fingerprint_from_b64("!!!invalid!!!");
+        assert_eq!(result, "unknown");
+    }
+
+    #[test]
+    fn test_make_key_port_22() {
+        // Port 22 should produce bare hostname
+        let key = KnownHostsStore::make_key("example.com", 22);
+        assert!(!key.contains('['));
+        assert!(!key.contains(':'));
+    }
+
+    #[test]
+    fn test_make_key_non_standard_port() {
+        let key = KnownHostsStore::make_key("example.com", 443);
+        assert_eq!(key, "[example.com]:443");
+    }
 }

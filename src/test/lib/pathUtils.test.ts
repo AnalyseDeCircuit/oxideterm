@@ -7,7 +7,7 @@ import {
   validateFileName,
   isSubPath,
   getRelativePath,
-} from './pathUtils';
+} from '@/lib/pathUtils';
 
 describe('normalizePath', () => {
   it('collapses multiple slashes', () => {

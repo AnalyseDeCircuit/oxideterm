@@ -1048,4 +1048,138 @@ mod tests {
             "All messages should be cleared"
         );
     }
+
+    #[test]
+    fn test_compress_buffer_empty_string() {
+        let (result, compressed) = compress_buffer("");
+        assert!(!compressed);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_decompress_not_compressed() {
+        let result = decompress_buffer("plain text", false).unwrap();
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_decompress_invalid_base64() {
+        let result = decompress_buffer("!!!not-base64!!!", true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compress_decompress_roundtrip_unicode() {
+        let content = "你好世界 ".repeat(2000); // CJK + emoji
+        let (compressed, is_compressed) = compress_buffer(&content);
+        assert!(is_compressed);
+
+        let decompressed = decompress_buffer(&compressed, true).unwrap();
+        assert_eq!(decompressed, content);
+    }
+
+    #[test]
+    fn test_update_conversation_title() {
+        let (store, _dir) = create_test_store();
+
+        let meta = ConversationMeta {
+            id: "conv-update".to_string(),
+            title: "Original".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            message_count: 0,
+            session_id: None,
+            origin: "sidebar".to_string(),
+        };
+        store.create_conversation(&meta).unwrap();
+
+        let updated = ConversationMeta {
+            title: "Updated Title".to_string(),
+            updated_at: 2000,
+            ..meta
+        };
+        store.update_conversation(&updated).unwrap();
+
+        let conversations = store.list_conversations().unwrap();
+        assert_eq!(conversations[0].title, "Updated Title");
+    }
+
+    #[test]
+    fn test_message_ordering() {
+        let (store, _dir) = create_test_store();
+
+        let meta = ConversationMeta {
+            id: "conv-order".to_string(),
+            title: "Order Test".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            message_count: 0,
+            session_id: None,
+            origin: "sidebar".to_string(),
+        };
+        store.create_conversation(&meta).unwrap();
+
+        // Add messages with different timestamps
+        for i in (0..5).rev() {
+            let msg = PersistedMessage {
+                id: format!("msg-{}", i),
+                conversation_id: "conv-order".to_string(),
+                role: "user".to_string(),
+                content: format!("Message {}", i),
+                timestamp: 1000 + i as i64,
+                tool_calls: vec![],
+                context_snapshot: None,
+            };
+            store.save_message(msg).unwrap();
+        }
+
+        let full = store.get_conversation("conv-order").unwrap();
+        assert_eq!(full.messages.len(), 5);
+        // Messages should be ordered by timestamp
+        for i in 0..4 {
+            assert!(full.messages[i].timestamp <= full.messages[i + 1].timestamp);
+        }
+    }
+
+    #[test]
+    fn test_update_message_content() {
+        let (store, _dir) = create_test_store();
+
+        let meta = ConversationMeta {
+            id: "conv-upd-msg".to_string(),
+            title: "Test".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            message_count: 0,
+            session_id: None,
+            origin: "sidebar".to_string(),
+        };
+        store.create_conversation(&meta).unwrap();
+
+        let msg = PersistedMessage {
+            id: "msg-to-update".to_string(),
+            conversation_id: "conv-upd-msg".to_string(),
+            role: "assistant".to_string(),
+            content: "Original response".to_string(),
+            timestamp: 1001,
+            tool_calls: vec![],
+            context_snapshot: None,
+        };
+        store.save_message(msg).unwrap();
+
+        store
+            .update_message("msg-to-update", "Updated response")
+            .unwrap();
+
+        let full = store.get_conversation("conv-upd-msg").unwrap();
+        assert_eq!(full.messages[0].content, "Updated response");
+    }
+
+    #[test]
+    fn test_stats() {
+        let (store, _dir) = create_test_store();
+        let stats = store.get_stats().unwrap();
+        assert_eq!(stats.conversation_count, 0);
+        assert_eq!(stats.message_count, 0);
+    }
 }

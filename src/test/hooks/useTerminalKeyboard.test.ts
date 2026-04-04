@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTerminalReservedKey } from './useTerminalKeyboard';
+import { isTerminalReservedKey } from '@/hooks/useTerminalKeyboard';
 
 /** Helper to create a minimal KeyboardEvent-like object */
 function makeKeyEvent(overrides: Partial<KeyboardEvent>): KeyboardEvent {

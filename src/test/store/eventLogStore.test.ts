@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { useEventLogStore } from './eventLogStore';
+import { useEventLogStore } from '@/store/eventLogStore';
 
 function getStore() {
   return useEventLogStore.getState();

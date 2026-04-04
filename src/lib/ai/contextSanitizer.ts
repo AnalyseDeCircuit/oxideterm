@@ -36,8 +36,18 @@ const SECRET_PATTERNS: Array<[RegExp, string | ((...args: string[]) => string)]>
   // ── Generic KEY=value assignments ─────────────────────────────────────
   // AWS_SECRET_ACCESS_KEY=abc  →  AWS_SECRET_ACCESS_KEY=[REDACTED]
   // DB_PASSWORD=xyz            →  DB_PASSWORD=[REDACTED]
+  // DB_PASSWORD='val with spaces'  →  DB_PASSWORD=[REDACTED]
+  // Excludes TypeScript type annotations: `password: string` (word boundary after colon + known type)
   [
-    /\b(\w*(?:SECRET|_KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH_TOKEN|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)\s*[=:]\s*)(?:['"]?)([^\s'";\n]{8,})(?:['"]?)/gi,
+    /\b(\w*(?:SECRET|_KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH_TOKEN|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)\s*[=:]\s*)(['"])([^'"]{8,})\2/gi,
+    `$1${REDACTED}`,
+  ],
+  [
+    /\b(\w*(?:SECRET|_KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH_TOKEN|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)\s*=\s*)([^\s'";\n]{8,})/gi,
+    `$1${REDACTED}`,
+  ],
+  [
+    /\b(\w*(?:SECRET|_KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH_TOKEN|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY)\s*:\s*)(?!(?:string|number|boolean|any|unknown|never|void|null|undefined|Buffer|Uint8Array)\b)([^\s'";\n,)}{]{8,})/gi,
     `$1${REDACTED}`,
   ],
 
@@ -51,6 +61,17 @@ const SECRET_PATTERNS: Array<[RegExp, string | ((...args: string[]) => string)]>
   // ── AWS-style keys (AKIA...) ──────────────────────────────────────────
   [
     /\b(AKIA[0-9A-Z]{16})\b/g,
+    REDACTED,
+  ],
+
+  // ── Vendor-specific token prefixes (standalone, no KEY= needed) ──────
+  // GitHub PAT:      ghp_xxx, gho_xxx, ghu_xxx, ghs_xxx, ghr_xxx, github_pat_xxx
+  // OpenAI:          sk-proj-xxx, sk-ant-xxx
+  // Stripe:          sk_live_xxx, sk_test_xxx, pk_live_xxx, pk_test_xxx, rk_live_xxx, rk_test_xxx
+  // Slack:           xoxb-xxx, xoxp-xxx, xoxo-xxx, xoxa-xxx, xoxs-xxx
+  // Anthropic:       sk-ant-xxx
+  [
+    /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-proj-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9]{20,}|sk_(?:live|test)_[A-Za-z0-9]{10,}|pk_(?:live|test)_[A-Za-z0-9]{10,}|rk_(?:live|test)_[A-Za-z0-9]{10,}|xox[bpoas]-[A-Za-z0-9\-]{10,})/g,
     REDACTED,
   ],
 
@@ -78,6 +99,15 @@ const SECRET_PATTERNS: Array<[RegExp, string | ((...args: string[]) => string)]>
   [
     /((?:postgres|mysql|mongodb|redis|amqp|mssql|sqlite|mariadb|cockroachdb):\/\/[^:]+:)([^@]+)(@)/gi,
     `$1${REDACTED}$3`,
+  ],
+
+  // ── JSON "key": "value" for secret-looking keys ──────────────────────
+  // "api_key": "sk_live_abc..."  →  "api_key": "[REDACTED]"
+  // "password": "hunter2"        →  "password": "[REDACTED]"
+  // Also handles: no-space, single-quoted (non-standard JSON)
+  [
+    /(["'](?:\w*(?:secret|_key|token|password|passwd|credential|auth_token|api_key|apikey|access_key|private_key))["']\s*:\s*)(["'])([^"']{8,})\2/gi,
+    `$1$2${REDACTED}$2`,
   ],
 ];
 
@@ -111,4 +141,24 @@ export function sanitizeForAi(text: string): string {
  */
 export function sanitizeConnectionInfo(_username: string, host: string, port: number): string {
   return `****@${host}:${port}`;
+}
+
+/**
+ * Last-mile sanitization for API messages before sending to external providers.
+ *
+ * Applies sanitizeForAi to the `content` field of every message.
+ * Returns a new array — does NOT mutate the input.
+ *
+ * This is the safety net: even if a data source forgot to sanitize,
+ * this catch-all pass will redact secrets before they leave the process.
+ */
+export function sanitizeApiMessages<T extends { role: string; content?: string | null }>(
+  messages: T[],
+): T[] {
+  return messages.map((msg) => {
+    if (!msg.content || typeof msg.content !== 'string') return msg;
+    const cleaned = sanitizeForAi(msg.content);
+    if (cleaned === msg.content) return msg; // no change — avoid allocation
+    return { ...msg, content: cleaned };
+  });
 }

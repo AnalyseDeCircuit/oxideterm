@@ -644,4 +644,104 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No route found"));
     }
+
+    #[test]
+    fn test_compute_route_prefers_lower_cost() {
+        let mut topology = create_test_topology();
+        // Add a direct but cheaper path
+        topology.edges.push(TopologyEdge {
+            from: "local".to_string(),
+            to: "target".to_string(),
+            cost: 1,
+        });
+
+        let result = topology.compute_route("target").unwrap();
+        // Direct path (cost 1) should beat jump→bastion→target (cost 3)
+        assert!(result.path.is_empty()); // direct = no intermediate hops
+        assert_eq!(result.total_cost, 1);
+    }
+
+    #[test]
+    fn test_compute_route_single_hop() {
+        let topology = create_test_topology();
+        let result = topology.compute_route("jump").unwrap();
+
+        assert!(result.path.is_empty()); // direct from local
+        assert_eq!(result.total_cost, 1);
+    }
+
+    #[test]
+    fn test_get_all_edges() {
+        let topology = create_test_topology();
+        let edges = topology.get_all_edges();
+        assert_eq!(edges.len(), 3);
+    }
+
+    #[test]
+    fn test_get_all_nodes_excludes_local() {
+        let mut topology = create_test_topology();
+        topology.nodes.insert(
+            "local".to_string(),
+            TopologyNodeConfig {
+                id: "local".to_string(),
+                host: "localhost".to_string(),
+                port: 22,
+                username: "me".to_string(),
+                auth_type: "agent".to_string(),
+                key_path: None,
+                display_name: None,
+                is_local: true,
+                tags: vec![],
+                saved_connection_id: None,
+            },
+        );
+
+        let nodes = topology.get_all_nodes();
+        // Should not contain the local node
+        assert!(nodes.iter().all(|n| !n.is_local));
+        assert_eq!(nodes.len(), 3); // jump, bastion, target
+    }
+
+    #[test]
+    fn test_get_all_nodes_includes_neighbors() {
+        let topology = create_test_topology();
+        let nodes = topology.get_all_nodes();
+
+        let jump_node = nodes.iter().find(|n| n.id == "jump").unwrap();
+        assert!(jump_node.neighbors.contains(&"bastion".to_string()));
+    }
+
+    #[test]
+    fn test_get_node() {
+        let topology = create_test_topology();
+        assert!(topology.get_node("jump").is_some());
+        assert!(topology.get_node("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_topology_edge_equality() {
+        let e1 = TopologyEdge {
+            from: "a".to_string(),
+            to: "b".to_string(),
+            cost: 1,
+        };
+        let e2 = TopologyEdge {
+            from: "a".to_string(),
+            to: "b".to_string(),
+            cost: 1,
+        };
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn test_empty_topology() {
+        let topology = NetworkTopology {
+            version: "2.0".to_string(),
+            nodes: HashMap::new(),
+            edges: vec![],
+        };
+        assert!(topology.compute_route("any").is_err());
+        assert!(topology.get_all_edges().is_empty());
+        assert!(topology.get_all_nodes().is_empty());
+    }
 }

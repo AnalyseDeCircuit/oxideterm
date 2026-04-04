@@ -391,4 +391,53 @@ mod tests {
         cache.invalidate("test.example.com", 22);
         assert!(cache.get_verified("test.example.com", 22).is_none());
     }
+
+    #[test]
+    fn test_cache_clear() {
+        let cache = HostKeyCache::new();
+        cache.set_verified("host1.com", 22, "fp1".to_string());
+        cache.set_verified("host2.com", 22, "fp2".to_string());
+
+        cache.clear();
+        assert!(cache.get_verified("host1.com", 22).is_none());
+        assert!(cache.get_verified("host2.com", 22).is_none());
+    }
+
+    #[test]
+    fn test_cache_different_ports() {
+        let cache = HostKeyCache::new();
+        cache.set_verified("host.com", 22, "fp22".to_string());
+        cache.set_verified("host.com", 2222, "fp2222".to_string());
+
+        assert_eq!(cache.get_verified("host.com", 22), Some("fp22".to_string()));
+        assert_eq!(
+            cache.get_verified("host.com", 2222),
+            Some("fp2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_cache_overwrite() {
+        let cache = HostKeyCache::new();
+        cache.set_verified("host.com", 22, "old-fp".to_string());
+        cache.set_verified("host.com", 22, "new-fp".to_string());
+
+        assert_eq!(
+            cache.get_verified("host.com", 22),
+            Some("new-fp".to_string())
+        );
+    }
+
+    #[test]
+    fn test_cache_invalidate_nonexistent() {
+        let cache = HostKeyCache::new();
+        // Should not panic
+        cache.invalidate("nonexistent.com", 22);
+    }
+
+    #[test]
+    fn test_cache_default() {
+        let cache = HostKeyCache::default();
+        assert!(cache.get_verified("any.com", 22).is_none());
+    }
 }

@@ -18,6 +18,7 @@ import i18n from '../../../i18n';
 import type { ChatMessage, AiStreamProvider, AiToolDefinition } from '../providers';
 import type { AgentStep, AgentApproval, AgentTask, AiToolResult } from '../../../types';
 import type { ToolExecutionContext } from '../tools';
+import { sanitizeApiMessages } from '../contextSanitizer';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -84,7 +85,7 @@ export async function streamCompletion(
     tools,
   };
 
-  for await (const event of llmConfig.provider.streamCompletion(config, messages, signal)) {
+  for await (const event of llmConfig.provider.streamCompletion(config, sanitizeApiMessages(messages), signal)) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
     switch (event.type) {

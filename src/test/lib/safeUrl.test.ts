@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateUrl } from './safeUrl';
+import { validateUrl } from '@/lib/safeUrl';
 
 describe('validateUrl', () => {
   describe('safe protocols', () => {

@@ -446,4 +446,172 @@ mod tests {
 
         assert!(config.search("nonexistent").is_empty());
     }
+
+    #[test]
+    fn test_add_connection_replaces_existing() {
+        let mut config = ConfigFile::default();
+        let conn = SavedConnection::new_password("Test", "host.com", 22, "user", "kc-1");
+        let id = conn.id.clone();
+        config.add_connection(conn);
+
+        // Add another with the same ID
+        let mut conn2 = SavedConnection::new_password("Updated", "host2.com", 22, "user2", "kc-2");
+        conn2.id = id.clone();
+        config.add_connection(conn2);
+
+        assert_eq!(config.connections.len(), 1);
+        assert_eq!(config.connections[0].name, "Updated");
+    }
+
+    #[test]
+    fn test_remove_connection_not_found() {
+        let mut config = ConfigFile::default();
+        assert!(config.remove_connection("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_connection() {
+        let mut config = ConfigFile::default();
+        let conn = SavedConnection::new_password("Test", "host.com", 22, "user", "kc-1");
+        let id = conn.id.clone();
+        config.add_connection(conn);
+
+        assert!(config.get_connection(&id).is_some());
+        assert!(config.get_connection("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_connection_mut() {
+        let mut config = ConfigFile::default();
+        let conn = SavedConnection::new_password("Test", "host.com", 22, "user", "kc-1");
+        let id = conn.id.clone();
+        config.add_connection(conn);
+
+        let conn_mut = config.get_connection_mut(&id).unwrap();
+        conn_mut.name = "Modified".to_string();
+
+        assert_eq!(config.get_connection(&id).unwrap().name, "Modified");
+    }
+
+    #[test]
+    fn test_mark_used_truncates_to_10() {
+        let mut config = ConfigFile::default();
+        let mut ids = Vec::new();
+        for i in 0..15 {
+            let conn =
+                SavedConnection::new_password(format!("S{}", i), "host.com", 22, "user", "kc");
+            ids.push(conn.id.clone());
+            config.add_connection(conn);
+        }
+
+        for id in &ids {
+            config.mark_used(id);
+        }
+
+        assert_eq!(config.recent.len(), 10);
+        // Most recent should be last inserted
+        assert_eq!(config.recent[0], ids[14]);
+    }
+
+    #[test]
+    fn test_mark_used_moves_to_front() {
+        let mut config = ConfigFile::default();
+        let c1 = SavedConnection::new_password("A", "a.com", 22, "u", "kc");
+        let c2 = SavedConnection::new_password("B", "b.com", 22, "u", "kc");
+        let id1 = c1.id.clone();
+        let id2 = c2.id.clone();
+        config.add_connection(c1);
+        config.add_connection(c2);
+
+        config.mark_used(&id1);
+        config.mark_used(&id2);
+        assert_eq!(config.recent[0], id2);
+
+        // Use id1 again — should move to front
+        config.mark_used(&id1);
+        assert_eq!(config.recent[0], id1);
+        assert_eq!(config.recent.len(), 2); // no duplicates
+    }
+
+    #[test]
+    fn test_get_recent() {
+        let mut config = ConfigFile::default();
+        let c1 = SavedConnection::new_password("A", "a.com", 22, "u", "kc");
+        let c2 = SavedConnection::new_password("B", "b.com", 22, "u", "kc");
+        let id1 = c1.id.clone();
+        let id2 = c2.id.clone();
+        config.add_connection(c1);
+        config.add_connection(c2);
+
+        config.mark_used(&id1);
+        config.mark_used(&id2);
+
+        let recent = config.get_recent(1);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, id2);
+    }
+
+    #[test]
+    fn test_get_by_group() {
+        let mut config = ConfigFile::default();
+        let mut c1 = SavedConnection::new_password("Prod", "p.com", 22, "u", "kc");
+        c1.group = Some("production".to_string());
+        let mut c2 = SavedConnection::new_password("Dev", "d.com", 22, "u", "kc");
+        c2.group = Some("development".to_string());
+        let c3 = SavedConnection::new_password("Ungrouped", "u.com", 22, "u", "kc");
+
+        config.add_connection(c1);
+        config.add_connection(c2);
+        config.add_connection(c3);
+
+        assert_eq!(config.get_by_group(Some("production")).len(), 1);
+        assert_eq!(config.get_by_group(Some("development")).len(), 1);
+        assert_eq!(config.get_by_group(None).len(), 1); // ungrouped
+        assert_eq!(config.get_by_group(Some("nonexistent")).len(), 0);
+    }
+
+    #[test]
+    fn test_search_empty_query() {
+        let mut config = ConfigFile::default();
+        config.add_connection(SavedConnection::new_password(
+            "Server", "host.com", 22, "root", "kc-1",
+        ));
+
+        // Empty query should match everything
+        assert_eq!(config.search("").len(), 1);
+    }
+
+    #[test]
+    fn test_saved_auth_variants() {
+        let password = SavedAuth::Password {
+            keychain_id: Some("kc-1".to_string()),
+        };
+        let key = SavedAuth::Key {
+            key_path: "/path/to/key".to_string(),
+            has_passphrase: false,
+            passphrase_keychain_id: None,
+        };
+        let agent = SavedAuth::Agent;
+        let cert = SavedAuth::Certificate {
+            key_path: "/path/to/key".to_string(),
+            cert_path: "/path/to/cert".to_string(),
+            has_passphrase: true,
+            passphrase_keychain_id: Some("kc-pass".to_string()),
+        };
+
+        // Test equality
+        assert_eq!(password.clone(), password);
+        assert_ne!(password, key);
+        assert_ne!(key, agent);
+        assert_ne!(agent, cert);
+    }
+
+    #[test]
+    fn test_connection_options_default() {
+        let opts = ConnectionOptions::default();
+        assert_eq!(opts.keep_alive_interval, 0);
+        assert!(!opts.compression);
+        assert!(opts.jump_host.is_none());
+        assert!(opts.term_type.is_none());
+    }
 }
