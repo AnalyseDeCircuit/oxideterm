@@ -743,7 +743,10 @@ impl WsBridge {
                 // Queue depth monitoring (P5)
                 let remaining = frame_tx_ssh.capacity();
                 if remaining < FRAME_CHANNEL_CAPACITY / 4 {
-                    warn!("frame_tx queue pressure: {}/{} remaining", remaining, FRAME_CHANNEL_CAPACITY);
+                    warn!(
+                        "frame_tx queue pressure: {}/{} remaining",
+                        remaining, FRAME_CHANNEL_CAPACITY
+                    );
                 }
 
                 // Forward to WebSocket
@@ -1203,7 +1206,10 @@ impl WsBridge {
                 // Queue depth monitoring (P5)
                 let remaining = frame_tx_ssh.capacity();
                 if remaining < FRAME_CHANNEL_CAPACITY / 4 {
-                    warn!("frame_tx queue pressure: {}/{} remaining for session {}", remaining, FRAME_CHANNEL_CAPACITY, sid_out);
+                    warn!(
+                        "frame_tx queue pressure: {}/{} remaining for session {}",
+                        remaining, FRAME_CHANNEL_CAPACITY, sid_out
+                    );
                 }
 
                 // Forward to WebSocket
@@ -1518,7 +1524,10 @@ impl WsBridge {
                 // Queue depth monitoring (P5)
                 let remaining = frame_tx_ssh.capacity();
                 if remaining < FRAME_CHANNEL_CAPACITY / 4 {
-                    warn!("frame_tx queue pressure: {}/{} remaining for session {}", remaining, FRAME_CHANNEL_CAPACITY, sid_out);
+                    warn!(
+                        "frame_tx queue pressure: {}/{} remaining for session {}",
+                        remaining, FRAME_CHANNEL_CAPACITY, sid_out
+                    );
                 }
 
                 // Forward to WebSocket

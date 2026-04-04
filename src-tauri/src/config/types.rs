@@ -344,12 +344,20 @@ mod tests {
 
     #[test]
     fn test_new_key_connection() {
-        let conn = SavedConnection::new_key("GPU Node", "gpu.hpc.edu", 22, "student", "/home/student/.ssh/id_ed25519");
+        let conn = SavedConnection::new_key(
+            "GPU Node",
+            "gpu.hpc.edu",
+            22,
+            "student",
+            "/home/student/.ssh/id_ed25519",
+        );
         assert_eq!(conn.name, "GPU Node");
         assert_eq!(conn.host, "gpu.hpc.edu");
         assert_eq!(conn.port, 22);
         assert_eq!(conn.username, "student");
-        assert!(matches!(conn.auth, SavedAuth::Key { ref key_path, .. } if key_path == "/home/student/.ssh/id_ed25519"));
+        assert!(
+            matches!(conn.auth, SavedAuth::Key { ref key_path, .. } if key_path == "/home/student/.ssh/id_ed25519")
+        );
         assert!(conn.last_used_at.is_none());
     }
 
@@ -364,8 +372,20 @@ mod tests {
     #[test]
     fn test_search_by_name() {
         let mut config = ConfigFile::default();
-        config.add_connection(SavedConnection::new_password("Production DB", "db.prod.com", 22, "admin", "kc-1"));
-        config.add_connection(SavedConnection::new_password("Staging API", "api.staging.com", 22, "deploy", "kc-2"));
+        config.add_connection(SavedConnection::new_password(
+            "Production DB",
+            "db.prod.com",
+            22,
+            "admin",
+            "kc-1",
+        ));
+        config.add_connection(SavedConnection::new_password(
+            "Staging API",
+            "api.staging.com",
+            22,
+            "deploy",
+            "kc-2",
+        ));
 
         let results = config.search("prod");
         assert_eq!(results.len(), 1);
@@ -375,7 +395,13 @@ mod tests {
     #[test]
     fn test_search_by_host() {
         let mut config = ConfigFile::default();
-        config.add_connection(SavedConnection::new_password("Server", "192.168.1.100", 22, "root", "kc-1"));
+        config.add_connection(SavedConnection::new_password(
+            "Server",
+            "192.168.1.100",
+            22,
+            "root",
+            "kc-1",
+        ));
 
         let results = config.search("192.168");
         assert_eq!(results.len(), 1);
@@ -384,7 +410,13 @@ mod tests {
     #[test]
     fn test_search_by_username() {
         let mut config = ConfigFile::default();
-        config.add_connection(SavedConnection::new_password("Server", "host.com", 22, "deploy_user", "kc-1"));
+        config.add_connection(SavedConnection::new_password(
+            "Server",
+            "host.com",
+            22,
+            "deploy_user",
+            "kc-1",
+        ));
 
         let results = config.search("deploy");
         assert_eq!(results.len(), 1);
@@ -393,7 +425,13 @@ mod tests {
     #[test]
     fn test_search_case_insensitive() {
         let mut config = ConfigFile::default();
-        config.add_connection(SavedConnection::new_password("MyServer", "example.com", 22, "root", "kc-1"));
+        config.add_connection(SavedConnection::new_password(
+            "MyServer",
+            "example.com",
+            22,
+            "root",
+            "kc-1",
+        ));
 
         assert_eq!(config.search("myserver").len(), 1);
         assert_eq!(config.search("MYSERVER").len(), 1);
@@ -402,7 +440,9 @@ mod tests {
     #[test]
     fn test_search_no_match() {
         let mut config = ConfigFile::default();
-        config.add_connection(SavedConnection::new_password("Server", "host.com", 22, "root", "kc-1"));
+        config.add_connection(SavedConnection::new_password(
+            "Server", "host.com", 22, "root", "kc-1",
+        ));
 
         assert!(config.search("nonexistent").is_empty());
     }
