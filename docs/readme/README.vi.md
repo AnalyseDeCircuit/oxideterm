@@ -67,6 +67,8 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | Thư viện SSH phụ thuộc OpenSSL | **russh 0.54**: SSH thuần Rust biên dịch với `ring` — không phụ thuộc C |
 | Ứng dụng Electron hơn 100 MB | **Tauri 2.0**: backend Rust gốc, tệp nhị phân 25–40 MB |
 | AI bị khóa vào một nhà cung cấp | **OxideSens**: 40+ công cụ, giao thức MCP, cơ sở kiến thức RAG — hoạt động với OpenAI/Ollama/DeepSeek/bất kỳ API tương thích nào |
+| Thông tin xác thực lưu trong file cấu hình dạng rõ | **Chỉ dùng keychain hệ thống**: mật khẩu và API key không bao giờ ghi xuống đĩa; file `.oxide` mã hóa bằng ChaCha20-Poly1305 + Argon2id |
+| Công cụ phụ thuộc cloud, yêu cầu tài khoản | **Ưu tiên cục bộ**: không tài khoản, không telemetry, không đồng bộ cloud — dữ liệu của bạn ở trên máy bạn. Tự cung cấp API key AI |
 
 ---
 

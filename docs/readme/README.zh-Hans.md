@@ -67,6 +67,8 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | SSH 库依赖 OpenSSL | **russh 0.54**：基于 `ring` 编译的纯 Rust SSH——零 C 依赖 |
 | 100+ MB 的 Electron 应用 | **Tauri 2.0**：原生 Rust 后端，25–40 MB 二进制文件 |
 | AI 被锁定在单一供应商 | **OxideSens**：40+ 工具、MCP 协议、RAG 知识库——支持 OpenAI/Ollama/DeepSeek 及任何兼容 API |
+| 凭证存储在明文配置文件中 | **仅系统钥匙串**：密码和 API 密钥绝不落盘；`.oxide` 文件使用 ChaCha20-Poly1305 + Argon2id 加密 |
+| 依赖云端、需要注册账号 | **本地优先**：零账号、零遥测、零云同步——数据留在你的设备上。AI 密钥自行提供 |
 
 ---
 

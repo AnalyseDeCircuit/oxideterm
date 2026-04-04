@@ -67,6 +67,8 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | Bibliotecas SSH dependem do OpenSSL | **russh 0.54**: SSH puro em Rust compilado com `ring` — zero dependências C |
 | Apps Electron de 100+ MB | **Tauri 2.0**: backend Rust nativo, binário de 25–40 MB |
 | IA presa a um provedor | **OxideSens**: 40+ ferramentas, protocolo MCP, base de conhecimento RAG — funciona com OpenAI/Ollama/DeepSeek/qualquer API compatível |
+| Credenciais em arquivos de configuração em texto simples | **Apenas chaveiro do sistema**: senhas e chaves de API nunca são gravadas em disco; arquivos `.oxide` criptografados com ChaCha20-Poly1305 + Argon2id |
+| Ferramentas dependentes da nuvem que exigem conta | **Local-first**: zero contas, zero telemetria, zero sincronização em nuvem — seus dados ficam no seu dispositivo. Traga sua própria chave de IA |
 
 ---
 

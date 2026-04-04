@@ -67,6 +67,8 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | SSH 라이브러리가 OpenSSL에 의존 | **russh 0.54**: `ring`으로 컴파일된 순수 Rust SSH — C 의존성 제로 |
 | 100 MB 이상의 Electron 앱 | **Tauri 2.0**: 네이티브 Rust 백엔드, 25~40 MB 바이너리 |
 | AI가 특정 프로바이더에 종속 | **OxideSens**: 40개 이상 도구, MCP 프로토콜, RAG 지식 베이스 — OpenAI/Ollama/DeepSeek/호환 API 지원 |
+| 자격 증명이 일반 텍스트 설정에 저장 | **OS 키체인만 사용**: 비밀번호와 API 키는 디스크에 기록되지 않음; `.oxide` 파일은 ChaCha20-Poly1305 + Argon2id 암호화 |
+| 클라우드 종속, 계정 필수 도구 | **로컬 우선**: 계정 없음, 텔레메트리 없음, 클라우드 동기화 없음 — 데이터는 내 기기에만. AI 키는 직접 제공 |
 
 ---
 
