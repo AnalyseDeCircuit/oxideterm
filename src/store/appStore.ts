@@ -87,7 +87,7 @@ interface AppStore {
   setNetworkOnline: (online: boolean) => void;
   
   // Actions - Tabs
-  createTab: (type: TabType, sessionId?: string, options?: { nodeId?: string }) => void;
+  createTab: (type: TabType, sessionId?: string, options?: { nodeId?: string; skipFocus?: boolean }) => void;
   /**
    * 关闭标签页并执行完整的清理
    * 
@@ -493,7 +493,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (type === 'settings' || type === 'connection_monitor' || type === 'connection_pool' || type === 'topology' || type === 'file_manager' || type === 'session_manager' || type === 'plugin_manager' || type === 'graphics' || type === 'launcher' || type === 'ai_agent') {
       const existingTab = get().tabs.find(t => t.type === type);
       if (existingTab) {
-        set({ activeTabId: existingTab.id });
+        if (!options?.skipFocus) set({ activeTabId: existingTab.id });
         return;
       }
 
@@ -538,7 +538,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
       set((state) => ({
         tabs: [...state.tabs, newTab],
-        activeTabId: newTab.id
+        ...(options?.skipFocus ? {} : { activeTabId: newTab.id })
       }));
       return;
     }
@@ -550,7 +550,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Check if a tab with the same sessionId already exists
       const existingTab = get().tabs.find(t => t.type === 'local_terminal' && t.sessionId === sessionId);
       if (existingTab) {
-        set({ activeTabId: existingTab.id });
+        if (!options?.skipFocus) set({ activeTabId: existingTab.id });
         return;
       }
 
@@ -571,7 +571,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
       set((state) => ({
         tabs: [...state.tabs, newTab],
-        activeTabId: newTab.id
+        ...(options?.skipFocus ? {} : { activeTabId: newTab.id })
       }));
       return;
     }
@@ -589,7 +589,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return !t.nodeId && t.sessionId === sessionId;
       });
       if (existingTab) {
-        set({ activeTabId: existingTab.id });
+        if (!options?.skipFocus) set({ activeTabId: existingTab.id });
         return;
       }
 
@@ -608,7 +608,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
       set((state) => ({
         tabs: [...state.tabs, newTab],
-        activeTabId: newTab.id
+        ...(options?.skipFocus ? {} : { activeTabId: newTab.id })
       }));
       return;
     }
@@ -630,7 +630,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     if (existingTab) {
       // Switch to existing tab instead of creating a new one
-      set({ activeTabId: existingTab.id });
+      if (!options?.skipFocus) set({ activeTabId: existingTab.id });
       return;
     }
 
@@ -645,7 +645,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     set((state) => ({
       tabs: [...state.tabs, newTab],
-      activeTabId: newTab.id
+      ...(options?.skipFocus ? {} : { activeTabId: newTab.id })
     }));
   },
 

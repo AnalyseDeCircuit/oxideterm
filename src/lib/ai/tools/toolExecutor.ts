@@ -70,6 +70,8 @@ export type ToolExecutionContext = {
   activeNodeId: string | null;
   /** Whether the active node has remote agent available */
   activeAgentAvailable: boolean;
+  /** If true, tabs created by tools won't steal focus (used by Agent mode) */
+  skipFocus?: boolean;
 };
 
 /** Resolved target for a tool that requires a specific node */
@@ -160,12 +162,12 @@ export async function executeTool(
         case 'local_get_drives':
           return await execLocalGetDrives(startTime, toolCallId);
         case 'open_local_terminal':
-          return await execOpenLocalTerminal(args, startTime, toolCallId);
+          return await execOpenLocalTerminal(args, startTime, toolCallId, context.skipFocus);
         // Navigation tools
         case 'open_tab':
-          return execOpenTab(args, startTime, toolCallId);
+          return execOpenTab(args, startTime, toolCallId, context.skipFocus);
         case 'open_session_tab':
-          return execOpenSessionTab(args, startTime, toolCallId);
+          return execOpenSessionTab(args, startTime, toolCallId, context.skipFocus);
         // Settings tools
         case 'get_settings':
           return execGetSettings(args, startTime, toolCallId);
@@ -189,7 +191,7 @@ export async function executeTool(
         case 'get_session_tree':
           return await execGetSessionTree(startTime, toolCallId);
         case 'connect_saved_session':
-          return await execConnectSavedSession(args, startTime, toolCallId);
+          return await execConnectSavedSession(args, startTime, toolCallId, context.skipFocus);
         // Plugin manager tools
         case 'list_plugins':
           return execListPlugins(startTime, toolCallId);
@@ -2153,7 +2155,7 @@ async function execLocalGetDrives(startTime: number, toolCallId: string): Promis
   }
 }
 
-async function execOpenLocalTerminal(args: Record<string, unknown>, startTime: number, toolCallId: string): Promise<AiToolResult> {
+async function execOpenLocalTerminal(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): Promise<AiToolResult> {
   try {
     const terminals = useLocalTerminalStore.getState().terminals;
     if (terminals.size >= 10) {
@@ -2163,7 +2165,7 @@ async function execOpenLocalTerminal(args: Record<string, unknown>, startTime: n
     const info = await useLocalTerminalStore.getState().createTerminal(
       cwd ? { cwd } : undefined,
     );
-    useAppStore.getState().createTab('local_terminal', info.id);
+    useAppStore.getState().createTab('local_terminal', info.id, skipFocus ? { skipFocus } : undefined);
     return {
       toolCallId,
       toolName: 'open_local_terminal',
@@ -2188,18 +2190,18 @@ const ALLOWED_SINGLETON_TABS = new Set([
   'file_manager', 'session_manager', 'plugin_manager', 'launcher',
 ]);
 
-function execOpenTab(args: Record<string, unknown>, startTime: number, toolCallId: string): AiToolResult {
+function execOpenTab(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): AiToolResult {
   const tabType = typeof args.tab_type === 'string' ? args.tab_type.trim() : '';
   if (!tabType || !ALLOWED_SINGLETON_TABS.has(tabType)) {
     return { toolCallId, toolName: 'open_tab', success: false, output: '', error: `Invalid tab_type. Allowed: ${[...ALLOWED_SINGLETON_TABS].join(', ')}`, durationMs: Date.now() - startTime };
   }
-  useAppStore.getState().createTab(tabType as TabType);
+  useAppStore.getState().createTab(tabType as TabType, undefined, skipFocus ? { skipFocus } : undefined);
   return { toolCallId, toolName: 'open_tab', success: true, output: `Opened ${tabType} tab.`, durationMs: Date.now() - startTime };
 }
 
 const ALLOWED_SESSION_TABS = new Set(['sftp', 'ide', 'forwards']);
 
-function execOpenSessionTab(args: Record<string, unknown>, startTime: number, toolCallId: string): AiToolResult {
+function execOpenSessionTab(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): AiToolResult {
   const tabType = typeof args.tab_type === 'string' ? args.tab_type.trim() : '';
   const nodeId = typeof args.node_id === 'string' ? args.node_id.trim() : '';
   if (!tabType || !ALLOWED_SESSION_TABS.has(tabType)) {
@@ -2221,7 +2223,7 @@ function execOpenSessionTab(args: Record<string, unknown>, startTime: number, to
   if (!terminalId) {
     return { toolCallId, toolName: 'open_session_tab', success: false, output: '', error: `Node ${nodeId} has no active terminal session. Is it connected?`, durationMs: Date.now() - startTime };
   }
-  useAppStore.getState().createTab(tabType as TabType, terminalId, { nodeId });
+  useAppStore.getState().createTab(tabType as TabType, terminalId, { nodeId, ...(skipFocus ? { skipFocus } : {}) });
   return { toolCallId, toolName: 'open_session_tab', success: true, output: `Opened ${tabType} tab for node ${nodeId}.`, durationMs: Date.now() - startTime };
 }
 
@@ -2412,7 +2414,7 @@ async function execGetSessionTree(startTime: number, toolCallId: string): Promis
   }
 }
 
-async function execConnectSavedSession(args: Record<string, unknown>, startTime: number, toolCallId: string): Promise<AiToolResult> {
+async function execConnectSavedSession(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): Promise<AiToolResult> {
   const toolName = 'connect_saved_session';
   const connectionId = typeof args.connection_id === 'string' ? args.connection_id.trim() : '';
   if (!connectionId) {
@@ -2427,7 +2429,7 @@ async function execConnectSavedSession(args: Record<string, unknown>, startTime:
     let connectError: string | null = null;
     const createTab = (_type: 'terminal', sessionId: string) => {
       openedSessionId = sessionId;
-      useAppStore.getState().createTab('terminal', sessionId);
+      useAppStore.getState().createTab('terminal', sessionId, skipFocus ? { skipFocus } : undefined);
     };
 
     const connectPromise = connectToSaved(connectionId, {
