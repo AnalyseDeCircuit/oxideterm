@@ -316,16 +316,13 @@ cd oxideterm && pnpm install
 pnpm cli:build
 
 # 完整應用（前端 + Rust 後端，熱重載）
-pnpm tauri dev
+pnpm run tauri dev
 
 # 僅前端（Vite 執行於連接埠 1420）
 pnpm dev
 
 # 正式建置
-pnpm tauri build
-
-# 輕量建置——剝離本機 PTY 用於行動裝置
-cd src-tauri && cargo build --no-default-features --release
+pnpm run tauri build
 ```
 
 ---

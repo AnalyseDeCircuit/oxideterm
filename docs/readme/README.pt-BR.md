@@ -316,16 +316,13 @@ cd oxideterm && pnpm install
 pnpm cli:build
 
 # App completa (frontend + backend Rust com hot reload)
-pnpm tauri dev
+pnpm run tauri dev
 
 # Apenas frontend (Vite na porta 1420)
 pnpm dev
 
 # Build de produção
-pnpm tauri build
-
-# Build leve — remover PTY local para mobile
-cd src-tauri && cargo build --no-default-features --release
+pnpm run tauri build
 ```
 
 ---

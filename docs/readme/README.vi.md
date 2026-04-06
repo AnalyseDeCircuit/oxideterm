@@ -316,16 +316,13 @@ cd oxideterm && pnpm install
 pnpm cli:build
 
 # Ứng dụng đầy đủ (frontend + backend Rust với hot reload)
-pnpm tauri dev
+pnpm run tauri dev
 
 # Chỉ frontend (Vite trên cổng 1420)
 pnpm dev
 
 # Build sản phẩm
-pnpm tauri build
-
-# Build nhẹ — loại bỏ PTY cục bộ cho di động
-cd src-tauri && cargo build --no-default-features --release
+pnpm run tauri build
 ```
 
 ---
