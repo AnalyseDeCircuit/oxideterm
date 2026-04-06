@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0--beta.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.0--beta.5-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
