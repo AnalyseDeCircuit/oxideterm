@@ -288,7 +288,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       case MSG_TYPE_DATA: {
         // CRITICAL: Use slice() to create a copy, not a view!
         // Views keep the entire original ArrayBuffer alive until GC
-        let payloadCopy = data.slice(HEADER_SIZE, HEADER_SIZE + length);
+        let payloadCopy: Uint8Array = data.slice(HEADER_SIZE, HEADER_SIZE + length);
 
         // Plugin output pipeline (fail-open: exceptions pass original data through)
         payloadCopy = runOutputPipeline(payloadCopy, sessionId, nodeId);
