@@ -52,9 +52,13 @@ body:
       required: false
 
   - type: checkboxes
-    id: search
+    id: checklist
     attributes:
       label: Checklist
       options:
         - label: I searched existing issues for duplicates / 我已搜索过是否已有相同 Issue
+          required: true
+        - label: |
+            I understand OxideTerm is free, open-source software — not a commercial product with 24/7 support. The author's time and energy are limited. I agree that issues with insufficient information or prolonged inactivity may be closed without further notice.
+            我明白 OxideTerm 是免费开源软件，而非提供 7×24 小时支持的商业产品，作者本人时间与精力均有限。我同意：任何信息不足或长时间无回复的 Issue 将有可能被直接关闭。
           required: true

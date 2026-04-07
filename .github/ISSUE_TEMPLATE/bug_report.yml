@@ -63,15 +63,38 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Logs or screenshots (optional) / 日志或截图（可选）
-      description: Redact hostnames, IPs, and secrets. 请隐去主机名、IP、密钥。
+      label: Logs or screenshots / 日志或截图
+      description: |
+        Paste relevant log output or attach screenshots. Redact hostnames, IPs, and secrets.
+        请粘贴相关日志或附上截图。请隐去主机名、IP、密钥。
+        Tip: Menu → Help → Open Logs / 提示：菜单 → 帮助 → 打开日志
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details / 环境信息
+      description: |
+        OS version, architecture, remote server OS, SSH server version, etc.
+        操作系统版本、架构、远程服务器系统、SSH 服务端版本等。
+      placeholder: |
+        - OS: macOS 15.3 (Apple Silicon) / Windows 11 23H2 / Ubuntu 24.04
+        - Remote: Ubuntu 22.04, OpenSSH 9.6
+        - Terminal: built-in / external
     validations:
       required: false
 
   - type: checkboxes
-    id: search
+    id: checklist
     attributes:
       label: Checklist
       options:
         - label: I searched existing issues for duplicates / 我已搜索过是否已有相同 Issue
+          required: true
+        - label: I have provided the OxideTerm version, platform, and steps to reproduce / 我已提供版本号、平台及复现步骤
+          required: true
+        - label: |
+            I understand OxideTerm is free, open-source software — not a commercial product with 24/7 support. The author's time and energy are limited. I agree that issues with insufficient information or prolonged inactivity may be closed without further notice.
+            我明白 OxideTerm 是免费开源软件，而非提供 7×24 小时支持的商业产品，作者本人时间与精力均有限。我同意：任何信息不足或长时间无回复的 Issue 将有可能被直接关闭。
           required: true
