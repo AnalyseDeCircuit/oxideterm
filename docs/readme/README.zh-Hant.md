@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>零 Electron。零 OpenSSL。純 Rust SSH。</strong>
+  <strong>零 Electron。零 OpenSSL。零遙測。零訂閱。純 Rust SSH。</strong>
   <br>
   <em>一個原生二進位檔——本機 Shell、SSH、SFTP、遠端 IDE、AI、連接埠轉發、外掛、30+ 主題、11 種語言。</em>
 </p>

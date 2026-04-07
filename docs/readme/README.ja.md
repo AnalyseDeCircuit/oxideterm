@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>Electron ゼロ。OpenSSL ゼロ。純粋な Rust SSH。</strong>
+  <strong>Electron ゼロ。OpenSSL ゼロ。テレメトリゼロ。サブスクゼロ。純粋な Rust SSH。</strong>
   <br>
   <em>ネイティブバイナリひとつで — ローカルシェル、SSH、SFTP、リモート IDE、AI、ポートフォワーディング、プラグイン、30 以上のテーマ、11 言語。</em>
 </p>

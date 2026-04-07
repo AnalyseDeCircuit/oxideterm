@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>零 Electron。零 OpenSSL。纯 Rust SSH。</strong>
+  <strong>零 Electron。零 OpenSSL。零遥测。零订阅。纯 Rust SSH。</strong>
   <br>
   <em>一个原生二进制——本地 Shell、SSH、SFTP、远程 IDE、AI、端口转发、插件、30+ 主题、11 种语言。</em>
 </p>

@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>Electron 제로. OpenSSL 제로. 순수 Rust SSH.</strong>
+  <strong>Electron 제로. OpenSSL 제로. 텔레메트리 제로. 구독 제로. 순수 Rust SSH.</strong>
   <br>
   <em>네이티브 바이너리 하나로 — 로컬 셸, SSH, SFTP, 원격 IDE, AI, 포트 포워딩, 플러그인, 30개 이상 테마, 11개 언어.</em>
 </p>

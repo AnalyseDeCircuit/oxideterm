@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>Không Electron. Không OpenSSL. SSH thuần Rust.</strong>
+  <strong>Không Electron. Không OpenSSL. Không thu thập dữ liệu. Không đăng ký trả phí. SSH thuần Rust.</strong>
   <br>
   <em>Một tệp nhị phân gốc duy nhất — shell cục bộ, SSH, SFTP, IDE từ xa, AI, chuyển tiếp cổng, plugin, 30+ giao diện, 11 ngôn ngữ.</em>
 </p>

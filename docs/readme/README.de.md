@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>Kein Electron. Kein OpenSSL. Reines Rust-SSH.</strong>
+  <strong>Kein Electron. Kein OpenSSL. Kein Telemetrie. Kein Abo. Reines Rust-SSH.</strong>
   <br>
   <em>Eine einzige native Binärdatei — lokale Shells, SSH, SFTP, Remote-IDE, KI, Portweiterleitung, Plugins, 30+ Designs, 11 Sprachen.</em>
 </p>

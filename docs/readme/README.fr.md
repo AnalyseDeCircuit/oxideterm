@@ -14,7 +14,7 @@
 
 
 <p align="center">
-  <strong>Zéro Electron. Zéro OpenSSL. SSH pur Rust.</strong>
+  <strong>Zéro Electron. Zéro OpenSSL. Zéro télémétrie. Zéro abonnement. SSH pur Rust.</strong>
   <br>
   <em>Un seul binaire natif — shells locaux, SSH, SFTP, IDE distant, IA, redirection de ports, plugins, 30+ thèmes, 11 langues.</em>
 </p>
