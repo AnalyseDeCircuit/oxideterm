@@ -311,6 +311,7 @@
       "certificate": "証明書",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "OpenSSH証明書ファイル（通常は-cert.pubで終わる）",
+      "certificate_note": "この項目は OpenSSH CA 署名証明書用です。通常の SSH 鍵ではありません。パスフレーズ付きの秘密鍵をお持ちの場合は、「SSH 鍵」タブをご使用ください。",
       "passphrase": "パスフレーズ（オプション）",
       "passphrase_placeholder": "暗号化されている場合はキーパスフレーズ",
       "twofa_desc": "二要素認証（Keyboard-Interactive）",

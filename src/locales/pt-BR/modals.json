@@ -311,6 +311,7 @@
       "certificate": "Certificado",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "Arquivo de certificado OpenSSH (geralmente termina em -cert.pub)",
+      "certificate_note": "Esta opção é para certificados assinados por CA OpenSSH, não para chaves SSH comuns. Se você tem uma chave privada com frase secreta, use a aba Chave SSH.",
       "passphrase": "Frase secreta (opcional)",
       "passphrase_placeholder": "Frase secreta da chave se criptografada",
       "twofa_desc": "Autenticação de dois fatores (Keyboard-Interactive)",

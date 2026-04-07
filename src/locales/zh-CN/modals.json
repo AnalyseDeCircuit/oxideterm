@@ -311,6 +311,7 @@
       "certificate": "证书",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "OpenSSH 证书文件（通常以 -cert.pub 结尾）",
+      "certificate_note": "此选项仅用于 OpenSSH CA 签发的证书认证，而非普通 SSH 密钥。如果你只有带口令的私钥，请使用「SSH 密钥」选项。",
       "passphrase": "口令（可选）",
       "passphrase_placeholder": "加密密钥的口令",
       "twofa_desc": "双因素认证 (Keyboard-Interactive)",

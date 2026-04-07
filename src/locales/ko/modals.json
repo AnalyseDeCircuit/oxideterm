@@ -311,6 +311,7 @@
       "certificate": "인증서",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "OpenSSH 인증서 파일 (보통 -cert.pub로 끝남)",
+      "certificate_note": "이 옵션은 OpenSSH CA 서명 인증서용이며, 일반 SSH 키가 아닙니다. 암호가 있는 개인 키를 사용하려면 SSH 키 탭을 사용하세요.",
       "passphrase": "패스프레이즈 (선택사항)",
       "passphrase_placeholder": "암호화된 경우 키 패스프레이즈",
       "twofa_desc": "이중 인증 (Keyboard-Interactive)",

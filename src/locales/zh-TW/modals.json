@@ -313,6 +313,7 @@
       "certificate": "憑證",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "OpenSSH 憑證檔案（通常以 -cert.pub 結尾）",
+      "certificate_note": "此選項僅用於 OpenSSH CA 簽發的憑證認證，而非普通 SSH 金鑰。如果你只有帶密語的私鑰，請使用「SSH 金鑰」選項。",
       "passphrase": "密碼短語（選填）",
       "passphrase_placeholder": "加密金鑰的密碼短語",
       "twofa_desc": "雙因素驗證（Keyboard-Interactive）",

@@ -313,6 +313,7 @@
       "certificate": "Zertifikat",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "OpenSSH-Zertifikatsdatei (endet normalerweise mit -cert.pub)",
+      "certificate_note": "Diese Option ist nur für OpenSSH-CA-signierte Zertifikate, nicht für reguläre SSH-Schlüssel. Wenn Sie einen privaten Schlüssel mit Passphrase haben, verwenden Sie stattdessen den SSH-Schlüssel-Tab.",
       "passphrase": "Passphrase (optional)",
       "passphrase_placeholder": "Schlüssel-Passphrase, falls verschlüsselt",
       "twofa_desc": "Zwei-Faktor-Authentifizierung (Keyboard-Interactive)",

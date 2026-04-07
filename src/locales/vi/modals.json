@@ -313,6 +313,7 @@
       "certificate": "Chứng chỉ",
       "certificate_placeholder": "~/.ssh/id_ed25519-cert.pub",
       "certificate_hint": "File chứng chỉ OpenSSH (thường kết thúc bằng -cert.pub)",
+      "certificate_note": "Tùy chọn này dành cho chứng chỉ được ký bởi CA OpenSSH, không phải khóa SSH thông thường. Nếu bạn có khóa riêng có cụm mật khẩu, hãy sử dụng tab Khóa SSH.",
       "passphrase": "Passphrase (tùy chọn)",
       "passphrase_placeholder": "Passphrase key nếu được mã hóa",
       "twofa_desc": "Xác thực hai yếu tố (Keyboard-Interactive)",

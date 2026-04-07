@@ -281,7 +281,7 @@ export const NewConnectionModal = () => {
         password: authType === 'password' ? password : undefined,
         keyPath: (authType === 'key' || authType === 'default_key' || authType === 'certificate') ? keyPath : undefined,
         certPath: authType === 'certificate' ? certPath : undefined,
-        passphrase: authType === 'certificate' ? passphrase : undefined,
+        passphrase: (authType === 'key' || authType === 'certificate') && passphrase ? passphrase : undefined,
         proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
         agentForwarding,
       };
@@ -350,6 +350,7 @@ export const NewConnectionModal = () => {
         // 关闭 modal 时清除敏感数据
         if (!open) {
           setPassword('');
+          setPassphrase('');
           setKbiError(null);
           setAgentForwarding(false);
           // 清除代理链中的密码
@@ -484,16 +485,28 @@ export const NewConnectionModal = () => {
                 </TabsContent>
                 
                 <TabsContent value="key">
-                   <div className="grid gap-2 pt-2">
-                     <Label htmlFor="keypath">{t('modals.new_connection.key_file')}</Label>
-                     <div className="flex gap-2">
-                        <Input 
-                          id="keypath" 
-                          value={keyPath}
-                          onChange={(e) => setKeyPath(e.target.value)}
-                          placeholder="~/.ssh/id_rsa"
-                        />
-                        <Button variant="outline" onClick={handleBrowseKey}>{t('modals.new_connection.browse')}</Button>
+                   <div className="grid gap-3 pt-2">
+                     <div className="space-y-2">
+                       <Label htmlFor="keypath">{t('modals.new_connection.key_file')}</Label>
+                       <div className="flex gap-2">
+                          <Input 
+                            id="keypath" 
+                            value={keyPath}
+                            onChange={(e) => setKeyPath(e.target.value)}
+                            placeholder="~/.ssh/id_rsa"
+                          />
+                          <Button variant="outline" onClick={handleBrowseKey}>{t('modals.new_connection.browse')}</Button>
+                       </div>
+                     </div>
+                     <div className="space-y-2">
+                       <Label htmlFor="key-passphrase">{t('modals.new_connection.passphrase')}</Label>
+                       <Input 
+                         id="key-passphrase" 
+                         type="password"
+                         value={passphrase}
+                         onChange={(e) => setPassphrase(e.target.value)}
+                         placeholder={t('modals.new_connection.passphrase_placeholder')}
+                       />
                      </div>
                    </div>
                 </TabsContent>
@@ -521,6 +534,9 @@ export const NewConnectionModal = () => {
                 
                 <TabsContent value="certificate">
                   <div className="grid gap-3 pt-2">
+                    <p className="text-xs text-yellow-600">
+                      {t('modals.new_connection.certificate_note')}
+                    </p>
                     <div className="space-y-2">
                       <Label htmlFor="cert-keypath">{t('modals.new_connection.private_key')}</Label>
                       <div className="flex gap-2">
