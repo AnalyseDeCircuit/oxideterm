@@ -635,6 +635,10 @@ export const Sidebar = () => {
       });
     } catch (err) {
       console.error('Failed to reconnect:', err);
+      toast({
+        title: t('connections.reconnect.failed', { error: String(err) }),
+        variant: 'error',
+      });
     }
   }, [connectNode, createTerminalForNode, createTab, getNode, toast, t, tabs, closeTab]);
 

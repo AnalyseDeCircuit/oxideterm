@@ -281,7 +281,7 @@ export const NewConnectionModal = () => {
         password: authType === 'password' ? password : undefined,
         keyPath: (authType === 'key' || authType === 'default_key' || authType === 'certificate') ? keyPath : undefined,
         certPath: authType === 'certificate' ? certPath : undefined,
-        passphrase: (authType === 'key' || authType === 'certificate') && passphrase ? passphrase : undefined,
+        passphrase: (authType === 'key' || authType === 'default_key' || authType === 'certificate') && passphrase ? passphrase : undefined,
         proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
         agentForwarding,
       };
@@ -512,8 +512,20 @@ export const NewConnectionModal = () => {
                 </TabsContent>
                 
                 <TabsContent value="default_key">
-                  <div className="text-sm text-theme-text-muted pt-2">
-                  {t('modals.new_connection.default_key_desc')}
+                  <div className="grid gap-3 pt-2">
+                    <div className="text-sm text-theme-text-muted">
+                      {t('modals.new_connection.default_key_desc')}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="default-key-passphrase">{t('modals.new_connection.passphrase')}</Label>
+                      <Input 
+                        id="default-key-passphrase" 
+                        type="password"
+                        value={passphrase}
+                        onChange={(e) => setPassphrase(e.target.value)}
+                        placeholder={t('modals.new_connection.passphrase_placeholder')}
+                      />
+                    </div>
                   </div>
                 </TabsContent>
                 
