@@ -58,7 +58,7 @@ export type ReconnectSnapshot = {
   perNodeOldSessionIds: Map<string, string[]>;
   /** Incomplete SFTP transfers captured BEFORE resetNodeState destroys old sessions */
   incompleteTransfers: Array<{
-    oldSessionId: string;
+    nodeId: string;
     transfers: IncompleteTransferInfo[];
   }>;
   /** Per-node mapping of old SSH connectionIds for grace period recovery probing */
@@ -698,8 +698,7 @@ async function phaseSnapshot(nodeId: string) {
       const transfers = await nodeSftpListIncompleteTransfers(n.id);
       const resumable = transfers.filter((t) => t.can_resume);
       if (resumable.length > 0) {
-        // Store nodeId as oldSessionId for backward compatibility with ReconnectSnapshot type
-        incompleteTransfers.push({ oldSessionId: n.id, transfers: resumable });
+        incompleteTransfers.push({ nodeId: n.id, transfers: resumable });
       }
     } catch (e) {
       // Node SFTP may not be initialized — that's ok
@@ -914,6 +913,7 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
 
     if (!isNonRetryable && (job.attempt + 1) < job.maxAttempts) {
       const delay = calculateBackoff(job.attempt + 1);
+      exitPhase(nodeId, 'failed', `retrying in ${delay}ms: ${msg}`);
       console.debug(`[Orchestrator] Retryable error, will retry in ${delay}ms (attempt ${job.attempt + 1}/${job.maxAttempts})`);
       await sleep(delay);
 
@@ -968,7 +968,7 @@ async function phaseAwaitTerminal(nodeId: string) {
   }
 
   const { snapshot } = job;
-
+  const allNodes = [node, ...treeStore.getDescendants(nodeId)];
   // Determine which nodes NEED a terminal session for restore phases
   // (nodes that had forwards or incomplete transfers in the snapshot)
   const nodesNeedingSession = new Set<string>();
@@ -976,11 +976,7 @@ async function phaseAwaitTerminal(nodeId: string) {
     nodesNeedingSession.add(entry.nodeId);
   }
   for (const entry of snapshot.incompleteTransfers) {
-    for (const [nId, oldIds] of snapshot.perNodeOldSessionIds) {
-      if (oldIds.includes(entry.oldSessionId)) {
-        nodesNeedingSession.add(nId);
-      }
-    }
+    nodesNeedingSession.add(entry.nodeId);
   }
 
   const { useAppStore } = await import('./appStore');
@@ -988,7 +984,6 @@ async function phaseAwaitTerminal(nodeId: string) {
   // Process ALL affected nodes (root + descendants), not just the root.
   // For each node that had open terminal tab(s), create new terminal(s) and
   // patch the pane tree so TerminalView remounts with a valid session.
-  const allNodes = [node, ...treeStore.getDescendants(nodeId)];
   let terminalTabsFixed = 0;
 
   for (const n of allNodes) {
@@ -1167,20 +1162,14 @@ async function phaseResumeTransfers(nodeId: string) {
   if (!job) return;
 
   const { snapshot } = job;
-  if (snapshot.oldTerminalSessionIds.length === 0) {
-    console.debug(`[Orchestrator] No sessions to check for incomplete transfers`);
-    exitPhase(nodeId, 'skipped', 'no old sessions');
-    return;
-  }
-
-  console.debug(`[Orchestrator] Phase: resume-transfers for ${nodeId}`);
-
   // Use pre-snapshotted incomplete transfers (captured before resetNodeState destroyed old sessions)
   if (snapshot.incompleteTransfers.length === 0) {
     console.debug(`[Orchestrator] No incomplete transfers in snapshot`);
     exitPhase(nodeId, 'skipped', 'no incomplete transfers in snapshot');
     return;
   }
+
+  console.debug(`[Orchestrator] Phase: resume-transfers for ${nodeId}`);
 
   // Ensure SFTP sessions are initialized for all affected nodes before resuming
   const treeStore = useSessionTreeStore.getState();
@@ -1206,8 +1195,7 @@ async function phaseResumeTransfers(nodeId: string) {
   for (const entry of snapshot.incompleteTransfers) {
     if (job.abortController.signal.aborted) return;
 
-    // entry.oldSessionId is actually nodeId (set in snapshot phase)
-    const entryNodeId = entry.oldSessionId;
+    const entryNodeId = entry.nodeId;
 
     for (const transfer of entry.transfers) {
       if (job.abortController.signal.aborted) return;
@@ -1262,7 +1250,7 @@ async function phaseRestoreIde(nodeId: string) {
   // so use it directly instead of resolving through topologyResolver
   const targetNodeId = ideSnapshot.connectionId;
   const treeStore = useSessionTreeStore.getState();
-  const ideNode = treeStore.getNode(targetNodeId);
+  let ideNode = treeStore.getNode(targetNodeId);
 
   if (!ideNode) {
     console.warn(`[Orchestrator] IDE node ${targetNodeId} no longer exists`);
@@ -1271,27 +1259,39 @@ async function phaseRestoreIde(nodeId: string) {
   }
 
   const newConnectionId = ideNode.runtime.connectionId;
-  const newSftpSessionId = ideNode.sftpSessionId;
 
-  if (!newConnectionId || !newSftpSessionId) {
+  if (!newConnectionId) {
     console.warn(`[Orchestrator] IDE node ${targetNodeId} missing connectionId or sftpSessionId, skipping IDE restore`);
-    exitPhase(nodeId, 'skipped', 'missing connectionId or sftpSessionId');
+    exitPhase(nodeId, 'skipped', 'missing connectionId');
+    return;
+  }
+
+  if (!ideNode.sftpSessionId) {
+    try {
+      await treeStore.openSftpForNode(targetNodeId);
+      ideNode = treeStore.getNode(targetNodeId);
+    } catch (e) {
+      console.warn(`[Orchestrator] Failed to init SFTP for IDE node ${targetNodeId}:`, e);
+    }
+  }
+
+  if (!ideNode?.sftpSessionId) {
+    console.warn(`[Orchestrator] IDE node ${targetNodeId} missing connectionId or sftpSessionId, skipping IDE restore`);
+    exitPhase(nodeId, 'skipped', 'missing sftpSessionId');
     return;
   }
 
   const ideStore = useIdeStore.getState();
+  const sameProjectOpen =
+    ideStore.project?.rootPath === ideSnapshot.projectPath && ideStore.nodeId === targetNodeId;
 
   // Respect user intent: if user opened a different project or closed IDE after snapshot, skip
   if (ideStore.project) {
-    if (ideStore.project.rootPath !== ideSnapshot.projectPath) {
+    if (!sameProjectOpen) {
       console.debug(`[Orchestrator] IDE project changed by user (${ideStore.project.rootPath} != ${ideSnapshot.projectPath}), skipping IDE restore`);
       exitPhase(nodeId, 'skipped', 'user changed project');
       return;
     }
-    // Same project already open — no need to restore
-    console.debug(`[Orchestrator] IDE already has the same project open, skipping IDE restore`);
-    exitPhase(nodeId, 'skipped', 'same project already open');
-    return;
   }
 
   // IDE is closed — check if it was explicitly closed by user after the snapshot
@@ -1303,8 +1303,10 @@ async function phaseRestoreIde(nodeId: string) {
   }
 
   try {
-    // Re-open project using nodeId (node-first)
-    await ideStore.openProject(targetNodeId, ideSnapshot.projectPath);
+    if (!sameProjectOpen) {
+      // Re-open project using nodeId (node-first)
+      await ideStore.openProject(targetNodeId, ideSnapshot.projectPath);
+    }
 
     // Re-open file tabs
     let openedTabs = 0;
@@ -1325,6 +1327,9 @@ async function phaseRestoreIde(nodeId: string) {
       const currentIdeState = useIdeStore.getState();
       const tabUpdates = currentIdeState.tabs.map(tab => {
         const savedContent = dirtyContents[tab.path];
+        if (tab.isDirty) {
+          return tab;
+        }
         if (savedContent !== undefined && savedContent !== tab.originalContent) {
           return { ...tab, content: savedContent, isDirty: true };
         }
@@ -1334,7 +1339,7 @@ async function phaseRestoreIde(nodeId: string) {
       console.debug(`[Orchestrator] Restored ${dirtyPaths.length} dirty file(s) from snapshot`);
     }
 
-    if (openedTabs > 0) {
+    if (!sameProjectOpen || openedTabs > 0 || dirtyPaths.length > 0) {
       updateJob(nodeId, { restoredCount: (job.restoredCount || 0) + 1 });
     }
     console.debug(`[Orchestrator] IDE restored: project=${ideSnapshot.projectPath}, tabs=${openedTabs}`);

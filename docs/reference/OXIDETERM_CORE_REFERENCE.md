@@ -967,9 +967,9 @@ type ReconnectSnapshot = {
   // 按 nodeId 分组的旧终端 session ID 映射
   perNodeOldSessionIds: Map<string, string[]>;
   
-  // 未完成的 SFTP 传输，在 resetNodeState 销毁旧 session 前捕获
+  // 未完成的 SFTP 传输，按 nodeId 分组，在 resetNodeState 前捕获
   incompleteTransfers: Array<{
-    oldSessionId: string;
+    nodeId: string;
     transfers: IncompleteTransferInfo[];
   }>;
   
@@ -1033,7 +1033,7 @@ delay = min(baseDelayMs × BACKOFF_MULTIPLIER^(attempt-1), maxDelayMs) × (0.8 ~
 3. 对每个旧 session ID：
    - 调用 `api.listPortForwards(sessionId)` 快照转发规则。
    - 过滤：仅保留 `status !== 'stopped'` 的规则（尊重用户意图）。
-4. 快照未完成的 SFTP 传输（`nodeSftpListIncompleteTransfers`）。
+4. 按节点快照未完成的 SFTP 传输（`nodeSftpListIncompleteTransfers(nodeId)`）。
 5. 收集 `oldConnectionIds`（每个受影响节点的旧 `connectionId`）。
 6. 检查 `ideStore`：如果当前项目的 nodeId 匹配，保存 `{ projectPath, tabPaths, connectionId, dirtyContents }`。
 7. 以 `snapshotAt` 时间戳存储快照（用于后续的用户意图检测）。
@@ -1078,17 +1078,16 @@ React Key-Driven Reset 自动处理终端创建：
 1. 确定哪些节点**需要**终端 session（快照中有转发或未完成传输的节点）。
 2. 每 500ms 轮询 `rawNodes[nodeId].terminalSessionId`，超时 10 秒。
 3. 对需要 session 但无终端标签页的节点，显式调用 `createTerminalForNode()` 确保存在有效 session。
-4. 构建 `oldSessionId → newSessionId` 映射（基于 `perNodeOldSessionIds` + 当前状态，确定性映射）。
+4. 对仍被标签页或 pane tree 引用的旧终端 session，调用 `updatePaneSessionId(oldSessionId, newSessionId)` 完成确定性 remap。
 
 #### Phase 3: `restore-forwards`
 
 1. 收集当前存活的转发规则，避免重复或恢复用户手动停止的规则。
 2. 对快照中的每个 `forwardRules` 条目：
-   - 查找 old → new session ID 映射。
-   - 如果该节点无新 session，跳过。
+   - 直接使用 `entry.nodeId` 作为 node-first 路由目标。
    - 对每条规则（排除 `stopped`）：
-     - 如果已存在相同 `type:bind_address:bind_port` 的转发，跳过。
-     - 调用 `api.createPortForward({ sessionId: newSessionId, ...rule })`。
+     - 如果已存在相同 `type:bind_address:bind_port:target_host:target_port` 的转发，跳过。
+     - 调用 `nodeCreateForward({ node_id: entry.nodeId, ...rule })`。
      - 失败：记录警告，继续。
      - 成功：递增 `restoredCount`。
 3. 每条规则之间检查 `abortController.signal`。

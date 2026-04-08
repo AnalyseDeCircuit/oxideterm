@@ -226,6 +226,14 @@ describe('reconnectOrchestratorStore', () => {
     treeStoreMock.state.nodeTerminalMap = new Map();
     treeStoreMock.state.terminalNodeMap = new Map();
     appStoreMock.state.tabs = [];
+    appStoreMock.state.updatePaneSessionId.mockReset();
+
+    ideStoreMock.state.nodeId = null;
+    ideStoreMock.state.project = null;
+    ideStoreMock.state.tabs = [];
+    ideStoreMock.state.lastClosedAt = null;
+    ideStoreMock.state.openProject.mockReset().mockResolvedValue(undefined);
+    ideStoreMock.state.openFile.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -484,5 +492,201 @@ describe('reconnectOrchestratorStore', () => {
         target_port: 4000,
       }),
     );
+  });
+
+  it('uses grace period recovery when the old connection comes back alive', async () => {
+    apiMocks.probeSingleConnection.mockResolvedValue('alive');
+    const store = await loadStore();
+
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    expect(apiMocks.probeSingleConnection).toHaveBeenCalledWith('conn-root');
+    expect(treeStoreMock.state.reconnectCascade).not.toHaveBeenCalled();
+    expect(treeStoreMock.state.clearLinkDown).toHaveBeenCalledWith('root');
+    expect(store.getState().getJob('root')?.status).toBe('done');
+  });
+
+  it('cancels during grace period without falling through to reconnectCascade', async () => {
+    apiMocks.probeSingleConnection.mockResolvedValue('dead');
+    const store = await loadStore();
+
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    store.getState().cancel('root');
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushMicrotasks();
+
+    expect(treeStoreMock.state.reconnectCascade).not.toHaveBeenCalled();
+    expect(store.getState().getJob('root')?.status).toBe('cancelled');
+  });
+
+  it('closes every ssh-connect phaseHistory entry when a retry succeeds', async () => {
+    apiMocks.probeSingleConnection.mockResolvedValue('not_found');
+    treeStoreMock.state.reconnectCascade
+      .mockRejectedValueOnce(new Error('temporary network error'))
+      .mockResolvedValueOnce(['root']);
+
+    const store = await loadStore();
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(600);
+    await flushMicrotasks();
+
+    const job = store.getState().getJob('root');
+    const sshPhases = job?.phaseHistory.filter((entry) => entry.phase === 'ssh-connect') ?? [];
+
+    expect(job?.status).toBe('done');
+    expect(sshPhases).toHaveLength(2);
+    expect(sshPhases.every((entry) => entry.result !== 'running' && entry.endedAt != null)).toBe(true);
+  });
+
+  it('restores transfer-only nodes even when they had no old terminal sessions', async () => {
+    treeStoreMock.nodes.clear();
+    treeStoreMock.nodes.set(
+      'root',
+      makeUnifiedNode({
+        id: 'root',
+        runtime: { connectionId: 'conn-root', status: 'link-down', terminalIds: [], sftpSessionId: null },
+      }),
+    );
+    sftpMocks.nodeSftpListIncompleteTransfers
+      .mockResolvedValueOnce([
+        { transfer_id: 'tx-1', can_resume: true },
+      ])
+      .mockResolvedValueOnce([
+        { transfer_id: 'tx-1', can_resume: true },
+      ]);
+
+    const store = await loadStore();
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    expect(treeStoreMock.state.createTerminalForNode).toHaveBeenCalledWith('root');
+    expect(treeStoreMock.state.openSftpForNode).toHaveBeenCalledWith('root');
+    expect(sftpMocks.nodeSftpResumeTransfer).toHaveBeenCalledWith('root', 'tx-1');
+    expect(store.getState().getJob('root')?.status).toBe('done');
+  });
+
+  it('restores IDE tabs and dirty content when the same project stayed open', async () => {
+    apiMocks.probeSingleConnection.mockResolvedValue('not_found');
+    ideStoreMock.state.nodeId = 'root';
+    ideStoreMock.state.project = { rootPath: '/workspace/project' };
+    ideStoreMock.state.tabs = [
+      {
+        path: '/workspace/project/src/app.ts',
+        isDirty: true,
+        content: 'dirty snapshot',
+        originalContent: 'clean server',
+      },
+    ];
+    ideStoreMock.state.openFile.mockImplementation(async (path: string) => {
+      ideStoreMock.state.tabs = [
+        {
+          path,
+          isDirty: false,
+          content: 'clean server',
+          originalContent: 'clean server',
+        },
+      ];
+    });
+    treeStoreMock.state.openSftpForNode.mockImplementation(async (nodeId: string) => {
+      const node = treeStoreMock.nodes.get(nodeId);
+      if (node) {
+        node.sftpSessionId = 'sftp-1';
+      }
+      return 'sftp-1';
+    });
+    treeStoreMock.state.reconnectCascade.mockImplementation(async () => {
+      ideStoreMock.state.tabs = [];
+      return ['root'];
+    });
+
+    const store = await loadStore();
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    expect(ideStoreMock.state.openProject).not.toHaveBeenCalled();
+    expect(ideStoreMock.state.openFile).toHaveBeenCalledWith('/workspace/project/src/app.ts');
+    expect(ideStoreMock.state.tabs[0]).toEqual(
+      expect.objectContaining({
+        path: '/workspace/project/src/app.ts',
+        content: 'dirty snapshot',
+        isDirty: true,
+      }),
+    );
+    expect(store.getState().getJob('root')?.status).toBe('done');
+  });
+
+  it('does not overwrite newer dirty IDE edits in the same-project-open path', async () => {
+    apiMocks.probeSingleConnection.mockResolvedValue('not_found');
+    ideStoreMock.state.nodeId = 'root';
+    ideStoreMock.state.project = { rootPath: '/workspace/project' };
+    ideStoreMock.state.tabs = [
+      {
+        path: '/workspace/project/src/app.ts',
+        isDirty: true,
+        content: 'snapshot dirty content',
+        originalContent: 'clean server',
+      },
+    ];
+    ideStoreMock.state.openFile.mockImplementation(async (path: string) => {
+      const existing = ideStoreMock.state.tabs.find((tab) => tab.path === path);
+      if (existing) {
+        return;
+      }
+      ideStoreMock.state.tabs = [
+        ...ideStoreMock.state.tabs,
+        {
+          path,
+          isDirty: false,
+          content: 'clean server',
+          originalContent: 'clean server',
+        },
+      ];
+    });
+    treeStoreMock.state.openSftpForNode.mockImplementation(async (nodeId: string) => {
+      const node = treeStoreMock.nodes.get(nodeId);
+      if (node) {
+        node.sftpSessionId = 'sftp-1';
+      }
+      return 'sftp-1';
+    });
+    treeStoreMock.state.reconnectCascade.mockImplementation(async () => {
+      ideStoreMock.state.tabs = [
+        {
+          path: '/workspace/project/src/app.ts',
+          isDirty: true,
+          content: 'newer local edit',
+          originalContent: 'clean server',
+        },
+      ];
+      return ['root'];
+    });
+
+    const store = await loadStore();
+    store.getState().scheduleReconnect('root');
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    expect(ideStoreMock.state.tabs[0]).toEqual(
+      expect.objectContaining({
+        path: '/workspace/project/src/app.ts',
+        content: 'newer local edit',
+        isDirty: true,
+      }),
+    );
+    expect(store.getState().getJob('root')?.status).toBe('done');
   });
 });
