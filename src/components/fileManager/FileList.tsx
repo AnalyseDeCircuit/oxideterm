@@ -43,6 +43,7 @@ import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 import { PathBreadcrumb } from '../sftp/PathBreadcrumb';
 import type { FileInfo, SortField, SortDirection, ContextMenuState } from './types';
+import { joinLocalPath } from './pathUtils';
 
 // Format file size to human readable format
 export const formatFileSize = (bytes: number): string => {
@@ -61,6 +62,7 @@ export interface FileListProps {
   isRemote?: boolean;
   active?: boolean;
   loading?: boolean;
+  error?: string | null;
   
   // Selection
   selected: Set<string>;
@@ -126,6 +128,13 @@ export interface FileListProps {
 
 const FILE_ROW_HEIGHT = 28; // py-1 + text-xs + border ≈ 28px
 
+function joinPanePath(basePath: string, name: string, isRemote: boolean): string {
+  if (isRemote) {
+    return basePath === '/' ? `/${name}` : `${basePath.replace(/\/+$/g, '')}/${name}`;
+  }
+  return joinLocalPath(basePath, name);
+}
+
 type FileRowProps = {
   file: FileInfo;
   isSelected: boolean;
@@ -169,7 +178,7 @@ const FileRow = React.memo<FileRowProps>(({
     onDoubleClick={(e) => {
       e.stopPropagation();
       if (file.file_type === 'Directory') {
-        const newPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
+        const newPath = joinPanePath(path, file.name, isRemote);
         onNavigate(newPath);
       } else if (onPreview) {
         onPreview(file);
@@ -211,6 +220,7 @@ export const FileList: React.FC<FileListProps> = ({
   isRemote = false,
   active = false,
   loading = false,
+  error = null,
   selected,
   onSelect,
   onSelectAll,
@@ -293,7 +303,7 @@ export const FileList: React.FC<FileListProps> = ({
       const file = files.find(f => f.name === selectedFiles[0]);
       if (file) {
         if (file.file_type === 'Directory') {
-          const newPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
+          const newPath = joinPanePath(path, file.name, isRemote);
           onNavigate(newPath);
         } else if (onPreview) {
           onPreview(file);
@@ -539,7 +549,24 @@ export const FileList: React.FC<FileListProps> = ({
         onClick={onClearSelection}
         onKeyDown={handleKeyDown}
       >
-        {files.length > 0 ? (
+        {error && !loading ? (
+          <div className="m-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
+            <div className="font-medium text-red-100">{t('fileManager.error')}</div>
+            <div className="mt-1 break-words text-red-200/90">{error}</div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-2 h-7 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefresh();
+              }}
+            >
+              <RefreshCw className="mr-1 h-3 w-3" />
+              {t('fileManager.refresh')}
+            </Button>
+          </div>
+        ) : files.length > 0 ? (
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const file = files[virtualRow.index];
@@ -593,7 +620,7 @@ export const FileList: React.FC<FileListProps> = ({
             <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-theme-bg-hover flex items-center gap-2 font-medium"
               onClick={() => {
-                onNavigate(`${path}/${contextMenu.file!.name}`);
+                onNavigate(joinPanePath(path, contextMenu.file!.name, isRemote));
                 setContextMenu(null);
               }}
             >
@@ -607,7 +634,7 @@ export const FileList: React.FC<FileListProps> = ({
             <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-theme-bg-hover flex items-center gap-2"
               onClick={() => {
-                onOpenExternal(`${path}/${contextMenu.file!.name}`);
+                onOpenExternal(joinPanePath(path, contextMenu.file!.name, false));
                 setContextMenu(null);
               }}
             >
@@ -620,7 +647,7 @@ export const FileList: React.FC<FileListProps> = ({
             <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-theme-bg-hover flex items-center gap-2"
               onClick={() => {
-                onRevealInFileManager(`${path}/${contextMenu.file!.name}`);
+                onRevealInFileManager(joinPanePath(path, contextMenu.file!.name, false));
                 setContextMenu(null);
               }}
             >
@@ -718,7 +745,7 @@ export const FileList: React.FC<FileListProps> = ({
             <button
               className="w-full px-3 py-1.5 text-left text-xs hover:bg-theme-bg-hover flex items-center gap-2"
               onClick={() => {
-                const fullPath = `${path}/${contextMenu.file!.name}`;
+                const fullPath = joinPanePath(path, contextMenu.file!.name, isRemote);
                 navigator.clipboard.writeText(fullPath);
                 setContextMenu(null);
               }}

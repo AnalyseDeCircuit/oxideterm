@@ -9,7 +9,7 @@
 import { useState, useCallback } from 'react';
 import { copyFile, rename, mkdir, readDir } from '@tauri-apps/plugin-fs';
 import type { FileInfo, ClipboardData, ClipboardMode } from '../types';
-import { joinLocalPath } from '../pathUtils';
+import { isLocalPathEqual, isLocalPathWithin, joinLocalPath } from '../pathUtils';
 
 export interface PasteProgress {
   /** Currently processing file index (1-based) */
@@ -238,7 +238,11 @@ export function useFileClipboard(options: UseFileClipboardOptions = {}): UseFile
     for (const file of files) {
       try {
         // Check if pasting to same directory
-        const isSameDir = sourcePath === destPath;
+        const isSameDir = isLocalPathEqual(sourcePath, destPath);
+
+        if (file.file_type === 'Directory' && !isSameDir && isLocalPathWithin(file.path, destPath)) {
+          throw new Error(`Cannot ${mode} folder into itself or a subdirectory: ${file.name}`);
+        }
         
         if (isSameDir && mode === 'cut') {
           // Cut + paste in same dir is a no-op

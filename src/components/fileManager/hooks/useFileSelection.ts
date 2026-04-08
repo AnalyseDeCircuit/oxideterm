@@ -6,7 +6,7 @@
  * Handles multi-select, range select, and selection state
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { FileInfo } from '../types';
 
 export interface UseFileSelectionOptions {
@@ -33,14 +33,41 @@ export interface UseFileSelectionReturn {
 export function useFileSelection({ files }: UseFileSelectionOptions): UseFileSelectionReturn {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastSelected, setLastSelected] = useState<string | null>(null);
+  const selectedRef = useRef(selected);
+  const lastSelectedRef = useRef(lastSelected);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    lastSelectedRef.current = lastSelected;
+  }, [lastSelected]);
+
+  useEffect(() => {
+    const available = new Set(files.map(file => file.name));
+
+    setSelected(prev => {
+      const next = new Set(Array.from(prev).filter(name => available.has(name)));
+      if (next.size === prev.size && Array.from(next).every(name => prev.has(name))) {
+        return prev;
+      }
+      return next;
+    });
+
+    setLastSelected(prev => (prev && available.has(prev) ? prev : null));
+  }, [files]);
   
   // Select with multi and range support
   const select = useCallback((name: string, multi: boolean, range: boolean) => {
-    const newSelected = new Set(multi ? selected : []);
+    const currentSelected = selectedRef.current;
+    const currentLastSelected = lastSelectedRef.current;
+    const newSelected = new Set(multi ? currentSelected : []);
+    let handledRange = false;
     
-    if (range && lastSelected && files.length > 0) {
+    if (range && currentLastSelected && files.length > 0) {
       // Range select (Shift+click)
-      const start = files.findIndex(f => f.name === lastSelected);
+      const start = files.findIndex(f => f.name === currentLastSelected);
       const end = files.findIndex(f => f.name === name);
       
       if (start > -1 && end > -1) {
@@ -48,8 +75,11 @@ export function useFileSelection({ files }: UseFileSelectionOptions): UseFileSel
         for (let i = min; i <= max; i++) {
           newSelected.add(files[i].name);
         }
+        handledRange = true;
       }
-    } else {
+    }
+
+    if (!handledRange) {
       // Single or multi select
       if (newSelected.has(name) && multi) {
         newSelected.delete(name);
@@ -58,9 +88,11 @@ export function useFileSelection({ files }: UseFileSelectionOptions): UseFileSel
       }
     }
     
+    selectedRef.current = newSelected;
+    lastSelectedRef.current = name;
     setSelected(newSelected);
     setLastSelected(name);
-  }, [selected, lastSelected, files]);
+  }, [files]);
   
   // Select all files
   const selectAll = useCallback(() => {

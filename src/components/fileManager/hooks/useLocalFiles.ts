@@ -6,7 +6,7 @@
  * Manages local file system navigation and listing
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { readDir, stat, remove, rename as fsRename, mkdir } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -57,13 +57,15 @@ export interface UseLocalFilesReturn {
 
 export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFilesReturn {
   const { initialPath } = options;
+  const normalizedInitialPath = initialPath ? normalizeLocalPath(initialPath) : '';
   
   // Core state
   const [files, setFiles] = useState<FileInfo[]>([]);
-  const [path, setPath] = useState<string>(initialPath || '');
+  const [path, setPath] = useState<string>(normalizedInitialPath || '');
   const [homePath, setHomePath] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshRequestId = useRef(0);
   
   // Path editing
   const [pathInput, setPathInput] = useState('');
@@ -77,10 +79,11 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
   // Initialize home directory
   useEffect(() => {
     homeDir().then(home => {
-      setHomePath(home);
+      const normalizedHome = normalizeLocalPath(home);
+      setHomePath(normalizedHome);
       if (!initialPath) {
-        setPath(home);
-        setPathInput(home);
+        setPath(normalizedHome);
+        setPathInput(normalizedHome);
       }
     }).catch(() => {
       if (!initialPath) {
@@ -100,6 +103,7 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
   // Refresh file list
   const refresh = useCallback(async () => {
     if (!path) return;
+    const requestId = ++refreshRequestId.current;
     
     setLoading(true);
     setError(null);
@@ -107,8 +111,12 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
     try {
       const entries = await readDir(path);
 
+      if (refreshRequestId.current !== requestId) {
+        return;
+      }
+
       // Map entries to stat tasks, batched to limit concurrency
-      const BATCH_SIZE = 50;
+      const BATCH_SIZE = entries.length >= 5000 ? 20 : entries.length >= 1000 ? 30 : 50;
       const fileList: FileInfo[] = [];
 
       for (let i = 0; i < entries.length; i += BATCH_SIZE) {
@@ -144,6 +152,10 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
           })
         );
         fileList.push(...results);
+
+        if (refreshRequestId.current !== requestId) {
+          return;
+        }
       }
       
       // Initial sort: directories first, then alphabetically
@@ -153,13 +165,19 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
         return a.name.localeCompare(b.name);
       });
       
-      setFiles(fileList);
+      if (refreshRequestId.current === requestId) {
+        setFiles(fileList);
+      }
     } catch (err) {
       console.error("Local list error:", err);
-      setError(String(err));
-      setFiles([]);
+      if (refreshRequestId.current === requestId) {
+        setError(String(err));
+        setFiles([]);
+      }
     } finally {
-      setLoading(false);
+      if (refreshRequestId.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [path]);
   
@@ -227,7 +245,7 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
     } else if (target === '~') {
       setPath(homePath);
     } else {
-      setPath(target);
+      setPath(normalizeLocalPath(target));
     }
     setIsPathEditing(false);
   }, [path, homePath, getParentPath]);
@@ -243,7 +261,7 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
   // Submit path input
   const submitPathInput = useCallback(() => {
     if (pathInput.trim()) {
-      setPath(pathInput.trim());
+      setPath(normalizeLocalPath(pathInput.trim()));
     }
     setIsPathEditing(false);
   }, [pathInput]);
@@ -257,8 +275,9 @@ export function useLocalFiles(options: UseLocalFilesOptions = {}): UseLocalFiles
         defaultPath: path || undefined
       });
       if (selected && typeof selected === 'string') {
-        setPath(selected);
-        setPathInput(selected);
+        const normalizedSelected = normalizeLocalPath(selected);
+        setPath(normalizedSelected);
+        setPathInput(normalizedSelected);
         setIsPathEditing(false);
       }
     } catch (err) {

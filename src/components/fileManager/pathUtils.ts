@@ -132,6 +132,40 @@ export function getLocalBaseName(path: string, forcedStyle?: LocalPathStyle): st
   return separatorIndex === -1 ? normalized : normalized.slice(separatorIndex + 1);
 }
 
+export function isLocalPathEqual(a: string, b: string, forcedStyle?: LocalPathStyle): boolean {
+  const style = forcedStyle ?? detectLocalPathStyle(a || b);
+  const left = normalizeLocalPath(a, style);
+  const right = normalizeLocalPath(b, style);
+  if (style === 'windows') {
+    return left.toLowerCase() === right.toLowerCase();
+  }
+  return left === right;
+}
+
+export function isLocalPathWithin(parent: string, candidate: string, forcedStyle?: LocalPathStyle): boolean {
+  const style = forcedStyle ?? detectLocalPathStyle(parent || candidate);
+  const normalizedParent = normalizeLocalPath(parent, style);
+  const normalizedCandidate = normalizeLocalPath(candidate, style);
+
+  if (!normalizedParent || !normalizedCandidate) {
+    return false;
+  }
+
+  if (isLocalPathEqual(normalizedParent, normalizedCandidate, style)) {
+    return true;
+  }
+
+  const separator = style === 'windows' ? '\\' : '/';
+  const parentPrefix = normalizedParent.endsWith(separator)
+    ? normalizedParent
+    : `${normalizedParent}${separator}`;
+
+  if (style === 'windows') {
+    return normalizedCandidate.toLowerCase().startsWith(parentPrefix.toLowerCase());
+  }
+  return normalizedCandidate.startsWith(parentPrefix);
+}
+
 export function validateLocalFileName(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) {

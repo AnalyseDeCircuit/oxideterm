@@ -4,6 +4,7 @@
 import React from 'react';
 import { ChevronRight, Home, HardDrive, Server } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { detectLocalPathStyle, joinLocalPath, normalizeLocalPath } from '../fileManager/pathUtils';
 
 interface PathBreadcrumbProps {
   path: string;
@@ -15,43 +16,73 @@ interface PathBreadcrumbProps {
 // Parse path into segments
 const parsePathSegments = (path: string, isRemote: boolean): { name: string; fullPath: string }[] => {
   const segments: { name: string; fullPath: string }[] = [];
-  
-  // Normalize path
-  const normalizedPath = path.replace(/\\/g, '/').replace(/\/+/g, '/');
-  
-  // Handle root
+
   if (isRemote) {
+    const normalizedPath = path.replace(/\\/g, '/').replace(/\/+/g, '/');
     // Remote paths always start with /
     segments.push({ name: '/', fullPath: '/' });
-  } else {
-    // Local paths - handle Windows drives
-    const windowsDriveMatch = normalizedPath.match(/^([A-Za-z]:)/);
-    if (windowsDriveMatch) {
-      // Windows: C:/ or D:/
-      segments.push({ name: windowsDriveMatch[1], fullPath: windowsDriveMatch[1] + '/' });
-    } else if (normalizedPath.startsWith('/')) {
-      // Unix root
-      segments.push({ name: '/', fullPath: '/' });
+    const pathWithoutRoot = normalizedPath.replace(/^\/+/, '');
+
+    if (pathWithoutRoot) {
+      const parts = pathWithoutRoot.split('/').filter(Boolean);
+      let currentPath = '/';
+
+      for (const part of parts) {
+        currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
+        segments.push({ name: part, fullPath: currentPath });
+      }
     }
+    return segments;
   }
-  
-  // Split remaining path
-  const pathWithoutRoot = normalizedPath
-    .replace(/^[A-Za-z]:/, '') // Remove Windows drive
-    .replace(/^\/+/, '');      // Remove leading slashes
-  
+
+  const style = detectLocalPathStyle(path);
+  const normalizedPath = normalizeLocalPath(path, style);
+
+  if (style === 'windows') {
+    if (normalizedPath.startsWith('\\\\')) {
+      const parts = normalizedPath.replace(/^\\+/, '').split('\\').filter(Boolean);
+      if (parts.length >= 2) {
+        const root = `\\\\${parts[0]}\\${parts[1]}`;
+        segments.push({ name: root, fullPath: root });
+        let currentPath = root;
+        for (const part of parts.slice(2)) {
+          currentPath = joinLocalPath(currentPath, part, 'windows');
+          segments.push({ name: part, fullPath: currentPath });
+        }
+      }
+      return segments;
+    }
+
+    const driveMatch = normalizedPath.match(/^([A-Za-z]:\\)(.*)$/);
+    if (driveMatch) {
+      segments.push({ name: driveMatch[1].slice(0, 2), fullPath: driveMatch[1] });
+      let currentPath = driveMatch[1];
+      const parts = driveMatch[2].split('\\').filter(Boolean);
+      for (const part of parts) {
+        currentPath = joinLocalPath(currentPath, part, 'windows');
+        segments.push({ name: part, fullPath: currentPath });
+      }
+      return segments;
+    }
+
+    if (normalizedPath) {
+      segments.push({ name: normalizedPath, fullPath: normalizedPath });
+    }
+    return segments;
+  }
+
+  segments.push({ name: '/', fullPath: '/' });
+  const pathWithoutRoot = normalizedPath.replace(/^\/+/, '');
   if (pathWithoutRoot) {
     const parts = pathWithoutRoot.split('/').filter(Boolean);
-    let currentPath = segments.length > 0 ? segments[0].fullPath : '/';
-    
+    let currentPath = '/';
+
     for (const part of parts) {
-      currentPath = currentPath.endsWith('/') 
-        ? `${currentPath}${part}` 
-        : `${currentPath}/${part}`;
+      currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
       segments.push({ name: part, fullPath: currentPath });
     }
   }
-  
+
   return segments;
 };
 
@@ -62,9 +93,10 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   className,
 }) => {
   const segments = parsePathSegments(path, isRemote);
+  const localPathStyle = isRemote ? 'posix' : detectLocalPathStyle(path);
   
   // Get icon for root
-  const RootIcon = isRemote ? Server : (path.match(/^[A-Za-z]:/) ? HardDrive : Home);
+  const RootIcon = isRemote ? Server : (localPathStyle === 'windows' ? HardDrive : Home);
   
   return (
     <div className={cn(

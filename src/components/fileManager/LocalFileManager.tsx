@@ -954,6 +954,7 @@ export const LocalFileManager: React.FC<LocalFileManagerProps> = ({ className })
             isRemote={false}
             active={true}
             loading={localFiles.loading}
+            error={localFiles.error}
             selected={selection.selected}
             lastSelected={selection.lastSelected}
             onSelect={selection.select}
