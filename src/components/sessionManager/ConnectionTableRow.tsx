@@ -14,6 +14,13 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '../ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  ContextMenuSeparator,
+} from '../ui/context-menu';
 import type { ConnectionInfo } from '../../types';
 
 type ConnectionTableRowProps = {
@@ -83,13 +90,15 @@ export const ConnectionTableRow = ({
   const { t } = useTranslation();
 
   return (
-    <div
-      className={cn(
-        'relative flex items-center px-2 py-1.5 text-sm border-b border-theme-border/50 hover:bg-theme-bg-hover transition-colors group cursor-default',
-        isSelected && 'bg-blue-500/10'
-      )}
-      onDoubleClick={() => onConnect(conn.id)}
-    >
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'relative flex items-center px-2 py-1.5 text-sm border-b border-theme-border/50 hover:bg-theme-bg-hover transition-colors group cursor-default',
+            isSelected && 'bg-blue-500/10'
+          )}
+          onDoubleClick={() => onConnect(conn.id)}
+        >
       {/* Color indicator */}
       {conn.color && (
         <div
@@ -142,7 +151,7 @@ export const ConnectionTableRow = ({
       </div>
 
       {/* Actions */}
-      <div className="w-[84px] shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="w-[84px] shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity sticky right-0 bg-theme-bg group-hover:bg-theme-bg-hover">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -191,6 +200,30 @@ export const ConnectionTableRow = ({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => onConnect(conn.id)}>
+          <Play className="h-4 w-4 mr-2 text-green-400" />
+          {t('sessionManager.actions.connect')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onEdit(conn.id)}>
+          <Pencil className="h-4 w-4 mr-2" />
+          {t('sessionManager.actions.edit')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onDuplicate(conn)}>
+          <Copy className="h-4 w-4 mr-2" />
+          {t('sessionManager.actions.duplicate')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          className="text-red-400 focus:text-red-400"
+          onClick={() => onDelete(conn)}
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          {t('sessionManager.actions.delete')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };

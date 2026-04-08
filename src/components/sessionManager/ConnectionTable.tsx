@@ -59,7 +59,7 @@ export const ConnectionTable = ({
     { key: 'auth_type', label: t('sessionManager.table.auth_type'), sortable: true, className: 'w-[72px] shrink-0' },
     { key: 'group', label: t('sessionManager.table.group'), sortable: true, className: 'w-[100px] shrink-0' },
     { key: 'last_used_at', label: t('sessionManager.table.last_used'), sortable: true, className: 'w-[90px] shrink-0' },
-    { key: 'actions', label: '', sortable: false, className: 'w-[84px] shrink-0' },
+    { key: 'actions', label: '', sortable: false, className: 'w-[84px] shrink-0 sticky right-0 bg-theme-bg-secondary z-20' },
   ];
 
   if (connections.length === 0) {
