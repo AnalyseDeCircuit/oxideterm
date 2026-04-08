@@ -68,6 +68,9 @@
       "cli_installed": "Installato",
       "cli_not_installed": "Non installato",
       "cli_install": "Installa",
+      "cli_reinstall_required": "Reinstallazione richiesta",
+      "cli_reinstall": "Reinstalla",
+      "cli_reinstall_hint": "La CLI installata è diversa dalla CLI inclusa in OxideTerm {{version}}. Reinstalla la CLI inclusa per evitare incompatibilità di protocollo.",
       "cli_uninstall": "Disinstalla",
       "cli_not_bundled": "Il binario CLI non è incluso in questa build"
     },

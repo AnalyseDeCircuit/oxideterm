@@ -57,6 +57,16 @@ import type { PluginManifest } from '../types/plugin';
 // Toggle this for development without a backend
 const USE_MOCK = false;
 
+export type CliCompanionStatus = {
+  bundled: boolean;
+  installed: boolean;
+  install_path: string | null;
+  bundle_path: string | null;
+  app_version: string;
+  matches_bundled: boolean | null;
+  needs_reinstall: boolean;
+};
+
 // ---------------------------------------------------------------------------
 // In-flight Promise dedup — prevents StrictMode double-mount from issuing
 // duplicate IPC calls (especially OS keychain access which can trigger macOS
@@ -1569,8 +1579,8 @@ export const api = {
   // ── CLI Companion ───────────────────────────────────────────────────
 
   /** Get CLI installation status */
-  cliGetStatus: async (): Promise<{ bundled: boolean; installed: boolean; install_path: string | null; bundle_path: string | null }> => {
-    if (USE_MOCK) return { bundled: false, installed: false, install_path: null, bundle_path: null };
+  cliGetStatus: async (): Promise<CliCompanionStatus> => {
+    if (USE_MOCK) return { bundled: false, installed: false, install_path: null, bundle_path: null, app_version: '0.0.0', matches_bundled: null, needs_reinstall: false };
     return invoke('cli_get_status');
   },
 

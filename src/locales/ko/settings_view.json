@@ -68,6 +68,9 @@
       "cli_installed": "설치됨",
       "cli_not_installed": "미설치",
       "cli_install": "설치",
+      "cli_reinstall_required": "다시 설치 필요",
+      "cli_reinstall": "다시 설치",
+      "cli_reinstall_hint": "설치된 CLI가 OxideTerm {{version}}에 번들된 CLI와 다릅니다. 프로토콜 불일치를 방지하려면 번들된 CLI를 다시 설치하세요.",
       "cli_uninstall": "제거",
       "cli_not_bundled": "이 빌드에는 CLI 바이너리가 포함되어 있지 않습니다"
     },

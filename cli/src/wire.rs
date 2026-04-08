@@ -6,12 +6,13 @@
 //! Binary format: [Type:1B][Length:4B BE][Payload:NB]
 //! Compatible with the backend's `FrameCodec` in `src-tauri/src/bridge/protocol.rs`.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
 /// Message types matching the backend Wire Protocol v1.
 #[repr(u8)]
 pub enum MessageType {
     Data = 0x00,
+    #[allow(dead_code)]
     Resize = 0x01,
     Heartbeat = 0x02,
     Error = 0x03,
@@ -27,14 +28,6 @@ pub fn encode_data(payload: &[u8], buf: &mut Vec<u8>) {
     buf.extend_from_slice(payload);
 }
 
-/// Encode a Resize frame (cols, rows) into the provided buffer.
-pub fn encode_resize(cols: u16, rows: u16, buf: &mut Vec<u8>) {
-    buf.push(MessageType::Resize as u8);
-    buf.extend_from_slice(&4u32.to_be_bytes());
-    buf.extend_from_slice(&cols.to_be_bytes());
-    buf.extend_from_slice(&rows.to_be_bytes());
-}
-
 /// Encode a Heartbeat frame into the provided buffer.
 pub fn encode_heartbeat(buf: &mut Vec<u8>) {
     buf.push(MessageType::Heartbeat as u8);
@@ -42,15 +35,15 @@ pub fn encode_heartbeat(buf: &mut Vec<u8>) {
 }
 
 /// A decoded frame from the wire.
+#[derive(Debug)]
 pub struct Frame {
     pub msg_type: u8,
     pub payload: Vec<u8>,
 }
 
-/// Decode a single frame from a byte slice reader.
+/// Decode a single frame from a reader containing one complete frame.
 ///
-/// Returns `Ok(None)` if there's not enough data yet.
-/// Returns `Err` if the frame is malformed.
+/// Returns `Err` if the frame is truncated or malformed.
 pub fn decode_frame<R: Read>(reader: &mut R) -> io::Result<Frame> {
     let mut header = [0u8; 5];
     reader.read_exact(&mut header)?;
@@ -92,12 +85,54 @@ pub fn is_error(frame: &Frame) -> bool {
     frame.msg_type == MessageType::Error as u8
 }
 
-/// Encode a frame into a writer (for WebSocket binary messages).
-pub fn encode_to_writer<W: Write>(msg_type: u8, payload: &[u8], writer: &mut W) -> io::Result<()> {
-    writer.write_all(&[msg_type])?;
-    writer.write_all(&(payload.len() as u32).to_be_bytes())?;
-    if !payload.is_empty() {
-        writer.write_all(payload)?;
+#[cfg(test)]
+mod tests {
+    use super::{decode_frame, encode_data, MessageType, MAX_PAYLOAD_SIZE};
+    use std::io::{Cursor, ErrorKind, Write};
+
+    fn encode_to_writer<W: Write>(
+        msg_type: u8,
+        payload: &[u8],
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        writer.write_all(&[msg_type])?;
+        writer.write_all(&(payload.len() as u32).to_be_bytes())?;
+        if !payload.is_empty() {
+            writer.write_all(payload)?;
+        }
+        Ok(())
     }
-    Ok(())
+
+    #[test]
+    fn decodes_round_trip_data_frame() {
+        let mut encoded = Vec::new();
+        encode_data(b"hello", &mut encoded);
+
+        let frame = decode_frame(&mut Cursor::new(encoded)).unwrap();
+
+        assert_eq!(frame.msg_type, MessageType::Data as u8);
+        assert_eq!(frame.payload, b"hello");
+    }
+
+    #[test]
+    fn rejects_oversized_payload_header() {
+        let mut encoded = Vec::new();
+        encoded.push(MessageType::Data as u8);
+        encoded.extend_from_slice(&(MAX_PAYLOAD_SIZE + 1).to_be_bytes());
+
+        let err = decode_frame(&mut Cursor::new(encoded)).unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn rejects_truncated_frame() {
+        let mut encoded = Vec::new();
+        encode_to_writer(MessageType::Data as u8, b"hello", &mut encoded).unwrap();
+        encoded.pop();
+
+        let err = decode_frame(&mut Cursor::new(encoded)).unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+    }
 }

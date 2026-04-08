@@ -68,6 +68,9 @@
       "cli_installed": "インストール済み",
       "cli_not_installed": "未インストール",
       "cli_install": "インストール",
+      "cli_reinstall_required": "再インストールが必要",
+      "cli_reinstall": "再インストール",
+      "cli_reinstall_hint": "インストール済みの CLI は OxideTerm {{version}} に同梱されている CLI と異なります。プロトコルの不一致を避けるため、同梱の CLI を再インストールしてください。",
       "cli_uninstall": "アンインストール",
       "cli_not_bundled": "このビルドには CLI バイナリが含まれていません"
     },

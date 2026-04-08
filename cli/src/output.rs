@@ -57,6 +57,10 @@ impl OutputMode {
                     .get("version")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
+                let cli_api_version = value.pointer("/cli_api/version").and_then(|v| v.as_u64());
+                let cli_api_min_supported = value
+                    .pointer("/cli_api/min_supported")
+                    .and_then(|v| v.as_u64());
                 let sessions = value.get("sessions").and_then(|v| v.as_u64()).unwrap_or(0);
                 let ssh = value
                     .pointer("/connections/ssh")
@@ -68,6 +72,14 @@ impl OutputMode {
                     .unwrap_or(0);
 
                 println!("OxideTerm v{version}");
+                if let Some(api_version) = cli_api_version {
+                    let api_min = cli_api_min_supported.unwrap_or(api_version);
+                    if api_min == api_version {
+                        println!("  CLI API:       v{api_version}");
+                    } else {
+                        println!("  CLI API:       {api_min}-{api_version}");
+                    }
+                }
                 println!("  Sessions:      {sessions} active");
                 println!("  Connections:   {ssh} SSH, {local} local");
             }

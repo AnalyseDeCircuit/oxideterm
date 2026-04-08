@@ -16,6 +16,15 @@ mod wire;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
+const CLI_API_CURRENT_VERSION: u64 = 1;
+const CLI_API_MIN_SUPPORTED_VERSION: u64 = 1;
+
+struct CompatibilityReport {
+    status: serde_json::Value,
+    warning: Option<String>,
+    error: Option<String>,
+}
+
 #[derive(Parser)]
 #[command(
     name = "oxt",
@@ -316,22 +325,35 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
     }
 
     let mut conn = connect::IpcConnection::connect(cli.socket.as_deref(), cli.timeout)?;
+    let compatibility = fetch_compatibility_report(&mut conn)?;
 
     match &cli.command {
         Commands::Status => {
-            let resp = conn.call("status", serde_json::json!({}))?;
-            out.print_status(&resp);
+            out.print_status(&compatibility.status);
+            emit_compatibility_notice(
+                out,
+                compatibility
+                    .error
+                    .as_deref()
+                    .or(compatibility.warning.as_deref()),
+            );
         }
         Commands::List { what } => match what {
+            _ if compatibility.error.is_some() => {
+                return Err(compatibility.error.unwrap_or_default())
+            }
             ListTarget::Connections => {
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let resp = conn.call("list_saved_connections", serde_json::json!({}))?;
                 out.print_connections(&resp);
             }
             ListTarget::Sessions => {
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let resp = conn.call("list_sessions", serde_json::json!({}))?;
                 out.print_sessions(&resp);
             }
             ListTarget::Forwards { session_id } => {
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let params = match session_id {
                     Some(id) => serde_json::json!({ "session_id": id }),
                     None => serde_json::json!({}),
@@ -341,6 +363,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             }
         },
         Commands::Health { session_id } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let params = match session_id {
                 Some(id) => serde_json::json!({ "session_id": id }),
                 None => serde_json::json!({}),
@@ -349,6 +373,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             out.print_health(&resp, session_id.is_some());
         }
         Commands::Disconnect { target } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let resp = conn.call("disconnect", serde_json::json!({ "target": target }))?;
             out.print_disconnect(&resp);
         }
@@ -359,6 +385,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
                 r#type,
                 description,
             } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let (bind_address, bind_port, target_host, target_port) =
                     parse_forward_spec(spec, r#type)?;
 
@@ -383,6 +411,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
                 forward_id,
                 session,
             } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let session_id = resolve_session_id(&mut conn, session)?;
                 let resp = conn.call(
                     "delete_forward",
@@ -396,10 +426,14 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
         },
         Commands::Config { action } => match action {
             ConfigAction::List => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let resp = conn.call("config_list", serde_json::json!({}))?;
                 out.print_config_list(&resp);
             }
             ConfigAction::Get { name } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let resp = conn.call("config_get", serde_json::json!({ "name": name }))?;
                 out.print_config_get(&resp);
             }
@@ -413,6 +447,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             raw,
             r#continue: continue_id,
         } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let prompt_text = prompt.join(" ");
             if prompt_text.is_empty() && is_terminal_stdin() {
                 return Err("No prompt provided. Usage: oxt ask \"your question\"".to_string());
@@ -488,6 +524,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             model,
             provider,
         } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let prompt_text = prompt.join(" ");
             if prompt_text.is_empty() && is_terminal_stdin() {
                 return Err("No prompt provided. Usage: oxt exec \"generate a script\"".to_string());
@@ -526,11 +564,15 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             println!();
         }
         Commands::Connect { target } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let resp = conn.call("connect", serde_json::json!({ "target": target }))?;
             out.print_connect_result(&resp);
         }
         Commands::Sftp { action } => match action {
             SftpAction::Ls { session, path } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let session_id = resolve_session_id(&mut conn, session)?;
                 let params = serde_json::json!({
                     "session_id": session_id,
@@ -544,6 +586,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
                 remote,
                 local,
             } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let session_id = resolve_session_id(&mut conn, session)?;
                 // Default local path: filename in current directory
                 let local_path = local.clone().unwrap_or_else(|| {
@@ -565,6 +609,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
                 local,
                 remote,
             } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let session_id = resolve_session_id(&mut conn, session)?;
                 let params = serde_json::json!({
                     "session_id": session_id,
@@ -577,10 +623,14 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
         },
         Commands::Import { action } => match action {
             ImportAction::List => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 let resp = conn.call("import_list", serde_json::json!({}))?;
                 out.print_import_list(&resp);
             }
             ImportAction::Add { aliases, all } => {
+                return_if_incompatible(&compatibility)?;
+                emit_compatibility_notice(out, compatibility.warning.as_deref());
                 // If --all, first fetch available hosts and use all non-imported aliases
                 let aliases_to_import = if *all {
                     let hosts = conn.call("import_list", serde_json::json!({}))?;
@@ -615,6 +665,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             }
         },
         Commands::Open { path } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             let dir = path.clone().unwrap_or_else(|| {
                 std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
@@ -624,6 +676,8 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             out.print_json(&resp);
         }
         Commands::Focus { target } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             match target {
                 Some(t) => {
                     let resp = conn.call("focus_tab", serde_json::json!({ "target": t }))?;
@@ -684,16 +738,119 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
             }
         }
         Commands::Ping => {
+            emit_compatibility_notice(
+                out,
+                compatibility
+                    .error
+                    .as_deref()
+                    .or(compatibility.warning.as_deref()),
+            );
             let resp = conn.call("ping", serde_json::json!({}))?;
             out.print_json(&resp);
         }
         Commands::Attach { target } => {
+            return_if_incompatible(&compatibility)?;
+            emit_compatibility_notice(out, compatibility.warning.as_deref());
             return run_attach(&mut conn, out, target.as_deref());
         }
         Commands::Version | Commands::Completions { .. } => unreachable!(),
     }
 
     Ok(())
+}
+
+fn fetch_compatibility_report(
+    conn: &mut connect::IpcConnection,
+) -> Result<CompatibilityReport, String> {
+    let status = conn.call("status", serde_json::json!({}))?;
+    Ok(check_compatibility(status))
+}
+
+fn check_compatibility(status: serde_json::Value) -> CompatibilityReport {
+    let server_version = status
+        .get("version")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let server_api_version = status
+        .pointer("/cli_api/version")
+        .and_then(|value| value.as_u64());
+    let server_api_min_supported = status
+        .pointer("/cli_api/min_supported")
+        .and_then(|value| value.as_u64());
+
+    let error = match (server_api_version, server_api_min_supported) {
+        (Some(server_api_version), Some(server_api_min_supported)) => {
+            if protocol_ranges_overlap(
+                CLI_API_MIN_SUPPORTED_VERSION,
+                CLI_API_CURRENT_VERSION,
+                server_api_min_supported,
+                server_api_version,
+            ) {
+                None
+            } else {
+                Some(format!(
+                    "CLI API mismatch: oxt {} supports CLI API {}-{}, but OxideTerm {} supports {}-{}. Update OxideTerm or reinstall the bundled CLI.",
+                    env!("CARGO_PKG_VERSION"),
+                    CLI_API_MIN_SUPPORTED_VERSION,
+                    CLI_API_CURRENT_VERSION,
+                    server_version.as_deref().unwrap_or("unknown"),
+                    server_api_min_supported,
+                    server_api_version,
+                ))
+            }
+        }
+        _ => Some(format!(
+            "OxideTerm {} does not expose CLI API compatibility metadata. This CLI requires a newer app build with cli_api status support.",
+            server_version.as_deref().unwrap_or("unknown"),
+        )),
+    };
+
+    let warning = if error.is_none() {
+        server_version.and_then(|version| {
+            if version != env!("CARGO_PKG_VERSION") {
+                Some(format!(
+                    "CLI version {} is talking to OxideTerm {}. CLI API is compatible, but reinstalling the bundled CLI is recommended.",
+                    env!("CARGO_PKG_VERSION"),
+                    version,
+                ))
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    CompatibilityReport {
+        status,
+        warning,
+        error,
+    }
+}
+
+fn protocol_ranges_overlap(
+    client_min: u64,
+    client_max: u64,
+    server_min: u64,
+    server_max: u64,
+) -> bool {
+    client_min <= server_max && server_min <= client_max
+}
+
+fn return_if_incompatible(report: &CompatibilityReport) -> Result<(), String> {
+    if let Some(error) = &report.error {
+        return Err(error.clone());
+    }
+    Ok(())
+}
+
+fn emit_compatibility_notice(out: &output::OutputMode, message: Option<&str>) {
+    if out.is_json() {
+        return;
+    }
+    if let Some(message) = message {
+        eprintln!("warning: {message}");
+    }
 }
 
 /// Parse a forward spec like `8080:localhost:80` or `0.0.0.0:8080:localhost:80`
@@ -835,14 +992,29 @@ fn is_terminal_stdout() -> bool {
 }
 
 fn read_stdin() -> Result<String, String> {
+    let mut stdin = std::io::stdin();
+    read_stdin_from_reader(&mut stdin, 512 * 1024)
+}
+
+fn read_stdin_from_reader<R: std::io::Read>(
+    reader: &mut R,
+    max_size: usize,
+) -> Result<String, String> {
     use std::io::Read;
+
     let mut buf = String::new();
-    // Cap stdin reading at 512KB to prevent excessively large contexts
-    let max_size = 512 * 1024;
-    std::io::stdin()
-        .take(max_size as u64)
+    reader
+        .take((max_size + 1) as u64)
         .read_to_string(&mut buf)
         .map_err(|e| format!("Failed to read stdin: {e}"))?;
+
+    if buf.len() > max_size {
+        return Err(format!(
+            "Piped stdin exceeds the {} KB limit",
+            max_size / 1024
+        ));
+    }
+
     Ok(buf)
 }
 
@@ -1217,14 +1389,51 @@ fn run_attach(
 
     #[cfg(windows)]
     {
-        use std::io::{Read, Write};
+        use std::io::Write;
+        use std::sync::mpsc::{self, RecvTimeoutError};
+
+        enum WindowsStdinEvent {
+            Bytes(Vec<u8>),
+            Closed,
+            Error(String),
+        }
+
+        let (stdin_tx, stdin_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::Read;
+
+            let mut stdin = std::io::stdin();
+            loop {
+                let mut buf = [0u8; 4096];
+                match stdin.read(&mut buf) {
+                    Ok(0) => {
+                        let _ = stdin_tx.send(WindowsStdinEvent::Closed);
+                        break;
+                    }
+                    Ok(n) => {
+                        if stdin_tx
+                            .send(WindowsStdinEvent::Bytes(buf[..n].to_vec()))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = stdin_tx.send(WindowsStdinEvent::Error(format!(
+                            "Failed to read stdin: {e}"
+                        )));
+                        break;
+                    }
+                }
+            }
+        });
+
         let mut escape = escape::EscapeDetector::new();
-        let mut stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
         let mut last_activity = std::time::Instant::now();
         const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(330);
 
-        loop {
+        'windows_event_loop: loop {
             if last_activity.elapsed() > IDLE_TIMEOUT {
                 eprintln!("\r\nConnection timed out (no data received).\r\n");
                 break;
@@ -1244,6 +1453,10 @@ fn run_attach(
                                 let mut buf = Vec::new();
                                 wire::encode_heartbeat(&mut buf);
                                 let _ = ws.send(tungstenite::Message::Binary(buf));
+                            } else if wire::is_error(&frame) {
+                                let msg = String::from_utf8_lossy(&frame.payload);
+                                eprintln!("\r\nServer error: {msg}\r\n");
+                                break 'windows_event_loop;
                             }
                         }
                     }
@@ -1258,13 +1471,12 @@ fn run_attach(
                 _ => {}
             }
 
-            // Try reading from stdin (blocking — Windows fallback)
-            let mut buf = [0u8; 4096];
-            match stdin.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
+            match stdin_rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                Ok(WindowsStdinEvent::Closed) => break,
+                Ok(WindowsStdinEvent::Error(err)) => return Err(err),
+                Ok(WindowsStdinEvent::Bytes(buf)) => {
                     let mut to_send = Vec::new();
-                    for &byte in &buf[..n] {
+                    for byte in buf {
                         match escape.feed(byte) {
                             escape::EscapeAction::Forward(b) => to_send.push(b),
                             escape::EscapeAction::ForwardTwo(a, b) => {
@@ -1292,7 +1504,8 @@ fn run_attach(
                         }
                     }
                 }
-                Err(_) => break,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
     }
@@ -1300,4 +1513,87 @@ fn run_attach(
     eprintln!("\r\nConnection closed.");
     terminal::disable_mouse_tracking();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_compatibility, protocol_ranges_overlap, read_stdin_from_reader};
+    use std::io::Cursor;
+
+    #[test]
+    fn stdin_reader_accepts_exact_limit() {
+        let input = vec![b'a'; 8];
+        let mut reader = Cursor::new(input);
+
+        let result = read_stdin_from_reader(&mut reader, 8).unwrap();
+
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn stdin_reader_rejects_oversized_input() {
+        let input = vec![b'a'; 9];
+        let mut reader = Cursor::new(input);
+
+        let err = read_stdin_from_reader(&mut reader, 8).unwrap_err();
+
+        assert!(err.contains("exceeds"));
+    }
+
+    #[test]
+    fn legacy_status_without_cli_api_is_rejected() {
+        let report = check_compatibility(serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "sessions": 0,
+            "connections": { "ssh": 0, "local": 0 }
+        }));
+
+        assert!(report
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("does not expose CLI API"));
+        assert!(report.warning.is_none());
+    }
+
+    #[test]
+    fn protocol_range_overlap_accepts_shared_version() {
+        assert!(protocol_ranges_overlap(1, 2, 2, 3));
+        assert!(protocol_ranges_overlap(2, 2, 1, 2));
+        assert!(!protocol_ranges_overlap(1, 1, 2, 2));
+    }
+
+    #[test]
+    fn compatibility_warns_on_app_version_mismatch() {
+        let report = check_compatibility(serde_json::json!({
+            "version": "9.9.9",
+            "cli_api": { "version": 1, "min_supported": 1 },
+            "sessions": 0,
+            "connections": { "ssh": 0, "local": 0 }
+        }));
+
+        assert!(report.error.is_none());
+        assert!(report
+            .warning
+            .as_deref()
+            .unwrap_or_default()
+            .contains("9.9.9"));
+    }
+
+    #[test]
+    fn compatibility_rejects_non_overlapping_protocol_ranges() {
+        let report = check_compatibility(serde_json::json!({
+            "version": "9.9.9",
+            "cli_api": { "version": 3, "min_supported": 3 },
+            "sessions": 0,
+            "connections": { "ssh": 0, "local": 0 }
+        }));
+
+        assert!(report.warning.is_none());
+        assert!(report
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("CLI API mismatch"));
+    }
 }

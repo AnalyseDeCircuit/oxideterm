@@ -8,7 +8,7 @@ import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Slider } from '../ui/slider';
 import { useSettingsStore, type FontFamily, type Language } from '../../store/settingsStore';
-import { api } from '../../lib/api';
+import { api, type CliCompanionStatus } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { platform } from '../../lib/platform';
@@ -164,7 +164,7 @@ export const OnboardingModal = () => {
   const [importState, setImportState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [importedCount, setImportedCount] = useState(0);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
-  const [cliStatus, setCliStatus] = useState<{ bundled: boolean; installed: boolean; install_path: string | null; error?: boolean } | null>(null);
+  const [cliStatus, setCliStatus] = useState<(CliCompanionStatus & { error?: boolean }) | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -206,7 +206,7 @@ export const OnboardingModal = () => {
     if (!open || step !== 5) return;
     api.cliGetStatus()
       .then((status) => setCliStatus(status))
-      .catch(() => setCliStatus({ bundled: false, installed: false, install_path: null, error: true }));
+      .catch(() => setCliStatus({ bundled: false, installed: false, install_path: null, bundle_path: null, app_version: '0.0.0', matches_bundled: null, needs_reinstall: false, error: true }));
   }, [open, step]);
 
   const handleClose = useCallback(() => {
@@ -247,8 +247,9 @@ export const OnboardingModal = () => {
   const handleCliInstall = useCallback(async () => {
     setCliInstalling(true);
     try {
-      const path = await api.cliInstall();
-      setCliStatus({ bundled: true, installed: true, install_path: path });
+      await api.cliInstall();
+      const status = await api.cliGetStatus();
+      setCliStatus(status);
     } catch {
       setCliStatus((prev) => prev ? { ...prev, error: true } : prev);
     }
@@ -682,7 +683,18 @@ export const OnboardingModal = () => {
       {/* Install action */}
       <div className="flex items-center gap-3 p-3.5 rounded-md border border-theme-border bg-theme-bg-panel">
         <div className="flex-1 min-w-0">
-          {cliStatus?.installed ? (
+          {cliStatus?.installed && cliStatus.needs_reinstall ? (
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <div>
+                <span className="text-xs font-medium text-amber-400">{t('onboarding.cli_step_reinstall_required')}</span>
+                {cliStatus.install_path && (
+                  <p className="text-[11px] text-theme-text-muted mt-0.5 font-mono">{t('onboarding.cli_step_installed_at', { path: cliStatus.install_path })}</p>
+                )}
+                <p className="text-[11px] text-theme-text-muted mt-0.5">{t('onboarding.cli_step_reinstall_hint', { version: cliStatus.app_version })}</p>
+              </div>
+            </div>
+          ) : cliStatus?.installed ? (
             <div className="flex items-center gap-2">
               <Check className="h-4 w-4 text-emerald-400" />
               <div>
@@ -703,7 +715,7 @@ export const OnboardingModal = () => {
                   setCliStatus(null);
                   api.cliGetStatus()
                     .then((status) => setCliStatus(status))
-                    .catch(() => setCliStatus({ bundled: false, installed: false, install_path: null, error: true }));
+                    .catch(() => setCliStatus({ bundled: false, installed: false, install_path: null, bundle_path: null, app_version: '0.0.0', matches_bundled: null, needs_reinstall: false, error: true }));
                 }}
                 className="gap-1 shrink-0"
               >
@@ -713,7 +725,7 @@ export const OnboardingModal = () => {
             </div>
           ) : !cliStatus?.bundled ? (
             <span className="text-xs text-theme-text-muted">{t('onboarding.cli_step_not_bundled')}</span>
-          ) : (
+          ) : !cliStatus?.installed ? (
             <Button
               size="sm"
               onClick={handleCliInstall}
@@ -723,17 +735,37 @@ export const OnboardingModal = () => {
               {cliInstalling ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t('onboarding.cli_step_installing')}
+                  {cliStatus?.needs_reinstall ? t('onboarding.cli_step_reinstalling') : t('onboarding.cli_step_installing')}
                 </>
               ) : (
                 <>
                   <Download className="h-3.5 w-3.5" />
-                  {t('onboarding.cli_step_install')}
+                  {cliStatus?.needs_reinstall ? t('onboarding.cli_step_reinstall') : t('onboarding.cli_step_install')}
                 </>
               )}
             </Button>
-          )}
+          ) : null}
         </div>
+        {cliStatus?.bundled && cliStatus.needs_reinstall && (
+          <Button
+            size="sm"
+            onClick={handleCliInstall}
+            disabled={cliInstalling}
+            className="gap-1.5 shrink-0"
+          >
+            {cliInstalling ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t('onboarding.cli_step_reinstalling')}
+              </>
+            ) : (
+              <>
+                <Download className="h-3.5 w-3.5" />
+                {t('onboarding.cli_step_reinstall')}
+              </>
+            )}
+          </Button>
+          )}
       </div>
 
       {/* Skip hint */}

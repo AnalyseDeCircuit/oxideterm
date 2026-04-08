@@ -68,6 +68,9 @@
       "cli_installed": "Đã cài đặt",
       "cli_not_installed": "Chưa cài đặt",
       "cli_install": "Cài đặt",
+      "cli_reinstall_required": "Cần cài đặt lại",
+      "cli_reinstall": "Cài đặt lại",
+      "cli_reinstall_hint": "CLI đã cài đặt khác với CLI đi kèm OxideTerm {{version}}. Hãy cài đặt lại CLI đi kèm để tránh không khớp giao thức.",
       "cli_uninstall": "Gỡ cài đặt",
       "cli_not_bundled": "Tệp nhị phân CLI không có trong bản dựng này"
     },

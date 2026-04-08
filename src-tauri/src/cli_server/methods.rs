@@ -27,6 +27,9 @@ use crate::sftp::session::SftpRegistry;
 use crate::ssh::{ExtendedSessionHandle, SessionCommand, SshConnectionRegistry};
 use crate::state::{AiChatStore, ConversationMeta, PersistedMessage};
 
+const CLI_API_CURRENT_VERSION: u64 = 1;
+const CLI_API_MIN_SUPPORTED_VERSION: u64 = 1;
+
 /// Dispatch a JSON-RPC method call to the appropriate handler.
 pub async fn dispatch(
     method: &str,
@@ -90,6 +93,10 @@ async fn status(app: &tauri::AppHandle) -> Result<Value, (i32, String)> {
 
     Ok(json!({
         "version": version,
+        "cli_api": {
+            "version": CLI_API_CURRENT_VERSION,
+            "min_supported": CLI_API_MIN_SUPPORTED_VERSION,
+        },
         "sessions": session_count,
         "connections": {
             "ssh": ssh_count,

@@ -1196,7 +1196,7 @@ export const SettingsView = () => {
     const [dataDirLoading, setDataDirLoading] = useState(false);
 
     // CLI companion state
-    const [cliStatus, setCliStatus] = useState<{ bundled: boolean; installed: boolean; install_path: string | null; bundle_path: string | null } | null>(null);
+    const [cliStatus, setCliStatus] = useState<{ bundled: boolean; installed: boolean; install_path: string | null; bundle_path: string | null; app_version: string; matches_bundled: boolean | null; needs_reinstall: boolean } | null>(null);
     const [cliLoading, setCliLoading] = useState(false);
 
     useEffect(() => {
@@ -1610,7 +1610,9 @@ export const SettingsView = () => {
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <TerminalSquare className="h-4 w-4 text-theme-text-muted" />
                                                         <span className="text-sm text-theme-text font-mono">oxide</span>
-                                                        {cliStatus.installed ? (
+                                                        {cliStatus.installed && cliStatus.needs_reinstall ? (
+                                                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500">{t('settings_view.general.cli_reinstall_required')}</span>
+                                                        ) : cliStatus.installed ? (
                                                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">{t('settings_view.general.cli_installed')}</span>
                                                         ) : (
                                                             <span className="text-xs px-1.5 py-0.5 rounded bg-theme-bg-subtle text-theme-text-muted">{t('settings_view.general.cli_not_installed')}</span>
@@ -1619,8 +1621,11 @@ export const SettingsView = () => {
                                                     {cliStatus.install_path && (
                                                         <code className="text-xs text-theme-text-muted font-mono">{cliStatus.install_path}</code>
                                                     )}
+                                                    {cliStatus.installed && cliStatus.needs_reinstall && (
+                                                        <p className="text-xs text-amber-500 mt-1">{t('settings_view.general.cli_reinstall_hint', { version: cliStatus.app_version })}</p>
+                                                    )}
                                                 </div>
-                                                {cliStatus.bundled && !cliStatus.installed && (
+                                                {cliStatus.bundled && (!cliStatus.installed || cliStatus.needs_reinstall) && (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
@@ -1640,7 +1645,7 @@ export const SettingsView = () => {
                                                         }}
                                                     >
                                                         {cliLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <ArrowDownToLine className="h-3 w-3 mr-1" />}
-                                                        {t('settings_view.general.cli_install')}
+                                                        {cliStatus.needs_reinstall ? t('settings_view.general.cli_reinstall') : t('settings_view.general.cli_install')}
                                                     </Button>
                                                 )}
                                                 {cliStatus.installed && (

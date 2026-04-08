@@ -10,6 +10,12 @@
 pub struct RawModeGuard {
     #[cfg(unix)]
     original: libc::termios,
+    #[cfg(windows)]
+    handle: isize,
+    #[cfg(windows)]
+    original_mode: u32,
+    #[cfg(windows)]
+    active: bool,
 }
 
 impl RawModeGuard {
@@ -40,9 +46,41 @@ impl RawModeGuard {
 
         #[cfg(windows)]
         {
-            // Windows raw mode via Console API
-            // For now, minimal implementation
-            Ok(Self {})
+            use windows_sys::Win32::System::Console::{
+                GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT,
+                ENABLE_PROCESSED_INPUT, STD_INPUT_HANDLE,
+            };
+
+            let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+            if handle.is_null() || handle == -1isize as _ {
+                return Ok(Self {
+                    handle: 0,
+                    original_mode: 0,
+                    active: false,
+                });
+            }
+
+            let mut original_mode = 0;
+            if unsafe { GetConsoleMode(handle, &mut original_mode) } == 0 {
+                return Ok(Self {
+                    handle: handle as isize,
+                    original_mode: 0,
+                    active: false,
+                });
+            }
+
+            let mut raw_mode = original_mode;
+            raw_mode &= !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+
+            if unsafe { SetConsoleMode(handle, raw_mode) } == 0 {
+                return Err("Failed to set raw mode".to_string());
+            }
+
+            Ok(Self {
+                handle: handle as isize,
+                original_mode,
+                active: true,
+            })
         }
     }
 }
@@ -53,6 +91,18 @@ impl Drop for RawModeGuard {
         {
             unsafe {
                 libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.original);
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            if self.active {
+                unsafe {
+                    windows_sys::Win32::System::Console::SetConsoleMode(
+                        self.handle as _,
+                        self.original_mode,
+                    );
+                }
             }
         }
     }

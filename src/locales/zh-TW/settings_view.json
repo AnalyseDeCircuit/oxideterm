@@ -68,6 +68,9 @@
       "cli_installed": "已安裝",
       "cli_not_installed": "未安裝",
       "cli_install": "安裝",
+      "cli_reinstall_required": "需要重新安裝",
+      "cli_reinstall": "重新安裝",
+      "cli_reinstall_hint": "已安裝的 CLI 與 OxideTerm {{version}} 隨附的 CLI 不一致。請重新安裝隨附的 CLI，以避免協定不匹配。",
       "cli_uninstall": "解除安裝",
       "cli_not_bundled": "此建置不包含 CLI 二進位檔案"
     },
