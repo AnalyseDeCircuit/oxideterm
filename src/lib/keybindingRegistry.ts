@@ -49,6 +49,7 @@ export type ActionId =
   | 'app.showShortcuts'
   // Terminal
   | 'terminal.search'
+  | 'terminal.paste'
   | 'terminal.aiPanel'
   | 'terminal.recording'
   | 'terminal.closePanel'
@@ -195,6 +196,7 @@ const defaults: ActionDefinition[] = [
 
   // ── Terminal ──
   { id: 'terminal.search',     scope: 'terminal', mac: cmd('f'),         other: ctrl('f', true),         terminalBehavior: 'always' },
+  { id: 'terminal.paste',      scope: 'terminal', mac: cmd('v'),         other: ctrl('v', true),         terminalBehavior: 'always' },
   { id: 'terminal.aiPanel',    scope: 'terminal', mac: cmd('i'),         other: ctrl('i', true),         terminalBehavior: 'always' },
   { id: 'terminal.recording',  scope: 'terminal', mac: cmd('r', true),   other: ctrl('r', true),         terminalBehavior: 'always' },
   { id: 'terminal.closePanel', scope: 'terminal', mac: k('escape'),      other: k('escape'),             terminalBehavior: 'when-panel-open' },

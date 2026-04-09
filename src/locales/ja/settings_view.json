@@ -706,6 +706,7 @@
         "app.fontReset": "フォントサイズをリセット",
         "app.showShortcuts": "ショートカット表示",
         "terminal.search": "ターミナル内検索",
+        "terminal.paste": "ターミナルに貼り付ける",
         "terminal.aiPanel": "OxideSensパネル",
         "terminal.recording": "録画切替",
         "terminal.closePanel": "パネルを閉じる",

@@ -76,4 +76,35 @@ describe('keybindingStore', () => {
     });
     expect(errorSpy).toHaveBeenCalledOnce();
   });
+
+  it('persists and reloads terminal.paste overrides for Windows/Linux remaps', async () => {
+    const { useKeybindingStore, getBinding } = await loadModules();
+
+    useKeybindingStore.getState().setBinding('terminal.paste', 'other', {
+      key: 'v',
+      ctrl: true,
+      shift: false,
+      alt: false,
+      meta: false,
+    });
+
+    expect(getBinding('terminal.paste')).toEqual({
+      key: 'v',
+      ctrl: true,
+      shift: false,
+      alt: false,
+      meta: false,
+    });
+
+    vi.resetModules();
+
+    const reloaded = await loadModules();
+    expect(reloaded.getBinding('terminal.paste')).toEqual({
+      key: 'v',
+      ctrl: true,
+      shift: false,
+      alt: false,
+      meta: false,
+    });
+  });
 });

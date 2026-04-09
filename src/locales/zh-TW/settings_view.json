@@ -706,6 +706,7 @@
         "app.fontReset": "重設字體大小",
         "app.showShortcuts": "顯示快捷鍵",
         "terminal.search": "終端搜尋",
+        "terminal.paste": "貼入終端機",
         "terminal.aiPanel": "OxideSens 面板",
         "terminal.recording": "切換錄製",
         "terminal.closePanel": "關閉面板",

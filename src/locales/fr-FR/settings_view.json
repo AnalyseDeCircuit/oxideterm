@@ -706,6 +706,7 @@
         "app.fontReset": "Réinitialiser la taille de police",
         "app.showShortcuts": "Afficher les raccourcis",
         "terminal.search": "Rechercher dans le terminal",
+        "terminal.paste": "Coller dans le terminal",
         "terminal.aiPanel": "Panneau OxideSens",
         "terminal.recording": "Basculer l'enregistrement",
         "terminal.closePanel": "Fermer le panneau",

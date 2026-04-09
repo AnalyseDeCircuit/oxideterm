@@ -128,3 +128,17 @@ export async function installTerminalClipboardSupport(term: Terminal): Promise<D
     return installOsc52Fallback(term);
   }
 }
+
+export async function readSystemClipboardText(): Promise<string | null> {
+  if (!navigator.clipboard?.readText) {
+    console.warn('[Terminal] Clipboard read is unavailable in this environment');
+    return null;
+  }
+
+  try {
+    return await navigator.clipboard.readText();
+  } catch (error) {
+    console.warn('[Terminal] Clipboard read failed:', error);
+    return null;
+  }
+}

@@ -77,6 +77,7 @@ export function getShortcutCategories(t: TFunction): ShortcutCategory[] {
       title: t('settings_view.help.category_terminal'),
       shortcuts: [
         fromRegistry('terminal.search', t('settings_view.help.shortcut_find')),
+        fromRegistry('terminal.paste', t('settings_view.help.shortcut_paste')),
         fromRegistry('terminal.aiPanel', t('settings_view.help.shortcut_ai_panel')),
         fromRegistry('terminal.recording', t('settings_view.help.shortcut_recording')),
         fromRegistry('terminal.closePanel', t('settings_view.help.shortcut_close_panel')),

@@ -706,6 +706,7 @@
         "app.fontReset": "Đặt lại cỡ chữ",
         "app.showShortcuts": "Hiển thị phím tắt",
         "terminal.search": "Tìm trong terminal",
+        "terminal.paste": "Dán vào terminal",
         "terminal.aiPanel": "Bảng OxideSens",
         "terminal.recording": "Bật/tắt ghi hình",
         "terminal.closePanel": "Đóng bảng",

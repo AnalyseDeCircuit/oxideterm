@@ -706,6 +706,7 @@
         "app.fontReset": "Ripristina dimensione font",
         "app.showShortcuts": "Mostra scorciatoie",
         "terminal.search": "Cerca nel terminale",
+        "terminal.paste": "Incolla nel terminale",
         "terminal.aiPanel": "Pannello OxideSens",
         "terminal.recording": "Registrazione",
         "terminal.closePanel": "Chiudi pannello",

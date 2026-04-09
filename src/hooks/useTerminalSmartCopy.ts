@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import type { Terminal } from '@xterm/xterm';
+import { matchAction } from '@/lib/keybindingRegistry';
 import { platform } from '@/lib/platform';
 
 type Disposable = { dispose: () => void };
@@ -9,6 +10,7 @@ type Disposable = { dispose: () => void };
 type TerminalSmartCopyOptions = {
   isActive: () => boolean;
   isEnabled: () => boolean;
+  onPasteShortcut?: () => void;
 };
 
 function isSmartCopyShortcut(event: KeyboardEvent): boolean {
@@ -16,6 +18,20 @@ function isSmartCopyShortcut(event: KeyboardEvent): boolean {
   if (!(platform.isWindows || platform.isLinux)) return false;
   if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
   return event.key.toLowerCase() === 'c';
+}
+
+function isNativeTerminalPasteShortcut(event: KeyboardEvent): boolean {
+  if (event.type !== 'keydown') return false;
+
+  if (platform.isMac) {
+    return event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v';
+  }
+
+  if (platform.isWindows || platform.isLinux) {
+    return event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'v';
+  }
+
+  return false;
 }
 
 function fallbackCopySelection(): void {
@@ -56,21 +72,34 @@ export function attachTerminalSmartCopy(
   // same component cleanup path, so restoring the default pass-through handler
   // is safe as long as no other feature attaches a second custom handler.
   term.attachCustomKeyEventHandler((event) => {
-    if (!options.isEnabled() || !options.isActive() || !isSmartCopyShortcut(event)) {
+    if (!options.isActive()) {
       return true;
     }
 
-    if (!term.hasSelection()) {
-      return true;
+    if (options.isEnabled() && isSmartCopyShortcut(event)) {
+      if (!term.hasSelection()) {
+        return true;
+      }
+
+      const selection = term.getSelection();
+      if (!selection) {
+        return true;
+      }
+
+      copySelection(selection);
+      return false;
     }
 
-    const selection = term.getSelection();
-    if (!selection) {
-      return true;
+    if (options.onPasteShortcut && matchAction(event, 'terminal') === 'terminal.paste') {
+      if (isNativeTerminalPasteShortcut(event)) {
+        return true;
+      }
+
+      options.onPasteShortcut();
+      return false;
     }
 
-    copySelection(selection);
-    return false;
+    return true;
   });
 
   return {

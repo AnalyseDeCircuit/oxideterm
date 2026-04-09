@@ -45,7 +45,7 @@ import {
   MSG_TYPE_DATA, MSG_TYPE_HEARTBEAT, MSG_TYPE_ERROR,
   HEADER_SIZE, encodeHeartbeatFrame, encodeDataFrame, encodeResizeFrame,
 } from '../../lib/wireProtocol';
-import { installTerminalClipboardSupport } from '../../lib/clipboardSupport';
+import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
@@ -990,6 +990,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     smartCopyDisposableRef.current = attachTerminalSmartCopy(term, {
       isActive: () => isActiveRef.current,
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
+      onPasteShortcut: handlePasteShortcut,
     });
 
     // Detect mouse tracking mode changes (tmux, vim, etc.)
@@ -2052,6 +2053,44 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     terminalRef.current?.focus();
   }, []);
 
+  const processTerminalPaste = useCallback((text: string | null | undefined, allowNativePassthrough: boolean): boolean => {
+    const decision = getProtectedPasteDecision(text, !inputLockedRef.current);
+
+    if (decision === 'block') {
+      return true;
+    }
+
+    if (!text) {
+      return !allowNativePassthrough;
+    }
+
+    if (decision === 'confirm') {
+      setPendingPaste(text);
+      return true;
+    }
+
+    if (allowNativePassthrough) {
+      return false;
+    }
+
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return true;
+    }
+
+    const payload = encodeTerminalTextInput(text);
+    const frame = encodeDataFrame(payload);
+    ws.send(frame);
+    return true;
+  }, []);
+
+  const handlePasteShortcut = useCallback(() => {
+    void readSystemClipboardText().then((text) => {
+      if (text === null) return;
+      processTerminalPaste(text, false);
+    });
+  }, [processTerminalPaste]);
+
   // Paste protection: intercept paste events
   useEffect(() => {
     const container = containerRef.current;
@@ -2059,25 +2098,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
     const handlePaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData('text');
-      const decision = getProtectedPasteDecision(text, !inputLockedRef.current);
-
-      if (decision === 'block') {
+      if (processTerminalPaste(text, true)) {
         e.preventDefault();
         e.stopPropagation();
-        return;
       }
-
-      if (decision === 'confirm' && text) {
-        e.preventDefault();
-        e.stopPropagation();
-        setPendingPaste(text);
-      }
-      // If not multi-line, let xterm.js handle normally
     };
 
     container.addEventListener('paste', handlePaste, { capture: true });
     return () => container.removeEventListener('paste', handlePaste, { capture: true });
-  }, [terminalSettings.pasteProtection]);
+  }, [processTerminalPaste, terminalSettings.pasteProtection]);
   
   // Use unified terminal keyboard shortcuts
   // Only handles shortcuts when this terminal is active

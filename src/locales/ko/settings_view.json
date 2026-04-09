@@ -706,6 +706,7 @@
         "app.fontReset": "글꼴 크기 초기화",
         "app.showShortcuts": "단축키 보기",
         "terminal.search": "터미널 검색",
+        "terminal.paste": "터미널에 붙여넣기",
         "terminal.aiPanel": "OxideSens 패널",
         "terminal.recording": "녹화 전환",
         "terminal.closePanel": "패널 닫기",
