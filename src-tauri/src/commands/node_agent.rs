@@ -90,6 +90,29 @@ pub async fn node_agent_deploy(
             );
             Ok(AgentStatus::ManualUploadRequired { arch, remote_path })
         }
+        Err(DeployError::ManualUpdateRequired {
+            arch,
+            remote_path,
+            current_agent_version,
+            current_compatibility_version,
+            expected_compatibility_version,
+        }) => {
+            info!(
+                "[node_agent_deploy] Manual update required for arch '{}' at {} (agent {}, compat {} -> {})",
+                arch,
+                remote_path,
+                current_agent_version,
+                current_compatibility_version,
+                expected_compatibility_version
+            );
+            Ok(AgentStatus::ManualUpdateRequired {
+                arch,
+                remote_path,
+                current_agent_version,
+                current_compatibility_version,
+                expected_compatibility_version,
+            })
+        }
         Err(e) => {
             warn!(
                 "[node_agent_deploy] Failed to deploy agent for node {}: {}",
@@ -191,7 +214,9 @@ pub async fn node_agent_status(
 
     match agent_registry.get(&resolved.connection_id) {
         Some(session) => Ok(session.status()),
-        None => Ok(AgentStatus::NotDeployed),
+        None => AgentDeployer::inspect_remote_status(&resolved.handle_controller)
+            .await
+            .map_err(|e| e.to_string()),
     }
 }
 

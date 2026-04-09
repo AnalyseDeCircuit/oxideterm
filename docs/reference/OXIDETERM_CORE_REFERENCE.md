@@ -1946,21 +1946,13 @@ graph TD
 | x86_64 (Intel/AMD) | `oxideterm-agent-x86_64-linux-musl` | ~670 KB |
 | aarch64 (ARM64) | `oxideterm-agent-aarch64-linux-musl` | ~600 KB |
 
-#### 扩展架构（位于 `agents/extra/`，按需使用）
+#### 其他架构
 
-| 架构 | 二进制名 |
-|------|---------|
-| aarch64-android | `oxideterm-agent-aarch64-android` |
-| arm (32-bit) | `oxideterm-agent-arm-linux-musleabihf` |
-| armv7 | `oxideterm-agent-armv7-linux-musleabihf` |
-| i686 (32-bit x86) | `oxideterm-agent-i686-linux-musl` |
-| loongarch64 | `oxideterm-agent-loongarch64-linux-gnu` |
-| powerpc64le | `oxideterm-agent-powerpc64le-linux-gnu` |
-| riscv64 | `oxideterm-agent-riscv64gc-linux-gnu` |
-| s390x | `oxideterm-agent-s390x-linux-gnu` |
-| x86_64-freebsd | `oxideterm-agent-x86_64-freebsd` |
+仓库不再提供额外架构的预编译 Agent 二进制。
 
-所有二进制均为静态链接（musl libc 或相应系统 libc），无外部运行时依赖。
+如需在其他架构上使用 Agent，请自行从源码构建 `oxideterm-agent`，并手动上传到远端 `~/.oxideterm/oxideterm-agent`。
+
+内嵌的 Linux 二进制仍为静态链接（musl libc），无外部运行时依赖。
 
 ### 6.7 安全性
 
@@ -2089,7 +2081,7 @@ IDE 模式界面显示 Agent 连接状态：
 
 | 症状 | 原因 | 解决方案 |
 |------|------|---------|
-| 始终使用 SFTP，不部署 Agent | 远程架构不在支持列表 | 检查 `uname -m`，可手动放置对应架构的二进制到 `agents/extra/` |
+| 始终使用 SFTP，不部署 Agent | 远程架构不在支持列表 | 检查 `uname -m`，自行从源码构建 `oxideterm-agent` 后上传到 `~/.oxideterm/oxideterm-agent` |
 | Agent 部署失败 | SELinux 或 `noexec` 挂载选项 | 检查 `/tmp` 或 Agent 部署目录的挂载选项和 SELinux 策略 |
 | 文件监视不工作 | inotify watch 数量达到系统限制 | 增大 `fs.inotify.max_user_watches`（`echo 65536 > /proc/sys/fs/inotify/max_user_watches`） |
 | Agent 未自动退出 | stdin EOF 未正确传播 | 检查 SSH 连接是否正常关闭；Agent 在 stdin 关闭后自行退出 |

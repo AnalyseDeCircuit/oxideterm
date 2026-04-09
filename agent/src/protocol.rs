@@ -419,10 +419,11 @@ pub struct GitFileEntry {
 #[derive(Debug, Serialize)]
 pub struct SysInfoResult {
     pub version: String,
+    pub compatibility_version: u32,
     pub arch: String,
     pub os: String,
     pub pid: u32,
-    /// Supported capabilities: ["zstd"]
+    /// Supported optional capabilities, for example ["zstd"].
     #[serde(default)]
     pub capabilities: Vec<String>,
 }

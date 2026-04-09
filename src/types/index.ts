@@ -1445,7 +1445,15 @@ export type AgentStatus =
   | { type: 'ready'; version: string; arch: string; pid: number }
   | { type: 'failed'; reason: string }
   | { type: 'unsupportedArch'; arch: string }
-  | { type: 'manualUploadRequired'; arch: string; remotePath: string };
+  | { type: 'manualUploadRequired'; arch: string; remotePath: string }
+  | {
+      type: 'manualUpdateRequired';
+      arch: string;
+      remotePath: string;
+      currentAgentVersion: string;
+      currentCompatibilityVersion: number;
+      expectedCompatibilityVersion: number;
+    };
 
 /** Agent fs/readFile result */
 export type AgentReadFileResult = {

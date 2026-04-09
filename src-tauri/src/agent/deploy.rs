@@ -28,14 +28,36 @@ use crate::ssh::HandleController;
 /// Remote path where the agent binary is stored.
 const AGENT_REMOTE_DIR: &str = ".oxideterm";
 const AGENT_BINARY_NAME: &str = "oxideterm-agent";
-
-/// Current agent version (must match agent/Cargo.toml).
-const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const LEGACY_AGENT_COMPATIBILITY_VERSION: u32 = 1;
 
 /// Deployer for the OxideTerm agent.
 pub struct AgentDeployer;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteAgentVersionInfo {
+    version: String,
+    compatibility_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemoteAgentInstallState {
+    Missing,
+    Current,
+    Incompatible(RemoteAgentVersionInfo),
+}
+
 impl AgentDeployer {
+    fn remote_path() -> String {
+        format!("~/{}/{}", AGENT_REMOTE_DIR, AGENT_BINARY_NAME)
+    }
+
+    fn expected_compatibility_version() -> u32 {
+        include_str!("../../../agent/COMPATIBILITY_VERSION")
+            .trim()
+            .parse()
+            .expect("agent compatibility version must be a valid u32")
+    }
+
     /// Deploy and start the agent on a remote host.
     ///
     /// Returns a connected `AgentTransport` if successful.
@@ -55,7 +77,7 @@ impl AgentDeployer {
 
         // Step 2: Determine remote path
         let remote_dir = format!("~/{}", AGENT_REMOTE_DIR);
-        let remote_path = format!("{}/{}", remote_dir, AGENT_BINARY_NAME);
+        let remote_path = Self::remote_path();
 
         // Step 3: Try to resolve the local binary for this architecture
         let local_binary_result = Self::resolve_binary(&arch, app_handle);
@@ -66,7 +88,10 @@ impl AgentDeployer {
                 info!("[agent-deploy] Using binary: {}", local_binary.display());
 
                 // Step 4: Check if agent is already deployed (check version)
-                let needs_upload = Self::needs_upload(controller, &remote_path).await;
+                let needs_upload = !matches!(
+                    Self::probe_remote_install(controller, &remote_path).await,
+                    RemoteAgentInstallState::Current
+                );
 
                 if needs_upload {
                     // Step 5: Upload binary
@@ -102,24 +127,39 @@ impl AgentDeployer {
                     unsupported_arch, remote_path
                 );
 
-                let needs_upload = Self::needs_upload(controller, &remote_path).await;
-
-                if needs_upload {
-                    // No usable binary found — inform user to manually upload
-                    info!(
-                        "[agent-deploy] No agent binary found for arch '{}', manual upload required",
-                        arch
-                    );
-                    return Err(DeployError::ManualUploadRequired {
-                        arch: arch.clone(),
-                        remote_path: remote_path.clone(),
-                    });
-                } else {
-                    // User has manually uploaded a binary — proceed
-                    info!(
-                        "[agent-deploy] Found manually uploaded agent for unsupported arch '{}'",
-                        arch
-                    );
+                match Self::probe_remote_install(controller, &remote_path).await {
+                    RemoteAgentInstallState::Missing => {
+                        info!(
+                            "[agent-deploy] No agent binary found for arch '{}', manual upload required",
+                            arch
+                        );
+                        return Err(DeployError::ManualUploadRequired {
+                            arch: arch.clone(),
+                            remote_path: remote_path.clone(),
+                        });
+                    }
+                    RemoteAgentInstallState::Incompatible(version_info) => {
+                        info!(
+                            "[agent-deploy] Incompatible agent found for unsupported arch '{}': '{}' (compat {} -> {})",
+                            arch,
+                            version_info.version,
+                            version_info.compatibility_version,
+                            Self::expected_compatibility_version()
+                        );
+                        return Err(DeployError::ManualUpdateRequired {
+                            arch: arch.clone(),
+                            remote_path: remote_path.clone(),
+                            current_agent_version: version_info.version,
+                            current_compatibility_version: version_info.compatibility_version,
+                            expected_compatibility_version: Self::expected_compatibility_version(),
+                        });
+                    }
+                    RemoteAgentInstallState::Current => {
+                        info!(
+                            "[agent-deploy] Found manually uploaded agent for unsupported arch '{}'",
+                            arch
+                        );
+                    }
                 }
             }
             Err(e) => return Err(e),
@@ -191,8 +231,43 @@ impl AgentDeployer {
         Ok(resource_path)
     }
 
-    /// Check if the deployed version matches (fast check via --version flag).
-    async fn needs_upload(controller: &HandleController, remote_path: &str) -> bool {
+    fn parse_remote_version_output(output: &str) -> RemoteAgentInstallState {
+        let trimmed = output.trim();
+
+        if trimmed.contains("NOT_FOUND") || trimmed.is_empty() {
+            RemoteAgentInstallState::Missing
+        } else {
+            let mut parts = trimmed.split_whitespace();
+            let _binary_name = parts.next();
+            let version = parts.next().unwrap_or(trimmed).to_string();
+            let mut compatibility_version = LEGACY_AGENT_COMPATIBILITY_VERSION;
+
+            while let Some(part) = parts.next() {
+                if part == "compat" {
+                    if let Some(raw_version) = parts.next() {
+                        if let Ok(parsed) = raw_version.parse::<u32>() {
+                            compatibility_version = parsed;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if compatibility_version == Self::expected_compatibility_version() {
+                RemoteAgentInstallState::Current
+            } else {
+                RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
+                    version,
+                    compatibility_version,
+                })
+            }
+        }
+    }
+
+    async fn probe_remote_install(
+        controller: &HandleController,
+        remote_path: &str,
+    ) -> RemoteAgentInstallState {
         // Try running the agent with --version flag
         let result = crate::commands::ide::exec_command_inner(
             controller.clone(),
@@ -205,24 +280,59 @@ impl AgentDeployer {
         match result {
             Ok(r) => {
                 let output = r.stdout.trim();
-                if output.contains("NOT_FOUND") || output.is_empty() {
-                    debug!("[agent-deploy] Agent not found at {}", remote_path);
-                    true
-                } else if output.contains(AGENT_VERSION) {
-                    debug!("[agent-deploy] Version match: {}", output);
-                    false
-                } else {
-                    debug!(
-                        "[agent-deploy] Version mismatch: got '{}', want '{}'",
-                        output, AGENT_VERSION
-                    );
-                    true
+                match Self::parse_remote_version_output(output) {
+                    RemoteAgentInstallState::Missing => {
+                        debug!("[agent-deploy] Agent not found at {}", remote_path);
+                        RemoteAgentInstallState::Missing
+                    }
+                    RemoteAgentInstallState::Current => {
+                        debug!("[agent-deploy] Version match: {}", output);
+                        RemoteAgentInstallState::Current
+                    }
+                    RemoteAgentInstallState::Incompatible(version_info) => {
+                        debug!(
+                            "[agent-deploy] Compatibility mismatch: got compat {}, want {}",
+                            version_info.compatibility_version,
+                            Self::expected_compatibility_version()
+                        );
+                        RemoteAgentInstallState::Incompatible(version_info)
+                    }
                 }
             }
             Err(_) => {
                 debug!("[agent-deploy] Failed to check version, will upload");
-                true
+                RemoteAgentInstallState::Missing
             }
+        }
+    }
+
+    /// Inspect remote agent install state for frontend status display.
+    pub async fn inspect_remote_status(
+        controller: &HandleController,
+    ) -> Result<AgentStatus, DeployError> {
+        let arch = Self::detect_arch(controller).await?;
+        let remote_path = Self::remote_path();
+
+        match Self::arch_to_target(&arch) {
+            Ok(_) => Ok(AgentStatus::NotDeployed),
+            Err(DeployError::UnsupportedArch(_)) => {
+                match Self::probe_remote_install(controller, &remote_path).await {
+                    RemoteAgentInstallState::Missing => {
+                        Ok(AgentStatus::ManualUploadRequired { arch, remote_path })
+                    }
+                    RemoteAgentInstallState::Current => Ok(AgentStatus::NotDeployed),
+                    RemoteAgentInstallState::Incompatible(version_info) => {
+                        Ok(AgentStatus::ManualUpdateRequired {
+                            arch,
+                            remote_path,
+                            current_agent_version: version_info.version,
+                            current_compatibility_version: version_info.compatibility_version,
+                            expected_compatibility_version: Self::expected_compatibility_version(),
+                        })
+                    }
+                }
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -263,6 +373,14 @@ impl AgentDeployer {
 
         let info: SysInfoResult = serde_json::from_value(info_value)
             .map_err(|e| DeployError::Handshake(format!("Invalid sys/info response: {}", e)))?;
+
+        if info.compatibility_version != Self::expected_compatibility_version() {
+            return Err(DeployError::Handshake(format!(
+                "Agent compatibility mismatch: got {}, expected {}",
+                info.compatibility_version,
+                Self::expected_compatibility_version()
+            )));
+        }
 
         Ok(info)
     }
@@ -316,6 +434,17 @@ pub enum DeployError {
     #[error("Manual upload required for arch '{arch}': upload agent binary to {remote_path}")]
     ManualUploadRequired { arch: String, remote_path: String },
 
+    #[error(
+        "Manual update required for arch '{arch}': replace {remote_path} (agent {current_agent_version}, compat {current_compatibility_version} -> {expected_compatibility_version})"
+    )]
+    ManualUpdateRequired {
+        arch: String,
+        remote_path: String,
+        current_agent_version: String,
+        current_compatibility_version: u32,
+        expected_compatibility_version: u32,
+    },
+
     #[error("Agent binary not found: {0}")]
     BinaryNotFound(String),
 
@@ -348,6 +477,66 @@ impl std::fmt::Display for AgentStatus {
             AgentStatus::ManualUploadRequired { arch, remote_path } => {
                 write!(f, "Manual upload required for {}: {}", arch, remote_path)
             }
+            AgentStatus::ManualUpdateRequired {
+                arch,
+                remote_path,
+                current_agent_version,
+                current_compatibility_version,
+                expected_compatibility_version,
+            } => write!(
+                f,
+                "Manual update required for {}: {} (agent {}, compat {} -> {})",
+                arch,
+                remote_path,
+                current_agent_version,
+                current_compatibility_version,
+                expected_compatibility_version
+            ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentDeployer, RemoteAgentInstallState, RemoteAgentVersionInfo};
+
+    #[test]
+    fn parses_missing_remote_agent() {
+        assert_eq!(
+            AgentDeployer::parse_remote_version_output("NOT_FOUND"),
+            RemoteAgentInstallState::Missing
+        );
+        assert_eq!(
+            AgentDeployer::parse_remote_version_output("   "),
+            RemoteAgentInstallState::Missing
+        );
+    }
+
+    #[test]
+    fn parses_current_remote_agent() {
+        let current_output = format!(
+            "oxideterm-agent 0.12.1 compat {}",
+            AgentDeployer::expected_compatibility_version()
+        );
+        assert_eq!(
+            AgentDeployer::parse_remote_version_output(&current_output),
+            RemoteAgentInstallState::Current
+        );
+
+        assert_eq!(
+            AgentDeployer::parse_remote_version_output("oxideterm-agent 0.12.1"),
+            RemoteAgentInstallState::Current
+        );
+    }
+
+    #[test]
+    fn parses_outdated_remote_agent() {
+        assert_eq!(
+            AgentDeployer::parse_remote_version_output("oxideterm-agent 0.12.1 compat 2"),
+            RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
+                version: "0.12.1".to_string(),
+                compatibility_version: 2,
+            })
+        );
     }
 }

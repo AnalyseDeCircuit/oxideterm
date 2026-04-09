@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plateforme">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licence">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **Terminal** | PTY local (zsh/bash/fish/pwsh/WSL2), SSH distant, panneaux divisés, diffusion d'entrée, enregistrement/lecture de sessions (asciicast v2), rendu WebGL, 30+ thèmes + éditeur personnalisé, palette de commandes (`⌘K`), mode zen |
 | **SSH & Auth** | Pool de connexions & multiplexage, ProxyJump (sauts illimités) avec graphe topologique, reconnexion automatique avec période de grâce, Transfert d'agent. Auth : mot de passe, clé SSH (RSA/Ed25519/ECDSA), SSH Agent, certificats, 2FA interactif clavier, Known Hosts TOFU |
 | **SFTP** | Navigateur double volet, glisser-déposer, aperçu intelligent (images/vidéo/audio/code/PDF/hex/polices), file de transfert avec progression & ETA, signets, extraction d'archives |
-| **Mode IDE** | CodeMirror 6 avec 30+ langages, arborescence + statut Git, multi-onglets, résolution de conflits, terminal intégré. Agent distant optionnel pour Linux (9 architectures supplémentaires) |
+| **Mode IDE** | CodeMirror 6 avec 30+ langages, arborescence + statut Git, multi-onglets, résolution de conflits, terminal intégré. Agent distant Linux optionnel ; les autres architectures doivent le compiler et l'envoyer manuellement |
 | **Redirection de ports** | Local (-L), distant (-R), SOCKS5 dynamique (-D), I/O par passage de messages sans verrou, restauration automatique à la reconnexion, rapport d'arrêt, délai d'inactivité |
 | **IA (OxideSens)** | Panneau inline (`⌘I`) + chat latéral, capture du buffer terminal (panneau unique/tous), contexte multi-sources (IDE/SFTP/Git), 40+ outils autonomes, intégration serveur MCP, base de connaissances RAG (recherche hybride BM25 + vecteurs), streaming SSE |
 | **Plugins** | Chargement ESM en runtime, 18 espaces de noms API, 24 composants UI Kit, API gelée + ACL Proxy, disjoncteur, désactivation automatique en cas d'erreurs |
@@ -198,7 +198,7 @@ Assistant IA axé sur la confidentialité avec deux modes d'interaction :
 - **Résolution de conflits** : verrouillage optimiste par mtime — détecte les modifications distantes avant l'écrasement
 - **Git événementiel** : rafraîchissement automatique à la sauvegarde, création, suppression, renommage et touche Entrée du terminal
 - **State Gating** : toutes les E/S bloquées quand `readiness !== 'ready'`, Key-Driven Reset force un remontage complet à la reconnexion
-- **Agent distant** (optionnel) : binaire Rust d'environ 1 Mo, déployé automatiquement sur x86_64/aarch64 Linux. 9 architectures supplémentaires (ARMv7, RISC-V64, LoongArch64, s390x, Power64LE, i686, ARM, Android aarch64, FreeBSD x86_64) dans `agents/extra/` pour upload manuel. Active l'arborescence améliorée, la recherche de symboles et la surveillance de fichiers.
+- **Agent distant** (optionnel) : binaire Rust d'environ 1 Mo, déployé automatiquement sur x86_64/aarch64 Linux. Sur les autres architectures, l'utilisateur doit compiler l'agent depuis les sources puis le téléverser manuellement. Active l'arborescence améliorée, la recherche de symboles et la surveillance de fichiers.
 
 ### 🔀 Redirection de ports — I/O sans verrou
 

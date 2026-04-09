@@ -18,8 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 
-/** GitHub repo URL for downloading extra-arch agent binaries */
-const AGENT_DOWNLOAD_BASE_URL = 'https://github.com/AnaLysedeCircuit/oxideterm/tree/main/agents/extra';
+/** GitHub repo URL for agent build instructions for unsupported architectures. */
+const AGENT_DOWNLOAD_BASE_URL = 'https://github.com/AnalyseDeCircuit/oxideterm/blob/main/agents/README.md';
 
 export function IdeStatusBar() {
   const { t } = useTranslation();
@@ -83,6 +83,7 @@ export function IdeStatusBar() {
             mode === 'agent' && "text-emerald-400",
             mode === 'sftp' && "text-theme-text-muted",
             mode === 'manual-upload' && "text-amber-400",
+            mode === 'manual-update' && "text-amber-400",
             mode === 'deploying' && "text-amber-400",
             mode === 'checking' && "text-theme-text-muted opacity-50",
           )}>
@@ -106,6 +107,9 @@ export function IdeStatusBar() {
             {mode === 'manual-upload' && (
               <span>{t('ide.agent_status_manual_upload', 'Manual upload required')}</span>
             )}
+            {mode === 'manual-update' && (
+              <span>{t('ide.agent_status_manual_update', 'Manual update required')}</span>
+            )}
             {mode === 'deploying' && (
               <span>{t('ide.agent_status_deploying', 'Deploying agent…')}</span>
             )}
@@ -121,7 +125,7 @@ export function IdeStatusBar() {
               <div className="px-2 py-2 text-xs text-theme-text-muted max-w-[300px]">
                 <div className="flex items-start gap-1.5 mb-2">
                   <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
-                  <span>{t('ide.agent_manual_upload_hint', 'Unsupported architecture. Download the agent binary for your architecture and upload it to the remote host.')}</span>
+                  <span>{t('ide.agent_manual_upload_hint', 'Unsupported architecture. You need to build the agent from source yourself and upload it to the remote host.')}</span>
                 </div>
                 
                 {/* Download link */}
@@ -132,7 +136,7 @@ export function IdeStatusBar() {
                   className="flex items-center gap-1.5 text-theme-accent hover:underline mb-2"
                 >
                   <ExternalLink className="w-3 h-3" />
-                  {t('ide.agent_download_link', 'Download from GitHub')}
+                  {t('ide.agent_download_link', 'Build Instructions')}
                 </a>
                 
                 {/* Remote path */}
@@ -144,6 +148,65 @@ export function IdeStatusBar() {
                 </code>
                 <div className="mt-1.5 text-[10px] opacity-70">
                   {t('ide.agent_manual_upload_arch', 'Architecture: {{arch}}', { arch: status.arch })}
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleDeployAgent}
+                disabled={deploying}
+                className="gap-2"
+              >
+                {deploying ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Rocket className="w-3.5 h-3.5" />
+                )}
+                {t('ide.agent_retry_btn', 'Retry Deploy')}
+              </DropdownMenuItem>
+            </>
+          )}
+
+          {mode === 'manual-update' && status?.type === 'manualUpdateRequired' && (
+            <>
+              <div className="px-2 py-2 text-xs text-theme-text-muted max-w-[300px]">
+                <div className="flex items-start gap-1.5 mb-2">
+                  <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <span>{t('ide.agent_manual_update_hint', 'An incompatible agent was detected. You need to build a compatible version yourself and replace the remote file.')}</span>
+                </div>
+
+                <a
+                  href={AGENT_DOWNLOAD_BASE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-theme-accent hover:underline mb-2"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  {t('ide.agent_download_link', 'Build Instructions')}
+                </a>
+
+                <div className="text-[10px] opacity-70 mb-1">
+                  {t('ide.agent_upload_to', 'Upload to:')}
+                </div>
+                <code className="block bg-theme-bg-hover px-1.5 py-1 rounded text-[10px] font-mono break-all">
+                  {status.remotePath}
+                </code>
+                <div className="mt-1.5 text-[10px] opacity-70">
+                  {t('ide.agent_manual_upload_arch', 'Architecture: {{arch}}', { arch: status.arch })}
+                </div>
+                <div className="mt-1 text-[10px] opacity-70">
+                  {t('ide.agent_manual_update_current_agent_version', 'Agent version: {{version}}', {
+                    version: status.currentAgentVersion,
+                  })}
+                </div>
+                <div className="mt-1 text-[10px] opacity-70">
+                  {t('ide.agent_manual_update_current_compatibility_version', 'Compatibility version: {{version}}', {
+                    version: status.currentCompatibilityVersion,
+                  })}
+                </div>
+                <div className="mt-1 text-[10px] opacity-70">
+                  {t('ide.agent_manual_update_expected_compatibility_version', 'Required compatibility version: {{version}}', {
+                    version: status.expectedCompatibilityVersion,
+                  })}
                 </div>
               </div>
               <DropdownMenuSeparator />

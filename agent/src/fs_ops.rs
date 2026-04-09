@@ -46,6 +46,7 @@ pub(crate) fn resolve_path(raw: &str) -> PathBuf {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Decode standard base64 (RFC 4648) to bytes.
+#[cfg(not(target_arch = "loongarch64"))]
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     const TABLE: [u8; 256] = {
         let mut t = [0xFFu8; 256];
@@ -258,6 +259,54 @@ fn map_io_error(e: &io::Error) -> (i32, String) {
     }
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
+fn maybe_compress_content(content_bytes: &[u8]) -> Option<Vec<u8>> {
+    zstd::stream::encode_all(content_bytes, 3)
+        .ok()
+        .filter(|compressed| compressed.len() < content_bytes.len())
+}
+
+#[cfg(target_arch = "loongarch64")]
+fn maybe_compress_content(_content_bytes: &[u8]) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(not(target_arch = "loongarch64"))]
+fn decode_write_content(params: &WriteFileParams) -> Result<Vec<u8>, (i32, String)> {
+    let content = match params.encoding.as_str() {
+        "zstd+base64" => {
+            let compressed = base64_decode(&params.content)
+                .map_err(|e| (ERR_INVALID_PARAMS, format!("Base64 decode error: {}", e)))?;
+            zstd::stream::decode_all(compressed.as_slice())
+                .map_err(|e| (ERR_IO, format!("Zstd decompress error: {}", e)))?
+        }
+        "plain" | "" => params.content.clone().into_bytes(),
+        other => {
+            return Err((
+                ERR_INVALID_PARAMS,
+                format!("Unsupported encoding: {}", other),
+            ));
+        }
+    };
+
+    Ok(content)
+}
+
+#[cfg(target_arch = "loongarch64")]
+fn decode_write_content(params: &WriteFileParams) -> Result<Vec<u8>, (i32, String)> {
+    match params.encoding.as_str() {
+        "plain" | "" => Ok(params.content.clone().into_bytes()),
+        "zstd+base64" => Err((
+            ERR_INVALID_PARAMS,
+            "Unsupported encoding: zstd+base64 on this agent build".to_string(),
+        )),
+        other => Err((
+            ERR_INVALID_PARAMS,
+            format!("Unsupported encoding: {}", other),
+        )),
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Operations
 // ═══════════════════════════════════════════════════════════════════════════
@@ -293,17 +342,14 @@ pub fn read_file(params: ReadFileParams) -> Result<ReadFileResult, (i32, String)
     // Compress large files (>32KB) with zstd for faster transfer over SSH
     const COMPRESS_THRESHOLD: u64 = 32 * 1024;
     if size > COMPRESS_THRESHOLD {
-        if let Ok(compressed) = zstd::stream::encode_all(content_bytes.as_slice(), 3) {
-            // Only use compression if it actually saves space
-            if compressed.len() < content_bytes.len() {
-                return Ok(ReadFileResult {
-                    content: base64_encode(&compressed),
-                    hash,
-                    size,
-                    mtime,
-                    encoding: "zstd+base64".to_string(),
-                });
-            }
+        if let Some(compressed) = maybe_compress_content(content_bytes.as_slice()) {
+            return Ok(ReadFileResult {
+                content: base64_encode(&compressed),
+                hash,
+                size,
+                mtime,
+                encoding: "zstd+base64".to_string(),
+            });
         }
     }
 
@@ -362,21 +408,7 @@ pub fn write_file(params: WriteFileParams) -> Result<WriteFileResult, (i32, Stri
     }
 
     // Decode content based on encoding
-    let content_bytes = match params.encoding.as_str() {
-        "zstd+base64" => {
-            let compressed = base64_decode(&params.content)
-                .map_err(|e| (ERR_INVALID_PARAMS, format!("Base64 decode error: {}", e)))?;
-            zstd::stream::decode_all(compressed.as_slice())
-                .map_err(|e| (ERR_IO, format!("Zstd decompress error: {}", e)))?
-        }
-        "plain" | "" => params.content.into_bytes(),
-        other => {
-            return Err((
-                ERR_INVALID_PARAMS,
-                format!("Unsupported encoding: {}", other),
-            ));
-        }
-    };
+    let content_bytes = decode_write_content(&params)?;
 
     // Write to temp file in the same directory (same filesystem for rename)
     let parent = path.parent().unwrap_or(Path::new("/"));

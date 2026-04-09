@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="版本">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="版本">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="平台">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="授權條款">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -198,7 +198,7 @@ CodeMirror 6 編輯器基於 SFTP 運作——預設無需伺服端安裝：
 - **衝突解決**：樂觀 mtime 鎖定——覆寫前偵測遠端變更
 - **事件驅動 Git**：儲存、建立、刪除、重新命名及終端 Enter 按鍵時自動重新整理
 - **狀態閘控**：當 `readiness !== 'ready'` 時阻止所有 IO，Key-Driven Reset 在重連時強制完整重新掛載
-- **遠端 Agent**（可選）：~1 MB Rust 二進位檔，在 x86_64/aarch64 Linux 上自動部署。9 種額外架構（ARMv7、RISC-V64、LoongArch64、s390x、Power64LE、i686、ARM、Android aarch64、FreeBSD x86_64）位於 `agents/extra/`，可手動上傳。提供增強檔案樹、符號搜尋和檔案監視功能。
+- **遠端 Agent**（可選）：~1 MB Rust 二進位檔，在 x86_64/aarch64 Linux 上自動部署。其他架構需要使用者自行從原始碼建置 Agent 並手動上傳。提供增強檔案樹、符號搜尋和檔案監視功能。
 
 ### 🔀 連接埠轉發——無鎖 I/O
 

@@ -1,46 +1,39 @@
 # OxideTerm Agent Binaries
 
-This directory contains pre-compiled agent binaries for the OxideTerm IDE mode.
+This directory documents how OxideTerm packages the remote agent for IDE mode.
 
-## Directory Structure
+## Bundled Architectures
 
-```
-agents/
-└── extra/           # Extra architectures (not bundled with app)
-    ├── README.md
-    └── oxideterm-agent-*
-```
+Only these two Linux targets are bundled with the application and auto-deployed:
 
-## Bundled vs Extra
-
-**Bundled** (auto-deployed, included in app package):
-- `x86_64-unknown-linux-musl` - Standard 64-bit Linux
-- `aarch64-unknown-linux-musl` - ARM64 Linux (e.g., AWS Graviton, Apple Silicon VMs)
-
-**Extra** (manual download required):
-- See `extra/README.md` for the full list of additional architectures
+- `x86_64-unknown-linux-musl`
+- `aarch64-unknown-linux-musl`
 
 ## Building
 
-To compile agents for all supported targets:
+Use the unified build script from the repository root:
 
 ```bash
-cd agent
+# Build both bundled targets
+./scripts/build-agent.sh
 
-# Bundled targets
-cross build --release --target x86_64-unknown-linux-musl
-cross build --release --target aarch64-unknown-linux-musl
-
-# Extra targets
-cross build --release --target armv7-unknown-linux-musleabihf
-cross build --release --target arm-unknown-linux-musleabihf
-cross build --release --target i686-unknown-linux-musl
-cross build --release --target powerpc64le-unknown-linux-gnu
-cross build --release --target s390x-unknown-linux-gnu
-cross build --release --target riscv64gc-unknown-linux-gnu
-cross build --release --target loongarch64-unknown-linux-gnu
-cross build --release --target aarch64-linux-android
-cross build --release --target x86_64-unknown-freebsd
+# Build a single bundled target
+USE_CROSS=1 ./scripts/build-agent.sh x86_64
+USE_CROSS=1 ./scripts/build-agent.sh aarch64
 ```
 
-Requires: [cross](https://github.com/cross-rs/cross) + Docker
+Bundled outputs are written to `src-tauri/agents/`.
+
+Recommended: [cross](https://github.com/cross-rs/cross) + Docker
+
+If you use `USE_CROSS=1`, make sure Docker or Podman is installed locally.
+
+On Apple Silicon macOS, prefer Docker Desktop. `cross` with Podman may fail on the x86_64 Linux target under qemu emulation.
+
+The build script auto-installs missing Rust targets by default. Set `AUTO_INSTALL_TARGETS=0` if you want manual control.
+
+## Other Architectures
+
+Prebuilt binaries for other architectures are no longer published in this repository.
+
+If you need an unsupported architecture, build the agent yourself from source with `cargo` or `cross`, then upload the resulting `oxideterm-agent` binary to `~/.oxideterm/oxideterm-agent` on the remote host.

@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, split panes, broadcast input, session recording/playback (asciicast v2), WebGL rendering, 30+ themes + custom editor, command palette (`⌘K`), zen mode |
 | **SSH & Auth** | Connection pooling & multiplexing, ProxyJump (unlimited hops) with topology graph, auto-reconnect with Grace Period, Agent Forwarding. Auth: password, SSH key (RSA/Ed25519/ECDSA), SSH Agent, certificates, keyboard-interactive 2FA, Known Hosts TOFU |
 | **SFTP** | Dual-pane browser, drag-and-drop, smart preview (images/video/audio/code/PDF/hex/fonts), transfer queue with progress & ETA, bookmarks, archive extraction |
-| **IDE Mode** | CodeMirror 6 with 24 languages, file tree + Git status, multi-tab, conflict resolution, integrated terminal. Optional remote agent for Linux (9 extra architectures) |
+| **IDE Mode** | CodeMirror 6 with 24 languages, file tree + Git status, multi-tab, conflict resolution, integrated terminal. Optional remote agent for Linux; unsupported architectures can self-build and upload |
 | **Port Forwarding** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), lock-free message-passing I/O, auto-restore on reconnect, death reporting, idle timeout |
 | **AI (OxideSens)** | Inline panel (`⌘I`) + sidebar chat, terminal buffer capture (single/all panes), multi-source context (IDE/SFTP/Git), 40+ autonomous tools, MCP server integration, RAG knowledge base (BM25 + vector hybrid search), streaming SSE |
 | **Plugins** | Runtime ESM loading, 18 API namespaces, 24 UI Kit components, frozen API + Proxy ACL, circuit breaker, auto-disable on errors |
@@ -198,7 +198,7 @@ CodeMirror 6 editor operating over SFTP — no server-side installation required
 - **Conflict resolution**: optimistic mtime locking — detects remote changes before overwriting
 - **Event-driven Git**: auto-refresh on save, create, delete, rename, and terminal Enter keypress
 - **State Gating**: all IO blocked when `readiness !== 'ready'`, Key-Driven Reset forces full remount on reconnect
-- **Remote agent** (optional): ~1 MB Rust binary, auto-deployed on x86_64/aarch64 Linux. 9 extra architectures (ARMv7, RISC-V64, LoongArch64, s390x, Power64LE, i686, ARM, Android aarch64, FreeBSD x86_64) in `agents/extra/` for manual upload. Enables enhanced file tree, symbol search, and file watching.
+- **Remote agent** (optional): ~1 MB Rust binary, auto-deployed on x86_64/aarch64 Linux. Other architectures must build the agent from source and upload it manually. Enables enhanced file tree, symbol search, and file watching.
 
 ### 🔀 Port Forwarding — Lock-Free I/O
 

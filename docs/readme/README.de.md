@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plattform">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Lizenz">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -198,7 +198,7 @@ CodeMirror 6-Editor über SFTP — standardmäßig keine serverseitige Installat
 - **Konfliktlösung**: optimistisches mtime-Locking — erkennt Remote-Änderungen vor dem Überschreiben
 - **Ereignisgesteuertes Git**: automatische Aktualisierung bei Speichern, Erstellen, Löschen, Umbenennen und Terminal-Enter-Tastendruck
 - **State Gating**: alle I/O-Operationen blockiert wenn `readiness !== 'ready'`, Key-Driven Reset erzwingt vollständiges Remount bei Reconnect
-- **Remote-Agent** (optional): ~1 MB Rust-Binärdatei, automatisches Deployment auf x86_64/aarch64 Linux. 9 zusätzliche Architekturen (ARMv7, RISC-V64, LoongArch64, s390x, Power64LE, i686, ARM, Android aarch64, FreeBSD x86_64) in `agents/extra/` für manuellen Upload. Aktiviert erweiterten Dateibaum, Symbolsuche und Dateiüberwachung.
+- **Remote-Agent** (optional): ~1 MB Rust-Binärdatei, automatisches Deployment auf x86_64/aarch64 Linux. Auf anderen Architekturen muss der Agent aus dem Quellcode gebaut und manuell hochgeladen werden. Aktiviert erweiterten Dateibaum, Symbolsuche und Dateiüberwachung.
 
 ### 🔀 Portweiterleitung — Lock-freie I/O
 

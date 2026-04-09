@@ -89,7 +89,18 @@ export async function isAgentReady(nodeId: string): Promise<boolean> {
 export async function ensureAgent(nodeId: string): Promise<AgentStatus> {
   // Already ready?
   if (agentReadyCache.get(nodeId)) {
-    return nodeAgentStatus(nodeId);
+    const status = await nodeAgentStatus(nodeId);
+    switch (status.type) {
+      case 'ready':
+        return status;
+      case 'manualUploadRequired':
+      case 'manualUpdateRequired':
+      case 'unsupportedArch':
+        markAgentUnavailable(nodeId);
+        return status;
+      default:
+        markAgentUnavailable(nodeId);
+    }
   }
 
   // Dedupe concurrent deploys

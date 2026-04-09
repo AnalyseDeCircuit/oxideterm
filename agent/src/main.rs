@@ -37,6 +37,25 @@ use watcher::Watcher;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SYMBOL_CACHE_CAPACITY: usize = 16;
 
+fn compatibility_version() -> u32 {
+    include_str!("../COMPATIBILITY_VERSION")
+        .trim()
+        .parse()
+        .expect("agent compatibility version must be a valid u32")
+}
+
+fn supported_capabilities() -> Vec<String> {
+    #[cfg(not(target_arch = "loongarch64"))]
+    {
+        return vec!["zstd".to_string()];
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    {
+        Vec::new()
+    }
+}
+
 struct SymbolCache {
     entries: HashMap<String, Arc<Vec<SymbolInfo>>>,
     access_order: VecDeque<String>,
@@ -90,7 +109,11 @@ fn main() {
     // Handle --version flag for deploy version check
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
-        println!("oxideterm-agent {}", VERSION);
+        println!(
+            "oxideterm-agent {} compat {}",
+            VERSION,
+            compatibility_version()
+        );
         return;
     }
 
@@ -406,10 +429,11 @@ fn dispatch(
         "sys/info" => {
             let info = SysInfoResult {
                 version: VERSION.to_string(),
+                compatibility_version: compatibility_version(),
                 arch: std::env::consts::ARCH.to_string(),
                 os: std::env::consts::OS.to_string(),
                 pid: std::process::id(),
-                capabilities: vec!["zstd".to_string()],
+                capabilities: supported_capabilities(),
             };
             Response::ok(req.id, serde_json::to_value(info).unwrap())
         }

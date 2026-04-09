@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="Versión">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="Versión">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plataforma">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licencia">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -198,7 +198,7 @@ Editor CodeMirror 6 operando sobre SFTP — sin instalación del lado del servid
 - **Resolución de conflictos**: bloqueo optimista por mtime — detecta cambios remotos antes de sobrescribir
 - **Git basado en eventos**: actualización automática al guardar, crear, eliminar, renombrar y pulsar Enter en el terminal
 - **State Gating**: todas las E/S bloqueadas cuando `readiness !== 'ready'`, Key-Driven Reset fuerza remontaje completo en reconexión
-- **Agente remoto** (opcional): binario Rust de ~1 MB, desplegado automáticamente en x86_64/aarch64 Linux. 9 arquitecturas adicionales (ARMv7, RISC-V64, LoongArch64, s390x, Power64LE, i686, ARM, Android aarch64, FreeBSD x86_64) en `agents/extra/` para carga manual. Habilita árbol de archivos mejorado, búsqueda de símbolos y vigilancia de archivos.
+- **Agente remoto** (opcional): binario Rust de ~1 MB, desplegado automáticamente en x86_64/aarch64 Linux. En otras arquitecturas, el usuario debe compilar el agente desde el código fuente y cargarlo manualmente. Habilita árbol de archivos mejorado, búsqueda de símbolos y vigilancia de archivos.
 
 ### 🔀 Reenvío de puertos — I/O sin bloqueo
 

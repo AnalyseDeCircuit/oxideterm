@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="版本">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="版本">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="平台">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="许可证">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **终端** | 本地 PTY（zsh/bash/fish/pwsh/WSL2）、SSH 远程、分屏窗格、广播输入、会话录制/回放（asciicast v2）、WebGL 渲染、30+ 主题 + 自定义编辑器、命令面板（`⌘K`）、禅模式 |
 | **SSH 与认证** | 连接池与多路复用、ProxyJump（无限跳数）拓扑图、宽限期自动重连、Agent 转发。认证方式：密码、SSH 密钥（RSA/Ed25519/ECDSA）、SSH Agent、证书、keyboard-interactive 2FA、Known Hosts TOFU |
 | **SFTP** | 双窗格浏览器、拖放操作、智能预览（图片/视频/音频/代码/PDF/十六进制/字体）、带进度和预计到达时间的传输队列、书签、压缩包解压 |
-| **IDE 模式** | CodeMirror 6 支持 30+ 语言、文件树 + Git 状态、多标签页、冲突解决、集成终端。可选 Linux 远程 Agent（9 种额外架构） |
+| **IDE 模式** | CodeMirror 6 支持 30+ 语言、文件树 + Git 状态、多标签页、冲突解决、集成终端。可选 Linux 远程 Agent，其他架构需自行编译并上传 |
 | **端口转发** | 本地（-L）、远程（-R）、动态 SOCKS5（-D）、无锁消息传递 I/O、重连自动恢复、终止报告、空闲超时 |
 | **AI（OxideSens）** | 内联面板（`⌘I`）+ 侧边栏聊天、终端缓冲区捕获（单窗格/所有窗格）、多源上下文（IDE/SFTP/Git）、40+ 自主工具、MCP 服务器集成、RAG 知识库（BM25 + 向量混合搜索）、SSE 流式输出 |
 | **插件** | 运行时 ESM 加载、18 个 API 命名空间、24 个 UI Kit 组件、冻结 API + Proxy ACL、熔断器、错误时自动禁用 |
@@ -198,7 +198,7 @@ CodeMirror 6 编辑器基于 SFTP 运行——默认无需服务端安装：
 - **冲突解决**：乐观 mtime 锁定——覆盖前检测远端变更
 - **事件驱动 Git**：保存、创建、删除、重命名及终端回车按键时自动刷新
 - **状态门控**：当 `readiness !== 'ready'` 时阻止所有 IO，Key-Driven Reset 在重连时强制完整重载
-- **远程 Agent**（可选）：~1 MB Rust 二进制文件，在 x86_64/aarch64 Linux 上自动部署。9 种额外架构（ARMv7、RISC-V64、LoongArch64、s390x、Power64LE、i686、ARM、Android aarch64、FreeBSD x86_64）位于 `agents/extra/`，可手动上传。提供增强文件树、符号搜索和文件监视功能。
+- **远程 Agent**（可选）：~1 MB Rust 二进制文件，在 x86_64/aarch64 Linux 上自动部署。其他架构需要用户自行从源码构建 Agent 并手动上传。提供增强文件树、符号搜索和文件监视功能。
 
 ### 🔀 端口转发——无锁 I/O
 

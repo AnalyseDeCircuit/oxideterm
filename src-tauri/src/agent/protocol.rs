@@ -172,12 +172,20 @@ pub struct GitFileEntry {
 }
 
 /// sys/info result
+fn default_legacy_agent_compatibility_version() -> u32 {
+    1
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SysInfoResult {
     pub version: String,
+    #[serde(default = "default_legacy_agent_compatibility_version")]
+    pub compatibility_version: u32,
     pub arch: String,
     pub os: String,
     pub pid: u32,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// watch/event notification
@@ -254,5 +262,17 @@ pub enum AgentStatus {
         arch: String,
         /// Expected remote path for the manually uploaded binary
         remote_path: String,
+    },
+    /// Manual update required — an outdated manually uploaded binary was detected
+    ManualUpdateRequired {
+        arch: String,
+        /// Expected remote path for the manually uploaded binary
+        remote_path: String,
+        /// Agent version string reported by the remote binary
+        current_agent_version: String,
+        /// Compatibility version reported by the remote binary
+        current_compatibility_version: u32,
+        /// Compatibility version required by this app build
+        expected_compatibility_version: u32,
     },
 }

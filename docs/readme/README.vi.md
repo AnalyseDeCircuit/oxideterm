@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.14-blue" alt="Phiên bản">
+  <img src="https://img.shields.io/badge/version-1.1.15-blue" alt="Phiên bản">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Nền tảng">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Giấy phép">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -198,7 +198,7 @@ Trình soạn thảo CodeMirror 6 hoạt động qua SFTP — không yêu cầu 
 - **Giải quyết xung đột**: khóa lạc quan bằng mtime — phát hiện thay đổi từ xa trước khi ghi đè
 - **Git theo sự kiện**: tự động làm mới khi lưu, tạo, xóa, đổi tên và nhấn Enter trong terminal
 - **State Gating**: tất cả I/O bị chặn khi `readiness !== 'ready'`, Key-Driven Reset buộc remount hoàn toàn khi kết nối lại
-- **Agent từ xa** (tùy chọn): nhị phân Rust ~1 MB, triển khai tự động trên x86_64/aarch64 Linux. 9 kiến trúc bổ sung (ARMv7, RISC-V64, LoongArch64, s390x, Power64LE, i686, ARM, Android aarch64, FreeBSD x86_64) trong `agents/extra/` để tải thủ công. Kích hoạt cây tệp nâng cao, tìm kiếm biểu tượng và theo dõi tệp.
+- **Agent từ xa** (tùy chọn): nhị phân Rust ~1 MB, triển khai tự động trên x86_64/aarch64 Linux. Với các kiến trúc khác, người dùng phải tự biên dịch agent từ mã nguồn rồi tải lên thủ công. Kích hoạt cây tệp nâng cao, tìm kiếm biểu tượng và theo dõi tệp.
 
 ### 🔀 Chuyển tiếp cổng — I/O không khóa
 

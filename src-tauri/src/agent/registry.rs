@@ -38,6 +38,10 @@ impl AgentSession {
         &self.info
     }
 
+    fn supports_capability(&self, capability: &str) -> bool {
+        self.info.capabilities.iter().any(|item| item == capability)
+    }
+
     /// Check if the agent is still alive.
     pub fn is_alive(&self) -> bool {
         self.transport.is_alive()
@@ -99,19 +103,20 @@ impl AgentSession {
     ) -> Result<WriteFileResult, TransportError> {
         const COMPRESS_THRESHOLD: usize = 32 * 1024;
 
-        let (send_content, encoding) = if content.len() > COMPRESS_THRESHOLD {
-            // Try zstd compression
-            match zstd::stream::encode_all(content.as_bytes(), 3) {
-                Ok(compressed) if compressed.len() < content.len() => {
-                    use base64::Engine;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&compressed);
-                    (encoded, "zstd+base64")
+        let (send_content, encoding) =
+            if self.supports_capability("zstd") && content.len() > COMPRESS_THRESHOLD {
+                // Try zstd compression
+                match zstd::stream::encode_all(content.as_bytes(), 3) {
+                    Ok(compressed) if compressed.len() < content.len() => {
+                        use base64::Engine;
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(&compressed);
+                        (encoded, "zstd+base64")
+                    }
+                    _ => (content.to_string(), "plain"),
                 }
-                _ => (content.to_string(), "plain"),
-            }
-        } else {
-            (content.to_string(), "plain")
-        };
+            } else {
+                (content.to_string(), "plain")
+            };
 
         let mut params = serde_json::json!({
             "path": path,

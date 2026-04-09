@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { nodeAgentStatus } from '../../../lib/api';
 import type { AgentStatus } from '../../../types';
 
-export type AgentMode = 'agent' | 'sftp' | 'checking' | 'deploying' | 'manual-upload';
+export type AgentMode = 'agent' | 'sftp' | 'checking' | 'deploying' | 'manual-upload' | 'manual-update';
 
 interface AgentStatusInfo {
   /** Current operating mode */
@@ -57,6 +57,9 @@ export function useAgentStatus(nodeId: string | undefined): AgentStatusInfo {
         case 'manualUploadRequired':
           setMode('manual-upload');
           break;
+        case 'manualUpdateRequired':
+          setMode('manual-update');
+          break;
         case 'notDeployed':
         case 'unsupportedArch':
         case 'failed':
@@ -84,10 +87,17 @@ export function useAgentStatus(nodeId: string | undefined): AgentStatusInfo {
   }, [nodeId, refresh]);
 
   // Poll continuously so we can detect agent recovery and agent loss while IDE stays open.
+  // Manual upload/update states poll more slowly so we can detect a user replacing the
+  // remote binary without requiring a full IDE refresh.
   useEffect(() => {
-    if (!nodeId || mode === 'manual-upload') return;
+    if (!nodeId) return;
 
-    const interval = mode === 'deploying' || mode === 'checking' ? 2000 : 5000;
+    const interval =
+      mode === 'deploying' || mode === 'checking'
+        ? 2000
+        : mode === 'manual-upload' || mode === 'manual-update'
+          ? 10000
+          : 5000;
 
     const timer = setInterval(() => {
       void refresh();
@@ -107,6 +117,7 @@ export function useAgentStatus(nodeId: string | undefined): AgentStatusInfo {
       case 'checking':
         return '…';
       case 'manual-upload':
+      case 'manual-update':
         return 'SFTP';  // Still SFTP mode, but with hint available
       case 'sftp':
       default:

@@ -2,18 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const eventMocks = vi.hoisted(() => {
   const listeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
+  const defaultListen = async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+    const set = listeners.get(eventName) ?? new Set();
+    set.add(callback);
+    listeners.set(eventName, set);
+    return vi.fn(() => {
+      listeners.get(eventName)?.delete(callback);
+    });
+  };
+
   return {
-    listen: vi.fn(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
-      const set = listeners.get(eventName) ?? new Set();
-      set.add(callback);
-      listeners.set(eventName, set);
-      return vi.fn(() => {
-        listeners.get(eventName)?.delete(callback);
-      });
-    }),
+    listen: vi.fn(defaultListen),
     clear() {
       listeners.clear();
-      this.listen.mockClear();
+      this.listen.mockReset();
+      this.listen.mockImplementation(defaultListen);
     },
   };
 });
@@ -46,9 +49,62 @@ vi.mock('@/lib/api', () => apiMocks);
 
 import { ensureAgent, invalidateAgentCache, readFile, watchDirectory } from '@/lib/agentService';
 
+function resetApiMocks(): void {
+  Object.values(apiMocks).forEach((mockFn) => {
+    mockFn.mockReset();
+  });
+}
+
+describe('agentService.ensureAgent', () => {
+  beforeEach(() => {
+    resetApiMocks();
+    eventMocks.clear();
+    invalidateAgentCache('node-1');
+  });
+
+  it('retries deployment when the ready cache is stale', async () => {
+    apiMocks.nodeAgentStatus
+      .mockResolvedValueOnce({ type: 'failed', reason: 'channel closed' });
+    apiMocks.nodeAgentDeploy
+      .mockResolvedValueOnce({ type: 'ready', version: '1.0.0', arch: 'x86_64', pid: 1 })
+      .mockResolvedValueOnce({ type: 'ready', version: '1.0.1', arch: 'x86_64', pid: 2 });
+
+    await ensureAgent('node-1');
+    const redeployed = await ensureAgent('node-1');
+
+    expect(apiMocks.nodeAgentDeploy).toHaveBeenCalledTimes(2);
+    expect(redeployed).toEqual({ type: 'ready', version: '1.0.1', arch: 'x86_64', pid: 2 });
+  });
+
+  it('returns manual intervention states without forcing a redeploy', async () => {
+    apiMocks.nodeAgentStatus.mockResolvedValueOnce({
+      type: 'manualUpdateRequired',
+      arch: 'mips64',
+      remotePath: '~/.oxideterm/oxideterm-agent',
+      currentAgentVersion: '0.12.1',
+      currentCompatibilityVersion: 1,
+      expectedCompatibilityVersion: 2,
+    });
+    apiMocks.nodeAgentDeploy.mockResolvedValueOnce({ type: 'ready', version: '1.0.0', arch: 'x86_64', pid: 1 });
+
+    await ensureAgent('node-1');
+    const status = await ensureAgent('node-1');
+
+    expect(apiMocks.nodeAgentDeploy).toHaveBeenCalledTimes(1);
+    expect(status).toEqual({
+      type: 'manualUpdateRequired',
+      arch: 'mips64',
+      remotePath: '~/.oxideterm/oxideterm-agent',
+      currentAgentVersion: '0.12.1',
+      currentCompatibilityVersion: 1,
+      expectedCompatibilityVersion: 2,
+    });
+  });
+});
+
 describe('agentService.watchDirectory', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetApiMocks();
     eventMocks.clear();
     invalidateAgentCache('node-1');
     apiMocks.nodeAgentStatus.mockResolvedValue({ type: 'ready', version: '1.0.0', arch: 'x86_64', pid: 42 });
