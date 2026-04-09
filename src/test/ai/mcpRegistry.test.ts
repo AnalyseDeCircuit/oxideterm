@@ -1,19 +1,48 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { McpServerConfig, McpServerState, McpToolSchema } from '@/lib/ai/mcp/mcpTypes';
+
+function createSseConfig(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
+  return {
+    id: 'srv-1',
+    name: 'server-one',
+    transport: 'sse',
+    url: 'http://localhost:3000/sse',
+    enabled: true,
+    retryOnDisconnect: true,
+    ...overrides,
+  };
+}
+
+function createStdioConfig(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
+  return {
+    id: 'srv-stdio',
+    name: 'stdio-server',
+    transport: 'stdio',
+    command: 'npx',
+    enabled: true,
+    ...overrides,
+  };
+}
+
+function createTool(name: string): McpToolSchema {
+  return { name, inputSchema: { type: 'object' } };
+}
+
+function createConnectedState(config: McpServerConfig, overrides: Partial<McpServerState> = {}): McpServerState {
+  return {
+    config,
+    status: 'connected',
+    tools: [],
+    resources: [],
+    ...overrides,
+  };
+}
 
 const settingsStoreMock = vi.hoisted(() => ({
   state: {
     settings: {
       ai: {
-        mcpServers: [
-          {
-            id: 'srv-1',
-            name: 'server-one',
-            transport: 'sse',
-            url: 'http://localhost:3000/sse',
-            enabled: true,
-            retryOnDisconnect: true,
-          },
-        ],
+        mcpServers: [createSseConfig()],
       },
     },
   },
@@ -41,16 +70,7 @@ describe('mcpRegistry', () => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.useFakeTimers();
-    settingsStoreMock.state.settings.ai.mcpServers = [
-      {
-        id: 'srv-1',
-        name: 'server-one',
-        transport: 'sse',
-        url: 'http://localhost:3000/sse',
-        enabled: true,
-        retryOnDisconnect: true,
-      },
-    ];
+    settingsStoreMock.state.settings.ai.mcpServers = [createSseConfig()];
   });
 
   afterEach(() => {
@@ -85,9 +105,9 @@ describe('mcpRegistry', () => {
   });
 
   it('ignores duplicate connect calls without invalidating the in-flight attempt', async () => {
-    let resolveConnect: ((value: unknown) => void) | null = null;
+    let resolveConnect: ((value: McpServerState) => void) | undefined;
     mcpClientMock.connectMcpServer.mockImplementation(
-      () => new Promise((resolve) => {
+      () => new Promise<McpServerState>((resolve) => {
         resolveConnect = resolve;
       }),
     );
@@ -97,13 +117,10 @@ describe('mcpRegistry', () => {
     await Promise.resolve();
     await useMcpRegistry.getState().connect('srv-1');
 
-    resolveConnect?.({
-      config: settingsStoreMock.state.settings.ai.mcpServers[0],
-      status: 'connected',
+    expect(resolveConnect).toBeDefined();
+    resolveConnect!(createConnectedState(settingsStoreMock.state.settings.ai.mcpServers[0], {
       runtimeId: 'runtime-1',
-      tools: [],
-      resources: [],
-    });
+    }));
     await firstConnect;
 
     expect(mcpClientMock.connectMcpServer).toHaveBeenCalledTimes(1);
@@ -162,16 +179,10 @@ describe('mcpRegistry', () => {
   });
 
   it('ignores stale connect results after a manual disconnect invalidates the attempt', async () => {
-    let resolveConnect: ((state: {
-      config: { id: string; name: string; transport: string; url: string; enabled: boolean; retryOnDisconnect: boolean };
-      status: 'connected';
-      runtimeId: string;
-      tools: never[];
-      resources: never[];
-    }) => void) | null = null;
+    let resolveConnect: ((state: McpServerState) => void) | undefined;
 
     mcpClientMock.connectMcpServer.mockImplementation(
-      () => new Promise((resolve) => {
+      () => new Promise<McpServerState>((resolve) => {
         resolveConnect = resolve;
       }),
     );
@@ -190,13 +201,10 @@ describe('mcpRegistry', () => {
 
     await useMcpRegistry.getState().disconnect('srv-1');
 
-    resolveConnect?.({
-      config: settingsStoreMock.state.settings.ai.mcpServers[0],
-      status: 'connected',
+    expect(resolveConnect).toBeDefined();
+    resolveConnect!(createConnectedState(settingsStoreMock.state.settings.ai.mcpServers[0], {
       runtimeId: 'runtime-late',
-      tools: [],
-      resources: [],
-    });
+    }));
     await connectPromise;
 
     expect(mcpClientMock.disconnectMcpServer).toHaveBeenCalledWith(expect.objectContaining({ runtimeId: 'runtime-late' }));
@@ -204,9 +212,9 @@ describe('mcpRegistry', () => {
   });
 
   it('allows reconnect while a disconnect is still awaiting cleanup', async () => {
-    let resolveDisconnect: ((value: unknown) => void) | null = null;
+    let resolveDisconnect: ((value: McpServerState) => void) | undefined;
     mcpClientMock.disconnectMcpServer.mockImplementation(
-      () => new Promise((resolve) => {
+      () => new Promise<McpServerState>((resolve) => {
         resolveDisconnect = resolve;
       }),
     );
@@ -220,15 +228,11 @@ describe('mcpRegistry', () => {
 
     const { useMcpRegistry } = await import('@/lib/ai/mcp/mcpRegistry');
     useMcpRegistry.setState({
-      servers: new Map([[
+      servers: new Map<string, McpServerState>([[
         'srv-1',
-        {
-          config: settingsStoreMock.state.settings.ai.mcpServers[0],
-          status: 'connected',
+        createConnectedState(settingsStoreMock.state.settings.ai.mcpServers[0], {
           runtimeId: 'runtime-old',
-          tools: [],
-          resources: [],
-        },
+        }),
       ]]),
       toolIndex: new Map(),
     });
@@ -237,7 +241,8 @@ describe('mcpRegistry', () => {
     await Promise.resolve();
     await useMcpRegistry.getState().connect('srv-1');
 
-    resolveDisconnect?.({
+    expect(resolveDisconnect).toBeDefined();
+    resolveDisconnect!({
       config: settingsStoreMock.state.settings.ai.mcpServers[0],
       status: 'disconnected',
       tools: [],
@@ -283,15 +288,7 @@ describe('mcpRegistry', () => {
   });
 
   it('closes the old stdio runtime when a connected server fails at runtime', async () => {
-    settingsStoreMock.state.settings.ai.mcpServers = [
-      {
-        id: 'srv-stdio',
-        name: 'stdio-server',
-        transport: 'stdio',
-        command: 'npx',
-        enabled: true,
-      },
-    ];
+    settingsStoreMock.state.settings.ai.mcpServers = [createStdioConfig()];
     mcpClientMock.connectMcpServer.mockResolvedValue({
       config: settingsStoreMock.state.settings.ai.mcpServers[0],
       status: 'connected',
@@ -321,7 +318,7 @@ describe('mcpRegistry', () => {
   });
 
   it('ignores late runtime failures from an old connection after reconnect', async () => {
-    let rejectOldCall: ((error: Error) => void) | null = null;
+    let rejectOldCall: ((error: Error) => void) | undefined;
     mcpClientMock.connectMcpServer
       .mockResolvedValueOnce({
         config: settingsStoreMock.state.settings.ai.mcpServers[0],
@@ -361,7 +358,8 @@ describe('mcpRegistry', () => {
     await useMcpRegistry.getState().disconnect('srv-1');
     await useMcpRegistry.getState().connect('srv-1');
 
-    rejectOldCall?.(new Error('old socket closed'));
+    expect(rejectOldCall).toBeDefined();
+    rejectOldCall!(new Error('old socket closed'));
     await expect(oldCall).rejects.toThrow('old socket closed');
 
     expect(useMcpRegistry.getState().servers.get('srv-1')?.status).toBe('connected');
@@ -370,7 +368,7 @@ describe('mcpRegistry', () => {
   });
 
   it('does not let a stale refreshTools result roll back a newer connection state', async () => {
-    let resolveRefresh: ((tools: Array<{ name: string; inputSchema: { type: 'object' } }>) => void) | null = null;
+    let resolveRefresh: ((tools: McpToolSchema[]) => void) | undefined;
     mcpClientMock.connectMcpServer
       .mockResolvedValueOnce({
         config: settingsStoreMock.state.settings.ai.mcpServers[0],
@@ -389,7 +387,7 @@ describe('mcpRegistry', () => {
         resources: [],
       });
     mcpClientMock.refreshMcpTools.mockImplementationOnce(
-      () => new Promise((resolve) => {
+      () => new Promise<McpToolSchema[]>((resolve) => {
         resolveRefresh = resolve;
       }),
     );
@@ -410,7 +408,8 @@ describe('mcpRegistry', () => {
     await useMcpRegistry.getState().disconnect('srv-1');
     await useMcpRegistry.getState().connect('srv-1');
 
-    resolveRefresh?.([{ name: 'stale-tool', inputSchema: { type: 'object' } }]);
+    expect(resolveRefresh).toBeDefined();
+    resolveRefresh!([createTool('stale-tool')]);
     await refreshPromise;
 
     const server = useMcpRegistry.getState().servers.get('srv-1');
@@ -421,37 +420,19 @@ describe('mcpRegistry', () => {
 
   it('disambiguates tool names when two connected servers share the same display name', async () => {
     settingsStoreMock.state.settings.ai.mcpServers = [
-      {
-        id: 'srv-a',
-        name: 'shared-name',
-        transport: 'sse',
-        url: 'http://localhost:3000/a',
-        enabled: true,
-      },
-      {
-        id: 'srv-b',
-        name: 'shared-name',
-        transport: 'sse',
-        url: 'http://localhost:3000/b',
-        enabled: true,
-      },
+      createSseConfig({ id: 'srv-a', name: 'shared-name', url: 'http://localhost:3000/a' }),
+      createSseConfig({ id: 'srv-b', name: 'shared-name', url: 'http://localhost:3000/b' }),
     ];
 
     const { useMcpRegistry } = await import('@/lib/ai/mcp/mcpRegistry');
     useMcpRegistry.setState({
-      servers: new Map([
-        ['srv-a', {
-          config: settingsStoreMock.state.settings.ai.mcpServers[0],
-          status: 'connected',
-          tools: [{ name: 'ping', inputSchema: { type: 'object' } }],
-          resources: [],
-        }],
-        ['srv-b', {
-          config: settingsStoreMock.state.settings.ai.mcpServers[1],
-          status: 'connected',
-          tools: [{ name: 'ping', inputSchema: { type: 'object' } }],
-          resources: [],
-        }],
+      servers: new Map<string, McpServerState>([
+        ['srv-a', createConnectedState(settingsStoreMock.state.settings.ai.mcpServers[0], {
+          tools: [createTool('ping')],
+        })],
+        ['srv-b', createConnectedState(settingsStoreMock.state.settings.ai.mcpServers[1], {
+          tools: [createTool('ping')],
+        })],
       ]),
       toolIndex: new Map(),
     });
