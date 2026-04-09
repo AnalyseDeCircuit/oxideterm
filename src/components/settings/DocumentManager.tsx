@@ -15,6 +15,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { readTextFile, stat } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
 import { useRagStore } from '../../store/ragStore';
+import { RAG_SYNC_VERSION_CONFLICT_ERROR } from '../../store/ragStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getProvider } from '../../lib/ai/providerRegistry';
 import { useToast } from '../../hooks/useToast';
@@ -156,6 +157,10 @@ export function DocumentManager() {
           toastSuccess(t('settings_view.knowledge.doc_updated'));
         }
       } catch (e) {
+        if (e instanceof Error && e.message === RAG_SYNC_VERSION_CONFLICT_ERROR) {
+          toastError(t('settings_view.knowledge.error_sync'));
+          return;
+        }
         toastError(t('settings_view.knowledge.error_sync'), e instanceof Error ? e.message : String(e));
       }
     };
@@ -359,6 +364,10 @@ export function DocumentManager() {
         toastSuccess(t('settings_view.knowledge.doc_no_changes'));
       }
     } catch (e) {
+      if (e instanceof Error && e.message === RAG_SYNC_VERSION_CONFLICT_ERROR) {
+        toastError(t('settings_view.knowledge.error_sync'));
+        return;
+      }
       toastError(t('settings_view.knowledge.error_sync'), e instanceof Error ? e.message : String(e));
     }
   }, [syncExternalEdits, toastError, toastSuccess, t]);

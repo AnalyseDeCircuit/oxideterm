@@ -249,6 +249,33 @@ impl RagStore {
         Ok(false)
     }
 
+    /// Check whether a matching content hash exists in the collection, excluding
+    /// the provided document ID. Used when updating a document so the current
+    /// document does not trip the duplicate-content guard.
+    pub fn check_content_hash_exists_excluding_doc(
+        &self,
+        collection_id: &str,
+        content_hash: &str,
+        excluded_doc_id: &str,
+    ) -> Result<bool, RagError> {
+        let doc_ids = self.get_collection_doc_ids(collection_id)?;
+        let txn = self.db.begin_read()?;
+        let meta_t = txn.open_table(DOC_METADATA_TABLE)?;
+
+        for doc_id in &doc_ids {
+            if doc_id == excluded_doc_id {
+                continue;
+            }
+            if let Some(guard) = meta_t.get(doc_id.as_str())? {
+                let meta: DocMetadata = rmp_serde::from_slice(guard.value())?;
+                if meta.content_hash == content_hash {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Add a document (metadata + chunks) and update the collection's doc list.
     pub fn add_document(
         &self,
@@ -928,5 +955,69 @@ impl RagStore {
         self.invalidate_hnsw_index();
 
         Ok(updated_meta)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_store(test_name: &str) -> RagStore {
+        let dir = std::env::temp_dir().join(format!(
+            "oxideterm_rag_store_{}_{}_{}",
+            test_name,
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        RagStore::new(&dir).unwrap()
+    }
+
+    fn make_collection(id: &str) -> DocCollection {
+        let now = chrono::Utc::now().timestamp_millis();
+        DocCollection {
+            id: id.to_string(),
+            name: id.to_string(),
+            scope: DocScope::Global,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_doc(doc_id: &str, collection_id: &str, hash: &str) -> DocMetadata {
+        DocMetadata {
+            id: doc_id.to_string(),
+            collection_id: collection_id.to_string(),
+            title: doc_id.to_string(),
+            source_path: None,
+            format: DocFormat::PlainText,
+            content_hash: hash.to_string(),
+            indexed_at: chrono::Utc::now().timestamp_millis(),
+            chunk_count: 0,
+            version: 0,
+        }
+    }
+
+    #[test]
+    fn check_content_hash_exists_excluding_doc_ignores_same_doc_and_detects_other_docs() {
+        let store = temp_store("content_hash_excluding_doc");
+        store.create_collection(&make_collection("col-1")).unwrap();
+        store
+            .add_document(&make_doc("doc-1", "col-1", "hash-a"), &[], Some("alpha"))
+            .unwrap();
+        store
+            .add_document(&make_doc("doc-2", "col-1", "hash-b"), &[], Some("beta"))
+            .unwrap();
+
+        assert!(
+            !store
+                .check_content_hash_exists_excluding_doc("col-1", "hash-a", "doc-1")
+                .unwrap()
+        );
+        assert!(
+            store
+                .check_content_hash_exists_excluding_doc("col-1", "hash-b", "doc-1")
+                .unwrap()
+        );
     }
 }

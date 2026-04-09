@@ -44,6 +44,7 @@ type RagStoreState = {
   error: string | null;
   editingDocId: string | null;
   editFilePath: string | null;
+  editingDocVersion: number | null;
 
   // Actions
   loadCollections: (scopeFilter?: string) => Promise<void>;
@@ -65,6 +66,8 @@ type RagStoreState = {
   clearError: () => void;
 };
 
+export const RAG_SYNC_VERSION_CONFLICT_ERROR = 'RAG_SYNC_VERSION_CONFLICT';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Store Implementation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -81,6 +84,7 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
   error: null,
   editingDocId: null,
   editFilePath: null,
+  editingDocVersion: null,
 
   loadCollections: async (scopeFilter?: string) => {
     set({ isLoading: true, error: null });
@@ -107,6 +111,7 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
       collections: s.collections.filter((c) => c.id !== collectionId),
       selectedCollectionId: s.selectedCollectionId === collectionId ? null : s.selectedCollectionId,
       documents: s.selectedCollectionId === collectionId ? [] : s.documents,
+      documentTotal: s.selectedCollectionId === collectionId ? 0 : s.documentTotal,
       stats: s.selectedCollectionId === collectionId ? null : s.stats,
     }));
   },
@@ -138,7 +143,10 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
 
   addDocument: async (collectionId, title, content, format, sourcePath) => {
     const doc = await ragAddDocument({ collectionId, title, content, format, sourcePath });
-    set((s) => ({ documents: [...s.documents, doc] }));
+    set((s) => ({
+      documents: s.selectedCollectionId === collectionId ? [...s.documents, doc] : s.documents,
+      documentTotal: s.selectedCollectionId === collectionId ? s.documentTotal + 1 : s.documentTotal,
+    }));
     // Refresh stats
     try {
       const stats = await ragGetCollectionStats(collectionId);
@@ -157,11 +165,12 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
         const { remove } = await import('@tauri-apps/plugin-fs');
         await remove(editFilePath);
       } catch { /* best-effort */ }
-      set({ editingDocId: null, editFilePath: null });
+      set({ editingDocId: null, editFilePath: null, editingDocVersion: null });
     }
     await ragRemoveDocument(docId);
     set((s) => ({
       documents: s.documents.filter((d) => d.id !== docId),
+      documentTotal: s.documents.some((d) => d.id === docId) ? Math.max(0, s.documentTotal - 1) : s.documentTotal,
     }));
     // Refresh stats
     const { selectedCollectionId } = get();
@@ -194,7 +203,10 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
 
   createBlankDocument: async (collectionId, title, format) => {
     const doc = await ragCreateBlankDocument({ collectionId, title, format });
-    set((s) => ({ documents: [...s.documents, doc] }));
+    set((s) => ({
+      documents: s.selectedCollectionId === collectionId ? [...s.documents, doc] : s.documents,
+      documentTotal: s.selectedCollectionId === collectionId ? s.documentTotal + 1 : s.documentTotal,
+    }));
     try {
       const stats = await ragGetCollectionStats(collectionId);
       set({ stats, statsStale: false });
@@ -206,34 +218,57 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
 
   openDocumentExternal: async (docId) => {
     const filePath = await ragOpenDocumentExternal(docId);
-    set({ editingDocId: docId, editFilePath: filePath });
+    const currentDoc = get().documents.find((doc) => doc.id === docId);
+    set({ editingDocId: docId, editFilePath: filePath, editingDocVersion: currentDoc?.version ?? null });
     return filePath;
   },
 
   syncExternalEdits: async () => {
-    const { editingDocId, editFilePath, selectedCollectionId } = get();
+    const { editingDocId, editFilePath, editingDocVersion, selectedCollectionId } = get();
     if (!editingDocId || !editFilePath) return null;
 
     const { readTextFile, remove } = await import('@tauri-apps/plugin-fs');
-    const fileContent = await readTextFile(editFilePath);
+    let fileContent: string;
+    try {
+      fileContent = await readTextFile(editFilePath);
+    } catch (error) {
+      try { await remove(editFilePath); } catch { /* best-effort */ }
+      set({ editingDocId: null, editFilePath: null, editingDocVersion: null });
+      throw error;
+    }
     const storedContent = await ragGetDocumentContent(editingDocId);
 
     if (fileContent === storedContent) {
       // Clean up temp file
       try { await remove(editFilePath); } catch { /* best-effort */ }
-      set({ editingDocId: null, editFilePath: null });
+      set({ editingDocId: null, editFilePath: null, editingDocVersion: null });
       return { updated: false, docId: editingDocId };
     }
 
     // Look up current version for optimistic locking
     const currentDoc = get().documents.find((d) => d.id === editingDocId);
-    const updatedDoc = await ragUpdateDocument(editingDocId, fileContent, currentDoc?.version);
+    let updatedDoc;
+    try {
+      updatedDoc = await ragUpdateDocument(
+        editingDocId,
+        fileContent,
+        currentDoc?.version ?? editingDocVersion ?? undefined,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('Version conflict')) {
+        set({ editingDocId: null, editFilePath: null, editingDocVersion: null });
+        throw new Error(RAG_SYNC_VERSION_CONFLICT_ERROR);
+      }
+      throw error;
+    }
     // Clean up temp file after successful sync
     try { await remove(editFilePath); } catch { /* best-effort */ }
     set((s) => ({
       documents: s.documents.map((d) => d.id === updatedDoc.id ? updatedDoc : d),
       editingDocId: null,
       editFilePath: null,
+      editingDocVersion: null,
     }));
 
     // Refresh stats
@@ -249,7 +284,7 @@ export const useRagStore = create<RagStoreState>()((set, get) => ({
     return { updated: true, docId: editingDocId };
   },
 
-  clearEditing: () => set({ editingDocId: null, editFilePath: null }),
+  clearEditing: () => set({ editingDocId: null, editFilePath: null, editingDocVersion: null }),
 
   clearError: () => set({ error: null }),
 }));

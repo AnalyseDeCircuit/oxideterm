@@ -35,8 +35,13 @@ pub fn search_vector(
         return Ok(Vec::new());
     }
 
-    // Get all chunk IDs in the target collections
-    let chunk_ids = store.get_chunk_ids_in_collections(collection_ids)?;
+    // Match BM25 semantics: an empty collection filter means search across all collections.
+    let chunk_ids = if collection_ids.is_empty() {
+        let all_collection_ids = store.get_all_collection_ids()?;
+        store.get_chunk_ids_in_collections(&all_collection_ids)?
+    } else {
+        store.get_chunk_ids_in_collections(collection_ids)?
+    };
     if chunk_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -158,6 +163,72 @@ fn l2_norm(v: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rag::store::RagStore;
+    use crate::rag::types::{DocCollection, DocFormat, DocMetadata, DocScope};
+
+    fn temp_store(test_name: &str) -> RagStore {
+        let dir = std::env::temp_dir().join(format!(
+            "oxideterm_rag_embedding_{}_{}_{}",
+            test_name,
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        RagStore::new(&dir).unwrap()
+    }
+
+    fn add_chunk_with_embedding(
+        store: &RagStore,
+        collection_id: &str,
+        doc_id: &str,
+        chunk_id: &str,
+        content: &str,
+        vector: Vec<f32>,
+    ) {
+        let now = chrono::Utc::now().timestamp_millis();
+        store
+            .create_collection(&DocCollection {
+                id: collection_id.to_string(),
+                name: collection_id.to_string(),
+                scope: DocScope::Global,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+
+        let metadata = DocMetadata {
+            id: doc_id.to_string(),
+            collection_id: collection_id.to_string(),
+            title: doc_id.to_string(),
+            source_path: None,
+            format: DocFormat::PlainText,
+            content_hash: format!("hash-{doc_id}"),
+            indexed_at: now,
+            chunk_count: 1,
+            version: 0,
+        };
+        let chunk = crate::rag::types::DocChunk {
+            id: chunk_id.to_string(),
+            doc_id: doc_id.to_string(),
+            section_path: None,
+            content: content.to_string(),
+            tokens_estimate: 1,
+            offset: 0,
+            length: content.len(),
+            context_prefix: None,
+        };
+        store
+            .add_document(&metadata, &[chunk], Some(content))
+            .unwrap();
+        store
+            .store_embeddings_batch(&[EmbeddingRecord {
+                chunk_id: chunk_id.to_string(),
+                dimensions: vector.len(),
+                model_name: "test-model".to_string(),
+                vector,
+            }])
+            .unwrap();
+    }
 
     #[test]
     fn test_cosine_identical() {
@@ -198,5 +269,18 @@ mod tests {
         let norm = l2_norm(&a);
         let sim = cosine_similarity(&a, &b, norm);
         assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn test_search_vector_empty_collection_filter_searches_all_collections() {
+        let store = temp_store("all_collections");
+        add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
+        add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
+
+        let results = search_vector(&store, &[0.9, 0.1], &[], 2).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].chunk_id, "chunk-a");
+        assert!(results.iter().any(|hit| hit.chunk_id == "chunk-b"));
     }
 }

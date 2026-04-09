@@ -16,6 +16,7 @@ use crate::rag::types::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -27,6 +28,45 @@ static REINDEX_CANCEL: std::sync::LazyLock<AtomicBool> =
 /// Guard to prevent concurrent reindex operations.
 static REINDEX_RUNNING: std::sync::LazyLock<AtomicBool> =
     std::sync::LazyLock::new(|| AtomicBool::new(false));
+
+#[derive(Default)]
+struct HnswRebuildState {
+    running: bool,
+    rerun_requested: bool,
+}
+
+#[derive(Default)]
+struct HnswRebuildCoordinator {
+    state: Mutex<HnswRebuildState>,
+}
+
+impl HnswRebuildCoordinator {
+    fn request_or_queue(&self) -> bool {
+        let mut state = self.state.lock().expect("hnsw rebuild lock poisoned");
+        if state.running {
+            state.rerun_requested = true;
+            false
+        } else {
+            state.running = true;
+            state.rerun_requested = false;
+            true
+        }
+    }
+
+    fn finish_cycle(&self) -> bool {
+        let mut state = self.state.lock().expect("hnsw rebuild lock poisoned");
+        if state.rerun_requested {
+            state.rerun_requested = false;
+            true
+        } else {
+            state.running = false;
+            false
+        }
+    }
+}
+
+static HNSW_REBUILD_COORDINATOR: std::sync::LazyLock<HnswRebuildCoordinator> =
+    std::sync::LazyLock::new(HnswRebuildCoordinator::default);
 
 /// Event payload emitted during BM25 reindex progress.
 #[derive(Clone, Serialize)]
@@ -178,6 +218,25 @@ fn require_rag_store<'a>(
     state
         .as_ref()
         .ok_or_else(|| "RAG store not available. Knowledge base features are disabled.".to_string())
+}
+
+fn queue_hnsw_rebuild(store: Arc<RagStore>) {
+    if !HNSW_REBUILD_COORDINATOR.request_or_queue() {
+        tracing::debug!("HNSW rebuild already running; queued another pass");
+        return;
+    }
+
+    tokio::task::spawn_blocking(move || {
+        loop {
+            if let Err(e) = store.rebuild_hnsw_index() {
+                tracing::warn!("Async HNSW rebuild failed: {}", e);
+            }
+
+            if !HNSW_REBUILD_COORDINATOR.finish_cycle() {
+                break;
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -484,23 +543,7 @@ pub async fn rag_store_embeddings(
 
     let count = embedding::store_embeddings(&store, records).map_err(|e| e.to_string())?;
 
-    // Spawn blocking HNSW index rebuild (non-blocking to caller)
-    // Guard prevents multiple concurrent rebuilds from overlapping
-    static HNSW_REBUILD_RUNNING: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
-        std::sync::LazyLock::new(|| std::sync::atomic::AtomicBool::new(false));
-
-    if !HNSW_REBUILD_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let store_clone = store.clone();
-        tokio::task::spawn_blocking(move || {
-            let result = store_clone.rebuild_hnsw_index();
-            HNSW_REBUILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-            if let Err(e) = result {
-                tracing::warn!("Async HNSW rebuild failed: {}", e);
-            }
-        });
-    } else {
-        tracing::debug!("HNSW rebuild already in progress, skipping");
-    }
+    queue_hnsw_rebuild(Arc::clone(store));
 
     Ok(count)
 }
@@ -631,6 +674,17 @@ pub async fn rag_update_document(
     let chunks = chunker::chunk_document(&doc_id, &content, &meta.format);
     let hash = content_hash(&content);
 
+    if hash != meta.content_hash
+        && store
+            .check_content_hash_exists_excluding_doc(&meta.collection_id, &hash, &doc_id)
+            .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Duplicate document: identical content already exists in this collection (hash: {})",
+            &hash[..8]
+        ));
+    }
+
     // Generate contextual headers for updated chunks
     let chunks: Vec<_> = chunks
         .into_iter()
@@ -669,6 +723,22 @@ pub async fn rag_update_document(
         indexed_at: now,
         version: updated.version,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hnsw_rebuild_coordinator_queues_one_follow_up_pass() {
+        let coordinator = HnswRebuildCoordinator::default();
+
+        assert!(coordinator.request_or_queue());
+        assert!(!coordinator.request_or_queue());
+        assert!(coordinator.finish_cycle());
+        assert!(!coordinator.finish_cycle());
+        assert!(coordinator.request_or_queue());
+    }
 }
 
 #[derive(Debug, Deserialize)]
