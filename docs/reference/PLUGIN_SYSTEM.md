@@ -213,11 +213,13 @@ export async function activate(ctx) {
 
 ---
 
-## 3. PluginContext API（18 个命名空间）
+## 3. PluginContext API（20 个命名空间）
 
 插件通过 `activate(ctx)` 接收的唯一 API 入口。整个对象通过 `Object.freeze()` 递归冻结。
 
-包含：`pluginId` + 17 个子 API（`connections`、`events`、`ui`、`terminal`、`settings`、`i18n`、`storage`、`api`、`assets`、`sftp`、`forward`、`sessions`、`transfers`、`profiler`、`eventLog`、`ide`、`ai`、`app`）
+包含：`pluginId` + 19 个子 API（`connections`、`events`、`ui`、`terminal`、`settings`、`i18n`、`storage`、`sync`、`secrets`、`api`、`assets`、`sftp`、`forward`、`sessions`、`transfers`、`profiler`、`eventLog`、`ide`、`ai`、`app`）。
+
+其中 `ctx.sync` 提供保存连接的加密 `.oxide` 导出/导入、冲突预览，以及 `rename` / `skip` / `replace` / `merge` 四种冲突策略；`ctx.secrets` 提供插件作用域的 OS keychain 安全存储，适合保存 WebDAV token、同步密码等敏感信息。当前 `merge` 是非破坏式合并：连接主字段采用导入值，`tags` 做并集，本地已保存但导入缺失的 password / passphrase 会保留；`.oxide` 里的 `forwards` 现在会作为 owner-bound saved forward 一起持久化导入导出，但不会在导入时直接变成活跃转发。
 
 > `ctx.ui.registerContextMenu()`、`ctx.ui.registerStatusBarItem()`、`ctx.ui.registerKeybinding()` 和 `ctx.ui.showProgress()` 现在都已经完成宿主接线：上下文菜单会挂到 terminal / sftp / tab / sidebar 目标，状态栏项会渲染到主布局底部，全局 keybinding 会进入统一快捷键分发链路，进度则显示为右上角 HUD。
 

@@ -234,6 +234,101 @@ export type PluginStorageAPI = {
   remove(key: string): void;
 };
 
+export type SavedConnectionSnapshot = Readonly<{
+  id: string;
+  name: string;
+  group: string | null;
+  host: string;
+  port: number;
+  username: string;
+  auth_type: 'password' | 'key' | 'agent' | 'certificate';
+  key_path: string | null;
+  cert_path: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  color: string | null;
+  tags: readonly string[];
+  proxy_chain: readonly Readonly<{
+    host: string;
+    port: number;
+    username: string;
+    auth_type: 'password' | 'key' | 'agent';
+    key_path?: string;
+  }>[];
+}>;
+
+export type OxideMetadata = Readonly<{
+  exported_at: string;
+  exported_by: string;
+  description?: string;
+  num_connections: number;
+  connection_names: readonly string[];
+}>;
+
+export type ImportResult = Readonly<{
+  imported: number;
+  skipped: number;
+  merged: number;
+  replaced: number;
+  renamed: number;
+  errors: readonly string[];
+  renames: readonly [string, string][];
+}>;
+
+export type ImportPreview = Readonly<{
+  totalConnections: number;
+  unchanged: readonly string[];
+  willRename: readonly [string, string][];
+  willSkip: readonly string[];
+  willReplace: readonly string[];
+  willMerge: readonly string[];
+  hasEmbeddedKeys: boolean;
+  totalForwards: number;
+}>;
+
+export type ExportPreflightResult = Readonly<{
+  totalConnections: number;
+  missingKeys: readonly [string, string][];
+  connectionsWithKeys: number;
+  connectionsWithPasswords: number;
+  connectionsWithAgent: number;
+  totalKeyBytes: number;
+  canExport: boolean;
+}>;
+
+export type PluginSyncConflictStrategy = 'rename' | 'skip' | 'replace' | 'merge';
+
+export type PluginSyncAPI = {
+  listSavedConnections(): ReadonlyArray<SavedConnectionSnapshot>;
+  refreshSavedConnections(): Promise<ReadonlyArray<SavedConnectionSnapshot>>;
+  onSavedConnectionsChange(handler: (connections: ReadonlyArray<SavedConnectionSnapshot>) => void): Disposable;
+  preflightExport(connectionIds?: string[], options?: { embedKeys?: boolean }): Promise<ExportPreflightResult>;
+  exportOxide(request: {
+    connectionIds?: string[];
+    password: string;
+    description?: string;
+    embedKeys?: boolean;
+  }): Promise<Uint8Array>;
+  validateOxide(fileData: Uint8Array): Promise<OxideMetadata>;
+  previewImport(
+    fileData: Uint8Array,
+    password: string,
+    options?: { conflictStrategy?: PluginSyncConflictStrategy },
+  ): Promise<ImportPreview>;
+  importOxide(
+    fileData: Uint8Array,
+    password: string,
+    options?: { selectedNames?: string[]; conflictStrategy?: PluginSyncConflictStrategy },
+  ): Promise<ImportResult>;
+};
+
+export type PluginSecretsAPI = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  has(key: string): Promise<boolean>;
+  delete(key: string): Promise<void>;
+};
+
 /** ctx.api — restricted backend calls (requires apiCommands in manifest) */
 export type PluginBackendAPI = {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -301,6 +396,8 @@ export type PluginContext = Readonly<{
   settings: PluginSettingsAPI;
   i18n: PluginI18nAPI;
   storage: PluginStorageAPI;
+  sync: PluginSyncAPI;
+  secrets: PluginSecretsAPI;
   api: PluginBackendAPI;
   assets: PluginAssetsAPI;
   sftp: PluginSftpAPI;

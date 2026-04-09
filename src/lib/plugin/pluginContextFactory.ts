@@ -19,6 +19,8 @@ import type {
   PluginSettingsAPI,
   PluginI18nAPI,
   PluginStorageAPI,
+  PluginSyncAPI,
+  PluginSecretsAPI,
   PluginBackendAPI,
   PluginAssetsAPI,
   PluginSftpAPI,
@@ -33,6 +35,7 @@ import type {
   PluginFileInfo,
   PluginForwardRule,
   ConnectionSnapshot,
+  SavedConnectionSnapshot,
   SessionTreeNodeSnapshot,
   TransferSnapshot,
   ProfilerMetricsSnapshot,
@@ -52,7 +55,13 @@ import type {
   OutputProcessor,
   PluginTabProps,
 } from '../../types/plugin';
-import type { SshConnectionState } from '../../types';
+import type {
+  ExportPreflightResult,
+  ImportPreview,
+  ImportResult,
+  OxideMetadata,
+  SshConnectionState,
+} from '../../types';
 import { useAppStore } from '../../store/appStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { usePluginStore } from '../../store/pluginStore';
@@ -192,6 +201,79 @@ function resolveNodeToFirstSession(nodeId: string): string | null {
   if (!node) return null;
   const terminalIds = node.runtime.terminalIds;
   return terminalIds.length > 0 ? terminalIds[0] : null;
+}
+
+function toSavedConnectionSnapshot(connection: {
+  id: string;
+  name: string;
+  group: string | null;
+  host: string;
+  port: number;
+  username: string;
+  auth_type: 'password' | 'key' | 'agent' | 'certificate';
+  key_path: string | null;
+  cert_path: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  color: string | null;
+  tags: string[];
+  proxy_chain?: Array<{
+    host: string;
+    port: number;
+    username: string;
+    auth_type: 'password' | 'key' | 'agent';
+    key_path?: string;
+  }>;
+}): SavedConnectionSnapshot {
+  return freezeSnapshot<SavedConnectionSnapshot>({
+    id: connection.id,
+    name: connection.name,
+    group: connection.group,
+    host: connection.host,
+    port: connection.port,
+    username: connection.username,
+    auth_type: connection.auth_type,
+    key_path: connection.key_path,
+    cert_path: connection.cert_path,
+    created_at: connection.created_at,
+    last_used_at: connection.last_used_at,
+    color: connection.color,
+    tags: [...connection.tags],
+    proxy_chain: (connection.proxy_chain ?? []).map((hop) => ({ ...hop })),
+  });
+}
+
+function toFrozenExportPreflight(result: ExportPreflightResult): Readonly<ExportPreflightResult> {
+  return freezeSnapshot<ExportPreflightResult>({
+    ...result,
+    missingKeys: result.missingKeys.map(([name, path]) => [name, path]),
+  });
+}
+
+function toFrozenOxideMetadata(metadata: OxideMetadata): Readonly<OxideMetadata> {
+  return freezeSnapshot<OxideMetadata>({
+    ...metadata,
+    connection_names: [...metadata.connection_names],
+  });
+}
+
+function toFrozenImportPreview(preview: ImportPreview): Readonly<ImportPreview> {
+  return freezeSnapshot<ImportPreview>({
+    ...preview,
+    unchanged: [...preview.unchanged],
+    willRename: preview.willRename.map(([original, renamed]) => [original, renamed]),
+    willSkip: [...preview.willSkip],
+    willReplace: [...preview.willReplace],
+    willMerge: [...preview.willMerge],
+  });
+}
+
+function toFrozenImportResult(result: ImportResult): Readonly<ImportResult> {
+  return freezeSnapshot<ImportResult>({
+    ...result,
+    errors: [...result.errors],
+    renames: result.renames.map(([original, renamed]) => [original, renamed]),
+  });
 }
 
 /**
@@ -622,6 +704,117 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     },
     remove(key: string): void {
       storage.remove(key);
+    },
+  });
+
+  const getSavedConnectionSnapshots = (): ReadonlyArray<SavedConnectionSnapshot> => {
+    return Object.freeze(useAppStore.getState().savedConnections.map(toSavedConnectionSnapshot));
+  };
+
+  const refreshSavedConnectionSnapshots = async (): Promise<ReadonlyArray<SavedConnectionSnapshot>> => {
+    await useAppStore.getState().loadSavedConnections();
+    return getSavedConnectionSnapshots();
+  };
+
+  const resolveExportConnectionIds = async (connectionIds?: string[]): Promise<string[]> => {
+    if (connectionIds && connectionIds.length > 0) {
+      return [...connectionIds];
+    }
+    const currentConnections = useAppStore.getState().savedConnections;
+    if (currentConnections.length > 0) {
+      return currentConnections.map((connection) => connection.id);
+    }
+    const snapshots = await refreshSavedConnectionSnapshots();
+    return snapshots.map((connection) => connection.id);
+  };
+
+  const sync: PluginSyncAPI = Object.freeze({
+    listSavedConnections(): ReadonlyArray<SavedConnectionSnapshot> {
+      return getSavedConnectionSnapshots();
+    },
+    async refreshSavedConnections(): Promise<ReadonlyArray<SavedConnectionSnapshot>> {
+      return refreshSavedConnectionSnapshots();
+    },
+    onSavedConnectionsChange(handler) {
+      let previous = useAppStore.getState().savedConnections;
+      const unsub = useAppStore.subscribe((state) => {
+        if (state.savedConnections !== previous) {
+          previous = state.savedConnections;
+          try { handler(getSavedConnectionSnapshots()); } catch { /* swallow */ }
+        }
+      });
+      return createDisposable(pluginId, unsub);
+    },
+    async preflightExport(connectionIds?: string[], options?: { embedKeys?: boolean }): Promise<Readonly<ExportPreflightResult>> {
+      const effectiveIds = await resolveExportConnectionIds(connectionIds);
+      const result = await invoke<ExportPreflightResult>('preflight_export', {
+        connectionIds: effectiveIds,
+        embedKeys: options?.embedKeys ?? null,
+      });
+      return toFrozenExportPreflight(result);
+    },
+    async exportOxide(request): Promise<Uint8Array> {
+      const effectiveIds = await resolveExportConnectionIds(request.connectionIds);
+      const fileData = await invoke<number[]>('export_to_oxide', {
+        connectionIds: effectiveIds,
+        password: request.password,
+        description: request.description ?? null,
+        embedKeys: request.embedKeys ?? null,
+      });
+      return new Uint8Array(fileData);
+    },
+    async validateOxide(fileData: Uint8Array): Promise<Readonly<OxideMetadata>> {
+      const metadata = await invoke<OxideMetadata>('validate_oxide_file', {
+        fileData: Array.from(fileData),
+      });
+      return toFrozenOxideMetadata(metadata);
+    },
+    async previewImport(fileData: Uint8Array, password: string, options): Promise<Readonly<ImportPreview>> {
+      const preview = await invoke<ImportPreview>('preview_oxide_import', {
+        fileData: Array.from(fileData),
+        password,
+        conflictStrategy: options?.conflictStrategy ?? null,
+      });
+      return toFrozenImportPreview(preview);
+    },
+    async importOxide(fileData: Uint8Array, password: string, options): Promise<Readonly<ImportResult>> {
+      const result = await invoke<ImportResult>('import_from_oxide', {
+        fileData: Array.from(fileData),
+        password,
+        selectedNames: options?.selectedNames ?? null,
+        conflictStrategy: options?.conflictStrategy ?? null,
+      });
+
+      await useAppStore.getState().loadSavedConnections();
+      return toFrozenImportResult(result);
+    },
+  });
+
+  const secrets: PluginSecretsAPI = Object.freeze({
+    async get(key: string): Promise<string | null> {
+      return invoke<string | null>('get_plugin_secret', {
+        pluginId,
+        key,
+      });
+    },
+    async set(key: string, value: string): Promise<void> {
+      await invoke('set_plugin_secret', {
+        pluginId,
+        key,
+        value,
+      });
+    },
+    async has(key: string): Promise<boolean> {
+      return invoke<boolean>('has_plugin_secret', {
+        pluginId,
+        key,
+      });
+    },
+    async delete(key: string): Promise<void> {
+      await invoke('delete_plugin_secret', {
+        pluginId,
+        key,
+      });
     },
   });
 
@@ -1298,6 +1491,8 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     settings,
     i18n,
     storage: storageApi,
+    sync,
+    secrets,
     api,
     assets,
     sftp,

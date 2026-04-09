@@ -19,6 +19,9 @@ use crate::commands::forwarding::{
 };
 use crate::forwarding::{ForwardRule, ForwardRuleUpdate, ForwardStatus, ForwardType};
 use crate::router::{NodeRouter, RouteError};
+use crate::state::PersistedForward;
+
+use super::session_tree::SessionTreeState;
 
 fn parse_forward_type(forward_type: &str) -> Result<ForwardType, String> {
     match forward_type {
@@ -52,6 +55,51 @@ async fn resolve_terminal_session_id(
     resolved.terminal_session_id.ok_or_else(|| {
         RouteError::NotConnected(format!("Node {} has no terminal session", node_id))
     })
+}
+
+async fn resolve_saved_connection_owner(
+    session_tree_state: &SessionTreeState,
+    node_id: &str,
+) -> Option<String> {
+    let tree = session_tree_state.tree.read().await;
+    tree.get_node(node_id)
+        .and_then(|node| node.origin.saved_connection_id().map(|id| id.to_string()))
+}
+
+async fn load_saved_forwards_for_node(
+    node_id: &str,
+    router: &NodeRouter,
+    registry: &ForwardingRegistry,
+    session_tree_state: &SessionTreeState,
+) -> Result<Vec<PersistedForward>, RouteError> {
+    if let Some(owner_connection_id) =
+        resolve_saved_connection_owner(session_tree_state, node_id).await
+    {
+        return registry
+            .load_owned_forwards(&owner_connection_id)
+            .await
+            .map_err(RouteError::ConnectionError);
+    }
+
+    let session_id = resolve_terminal_session_id(router, node_id).await?;
+    registry
+        .load_persisted_forwards(&session_id)
+        .await
+        .map_err(RouteError::ConnectionError)
+}
+
+async fn sync_node_owned_forward(
+    node_id: &str,
+    session_id: &str,
+    rule: &ForwardRule,
+    registry: &ForwardingRegistry,
+    session_tree_state: &SessionTreeState,
+) -> Result<(), RouteError> {
+    let owner_connection_id = resolve_saved_connection_owner(session_tree_state, node_id).await;
+    registry
+        .sync_persisted_forward_rule(&rule.id, session_id, owner_connection_id, rule.clone())
+        .await
+        .map_err(RouteError::ConnectionError)
 }
 
 // ========================================================================
@@ -89,6 +137,7 @@ pub async fn node_create_forward(
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
     connection_registry: State<'_, Arc<crate::ssh::SshConnectionRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     info!(
@@ -162,6 +211,18 @@ pub async fn node_create_forward(
         Ok(created) => {
             let forward_id = created.id.clone();
             info!("Port forward created: {}", forward_id);
+
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &created,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!("Failed to persist saved forward {}: {}", created.id, e);
+            }
 
             // 更新 ConnectionRegistry 的 forward 列表
             if let Err(e) = connection_registry
@@ -273,6 +334,10 @@ pub async fn node_delete_forward(
 
     match mgr.delete_forward(&forward_id).await {
         Ok(()) => {
+            if let Err(e) = registry.delete_persisted_forward(forward_id.clone()).await {
+                warn!("Failed to delete persisted forward {}: {}", forward_id, e);
+            }
+
             // 从 ConnectionRegistry 移除 forward
             if let Err(e) = connection_registry
                 .remove_forward(&session_id, &forward_id)
@@ -301,6 +366,7 @@ pub async fn node_restart_forward(
     forward_id: String,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     let mgr = registry.get(&session_id).await.ok_or_else(|| {
@@ -308,11 +374,28 @@ pub async fn node_restart_forward(
     })?;
 
     match mgr.restart_forward(&forward_id).await {
-        Ok(rule) => Ok(ForwardResponse {
-            success: true,
-            forward: Some(rule.into()),
-            error: None,
-        }),
+        Ok(rule) => {
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &rule,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!(
+                    "Failed to sync saved forward {} after restart: {}",
+                    rule.id, e
+                );
+            }
+
+            Ok(ForwardResponse {
+                success: true,
+                forward: Some(rule.into()),
+                error: None,
+            })
+        }
         Err(e) => Ok(ForwardResponse {
             success: false,
             forward: None,
@@ -333,6 +416,7 @@ pub async fn node_update_forward(
     description: Option<String>,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     let mgr = registry.get(&session_id).await.ok_or_else(|| {
@@ -348,11 +432,28 @@ pub async fn node_update_forward(
     };
 
     match mgr.update_forward(&forward_id, updates).await {
-        Ok(rule) => Ok(ForwardResponse {
-            success: true,
-            forward: Some(rule.into()),
-            error: None,
-        }),
+        Ok(rule) => {
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &rule,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!(
+                    "Failed to sync saved forward {} after update: {}",
+                    rule.id, e
+                );
+            }
+
+            Ok(ForwardResponse {
+                success: true,
+                forward: Some(rule.into()),
+                error: None,
+            })
+        }
         Err(e) => Ok(ForwardResponse {
             success: false,
             forward: None,
@@ -399,6 +500,7 @@ pub async fn node_forward_jupyter(
     remote_port: u16,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     let mgr = registry.get(&session_id).await.ok_or_else(|| {
@@ -406,11 +508,25 @@ pub async fn node_forward_jupyter(
     })?;
 
     match mgr.forward_jupyter(local_port, remote_port).await {
-        Ok(rule) => Ok(ForwardResponse {
-            success: true,
-            forward: Some(rule.into()),
-            error: None,
-        }),
+        Ok(rule) => {
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &rule,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!("Failed to persist Jupyter forward {}: {}", rule.id, e);
+            }
+
+            Ok(ForwardResponse {
+                success: true,
+                forward: Some(rule.into()),
+                error: None,
+            })
+        }
         Err(e) => Ok(ForwardResponse {
             success: false,
             forward: None,
@@ -427,6 +543,7 @@ pub async fn node_forward_tensorboard(
     remote_port: u16,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     let mgr = registry.get(&session_id).await.ok_or_else(|| {
@@ -434,11 +551,25 @@ pub async fn node_forward_tensorboard(
     })?;
 
     match mgr.forward_tensorboard(local_port, remote_port).await {
-        Ok(rule) => Ok(ForwardResponse {
-            success: true,
-            forward: Some(rule.into()),
-            error: None,
-        }),
+        Ok(rule) => {
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &rule,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!("Failed to persist TensorBoard forward {}: {}", rule.id, e);
+            }
+
+            Ok(ForwardResponse {
+                success: true,
+                forward: Some(rule.into()),
+                error: None,
+            })
+        }
         Err(e) => Ok(ForwardResponse {
             success: false,
             forward: None,
@@ -455,6 +586,7 @@ pub async fn node_forward_vscode(
     remote_port: u16,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<ForwardResponse, RouteError> {
     let session_id = resolve_terminal_session_id(&router, &node_id).await?;
     let mgr = registry.get(&session_id).await.ok_or_else(|| {
@@ -462,11 +594,25 @@ pub async fn node_forward_vscode(
     })?;
 
     match mgr.forward_vscode(local_port, remote_port).await {
-        Ok(rule) => Ok(ForwardResponse {
-            success: true,
-            forward: Some(rule.into()),
-            error: None,
-        }),
+        Ok(rule) => {
+            if let Err(e) = sync_node_owned_forward(
+                &node_id,
+                &session_id,
+                &rule,
+                registry.inner().as_ref(),
+                session_tree_state.inner().as_ref(),
+            )
+            .await
+            {
+                warn!("Failed to persist VS Code forward {}: {}", rule.id, e);
+            }
+
+            Ok(ForwardResponse {
+                success: true,
+                forward: Some(rule.into()),
+                error: None,
+            })
+        }
         Err(e) => Ok(ForwardResponse {
             success: false,
             forward: None,
@@ -481,18 +627,22 @@ pub async fn node_list_saved_forwards(
     node_id: String,
     router: State<'_, Arc<NodeRouter>>,
     registry: State<'_, Arc<ForwardingRegistry>>,
+    session_tree_state: State<'_, Arc<SessionTreeState>>,
 ) -> Result<Vec<PersistedForwardDto>, RouteError> {
-    let session_id = resolve_terminal_session_id(&router, &node_id).await?;
-    let forwards = registry
-        .load_persisted_forwards(&session_id)
-        .await
-        .map_err(RouteError::ConnectionError)?;
+    let forwards = load_saved_forwards_for_node(
+        &node_id,
+        router.inner().as_ref(),
+        registry.inner().as_ref(),
+        session_tree_state.inner().as_ref(),
+    )
+    .await?;
 
     Ok(forwards
         .into_iter()
         .map(|f| PersistedForwardDto {
             id: f.id,
             session_id: f.session_id,
+            owner_connection_id: f.owner_connection_id,
             forward_type: format!("{:?}", f.forward_type).to_lowercase(),
             bind_address: f.rule.bind_address,
             bind_port: f.rule.bind_port,

@@ -13,6 +13,25 @@ const appStoreState = vi.hoisted(() => ({
   connections: new Map([
     ['conn-1', { id: 'conn-1', host: 'host', port: 22, username: 'user', state: 'active', refCount: 1, keepAlive: false, createdAt: '1', lastActive: '2', terminalIds: ['sess-1'] }],
   ]),
+  savedConnections: [
+    {
+      id: 'saved-1',
+      name: 'Prod',
+      group: 'Ops',
+      host: 'prod.example.com',
+      port: 22,
+      username: 'root',
+      auth_type: 'password',
+      key_path: null,
+      cert_path: null,
+      created_at: '2026-01-01T00:00:00Z',
+      last_used_at: null,
+      color: null,
+      tags: ['prod'],
+      proxy_chain: [],
+    },
+  ],
+  loadSavedConnections: vi.fn(async () => undefined),
 }));
 
 const sessionTreeState = vi.hoisted(() => ({
@@ -166,6 +185,25 @@ describe('pluginContextFactory', () => {
     resetPluginStore();
     appStoreState.tabs = [];
     appStoreState.activeTabId = null;
+    appStoreState.savedConnections = [
+      {
+        id: 'saved-1',
+        name: 'Prod',
+        group: 'Ops',
+        host: 'prod.example.com',
+        port: 22,
+        username: 'root',
+        auth_type: 'password',
+        key_path: null,
+        cert_path: null,
+        created_at: '2026-01-01T00:00:00Z',
+        last_used_at: null,
+        color: null,
+        tags: ['prod'],
+        proxy_chain: [],
+      },
+    ];
+    appStoreState.loadSavedConnections.mockResolvedValue(undefined);
     document.head.innerHTML = '';
     (globalThis as typeof globalThis & { __blobCounter?: number }).__blobCounter = 0;
     vi.stubGlobal('URL', {
@@ -242,5 +280,203 @@ describe('pluginContextFactory', () => {
 
     await expect(context.api.invoke('ssh_get_pool_stats')).resolves.toEqual({ active_connections: 1, total_sessions: 2 });
     await expect(context.api.invoke('read_plugin_file')).rejects.toThrow(/not whitelisted/i);
+  });
+
+  it('exposes saved-connection sync helpers and applies skip conflict strategy', async () => {
+    const context = buildPluginContext(manifest());
+    const importPreview = {
+      totalConnections: 2,
+      unchanged: ['Prod'],
+      willRename: [['Staging', 'Staging (Copy)']] as [string, string][],
+      willSkip: [],
+      willReplace: [],
+      willMerge: [],
+      hasEmbeddedKeys: false,
+      totalForwards: 0,
+    };
+
+    invokeMock
+      .mockResolvedValueOnce({
+        totalConnections: 1,
+        missingKeys: [],
+        connectionsWithKeys: 0,
+        connectionsWithPasswords: 1,
+        connectionsWithAgent: 0,
+        totalKeyBytes: 0,
+        canExport: true,
+      })
+      .mockResolvedValueOnce([1, 2, 3])
+      .mockResolvedValueOnce({
+        exported_at: '2026-01-01T00:00:00Z',
+        exported_by: 'OxideTerm 1.1.13',
+        description: 'sync payload',
+        num_connections: 1,
+        connection_names: ['Prod'],
+      })
+      .mockResolvedValueOnce(importPreview)
+      .mockResolvedValueOnce({
+        imported: 1,
+        skipped: 1,
+        merged: 0,
+        replaced: 0,
+        renamed: 0,
+        errors: [],
+        renames: [],
+      });
+
+    const savedConnections = context.sync.listSavedConnections();
+    expect(savedConnections).toHaveLength(1);
+    expect(savedConnections[0].name).toBe('Prod');
+    expect(Object.isFrozen(savedConnections[0])).toBe(true);
+
+    const refreshed = await context.sync.refreshSavedConnections();
+    expect(appStoreState.loadSavedConnections).toHaveBeenCalledTimes(1);
+    expect(refreshed[0].id).toBe('saved-1');
+
+    const preflight = await context.sync.preflightExport();
+    expect(preflight.totalConnections).toBe(1);
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'preflight_export', {
+      connectionIds: ['saved-1'],
+      embedKeys: null,
+    });
+
+    const exported = await context.sync.exportOxide({ password: 'StrongPass!123' });
+    expect(exported).toBeInstanceOf(Uint8Array);
+    expect(Array.from(exported)).toEqual([1, 2, 3]);
+
+    const metadata = await context.sync.validateOxide(new Uint8Array([9, 8, 7]));
+    expect(metadata.connection_names).toEqual(['Prod']);
+
+    const preview = await context.sync.previewImport(new Uint8Array([4, 5, 6]), 'ImportPass!123');
+    expect(preview.willRename).toEqual([['Staging', 'Staging (Copy)']]);
+
+    const result = await context.sync.importOxide(new Uint8Array([4, 5, 6]), 'ImportPass!123', {
+      conflictStrategy: 'skip',
+    });
+    expect(result.imported).toBe(1);
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'preview_oxide_import', {
+      fileData: [4, 5, 6],
+      password: 'ImportPass!123',
+      conflictStrategy: null,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, 'import_from_oxide', {
+      fileData: [4, 5, 6],
+      password: 'ImportPass!123',
+      selectedNames: null,
+      conflictStrategy: 'skip',
+    });
+    expect(appStoreState.loadSavedConnections).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes merge conflict strategy through to preview and import', async () => {
+    const context = buildPluginContext(manifest());
+
+    invokeMock
+      .mockResolvedValueOnce({
+        totalConnections: 1,
+        unchanged: [],
+        willRename: [],
+        willSkip: [],
+        willReplace: [],
+        willMerge: ['Prod'],
+        hasEmbeddedKeys: false,
+        totalForwards: 0,
+      })
+      .mockResolvedValueOnce({
+        imported: 1,
+        skipped: 0,
+        merged: 1,
+        replaced: 0,
+        renamed: 0,
+        errors: [],
+        renames: [],
+      });
+
+    const fileData = new Uint8Array([7, 8, 9]);
+    const preview = await context.sync.previewImport(fileData, 'ImportPass!123', {
+      conflictStrategy: 'merge',
+    });
+    const result = await context.sync.importOxide(fileData, 'ImportPass!123', {
+      conflictStrategy: 'merge',
+    });
+
+    expect(preview.willMerge).toEqual(['Prod']);
+    expect(result.merged).toBe(1);
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'preview_oxide_import', {
+      fileData: [7, 8, 9],
+      password: 'ImportPass!123',
+      conflictStrategy: 'merge',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'import_from_oxide', {
+      fileData: [7, 8, 9],
+      password: 'ImportPass!123',
+      selectedNames: null,
+      conflictStrategy: 'merge',
+    });
+  });
+
+  it('stores plugin secrets with a plugin-scoped keychain namespace', async () => {
+    const context = buildPluginContext({ ...manifest(), id: 'plugin:example' });
+    invokeMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('secret-token')
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(undefined);
+
+    await context.secrets.set('webdav:token', 'secret-token');
+    await expect(context.secrets.get('webdav:token')).resolves.toBe('secret-token');
+    await expect(context.secrets.has('webdav:token')).resolves.toBe(true);
+    await context.secrets.delete('webdav:token');
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'set_plugin_secret', {
+      pluginId: 'plugin:example',
+      key: 'webdav:token',
+      value: 'secret-token',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'get_plugin_secret', {
+      pluginId: 'plugin:example',
+      key: 'webdav:token',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'has_plugin_secret', {
+      pluginId: 'plugin:example',
+      key: 'webdav:token',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'delete_plugin_secret', {
+      pluginId: 'plugin:example',
+      key: 'webdav:token',
+    });
+  });
+
+  it('notifies plugins when saved connections change', () => {
+    const context = buildPluginContext(manifest());
+    const handler = vi.fn();
+
+    const disposable = context.sync.onSavedConnectionsChange(handler);
+    appStoreMock.setState({
+      savedConnections: [
+        ...appStoreState.savedConnections,
+        {
+          id: 'saved-2',
+          name: 'Stage',
+          group: null,
+          host: 'stage.example.com',
+          port: 22,
+          username: 'deploy',
+          auth_type: 'key',
+          key_path: '~/.ssh/id_ed25519',
+          cert_path: null,
+          created_at: '2026-01-02T00:00:00Z',
+          last_used_at: null,
+          color: null,
+          tags: ['stage'],
+          proxy_chain: [],
+        },
+      ],
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toHaveLength(2);
+
+    disposable.dispose();
   });
 });

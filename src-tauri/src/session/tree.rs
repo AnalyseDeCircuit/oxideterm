@@ -187,6 +187,22 @@ impl NodeOrigin {
             NodeOrigin::Restored { .. } => "restored",
         }
     }
+
+    /// 返回节点关联的已保存连接 ID（如果这是一个保存连接派生的节点）
+    pub fn saved_connection_id(&self) -> Option<&str> {
+        match self {
+            NodeOrigin::ManualPreset {
+                saved_connection_id,
+                ..
+            }
+            | NodeOrigin::Restored {
+                saved_connection_id,
+            } => Some(saved_connection_id),
+            NodeOrigin::AutoRoute { .. } | NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => {
+                None
+            }
+        }
+    }
 }
 
 /// 节点状态

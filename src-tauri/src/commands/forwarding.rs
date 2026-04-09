@@ -16,7 +16,7 @@ use tracing::{error, info, warn};
 use crate::forwarding::{
     ForwardRule, ForwardRuleUpdate, ForwardStats, ForwardStatus, ForwardType, ForwardingManager,
 };
-use crate::state::{PersistedForward, StateStore, forwarding::ForwardPersistence};
+use crate::state::{PersistedForward, StateError, StateStore, forwarding::ForwardPersistence};
 
 /// Global registry of forwarding managers (one per session)
 pub struct ForwardingRegistry {
@@ -60,11 +60,11 @@ impl ForwardingRegistry {
             manager.stop_all().await;
         }
 
-        // Delete persisted forwards for this session
+        // Session-scoped forwards are deleted, owner-bound forwards are detached and preserved.
         if let Some(persistence) = &self.persistence {
-            if let Err(e) = persistence.delete_by_session(session_id) {
+            if let Err(e) = persistence.handle_session_shutdown(session_id) {
                 error!(
-                    "Failed to delete persisted forwards for session {}: {:?}",
+                    "Failed to clean up persisted forwards for session {}: {:?}",
                     session_id, e
                 );
             }
@@ -170,6 +170,54 @@ impl ForwardingRegistry {
         Ok(())
     }
 
+    /// Upsert a persisted forward to keep saved rule state in sync with live edits.
+    pub async fn sync_persisted_forward_rule(
+        &self,
+        forward_id: &str,
+        session_id: &str,
+        owner_connection_id: Option<String>,
+        rule: ForwardRule,
+    ) -> Result<(), String> {
+        let Some(persistence) = &self.persistence else {
+            return Ok(());
+        };
+
+        let persisted = match persistence.load(forward_id) {
+            Ok(mut existing) => {
+                existing.session_id = session_id.to_string();
+                existing.owner_connection_id = owner_connection_id.or(existing.owner_connection_id);
+                existing.forward_type =
+                    crate::state::forwarding::ForwardType::from(&rule.forward_type);
+                existing.rule = rule;
+                existing
+            }
+            Err(StateError::NotFound(_)) => {
+                let Some(owner_connection_id) = owner_connection_id else {
+                    return Ok(());
+                };
+                PersistedForward::new(
+                    forward_id.to_string(),
+                    session_id.to_string(),
+                    Some(owner_connection_id),
+                    crate::state::forwarding::ForwardType::from(&rule.forward_type),
+                    rule,
+                    false,
+                )
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to load persisted forward {}: {:?}",
+                    forward_id, e
+                ));
+            }
+        };
+
+        persistence
+            .save_async(persisted)
+            .await
+            .map_err(|e| format!("Failed to sync persisted forward: {:?}", e))
+    }
+
     /// Delete a persisted forward
     pub async fn delete_persisted_forward(&self, forward_id: String) -> Result<(), String> {
         if let Some(persistence) = &self.persistence {
@@ -180,6 +228,52 @@ impl ForwardingRegistry {
             info!("Deleted persisted forward");
         }
         Ok(())
+    }
+
+    /// Load persisted forwards owned by a saved connection.
+    pub async fn load_owned_forwards(
+        &self,
+        owner_connection_id: &str,
+    ) -> Result<Vec<PersistedForward>, String> {
+        if let Some(persistence) = &self.persistence {
+            let all_forwards = persistence
+                .load_all_async()
+                .await
+                .map_err(|e| format!("Failed to load persisted forwards: {:?}", e))?;
+
+            Ok(all_forwards
+                .into_iter()
+                .filter(|f| f.owner_connection_id.as_deref() == Some(owner_connection_id))
+                .collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Delete all persisted forwards owned by a saved connection.
+    pub async fn delete_owned_forwards(&self, owner_connection_id: &str) -> Result<usize, String> {
+        if let Some(persistence) = &self.persistence {
+            persistence
+                .delete_by_owner(owner_connection_id)
+                .map_err(|e| format!("Failed to delete owned forwards: {:?}", e))
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Rebind saved forwards for a connection to the latest runtime session.
+    pub async fn bind_owned_forwards_to_session(
+        &self,
+        owner_connection_id: &str,
+        session_id: &str,
+    ) -> Result<usize, String> {
+        if let Some(persistence) = &self.persistence {
+            persistence
+                .rebind_owner_to_session(owner_connection_id, session_id)
+                .map_err(|e| format!("Failed to bind owned forwards to session: {:?}", e))
+        } else {
+            Ok(0)
+        }
     }
 
     /// Load persisted forwards for a session (uses async internally where possible)
@@ -848,6 +942,7 @@ pub async fn list_saved_forwards(
         .map(|f| PersistedForwardDto {
             id: f.id,
             session_id: f.session_id,
+            owner_connection_id: f.owner_connection_id,
             forward_type: format!("{:?}", f.forward_type).to_lowercase(),
             bind_address: f.rule.bind_address,
             bind_port: f.rule.bind_port,
@@ -888,6 +983,7 @@ pub async fn delete_saved_forward(
 pub struct PersistedForwardDto {
     pub id: String,
     pub session_id: String,
+    pub owner_connection_id: Option<String>,
     pub forward_type: String,
     pub bind_address: String,
     pub bind_port: u16,

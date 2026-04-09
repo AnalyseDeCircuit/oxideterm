@@ -8,7 +8,14 @@
  * Supports both single-file ESM bundles (v1) and multi-file packages (v2).
  */
 
-import type { SshConnectionState } from './index';
+import type {
+  ConnectionInfo,
+  ExportPreflightResult,
+  ImportPreview,
+  ImportResult,
+  OxideMetadata,
+  SshConnectionState,
+} from './index';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Plugin Manifest (plugin.json)
@@ -290,6 +297,71 @@ export type PluginStorageAPI = {
   get<T>(key: string): T | null;
   set<T>(key: string, value: T): void;
   remove(key: string): void;
+};
+
+/** Safe saved-connection snapshot for sync/export workflows (no secrets included) */
+export type SavedConnectionSnapshot = Readonly<{
+  id: ConnectionInfo['id'];
+  name: ConnectionInfo['name'];
+  group: ConnectionInfo['group'];
+  host: ConnectionInfo['host'];
+  port: ConnectionInfo['port'];
+  username: ConnectionInfo['username'];
+  auth_type: ConnectionInfo['auth_type'];
+  key_path: ConnectionInfo['key_path'];
+  cert_path: ConnectionInfo['cert_path'];
+  created_at: ConnectionInfo['created_at'];
+  last_used_at: ConnectionInfo['last_used_at'];
+  color: ConnectionInfo['color'];
+  tags: ReadonlyArray<string>;
+  proxy_chain: ReadonlyArray<NonNullable<ConnectionInfo['proxy_chain']>[number]>;
+}>;
+
+/** Built-in conflict strategies for importing encrypted .oxide payloads */
+export type PluginSyncConflictStrategy = 'rename' | 'skip' | 'replace' | 'merge';
+
+/** ctx.sync — saved-connection sync and encrypted import/export helpers */
+export type PluginSyncAPI = {
+  /** Current in-memory snapshot of saved connections */
+  listSavedConnections(): ReadonlyArray<SavedConnectionSnapshot>;
+  /** Refresh saved connections from backend, then return the updated snapshot */
+  refreshSavedConnections(): Promise<ReadonlyArray<SavedConnectionSnapshot>>;
+  /** Subscribe to saved-connection list changes */
+  onSavedConnectionsChange(handler: (connections: ReadonlyArray<SavedConnectionSnapshot>) => void): Disposable;
+  /** Pre-flight export analysis for selected connections (or all if omitted) */
+  preflightExport(connectionIds?: string[], options?: { embedKeys?: boolean }): Promise<Readonly<ExportPreflightResult>>;
+  /** Export selected connections (or all if omitted) to encrypted .oxide bytes */
+  exportOxide(request: {
+    connectionIds?: string[];
+    password: string;
+    description?: string;
+    embedKeys?: boolean;
+  }): Promise<Uint8Array>;
+  /** Validate a .oxide payload and read metadata without decrypting */
+  validateOxide(fileData: Uint8Array): Promise<Readonly<OxideMetadata>>;
+  /** Preview import results and detect conflicts before applying */
+  previewImport(
+    fileData: Uint8Array,
+    password: string,
+    options?: { conflictStrategy?: PluginSyncConflictStrategy },
+  ): Promise<Readonly<ImportPreview>>;
+  /** Import an encrypted .oxide payload using a host-managed conflict strategy */
+  importOxide(
+    fileData: Uint8Array,
+    password: string,
+    options?: {
+      selectedNames?: string[];
+      conflictStrategy?: PluginSyncConflictStrategy;
+    },
+  ): Promise<Readonly<ImportResult>>;
+};
+
+/** ctx.secrets — plugin-scoped secure secret storage backed by OS keychain */
+export type PluginSecretsAPI = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  has(key: string): Promise<boolean>;
+  delete(key: string): Promise<void>;
 };
 
 /** ctx.api — restricted backend calls */
@@ -644,6 +716,8 @@ export type PluginContext = Readonly<{
   settings: PluginSettingsAPI;
   i18n: PluginI18nAPI;
   storage: PluginStorageAPI;
+  sync: PluginSyncAPI;
+  secrets: PluginSecretsAPI;
   api: PluginBackendAPI;
   assets: PluginAssetsAPI;
   /** Remote file system operations via SFTP */

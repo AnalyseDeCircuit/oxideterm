@@ -510,6 +510,8 @@ export interface OxideMetadata {
 export interface ImportResult {
   imported: number;
   skipped: number;
+  merged: number;
+  replaced: number;
   renamed: number;
   errors: string[];
   /** List of name changes: [original_name, new_name][] */
@@ -523,6 +525,12 @@ export interface ImportPreview {
   unchanged: string[];
   /** Connections that will be renamed: [original_name, new_name][] */
   willRename: [string, string][];
+  /** Connections that will be skipped because a local entry already exists */
+  willSkip: string[];
+  /** Connections that will replace an existing local entry in place */
+  willReplace: string[];
+  /** Connections that will be merged into an existing local entry */
+  willMerge: string[];
   /** Whether any embedded keys will be extracted */
   hasEmbeddedKeys: boolean;
   /** Total number of port forwarding rules across all connections */
@@ -668,6 +676,7 @@ export interface ForwardRequest {
 export interface PersistedForwardInfo {
   id: string;
   session_id: string;
+  owner_connection_id?: string;
   forward_type: string;
   bind_address: string;
   bind_port: number;

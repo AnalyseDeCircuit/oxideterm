@@ -11,10 +11,11 @@ use tauri::State;
 use tracing::info;
 
 use crate::commands::config::ConfigState;
+use crate::commands::forwarding::ForwardingRegistry;
 use crate::config::types::SavedAuth;
 use crate::oxide_file::{
-    EncryptedAuth, EncryptedConnection, EncryptedPayload, EncryptedProxyHop, OxideMetadata,
-    compute_checksum, encrypt_oxide_file,
+    EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedPayload, EncryptedProxyHop,
+    OxideMetadata, compute_checksum, encrypt_oxide_file,
 };
 use zeroize::Zeroizing;
 
@@ -116,6 +117,18 @@ fn check_key_file_exists(path: &str) -> Option<u64> {
 
     // Check if file exists and return its size
     fs::metadata(&expanded_path).ok().map(|m| m.len())
+}
+
+fn export_forward(forward: &crate::state::PersistedForward) -> EncryptedForward {
+    EncryptedForward {
+        forward_type: forward.forward_type.as_str().to_string(),
+        bind_address: forward.rule.bind_address.clone(),
+        bind_port: forward.rule.bind_port,
+        target_host: forward.rule.target_host.clone(),
+        target_port: forward.rule.target_port,
+        description: forward.rule.description.clone(),
+        auto_start: forward.auto_start,
+    }
 }
 
 /// Pre-flight check before export - detects issues early
@@ -244,6 +257,7 @@ pub async fn export_to_oxide(
     description: Option<String>,
     embed_keys: Option<bool>,
     config_state: State<'_, Arc<ConfigState>>,
+    forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
 ) -> Result<Vec<u8>, String> {
     let should_embed_keys = embed_keys.unwrap_or(false);
     info!(
@@ -398,6 +412,10 @@ pub async fn export_to_oxide(
 
         // Export target server with its proxy_chain
         let target_auth = convert_auth(&saved_conn.auth, &saved_conn.name)?;
+        let owned_forwards = forwarding_registry
+            .load_owned_forwards(&saved_conn.id)
+            .await?;
+        let forwards = owned_forwards.iter().map(export_forward).collect();
 
         connections.push(EncryptedConnection {
             name: saved_conn.name.clone(),
@@ -410,7 +428,7 @@ pub async fn export_to_oxide(
             tags: saved_conn.tags.clone(),
             options: saved_conn.options.clone(),
             proxy_chain: encrypted_proxy_chain,
-            forwards: Vec::new(),
+            forwards,
         });
     }
 

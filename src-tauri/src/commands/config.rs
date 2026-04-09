@@ -16,6 +16,8 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 use zeroize::Zeroizing;
 
+use super::forwarding::ForwardingRegistry;
+
 /// Service name for AI provider API keys in system keychain
 const AI_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
 
@@ -151,6 +153,32 @@ fn auth_to_info(auth: &SavedAuth) -> (String, Option<String>, Option<String>) {
         ),
         SavedAuth::Agent => ("agent".to_string(), None, None),
     }
+}
+
+pub(crate) fn collect_keychain_ids_for_auth(auth: &SavedAuth) -> Vec<String> {
+    match auth {
+        SavedAuth::Password {
+            keychain_id: Some(keychain_id),
+        } => vec![keychain_id.clone()],
+        SavedAuth::Password { keychain_id: None } => Vec::new(),
+        SavedAuth::Key {
+            passphrase_keychain_id,
+            ..
+        }
+        | SavedAuth::Certificate {
+            passphrase_keychain_id,
+            ..
+        } => passphrase_keychain_id.iter().cloned().collect(),
+        SavedAuth::Agent => Vec::new(),
+    }
+}
+
+pub(crate) fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> {
+    let mut ids = collect_keychain_ids_for_auth(&connection.auth);
+    for hop in &connection.proxy_chain {
+        ids.extend(collect_keychain_ids_for_auth(&hop.auth));
+    }
+    ids
 }
 
 impl From<&SavedConnection> for ConnectionInfo {
@@ -811,31 +839,64 @@ mod tests {
 
         assert_eq!(updated, existing);
     }
+
+    #[test]
+    fn collect_connection_keychain_ids_includes_main_and_proxy_auth_entries() {
+        let connection = SavedConnection {
+            id: "conn-1".to_string(),
+            version: crate::config::CONFIG_VERSION,
+            name: "test".to_string(),
+            group: None,
+            host: "example.com".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth: SavedAuth::Certificate {
+                key_path: "/tmp/id_ed25519".to_string(),
+                cert_path: "/tmp/id_ed25519-cert.pub".to_string(),
+                has_passphrase: true,
+                passphrase_keychain_id: Some("kc-cert".to_string()),
+            },
+            options: Default::default(),
+            created_at: chrono::Utc::now(),
+            last_used_at: None,
+            color: None,
+            tags: Vec::new(),
+            proxy_chain: vec![ProxyHopConfig {
+                host: "jump.example.com".to_string(),
+                port: 22,
+                username: "jump".to_string(),
+                auth: SavedAuth::Password {
+                    keychain_id: Some("kc-hop".to_string()),
+                },
+                agent_forwarding: false,
+            }],
+        };
+
+        let ids = collect_connection_keychain_ids(&connection);
+
+        assert_eq!(ids, vec!["kc-cert".to_string(), "kc-hop".to_string()]);
+    }
 }
 
 /// Delete a connection
 #[tauri::command]
 pub async fn delete_connection(
     state: State<'_, Arc<ConfigState>>,
+    forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     id: String,
 ) -> Result<(), String> {
     {
         let mut config = state.config.write();
-
-        // Delete keychain entry if password auth
-        if let Some(conn) = config.get_connection(&id) {
-            if let SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-            } = &conn.auth
-            {
-                let _ = state.keychain.delete(keychain_id);
-            }
-        }
-
-        config
+        let connection = config
             .remove_connection(&id)
             .ok_or("Connection not found")?;
+
+        for keychain_id in collect_connection_keychain_ids(&connection) {
+            let _ = state.keychain.delete(&keychain_id);
+        }
     } // config lock dropped here
+
+    forwarding_registry.delete_owned_forwards(&id).await?;
 
     state.save().await?;
 

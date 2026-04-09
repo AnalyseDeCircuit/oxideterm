@@ -617,6 +617,10 @@ pub fn run() {
         commands::config::has_ai_provider_api_key,
         commands::config::delete_ai_provider_api_key,
         commands::config::list_ai_provider_keys,
+        commands::plugin::set_plugin_secret,
+        commands::plugin::get_plugin_secret,
+        commands::plugin::has_plugin_secret,
+        commands::plugin::delete_plugin_secret,
         // Oxide file export/import commands
         commands::oxide_export::export_to_oxide,
         commands::oxide_export::preflight_export,
@@ -938,6 +942,10 @@ pub fn run() {
         commands::config::has_ai_provider_api_key,
         commands::config::delete_ai_provider_api_key,
         commands::config::list_ai_provider_keys,
+        commands::plugin::set_plugin_secret,
+        commands::plugin::get_plugin_secret,
+        commands::plugin::has_plugin_secret,
+        commands::plugin::delete_plugin_secret,
         // Oxide file export/import commands
         commands::oxide_export::export_to_oxide,
         commands::oxide_export::preflight_export,

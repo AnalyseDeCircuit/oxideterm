@@ -123,6 +123,10 @@ OxideTerm 插件系统遵循以下设计原则：
 - **失败安全 (Fail-Open)**：Terminal hooks 中的异常不会阻塞终端 I/O，而是回退到原始数据
 - **自动清理**：基于 `Disposable` 模式的自动资源回收，插件卸载时所有注册自动清除
 
+当前 PluginContext 还包含两个面向同步插件的正式命名空间：`ctx.sync`（保存连接的加密导出/导入与冲突策略）和 `ctx.secrets`（插件作用域的 OS keychain 安全存储）。这使得 WebDAV / iCloud / Syncthing 一类同步插件不必再滥用 `ctx.storage` 或直接调用未封装的宿主命令。
+
+`ctx.sync.importOxide()` 现在支持 `rename`、`skip`、`replace`、`merge` 四种策略。其中 `merge` 适合多端同步场景：宿主会保留现有连接 ID 与本地元数据，导入侧更新主连接字段，`tags` 做并集，本地已保存但导入缺失的 password / key passphrase / certificate passphrase 会继续复用；`.oxide` 中的端口转发规则现在会以 owner-bound saved forward 的形式一并导入导出，但导入时不会直接创建活跃转发。
+
 ### 1.2 架构模型
 
 ```

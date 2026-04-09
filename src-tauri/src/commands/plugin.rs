@@ -9,7 +9,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::State;
 
+use crate::commands::config::ConfigState;
 use crate::config::storage::config_dir;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -189,6 +192,28 @@ pub fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_plugin_secret_key(key: &str) -> Result<(), String> {
+    if key.is_empty() {
+        return Err("Plugin secret key cannot be empty".to_string());
+    }
+    if key.bytes().any(|b| b < 0x20) {
+        return Err("Plugin secret key contains invalid characters".to_string());
+    }
+    Ok(())
+}
+
+fn plugin_secret_account_id(plugin_id: &str, key: &str) -> Result<String, String> {
+    validate_plugin_id(plugin_id)?;
+    validate_plugin_secret_key(key)?;
+    Ok(format!(
+        "plugin-secret:{}:{}:{}:{}",
+        plugin_id.len(),
+        plugin_id,
+        key.len(),
+        key
+    ))
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tauri Commands
 // ═══════════════════════════════════════════════════════════════════════════
@@ -328,6 +353,91 @@ pub async fn load_plugin_config() -> Result<String, String> {
     tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| format!("Failed to load plugin config: {}", e))
+}
+
+/// Store a plugin-scoped secret in the OS keychain.
+#[tauri::command]
+pub async fn set_plugin_secret(
+    state: State<'_, Arc<ConfigState>>,
+    plugin_id: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let account_id = plugin_secret_account_id(&plugin_id, &key)?;
+
+    if value.is_empty() {
+        state
+            .ai_keychain
+            .delete(&account_id)
+            .map_err(|e| format!("Failed to delete plugin secret: {}", e))?;
+        state.api_key_cache.write().remove(&account_id);
+    } else {
+        state
+            .ai_keychain
+            .store(&account_id, &value)
+            .map_err(|e| format!("Failed to save plugin secret: {}", e))?;
+        state.api_key_cache.write().insert(account_id, value);
+    }
+
+    Ok(())
+}
+
+/// Retrieve a plugin-scoped secret from the OS keychain.
+#[tauri::command]
+pub async fn get_plugin_secret(
+    state: State<'_, Arc<ConfigState>>,
+    plugin_id: String,
+    key: String,
+) -> Result<Option<String>, String> {
+    let account_id = plugin_secret_account_id(&plugin_id, &key)?;
+
+    if let Some(cached) = state.api_key_cache.read().get(&account_id) {
+        return Ok(Some(cached.clone()));
+    }
+
+    match state.ai_keychain.get(&account_id) {
+        Ok(secret) => {
+            state
+                .api_key_cache
+                .write()
+                .insert(account_id, secret.clone());
+            Ok(Some(secret))
+        }
+        Err(crate::config::KeychainError::NotFound(_)) => Ok(None),
+        Err(e) => Err(format!("Failed to read plugin secret: {}", e)),
+    }
+}
+
+/// Check whether a plugin-scoped secret exists in the OS keychain.
+#[tauri::command]
+pub async fn has_plugin_secret(
+    state: State<'_, Arc<ConfigState>>,
+    plugin_id: String,
+    key: String,
+) -> Result<bool, String> {
+    let account_id = plugin_secret_account_id(&plugin_id, &key)?;
+    state
+        .ai_keychain
+        .exists(&account_id)
+        .map_err(|e| format!("Failed to check plugin secret: {}", e))
+}
+
+/// Delete a plugin-scoped secret from the OS keychain.
+#[tauri::command]
+pub async fn delete_plugin_secret(
+    state: State<'_, Arc<ConfigState>>,
+    plugin_id: String,
+    key: String,
+) -> Result<(), String> {
+    let account_id = plugin_secret_account_id(&plugin_id, &key)?;
+
+    state
+        .ai_keychain
+        .delete(&account_id)
+        .map_err(|e| format!("Failed to delete plugin secret: {}", e))?;
+    state.api_key_cache.write().remove(&account_id);
+
+    Ok(())
 }
 
 /// Scaffold a new plugin with minimal boilerplate files.

@@ -24,6 +24,47 @@ pub enum ForwardType {
     Dynamic,
 }
 
+impl ForwardType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+            Self::Dynamic => "dynamic",
+        }
+    }
+
+    pub fn to_runtime(&self) -> crate::forwarding::ForwardType {
+        match self {
+            Self::Local => crate::forwarding::ForwardType::Local,
+            Self::Remote => crate::forwarding::ForwardType::Remote,
+            Self::Dynamic => crate::forwarding::ForwardType::Dynamic,
+        }
+    }
+}
+
+impl TryFrom<&str> for ForwardType {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "local" => Ok(Self::Local),
+            "remote" => Ok(Self::Remote),
+            "dynamic" => Ok(Self::Dynamic),
+            other => Err(format!("Unsupported forward type: {}", other)),
+        }
+    }
+}
+
+impl From<&crate::forwarding::ForwardType> for ForwardType {
+    fn from(value: &crate::forwarding::ForwardType) -> Self {
+        match value {
+            crate::forwarding::ForwardType::Local => Self::Local,
+            crate::forwarding::ForwardType::Remote => Self::Remote,
+            crate::forwarding::ForwardType::Dynamic => Self::Dynamic,
+        }
+    }
+}
+
 /// Persisted forward rule
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedForward {
@@ -32,6 +73,10 @@ pub struct PersistedForward {
 
     /// Associated session ID
     pub session_id: String,
+
+    /// Saved connection that owns this forward, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_connection_id: Option<String>,
 
     /// Forward type
     pub forward_type: ForwardType,
@@ -55,6 +100,7 @@ impl PersistedForward {
     pub fn new(
         id: String,
         session_id: String,
+        owner_connection_id: Option<String>,
         forward_type: ForwardType,
         rule: ForwardRule,
         auto_start: bool,
@@ -62,6 +108,7 @@ impl PersistedForward {
         Self {
             id,
             session_id,
+            owner_connection_id,
             forward_type,
             rule,
             created_at: Utc::now(),
@@ -187,6 +234,19 @@ impl ForwardPersistence {
             .collect())
     }
 
+    /// Load forwards owned by a saved connection
+    pub fn load_by_owner(
+        &self,
+        owner_connection_id: &str,
+    ) -> Result<Vec<PersistedForward>, StateError> {
+        let all_forwards = self.load_all()?;
+
+        Ok(all_forwards
+            .into_iter()
+            .filter(|f| f.owner_connection_id.as_deref() == Some(owner_connection_id))
+            .collect())
+    }
+
     /// Delete all forwards for a session
     pub fn delete_by_session(&self, session_id: &str) -> Result<usize, StateError> {
         let forwards = self.load_by_session(session_id)?;
@@ -197,6 +257,59 @@ impl ForwardPersistence {
         }
 
         Ok(count)
+    }
+
+    /// Delete all forwards owned by a saved connection
+    pub fn delete_by_owner(&self, owner_connection_id: &str) -> Result<usize, StateError> {
+        let forwards = self.load_by_owner(owner_connection_id)?;
+        let count = forwards.len();
+
+        for forward in forwards {
+            self.delete(&forward.id)?;
+        }
+
+        Ok(count)
+    }
+
+    /// Clear or delete forwards when a runtime session disappears.
+    /// Owner-bound forwards are detached from the old session and preserved.
+    pub fn handle_session_shutdown(&self, session_id: &str) -> Result<(usize, usize), StateError> {
+        let forwards = self.load_by_session(session_id)?;
+        let mut deleted = 0;
+        let mut detached = 0;
+
+        for mut forward in forwards {
+            if forward.owner_connection_id.is_some() {
+                forward.session_id.clear();
+                self.save(&forward)?;
+                detached += 1;
+            } else {
+                self.delete(&forward.id)?;
+                deleted += 1;
+            }
+        }
+
+        Ok((deleted, detached))
+    }
+
+    /// Rebind all owner-bound forwards to a newly established session.
+    pub fn rebind_owner_to_session(
+        &self,
+        owner_connection_id: &str,
+        session_id: &str,
+    ) -> Result<usize, StateError> {
+        let forwards = self.load_by_owner(owner_connection_id)?;
+        let mut rebound = 0;
+
+        for mut forward in forwards {
+            if forward.session_id.is_empty() {
+                forward.session_id = session_id.to_string();
+                self.save(&forward)?;
+                rebound += 1;
+            }
+        }
+
+        Ok(rebound)
     }
 
     /// List all forward IDs
@@ -238,6 +351,7 @@ mod tests {
         let forward = PersistedForward::new(
             "forward-1".to_string(),
             "session-1".to_string(),
+            Some("conn-1".to_string()),
             ForwardType::Local,
             rule,
             false,
@@ -248,6 +362,10 @@ mod tests {
 
         assert_eq!(forward.id, deserialized.id);
         assert_eq!(forward.session_id, deserialized.session_id);
+        assert_eq!(
+            forward.owner_connection_id,
+            deserialized.owner_connection_id
+        );
     }
 
     #[test]
@@ -259,6 +377,7 @@ mod tests {
         let forward = PersistedForward::new(
             "forward-1".to_string(),
             "session-1".to_string(),
+            Some("conn-1".to_string()),
             ForwardType::Local,
             rule,
             false,
@@ -294,6 +413,7 @@ mod tests {
                 let forward = PersistedForward::new(
                     format!("forward-{}-{}", session_num, forward_num),
                     format!("session-{}", session_num),
+                    Some(format!("conn-{}", session_num)),
                     ForwardType::Local,
                     rule,
                     false,
@@ -322,6 +442,7 @@ mod tests {
             let forward = PersistedForward::new(
                 format!("forward-{}", i),
                 "session-1".to_string(),
+                Some("conn-1".to_string()),
                 ForwardType::Local,
                 rule,
                 false,
@@ -336,5 +457,121 @@ mod tests {
         // Verify they're deleted
         let remaining = persistence.load_by_session("session-1").unwrap();
         assert_eq!(remaining.len(), 0);
+    }
+
+    #[test]
+    fn test_load_and_delete_by_owner() {
+        let (_temp_dir, store) = create_test_store();
+        let persistence = ForwardPersistence::new(store);
+
+        for i in 1..=3 {
+            let rule = create_test_forward_rule();
+            let forward = PersistedForward::new(
+                format!("forward-{}", i),
+                format!("session-{}", i),
+                Some("conn-owner".to_string()),
+                ForwardType::Local,
+                rule,
+                false,
+            );
+            persistence.save(&forward).unwrap();
+        }
+
+        assert_eq!(persistence.load_by_owner("conn-owner").unwrap().len(), 3);
+        assert_eq!(persistence.delete_by_owner("conn-owner").unwrap(), 3);
+        assert!(persistence.load_by_owner("conn-owner").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_handle_session_shutdown_preserves_owner_bound_forwards() {
+        let (_temp_dir, store) = create_test_store();
+        let persistence = ForwardPersistence::new(store);
+
+        let owner_bound = PersistedForward::new(
+            "forward-owner".to_string(),
+            "session-1".to_string(),
+            Some("conn-1".to_string()),
+            ForwardType::Local,
+            create_test_forward_rule(),
+            false,
+        );
+        let session_only = PersistedForward::new(
+            "forward-session".to_string(),
+            "session-1".to_string(),
+            None,
+            ForwardType::Local,
+            create_test_forward_rule(),
+            false,
+        );
+
+        persistence.save(&owner_bound).unwrap();
+        persistence.save(&session_only).unwrap();
+
+        let (deleted, detached) = persistence.handle_session_shutdown("session-1").unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(detached, 1);
+
+        let reloaded_owner = persistence.load("forward-owner").unwrap();
+        assert_eq!(reloaded_owner.session_id, "");
+        assert!(persistence.load("forward-session").is_err());
+    }
+
+    #[test]
+    fn test_rebind_owner_to_session_updates_all_owned_forwards() {
+        let (_temp_dir, store) = create_test_store();
+        let persistence = ForwardPersistence::new(store);
+
+        for i in 1..=2 {
+            let forward = PersistedForward::new(
+                format!("forward-{}", i),
+                String::new(),
+                Some("conn-1".to_string()),
+                ForwardType::Local,
+                create_test_forward_rule(),
+                false,
+            );
+            persistence.save(&forward).unwrap();
+        }
+
+        assert_eq!(
+            persistence
+                .rebind_owner_to_session("conn-1", "session-9")
+                .unwrap(),
+            2
+        );
+        assert!(
+            persistence
+                .load_by_owner("conn-1")
+                .unwrap()
+                .into_iter()
+                .all(|forward| forward.session_id == "session-9")
+        );
+    }
+
+    #[test]
+    fn test_rebind_owner_to_session_does_not_override_existing_binding() {
+        let (_temp_dir, store) = create_test_store();
+        let persistence = ForwardPersistence::new(store);
+
+        let forward = PersistedForward::new(
+            "forward-existing".to_string(),
+            "session-existing".to_string(),
+            Some("conn-1".to_string()),
+            ForwardType::Local,
+            create_test_forward_rule(),
+            false,
+        );
+        persistence.save(&forward).unwrap();
+
+        assert_eq!(
+            persistence
+                .rebind_owner_to_session("conn-1", "session-new")
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            persistence.load("forward-existing").unwrap().session_id,
+            "session-existing"
+        );
     }
 }

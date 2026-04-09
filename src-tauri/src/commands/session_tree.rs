@@ -17,6 +17,8 @@ use crate::session::types::SessionConfig;
 use crate::ssh::SshConnectionRegistry;
 use zeroize::Zeroizing;
 
+use super::forwarding::ForwardingRegistry;
+
 /// Session Tree 状态（全局单例）
 pub struct SessionTreeState {
     pub tree: RwLock<SessionTree>,
@@ -421,12 +423,27 @@ pub async fn set_tree_node_connection(
 #[tauri::command]
 pub async fn set_tree_node_terminal(
     state: State<'_, Arc<SessionTreeState>>,
+    forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
     node_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    let mut tree = state.tree.write().await;
-    tree.set_terminal_session_id(&node_id, session_id)
-        .map_err(|e| e.to_string())?;
+    let owner_connection_id = {
+        let mut tree = state.tree.write().await;
+        let owner_connection_id = tree
+            .get_node(&node_id)
+            .and_then(|node| node.origin.saved_connection_id().map(|id| id.to_string()));
+
+        tree.set_terminal_session_id(&node_id, session_id.clone())
+            .map_err(|e| e.to_string())?;
+        owner_connection_id
+    };
+
+    if let Some(owner_connection_id) = owner_connection_id {
+        forwarding_registry
+            .bind_owned_forwards_to_session(&owner_connection_id, &session_id)
+            .await?;
+    }
+
     Ok(())
 }
 
