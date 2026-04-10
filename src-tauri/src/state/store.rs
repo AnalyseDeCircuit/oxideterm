@@ -121,37 +121,10 @@ impl StateStore {
 
         #[cfg(windows)]
         {
-            // Restrict database file permissions to current user only via icacls
-            let path_str = path.to_string_lossy();
-            match std::env::var("USERNAME") {
-                Ok(username) if !username.is_empty() => {
-                    let result = std::process::Command::new("icacls")
-                        .args([
-                            &*path_str,
-                            "/inheritance:r",
-                            "/grant:r",
-                            &format!("{}:(R,W)", username),
-                        ])
-                        .output();
-                    match result {
-                        Ok(output) if output.status.success() => {
-                            info!("Set database file ACL to owner-only (Windows)");
-                        }
-                        Ok(output) => {
-                            warn!(
-                                "Failed to set ACL on database file: {}",
-                                String::from_utf8_lossy(&output.stderr)
-                            );
-                        }
-                        Err(e) => {
-                            warn!("Failed to run icacls for database file: {}", e);
-                        }
-                    }
-                }
-                _ => {
-                    warn!("Cannot determine Windows username - database ACL not restricted");
-                }
-            }
+            // Windows user-profile data directories are already per-user. Attempting to
+            // rewrite the ACL here can leave the redb file unreadable on the next launch.
+            // Keep the existing inherited ACLs to avoid self-locking the app.
+            info!("Skipping Windows ACL rewrite for state database");
         }
 
         let store = Self { db: Arc::new(db) };
