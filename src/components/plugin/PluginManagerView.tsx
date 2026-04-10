@@ -31,7 +31,7 @@ import {
   ScrollText,
   X,
 } from 'lucide-react';
-import { homeDir, join } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Separator } from '../ui/separator';
 import { usePluginStore } from '../../store/pluginStore';
@@ -564,8 +564,8 @@ export function PluginManagerView() {
 
   const handleOpenPluginsDir = useCallback(async () => {
     try {
-      const home = await homeDir();
-      const pluginsPath = await join(home, '.oxideterm', 'plugins');
+      const dataDir = await api.getDataDirectory();
+      const pluginsPath = await join(dataDir.path, 'plugins');
       await openPath(pluginsPath);
     } catch (err) {
       console.error('[PluginManager] Failed to open plugins directory:', err);

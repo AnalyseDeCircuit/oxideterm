@@ -541,7 +541,7 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         const newTab = {
           id: crypto.randomUUID(),
           type: 'plugin' as const,
-          title: tabDef?.title ?? tabId,
+          title: tabDef?.title ? i18nManager.t(tabDef.title) : tabId,
           icon: tabDef?.icon ?? 'Puzzle',
           pluginTabId: compositeKey,
         };
