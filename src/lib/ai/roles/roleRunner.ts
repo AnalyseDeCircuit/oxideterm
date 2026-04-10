@@ -220,8 +220,19 @@ export async function processToolCalls(
 
   // Clamp to max per round
   const clamped = toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
+  const dropped = toolCalls.slice(MAX_TOOL_CALLS_PER_ROUND);
   const results: ChatMessage[] = [];
   let allSucceeded = true;
+  const overflowContent = dropped.length > 0
+    ? `Too many tool calls in one round (${toolCalls.length}). Only the first ${MAX_TOOL_CALLS_PER_ROUND} were executed; retry the remaining work in a later round.`
+    : null;
+
+  if (overflowContent) {
+    allSucceeded = false;
+    const overflowStep = createStep(round, 'error', overflowContent);
+    store().appendStep(overflowStep);
+    store().updateStep(overflowStep.id, { status: 'error' });
+  }
 
   for (const tc of clamped) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -367,6 +378,17 @@ export async function processToolCalls(
       tool_call_id: tc.id,
       tool_name: tc.name,
     });
+  }
+
+  if (overflowContent) {
+    for (const tc of dropped) {
+      results.push({
+        role: 'tool',
+        content: `Error: ${overflowContent}`,
+        tool_call_id: tc.id,
+        tool_name: tc.name,
+      });
+    }
   }
 
   return { results, allSucceeded };

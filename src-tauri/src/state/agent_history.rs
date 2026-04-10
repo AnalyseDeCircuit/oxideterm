@@ -270,6 +270,10 @@ impl AgentHistoryStore {
         status_filter: Option<&str>,
         search_query: Option<&str>,
     ) -> Result<Vec<TaskMeta>, AgentHistoryError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let txn = self.db.begin_read()?;
         let index_table = txn.open_table(INDEX_TABLE)?;
         let meta_table = txn.open_table(META_TABLE)?;
@@ -387,6 +391,10 @@ impl AgentHistoryStore {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<String>, AgentHistoryError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let txn = self.db.begin_read()?;
         let steps_table = txn.open_table(STEPS_TABLE)?;
 
@@ -546,14 +554,14 @@ impl AgentHistoryStore {
         steps_table: &mut redb::Table<&str, &[u8]>,
         task_id: &str,
     ) -> Result<(), AgentHistoryError> {
-        // Delete step keys sequentially. We don't know exact count
-        // but MAX_STEPS_PER_TASK bounds the range. Check until miss.
+        // Delete step keys across the whole bounded range. Do not stop at the
+        // first miss because sparse indices can exist after interrupted writes
+        // or malformed callers, and we must not leave orphan step rows behind.
         for i in 0..MAX_STEPS_PER_TASK {
             let key = step_key(task_id, i as u32);
             match steps_table.remove(key.as_str()) {
-                Ok(None) => break, // no more steps
-                Ok(Some(_)) => {}
-                Err(_) => break,
+                Ok(_) => {}
+                Err(_) => continue,
             }
         }
         Ok(())
@@ -576,5 +584,71 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
     } else {
         let truncated: String = s.chars().take(max_chars).collect();
         format!("{}…", truncated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn create_store() -> (TempDir, AgentHistoryStore) {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("agent_history.redb");
+        let store = AgentHistoryStore::new(db_path).unwrap();
+        (temp_dir, store)
+    }
+
+    fn sample_meta(task_id: &str) -> TaskMeta {
+        TaskMeta {
+            id: task_id.to_string(),
+            goal: format!("goal for {task_id}"),
+            status: "completed".to_string(),
+            autonomy_level: "balanced".to_string(),
+            provider_id: "provider-1".to_string(),
+            model: "model-1".to_string(),
+            current_round: 3,
+            max_rounds: 10,
+            created_at: 1.0,
+            completed_at: Some(2.0),
+            summary: Some("done".to_string()),
+            error: None,
+            step_count: 1,
+            plan_description: None,
+            plan_json: None,
+            context_tab_type: None,
+        }
+    }
+
+    #[test]
+    fn zero_limits_return_empty_results() {
+        let (_temp_dir, store) = create_store();
+        store.save_meta(&sample_meta("task-1")).unwrap();
+        store.append_step("task-1", 0, r#"{"id":"s1"}"#).unwrap();
+
+        let metas = store.list_meta(0, None, None).unwrap();
+        let steps = store.get_steps("task-1", 0, 0).unwrap();
+
+        assert!(metas.is_empty());
+        assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn delete_task_removes_sparse_steps() {
+        let (_temp_dir, store) = create_store();
+        store.save_meta(&sample_meta("task-2")).unwrap();
+        store
+            .append_step("task-2", 3, r#"{"id":"late-step"}"#)
+            .unwrap();
+
+        assert_eq!(store.get_steps("task-2", 0, 10).unwrap().len(), 1);
+
+        store.delete_task("task-2").unwrap();
+
+        assert!(matches!(
+            store.get_meta("task-2"),
+            Err(AgentHistoryError::NotFound(_))
+        ));
+        assert!(store.get_steps("task-2", 0, 10).unwrap().is_empty());
     }
 }

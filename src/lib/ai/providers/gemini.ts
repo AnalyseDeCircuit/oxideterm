@@ -144,6 +144,35 @@ export const geminiProvider: AiStreamProvider = {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    const processDataLine = (line: string): AiStreamEvent[] => {
+      if (!line.startsWith('data: ')) return [];
+      const data = line.slice(6).trim();
+      if (!data) return [];
+
+      const events: AiStreamEvent[] = [];
+
+      try {
+        const json = JSON.parse(data);
+        const candidates = json.candidates;
+        if (candidates?.[0]?.content?.parts) {
+          for (const part of candidates[0].content.parts) {
+            if (part.text) {
+              events.push({ type: 'content', content: part.text });
+            }
+            if (part.functionCall) {
+              const callId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+              const args = JSON.stringify(part.functionCall.args || {});
+              events.push({ type: 'tool_call_complete', id: callId, name: part.functionCall.name, arguments: args });
+            }
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      return events;
+    };
+
     try {
       while (true) {
         if (signal.aborted) break;
@@ -155,29 +184,15 @@ export const geminiProvider: AiStreamProvider = {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (!data) continue;
-
-          try {
-            const json = JSON.parse(data);
-            const candidates = json.candidates;
-            if (candidates?.[0]?.content?.parts) {
-              for (const part of candidates[0].content.parts) {
-                if (part.text) {
-                  yield { type: 'content', content: part.text };
-                }
-                // Handle function calling
-                if (part.functionCall) {
-                  const callId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                  const args = JSON.stringify(part.functionCall.args || {});
-                  yield { type: 'tool_call_complete', id: callId, name: part.functionCall.name, arguments: args };
-                }
-              }
-            }
-          } catch {
-            // Ignore parse errors
+          for (const event of processDataLine(line)) {
+            yield event;
           }
+        }
+      }
+
+      if (buffer.trim()) {
+        for (const event of processDataLine(buffer.trim())) {
+          yield event;
         }
       }
     } finally {

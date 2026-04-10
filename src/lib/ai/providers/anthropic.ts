@@ -179,6 +179,67 @@ export const anthropicProvider: AiStreamProvider = {
     // Track current tool_use block being assembled
     let currentToolUse: { id: string; name: string; arguments: string } | null = null;
 
+    const processDataLine = (line: string): { events: AiStreamEvent[]; done: boolean } => {
+      if (!line.startsWith('data: ')) return { events: [], done: false };
+      const data = line.slice(6).trim();
+      if (!data) return { events: [], done: false };
+
+      const events: AiStreamEvent[] = [];
+
+      try {
+        const event = JSON.parse(data);
+
+        switch (event.type) {
+          case 'content_block_start': {
+            const block = event.content_block;
+            if (block?.type === 'tool_use') {
+              currentToolUse = {
+                id: block.id || '',
+                name: block.name || '',
+                arguments: '',
+              };
+            }
+            break;
+          }
+
+          case 'content_block_delta': {
+            const delta = event.delta;
+            if (delta?.type === 'thinking_delta' && delta.thinking) {
+              events.push({ type: 'thinking', content: delta.thinking });
+            } else if (delta?.type === 'text_delta' && delta.text) {
+              events.push({ type: 'content', content: delta.text });
+            } else if (delta?.type === 'input_json_delta' && delta.partial_json && currentToolUse) {
+              currentToolUse.arguments += delta.partial_json;
+              events.push({ type: 'tool_call', id: currentToolUse.id, name: currentToolUse.name, arguments: currentToolUse.arguments });
+            }
+            break;
+          }
+
+          case 'content_block_stop': {
+            if (currentToolUse) {
+              events.push({ type: 'tool_call_complete', id: currentToolUse.id, name: currentToolUse.name, arguments: currentToolUse.arguments });
+              currentToolUse = null;
+            }
+            break;
+          }
+
+          case 'message_stop': {
+            events.push({ type: 'done' });
+            return { events, done: true };
+          }
+
+          case 'error': {
+            events.push({ type: 'error', message: event.error?.message || 'Anthropic stream error' });
+            return { events, done: true };
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      return { events, done: false };
+    };
+
     try {
       while (true) {
         if (signal.aborted) break;
@@ -190,61 +251,29 @@ export const anthropicProvider: AiStreamProvider = {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (!data) continue;
-
-          try {
-            const event = JSON.parse(data);
-
-            switch (event.type) {
-              case 'content_block_start': {
-                const block = event.content_block;
-                if (block?.type === 'tool_use') {
-                  currentToolUse = {
-                    id: block.id || '',
-                    name: block.name || '',
-                    arguments: '',
-                  };
-                }
-                break;
-              }
-
-              case 'content_block_delta': {
-                const delta = event.delta;
-                if (delta?.type === 'thinking_delta' && delta.thinking) {
-                  yield { type: 'thinking', content: delta.thinking };
-                } else if (delta?.type === 'text_delta' && delta.text) {
-                  yield { type: 'content', content: delta.text };
-                } else if (delta?.type === 'input_json_delta' && delta.partial_json && currentToolUse) {
-                  currentToolUse.arguments += delta.partial_json;
-                  yield { type: 'tool_call', id: currentToolUse.id, name: currentToolUse.name, arguments: currentToolUse.arguments };
-                }
-                break;
-              }
-
-              case 'content_block_stop': {
-                if (currentToolUse) {
-                  yield { type: 'tool_call_complete', id: currentToolUse.id, name: currentToolUse.name, arguments: currentToolUse.arguments };
-                  currentToolUse = null;
-                }
-                break;
-              }
-
-              case 'message_stop': {
-                yield { type: 'done' };
-                return;
-              }
-
-              case 'error': {
-                yield { type: 'error', message: event.error?.message || 'Anthropic stream error' };
-                return;
-              }
-            }
-          } catch {
-            // Ignore parse errors
+          const processed = processDataLine(line);
+          for (const event of processed.events) {
+            yield event;
+          }
+          if (processed.done) {
+            return;
           }
         }
+      }
+
+      if (buffer.trim()) {
+        const processed = processDataLine(buffer.trim());
+        for (const event of processed.events) {
+          yield event;
+        }
+        if (processed.done) {
+          return;
+        }
+      }
+
+      if (currentToolUse) {
+        yield { type: 'tool_call_complete', id: currentToolUse.id, name: currentToolUse.name, arguments: currentToolUse.arguments };
+        currentToolUse = null;
       }
     } finally {
       reader.releaseLock();

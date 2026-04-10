@@ -144,6 +144,59 @@ export const ollamaProvider: AiStreamProvider = {
     let buffer = '';
     const pendingToolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
+    const processDataLine = (line: string): { events: AiStreamEvent[]; done: boolean } => {
+      if (!line.startsWith('data: ')) return { events: [], done: false };
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') {
+        const events: AiStreamEvent[] = [];
+        for (const tc of pendingToolCalls.values()) {
+          events.push({ type: 'tool_call_complete', id: tc.id, name: tc.name, arguments: tc.arguments });
+        }
+        pendingToolCalls.clear();
+        events.push({ type: 'done' });
+        return { events, done: true };
+      }
+
+      const events: AiStreamEvent[] = [];
+      try {
+        const json = JSON.parse(data);
+        const delta = json.choices?.[0]?.delta;
+        const finishReason = json.choices?.[0]?.finish_reason;
+
+        if (delta?.reasoning_content) {
+          events.push({ type: 'thinking', content: delta.reasoning_content });
+        }
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!pendingToolCalls.has(idx)) {
+              pendingToolCalls.set(idx, { id: tc.id || '', name: tc.function?.name || '', arguments: '' });
+            }
+            const pending = pendingToolCalls.get(idx)!;
+            if (tc.id) pending.id = tc.id;
+            if (tc.function?.name) pending.name = tc.function.name;
+            if (tc.function?.arguments) {
+              pending.arguments += tc.function.arguments;
+              events.push({ type: 'tool_call', id: pending.id, name: pending.name, arguments: pending.arguments });
+            }
+          }
+        }
+        if (finishReason === 'tool_calls') {
+          for (const tc of pendingToolCalls.values()) {
+            events.push({ type: 'tool_call_complete', id: tc.id, name: tc.name, arguments: tc.arguments });
+          }
+          pendingToolCalls.clear();
+        }
+        if (delta?.content) {
+          events.push({ type: 'content', content: delta.content });
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      return { events, done: false };
+    };
+
     try {
       while (true) {
         if (signal.aborted) break;
@@ -155,55 +208,31 @@ export const ollamaProvider: AiStreamProvider = {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') {
-              for (const tc of pendingToolCalls.values()) {
-                yield { type: 'tool_call_complete', id: tc.id, name: tc.name, arguments: tc.arguments };
-              }
-              pendingToolCalls.clear();
-              yield { type: 'done' };
-              return;
-            }
-
-            try {
-              const json = JSON.parse(data);
-              const delta = json.choices?.[0]?.delta;
-              const finishReason = json.choices?.[0]?.finish_reason;
-
-              if (delta?.reasoning_content) {
-                yield { type: 'thinking', content: delta.reasoning_content };
-              }
-              // Handle tool_calls delta (OpenAI-compatible format)
-              if (delta?.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  if (!pendingToolCalls.has(idx)) {
-                    pendingToolCalls.set(idx, { id: tc.id || '', name: tc.function?.name || '', arguments: '' });
-                  }
-                  const pending = pendingToolCalls.get(idx)!;
-                  if (tc.id) pending.id = tc.id;
-                  if (tc.function?.name) pending.name = tc.function.name;
-                  if (tc.function?.arguments) {
-                    pending.arguments += tc.function.arguments;
-                    yield { type: 'tool_call', id: pending.id, name: pending.name, arguments: pending.arguments };
-                  }
-                }
-              }
-              if (finishReason === 'tool_calls') {
-                for (const tc of pendingToolCalls.values()) {
-                  yield { type: 'tool_call_complete', id: tc.id, name: tc.name, arguments: tc.arguments };
-                }
-                pendingToolCalls.clear();
-              }
-              if (delta?.content) {
-                yield { type: 'content', content: delta.content };
-              }
-            } catch {
-              // Ignore parse errors
-            }
+          const processed = processDataLine(line);
+          for (const event of processed.events) {
+            yield event;
+          }
+          if (processed.done) {
+            return;
           }
         }
+      }
+
+      if (buffer.trim()) {
+        const processed = processDataLine(buffer.trim());
+        for (const event of processed.events) {
+          yield event;
+        }
+        if (processed.done) {
+          return;
+        }
+      }
+
+      if (pendingToolCalls.size > 0) {
+        for (const tc of pendingToolCalls.values()) {
+          yield { type: 'tool_call_complete', id: tc.id, name: tc.name, arguments: tc.arguments };
+        }
+        pendingToolCalls.clear();
       }
     } finally {
       reader.releaseLock();

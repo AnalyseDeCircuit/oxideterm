@@ -63,6 +63,21 @@ async function persistTask(task: AgentTask): Promise<void> {
   }
 }
 
+function upsertTaskHistory(taskHistory: AgentTaskMeta[], task: AgentTask): AgentTaskMeta[] {
+  const meta = buildTaskMeta(task);
+  return [meta, ...taskHistory.filter((entry) => entry.id !== meta.id)].slice(0, 50);
+}
+
+async function persistTaskAndClearCheckpoint(task: AgentTask): Promise<void> {
+  await persistTask(task);
+  await api.agentHistoryClearCheckpoint();
+}
+
+function isTaskTerminal(task: AgentTask | null): boolean {
+  if (!task) return true;
+  return task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
+}
+
 /** Load steps from backend and reconstruct a full AgentTask from meta */
 async function loadFullTask(meta: AgentTaskMeta): Promise<AgentTask> {
   const stepsJson = await api.agentHistoryGetSteps(meta.id, 0, meta.stepCount || 500);
@@ -227,7 +242,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   startTask: (goal, providerId, model, contextTabType, seedPlan) => {
     // Cancel any running task first
     const current = get();
-    if (current.isRunning && current.abortController) {
+    if (!isTaskTerminal(current.activeTask) && current.abortController) {
       current.abortController.abort();
     }
 
@@ -239,12 +254,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       const taskToArchive = (current.activeTask.status === 'executing' || current.activeTask.status === 'planning')
         ? { ...current.activeTask, status: 'cancelled' as const, completedAt: Date.now() }
         : current.activeTask;
-      const meta = buildTaskMeta(taskToArchive);
       set((s) => ({
-        taskHistory: [meta, ...s.taskHistory].slice(0, 50),
+        taskHistory: upsertTaskHistory(s.taskHistory, taskToArchive),
       }));
-      // Persist archived task (meta + steps)
-      persistTask(taskToArchive).catch((e) => {
+      persistTaskAndClearCheckpoint(taskToArchive).catch((e) => {
         console.warn('[AgentStore] Failed to persist archived task:', e);
       });
     }
@@ -311,11 +324,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       completedAt: Date.now(),
     };
 
-    set({
+    set((s) => ({
       activeTask: finishedTask,
+      taskHistory: upsertTaskHistory(s.taskHistory, finishedTask),
       isRunning: false,
       pendingApprovals: [],
       abortController: null,
+    }));
+
+    persistTaskAndClearCheckpoint(finishedTask).catch((e) => {
+      console.warn('[AgentStore] Failed to persist cancelled task:', e);
     });
 
     // Clear pending resolvers
@@ -338,7 +356,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
 
     // Cancel any running task first
-    if (current.isRunning && current.abortController) {
+    if (!isTaskTerminal(current.activeTask) && current.abortController) {
       current.abortController.abort();
     }
     clearApprovalResolvers();
@@ -348,11 +366,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       const taskToArchive = (current.activeTask.status === 'executing' || current.activeTask.status === 'planning')
         ? { ...current.activeTask, status: 'cancelled' as const, completedAt: Date.now() }
         : current.activeTask;
-      const meta = buildTaskMeta(taskToArchive);
       set((s) => ({
-        taskHistory: [meta, ...s.taskHistory].slice(0, 50),
+        taskHistory: upsertTaskHistory(s.taskHistory, taskToArchive),
       }));
-      persistTask(taskToArchive).catch((e) => {
+      persistTaskAndClearCheckpoint(taskToArchive).catch((e) => {
         console.warn('[AgentStore] Failed to persist archived task:', e);
       });
     }
@@ -543,16 +560,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         status,
         completedAt: finished ? Date.now() : s.activeTask.completedAt,
       };
-      // Persist finished tasks to backend (meta + steps)
       if (finished) {
-        persistTask(updatedTask).then(() =>
-          api.agentHistoryClearCheckpoint()
-        ).catch((e) => {
+        persistTaskAndClearCheckpoint(updatedTask).catch((e) => {
           console.warn('[AgentStore] Failed to persist task history:', e);
         });
       }
       return {
         activeTask: updatedTask,
+        ...(finished ? { taskHistory: upsertTaskHistory(s.taskHistory, updatedTask) } : {}),
         isRunning: !finished && status !== 'paused' && status !== 'awaiting_approval',
         ...(finished ? { pendingApprovals: [] } : {}),
       };
@@ -573,14 +588,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     set((s) => {
       if (!s.activeTask) return s;
       const finishedTask = { ...s.activeTask, error, status: 'failed' as const, completedAt: Date.now() };
-      // Persist failed task (meta + steps)
-      persistTask(finishedTask).then(() =>
-        api.agentHistoryClearCheckpoint()
-      ).catch((e) => {
+      persistTaskAndClearCheckpoint(finishedTask).catch((e) => {
         console.warn('[AgentStore] Failed to persist failed task:', e);
       });
       return {
         activeTask: finishedTask,
+        taskHistory: upsertTaskHistory(s.taskHistory, finishedTask),
         isRunning: false,
         abortController: null,
         pendingApprovals: [],

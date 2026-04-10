@@ -14,6 +14,7 @@
  */
 
 import type { AgentStep } from '../../types';
+import { parseReviewResponse } from './structuredOutput';
 
 // DEFAULT_REVIEW_INTERVAL is now in agentConfig.ts — kept as re-export for compatibility
 export { DEFAULT_REVIEW_INTERVAL } from './agentConfig';
@@ -85,19 +86,26 @@ export function parseReview(text: string): {
   suggestions: string[];
   shouldContinue: boolean;
 } | null {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
-  const toParse = jsonMatch ? jsonMatch[1] : text;
-  try {
-    const parsed = JSON.parse(toParse);
-    if (parsed.review) {
-      const validAssessments = new Set(['on_track', 'needs_correction', 'critical_issue'] as const);
-      return {
-        assessment: validAssessments.has(parsed.review.assessment) ? parsed.review.assessment : 'on_track',
-        findings: typeof parsed.review.findings === 'string' ? parsed.review.findings : '',
-        suggestions: Array.isArray(parsed.review.suggestions) ? parsed.review.suggestions : [],
-        shouldContinue: parsed.review.should_continue !== false,
-      };
-    }
-  } catch { /* not a valid review response */ }
-  return null;
+  return parseReviewResponse(text);
+}
+
+export function shouldRunReviewerForRound(round: number, reviewInterval: number): boolean {
+  return reviewInterval > 0 && ((round + 1) % reviewInterval === 0);
+}
+
+export function formatReviewFeedback(
+  review: {
+    assessment: 'on_track' | 'needs_correction' | 'critical_issue';
+    findings: string;
+    suggestions: string[];
+  },
+  round: number,
+): string | null {
+  if (review.assessment === 'on_track') return null;
+
+  const lines = [`[Review feedback after round ${round + 1}]: ${review.findings || 'Reviewer requested course correction.'}`];
+  if (review.suggestions.length > 0) {
+    lines.push(`Suggestions: ${review.suggestions.join('; ')}`);
+  }
+  return lines.join('\n');
 }

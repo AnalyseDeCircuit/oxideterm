@@ -12,6 +12,7 @@
  */
 
 import type { AutonomyLevel } from '../../types';
+export { parsePlanResponse } from './structuredOutput';
 
 /** Build a planner-specific system prompt (focused on analysis and plan generation) */
 export function buildPlannerSystemPrompt(options: {

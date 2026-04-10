@@ -19,8 +19,8 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getProvider } from './providerRegistry';
 import { buildAgentSystemPrompt } from './agentSystemPrompt';
-import { buildPlannerSystemPrompt } from './agentPlanner';
-import { buildReviewerSystemPrompt, buildReviewPrompt, parseReview } from './agentReviewer';
+import { buildPlannerSystemPrompt, parsePlanResponse } from './agentPlanner';
+import { buildReviewerSystemPrompt, buildReviewPrompt, formatReviewFeedback, parseReview, shouldRunReviewerForRound } from './agentReviewer';
 import { getToolsForContext } from './tools';
 import { estimateTokens, getModelContextWindow, responseReserve } from './tokenUtils';
 import { getActiveCwd, getActivePaneMetadata } from '../terminalRegistry';
@@ -37,6 +37,7 @@ import {
   CONTEXT_OVERFLOW_RATIO,
   DEFAULT_REVIEW_INTERVAL,
 } from './agentConfig';
+import { parseCompletionResponse } from './structuredOutput';
 import {
   streamCompletion,
   runSingleShot,
@@ -245,68 +246,8 @@ function rebuildMessagesFromSteps(messages: ChatMessage[], steps: AgentStep[]): 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helper: Parse plan from LLM response
-// ═══════════════════════════════════════════════════════════════════════════
-
-function parsePlan(text: string): { description: string; steps: AgentPlanStep[] } | null {
-  // Try to extract JSON plan from the response
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
-      if (parsed.plan?.steps && Array.isArray(parsed.plan.steps)) {
-        return {
-          description: parsed.plan.description || '',
-          steps: parsed.plan.steps.map((s: unknown) => ({
-            description: typeof s === 'string' ? s : String(s),
-            status: 'pending' as const,
-          })),
-        };
-      }
-    } catch { /* fallthrough */ }
-  }
-
-  // Try raw JSON parse
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed.plan?.steps && Array.isArray(parsed.plan.steps)) {
-      return {
-        description: parsed.plan.description || '',
-        steps: parsed.plan.steps.map((s: unknown) => ({
-          description: typeof s === 'string' ? s : String(s),
-          status: 'pending' as const,
-        })),
-      };
-    }
-  } catch { /* fallthrough */ }
-
-  return null;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Helper: Parse completion status from LLM response
 // ═══════════════════════════════════════════════════════════════════════════
-
-function parseCompletion(text: string): { status: 'completed' | 'failed'; summary: string; details: string } | null {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
-  const toParse = jsonMatch ? jsonMatch[1] : text;
-  try {
-    const parsed = JSON.parse(toParse);
-    if (parsed.status && parsed.summary) {
-      // Ensure details is always a string — AI may return an object
-      const rawDetails = parsed.details;
-      const details = typeof rawDetails === 'string'
-        ? rawDetails
-        : (rawDetails && typeof rawDetails === 'object' ? JSON.stringify(rawDetails, null, 2) : '');
-      return {
-        status: parsed.status === 'failed' ? 'failed' : 'completed',
-        summary: typeof parsed.summary === 'string' ? parsed.summary : String(parsed.summary),
-        details,
-      };
-    }
-  } catch { /* not a completion response */ }
-  return null;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helper: Get available sessions description
@@ -596,7 +537,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       }
 
       // Parse plan
-      const parsedPlan = parsePlan(planText);
+      const parsedPlan = parsePlanResponse(planText);
       if (parsedPlan) {
         store().setPlan({
           description: parsedPlan.description,
@@ -687,7 +628,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
 
       // Check if LLM returned a completion response (no tool calls)
       if (collectedToolCalls.length === 0) {
-        const completion = parseCompletion(responseText);
+        const completion = parseCompletionResponse(responseText);
 
         // Record the decision/observation
         const decisionStep = createStep(round, 'decision', responseText);
@@ -782,7 +723,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
 
       // ── Reviewer Check ────────────────────────────────────────────────
       // Invoke the reviewer at configured intervals to audit recent actions
-      if (reviewInterval > 0 && round > 0 && ((round + 1) % reviewInterval === 0)) {
+      if (shouldRunReviewerForRound(round, reviewInterval)) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
         try {
@@ -829,8 +770,8 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
               }
 
               // Inject review feedback into executor's conversation
-              if (review.assessment !== 'on_track' && review.suggestions.length > 0) {
-                const feedbackMsg = `[Review feedback after round ${round + 1}]: ${review.findings}\nSuggestions: ${review.suggestions.join('; ')}`;
+              const feedbackMsg = formatReviewFeedback(review, round);
+              if (feedbackMsg) {
                 messages.push({ role: 'user', content: feedbackMsg });
               }
             }
