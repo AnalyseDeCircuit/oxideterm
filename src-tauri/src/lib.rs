@@ -754,6 +754,7 @@ pub fn run() {
         // Plugin registry commands (remote install)
         commands::fetch_plugin_registry,
         commands::install_plugin,
+        commands::install_plugin_from_url,
         commands::uninstall_plugin,
         commands::check_plugin_updates,
         // Oxide-Next: node-first commands (Phase 0)
@@ -1087,6 +1088,7 @@ pub fn run() {
         // Plugin registry commands (remote install)
         commands::fetch_plugin_registry,
         commands::install_plugin,
+        commands::install_plugin_from_url,
         commands::uninstall_plugin,
         commands::check_plugin_updates,
         // Oxide-Next: node-first commands (Phase 0)

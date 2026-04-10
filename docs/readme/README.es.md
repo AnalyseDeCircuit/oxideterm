@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="Versión">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="Versión">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plataforma">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licencia">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -105,6 +105,26 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **CLI** | Companion `oxt`: JSON-RPC 2.0 vía Unix Socket / Named Pipe, `status`/`list`/`ping`, salida legible + JSON |
 | **Seguridad** | Exportación .oxide cifrada (ChaCha20-Poly1305 + Argon2id 256 MB), configuración local cifrada en reposo, llavero del SO, Touch ID (macOS), TOFU de clave de host, limpieza de memoria `zeroize` |
 | **i18n** | 11 idiomas: EN, 简体中文, 繁體中文, 日本語, 한국어, FR, DE, ES, IT, PT-BR, VI |
+
+---
+
+<div align="center">
+
+### 📊 Estadísticas del código
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>Líneas de código</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>Densidad del código</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>Líneas de test</sub></td>
+<td align="center"><strong>84</strong><br/><sub>Archivos de test</sub></td>
+<td align="center"><strong>910</strong><br/><sub>Archivos fuente</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · proporción tests/código 9,1% · sin frameworks de test externos</sub>
+
+</div>
 
 ---
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## Hoja de ruta
 
 - [x] Reenvío de agente SSH
-- [ ] Marketplace de plugins
+- [ ] Soporte completo de ProxyCommand
+- [ ] Registro de auditoría
+- [ ] Mejoras del Agent
+- [ ] Comandos rápidos
 - [ ] Búsqueda de sesiones y cambio rápido
 
 ---
@@ -402,7 +425,7 @@ Texto completo: [Licencia Pública General de GNU v3.0](https://www.gnu.org/lice
 ---
 
 <p align="center">
-  <sub>236.000+ líneas de Rust y TypeScript — construido con ⚡ y ☕</sub>
+  <sub>271.000+ líneas de Rust y TypeScript — construido con ⚡ y ☕</sub>
 </p>
 
 ## Star History

@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plateforme">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licence">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -108,7 +108,27 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 ---
 
-## Sous le capot
+<div align="center">
+
+### 📊 Statistiques du code
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>Lignes de code</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>Densité du code</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>Lignes de tests</sub></td>
+<td align="center"><strong>84</strong><br/><sub>Fichiers de test</sub></td>
+<td align="center"><strong>910</strong><br/><sub>Fichiers source</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · ratio tests/code 9,1% · aucun framework de test externe</sub>
+
+</div>
+
+---
+
+## Fonctionnement interne
 
 ### Architecture — Communication à double plan
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## Feuille de route
 
 - [x] Transfert d'agent SSH
-- [ ] Marketplace de plugins
+- [ ] Support complet de ProxyCommand
+- [ ] Journalisation d'audit
+- [ ] Améliorations de l'Agent
+- [ ] Commandes rapides
 - [ ] Recherche de sessions & changement rapide
 
 ---
@@ -402,7 +425,7 @@ Texte intégral : [Licence Publique Générale GNU v3.0](https://www.gnu.org/lic
 ---
 
 <p align="center">
-  <sub>236 000+ lignes de Rust & TypeScript — construit avec ⚡ et ☕</sub>
+  <sub>271 000+ lignes de Rust & TypeScript — construit avec ⚡ et ☕</sub>
 </p>
 
 ## Star History

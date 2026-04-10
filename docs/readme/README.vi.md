@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="Phiên bản">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="Phiên bản">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Nền tảng">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Giấy phép">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -108,7 +108,27 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 ---
 
-## Bên trong cỗ máy
+<div align="center">
+
+### 📊 Thống kê mã nguồn
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>Dòng mã</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>Mật độ mã</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>Dòng mã test</sub></td>
+<td align="center"><strong>84</strong><br/><sub>Tệp test</sub></td>
+<td align="center"><strong>910</strong><br/><sub>Tệp nguồn</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · tỷ lệ test/mã 9,1% · không dùng framework test bên ngoài</sub>
+
+</div>
+
+---
+
+## Bên trong
 
 ### Kiến trúc — Giao tiếp hai mặt phẳng
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## Lộ trình
 
 - [x] Chuyển tiếp SSH Agent
-- [ ] Marketplace plugin
+- [ ] Hỗ trợ ProxyCommand đầy đủ
+- [ ] Nhật ký kiểm toán
+- [ ] Nâng cao Agent
+- [ ] Lệnh nhanh
 - [ ] Tìm kiếm phiên & chuyển đổi nhanh
 
 ---
@@ -402,7 +425,7 @@ Toàn văn: [Giấy phép Công cộng GNU v3.0](https://www.gnu.org/licenses/gp
 ---
 
 <p align="center">
-  <sub>236.000+ dòng Rust & TypeScript — xây dựng với ⚡ và ☕</sub>
+  <sub>271.000+ dòng Rust & TypeScript — xây dựng với ⚡ và ☕</sub>
 </p>
 
 ## Star History

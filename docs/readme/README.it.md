@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="Versione">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="Versione">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Piattaforma">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licenza">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -105,6 +105,26 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **CLI** | Companion `oxt`: JSON-RPC 2.0 tramite Unix Socket / Named Pipe, `status`/`list`/`ping`, output leggibile + JSON |
 | **Sicurezza** | Export .oxide crittografato (ChaCha20-Poly1305 + Argon2id 256 MB), configurazione locale cifrata a riposo, portachiavi OS, Touch ID (macOS), TOFU chiave host, pulizia memoria `zeroize` |
 | **i18n** | 11 lingue: EN, 简体中文, 繁體中文, 日本語, 한국어, FR, DE, ES, IT, PT-BR, VI |
+
+---
+
+<div align="center">
+
+### 📊 Statistiche del codice
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>Righe di codice</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>Densità del codice</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>Righe di test</sub></td>
+<td align="center"><strong>84</strong><br/><sub>File di test</sub></td>
+<td align="center"><strong>910</strong><br/><sub>File sorgente</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · rapporto test/codice 9,1% · nessun framework di test esterno</sub>
+
+</div>
 
 ---
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## Roadmap
 
 - [x] Forwarding dell'agente SSH
-- [ ] Marketplace dei plugin
+- [ ] Supporto completo ProxyCommand
+- [ ] Registrazione audit
+- [ ] Miglioramenti Agent
+- [ ] Comandi rapidi
 - [ ] Ricerca sessioni e cambio rapido
 
 ---
@@ -402,7 +425,7 @@ Testo completo: [Licenza Pubblica Generale GNU v3.0](https://www.gnu.org/license
 ---
 
 <p align="center">
-  <sub>236.000+ righe di Rust e TypeScript — costruito con ⚡ e ☕</sub>
+  <sub>271.000+ righe di Rust e TypeScript — costruito con ⚡ e ☕</sub>
 </p>
 
 ## Star History

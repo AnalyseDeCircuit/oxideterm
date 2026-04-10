@@ -52,7 +52,7 @@ import {
   RagPendingEmbedding,
   RagSearchResult,
 } from '../types';
-import type { PluginManifest } from '../types/plugin';
+import type { PluginManifest, UrlInstallResult } from '../types/plugin';
 
 // Toggle this for development without a backend
 const USE_MOCK = false;
@@ -1570,6 +1570,16 @@ export const api = {
   ): Promise<PluginManifest> => {
     if (USE_MOCK) throw new Error('Mock mode does not support plugin installation');
     return invoke('install_plugin', { downloadUrl, expectedId, checksum });
+  },
+
+  /** Download and install a plugin from a URL without requiring a pre-known plugin ID */
+  pluginInstallFromUrl: async (
+    downloadUrl: string,
+    checksum?: string,
+    overwrite?: boolean,
+  ): Promise<UrlInstallResult> => {
+    if (USE_MOCK) throw new Error('Mock mode does not support plugin installation');
+    return invoke('install_plugin_from_url', { downloadUrl, checksum, overwrite });
   },
 
   /** Uninstall a plugin by removing its directory */

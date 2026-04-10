@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="버전">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="버전">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="플랫폼">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="라이선스">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -108,7 +108,27 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 ---
 
-## 내부 구조
+<div align="center">
+
+### 📊 코드 통계
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>코드 라인</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>코드 밀도</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>테스트 코드 라인</sub></td>
+<td align="center"><strong>84</strong><br/><sub>테스트 파일</sub></td>
+<td align="center"><strong>910</strong><br/><sub>소스 파일</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · 테스트/코드 비율 9.1% · 외부 테스트 프레임워크 미사용</sub>
+
+</div>
+
+---
+
+## 기술 상세
 
 ### 아키텍처 — 이중 평면 통신
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## 로드맵
 
 - [x] SSH Agent 포워딩
-- [ ] 플러그인 마켓플레이스
+- [ ] 완전한 ProxyCommand 지원
+- [ ] 감사 로깅
+- [ ] Agent 기능 강화
+- [ ] 빠른 명령어
 - [ ] 세션 검색 및 빠른 전환
 
 ---
@@ -402,7 +425,7 @@ GPL-3.0 조건에 따라 이 소프트웨어를 자유롭게 사용, 수정 및 
 ---
 
 <p align="center">
-  <sub>236,000줄 이상의 Rust & TypeScript — ⚡와 ☕로 구축</sub>
+  <sub>271,000줄 이상의 Rust & TypeScript — ⚡와 ☕로 구축</sub>
 </p>
 
 ## Star History

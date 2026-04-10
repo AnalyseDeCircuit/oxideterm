@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="バージョン">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="バージョン">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="プラットフォーム">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="ライセンス">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -108,7 +108,27 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 ---
 
-## 内部構造
+<div align="center">
+
+### 📊 コード統計
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>コード行数</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>コード密度</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>テストコード行</sub></td>
+<td align="center"><strong>84</strong><br/><sub>テストファイル</sub></td>
+<td align="center"><strong>910</strong><br/><sub>ソースファイル</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · テスト/コード比 9.1% · 外部テストフレームワーク不使用</sub>
+
+</div>
+
+---
+
+## 技術的な詳細
 
 ### アーキテクチャ — デュアルプレーン通信
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## ロードマップ
 
 - [x] SSH Agent フォワーディング
-- [ ] プラグインマーケットプレイス
+- [ ] 完全な ProxyCommand サポート
+- [ ] 監査ログ
+- [ ] Agent 機能強化
+- [ ] クイックコマンド
 - [ ] セッション検索とクイック切替
 
 ---
@@ -402,7 +425,7 @@ GPL-3.0 の条件のもとで、本ソフトウェアを自由に使用、修正
 ---
 
 <p align="center">
-  <sub>236,000 行以上の Rust & TypeScript — ⚡ と ☕ で構築</sub>
+  <sub>271,000 行以上の Rust & TypeScript — ⚡ と ☕ で構築</sub>
 </p>
 
 ## Star History

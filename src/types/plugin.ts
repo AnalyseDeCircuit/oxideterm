@@ -94,6 +94,12 @@ export type PluginManifest = {
   locales?: string;                       // relative path to locales dir
 };
 
+export type UrlInstallResult = {
+  manifest: PluginManifest;
+  checksum: string;
+  replacedExisting: boolean;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Plugin Lifecycle
 // ═══════════════════════════════════════════════════════════════════════════

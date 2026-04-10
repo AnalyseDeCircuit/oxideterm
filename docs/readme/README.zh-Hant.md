@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.16-blue" alt="版本">
+  <img src="https://img.shields.io/badge/version-1.1.17-blue" alt="版本">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="平台">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="授權條款">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -105,6 +105,26 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **CLI** | `oxt` 伴隨工具：JSON-RPC 2.0 基於 Unix Socket / Named Pipe、`status`/`list`/`ping`、人類可讀 + JSON 輸出 |
 | **安全** | .oxide 加密匯出（ChaCha20-Poly1305 + Argon2id 256 MB）、本機設定靜態加密、OS 鑰匙圈、Touch ID（macOS）、主機金鑰 TOFU、`zeroize` 記憶體清除 |
 | **國際化** | 11 種語言：EN、简体中文、繁體中文、日本語、한국어、FR、DE、ES、IT、PT-BR、VI |
+
+---
+
+<div align="center">
+
+### 📊 程式碼統計
+
+<table>
+<tr>
+<td align="center"><strong>271K+</strong><br/><sub>程式碼行數</sub></td>
+<td align="center"><strong>83%</strong><br/><sub>程式碼密度</sub></td>
+<td align="center"><strong>24K+</strong><br/><sub>測試程式碼行</sub></td>
+<td align="center"><strong>84</strong><br/><sub>測試檔案</sub></td>
+<td align="center"><strong>910</strong><br/><sub>原始碼檔案</sub></td>
+</tr>
+</table>
+
+<sub>TypeScript 102K · Rust 62K · 9.1% 測試程式碼比 · 零外部測試框架</sub>
+
+</div>
 
 ---
 
@@ -380,7 +400,10 @@ pnpm run tauri build
 ## 路線圖
 
 - [x] SSH Agent 轉發
-- [ ] 外掛市集
+- [ ] 完整 ProxyCommand 支援
+- [ ] 稽核功能
+- [ ] Agent 增強
+- [ ] 快捷命令
 - [ ] 工作階段搜尋與快速切換
 
 ---
@@ -402,7 +425,7 @@ pnpm run tauri build
 ---
 
 <p align="center">
-  <sub>236,000+ 行 Rust 與 TypeScript 程式碼——以 ⚡ 和 ☕ 建構</sub>
+  <sub>271,000+ 行 Rust 與 TypeScript 程式碼——以 ⚡ 和 ☕ 建構</sub>
 </p>
 
 ## Star History
