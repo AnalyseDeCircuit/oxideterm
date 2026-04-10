@@ -846,15 +846,62 @@ fn estimate_tokens(text: &str) -> usize {
     (raw * TOKEN_SAFETY_MARGIN).ceil() as usize
 }
 
-/// Get model context window size by name pattern (matches frontend MODEL_CONTEXT_WINDOWS).
+/// Try to extract context window size from model name.
+/// Matches patterns like -128k, _32k where digits are followed by 'k'
+/// at separator boundaries. Returns the largest match, or None.
+fn extract_context_from_model_name(model: &str) -> Option<usize> {
+    let lower = model.to_lowercase();
+    let bytes = lower.as_bytes();
+    let mut best: Option<usize> = None;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'k' && i > 0 && bytes[i - 1].is_ascii_digit() {
+            let digit_end = i;
+            let mut digit_start = i - 1;
+            while digit_start > 0 && bytes[digit_start - 1].is_ascii_digit() {
+                digit_start -= 1;
+            }
+
+            let preceded_ok = digit_start == 0
+                || matches!(bytes[digit_start - 1], b'-' | b'_' | b'.' | b'/' | b':');
+            let after_k = i + 1;
+            let followed_ok = after_k >= bytes.len()
+                || matches!(bytes[after_k], b'-' | b'_' | b'.' | b'/' | b':' | b'@');
+
+            if preceded_ok && followed_ok {
+                if let Ok(s) = std::str::from_utf8(&bytes[digit_start..digit_end]) {
+                    if let Ok(n) = s.parse::<usize>() {
+                        let tokens = n.saturating_mul(1024);
+                        if (1024..=4 * 1024 * 1024).contains(&tokens) {
+                            best = Some(best.map_or(tokens, |current| current.max(tokens)));
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    best
+}
+
+/// Get model context window size by name pattern (mirrors frontend MODEL_CONTEXT_WINDOWS).
 fn get_model_context_window(model: &str) -> usize {
     let m = model.to_lowercase();
     // OpenAI
     if m.contains("gpt-4.1") {
         return 1_048_576;
     }
-    if m.starts_with("o1") || m.starts_with("o2") || m.starts_with("o3") {
-        return 200_000;
+    if let Some(rest) = m.strip_prefix('o') {
+        if let Some(first) = rest.chars().next() {
+            if first.is_ascii_digit() && first != '0' {
+                let after = rest.get(1..).unwrap_or("");
+                if after.is_empty() || after.starts_with('-') || after.starts_with('.') {
+                    return 200_000;
+                }
+            }
+        }
     }
     if m.contains("gpt-4o-mini") {
         return 128_000;
@@ -862,50 +909,116 @@ fn get_model_context_window(model: &str) -> usize {
     if m.contains("gpt-4-turbo") || m.contains("gpt-4o") {
         return 128_000;
     }
+    if m.contains("gpt-4-32k") {
+        return 32_768;
+    }
     if m.contains("gpt-4") {
         return 8_192;
+    }
+    if m.contains("gpt-3.5-turbo-16k") {
+        return 16_384;
     }
     if m.contains("gpt-3.5") {
         return 4_096;
     }
     // Anthropic
+    if m.contains("claude-2") {
+        return 100_000;
+    }
     if m.contains("claude") {
         return 200_000;
     }
     // Google
-    if m.contains("gemini-2") || m.contains("gemini-1.5") {
+    if m.contains("gemini-2.5") || m.contains("gemini-2") || m.contains("gemini-1.5") {
         return 1_048_576;
     }
     if m.contains("gemini") {
         return 128_000;
     }
     // Meta
-    if m.contains("llama-4") {
+    if m.contains("llama-4") || m.contains("llama4") {
         return 1_048_576;
     }
-    if m.contains("llama-3.1") || m.contains("llama-3.2") || m.contains("llama-3.3") {
+    if m.contains("llama-3.1")
+        || m.contains("llama3.1")
+        || m.contains("llama-3.2")
+        || m.contains("llama3.2")
+        || m.contains("llama-3.3")
+        || m.contains("llama3.3")
+    {
         return 128_000;
     }
-    if m.contains("llama") {
+    if m.contains("llama-3") || m.contains("llama3") {
         return 8_192;
     }
-    // Others
-    if m.contains("qwen") {
-        return 128_000;
+    if m.contains("llama") {
+        return 4_096;
     }
-    if m.contains("deepseek") {
-        return 128_000;
-    }
+    // Mistral / Mixtral
     if m.contains("mistral-large") || m.contains("mistral-medium") {
         return 128_000;
     }
-    if m.contains("mistral") {
+    if m.contains("mixtral") || m.contains("mistral") {
         return 32_000;
     }
-    // Moonshot (common for this user)
+    // Alibaba Qwen
+    if m.contains("qwen-3")
+        || m.contains("qwen3")
+        || m.contains("qwen-2.5")
+        || m.contains("qwen2.5")
+        || m.contains("qwen-max")
+    {
+        return 128_000;
+    }
+    if m.contains("qwen") {
+        return 32_000;
+    }
+    // DeepSeek
+    if m.contains("deepseek") {
+        return 128_000;
+    }
+    // Moonshot
     if m.contains("moonshot") {
         return 128_000;
     }
+    // Zhipu GLM
+    if m.contains("glm-4") {
+        return 128_000;
+    }
+    if m.contains("glm") {
+        return 32_000;
+    }
+    // Baidu ERNIE
+    if m.contains("ernie") {
+        return 8_192;
+    }
+    // ByteDance Doubao
+    if m.contains("doubao") {
+        return 128_000;
+    }
+    // MiniMax
+    if m.contains("minimax") || m.contains("abab") {
+        return 245_760;
+    }
+    // Cohere
+    if m.contains("command-r") {
+        return 128_000;
+    }
+    if m.contains("command") {
+        return 4_096;
+    }
+    // Yi
+    if m.contains("yi-large") || m.contains("yi-lightning") {
+        return 32_000;
+    }
+    if m.contains("yi") {
+        return 4_000;
+    }
+
+    if let Some(extracted) = extract_context_from_model_name(&m) {
+        return extracted;
+    }
+
     DEFAULT_CONTEXT_WINDOW
 }
 
@@ -2027,4 +2140,30 @@ async fn import_hosts(app: &tauri::AppHandle, params: Value) -> Result<Value, (i
         "skipped": skipped,
         "errors": errors,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_context_from_model_name, get_model_context_window};
+
+    #[test]
+    fn extracts_context_from_model_name_suffix() {
+        assert_eq!(
+            extract_context_from_model_name("moonshot-v1-128k"),
+            Some(131_072)
+        );
+        assert_eq!(
+            extract_context_from_model_name("chatglm2-6b-32k"),
+            Some(32_768)
+        );
+    }
+
+    #[test]
+    fn matches_new_model_patterns() {
+        assert_eq!(get_model_context_window("o4-mini"), 200_000);
+        assert_eq!(get_model_context_window("gemini-2.5-pro"), 1_048_576);
+        assert_eq!(get_model_context_window("claude-2.1"), 100_000);
+        assert_eq!(get_model_context_window("llama3.2"), 128_000);
+        assert_eq!(get_model_context_window("glm-4-air"), 128_000);
+    }
 }

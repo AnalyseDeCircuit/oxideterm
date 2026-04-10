@@ -660,6 +660,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       providerModel,
       aiSettings.modelContextWindows,
       providerId,
+      aiSettings.userContextWindows,
     );
     const toolUseEnabled = aiSettings.toolUse?.enabled === true;
 
@@ -1338,6 +1339,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           providerModel,
           aiSettings.modelContextWindows,
           providerId,
+          aiSettings.userContextWindows,
         );
         let totalTokens = 0;
         for (const msg of postConv.messages) {
@@ -1932,6 +1934,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       providerModel,
       aiSettings.modelContextWindows,
       providerId,
+      aiSettings.userContextWindows,
     );
 
     // Calculate current usage

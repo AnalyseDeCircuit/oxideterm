@@ -252,4 +252,20 @@ describe('settingsStore', () => {
       'model-a': 32000,
     });
   });
+
+  it('persists per-model user context window overrides', async () => {
+    const useSettingsStore = await loadSettingsStore();
+    const providerId = useSettingsStore.getState().settings.ai.providers[0].id;
+
+    useSettingsStore.getState().setUserContextWindow(providerId, 'model-a', 65536);
+    expect(useSettingsStore.getState().settings.ai.userContextWindows?.[providerId]).toEqual({
+      'model-a': 65536,
+    });
+
+    useSettingsStore.getState().setUserContextWindow(providerId, 'model-a', null);
+    expect(useSettingsStore.getState().settings.ai.userContextWindows?.[providerId]).toBeUndefined();
+
+    const persisted = JSON.parse(localStorage.getItem('oxide-settings-v2') || '{}');
+    expect(persisted.ai.userContextWindows?.[providerId]).toBeUndefined();
+  });
 });

@@ -98,76 +98,155 @@ export function estimateToolDefinitionsTokens(tools: Array<{ name: string; descr
 
 /**
  * Hardcoded context window sizes by model name pattern.
- * Used as fallback when the provider API doesn't return context_length.
+ * Used as fallback when the provider API doesn't return context_length and
+ * no user override is set.
  *
  * NOTE: OpenAI and Anthropic /models APIs do NOT return context window info,
- * so this table is the only source for those providers.
- * Gemini returns inputTokenLimit via API and is cached separately.
+ * so this table is the primary source for those providers.
+ * Gemini and Ollama return context length via API and are cached separately.
  *
- * Last updated: 2026-03-01
+ * Last updated: 2026-04-10
  */
 const MODEL_CONTEXT_WINDOWS: Array<[RegExp, number]> = [
   // OpenAI — newest first for priority
   [/gpt-4\.1/, 1048576],
-  [/o[3-9]-|o[3-9]$/, 200000],
-  [/o[1-2]-|o[1-2]$/, 200000],
+  [/o[3-9][-.]|o[3-9]$/, 200000],
+  [/o[1-2][-.]|o[1-2]$/, 200000],
   [/gpt-4o-mini/, 128000],
   [/gpt-4-turbo|gpt-4o/, 128000],
-  [/gpt-4-32k/, 32000],
+  [/gpt-4-32k/, 32768],
   [/gpt-4(?!o|-)/, 8192],
-  [/gpt-3\.5-turbo-16k/, 16000],
+  [/gpt-3\.5-turbo-16k/, 16384],
   [/gpt-3\.5/, 4096],
   // Anthropic
   [/claude-4|claude-3\.7|claude-3\.6/, 200000],
   [/claude-3|claude-sonnet|claude-opus|claude-haiku/, 200000],
   [/claude-2/, 100000],
-  [/claude/, 100000],
+  [/claude/, 200000],
   // Google
   [/gemini-2\.5|gemini-2|gemini-1\.5/, 1048576],
   [/gemini/, 128000],
-  // Meta
-  [/llama-4/, 1048576],
-  [/llama-3\.1|llama-3\.2|llama-3\.3/, 128000],
-  [/llama-3/, 8192],
+  // Meta — handle both llama3.2 (Ollama) and llama-3.2 (API) formats
+  [/llama-?4/, 1048576],
+  [/llama-?3\.1|llama-?3\.2|llama-?3\.3/, 128000],
+  [/llama-?3/, 8192],
+  [/llama/, 4096],
   // Mistral
   [/mistral-large|mistral-medium/, 128000],
+  [/mixtral/, 32000],
   [/mistral/, 32000],
-  // Alibaba
-  [/qwen-3|qwen3|qwen-2\.5|qwen2\.5|qwen-max/, 128000],
+  // Alibaba Qwen
+  [/qwen-?3|qwen3|qwen-?2\.5|qwen2\.5|qwen-max/, 128000],
   [/qwen/, 32000],
   // DeepSeek
   [/deepseek-v3|deepseek-r1/, 128000],
   [/deepseek/, 128000],
+  // Moonshot
+  [/moonshot/, 128000],
+  // Zhipu GLM
+  [/glm-4/, 128000],
+  [/glm/, 32000],
+  // Baidu ERNIE
+  [/ernie/, 8192],
+  // ByteDance Doubao
+  [/doubao/, 128000],
+  // MiniMax
+  [/minimax|abab/, 245760],
+  // Cohere
+  [/command-r/, 128000],
+  [/command/, 4096],
+  // Yi
+  [/yi-large|yi-lightning/, 32000],
+  [/yi/, 4000],
 ];
 
 /** Default context window for unknown models (re-exported from constants) */
 const DEFAULT_CONTEXT_WINDOW = DEFAULT_CTX;
 
 /**
+ * Try to extract context window size from the model name.
+ *
+ * Many models encode their context size in their name, e.g.:
+ *   moonshot-v1-128k → 131072
+ *   doubao-lite-32k  → 32768
+ *   chatglm2-6b-32k  → 32768
+ *
+ * Matches patterns like -128k, _32k, .8k where the number is
+ * preceded by a separator (-, _, ., /, :) or start-of-string,
+ * and followed by a separator or end-of-string.
+ *
+ * Returns the largest matched value, or null if none found.
+ */
+export function extractContextWindowFromModelName(modelId: string): number | null {
+  const lower = modelId.toLowerCase();
+  const re = /(?:^|[-_./:])(\d+)k(?=$|[-_./:@])/g;
+  let best: number | null = null;
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(lower)) !== null) {
+    const n = parseInt(match[1], 10);
+    const tokens = n * 1024;
+    if (tokens >= 1024 && tokens <= 4 * 1024 * 1024) {
+      if (best === null || tokens > best) best = tokens;
+    }
+  }
+
+  return best;
+}
+
+export type ContextWindowSource = 'user' | 'api' | 'pattern' | 'name' | 'default';
+
+/**
+ * Get context window size for a model, including the source of the value.
+ *
+ * Priority:
+ *   1. userContextWindows[providerId][modelId]
+ *   2. cachedContextWindows[providerId][modelId]
+ *   3. MODEL_CONTEXT_WINDOWS pattern matching
+ *   4. extractContextWindowFromModelName
+ *   5. DEFAULT_CONTEXT_WINDOW
+ */
+export function getModelContextWindowInfo(
+  modelId: string,
+  cachedContextWindows?: Record<string, Record<string, number>>,
+  providerId?: string,
+  userContextWindows?: Record<string, Record<string, number>>,
+): { value: number; source: ContextWindowSource } {
+  if (providerId && userContextWindows?.[providerId]?.[modelId]) {
+    return { value: userContextWindows[providerId][modelId], source: 'user' };
+  }
+
+  if (providerId && cachedContextWindows?.[providerId]?.[modelId]) {
+    return { value: cachedContextWindows[providerId][modelId], source: 'api' };
+  }
+
+  const lower = modelId.toLowerCase();
+  for (const [pattern, size] of MODEL_CONTEXT_WINDOWS) {
+    if (pattern.test(lower)) return { value: size, source: 'pattern' };
+  }
+
+  const extracted = extractContextWindowFromModelName(lower);
+  if (extracted !== null) return { value: extracted, source: 'name' };
+
+  return { value: DEFAULT_CONTEXT_WINDOW, source: 'default' };
+}
+
+/**
  * Get context window size for a model.
  *
  * @param modelId - The model identifier string
- * @param cachedContextWindows - Optional provider-scoped cache: { [providerId]: { [modelId]: tokens } }
+ * @param cachedContextWindows - Optional provider-scoped API cache: { [providerId]: { [modelId]: tokens } }
  * @param providerId - Optional provider id for scoped lookup (prevents cross-provider collisions)
+ * @param userContextWindows - Optional user-configured overrides: { [providerId]: { [modelId]: tokens } }
  * @returns Context window size in tokens
  */
 export function getModelContextWindow(
   modelId: string,
   cachedContextWindows?: Record<string, Record<string, number>>,
   providerId?: string,
+  userContextWindows?: Record<string, Record<string, number>>,
 ): number {
-  // 1. Provider-scoped lookup (most accurate, avoids cross-provider name collisions)
-  if (providerId && cachedContextWindows?.[providerId]?.[modelId]) {
-    return cachedContextWindows[providerId][modelId];
-  }
-
-  // 2. Fallback to pattern matching
-  const lower = modelId.toLowerCase();
-  for (const [pattern, size] of MODEL_CONTEXT_WINDOWS) {
-    if (pattern.test(lower)) return size;
-  }
-
-  return DEFAULT_CONTEXT_WINDOW;
+  return getModelContextWindowInfo(modelId, cachedContextWindows, providerId, userContextWindows).value;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

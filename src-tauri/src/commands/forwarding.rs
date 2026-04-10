@@ -15,10 +15,10 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use crate::commands::config::ConfigState;
 use crate::forwarding::{
     ForwardRule, ForwardRuleUpdate, ForwardStats, ForwardStatus, ForwardType, ForwardingManager,
 };
-use crate::commands::config::ConfigState;
 use crate::state::{PersistedForward, StateError, StateStore, forwarding::ForwardPersistence};
 
 /// Global registry of forwarding managers (one per session)
@@ -963,10 +963,7 @@ pub async fn list_saved_forwards(
 
     let forwards = registry.load_persisted_forwards(&session_id).await?;
 
-    Ok(forwards
-        .into_iter()
-        .map(persisted_forward_to_dto)
-        .collect())
+    Ok(forwards.into_iter().map(persisted_forward_to_dto).collect())
 }
 
 /// Export a structured snapshot of owner-bound saved forwards for plugin-driven sync.
@@ -1172,8 +1169,11 @@ fn build_saved_forwards_sync_snapshot(
     })
 }
 
-fn persisted_forward_from_sync_payload(payload: PersistedForwardDto) -> Result<PersistedForward, String> {
-    let forward_type = crate::state::forwarding::ForwardType::try_from(payload.forward_type.as_str())?;
+fn persisted_forward_from_sync_payload(
+    payload: PersistedForwardDto,
+) -> Result<PersistedForward, String> {
+    let forward_type =
+        crate::state::forwarding::ForwardType::try_from(payload.forward_type.as_str())?;
     let created_at = chrono::DateTime::parse_from_rfc3339(&payload.created_at)
         .map_err(|e| format!("Invalid forward created_at '{}': {}", payload.created_at, e))?
         .with_timezone(&Utc);
@@ -1235,7 +1235,10 @@ mod tests {
 
         assert_eq!(snapshot.records.len(), 1);
         assert_eq!(
-            snapshot.records[0].payload.as_ref().and_then(|payload| payload.description.as_deref()),
+            snapshot.records[0]
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.description.as_deref()),
             Some("web")
         );
         assert!(!snapshot.revision.is_empty());

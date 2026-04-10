@@ -9,7 +9,7 @@
  */
 
 import type { AiStreamProvider, AiRequestConfig, ChatMessage, AiStreamEvent, AiToolDefinition } from '../providers';
-import { getModelContextWindow } from '../tokenUtils';
+import { DEFAULT_CONTEXT_WINDOW, getModelContextWindow } from '../tokenUtils';
 import { aiFetch, aiFetchStreaming } from '../aiFetch';
 
 /** Timeout for individual /api/show calls (ms) */
@@ -252,8 +252,8 @@ export const ollamaProvider: AiStreamProvider = {
     const wildModels: string[] = [];
     for (const m of data.models) {
       const staticCtx = getModelContextWindow(m.name);
-      // If static lookup returns the default 8192 fallback, it means no match → wild model
-      if (staticCtx !== 8192) {
+      // If static lookup returns the default fallback, it means no match → wild model.
+      if (staticCtx !== DEFAULT_CONTEXT_WINDOW) {
         result[m.name] = staticCtx;
       } else {
         wildModels.push(m.name);

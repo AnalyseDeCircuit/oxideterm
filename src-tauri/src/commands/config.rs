@@ -380,7 +380,8 @@ impl From<&SavedConnection> for ConnectionInfo {
 }
 
 fn sha256_hex<T: Serialize>(value: &T) -> Result<String, String> {
-    let bytes = serde_json::to_vec(value).map_err(|e| format!("Failed to serialize sync payload: {}", e))?;
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| format!("Failed to serialize sync payload: {}", e))?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
@@ -440,7 +441,10 @@ impl SavedConnectionsConflictStrategy {
             "skip" => Ok(Self::Skip),
             "replace" => Ok(Self::Replace),
             "merge" => Ok(Self::Merge),
-            other => Err(format!("Unsupported saved connection conflict strategy: {}", other)),
+            other => Err(format!(
+                "Unsupported saved connection conflict strategy: {}",
+                other
+            )),
         }
     }
 
@@ -489,7 +493,13 @@ fn build_synced_proxy_chain(
                     keychain,
                 )?
             } else {
-                build_saved_auth(&hop.auth_type, None, hop.key_path.as_deref(), None, keychain)?
+                build_saved_auth(
+                    &hop.auth_type,
+                    None,
+                    hop.key_path.as_deref(),
+                    None,
+                    keychain,
+                )?
             };
 
             Ok(ProxyHopConfig {
@@ -549,7 +559,12 @@ fn build_saved_connection_from_sync_payload(
             ..Default::default()
         },
         created_at: chrono::DateTime::parse_from_rfc3339(&payload.created_at)
-            .map_err(|e| format!("Invalid connection created_at '{}': {}", payload.created_at, e))?
+            .map_err(|e| {
+                format!(
+                    "Invalid connection created_at '{}': {}",
+                    payload.created_at, e
+                )
+            })?
             .with_timezone(&chrono::Utc),
         last_used_at: payload
             .last_used_at
@@ -640,10 +655,12 @@ fn apply_saved_connections_snapshot_to_config(
         )?;
 
         if let Some(existing) = baseline {
-            let existing_keychain_ids: HashSet<String> =
-                collect_connection_keychain_ids(existing).into_iter().collect();
-            let next_keychain_ids: HashSet<String> =
-                collect_connection_keychain_ids(&connection).into_iter().collect();
+            let existing_keychain_ids: HashSet<String> = collect_connection_keychain_ids(existing)
+                .into_iter()
+                .collect();
+            let next_keychain_ids: HashSet<String> = collect_connection_keychain_ids(&connection)
+                .into_iter()
+                .collect();
 
             side_effects.keychain_ids_to_delete.extend(
                 existing_keychain_ids
@@ -1358,13 +1375,8 @@ mod tests {
     #[test]
     fn build_saved_connections_sync_snapshot_includes_agent_forwarding() {
         let mut config = ConfigFile::default();
-        let mut connection = SavedConnection::new_key(
-            "Prod",
-            "prod.example.com",
-            22,
-            "root",
-            "/tmp/id_ed25519",
-        );
+        let mut connection =
+            SavedConnection::new_key("Prod", "prod.example.com", 22, "root", "/tmp/id_ed25519");
         connection.options.agent_forwarding = true;
         connection.proxy_chain.push(ProxyHopConfig {
             host: "jump.example.com".to_string(),
@@ -1541,7 +1553,10 @@ mod tests {
         .unwrap();
 
         side_effects.keychain_ids_to_delete.sort();
-        assert_eq!(side_effects.keychain_ids_to_delete, vec!["kc-hop-b".to_string()]);
+        assert_eq!(
+            side_effects.keychain_ids_to_delete,
+            vec!["kc-hop-b".to_string()]
+        );
     }
 }
 
@@ -1588,16 +1603,24 @@ pub async fn apply_saved_connections_snapshot(
 
     let (result, side_effects) = {
         let mut config = state.config.write();
-        apply_saved_connections_snapshot_to_config(&mut config, &snapshot, strategy, &state.keychain)?
+        apply_saved_connections_snapshot_to_config(
+            &mut config,
+            &snapshot,
+            strategy,
+            &state.keychain,
+        )?
     };
 
     for keychain_id in side_effects.keychain_ids_to_delete {
         let _ = state.keychain.delete(&keychain_id);
     }
 
-    let deleted_connection_ids: HashSet<String> = side_effects.deleted_connection_ids.into_iter().collect();
+    let deleted_connection_ids: HashSet<String> =
+        side_effects.deleted_connection_ids.into_iter().collect();
     for connection_id in deleted_connection_ids {
-        forwarding_registry.delete_owned_forwards(&connection_id).await?;
+        forwarding_registry
+            .delete_owned_forwards(&connection_id)
+            .await?;
     }
 
     if result.applied > 0 {

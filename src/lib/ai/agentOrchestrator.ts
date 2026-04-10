@@ -443,6 +443,7 @@ export async function runAgent(task: AgentTask, signal: AbortSignal): Promise<vo
       task.model,
       settings.ai.modelContextWindows,
       task.providerId,
+      settings.ai.userContextWindows,
     );
     const reserve = responseReserve(contextWindow);
 

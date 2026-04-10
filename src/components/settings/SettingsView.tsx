@@ -39,6 +39,7 @@ import {
 import { Monitor, Key, Terminal as TerminalIcon, Shield, Plus, Trash2, FolderInput, Sparkles, Square, HardDrive, HelpCircle, Github, ExternalLink, Keyboard, RefreshCw, ImageIcon, X, Code2, WifiOff, Download, Upload, Network, ArrowLeftRight, Settings, Folder, ListTree, Rocket, Puzzle, Activity, Loader2, CheckCircle2, ArrowDownToLine, RotateCw, Wrench, FileText, Pen, FolderOpen, Search, GitBranch, Radio, CirclePlus, CircleStop, FolderSearch, FileCode, Info, MousePointer2, FlaskConical, BookOpen, SkipForward, ArrowRight, TerminalSquare } from 'lucide-react';
 import { api } from '../../lib/api';
 import { TOOL_GROUPS, WRITE_TOOLS, EXPERIMENTAL_TOOLS } from '../../lib/ai/tools';
+import { getModelContextWindowInfo } from '../../lib/ai/tokenUtils';
 import { McpServersPanel } from './McpServersPanel';
 import { DocumentManager } from './DocumentManager';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
@@ -1141,7 +1142,7 @@ export const SettingsView = () => {
     const [activeTab, setActiveTab] = useState('general');
 
     // Use unified settings store
-    const { settings, updateTerminal, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels } = useSettingsStore();
+    const { settings, updateTerminal, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow } = useSettingsStore();
     const { general, terminal, appearance, connectionDefaults, ai, sftp, ide, reconnect } = settings;
 
     // AI enable confirmation dialog
@@ -2833,6 +2834,91 @@ export const SettingsView = () => {
                                               className="w-32 bg-theme-bg border border-theme-border rounded-md px-2 py-1 text-sm text-theme-text placeholder-theme-text-muted/40 focus:outline-none focus:ring-1 focus:ring-theme-accent/40"
                                             />
                                           </div>
+                                        )}
+                                    </div>
+
+                                    <Separator className="my-6 opacity-50" />
+
+                                    <div className={ai.enabled ? "" : "opacity-50 pointer-events-none"}>
+                                        <h4 className="text-sm font-medium text-theme-text mb-2 uppercase tracking-wider">{t('settings_view.ai.model_context_windows')}</h4>
+                                        <p className="text-xs text-theme-text-muted mb-4">{t('settings_view.ai.model_context_windows_hint')}</p>
+
+                                        {ai.providers.every((provider) => provider.models.length === 0) ? (
+                                            <p className="text-xs text-theme-text-muted italic">{t('settings_view.ai.model_context_windows_empty')}</p>
+                                        ) : (
+                                            <div className="space-y-4 max-w-3xl">
+                                                {ai.providers
+                                                    .filter((provider) => provider.models.length > 0)
+                                                    .map((provider) => (
+                                                        <div key={provider.id}>
+                                                            <div className="text-[10px] font-bold tracking-wider uppercase text-theme-text-muted mb-1">
+                                                                {provider.name}
+                                                            </div>
+                                                            <div className="border border-theme-border/30 rounded-md overflow-hidden">
+                                                                {provider.models.map((model, idx) => {
+                                                                    const info = getModelContextWindowInfo(
+                                                                        model,
+                                                                        ai.modelContextWindows,
+                                                                        provider.id,
+                                                                        ai.userContextWindows,
+                                                                    );
+                                                                    const hasUserOverride = !!ai.userContextWindows?.[provider.id]?.[model];
+
+                                                                    return (
+                                                                        <div
+                                                                            key={model}
+                                                                            className={cn(
+                                                                                'flex items-center gap-2 px-3 py-1.5',
+                                                                                idx > 0 && 'border-t border-theme-border/20',
+                                                                                hasUserOverride && 'bg-theme-accent/5',
+                                                                            )}
+                                                                        >
+                                                                            <span className="text-xs text-theme-text-muted font-mono flex-1 truncate min-w-0" title={model}>
+                                                                                {model}
+                                                                            </span>
+                                                                            <span
+                                                                                className={cn(
+                                                                                    'text-[9px] px-1.5 py-0.5 rounded shrink-0 font-medium',
+                                                                                    info.source === 'user' && 'text-blue-400 bg-blue-400/10',
+                                                                                    info.source === 'api' && 'text-emerald-400 bg-emerald-400/10',
+                                                                                    info.source === 'name' && 'text-cyan-400 bg-cyan-400/10',
+                                                                                    (info.source === 'pattern' || info.source === 'default') && 'text-theme-text-muted/70 bg-theme-border/20',
+                                                                                )}
+                                                                            >
+                                                                                {t(`settings_view.ai.ctx_source_${info.source}`)}
+                                                                            </span>
+                                                                            <Input
+                                                                                type="number"
+                                                                                min={1024}
+                                                                                max={10485760}
+                                                                                step={1024}
+                                                                                value={ai.userContextWindows?.[provider.id]?.[model] ?? info.value}
+                                                                                onChange={(e) => {
+                                                                                    const value = parseInt(e.target.value, 10);
+                                                                                    if (!Number.isNaN(value) && value >= 1024) {
+                                                                                        setUserContextWindow(provider.id, model, value);
+                                                                                    }
+                                                                                }}
+                                                                                className="w-28 h-7 bg-theme-bg border-theme-border text-xs text-right shrink-0"
+                                                                            />
+                                                                            <div className="w-4 shrink-0 flex items-center justify-center">
+                                                                                {hasUserOverride && (
+                                                                                    <button
+                                                                                        onClick={() => setUserContextWindow(provider.id, model, null)}
+                                                                                        title={t('settings_view.ai.ctx_reset')}
+                                                                                        className="text-theme-text-muted/60 hover:text-theme-text"
+                                                                                    >
+                                                                                        <X className="w-3 h-3" />
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                            </div>
                                         )}
                                     </div>
                                 </div>

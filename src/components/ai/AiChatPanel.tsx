@@ -128,7 +128,12 @@ export function AiChatPanel() {
         totalTokens += estimateTokens(msg.content);
       }
     }
-    const maxTokens = getModelContextWindow(activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId ?? undefined);
+    const maxTokens = getModelContextWindow(
+      activeModel,
+      aiSettings.modelContextWindows,
+      aiSettings.activeProviderId ?? undefined,
+      aiSettings.userContextWindows,
+    );
     const percentage = Math.min((totalTokens / maxTokens) * 100, 100);
     return {
       percentage,
@@ -137,7 +142,7 @@ export function AiChatPanel() {
       totalTokens,
       maxTokens,
     };
-  }, [activeConversation?.messages, activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId]);
+  }, [activeConversation?.messages, activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId, aiSettings.userContextWindows]);
 
   // ─── Model Switch Detection ─────────────────────────────────────────────
   const [modelSwitchWarning, setModelSwitchWarning] = useState<{

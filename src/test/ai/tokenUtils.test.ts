@@ -6,7 +6,9 @@ import {
   estimateTokens,
   getModelTokenCoefficient,
   estimateToolDefinitionsTokens,
+  extractContextWindowFromModelName,
   getModelContextWindow,
+  getModelContextWindowInfo,
   responseReserve,
   trimHistoryToTokenBudget,
 } from '@/lib/ai/tokenUtils';
@@ -174,6 +176,10 @@ describe('getModelContextWindow', () => {
     expect(getModelContextWindow('claude-3-opus')).toBe(200000);
   });
 
+  it('keeps generic claude fallback aligned with backend', () => {
+    expect(getModelContextWindow('claude')).toBe(200000);
+  });
+
   it('returns 1048576 for gemini-2', () => {
     expect(getModelContextWindow('gemini-2')).toBe(1048576);
   });
@@ -211,6 +217,35 @@ describe('getModelContextWindow', () => {
   it('returns 200000 for o1/o3', () => {
     expect(getModelContextWindow('o1-mini')).toBe(200000);
     expect(getModelContextWindow('o3')).toBe(200000);
+  });
+
+  it('extracts context window from model name suffix', () => {
+    expect(extractContextWindowFromModelName('moonshot-v1-128k')).toBe(131072);
+    expect(extractContextWindowFromModelName('chatglm2-6b-32k')).toBe(32768);
+  });
+
+  it('supports ollama dotted llama names and domestic providers', () => {
+    expect(getModelContextWindow('llama3.2')).toBe(128000);
+    expect(getModelContextWindow('doubao-lite-32k')).toBe(128000);
+    expect(getModelContextWindow('glm-4-air')).toBe(128000);
+  });
+
+  it('returns user override with highest priority', () => {
+    const info = getModelContextWindowInfo(
+      'gpt-4o',
+      { provider: { 'gpt-4o': 128000 } },
+      'provider',
+      { provider: { 'gpt-4o': 64000 } },
+    );
+
+    expect(info).toEqual({ value: 64000, source: 'user' });
+  });
+
+  it('falls back to name inference before default', () => {
+    expect(getModelContextWindowInfo('custom-256k-model')).toEqual({
+      value: 262144,
+      source: 'name',
+    });
   });
 });
 

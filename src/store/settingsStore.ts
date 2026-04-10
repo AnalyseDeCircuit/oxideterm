@@ -198,6 +198,11 @@ export interface AiSettings {
    * Shape: { [providerId]: { [modelId]: tokenCount } }
    */
   modelContextWindows?: Record<string, Record<string, number>>;
+  /** User-configured context window overrides per model.
+   * Takes highest priority over API cache and built-in patterns.
+   * Shape: { [providerId]: { [modelId]: tokenCount } }
+   */
+  userContextWindows?: Record<string, Record<string, number>>;
   /** Custom system prompt override (empty = use default) */
   customSystemPrompt?: string;
   /**
@@ -782,6 +787,7 @@ interface SettingsStore {
   updateProvider: (providerId: string, updates: Partial<import('../types').AiProvider>) => void;
   setActiveProvider: (providerId: string, model?: string) => void;
   refreshProviderModels: (providerId: string) => Promise<string[]>;
+  setUserContextWindow: (providerId: string, modelId: string, tokens: number | null) => void;
   updateLocalTerminal: <K extends keyof LocalTerminalSettings>(key: K, value: LocalTerminalSettings[K]) => void;
   updateSftp: <K extends keyof SftpSettings>(key: K, value: SftpSettings[K]) => void;
   updateIde: <K extends keyof IdeSettings>(key: K, value: IdeSettings[K]) => void;
@@ -1334,6 +1340,35 @@ export const useSettingsStore = create<SettingsStore>()(
       });
 
       return models;
+    },
+
+    setUserContextWindow: (providerId, modelId, tokens) => {
+      if (!providerId || !modelId) return;
+      set((state) => {
+        const ai = state.settings.ai;
+        const existing = ai.userContextWindows ?? {};
+        const providerOverrides = { ...(existing[providerId] ?? {}) };
+
+        if (tokens !== null && tokens >= 1024 && tokens <= 4_194_304) {
+          providerOverrides[modelId] = tokens;
+        } else {
+          delete providerOverrides[modelId];
+        }
+
+        const updated = { ...existing };
+        if (Object.keys(providerOverrides).length > 0) {
+          updated[providerId] = providerOverrides;
+        } else {
+          delete updated[providerId];
+        }
+
+        const newSettings: PersistedSettingsV2 = {
+          ...state.settings,
+          ai: { ...ai, userContextWindows: updated },
+        };
+        persistSettings(newSettings);
+        return { settings: newSettings };
+      });
     },
 
     // ========== Bulk Operations ==========

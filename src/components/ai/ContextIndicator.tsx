@@ -66,8 +66,13 @@ export function ContextIndicator({ pendingInput = '' }: ContextIndicatorProps) {
 
   // Context window size
   const maxTokens = useMemo(() => {
-    return getModelContextWindow(activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId ?? undefined);
-  }, [activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId]);
+    return getModelContextWindow(
+      activeModel,
+      aiSettings.modelContextWindows,
+      aiSettings.activeProviderId ?? undefined,
+      aiSettings.userContextWindows,
+    );
+  }, [activeModel, aiSettings.modelContextWindows, aiSettings.activeProviderId, aiSettings.userContextWindows]);
 
   // Calculate detailed token breakdown
   const breakdown = useMemo<DetailedTokenBreakdown>(() => {
