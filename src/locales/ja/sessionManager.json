@@ -71,6 +71,8 @@
       "test_success": "接続成功",
       "test_failed": "接続テスト失敗",
       "test_elapsed": "{{ms}}ms で接続しました",
+      "proxy_hop_kbi_unsupported": "このジャンプホストは keyboard-interactive/2FA をサポートしていません",
+      "proxy_hop_auth_unsupported": "このジャンプホストは未対応の認証方式を使用しています",
       "test_host_key_changed": "ホストキーが変更されました。想定値: {{expected}}。実際値: {{actual}}。"
     },
     "edit_properties": {

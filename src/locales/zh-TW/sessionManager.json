@@ -71,6 +71,8 @@
       "test_success": "連線成功",
       "test_failed": "連線測試失敗",
       "test_elapsed": "已在 {{ms}}ms 內連線",
+      "proxy_hop_kbi_unsupported": "此跳板主機暫不支援 keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "此跳板主機使用了不支援的驗證類型",
       "test_host_key_changed": "主機金鑰已變更。預期值：{{expected}}。實際值：{{actual}}。"
     },
     "edit_properties": {

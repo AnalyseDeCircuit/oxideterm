@@ -127,6 +127,9 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
 
           <div className="space-y-2">
             <Label>{t('modals.jump_server.authentication')}</Label>
+            <p className="text-xs text-theme-text-muted">
+              {t('modals.jump_server.kbi_not_supported_hint')}
+            </p>
             <Tabs
               value={authType}
               onValueChange={handleAuthTypeChange}

@@ -49,6 +49,7 @@
       "password": "Mot de passe",
       "agent_desc": "S'authentifier en utilisant l'agent SSH système",
       "agent_hint": "Assurez-vous que l'agent SSH est en cours d'exécution et contient les clés requises",
+      "kbi_not_supported_hint": "Les hôtes relais ne prennent pas encore en charge keyboard-interactive/2FA",
       "cancel": "Annuler",
       "add": "Ajouter"
     },

@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "关闭旧终端失败",
       "proxy_chain_established": "代理链连接已建立",
+      "proxy_chain_invalid": "代理链无效",
+      "proxy_hop_kbi_unsupported": "该跳板机暂不支持 keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "该跳板机使用了不支持的认证类型",
       "proxy_chain_desc": "链深度 {{depth}}，拓扑已同步"
     },
     "time": {

@@ -271,4 +271,41 @@ describe('connectToSaved', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(appStoreState.activeTabId).toBe('tab-1');
   });
+
+  it('blocks unsupported proxy-hop keyboard-interactive auth before expanding the chain', async () => {
+    apiMocks.getSavedConnectionForConnect.mockResolvedValue({
+      name: 'Jump Target',
+      host: 'target.example.com',
+      port: 22,
+      username: 'target-user',
+      auth_type: 'agent',
+      agent_forwarding: false,
+      proxy_chain: [
+        {
+          host: 'jump-1.example.com',
+          port: 22,
+          username: 'jump1',
+          auth_type: 'keyboard_interactive',
+          agent_forwarding: false,
+        },
+      ],
+    } as never);
+    const toast = vi.fn();
+    const onError = vi.fn();
+
+    await connectToSaved('saved-kbi-hop', {
+      createTab: vi.fn(),
+      toast,
+      t: (key: string) => key,
+      onError,
+    });
+
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'connections.toast.proxy_chain_invalid',
+      description: 'connections.toast.proxy_hop_kbi_unsupported',
+      variant: 'error',
+    }));
+    expect(onError).toHaveBeenCalledWith('saved-kbi-hop', 'connect-failed');
+    expect(sessionTreeState.expandManualPreset).not.toHaveBeenCalled();
+  });
 });

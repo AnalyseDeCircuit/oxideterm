@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Altes Terminal konnte nicht geschlossen werden",
       "proxy_chain_established": "Proxy-Ketten-Verbindung hergestellt",
+      "proxy_chain_invalid": "Proxy-Kette ist ungültig",
+      "proxy_hop_kbi_unsupported": "Dieser Jump-Host unterstützt Keyboard-Interactive/2FA nicht",
+      "proxy_hop_auth_unsupported": "Dieser Jump-Host verwendet einen nicht unterstützten Auth-Typ",
       "proxy_chain_desc": "Kettentiefe {{depth}}. Topologie synchronisiert."
     },
     "time": {

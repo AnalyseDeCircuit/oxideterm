@@ -48,9 +48,15 @@ impl SshClient {
         // Resolve address
         let socket_addr = addr
             .to_socket_addrs()
-            .map_err(|e| SshError::ConnectionFailed(format!("Failed to resolve address: {}", e)))?
+            .map_err(|e| SshError::DnsResolution {
+                address: addr.clone(),
+                message: e.to_string(),
+            })?
             .next()
-            .ok_or_else(|| SshError::ConnectionFailed("No address found".to_string()))?;
+            .ok_or_else(|| SshError::DnsResolution {
+                address: addr.clone(),
+                message: "No address found".to_string(),
+            })?;
 
         // SSH keepalive config (defense-in-depth):
         // Layer 1 (here): russh native keepalive — safety net in case app heartbeat stalls
@@ -247,10 +253,12 @@ impl client::Handler for ClientHandler {
                     "Host key changed between preflight and connect for {}:{}: expected {}, got {}",
                     self.host, self.port, expected_fingerprint, actual_fingerprint
                 );
-                return Err(SshError::ConnectionFailed(format!(
-                    "Host key verification failed: fingerprint changed between preflight and connect. Expected: {}, Actual: {}",
-                    expected_fingerprint, actual_fingerprint
-                )));
+                return Err(SshError::HostKeyChanged {
+                    host: self.host.clone(),
+                    port: self.port,
+                    expected_fingerprint: expected_fingerprint.to_string(),
+                    actual_fingerprint,
+                });
             }
         }
 
@@ -292,11 +300,11 @@ impl client::Handler for ClientHandler {
                         "Unknown host key for {}:{} (fingerprint: {}). Strict mode enabled, rejecting.",
                         self.host, self.port, fingerprint
                     );
-                    Err(SshError::ConnectionFailed(format!(
-                        "Host key verification failed: unknown host {}:{}. Fingerprint: {}. \
-                         Add to known_hosts or disable strict mode.",
-                        self.host, self.port, fingerprint
-                    )))
+                    Err(SshError::HostKeyUnknown {
+                        host: self.host.clone(),
+                        port: self.port,
+                        fingerprint,
+                    })
                 } else {
                     // Non-strict mode: auto-accept and save unknown keys
                     // NOTE: This is the legacy behavior, kept for backward compatibility
@@ -319,13 +327,12 @@ impl client::Handler for ClientHandler {
                     "HOST KEY CHANGED for {}:{}! Expected {}, got {}. POSSIBLE MITM ATTACK!",
                     self.host, self.port, expected_fingerprint, actual_fingerprint
                 );
-                Err(SshError::ConnectionFailed(format!(
-                    "HOST KEY VERIFICATION FAILED: Key for {}:{} has changed! \
-                     Expected: {}, Actual: {}. \
-                     This could indicate a man-in-the-middle attack. \
-                     If the key change is legitimate, remove the old key from ~/.ssh/known_hosts",
-                    self.host, self.port, expected_fingerprint, actual_fingerprint
-                )))
+                Err(SshError::HostKeyChanged {
+                    host: self.host.clone(),
+                    port: self.port,
+                    expected_fingerprint,
+                    actual_fingerprint,
+                })
             }
         }
     }

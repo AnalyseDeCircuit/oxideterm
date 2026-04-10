@@ -32,7 +32,11 @@ use crate::session::{
     AuthMethod, KeyAuth, SessionConfig, SessionInfo, SessionRegistry, SessionStats,
 };
 use crate::sftp::session::SftpRegistry;
-use crate::ssh::{SshClient, SshConfig, SshConnectionRegistry, SshError};
+use crate::ssh::{
+    ProxyChain, ProxyConnectEndpoint, ProxyConnectEndpointKind, ProxyConnectError,
+    ProxyConnectOperation, ProxyHop, SshClient, SshConfig, SshConnectionRegistry, SshError,
+    connect_via_proxy_for_test,
+};
 use zeroize::Zeroizing;
 
 /// Connect request from frontend
@@ -419,7 +423,7 @@ pub struct TestConnectionResponse {
     pub diagnostic: TestConnectionDiagnostic,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum TestConnectionPhase {
     Preparation,
@@ -429,7 +433,7 @@ pub enum TestConnectionPhase {
     Complete,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum TestConnectionCategory {
     Success,
@@ -437,6 +441,7 @@ pub enum TestConnectionCategory {
     DnsResolution,
     Timeout,
     Network,
+    Tunnel,
     HostKeyUnknown,
     HostKeyChanged,
     Authentication,
@@ -446,6 +451,28 @@ pub enum TestConnectionCategory {
     Unknown,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum TestConnectionLocationKind {
+    JumpHost,
+    Target,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TestConnectionLocation {
+    pub kind: TestConnectionLocationKind,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hop_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_hops: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via_hop_index: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConnectionDiagnostic {
@@ -453,9 +480,80 @@ pub struct TestConnectionDiagnostic {
     pub category: TestConnectionCategory,
     pub summary: String,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<TestConnectionLocation>,
 }
 
-fn build_success_test_connection_response(elapsed_ms: u64) -> TestConnectionResponse {
+fn target_location(request: &ConnectRequest) -> TestConnectionLocation {
+    TestConnectionLocation {
+        kind: TestConnectionLocationKind::Target,
+        host: request.host.clone(),
+        port: request.port,
+        username: request.username.clone(),
+        hop_index: None,
+        total_hops: request
+            .proxy_chain
+            .as_ref()
+            .map(|chain| chain.len())
+            .filter(|count| *count > 0),
+        via_hop_index: None,
+    }
+}
+
+fn jump_host_location(
+    hop: &ProxyChainRequest,
+    hop_index: usize,
+    total_hops: usize,
+) -> TestConnectionLocation {
+    TestConnectionLocation {
+        kind: TestConnectionLocationKind::JumpHost,
+        host: hop.host.clone(),
+        port: hop.port,
+        username: hop.username.clone(),
+        hop_index: Some(hop_index),
+        total_hops: Some(total_hops),
+        via_hop_index: None,
+    }
+}
+
+fn format_location(location: &TestConnectionLocation) -> String {
+    match location.kind {
+        TestConnectionLocationKind::JumpHost => format!(
+            "jump host {} ({}@{}:{})",
+            location.hop_index.unwrap_or_default(),
+            location.username,
+            location.host,
+            location.port,
+        ),
+        TestConnectionLocationKind::Target => {
+            format!("target {}@{}:{}", location.username, location.host, location.port)
+        }
+    }
+}
+
+fn route_overview(request: &ConnectRequest) -> String {
+    if let Some(proxy_chain) = request.proxy_chain.as_ref().filter(|chain| !chain.is_empty()) {
+        let hops = proxy_chain
+            .iter()
+            .enumerate()
+            .map(|(index, hop)| {
+                format!("jump host {} {}@{}:{}", index + 1, hop.username, hop.host, hop.port)
+            })
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        format!(
+            "{} -> target {}@{}:{}",
+            hops, request.username, request.host, request.port
+        )
+    } else {
+        format!("target {}@{}:{}", request.username, request.host, request.port)
+    }
+}
+
+fn build_success_test_connection_response(
+    elapsed_ms: u64,
+    location: Option<TestConnectionLocation>,
+) -> TestConnectionResponse {
     TestConnectionResponse {
         success: true,
         elapsed_ms,
@@ -464,6 +562,7 @@ fn build_success_test_connection_response(elapsed_ms: u64) -> TestConnectionResp
             category: TestConnectionCategory::Success,
             summary: "Connection test succeeded".to_string(),
             detail: "SSH handshake and authentication completed successfully".to_string(),
+            location,
         },
     }
 }
@@ -474,6 +573,7 @@ fn build_failed_test_connection_response(
     category: TestConnectionCategory,
     summary: impl Into<String>,
     detail: impl Into<String>,
+    location: Option<TestConnectionLocation>,
 ) -> TestConnectionResponse {
     TestConnectionResponse {
         success: false,
@@ -483,13 +583,12 @@ fn build_failed_test_connection_response(
             category,
             summary: summary.into(),
             detail: detail.into(),
+            location,
         },
     }
 }
 
-fn classify_test_connection_error(
-    error: &SshError,
-) -> (TestConnectionPhase, TestConnectionCategory, String) {
+fn classify_test_connection_error(error: &SshError) -> (TestConnectionPhase, TestConnectionCategory) {
     match error {
         SshError::Timeout(message) => {
             let phase = if message.to_lowercase().contains("auth") {
@@ -497,82 +596,263 @@ fn classify_test_connection_error(
             } else {
                 TestConnectionPhase::Transport
             };
-            (
-                phase,
-                TestConnectionCategory::Timeout,
-                "Connection attempt timed out".to_string(),
-            )
+            (phase, TestConnectionCategory::Timeout)
         }
         SshError::AuthenticationFailed(_) => (
             TestConnectionPhase::Authentication,
             TestConnectionCategory::Authentication,
-            "Authentication failed".to_string(),
         ),
         SshError::KeyError(_) | SshError::CertificateLoadError(_) | SshError::CertificateParseError(_) => (
             TestConnectionPhase::Authentication,
             TestConnectionCategory::KeyMaterial,
-            "Key or certificate material could not be loaded".to_string(),
         ),
         SshError::AgentNotAvailable(_) | SshError::AgentError(_) => (
             TestConnectionPhase::Authentication,
             TestConnectionCategory::Agent,
-            "SSH agent authentication failed".to_string(),
         ),
         SshError::ProtocolError(_) | SshError::ChannelError(_) => (
             TestConnectionPhase::Transport,
             TestConnectionCategory::Protocol,
-            "SSH protocol negotiation failed".to_string(),
         ),
-        SshError::ConnectionFailed(message) => {
-            let lower = message.to_lowercase();
-            if lower.contains("failed to resolve address") || lower.contains("no address found") {
-                (
-                    TestConnectionPhase::Transport,
-                    TestConnectionCategory::DnsResolution,
-                    "DNS resolution failed".to_string(),
-                )
-            } else if lower.contains("fingerprint changed between preflight and connect")
-                || lower.contains("unknown host")
-            {
-                (
-                    TestConnectionPhase::HostKeyVerification,
-                    TestConnectionCategory::HostKeyUnknown,
-                    "Host key verification is required before testing".to_string(),
-                )
-            } else if lower.contains("host key verification failed")
-                || lower.contains("has changed")
-                || lower.contains("possible mitm")
-            {
-                (
-                    TestConnectionPhase::HostKeyVerification,
-                    TestConnectionCategory::HostKeyChanged,
-                    "Host key verification failed".to_string(),
-                )
-            } else if lower.contains("connection refused")
-                || lower.contains("network is unreachable")
-                || lower.contains("no route to host")
-                || lower.contains("connection reset")
-                || lower.contains("broken pipe")
-            {
-                (
-                    TestConnectionPhase::Transport,
-                    TestConnectionCategory::Network,
-                    "Network connection failed".to_string(),
-                )
-            } else {
-                (
-                    TestConnectionPhase::Transport,
-                    TestConnectionCategory::Unknown,
-                    "SSH connection failed".to_string(),
-                )
+        SshError::DnsResolution { .. } => {
+            (TestConnectionPhase::Transport, TestConnectionCategory::DnsResolution)
+        }
+        SshError::HostKeyUnknown { .. } => (
+            TestConnectionPhase::HostKeyVerification,
+            TestConnectionCategory::HostKeyUnknown,
+        ),
+        SshError::HostKeyChanged { .. } => (
+            TestConnectionPhase::HostKeyVerification,
+            TestConnectionCategory::HostKeyChanged,
+        ),
+        SshError::ConnectionFailed(_) => (TestConnectionPhase::Transport, TestConnectionCategory::Unknown),
+        _ => (TestConnectionPhase::Preparation, TestConnectionCategory::Unknown),
+    }
+}
+
+fn direct_failure_summary(phase: &TestConnectionPhase, category: &TestConnectionCategory) -> String {
+    match phase {
+        TestConnectionPhase::Preparation => match category {
+            TestConnectionCategory::KeyMaterial => {
+                "Target authentication material is invalid".to_string()
+            }
+            _ => "Target connection request is incomplete".to_string(),
+        },
+        TestConnectionPhase::HostKeyVerification => "Target host key verification failed".to_string(),
+        TestConnectionPhase::Transport => match category {
+            TestConnectionCategory::DnsResolution => "Target DNS resolution failed".to_string(),
+            TestConnectionCategory::Timeout => "Timed out reaching the target".to_string(),
+            TestConnectionCategory::Network => "Target network connection failed".to_string(),
+            TestConnectionCategory::Protocol => "Target SSH transport negotiation failed".to_string(),
+            _ => "Target SSH transport failed".to_string(),
+        },
+        TestConnectionPhase::Authentication => match category {
+            TestConnectionCategory::Agent => "Target SSH agent authentication failed".to_string(),
+            TestConnectionCategory::KeyMaterial => {
+                "Target key or certificate material could not be loaded".to_string()
+            }
+            TestConnectionCategory::Timeout => {
+                "Timed out while authenticating to the target".to_string()
+            }
+            _ => "Target authentication failed".to_string(),
+        },
+        TestConnectionPhase::Complete => "Connection test succeeded".to_string(),
+    }
+}
+
+fn location_from_proxy_endpoint(endpoint: &ProxyConnectEndpoint) -> TestConnectionLocation {
+    TestConnectionLocation {
+        kind: match endpoint.kind {
+            ProxyConnectEndpointKind::JumpHost => TestConnectionLocationKind::JumpHost,
+            ProxyConnectEndpointKind::Target => TestConnectionLocationKind::Target,
+        },
+        host: endpoint.host.clone(),
+        port: endpoint.port,
+        username: endpoint.username.clone(),
+        hop_index: endpoint.hop_index,
+        total_hops: Some(endpoint.total_hops),
+        via_hop_index: endpoint.via_hop_index,
+    }
+}
+
+fn proxy_failure_summary(
+    operation: ProxyConnectOperation,
+    phase: &TestConnectionPhase,
+    category: &TestConnectionCategory,
+    location: &TestConnectionLocation,
+) -> String {
+    if operation == ProxyConnectOperation::OpenTunnel {
+        return match location.kind {
+            TestConnectionLocationKind::JumpHost => format!(
+                "Tunnel from jump host {} to jump host {} failed",
+                location.via_hop_index.unwrap_or_default(),
+                location.hop_index.unwrap_or_default(),
+            ),
+            TestConnectionLocationKind::Target => format!(
+                "Tunnel from jump host {} to the target failed",
+                location.via_hop_index.unwrap_or_default(),
+            ),
+        };
+    }
+
+    match location.kind {
+        TestConnectionLocationKind::JumpHost => {
+            let hop = location.hop_index.unwrap_or_default();
+            match phase {
+                TestConnectionPhase::Preparation => match category {
+                    TestConnectionCategory::KeyMaterial => {
+                        format!("Jump host {} authentication material is invalid", hop)
+                    }
+                    _ => format!("Jump host {} configuration is incomplete", hop),
+                },
+                TestConnectionPhase::HostKeyVerification => {
+                    format!("Jump host {} host key verification failed", hop)
+                }
+                TestConnectionPhase::Transport => match category {
+                    TestConnectionCategory::DnsResolution => {
+                        format!("Jump host {} DNS resolution failed", hop)
+                    }
+                    TestConnectionCategory::Timeout => {
+                        format!("Timed out reaching jump host {}", hop)
+                    }
+                    TestConnectionCategory::Protocol => {
+                        format!("Jump host {} SSH transport negotiation failed", hop)
+                    }
+                    _ => format!("Jump host {} transport failed", hop),
+                },
+                TestConnectionPhase::Authentication => match category {
+                    TestConnectionCategory::Agent => {
+                        format!("Jump host {} SSH agent authentication failed", hop)
+                    }
+                    TestConnectionCategory::KeyMaterial => {
+                        format!("Jump host {} key or certificate material could not be loaded", hop)
+                    }
+                    TestConnectionCategory::Timeout => {
+                        format!("Timed out while authenticating to jump host {}", hop)
+                    }
+                    _ => format!("Jump host {} authentication failed", hop),
+                },
+                TestConnectionPhase::Complete => "Connection test succeeded".to_string(),
             }
         }
-        _ => (
-            TestConnectionPhase::Preparation,
-            TestConnectionCategory::Unknown,
-            "Connection test failed".to_string(),
-        ),
+        TestConnectionLocationKind::Target => match phase {
+            TestConnectionPhase::Preparation => direct_failure_summary(phase, category),
+            TestConnectionPhase::HostKeyVerification => {
+                "Target host key verification failed after traversing jump hosts".to_string()
+            }
+            TestConnectionPhase::Transport => match category {
+                TestConnectionCategory::Timeout => {
+                    "Timed out reaching the target through jump hosts".to_string()
+                }
+                TestConnectionCategory::Protocol => {
+                    "Target SSH transport negotiation failed after jump hosts connected".to_string()
+                }
+                _ => "Target transport failed after jump hosts connected".to_string(),
+            },
+            TestConnectionPhase::Authentication => match category {
+                TestConnectionCategory::Agent => {
+                    "Target SSH agent authentication failed after jump hosts connected".to_string()
+                }
+                TestConnectionCategory::KeyMaterial => {
+                    "Target key or certificate material could not be loaded after jump hosts connected"
+                        .to_string()
+                }
+                TestConnectionCategory::Timeout => {
+                    "Timed out while authenticating to the target through jump hosts".to_string()
+                }
+                _ => "Target authentication failed after jump hosts connected".to_string(),
+            },
+            TestConnectionPhase::Complete => "Connection test succeeded".to_string(),
+        },
     }
+}
+
+fn build_direct_failure_diagnostic(
+    request: &ConnectRequest,
+    error: &SshError,
+) -> TestConnectionDiagnostic {
+    let (phase, category) = classify_test_connection_error(error);
+    let location = target_location(request);
+
+    TestConnectionDiagnostic {
+        summary: direct_failure_summary(&phase, &category),
+        detail: format!("While testing {}, {}", format_location(&location), error),
+        phase,
+        category,
+        location: Some(location),
+    }
+}
+
+fn build_proxy_failure_diagnostic(
+    request: &ConnectRequest,
+    error: &ProxyConnectError,
+) -> TestConnectionDiagnostic {
+    match error {
+        ProxyConnectError::InvalidChain { detail, total_hops } => TestConnectionDiagnostic {
+            phase: TestConnectionPhase::Preparation,
+            category: TestConnectionCategory::Unsupported,
+            summary: "Proxy chain configuration is invalid".to_string(),
+            detail: format!(
+                "While testing route with {} jump host(s), {}",
+                total_hops, detail
+            ),
+            location: Some(target_location(request)),
+        },
+        ProxyConnectError::Step {
+            operation,
+            endpoint,
+            source,
+        } => {
+            let location = location_from_proxy_endpoint(endpoint);
+            let (_, classified_category) = classify_test_connection_error(source);
+            let category = if *operation == ProxyConnectOperation::OpenTunnel {
+                TestConnectionCategory::Tunnel
+            } else {
+                classified_category
+            };
+            let phase = match operation {
+                ProxyConnectOperation::ResolveAddress => TestConnectionPhase::Transport,
+                ProxyConnectOperation::Authenticate => TestConnectionPhase::Authentication,
+                ProxyConnectOperation::OpenTunnel => TestConnectionPhase::Transport,
+                ProxyConnectOperation::EstablishTransport => match category {
+                    TestConnectionCategory::HostKeyUnknown
+                    | TestConnectionCategory::HostKeyChanged => {
+                        TestConnectionPhase::HostKeyVerification
+                    }
+                    _ => TestConnectionPhase::Transport,
+                },
+            };
+
+            TestConnectionDiagnostic {
+                phase,
+                category,
+                summary: proxy_failure_summary(*operation, &phase, &category, &location),
+                detail: format!(
+                    "While testing route {}, {} failed: {}",
+                    route_overview(request),
+                    format_location(&location),
+                    source,
+                ),
+                location: Some(location),
+            }
+        }
+    }
+}
+
+fn build_proxy_chain(requests: &[ProxyChainRequest]) -> Result<ProxyChain, (usize, String)> {
+    let mut chain = ProxyChain::new();
+
+    for (index, hop) in requests.iter().enumerate() {
+        let auth = build_session_auth(hop.auth.clone()).map_err(|error| (index + 1, error))?;
+        chain = chain.add_hop(ProxyHop {
+            host: hop.host.clone(),
+            port: hop.port,
+            username: hop.username.clone(),
+            auth,
+        });
+    }
+
+    Ok(chain)
 }
 
 /// Test an SSH connection without creating a persistent session.
@@ -591,17 +871,7 @@ pub async fn test_connection(
 
     let start = std::time::Instant::now();
 
-    if request.proxy_chain.as_ref().is_some_and(|chain| !chain.is_empty()) {
-        return Ok(build_failed_test_connection_response(
-            start.elapsed().as_millis() as u64,
-            TestConnectionPhase::Preparation,
-            TestConnectionCategory::Unsupported,
-            "Proxy chain diagnostics are not supported yet",
-            "Current test-connection diagnostics only support direct SSH targets. Use Connect for full jump-host traversal.",
-        ));
-    }
-
-    let auth = match build_session_auth(request.auth) {
+    let auth = match build_session_auth(request.auth.clone()) {
         Ok(auth) => auth,
         Err(message) => {
             let category = if message.to_lowercase().contains("ssh key")
@@ -616,41 +886,98 @@ pub async fn test_connection(
                 start.elapsed().as_millis() as u64,
                 TestConnectionPhase::Preparation,
                 category,
-                "Connection request is incomplete",
+                direct_failure_summary(&TestConnectionPhase::Preparation, &category),
                 message,
+                Some(target_location(&request)),
             ));
         }
     };
 
-    let config = SshConfig {
-        host: request.host.clone(),
-        port: request.port,
-        username: request.username.clone(),
-        auth,
-        timeout_secs: 30,
-        cols: request.cols,
-        rows: request.rows,
-        proxy_chain: None,
-        strict_host_key_checking: true,
-        trust_host_key: request.trust_host_key,
-        expected_host_key_fingerprint: request.expected_host_key_fingerprint,
-        agent_forwarding: false,
-    };
+    let response = if let Some(proxy_chain_requests) =
+        request.proxy_chain.as_ref().filter(|chain| !chain.is_empty())
+    {
+        let proxy_chain = match build_proxy_chain(proxy_chain_requests) {
+            Ok(chain) => chain,
+            Err((hop_index, message)) => {
+                let location = proxy_chain_requests
+                    .get(hop_index - 1)
+                    .map(|hop| jump_host_location(hop, hop_index, proxy_chain_requests.len()));
+                let category = if message.to_lowercase().contains("ssh key")
+                    || message.to_lowercase().contains("certificate")
+                {
+                    TestConnectionCategory::KeyMaterial
+                } else {
+                    TestConnectionCategory::Unknown
+                };
 
-    let response = match SshClient::new(config).connect(None).await {
-        Ok(session) => {
-            drop(session);
-            build_success_test_connection_response(start.elapsed().as_millis() as u64)
+                return Ok(build_failed_test_connection_response(
+                    start.elapsed().as_millis() as u64,
+                    TestConnectionPhase::Preparation,
+                    category,
+                    match category {
+                        TestConnectionCategory::KeyMaterial => {
+                            format!("Jump host {} authentication material is invalid", hop_index)
+                        }
+                        _ => format!("Jump host {} configuration is incomplete", hop_index),
+                    },
+                    format!("Jump host {} could not be prepared: {}", hop_index, message),
+                    location,
+                ));
+            }
+        };
+
+        match connect_via_proxy_for_test(
+            &proxy_chain,
+            &request.host,
+            request.port,
+            &request.username,
+            &auth,
+            30,
+        )
+        .await
+        {
+            Ok(connection) => {
+                drop(connection);
+                build_success_test_connection_response(
+                    start.elapsed().as_millis() as u64,
+                    Some(target_location(&request)),
+                )
+            }
+            Err(error) => TestConnectionResponse {
+                success: false,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                diagnostic: build_proxy_failure_diagnostic(&request, &error),
+            },
         }
-        Err(error) => {
-            let (phase, category, summary) = classify_test_connection_error(&error);
-            build_failed_test_connection_response(
-                start.elapsed().as_millis() as u64,
-                phase,
-                category,
-                summary,
-                error.to_string(),
-            )
+    } else {
+        let config = SshConfig {
+            host: request.host.clone(),
+            port: request.port,
+            username: request.username.clone(),
+            auth,
+            timeout_secs: 30,
+            cols: request.cols,
+            rows: request.rows,
+            proxy_chain: None,
+            strict_host_key_checking: true,
+            trust_host_key: request.trust_host_key,
+            expected_host_key_fingerprint: request.expected_host_key_fingerprint.clone(),
+            agent_forwarding: false,
+        };
+
+        match SshClient::new(config).connect(None).await {
+            Ok(session) => {
+                drop(session);
+                build_success_test_connection_response(
+                    start.elapsed().as_millis() as u64,
+                    Some(target_location(&request)),
+                )
+            }
+            Err(error) => TestConnectionResponse {
+                success: false,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                diagnostic: build_direct_failure_diagnostic(&request, &error),
+            },
         }
     };
 
@@ -764,5 +1091,136 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "No SSH key found: missing key");
+    }
+
+    #[test]
+    fn test_build_proxy_chain_preserves_hop_order() {
+        let requests = vec![
+            ProxyChainRequest {
+                host: "jump-1.example.com".to_string(),
+                port: 22,
+                username: "tester-1".to_string(),
+                auth: AuthRequest::Agent,
+            },
+            ProxyChainRequest {
+                host: "jump-2.example.com".to_string(),
+                port: 2222,
+                username: "tester-2".to_string(),
+                auth: AuthRequest::Agent,
+            },
+        ];
+
+        let chain = build_proxy_chain(&requests).expect("proxy chain");
+
+        assert_eq!(chain.hops.len(), 2);
+        assert_eq!(chain.hops[0].host, "jump-1.example.com");
+        assert_eq!(chain.hops[1].port, 2222);
+    }
+
+    #[test]
+    fn test_build_proxy_failure_diagnostic_marks_tunnel_step() {
+        let request = ConnectRequest {
+            host: "target.example.com".to_string(),
+            port: 22,
+            username: "target-user".to_string(),
+            auth: AuthRequest::Agent,
+            cols: default_cols(),
+            rows: default_rows(),
+            name: Some("Target".to_string()),
+            proxy_chain: Some(vec![
+                ProxyChainRequest {
+                    host: "jump-1.example.com".to_string(),
+                    port: 22,
+                    username: "jump1".to_string(),
+                    auth: AuthRequest::Agent,
+                },
+                ProxyChainRequest {
+                    host: "jump-2.example.com".to_string(),
+                    port: 2222,
+                    username: "jump2".to_string(),
+                    auth: AuthRequest::Agent,
+                },
+            ]),
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+            buffer_config: None,
+        };
+
+        let diagnostic = build_proxy_failure_diagnostic(
+            &request,
+            &ProxyConnectError::Step {
+                operation: ProxyConnectOperation::OpenTunnel,
+                endpoint: ProxyConnectEndpoint {
+                    kind: ProxyConnectEndpointKind::JumpHost,
+                    host: "jump-2.example.com".to_string(),
+                    port: 2222,
+                    username: "jump2".to_string(),
+                    hop_index: Some(2),
+                    total_hops: 2,
+                    via_hop_index: Some(1),
+                },
+                source: SshError::ConnectionFailed(
+                    "administratively prohibited".to_string(),
+                ),
+            },
+        );
+
+        assert!(matches!(diagnostic.phase, TestConnectionPhase::Transport));
+        assert!(matches!(diagnostic.category, TestConnectionCategory::Tunnel));
+        assert_eq!(diagnostic.summary, "Tunnel from jump host 1 to jump host 2 failed");
+        let location = diagnostic.location.expect("missing location");
+        assert!(matches!(location.kind, TestConnectionLocationKind::JumpHost));
+        assert_eq!(location.hop_index, Some(2));
+        assert_eq!(location.via_hop_index, Some(1));
+    }
+
+    #[test]
+    fn test_build_proxy_failure_diagnostic_marks_target_authentication() {
+        let request = ConnectRequest {
+            host: "target.example.com".to_string(),
+            port: 22,
+            username: "target-user".to_string(),
+            auth: AuthRequest::Agent,
+            cols: default_cols(),
+            rows: default_rows(),
+            name: Some("Target".to_string()),
+            proxy_chain: Some(vec![ProxyChainRequest {
+                host: "jump-1.example.com".to_string(),
+                port: 22,
+                username: "jump1".to_string(),
+                auth: AuthRequest::Agent,
+            }]),
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+            buffer_config: None,
+        };
+
+        let diagnostic = build_proxy_failure_diagnostic(
+            &request,
+            &ProxyConnectError::Step {
+                operation: ProxyConnectOperation::Authenticate,
+                endpoint: ProxyConnectEndpoint {
+                    kind: ProxyConnectEndpointKind::Target,
+                    host: "target.example.com".to_string(),
+                    port: 22,
+                    username: "target-user".to_string(),
+                    hop_index: None,
+                    total_hops: 1,
+                    via_hop_index: None,
+                },
+                source: SshError::AuthenticationFailed(
+                    "Authentication rejected by server".to_string(),
+                ),
+            },
+        );
+
+        assert!(matches!(diagnostic.phase, TestConnectionPhase::Authentication));
+        assert!(matches!(diagnostic.category, TestConnectionCategory::Authentication));
+        assert_eq!(
+            diagnostic.summary,
+            "Target authentication failed after jump hosts connected"
+        );
+        let location = diagnostic.location.expect("missing location");
+        assert!(matches!(location.kind, TestConnectionLocationKind::Target));
     }
 }

@@ -71,6 +71,8 @@
       "test_success": "Connection successful",
       "test_failed": "Connection test failed",
       "test_elapsed": "Connected in {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Jump host does not support keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host uses an unsupported auth type",
       "test_host_key_changed": "Host key changed. Expected: {{expected}}. Actual: {{actual}}."
     },
     "edit_properties": {

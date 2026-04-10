@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Échec de la fermeture de l'ancien terminal",
       "proxy_chain_established": "Connexion de chaîne proxy établie",
+      "proxy_chain_invalid": "Chaîne proxy invalide",
+      "proxy_hop_kbi_unsupported": "Cet hôte relais ne prend pas en charge keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Cet hôte relais utilise un type d'authentification non pris en charge",
       "proxy_chain_desc": "Profondeur de chaîne {{depth}}. Topologie synchronisée."
     },
     "time": {

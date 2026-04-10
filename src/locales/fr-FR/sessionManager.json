@@ -71,6 +71,8 @@
       "test_success": "Connexion réussie",
       "test_failed": "Échec du test de connexion",
       "test_elapsed": "Connecté en {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Cet hôte relais ne prend pas en charge keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Cet hôte relais utilise un type d'authentification non pris en charge",
       "test_host_key_changed": "La clé d'hôte a changé. Attendu : {{expected}}. Actuel : {{actual}}."
     },
     "edit_properties": {

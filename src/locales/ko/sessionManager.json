@@ -71,6 +71,8 @@
       "test_success": "연결 성공",
       "test_failed": "연결 테스트 실패",
       "test_elapsed": "{{ms}}ms 만에 연결 됨",
+      "proxy_hop_kbi_unsupported": "이 점프 호스트는 keyboard-interactive/2FA를 지원하지 않습니다",
+      "proxy_hop_auth_unsupported": "이 점프 호스트는 지원되지 않는 인증 유형을 사용합니다",
       "test_host_key_changed": "호스트 키가 변경되었습니다. 예상값: {{expected}}. 실제값: {{actual}}."
     },
     "edit_properties": {

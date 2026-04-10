@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Error al cerrar terminal antigua",
       "proxy_chain_established": "Conexión de cadena proxy establecida",
+      "proxy_chain_invalid": "Cadena proxy no válida",
+      "proxy_hop_kbi_unsupported": "Este host intermedio no admite keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Este host intermedio usa un tipo de autenticación no compatible",
       "proxy_chain_desc": "Profundidad de cadena {{depth}}. Topología sincronizada."
     },
     "time": {

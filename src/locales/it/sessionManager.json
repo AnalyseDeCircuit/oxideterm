@@ -71,6 +71,8 @@
       "test_success": "Connessione riuscita",
       "test_failed": "Test di connessione fallito",
       "test_elapsed": "Connesso in {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Questo jump host non supporta keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Questo jump host usa un tipo di autenticazione non supportato",
       "test_host_key_changed": "La chiave host è cambiata. Prevista: {{expected}}. Attuale: {{actual}}."
     },
     "edit_properties": {

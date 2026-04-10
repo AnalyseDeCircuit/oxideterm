@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { api } from './api';
+import { findUnsupportedProxyHopAuth } from './proxyHopSupport';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
 import { useAppStore } from '../store/appStore';
 import type { UnifiedFlatNode } from '../types';
@@ -50,6 +51,22 @@ export async function connectToSaved(
 
     // ========== Proxy Chain 支持 ==========
     if (savedConn.proxy_chain && savedConn.proxy_chain.length > 0) {
+      const unsupportedProxyHop = findUnsupportedProxyHopAuth(savedConn.proxy_chain);
+      if (unsupportedProxyHop) {
+        toast({
+          title: t('connections.toast.proxy_chain_invalid'),
+          description: unsupportedProxyHop.reason === 'keyboard_interactive'
+            ? t('connections.toast.proxy_hop_kbi_unsupported', { hop: unsupportedProxyHop.hopIndex })
+            : t('connections.toast.proxy_hop_auth_unsupported', {
+              hop: unsupportedProxyHop.hopIndex,
+              authType: unsupportedProxyHop.authType,
+            }),
+          variant: 'error',
+        });
+        onError?.(connectionId, 'connect-failed');
+        return;
+      }
+
       const { expandManualPreset, connectNodeWithAncestors, createTerminalForNode } = useSessionTreeStore.getState();
 
       const hops = savedConn.proxy_chain.map((hop: { host: string; port: number; username: string; auth_type: string; password?: string; key_path?: string; passphrase?: string; agent_forwarding: boolean }) => ({

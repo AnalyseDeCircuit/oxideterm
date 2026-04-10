@@ -372,14 +372,6 @@ export const NewConnectionModal = () => {
       toastError(t('modals.new_connection.test_not_supported_kbi'));
       return;
     }
-    if (proxyServers.length > 0) {
-      toastError(
-        t('modals.new_connection.test_failed'),
-        t('modals.new_connection.test_proxy_chain_not_supported'),
-      );
-      return;
-    }
-
     setTesting(true);
     try {
       const request = buildTestConnectionRequest({
@@ -392,7 +384,22 @@ export const NewConnectionModal = () => {
         keyPath,
         certPath,
         passphrase,
+        proxyChain: proxyServers.map((hop) => ({
+          host: hop.host,
+          port: hop.port,
+          username: hop.username,
+          authType: hop.auth_type,
+          password: hop.password,
+          keyPath: hop.key_path,
+          passphrase: hop.passphrase,
+        })),
       });
+
+      if (request.proxy_chain?.length) {
+        await executeTestConnection(request);
+        return;
+      }
+
       const preflight = await api.sshPreflight({ host, port: parseInt(port) || 22 });
 
       if (preflight.status === 'verified') {

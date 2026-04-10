@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "無法關閉舊終端機",
       "proxy_chain_established": "代理鏈連線已建立",
+      "proxy_chain_invalid": "代理鏈無效",
+      "proxy_hop_kbi_unsupported": "此跳板主機暫不支援 keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "此跳板主機使用了不支援的驗證類型",
       "proxy_chain_desc": "鏈深度 {{depth}}。拓撲已同步。"
     },
     "time": {

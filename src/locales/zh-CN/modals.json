@@ -49,6 +49,7 @@
       "password": "密码",
       "agent_desc": "使用系统 SSH Agent 进行认证",
       "agent_hint": "确保 SSH Agent 已运行并包含所需密钥",
+      "kbi_not_supported_hint": "跳板机暂不支持 keyboard-interactive/2FA",
       "cancel": "取消",
       "add": "添加"
     },

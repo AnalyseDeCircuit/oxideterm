@@ -25,7 +25,7 @@
 //! - Non-blocking: All operations async with tokio
 //! - Memory efficient: No extra buffers, channels used as transports
 
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -149,6 +149,183 @@ pub struct ProxyConnection {
     pub target_handle: Handle<ClientHandler>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyConnectOperation {
+    ResolveAddress,
+    EstablishTransport,
+    Authenticate,
+    OpenTunnel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyConnectEndpointKind {
+    JumpHost,
+    Target,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProxyConnectEndpoint {
+    pub kind: ProxyConnectEndpointKind,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub hop_index: Option<usize>,
+    pub total_hops: usize,
+    pub via_hop_index: Option<usize>,
+}
+
+impl ProxyConnectEndpoint {
+    fn with_via_hop_index(mut self, via_hop_index: usize) -> Self {
+        self.via_hop_index = Some(via_hop_index);
+        self
+    }
+}
+
+#[derive(Debug)]
+pub enum ProxyConnectError {
+    InvalidChain {
+        detail: String,
+        total_hops: usize,
+    },
+    Step {
+        operation: ProxyConnectOperation,
+        endpoint: ProxyConnectEndpoint,
+        source: SshError,
+    },
+}
+
+impl ProxyConnectError {
+    fn step(
+        operation: ProxyConnectOperation,
+        endpoint: ProxyConnectEndpoint,
+        source: SshError,
+    ) -> Self {
+        Self::Step {
+            operation,
+            endpoint,
+            source,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ProxyAuthPath {
+    Direct,
+    Stream,
+}
+
+fn jump_host_endpoint(hop: &ProxyHop, hop_index: usize, total_hops: usize) -> ProxyConnectEndpoint {
+    ProxyConnectEndpoint {
+        kind: ProxyConnectEndpointKind::JumpHost,
+        host: hop.host.clone(),
+        port: hop.port,
+        username: hop.username.clone(),
+        hop_index: Some(hop_index),
+        total_hops,
+        via_hop_index: None,
+    }
+}
+
+fn target_endpoint(
+    target_host: &str,
+    target_port: u16,
+    target_username: &str,
+    total_hops: usize,
+) -> ProxyConnectEndpoint {
+    ProxyConnectEndpoint {
+        kind: ProxyConnectEndpointKind::Target,
+        host: target_host.to_string(),
+        port: target_port,
+        username: target_username.to_string(),
+        hop_index: None,
+        total_hops,
+        via_hop_index: None,
+    }
+}
+
+fn resolve_socket_addr(addr: &str) -> Result<SocketAddr, SshError> {
+    addr.to_socket_addrs()
+        .map_err(|e| SshError::DnsResolution {
+            address: addr.to_string(),
+            message: e.to_string(),
+        })?
+        .next()
+        .ok_or_else(|| SshError::DnsResolution {
+            address: addr.to_string(),
+            message: "No address found".to_string(),
+        })
+}
+
+async fn authenticate_proxy_hop(
+    handle: &mut Handle<ClientHandler>,
+    hop: &ProxyHop,
+    auth_path: ProxyAuthPath,
+) -> Result<(), SshError> {
+    let authenticated = match &hop.auth {
+        AuthMethod::Password { password } => {
+            let (timeout_message, retry_timeout_message, retry_debug_label) = match auth_path {
+                ProxyAuthPath::Direct => (
+                    format!("Password auth to {} timed out", hop.host),
+                    format!("Password auth to {} timed out (retry)", hop.host),
+                    format!("Jump host password auth to {}", hop.host),
+                ),
+                ProxyAuthPath::Stream => (
+                    format!("Password auth to {} timed out", hop.host),
+                    format!("Password auth to {} timed out (retry)", hop.host),
+                    format!("Stream password auth to {}", hop.host),
+                ),
+            };
+
+            authenticate_password(
+                handle,
+                &hop.username,
+                password,
+                DEFAULT_AUTH_TIMEOUT_SECS,
+                &timeout_message,
+                &retry_timeout_message,
+                &retry_debug_label,
+            )
+            .await?
+        }
+        AuthMethod::Key {
+            key_path,
+            passphrase,
+        } => {
+            let key = load_private_key_material(key_path, passphrase.as_ref().map(|p| p.as_str()))?;
+            authenticate_publickey_best_algo(handle, &hop.username, key).await?
+        }
+        AuthMethod::Certificate {
+            key_path,
+            cert_path,
+            passphrase,
+        } => {
+            let (key, cert) = load_certificate_auth_material(
+                key_path,
+                cert_path,
+                passphrase.as_ref().map(|p| p.as_str()),
+            )?;
+
+            authenticate_certificate_best_algo(handle, &hop.username, key, cert).await?
+        }
+        AuthMethod::Agent => {
+            let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
+            agent.authenticate(handle, hop.username.clone()).await?;
+            client::AuthResult::Success
+        }
+        AuthMethod::KeyboardInteractive => {
+            return Err(SshError::AuthenticationFailed(
+                "KeyboardInteractive authentication not supported for proxy chain hops"
+                    .to_string(),
+            ));
+        }
+    };
+
+    ensure_auth_success(
+        &authenticated,
+        format!("Authentication to {} rejected", hop.host),
+    )
+}
+
 impl ProxyConnection {
     /// Extract the target handle, leaving only jump handles.
     /// This is needed because ProxyConnection implements Drop.
@@ -175,14 +352,14 @@ impl Drop for ProxyConnection {
     }
 }
 
-fn build_proxy_client_handler(host: String, port: u16) -> ClientHandler {
-    #[cfg(test)]
-    {
-        return ClientHandler::with_trust(host, port, false, Some(false), false, None);
-    }
-
-    #[cfg(not(test))]
-    {
+fn build_proxy_client_handler(
+    host: String,
+    port: u16,
+    trust_unknown_host: Option<bool>,
+) -> ClientHandler {
+    if let Some(trust) = trust_unknown_host {
+        ClientHandler::with_trust(host, port, false, Some(trust), false, None)
+    } else {
         ClientHandler::new(host, port, false)
     }
 }
@@ -191,13 +368,10 @@ fn build_proxy_client_handler(host: String, port: u16) -> ClientHandler {
 async fn direct_connect(
     hop: &ProxyHop,
     timeout_secs: u64,
+    trust_unknown_host: Option<bool>,
 ) -> Result<Handle<ClientHandler>, SshError> {
     let addr = format!("{}:{}", hop.host, hop.port);
-    let socket_addr = addr
-        .to_socket_addrs()
-        .map_err(|e| SshError::ConnectionFailed(format!("Failed to resolve {}: {}", addr, e)))?
-        .next()
-        .ok_or_else(|| SshError::ConnectionFailed(format!("No address found for {}", addr)))?;
+    let socket_addr = resolve_socket_addr(&addr)?;
 
     info!("Connecting to jump host at {}", addr);
 
@@ -205,7 +379,7 @@ async fn direct_connect(
     let ssh_config = build_client_config();
 
     // Use non-strict mode for jump hosts (auto-accept unknown)
-    let handler = build_proxy_client_handler(hop.host.clone(), hop.port);
+    let handler = build_proxy_client_handler(hop.host.clone(), hop.port, trust_unknown_host);
 
     // Connect with timeout
     let mut handle = tokio::time::timeout(
@@ -219,63 +393,7 @@ async fn direct_connect(
     debug!("SSH handshake with jump host completed");
 
     // Authenticate
-    let authenticated = match &hop.auth {
-        AuthMethod::Password { password } => {
-            authenticate_password(
-                &mut handle,
-                &hop.username,
-                password,
-                DEFAULT_AUTH_TIMEOUT_SECS,
-                &format!("Password auth to {} timed out", hop.host),
-                &format!("Password auth to {} timed out (retry)", hop.host),
-                &format!("Jump host password auth to {}", hop.host),
-            )
-            .await?
-        }
-        AuthMethod::Key {
-            key_path,
-            passphrase,
-        } => {
-            let key = load_private_key_material(key_path, passphrase.as_ref().map(|p| p.as_str()))?;
-            authenticate_publickey_best_algo(&mut handle, &hop.username, key).await?
-        }
-        AuthMethod::Certificate {
-            key_path,
-            cert_path,
-            passphrase,
-        } => {
-            info!(
-                "Authenticating to jump host with certificate: {}",
-                cert_path
-            );
-            let (key, cert) = load_certificate_auth_material(
-                key_path,
-                cert_path,
-                passphrase.as_ref().map(|p| p.as_str()),
-            )?;
-
-            authenticate_certificate_best_algo(&mut handle, &hop.username, key, cert).await?
-        }
-        AuthMethod::Agent => {
-            // Connect to SSH Agent and authenticate
-            let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent
-                .authenticate(&mut handle, hop.username.clone())
-                .await?;
-            client::AuthResult::Success
-        }
-        AuthMethod::KeyboardInteractive => {
-            // KBI not supported for proxy chain hops in MVP
-            return Err(SshError::AuthenticationFailed(
-                "KeyboardInteractive authentication not supported for proxy chain hops".to_string(),
-            ));
-        }
-    };
-
-    ensure_auth_success(
-        &authenticated,
-        format!("Authentication to {} rejected", hop.host),
-    )?;
+    authenticate_proxy_hop(&mut handle, hop, ProxyAuthPath::Direct).await?;
 
     info!("Authenticated to jump host {}", hop.host);
     Ok(handle)
@@ -299,6 +417,7 @@ async fn connect_via_stream(
     hop: &ProxyHop,
     stream: russh::ChannelStream<russh::client::Msg>,
     timeout_secs: u64,
+    trust_unknown_host: Option<bool>,
 ) -> Result<Handle<ClientHandler>, SshError> {
     use russh::client;
 
@@ -311,7 +430,7 @@ async fn connect_via_stream(
     let ssh_config = build_client_config();
 
     // Use non-strict mode for tunnel hosts (auto-accept unknown)
-    let handler = build_proxy_client_handler(hop.host.clone(), hop.port);
+    let handler = build_proxy_client_handler(hop.host.clone(), hop.port, trust_unknown_host);
     let config = Arc::new(ssh_config);
 
     // Use russh::connect_stream() to connect over our custom stream!
@@ -337,60 +456,7 @@ async fn connect_via_stream(
     debug!("SSH handshake via stream completed");
 
     // Authenticate
-    let authenticated = match &hop.auth {
-        AuthMethod::Password { password } => {
-            authenticate_password(
-                &mut handle,
-                &hop.username,
-                password,
-                DEFAULT_AUTH_TIMEOUT_SECS,
-                &format!("Password auth to {} timed out", hop.host),
-                &format!("Password auth to {} timed out (retry)", hop.host),
-                &format!("Stream password auth to {}", hop.host),
-            )
-            .await?
-        }
-        AuthMethod::Key {
-            key_path,
-            passphrase,
-        } => {
-            let key = load_private_key_material(key_path, passphrase.as_ref().map(|p| p.as_str()))?;
-            authenticate_publickey_best_algo(&mut handle, &hop.username, key).await?
-        }
-        AuthMethod::Certificate {
-            key_path,
-            cert_path,
-            passphrase,
-        } => {
-            info!("Authenticating via stream with certificate: {}", cert_path);
-            let (key, cert) = load_certificate_auth_material(
-                key_path,
-                cert_path,
-                passphrase.as_ref().map(|p| p.as_str()),
-            )?;
-
-            authenticate_certificate_best_algo(&mut handle, &hop.username, key, cert).await?
-        }
-        AuthMethod::Agent => {
-            // Connect to SSH Agent and authenticate
-            let mut agent = crate::ssh::agent::SshAgentClient::connect().await?;
-            agent
-                .authenticate(&mut handle, hop.username.clone())
-                .await?;
-            client::AuthResult::Success
-        }
-        AuthMethod::KeyboardInteractive => {
-            // KBI not supported for proxy chain hops in MVP
-            return Err(SshError::AuthenticationFailed(
-                "KeyboardInteractive authentication not supported for proxy chain hops".to_string(),
-            ));
-        }
-    };
-
-    ensure_auth_success(
-        &authenticated,
-        format!("Authentication to {} rejected", hop.host),
-    )?;
+    authenticate_proxy_hop(&mut handle, hop, ProxyAuthPath::Stream).await?;
 
     info!("Authenticated via stream to {}", hop.host);
     Ok(handle)
@@ -479,6 +545,214 @@ pub async fn connect_via_proxy(
     target_auth: &AuthMethod,
     timeout_secs: u64,
 ) -> Result<ProxyConnection, SshError> {
+    connect_via_proxy_internal(
+        chain,
+        target_host,
+        target_port,
+        target_username,
+        target_auth,
+        timeout_secs,
+        None,
+    )
+    .await
+}
+
+pub async fn connect_via_proxy_for_test(
+    chain: &ProxyChain,
+    target_host: &str,
+    target_port: u16,
+    target_username: &str,
+    target_auth: &AuthMethod,
+    timeout_secs: u64,
+) -> Result<ProxyConnection, ProxyConnectError> {
+    if chain.is_empty() {
+        return Err(ProxyConnectError::InvalidChain {
+            detail: "Proxy chain is empty".into(),
+            total_hops: 0,
+        });
+    }
+
+    let num_hops = chain.hops.len();
+    if num_hops > MAX_CHAIN_DEPTH as usize {
+        return Err(ProxyConnectError::InvalidChain {
+            detail: format!("Proxy chain too long: {} hops (max {})", num_hops, MAX_CHAIN_DEPTH),
+            total_hops: num_hops,
+        });
+    }
+
+    let mut current_stream: Option<russh::ChannelStream<russh::client::Msg>> = None;
+    let mut jump_handles: Vec<Handle<ClientHandler>> = Vec::with_capacity(num_hops);
+
+    for (index, hop) in chain.hops.iter().enumerate() {
+        let hop_number = index + 1;
+        let endpoint = jump_host_endpoint(hop, hop_number, num_hops);
+
+        let handle = if let Some(stream) = current_stream.take() {
+            connect_via_stream_for_test(hop, stream, timeout_secs, endpoint.clone()).await?
+        } else {
+            direct_connect_for_test(hop, timeout_secs, endpoint.clone()).await?
+        };
+
+        if index < num_hops - 1 {
+            let next_hop = &chain.hops[index + 1];
+            let next_endpoint = jump_host_endpoint(next_hop, hop_number + 1, num_hops)
+                .with_via_hop_index(hop_number);
+
+            let channel = handle
+                .channel_open_direct_tcpip(&next_hop.host, next_hop.port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|e| {
+                    ProxyConnectError::step(
+                        ProxyConnectOperation::OpenTunnel,
+                        next_endpoint,
+                        SshError::ConnectionFailed(format!(
+                            "Failed to open tunnel to {}@{}:{}: {}",
+                            next_hop.username, next_hop.host, next_hop.port, e
+                        )),
+                    )
+                })?;
+
+            current_stream = Some(channel.into_stream());
+        } else {
+            let destination = target_endpoint(target_host, target_port, target_username, num_hops)
+                .with_via_hop_index(hop_number);
+
+            let channel = handle
+                .channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|e| {
+                    ProxyConnectError::step(
+                        ProxyConnectOperation::OpenTunnel,
+                        destination,
+                        SshError::ConnectionFailed(format!(
+                            "Failed to open tunnel to target {}@{}:{}: {}",
+                            target_username, target_host, target_port, e
+                        )),
+                    )
+                })?;
+
+            current_stream = Some(channel.into_stream());
+        }
+
+        jump_handles.push(handle);
+    }
+
+    let target_hop = ProxyHop {
+        host: target_host.to_string(),
+        port: target_port,
+        username: target_username.to_string(),
+        auth: target_auth.clone(),
+    };
+
+    let stream = current_stream.ok_or_else(|| ProxyConnectError::step(
+        ProxyConnectOperation::OpenTunnel,
+        target_endpoint(target_host, target_port, target_username, num_hops),
+        SshError::ConnectionFailed("No stream available for target connection".into()),
+    ))?;
+
+    let target_handle = connect_via_stream_for_test(
+        &target_hop,
+        stream,
+        timeout_secs,
+        target_endpoint(target_host, target_port, target_username, num_hops),
+    )
+    .await?;
+
+    Ok(ProxyConnection {
+        jump_handles,
+        target_handle,
+    })
+}
+
+async fn direct_connect_for_test(
+    hop: &ProxyHop,
+    timeout_secs: u64,
+    endpoint: ProxyConnectEndpoint,
+) -> Result<Handle<ClientHandler>, ProxyConnectError> {
+    let addr = format!("{}:{}", hop.host, hop.port);
+    let socket_addr = resolve_socket_addr(&addr).map_err(|source| {
+        ProxyConnectError::step(ProxyConnectOperation::ResolveAddress, endpoint.clone(), source)
+    })?;
+
+    let ssh_config = build_client_config();
+    let handler = build_proxy_client_handler(hop.host.clone(), hop.port, Some(false));
+
+    let mut handle = tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        client::connect(Arc::new(ssh_config), socket_addr, handler),
+    )
+    .await
+    .map_err(|_| {
+        ProxyConnectError::step(
+            ProxyConnectOperation::EstablishTransport,
+            endpoint.clone(),
+            SshError::Timeout(format!("Connection to {} timed out", addr)),
+        )
+    })?
+    .map_err(|e| {
+        ProxyConnectError::step(
+            ProxyConnectOperation::EstablishTransport,
+            endpoint.clone(),
+            SshError::ConnectionFailed(e.to_string()),
+        )
+    })?;
+
+    authenticate_proxy_hop(&mut handle, hop, ProxyAuthPath::Direct)
+        .await
+        .map_err(|source| ProxyConnectError::step(ProxyConnectOperation::Authenticate, endpoint, source))?;
+
+    Ok(handle)
+}
+
+async fn connect_via_stream_for_test(
+    hop: &ProxyHop,
+    stream: russh::ChannelStream<russh::client::Msg>,
+    timeout_secs: u64,
+    endpoint: ProxyConnectEndpoint,
+) -> Result<Handle<ClientHandler>, ProxyConnectError> {
+    let ssh_config = build_client_config();
+    let handler = build_proxy_client_handler(hop.host.clone(), hop.port, Some(false));
+    let config = Arc::new(ssh_config);
+
+    let mut handle = tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        client::connect_stream(config, stream, handler),
+    )
+    .await
+    .map_err(|_| {
+        ProxyConnectError::step(
+            ProxyConnectOperation::EstablishTransport,
+            endpoint.clone(),
+            SshError::Timeout(format!("Connection to {}:{} via stream timed out", hop.host, hop.port)),
+        )
+    })?
+    .map_err(|e| {
+        ProxyConnectError::step(
+            ProxyConnectOperation::EstablishTransport,
+            endpoint.clone(),
+            SshError::ConnectionFailed(format!(
+                "Failed to connect via stream to {}:{}: {}",
+                hop.host, hop.port, e
+            )),
+        )
+    })?;
+
+    authenticate_proxy_hop(&mut handle, hop, ProxyAuthPath::Stream)
+        .await
+        .map_err(|source| ProxyConnectError::step(ProxyConnectOperation::Authenticate, endpoint, source))?;
+
+    Ok(handle)
+}
+
+async fn connect_via_proxy_internal(
+    chain: &ProxyChain,
+    target_host: &str,
+    target_port: u16,
+    target_username: &str,
+    target_auth: &AuthMethod,
+    timeout_secs: u64,
+    trust_unknown_host: Option<bool>,
+) -> Result<ProxyConnection, SshError> {
     if chain.is_empty() {
         return Err(SshError::ConnectionFailed("Proxy chain is empty".into()));
     }
@@ -508,9 +782,9 @@ pub async fn connect_via_proxy(
         );
 
         let handle = if let Some(stream) = current_stream.take() {
-            connect_via_stream(hop, stream, timeout_secs).await?
+            connect_via_stream(hop, stream, timeout_secs, trust_unknown_host).await?
         } else {
-            direct_connect(hop, timeout_secs).await?
+            direct_connect(hop, timeout_secs, trust_unknown_host).await?
         };
 
         if i < num_hops - 1 {
@@ -575,7 +849,8 @@ pub async fn connect_via_proxy(
         SshError::ConnectionFailed("No stream available for target connection".into())
     })?;
 
-    let target_handle = connect_via_stream(&target_hop, stream, timeout_secs).await?;
+    let target_handle = connect_via_stream(&target_hop, stream, timeout_secs, trust_unknown_host)
+        .await?;
 
     info!("Target connection established");
 

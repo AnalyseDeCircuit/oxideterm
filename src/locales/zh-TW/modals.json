@@ -49,6 +49,7 @@
       "password": "密碼",
       "agent_desc": "使用系統 SSH Agent 進行驗證",
       "agent_hint": "請確保 SSH Agent 正在執行且包含所需的金鑰",
+      "kbi_not_supported_hint": "跳板主機目前不支援 keyboard-interactive/2FA",
       "cancel": "取消",
       "add": "新增"
     },

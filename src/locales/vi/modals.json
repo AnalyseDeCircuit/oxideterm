@@ -49,6 +49,7 @@
       "password": "Mật khẩu",
       "agent_desc": "Xác thực bằng SSH Agent hệ thống",
       "agent_hint": "Đảm bảo SSH Agent đang chạy và chứa key cần thiết",
+      "kbi_not_supported_hint": "Jump host hiện chưa hỗ trợ keyboard-interactive/2FA",
       "cancel": "Hủy",
       "add": "Thêm"
     },

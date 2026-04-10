@@ -71,6 +71,8 @@
       "test_success": "Conexión exitosa",
       "test_failed": "Prueba de conexión fallida",
       "test_elapsed": "Conectado en {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Este host intermedio no admite keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Este host intermedio usa un tipo de autenticación no compatible",
       "test_host_key_changed": "La clave de host ha cambiado. Esperado: {{expected}}. Actual: {{actual}}."
     },
     "edit_properties": {

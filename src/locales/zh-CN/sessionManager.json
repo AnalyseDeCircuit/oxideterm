@@ -71,6 +71,8 @@
       "test_success": "连接成功",
       "test_failed": "连接测试失败",
       "test_elapsed": "已在 {{ms}}ms 内连接",
+      "proxy_hop_kbi_unsupported": "该跳板机暂不支持 keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "该跳板机使用了不支持的认证类型",
       "test_host_key_changed": "主机密钥已更改。预期值：{{expected}}。实际值：{{actual}}。"
     },
     "edit_properties": {

@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "이전 터미널 닫기 실패",
       "proxy_chain_established": "프록시 체인 연결 설정됨",
+      "proxy_chain_invalid": "프록시 체인이 올바르지 않습니다",
+      "proxy_hop_kbi_unsupported": "이 점프 호스트는 keyboard-interactive/2FA를 지원하지 않습니다",
+      "proxy_hop_auth_unsupported": "이 점프 호스트는 지원되지 않는 인증 유형을 사용합니다",
       "proxy_chain_desc": "체인 깊이 {{depth}}. 토폴로지 동기화됨."
     },
     "time": {

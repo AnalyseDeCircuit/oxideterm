@@ -69,6 +69,8 @@
       "test_success": "Kết nối thành công",
       "test_failed": "Thử kết nối thất bại",
       "test_elapsed": "Đã kết nối trong {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Jump host này không hỗ trợ keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host này dùng kiểu xác thực không được hỗ trợ",
       "test_host_key_changed": "Khóa máy chủ đã thay đổi. Dự kiến: {{expected}}. Thực tế: {{actual}}."
     },
     "edit_properties": {

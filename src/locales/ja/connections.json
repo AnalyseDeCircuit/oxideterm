@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "古いターミナルの終了に失敗しました",
       "proxy_chain_established": "プロキシチェーン接続が確立されました",
+      "proxy_chain_invalid": "プロキシチェーンが無効です",
+      "proxy_hop_kbi_unsupported": "このジャンプホストは keyboard-interactive/2FA をサポートしていません",
+      "proxy_hop_auth_unsupported": "このジャンプホストは未対応の認証方式を使用しています",
       "proxy_chain_desc": "チェーン深度{{depth}}。トポロジが同期されました。"
     },
     "time": {

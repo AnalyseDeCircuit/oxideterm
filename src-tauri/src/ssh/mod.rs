@@ -49,7 +49,11 @@ pub use known_hosts::{HostKeyVerification, KnownHostsStore, get_known_hosts};
 pub use preflight::{
     HostKeyCache, HostKeyStatus, accept_host_key, check_host_key, get_host_key_cache,
 };
-pub use proxy::{ProxyChain, ProxyConnection, ProxyHop, connect_via_proxy, connect_via_single_hop};
+pub use proxy::{
+    ProxyChain, ProxyConnectEndpoint, ProxyConnectEndpointKind, ProxyConnectError,
+    ProxyConnectOperation, ProxyConnection, ProxyHop, connect_via_proxy,
+    connect_via_proxy_for_test, connect_via_single_hop,
+};
 pub use session::{
     DEFAULT_PTY_MODES, ExtendedSessionHandle, SessionCommand, SessionHandle, SshSession,
 };

@@ -49,6 +49,7 @@
       "password": "パスワード",
       "agent_desc": "システムSSHエージェントを使用して認証",
       "agent_hint": "SSHエージェントが実行中で、必要なキーが含まれていることを確認してください",
+      "kbi_not_supported_hint": "ジャンプホストでは現在 keyboard-interactive/2FA はサポートされていません",
       "cancel": "キャンセル",
       "add": "追加"
     },

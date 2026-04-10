@@ -13,6 +13,7 @@ import { EditConnectionModal } from '../modals/EditConnectionModal';
 import { EditConnectionPropertiesModal } from '../modals/EditConnectionPropertiesModal';
 import { HostKeyConfirmDialog } from '../modals/HostKeyConfirmDialog';
 import { connectToSaved } from '../../lib/connectToSaved';
+import { findUnsupportedProxyHopAuth } from '../../lib/proxyHopSupport';
 import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -169,6 +170,11 @@ export const SessionManagerPanel = () => {
   }, [toast, t]);
 
   const prepareTestConnection = useCallback(async (label: string, request: Parameters<typeof api.testConnection>[0]) => {
+    if (request.proxy_chain?.length) {
+      await runTestConnection(label, request);
+      return;
+    }
+
     const preflight = await api.sshPreflight({ host: request.host, port: request.port });
 
     if (preflight.status === 'verified') {
@@ -204,6 +210,21 @@ export const SessionManagerPanel = () => {
   const handleTestConnection = useCallback(async (conn: ConnectionInfo) => {
     try {
       const savedConn = await api.getSavedConnectionForConnect(conn.id);
+      const unsupportedProxyHop = findUnsupportedProxyHopAuth(savedConn.proxy_chain);
+      if (unsupportedProxyHop) {
+        toast({
+          title: t('sessionManager.toast.test_failed'),
+          description: unsupportedProxyHop.reason === 'keyboard_interactive'
+            ? t('sessionManager.toast.proxy_hop_kbi_unsupported', { hop: unsupportedProxyHop.hopIndex })
+            : t('sessionManager.toast.proxy_hop_auth_unsupported', {
+              hop: unsupportedProxyHop.hopIndex,
+              authType: unsupportedProxyHop.authType,
+            }),
+          variant: 'error',
+        });
+        return;
+      }
+
       if (requiresSavedConnectionPasswordPrompt(savedConn)) {
         setConnectPromptAction('test');
         setConnectPromptConnectionId(conn.id);

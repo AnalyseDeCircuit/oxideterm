@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Không thể đóng terminal cũ",
       "proxy_chain_established": "Đã thiết lập chuỗi proxy",
+      "proxy_chain_invalid": "Chuỗi proxy không hợp lệ",
+      "proxy_hop_kbi_unsupported": "Jump host này không hỗ trợ keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host này dùng kiểu xác thực không được hỗ trợ",
       "proxy_chain_desc": "Độ sâu chuỗi {{depth}}. Đã đồng bộ topology."
     },
     "time": {

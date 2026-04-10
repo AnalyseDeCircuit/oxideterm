@@ -49,6 +49,7 @@
       "password": "Password",
       "agent_desc": "Authenticate using the system SSH Agent",
       "agent_hint": "Make sure the SSH Agent is running and contains the required key(s)",
+      "kbi_not_supported_hint": "Jump host currently does not support keyboard-interactive/2FA",
       "cancel": "Cancel",
       "add": "Add"
     },

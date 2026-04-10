@@ -10,6 +10,9 @@ pub enum SshError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
 
+    #[error("DNS resolution failed for {address}: {message}")]
+    DnsResolution { address: String, message: String },
+
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
 
@@ -48,6 +51,25 @@ pub enum SshError {
 
     #[error("SSH Agent error: {0}")]
     AgentError(String),
+
+    #[error(
+        "Host key verification failed: unknown host {host}:{port}. Fingerprint: {fingerprint}. Add to known_hosts or disable strict mode."
+    )]
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        fingerprint: String,
+    },
+
+    #[error(
+        "Host key verification failed for {host}:{port}. Expected: {expected_fingerprint}. Actual: {actual_fingerprint}."
+    )]
+    HostKeyChanged {
+        host: String,
+        port: u16,
+        expected_fingerprint: String,
+        actual_fingerprint: String,
+    },
 }
 
 impl From<russh::Error> for SshError {

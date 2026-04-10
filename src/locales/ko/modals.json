@@ -49,6 +49,7 @@
       "password": "비밀번호",
       "agent_desc": "시스템 SSH Agent로 인증",
       "agent_hint": "SSH Agent가 실행 중이고 필요한 키가 포함되어 있는지 확인하세요",
+      "kbi_not_supported_hint": "점프 호스트는 현재 keyboard-interactive/2FA를 지원하지 않습니다",
       "cancel": "취소",
       "add": "추가"
     },

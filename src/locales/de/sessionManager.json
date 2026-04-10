@@ -71,6 +71,8 @@
       "test_success": "Verbindung erfolgreich",
       "test_failed": "Verbindungstest fehlgeschlagen",
       "test_elapsed": "Verbunden in {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Dieser Jump-Host unterstützt Keyboard-Interactive/2FA nicht",
+      "proxy_hop_auth_unsupported": "Dieser Jump-Host verwendet einen nicht unterstützten Auth-Typ",
       "test_host_key_changed": "Host-Schlüssel wurde geändert. Erwartet: {{expected}}. Tatsächlich: {{actual}}."
     },
     "edit_properties": {

@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Failed to close old terminal",
       "proxy_chain_established": "Proxy chain connection established",
+      "proxy_chain_invalid": "Proxy chain is invalid",
+      "proxy_hop_kbi_unsupported": "Jump host does not support keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host uses an unsupported auth type",
       "proxy_chain_desc": "Chain depth {{depth}}. Topology synchronized."
     },
     "time": {

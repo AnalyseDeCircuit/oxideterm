@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 
 const connectToSavedMock = vi.hoisted(() => vi.fn());
+const toastMock = vi.hoisted(() => vi.fn());
 
 const sessionManagerState = vi.hoisted(() => ({
   connections: [{
@@ -66,7 +67,7 @@ vi.mock('@/components/sessionManager/useSessionManager', () => ({
 }));
 
 vi.mock('@/hooks/useToast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: toastMock }),
 }));
 
 vi.mock('@/hooks/useConfirm', () => ({
@@ -264,6 +265,93 @@ describe('SessionManagerPanel', () => {
       expect(screen.getByTestId('host-key-dialog')).toHaveTextContent('example.com:22');
     });
     expect(api.testConnection).not.toHaveBeenCalled();
+  });
+
+  it('bypasses direct preflight and sends proxy hops for jump-host tests', async () => {
+    vi.mocked(api.getSavedConnectionForConnect).mockResolvedValue({
+      name: 'Jump Target',
+      host: 'target.example.com',
+      port: 22,
+      username: 'target-user',
+      auth_type: 'agent',
+      agent_forwarding: false,
+      proxy_chain: [
+        {
+          host: 'jump-1.example.com',
+          port: 22,
+          username: 'jump1',
+          auth_type: 'password',
+          password: 'secret',
+          agent_forwarding: false,
+        },
+      ],
+    });
+    vi.mocked(api.testConnection).mockResolvedValue({
+      success: false,
+      elapsedMs: 15,
+      diagnostic: {
+        phase: 'transport',
+        category: 'tunnel',
+        summary: 'Tunnel from jump host 1 to the target failed',
+        detail: 'mock tunnel failure',
+      },
+    });
+
+    render(<SessionManagerPanel />);
+    fireEvent.click(screen.getByText('test-row'));
+
+    await waitFor(() => {
+      expect(api.testConnection).toHaveBeenCalledWith({
+        name: 'Jump Target',
+        host: 'target.example.com',
+        port: 22,
+        username: 'target-user',
+        auth_type: 'agent',
+        proxy_chain: [
+          {
+            host: 'jump-1.example.com',
+            port: 22,
+            username: 'jump1',
+            auth_type: 'password',
+            password: 'secret',
+          },
+        ],
+      });
+    });
+    expect(api.sshPreflight).not.toHaveBeenCalled();
+  });
+
+  it('blocks unsupported proxy-hop keyboard-interactive auth before starting a test', async () => {
+    vi.mocked(api.getSavedConnectionForConnect).mockResolvedValue({
+      name: 'Jump Target',
+      host: 'target.example.com',
+      port: 22,
+      username: 'target-user',
+      auth_type: 'agent',
+      agent_forwarding: false,
+      proxy_chain: [
+        {
+          host: 'jump-1.example.com',
+          port: 22,
+          username: 'jump1',
+          auth_type: 'keyboard_interactive',
+          agent_forwarding: false,
+        },
+      ],
+    } as never);
+
+    render(<SessionManagerPanel />);
+    fireEvent.click(screen.getByText('test-row'));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'sessionManager.toast.test_failed',
+        description: 'sessionManager.toast.proxy_hop_kbi_unsupported',
+        variant: 'error',
+      }));
+    });
+    expect(api.testConnection).not.toHaveBeenCalled();
+    expect(api.sshPreflight).not.toHaveBeenCalled();
   });
 
   it('broadcasts saved connection changes after deleting a connection', async () => {

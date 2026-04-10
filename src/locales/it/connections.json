@@ -15,6 +15,9 @@
     "toast": {
       "close_terminal_failed": "Impossibile chiudere il vecchio terminale",
       "proxy_chain_established": "Connessione catena proxy stabilita",
+      "proxy_chain_invalid": "Catena proxy non valida",
+      "proxy_hop_kbi_unsupported": "Questo jump host non supporta keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Questo jump host usa un tipo di autenticazione non supportato",
       "proxy_chain_desc": "Profondità catena {{depth}}. Topologia sincronizzata."
     },
     "time": {

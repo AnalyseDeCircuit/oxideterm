@@ -49,6 +49,7 @@
       "password": "Contraseña",
       "agent_desc": "Usar agente SSH del sistema para autenticación",
       "agent_hint": "Asegúrate de que el agente SSH esté ejecutándose y contenga las claves necesarias",
+      "kbi_not_supported_hint": "Los hosts intermedios no admiten keyboard-interactive/2FA por ahora",
       "cancel": "Cancelar",
       "add": "Añadir"
     },

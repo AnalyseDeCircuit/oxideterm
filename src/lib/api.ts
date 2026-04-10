@@ -60,7 +60,47 @@ const USE_MOCK = false;
 type TestConnectionRequestOptions = {
   trust_host_key?: boolean;
   expected_host_key_fingerprint?: string;
+  proxy_chain?: TestConnectionProxyHop[];
 };
+
+export type TestConnectionProxyHop =
+  | {
+      host: string;
+      port: number;
+      username: string;
+      auth_type: 'password';
+      password: string;
+    }
+  | {
+      host: string;
+      port: number;
+      username: string;
+      auth_type: 'key';
+      key_path: string;
+      passphrase?: string;
+    }
+  | {
+      host: string;
+      port: number;
+      username: string;
+      auth_type: 'default_key';
+      passphrase?: string;
+    }
+  | {
+      host: string;
+      port: number;
+      username: string;
+      auth_type: 'agent';
+    }
+  | {
+      host: string;
+      port: number;
+      username: string;
+      auth_type: 'certificate';
+      key_path: string;
+      cert_path: string;
+      passphrase?: string;
+    };
 
 export type TestConnectionRequest = TestConnectionRequestOptions &
   | {
@@ -119,6 +159,7 @@ export type TestConnectionCategory =
   | 'dns_resolution'
   | 'timeout'
   | 'network'
+  | 'tunnel'
   | 'host_key_unknown'
   | 'host_key_changed'
   | 'authentication'
@@ -127,11 +168,24 @@ export type TestConnectionCategory =
   | 'protocol'
   | 'unknown';
 
+export type TestConnectionLocationKind = 'jump_host' | 'target';
+
+export type TestConnectionLocation = {
+  kind: TestConnectionLocationKind;
+  host: string;
+  port: number;
+  username: string;
+  hopIndex?: number;
+  totalHops?: number;
+  viaHopIndex?: number;
+};
+
 export type TestConnectionDiagnostic = {
   phase: TestConnectionPhase;
   category: TestConnectionCategory;
   summary: string;
   detail: string;
+  location?: TestConnectionLocation;
 };
 
 export type TestConnectionResponse = {
