@@ -255,6 +255,32 @@ mod tests {
     }
 
     #[test]
+    fn test_persisted_session_with_config_preserves_buffer_config_without_payload() {
+        let config = SessionConfig::with_password("example.com", 22, "user", "pass");
+        let buffer_config = BufferConfig {
+            max_lines: 5_000,
+            save_on_disconnect: false,
+        };
+
+        let session = PersistedSession::with_config(
+            "session-1".to_string(),
+            config,
+            0,
+            buffer_config.clone(),
+        );
+
+        let bytes = session.to_bytes().unwrap();
+        let deserialized = PersistedSession::from_bytes(&bytes).unwrap();
+
+        assert!(deserialized.terminal_buffer.is_none());
+        assert_eq!(deserialized.buffer_config.max_lines, buffer_config.max_lines);
+        assert_eq!(
+            deserialized.buffer_config.save_on_disconnect,
+            buffer_config.save_on_disconnect
+        );
+    }
+
+    #[test]
     fn test_session_persistence() {
         let (_temp_dir, store) = create_test_store();
         let persistence = SessionPersistence::new(store);

@@ -26,12 +26,26 @@ const toastState = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const settingsStoreMock = vi.hoisted(() => ({
+  getState: vi.fn(() => ({
+    settings: {
+      buffer: {
+        maxLines: 7000,
+        saveOnDisconnect: false,
+      },
+    },
+  })),
+}));
+
 vi.mock('@/lib/api', () => ({ api: apiMocks }));
 vi.mock('@/store/appStore', () => ({
   useAppStore: createMutableSelectorStore(appStoreState),
 }));
 vi.mock('@/store/sessionTreeStore', () => ({
   useSessionTreeStore: createMutableSelectorStore(sessionTreeState),
+}));
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: settingsStoreMock,
 }));
 vi.mock('@/hooks/useToast', () => ({
   useToast: () => toastState,
@@ -84,6 +98,8 @@ describe('NewConnectionModal KBI flow', () => {
         host: 'server.example.com',
         username: 'alice',
         agentForwarding: true,
+        maxBufferLines: 7000,
+        saveOnDisconnect: false,
       }));
     });
   });
