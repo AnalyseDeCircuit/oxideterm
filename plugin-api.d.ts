@@ -261,6 +261,15 @@ export type ProgressReporter = {
   report(value: number, total: number, message?: string): void;
 };
 
+export type PluginActiveTerminalTarget = Readonly<{
+  sessionId: string;
+  terminalType: 'terminal' | 'local_terminal';
+  nodeId: string | null;
+  connectionId: string | null;
+  connectionState: string | null;
+  label: string | null;
+}>;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SFTP / Forwarding Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -485,6 +494,8 @@ export type PluginContext = Readonly<{
     registerInputInterceptor(handler: InputInterceptor): Disposable;
     registerOutputProcessor(handler: OutputProcessor): Disposable;
     registerShortcut(command: string, handler: () => void): Disposable;
+    getActiveTarget(): PluginActiveTerminalTarget | null;
+    writeToActive(text: string): boolean;
     writeToNode(nodeId: string, text: string): void;
     getNodeBuffer(nodeId: string): string | null;
     getNodeSelection(nodeId: string): string | null;

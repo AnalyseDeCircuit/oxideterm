@@ -12,6 +12,7 @@ import { cn } from '../../lib/utils';
 import { Tab, PaneNode } from '../../types';
 import { topologyResolver } from '../../lib/topologyResolver';
 import { resolvePluginIcon } from '../../lib/plugin/pluginIconResolver';
+import { resolvePluginTabTitle } from '../../lib/plugin/pluginI18nManager';
 import { selectVisiblePluginContextMenuItems } from '../../lib/plugin/pluginHostUi';
 import { ReconnectTimeline } from '../connections/ReconnectTimeline';
 import { TabBarTerminalActions } from './TabBarTerminalActions';
@@ -125,6 +126,11 @@ const getTabTitle = (
       return t('launcher.tabTitle');
     case 'plugin_manager':
       return t('tabs.plugin_manager');
+    case 'plugin':
+      if (tab.pluginTabId) {
+        return resolvePluginTabTitle(tab.pluginTabId) || tab.title;
+      }
+      return tab.title;
   }
 
   // Calculate pane count for terminal tabs with split panes

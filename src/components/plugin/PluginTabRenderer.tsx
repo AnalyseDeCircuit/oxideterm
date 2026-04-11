@@ -9,6 +9,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
+import i18n from 'i18next';
 import { usePluginStore } from '../../store/pluginStore';
 import { ErrorBoundary } from '../ErrorBoundary';
 import type { Tab } from '../../types';
@@ -21,6 +22,7 @@ type PluginTabRendererProps = {
 export function PluginTabRenderer({ pluginTabId }: PluginTabRendererProps) {
   const { t } = useTranslation();
   const tabView = usePluginStore((state) => state.tabViews.get(pluginTabId));
+  const language = i18n.language;
 
   if (!tabView) {
     return (
@@ -48,7 +50,11 @@ export function PluginTabRenderer({ pluginTabId }: PluginTabRendererProps) {
         </div>
       }
     >
-      <Component tabId={tabView.tabId} pluginId={tabView.pluginId} />
+      <Component
+        tabId={tabView.tabId}
+        pluginId={tabView.pluginId}
+        language={language}
+      />
     </ErrorBoundary>
   );
 }

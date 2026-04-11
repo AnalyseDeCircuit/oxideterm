@@ -213,6 +213,7 @@ export type PluginEventsAPI = {
 export type PluginTabProps = {
   tabId: string;
   pluginId: string;
+  language?: string;
 };
 
 /** ctx.ui — view registration and user interaction */
@@ -268,6 +269,10 @@ export type PluginTerminalAPI = {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
+  /** Get the last focused terminal target across SSH and local terminals */
+  getActiveTarget(): PluginActiveTerminalTarget | null;
+  /** Write directly to the last focused terminal target */
+  writeToActive(text: string): boolean;
   /** Write to terminal by nodeId (stable across reconnects) */
   writeToNode(nodeId: string, text: string): void;
   /** Get terminal buffer by nodeId */
@@ -706,6 +711,15 @@ export type ContextMenuItem = {
 export type ProgressReporter = {
   report(value: number, total: number, message?: string): void;
 };
+
+export type PluginActiveTerminalTarget = Readonly<{
+  sessionId: string;
+  terminalType: 'terminal' | 'local_terminal';
+  nodeId: string | null;
+  connectionId: string | null;
+  connectionState: string | null;
+  label: string | null;
+}>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Plugin API v3 — New Namespace Interfaces

@@ -3,6 +3,7 @@
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { refreshOpenPluginTabTitles } from './lib/plugin/pluginI18nManager';
 
 // 命名空间列表（每种语言对应 22 个 JSON 文件）
 const NAMESPACES = [
@@ -112,11 +113,15 @@ export async function changeLanguage(lang: string) {
   if (!loadedLanguages.has(lang)) {
     const translations = await loadLanguageResources(lang);
     if (version !== changeLanguageVersion) return; // 已被更新的调用取代
-    i18n.addResourceBundle(lang, 'translation', translations);
+    // Deep-merge app resources so already-loaded plugin translations under the
+    // top-level `plugin` namespace are preserved when a new language is loaded.
+    i18n.addResourceBundle(lang, 'translation', translations, true, true);
     loadedLanguages.add(lang);
   }
   if (version !== changeLanguageVersion) return;
   await i18n.changeLanguage(lang);
+  if (version !== changeLanguageVersion) return;
+  refreshOpenPluginTabTitles();
 }
 
 // 导出初始化 Promise，main.tsx 需等待此 Promise 完成后再渲染

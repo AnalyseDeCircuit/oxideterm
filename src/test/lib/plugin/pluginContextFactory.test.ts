@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeMock = vi.hoisted(() => vi.fn());
 const writeToTerminalMock = vi.hoisted(() => vi.fn(() => true));
 const findPaneBySessionIdMock = vi.hoisted(() => vi.fn(() => 'pane-1'));
+const getActivePaneIdMock = vi.hoisted(() => vi.fn(() => 'pane-1'));
+const getActivePaneMetadataMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'sess-1', terminalType: 'terminal', tabId: 'tab-1' })));
 const getTerminalBufferMock = vi.hoisted(() => vi.fn(() => 'buffer text'));
 const getTerminalSelectionMock = vi.hoisted(() => vi.fn(() => 'selected text'));
 
@@ -56,6 +58,9 @@ const sessionTreeState = vi.hoisted(() => ({
   ],
   getNode(nodeId: string) {
     return sessionTreeState.nodes.find((node) => node.id === nodeId) ?? null;
+  },
+  getNodeByTerminalId(sessionId: string) {
+    return sessionTreeState.nodes.find((node) => node.runtime.terminalIds.includes(sessionId)) ?? null;
   },
 }));
 
@@ -171,6 +176,8 @@ vi.mock('@/lib/plugin/pluginI18nManager', () => ({ createPluginI18nManager: vi.f
 vi.mock('@/lib/plugin/pluginUtils', () => ({ toSnapshot: (value: unknown) => value }));
 vi.mock('@/lib/plugin/pluginThrottledEvents', () => ({ createThrottledEmitter: vi.fn(() => ({ push: vi.fn(), dispose: vi.fn() })) }));
 vi.mock('@/lib/terminalRegistry', () => ({
+  getActivePaneId: getActivePaneIdMock,
+  getActivePaneMetadata: getActivePaneMetadataMock,
   findPaneBySessionId: findPaneBySessionIdMock,
   getTerminalBuffer: getTerminalBufferMock,
   getTerminalSelection: getTerminalSelectionMock,
@@ -307,6 +314,28 @@ describe('pluginContextFactory', () => {
     expect(writeToTerminalMock).toHaveBeenCalledWith('pane-1', 'pwd\n');
     expect(context.terminal.getNodeBuffer('node-1')).toBe('buffer text');
     expect(context.terminal.getNodeSelection('node-1')).toBe('selected text');
+  });
+
+  it('exposes the last focused terminal target and writes to local terminals', () => {
+    const context = buildPluginContext(manifest());
+
+    getActivePaneMetadataMock.mockReturnValueOnce({
+      sessionId: 'local-1',
+      terminalType: 'local_terminal',
+      tabId: 'tab-local',
+    });
+    getActivePaneIdMock.mockReturnValueOnce('pane-local');
+
+    expect(context.terminal.getActiveTarget()).toEqual({
+      sessionId: 'local-1',
+      terminalType: 'local_terminal',
+      nodeId: null,
+      connectionId: null,
+      connectionState: 'active',
+      label: 'local-1',
+    });
+    expect(context.terminal.writeToActive('echo test\n')).toBe(true);
+    expect(writeToTerminalMock).toHaveBeenCalledWith('pane-local', 'echo test\n');
   });
 
   it('loads plugin assets and cleanupPluginAssets removes styles and blob URLs', async () => {

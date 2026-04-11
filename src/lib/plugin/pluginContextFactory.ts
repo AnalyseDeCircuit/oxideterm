@@ -62,6 +62,7 @@ import type {
   Disposable,
   InputInterceptor,
   OutputProcessor,
+  PluginActiveTerminalTarget,
   PluginTabProps,
 } from '../../types/plugin';
 import type {
@@ -72,6 +73,7 @@ import type {
   SshConnectionState,
 } from '../../types';
 import { useAppStore } from '../../store/appStore';
+import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { createPluginStorage } from './pluginStorage';
@@ -83,6 +85,8 @@ import { freezeSnapshot } from './pluginSnapshots';
 import { createThrottledEmitter } from './pluginThrottledEvents';
 import { normalizePluginComboDescriptor, normalizePluginKeyCombo } from './pluginHostUi';
 import {
+  getActivePaneId,
+  getActivePaneMetadata,
   findPaneBySessionId,
   getTerminalBuffer,
   getTerminalSelection,
@@ -195,6 +199,20 @@ function createDisposable(pluginId: string, fn: () => void): Disposable {
       if (disposed) return;
       disposed = true;
       fn();
+      usePluginStore.setState((state) => {
+        const disposables = new Map(state.disposables);
+        const existing = disposables.get(pluginId);
+        if (!existing) return state;
+
+        const next = existing.filter((item) => item !== disposable);
+        if (next.length > 0) {
+          disposables.set(pluginId, next);
+        } else {
+          disposables.delete(pluginId);
+        }
+
+        return { disposables };
+      });
     },
   };
   usePluginStore.getState().trackDisposable(pluginId, disposable);
@@ -211,6 +229,39 @@ function resolveNodeToFirstSession(nodeId: string): string | null {
   if (!node) return null;
   const terminalIds = node.runtime.terminalIds;
   return terminalIds.length > 0 ? terminalIds[0] : null;
+}
+
+function resolveActiveTerminalTarget(): PluginActiveTerminalTarget | null {
+  const activePane = getActivePaneMetadata();
+  if (!activePane) return null;
+
+  if (activePane.terminalType === 'local_terminal') {
+    const terminal = useLocalTerminalStore.getState().getTerminal(activePane.sessionId);
+    return freezeSnapshot<PluginActiveTerminalTarget>({
+      sessionId: activePane.sessionId,
+      terminalType: 'local_terminal',
+      nodeId: null,
+      connectionId: null,
+      connectionState: terminal?.running === false ? 'disconnected' : 'active',
+      label: terminal?.shell?.label ?? activePane.sessionId,
+    });
+  }
+
+  const node = useSessionTreeStore.getState().getNodeByTerminalId(activePane.sessionId);
+  const connectionId = node?.runtime.connectionId ?? null;
+  const connection = connectionId ? useAppStore.getState().connections.get(connectionId) ?? null : null;
+  const connectionState = connection
+    ? (typeof connection.state === 'string' ? connection.state : 'error')
+    : null;
+
+  return freezeSnapshot<PluginActiveTerminalTarget>({
+    sessionId: activePane.sessionId,
+    terminalType: 'terminal',
+    nodeId: node?.id ?? null,
+    connectionId,
+    connectionState,
+    label: connection?.host ?? node?.displayName ?? activePane.sessionId,
+  });
 }
 
 function toSavedConnectionSnapshot(connection: {
@@ -729,6 +780,30 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         shortcuts.delete(normalizedKey);
         usePluginStore.setState({ shortcuts });
       });
+    },
+    getActiveTarget() {
+      return resolveActiveTerminalTarget();
+    },
+    writeToActive(text: string) {
+      const target = resolveActiveTerminalTarget();
+      if (!target) {
+        console.warn('[PluginContext] writeToActive: no active terminal target');
+        return false;
+      }
+      if (target.connectionState !== 'active') {
+        console.warn(`[PluginContext] writeToActive: target is not writable (state=${target.connectionState ?? 'unknown'})`);
+        return false;
+      }
+      const paneId = getActivePaneId();
+      if (!paneId) {
+        console.warn('[PluginContext] writeToActive: no active terminal pane');
+        return false;
+      }
+      if (!registryWriteToTerminal(paneId, text)) {
+        console.warn(`[PluginContext] writeToActive: no writer registered for pane "${paneId}"`);
+        return false;
+      }
+      return true;
     },
     writeToNode(nodeId: string, text: string) {
       const sessionId = resolveNodeToFirstSession(nodeId);

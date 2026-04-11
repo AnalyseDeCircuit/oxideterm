@@ -1425,47 +1425,80 @@ ctx.terminal.registerShortcut('openDashboard', () => {
 });
 ```
 
-#### `writeToTerminal(sessionId, text)`
+#### `getActiveTarget()` <small>v3</small>
 
 ```typescript
-terminal.writeToTerminal(sessionId: string, text: string): void
+terminal.getActiveTarget(): Readonly<{
+  sessionId: string;
+  terminalType: 'terminal' | 'local_terminal';
+  nodeId: string | null;
+  connectionId: string | null;
+  connectionState: string | null;
+  label: string | null;
+}> | null
 ```
 
-向指定会话的终端写入文本数据。通过 `terminalRegistry` 查找对应的 writer 回调，直接写入终端的数据通道（SSH WebSocket 或本地 PTY）。
+获取最近一次聚焦的终端目标。它同时覆盖 SSH 终端和本地终端，因此插件在自己的 Tab 中也能把命令发送回用户刚才操作的终端。
+其中 `connectionState === 'active'` 表示当前目标可写；`label` 是宿主提供的最佳努力显示名称（SSH 一般是 host，本地终端一般是 shell 名称）。
 
 ```javascript
-// 向终端发送命令
-ctx.terminal.writeToTerminal(sessionId, 'ls -la\n');
-
-// 发送特殊控制字符（如 Ctrl+C）
-ctx.terminal.writeToTerminal(sessionId, '\x03');
+const target = ctx.terminal.getActiveTarget();
+if (target) {
+  console.log(target.terminalType, target.label, target.sessionId);
+}
 ```
 
-> 如果找不到 sessionId 对应的终端或 writer 未注册，会输出 `console.warn` 但不会抛异常。
-
-#### `getBuffer(sessionId)`
+#### `writeToActive(text)` <small>v3</small>
 
 ```typescript
-terminal.getBuffer(sessionId: string): string | null
+terminal.writeToActive(text: string): boolean
 ```
 
-返回指定会话的终端缓冲区文本内容。
+向最近一次聚焦的终端直接写入文本。适合“发送到当前终端”这类动作，支持 SSH 和本地终端。
+当目标不存在，或目标状态不是 `active` 时，返回 `false`。
 
 ```javascript
-const buffer = ctx.terminal.getBuffer(sessionId);
+const ok = ctx.terminal.writeToActive('ls -la\n');
+if (!ok) {
+  ctx.ui.showToast({ title: 'No active terminal', variant: 'warning' });
+}
+```
+
+#### `writeToNode(nodeId, text)`
+
+```typescript
+terminal.writeToNode(nodeId: string, text: string): void
+```
+
+向指定 SSH 节点对应的终端写入文本。`nodeId` 在重连后保持稳定，适合绑定到会话树节点的插件逻辑。
+
+```javascript
+ctx.terminal.writeToNode(nodeId, 'journalctl -xe\n');
+```
+
+#### `getNodeBuffer(nodeId)`
+
+```typescript
+terminal.getNodeBuffer(nodeId: string): string | null
+```
+
+返回指定 SSH 节点终端的缓冲区文本内容。
+
+```javascript
+const buffer = ctx.terminal.getNodeBuffer(nodeId);
 if (buffer) {
   const lastLine = buffer.split('\n').pop();
   console.log('Last line:', lastLine);
 }
 ```
 
-#### `getSelection(sessionId)`
+#### `getNodeSelection(nodeId)`
 
 ```typescript
-terminal.getSelection(sessionId: string): string | null
+terminal.getNodeSelection(nodeId: string): string | null
 ```
 
-返回用户在指定会话终端中选中的文本。
+返回用户在指定 SSH 节点终端中选中的文本。
 
 #### `search(nodeId, query, options?)` <small>v3</small>
 
@@ -4456,6 +4489,8 @@ export type PluginTerminalAPI = {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
+  getActiveTarget(): PluginActiveTerminalTarget | null;
+  writeToActive(text: string): boolean;
   /** Write to terminal by nodeId (stable across reconnects) */
   writeToNode(nodeId: string, text: string): void;
   /** Get terminal buffer by nodeId */

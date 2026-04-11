@@ -203,11 +203,22 @@ export type PluginUIAPI = {
   showConfirm(opts: { title: string; description: string }): Promise<boolean>;
 };
 
+export type PluginActiveTerminalTarget = Readonly<{
+  sessionId: string;
+  terminalType: 'terminal' | 'local_terminal';
+  nodeId: string | null;
+  connectionId: string | null;
+  connectionState: string | null;
+  label: string | null;
+}>;
+
 /** ctx.terminal — terminal hooks and utilities */
 export type PluginTerminalAPI = {
   registerInputInterceptor(handler: InputInterceptor): Disposable;
   registerOutputProcessor(handler: OutputProcessor): Disposable;
   registerShortcut(command: string, handler: () => void): Disposable;
+  getActiveTarget(): PluginActiveTerminalTarget | null;
+  writeToActive(text: string): boolean;
   writeToNode(nodeId: string, text: string): void;
   getNodeBuffer(nodeId: string): string | null;
   getNodeSelection(nodeId: string): string | null;

@@ -10,6 +10,8 @@
  */
 
 import i18n from 'i18next';
+import { useAppStore } from '../../store/appStore';
+import { usePluginStore } from '../../store/pluginStore';
 
 export function createPluginI18nManager(pluginId: string) {
   const prefix = `plugin.${pluginId}.`;
@@ -17,7 +19,10 @@ export function createPluginI18nManager(pluginId: string) {
   return {
     /** Translate a key (auto-prefixed with plugin namespace) */
     t(key: string, params?: Record<string, string | number>): string {
-      return i18n.t(`${prefix}${key}`, params as Record<string, string>) || key;
+      const fullKey = `${prefix}${key}`;
+      const result = i18n.t(fullKey, params as Record<string, string>);
+      // i18next returns the full key string on failed lookup — detect and fall back
+      return (result && result !== fullKey) ? result : key;
     },
 
     /** Get current language */
@@ -63,4 +68,61 @@ export function removePluginI18n(pluginId: string): void {
     const nested: Record<string, unknown> = { plugin: { [pluginId]: {} } };
     i18n.addResourceBundle(lang, 'translation', nested, true, true);
   }
+}
+
+/**
+ * Resolve a plugin tab title dynamically.
+ * Called on every render by TabBar to keep titles in sync with the current language.
+ *
+ * @param compositeKey - "pluginId:tabId" composite key from Tab.pluginTabId
+ * @returns Resolved translated title, or null if unavailable
+ */
+export function resolvePluginTabTitle(compositeKey: string): string | null {
+  const colonIdx = compositeKey.indexOf(':');
+  if (colonIdx < 0) return null;
+
+  const pluginId = compositeKey.slice(0, colonIdx);
+  const tabId = compositeKey.slice(colonIdx + 1);
+
+  // Look up manifest from store
+  const pluginInfo = usePluginStore.getState().getPlugin(pluginId);
+  if (!pluginInfo?.manifest) return null;
+
+  const tabDef = pluginInfo.manifest.contributes?.tabs?.find(
+    (t: { id: string; title?: string }) => t.id === tabId,
+  );
+  if (!tabDef?.title) return null;
+
+  // Try translating via plugin-scoped key
+  const fullKey = `plugin.${pluginId}.${tabDef.title}`;
+  const result = i18n.t(fullKey);
+  // i18next returns the key itself on failed lookup
+  if (result && result !== fullKey) return result;
+
+  // Fallback: use the raw manifest title (at least it's human-readable)
+  return tabDef.title;
+}
+
+/**
+ * Refresh stored titles for all open plugin tabs after a language change.
+ * Some consumers read Tab.title directly instead of resolving titles at render time.
+ */
+export function refreshOpenPluginTabTitles(): void {
+  useAppStore.setState((state) => ({
+    tabs: state.tabs.map((tab) => {
+      if (tab.type !== 'plugin' || !tab.pluginTabId) {
+        return tab;
+      }
+
+      const resolvedTitle = resolvePluginTabTitle(tab.pluginTabId);
+      if (!resolvedTitle || resolvedTitle === tab.title) {
+        return tab;
+      }
+
+      return {
+        ...tab,
+        title: resolvedTitle,
+      };
+    }),
+  }));
 }
