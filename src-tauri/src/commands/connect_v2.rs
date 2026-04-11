@@ -64,7 +64,6 @@ pub struct ConnectRequest {
 #[derive(Debug, Deserialize, Clone)]
 pub struct BufferConfigRequest {
     pub max_lines: usize,
-    pub save_on_disconnect: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]

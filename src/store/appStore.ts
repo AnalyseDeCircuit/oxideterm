@@ -422,7 +422,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         cols,
         rows,
         maxBufferLines: bufferSettings.maxLines,
-        saveOnDisconnect: bufferSettings.saveOnDisconnect,
       });
       
       // 更新 sessions 和 connections

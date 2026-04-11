@@ -73,7 +73,6 @@ export function useIdeTerminal(): UseIdeTerminalResult {
         cols: 0,
         rows: 0,
         maxBufferLines: bufferSettings.maxLines,
-        saveOnDisconnect: bufferSettings.saveOnDisconnect,
       });
       
       setTerminalSession(response.sessionId);

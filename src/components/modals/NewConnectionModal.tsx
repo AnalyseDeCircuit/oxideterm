@@ -278,7 +278,6 @@ export const NewConnectionModal = () => {
         displayName: name || undefined,
         agentForwarding,
         maxBufferLines: bufferSettings.maxLines,
-        saveOnDisconnect: bufferSettings.saveOnDisconnect,
       });
     } catch (e) {
       console.error('Failed to start KBI flow:', e);

@@ -725,52 +725,27 @@ impl SessionRegistry {
         Ok(())
     }
 
-    /// Persist a session with terminal buffer (async)
+    /// Persist a session snapshot (metadata-only, async)
     pub async fn persist_session_with_buffer(&self, session_id: &str) -> Result<(), RegistryError> {
         if let Some(persistence) = &self.persistence {
-            let (id, config, order, buffer_data, buffer_config) = {
+            let (id, config, order, buffer_config) = {
                 let entry = self
                     .sessions
                     .get(session_id)
                     .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
 
-                // Persist using the actual runtime config captured for this session.
+                // Keep runtime config for forward compatibility.
                 let buffer_config = entry.buffer_config.clone();
-
-                // Only save buffer if enabled in config
-                let buffer_data = if buffer_config.save_on_disconnect {
-                    // Serialize buffer
-                    match entry.scroll_buffer.save_to_bytes().await {
-                        Ok(data) => Some(data),
-                        Err(e) => {
-                            tracing::warn!("Failed to serialize buffer for {}: {}", session_id, e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
 
                 (
                     entry.id.clone(),
                     entry.config.clone(),
                     entry.order,
-                    buffer_data,
                     buffer_config,
                 )
             };
 
-            let persisted = if let Some(buffer_data) = buffer_data {
-                crate::state::PersistedSession::with_buffer(
-                    id,
-                    config,
-                    order,
-                    buffer_data,
-                    buffer_config,
-                )
-            } else {
-                crate::state::PersistedSession::with_config(id, config, order, buffer_config)
-            };
+            let persisted = crate::state::PersistedSession::with_config(id, config, order, buffer_config);
 
             // Save asynchronously
             persistence
@@ -778,7 +753,7 @@ impl SessionRegistry {
                 .await
                 .map_err(|e| RegistryError::PersistenceError(e.to_string()))?;
 
-            debug!("Persisted session with buffer: {}", session_id);
+            debug!("Persisted session metadata snapshot: {}", session_id);
         }
         Ok(())
     }
@@ -873,6 +848,8 @@ pub fn create_shared_registry() -> Arc<SessionRegistry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::TerminalLine;
+    use tempfile::TempDir;
 
     #[test]
     fn test_create_session() {
@@ -1022,5 +999,39 @@ mod tests {
         assert_eq!(success_count, 1);
         assert_eq!(limit_error_count, 1);
         assert_eq!(registry.active_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_persist_session_with_buffer_does_not_store_terminal_payload() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+        let store = Arc::new(StateStore::new(db_path).unwrap());
+        let registry = SessionRegistry::new(store);
+
+        let config = SessionConfig::with_password("example.com", 22, "user", "pass");
+        let buffer_config = BufferConfig {
+            max_lines: 8_000,
+        };
+
+        let id = registry
+            .create_session_with_buffer(config, buffer_config.clone())
+            .unwrap();
+
+        let scroll_buffer = registry
+            .with_session(&id, |entry| entry.scroll_buffer.clone())
+            .expect("session should exist");
+        scroll_buffer
+            .append(TerminalLine::new("buffer-line".to_string()))
+            .await;
+
+        registry.persist_session_with_buffer(&id).await.unwrap();
+
+        let sessions = registry.restore_sessions().unwrap();
+        let restored = sessions
+            .into_iter()
+            .find(|s| s.id == id)
+            .expect("persisted session should exist");
+
+        assert_eq!(restored.buffer_config.max_lines, buffer_config.max_lines);
     }
 }

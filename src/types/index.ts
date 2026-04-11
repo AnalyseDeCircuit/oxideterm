@@ -280,7 +280,6 @@ export interface CreateTerminalRequest {
   cols?: number;
   rows?: number;
   maxBufferLines?: number;
-  saveOnDisconnect?: boolean;
 }
 
 /**
@@ -310,7 +309,6 @@ export interface SettingsChangedDetail {
   cursorBlink: boolean;
   scrollback: number;
   bufferMaxLines: number;
-  bufferSaveOnDisconnect: boolean;
   sidebarCollapsedDefault: boolean;
   defaultUsername: string;
   defaultPort: number;
@@ -362,7 +360,6 @@ export interface ProxyHopConfig {
 
 export interface BufferConfig {
   max_lines: number;
-  save_on_disconnect: boolean;
 }
 
 export interface ConnectRequest {

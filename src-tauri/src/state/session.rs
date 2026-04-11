@@ -34,10 +34,6 @@ pub struct PersistedSession {
     #[serde(default)]
     pub version: u32,
 
-    /// Terminal buffer content (optional, can be large)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub terminal_buffer: Option<Vec<u8>>,
-
     /// Buffer configuration
     #[serde(default)]
     pub buffer_config: BufferConfig,
@@ -49,25 +45,16 @@ pub struct BufferConfig {
     /// Maximum lines to keep in buffer
     #[serde(default = "default_max_lines")]
     pub max_lines: usize,
-
-    /// Whether to save buffer on disconnect
-    #[serde(default = "default_save_on_disconnect")]
-    pub save_on_disconnect: bool,
 }
 
 fn default_max_lines() -> usize {
     8_000
 }
 
-fn default_save_on_disconnect() -> bool {
-    true
-}
-
 impl Default for BufferConfig {
     fn default() -> Self {
         Self {
             max_lines: default_max_lines(),
-            save_on_disconnect: default_save_on_disconnect(),
         }
     }
 }
@@ -80,8 +67,7 @@ impl PersistedSession {
             config,
             created_at: Utc::now(),
             order,
-            version: 2, // Incremented for buffer support
-            terminal_buffer: None,
+            version: 2,
             buffer_config: BufferConfig::default(),
         }
     }
@@ -99,26 +85,6 @@ impl PersistedSession {
             created_at: Utc::now(),
             order,
             version: 2,
-            terminal_buffer: None,
-            buffer_config,
-        }
-    }
-
-    /// Create with terminal buffer
-    pub fn with_buffer(
-        id: String,
-        config: SessionConfig,
-        order: usize,
-        terminal_buffer: Vec<u8>,
-        buffer_config: BufferConfig,
-    ) -> Self {
-        Self {
-            id,
-            config,
-            created_at: Utc::now(),
-            order,
-            version: 2,
-            terminal_buffer: Some(terminal_buffer),
             buffer_config,
         }
     }
@@ -257,10 +223,7 @@ mod tests {
     #[test]
     fn test_persisted_session_with_config_preserves_buffer_config_without_payload() {
         let config = SessionConfig::with_password("example.com", 22, "user", "pass");
-        let buffer_config = BufferConfig {
-            max_lines: 5_000,
-            save_on_disconnect: false,
-        };
+        let buffer_config = BufferConfig { max_lines: 5_000 };
 
         let session = PersistedSession::with_config(
             "session-1".to_string(),
@@ -272,12 +235,7 @@ mod tests {
         let bytes = session.to_bytes().unwrap();
         let deserialized = PersistedSession::from_bytes(&bytes).unwrap();
 
-        assert!(deserialized.terminal_buffer.is_none());
         assert_eq!(deserialized.buffer_config.max_lines, buffer_config.max_lines);
-        assert_eq!(
-            deserialized.buffer_config.save_on_disconnect,
-            buffer_config.save_on_disconnect
-        );
     }
 
     #[test]

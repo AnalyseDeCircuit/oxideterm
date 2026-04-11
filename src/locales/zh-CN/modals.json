@@ -400,7 +400,6 @@
         "max_lines": "最大缓冲行数",
         "lines_hint": "达到限制时，旧行将被自动丢弃。",
         "new_sessions_only": "更改仅对新会话生效。",
-        "save_on_disconnect": "断开连接时保存缓冲区内容",
         "save_hint": "缓冲区内容将被持久化，并在重新连接到会话时恢复。"
       },
       "appearance": {

@@ -402,7 +402,6 @@
         "max_lines": "Maximale Pufferzeilen",
         "lines_hint": "Ältere Zeilen werden automatisch verworfen, wenn das Limit erreicht ist.",
         "new_sessions_only": "Änderungen gelten nur für neue Sitzungen.",
-        "save_on_disconnect": "Pufferinhalt beim Trennen speichern",
         "save_hint": "Pufferinhalt wird gespeichert und bei erneuter Verbindung wiederhergestellt."
       },
       "appearance": {

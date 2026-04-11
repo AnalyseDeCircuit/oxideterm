@@ -56,7 +56,6 @@ pub async fn ssh_connect_kbi(
     display_name: Option<String>,
     agent_forwarding: Option<bool>,
     max_buffer_lines: Option<usize>,
-    save_on_disconnect: Option<bool>,
 ) -> Result<(), String> {
     let auth_flow_id = uuid::Uuid::new_v4().to_string();
     info!(
@@ -77,7 +76,6 @@ pub async fn ssh_connect_kbi(
         display_name,
         agent_forwarding.unwrap_or(false),
         max_buffer_lines,
-        save_on_disconnect,
     )
     .await;
 
@@ -156,7 +154,6 @@ async fn run_kbi_flow(
     display_name: Option<String>,
     agent_forwarding: bool,
     max_buffer_lines: Option<usize>,
-    save_on_disconnect: Option<bool>,
 ) -> Result<(String, u16, String), String> {
     // 1. Establish TCP connection and SSH handshake (with timeout)
     let addr = format!("{}:{}", host, port);
@@ -310,7 +307,6 @@ async fn run_kbi_flow(
         max_lines: max_buffer_lines
             .unwrap_or(crate::session::scroll_buffer::DEFAULT_MAX_LINES)
             .clamp(5_000, 200_000),
-        save_on_disconnect: save_on_disconnect.unwrap_or(true),
     };
 
     let sid = registry

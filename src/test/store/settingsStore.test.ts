@@ -96,7 +96,7 @@ function buildSavedSettings(overrides: Record<string, unknown> = {}) {
     version: 2,
     general: { language: 'en' },
     terminal: { theme: 'default', renderer: 'auto' },
-    buffer: { maxLines: 2000, saveOnDisconnect: true },
+    buffer: { maxLines: 2000 },
     appearance: { sidebarCollapsedDefault: false, uiDensity: 'comfortable', borderRadius: 6, uiFontFamily: '', animationSpeed: 'normal', frostedGlass: 'off' },
     connectionDefaults: { username: 'root', port: 22 },
     treeUI: { expandedIds: [], focusedNodeId: null },
@@ -165,6 +165,13 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.version).toBe(2);
     expect(localStorage.getItem('oxide-settings')).toBeNull();
     expect(localStorage.getItem('oxide-ui-state')).toBeNull();
+  });
+
+  it('uses metadata-only buffer persistence defaults', async () => {
+    const useSettingsStore = await loadSettingsStore();
+
+    const buffer = useSettingsStore.getState().settings.buffer;
+    expect(buffer.maxLines).toBe(8000);
   });
 
   it('setLanguage persists app_lang and delegates to i18n', async () => {

@@ -160,8 +160,6 @@ pub struct CreateTerminalRequest {
     pub rows: u32,
     /// 缓冲区最大行数
     pub max_buffer_lines: Option<usize>,
-    /// 关闭时是否持久化 buffer
-    pub save_on_disconnect: Option<bool>,
 }
 
 fn default_cols() -> u32 {
@@ -258,7 +256,6 @@ pub async fn create_terminal(
             .max_buffer_lines
             .unwrap_or(crate::session::scroll_buffer::DEFAULT_MAX_LINES)
             .clamp(5_000, 200_000),
-        save_on_disconnect: request.save_on_disconnect.unwrap_or(true),
     };
     let session_id = session_registry
         .create_session_with_buffer(config.clone(), buffer_config)

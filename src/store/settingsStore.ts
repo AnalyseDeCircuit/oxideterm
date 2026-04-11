@@ -123,7 +123,6 @@ export interface TerminalSettings {
 /** Buffer settings (used by backend) */
 export interface BufferSettings {
   maxLines: number;          // Backend ScrollBuffer max lines
-  saveOnDisconnect: boolean; // Save buffer on disconnect
 }
 
 /** UI density control */
@@ -357,7 +356,6 @@ const defaultTerminalSettings: TerminalSettings = {
 
 const defaultBufferSettings: BufferSettings = {
   maxLines: 8000,
-  saveOnDisconnect: true,
 };
 
 const defaultAppearanceSettings: AppearanceSettings = {

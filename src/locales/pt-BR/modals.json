@@ -400,7 +400,6 @@
         "max_lines": "Linhas máximas de buffer",
         "lines_hint": "Linhas antigas serão descartadas automaticamente quando o limite for atingido.",
         "new_sessions_only": "As alterações se aplicam apenas a novas sessões.",
-        "save_on_disconnect": "Salvar conteúdo do buffer ao desconectar",
         "save_hint": "O conteúdo do buffer será persistido e restaurado ao reconectar à sessão."
       },
       "appearance": {

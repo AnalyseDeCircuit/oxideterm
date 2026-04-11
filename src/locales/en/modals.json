@@ -402,7 +402,6 @@
         "max_lines": "Maximum Buffer Lines",
         "lines_hint": "Older lines will be automatically discarded when limit is reached.",
         "new_sessions_only": "Changes only apply to new sessions.",
-        "save_on_disconnect": "Save buffer content on disconnect",
         "save_hint": "Buffer content will be persisted and restored when reconnecting to the session."
       },
       "appearance": {

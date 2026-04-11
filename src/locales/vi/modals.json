@@ -402,7 +402,6 @@
         "max_lines": "Số dòng Buffer tối đa",
         "lines_hint": "Các dòng cũ hơn sẽ tự động bị xóa khi đạt giới hạn.",
         "new_sessions_only": "Thay đổi chỉ áp dụng cho phiên làm việc mới.",
-        "save_on_disconnect": "Lưu nội dung buffer khi ngắt kết nối",
         "save_hint": "Nội dung buffer sẽ được lưu trữ và khôi phục khi kết nối lại phiên."
       },
       "appearance": {

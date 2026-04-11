@@ -1986,17 +1986,6 @@ export const SettingsView = () => {
                                         className="w-28"
                                     />
                                 </div>
-                                <div className="flex items-center justify-between mt-4">
-                                    <div>
-                                        <Label className="text-theme-text">{t('settings_view.terminal.save_buffer_on_disconnect')}</Label>
-                                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.save_buffer_on_disconnect_hint')}</p>
-                                    </div>
-                                    <Checkbox
-                                        id="save-buffer-on-disconnect"
-                                        checked={buffer.saveOnDisconnect}
-                                        onCheckedChange={(checked) => updateBuffer('saveOnDisconnect', checked as boolean)}
-                                    />
-                                </div>
                             </div>
                         </div>
                     )}

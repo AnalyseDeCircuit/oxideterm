@@ -31,7 +31,6 @@ const settingsStoreMock = vi.hoisted(() => ({
     settings: {
       buffer: {
         maxLines: 7000,
-        saveOnDisconnect: false,
       },
     },
   })),
@@ -99,7 +98,6 @@ describe('NewConnectionModal KBI flow', () => {
         username: 'alice',
         agentForwarding: true,
         maxBufferLines: 7000,
-        saveOnDisconnect: false,
       }));
     });
   });
