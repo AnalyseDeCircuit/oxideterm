@@ -1,14 +1,14 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-04-07T16:47:56.532Z
+Generated: 2026-04-11T13:07:15.125Z
 
 ## Summary
 - MIT: 228
 - ISC: 34
 - Apache-2.0: 18
 - BSD-3-Clause: 8
-- MIT OR Apache-2.0: 6
+- MIT OR Apache-2.0: 7
 - BSD-2-Clause: 4
 - MPL-2.0: 1
 - Apache-2.0 OR MIT: 1
@@ -128,6 +128,7 @@ Generated: 2026-04-07T16:47:56.532Z
 | @tanstack/react-virtual | 3.13.23 | MIT | https://tanstack.com/virtual |
 | @tanstack/virtual-core | 3.13.23 | MIT | https://tanstack.com/virtual |
 | @tauri-apps/api | 2.10.1 | Apache-2.0 OR MIT | https://github.com/tauri-apps/tauri#readme |
+| @tauri-apps/plugin-clipboard-manager | 2.3.2 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-dialog | 2.6.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-fs | 2.5.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-opener | 2.5.3 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
