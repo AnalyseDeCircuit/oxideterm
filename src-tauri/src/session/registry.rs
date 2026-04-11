@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 use super::state::SessionState;
 use super::types::{SessionConfig, SessionEntry, SessionInfo, SessionStats};
 use crate::ssh::{HandleController, SessionCommand};
-use crate::state::{PersistedSession, StateStore, session::SessionPersistence};
+use crate::state::{BufferConfig, PersistedSession, StateStore, session::SessionPersistence};
 
 /// Default maximum concurrent sessions
 const DEFAULT_MAX_SESSIONS: usize = 20;
@@ -127,7 +127,7 @@ impl SessionRegistry {
     pub fn create_session_with_buffer(
         &self,
         config: SessionConfig,
-        max_lines: usize,
+        buffer_config: BufferConfig,
     ) -> Result<String, RegistryError> {
         // Hold lock to prevent TOCTOU race between count check and insert
         let _guard = self.create_lock.lock();
@@ -149,10 +149,10 @@ impl SessionRegistry {
 
         info!(
             "Creating session {}: {}@{}:{} (order: {}, buffer: {} lines)",
-            session_id, config.username, config.host, config.port, order, max_lines
+            session_id, config.username, config.host, config.port, order, buffer_config.max_lines
         );
 
-        let entry = SessionEntry::with_buffer_config(session_id.clone(), config, order, max_lines);
+        let entry = SessionEntry::with_buffer_config(session_id.clone(), config, order, buffer_config);
         self.sessions.insert(session_id.clone(), entry);
 
         Ok(session_id)
@@ -734,8 +734,8 @@ impl SessionRegistry {
                     .get(session_id)
                     .ok_or_else(|| RegistryError::SessionNotFound(session_id.to_string()))?;
 
-                // Get buffer config from entry (or use default)
-                let buffer_config = crate::state::BufferConfig::default();
+                // Persist using the actual runtime config captured for this session.
+                let buffer_config = entry.buffer_config.clone();
 
                 // Only save buffer if enabled in config
                 let buffer_data = if buffer_config.save_on_disconnect {
@@ -769,7 +769,7 @@ impl SessionRegistry {
                     buffer_config,
                 )
             } else {
-                crate::state::PersistedSession::new(id, config, order)
+                crate::state::PersistedSession::with_config(id, config, order, buffer_config)
             };
 
             // Save asynchronously

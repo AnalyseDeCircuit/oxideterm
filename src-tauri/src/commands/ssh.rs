@@ -26,6 +26,7 @@ use crate::forwarding::ForwardingManager;
 use crate::session::{
     AuthMethod, SessionConfig, SessionInfo, SessionRegistry, parse_terminal_output,
 };
+use crate::state::BufferConfig;
 use crate::sftp::session::SftpRegistry;
 use crate::ssh::{
     ConnectionInfo, ConnectionPoolConfig, HostKeyStatus, SshConnectionRegistry, accept_host_key,
@@ -159,6 +160,8 @@ pub struct CreateTerminalRequest {
     pub rows: u32,
     /// 缓冲区最大行数
     pub max_buffer_lines: Option<usize>,
+    /// 关闭时是否持久化 buffer
+    pub save_on_disconnect: Option<bool>,
 }
 
 fn default_cols() -> u32 {
@@ -250,17 +253,16 @@ pub async fn create_terminal(
     };
 
     // 在 SessionRegistry 创建 session
-    let session_id = if let Some(max_lines) = request.max_buffer_lines {
-        // Clamp user-provided value to a safe range to prevent excessive memory use
-        let clamped = max_lines.clamp(10_000, 200_000);
-        session_registry
-            .create_session_with_buffer(config.clone(), clamped)
-            .map_err(|e| format!("Failed to create session: {}", e))?
-    } else {
-        session_registry
-            .create_session(config.clone())
-            .map_err(|e| format!("Failed to create session: {}", e))?
+    let buffer_config = BufferConfig {
+        max_lines: request
+            .max_buffer_lines
+            .unwrap_or(crate::session::scroll_buffer::DEFAULT_MAX_LINES)
+            .clamp(5_000, 200_000),
+        save_on_disconnect: request.save_on_disconnect.unwrap_or(true),
     };
+    let session_id = session_registry
+        .create_session_with_buffer(config.clone(), buffer_config)
+        .map_err(|e| format!("Failed to create session: {}", e))?;
 
     // 开始连接
     if let Err(e) = session_registry.start_connecting(&session_id) {

@@ -280,6 +280,7 @@ export interface CreateTerminalRequest {
   cols?: number;
   rows?: number;
   maxBufferLines?: number;
+  saveOnDisconnect?: boolean;
 }
 
 /**

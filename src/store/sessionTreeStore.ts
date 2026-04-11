@@ -1335,6 +1335,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         cols,
         rows,
         maxBufferLines: bufferSettings.maxLines,
+        saveOnDisconnect: bufferSettings.saveOnDisconnect,
       });
       const terminalId = response.sessionId;
       

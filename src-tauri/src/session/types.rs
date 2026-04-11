@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::scroll_buffer::ScrollBuffer;
 use super::state::{SessionState, SessionStateMachine};
+use crate::state::BufferConfig;
 use crate::ssh::{HandleController, SessionCommand};
 
 // Re-export AuthMethod from ssh module (single source of truth)
@@ -156,6 +157,8 @@ pub struct SessionEntry {
     pub handle_controller: Option<HandleController>,
     /// Terminal scroll buffer for backend storage and search
     pub scroll_buffer: Arc<ScrollBuffer>,
+    /// Buffer limits and persistence policy captured at session creation time
+    pub buffer_config: BufferConfig,
     /// Output broadcast channel for terminal data (supports WS reattach)
     pub output_tx: broadcast::Sender<Vec<u8>>,
     /// WS detached flag (true while client disconnected)
@@ -175,6 +178,7 @@ impl SessionEntry {
     /// Create a new session entry
     pub fn new(id: String, config: SessionConfig, order: usize) -> Self {
         let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let buffer_config = BufferConfig::default();
         Self {
             id,
             config,
@@ -183,7 +187,8 @@ impl SessionEntry {
             ws_token: None,
             cmd_tx: None,
             handle_controller: None,
-            scroll_buffer: Arc::new(ScrollBuffer::new()), // Default 10k lines
+            scroll_buffer: Arc::new(ScrollBuffer::with_capacity(buffer_config.max_lines)),
+            buffer_config,
             output_tx,
             ws_detached: false,
             ws_detach_cancel: None,
@@ -198,7 +203,7 @@ impl SessionEntry {
         id: String,
         config: SessionConfig,
         order: usize,
-        max_lines: usize,
+        buffer_config: BufferConfig,
     ) -> Self {
         let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
         Self {
@@ -209,7 +214,8 @@ impl SessionEntry {
             ws_token: None,
             cmd_tx: None,
             handle_controller: None,
-            scroll_buffer: Arc::new(ScrollBuffer::with_capacity(max_lines)),
+            scroll_buffer: Arc::new(ScrollBuffer::with_capacity(buffer_config.max_lines)),
+            buffer_config,
             output_tx,
             ws_detached: false,
             ws_detach_cancel: None,

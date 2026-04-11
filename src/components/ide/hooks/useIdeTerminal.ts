@@ -66,10 +66,14 @@ export function useIdeTerminal(): UseIdeTerminalResult {
     setError(null);
     
     try {
+      const { useSettingsStore } = await import('../../../store/settingsStore');
+      const bufferSettings = useSettingsStore.getState().settings.buffer;
       const response: CreateTerminalResponse = await api.createTerminal({
         connectionId,
         cols: 0,
         rows: 0,
+        maxBufferLines: bufferSettings.maxLines,
+        saveOnDisconnect: bufferSettings.saveOnDisconnect,
       });
       
       setTerminalSession(response.sessionId);

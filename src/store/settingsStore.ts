@@ -356,7 +356,7 @@ const defaultTerminalSettings: TerminalSettings = {
 };
 
 const defaultBufferSettings: BufferSettings = {
-  maxLines: 30000,
+  maxLines: 8000,
   saveOnDisconnect: true,
 };
 

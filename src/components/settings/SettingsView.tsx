@@ -1142,8 +1142,8 @@ export const SettingsView = () => {
     const [activeTab, setActiveTab] = useState('general');
 
     // Use unified settings store
-    const { settings, updateTerminal, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow } = useSettingsStore();
-    const { general, terminal, appearance, connectionDefaults, ai, sftp, ide, reconnect } = settings;
+    const { settings, updateTerminal, updateBuffer, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow } = useSettingsStore();
+    const { general, terminal, buffer, appearance, connectionDefaults, ai, sftp, ide, reconnect } = settings;
 
     // AI enable confirmation dialog
     const [showAiConfirm, setShowAiConfirm] = useState(false);
@@ -1964,6 +1964,37 @@ export const SettingsView = () => {
                                         min={100}
                                         max={50000}
                                         className="w-28"
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between mt-4">
+                                    <div>
+                                        <Label className="text-theme-text">{t('settings_view.terminal.backend_buffer_lines')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.backend_buffer_lines_hint')}</p>
+                                        <p className="text-xs text-theme-text-muted mt-1">{t('settings_view.terminal.backend_buffer_recommended')}</p>
+                                    </div>
+                                    <Input
+                                        type="number"
+                                        value={buffer.maxLines}
+                                        onChange={(e) => {
+                                            const parsed = parseInt(e.target.value, 10);
+                                            const next = Number.isFinite(parsed) ? Math.min(50000, Math.max(5000, parsed)) : 8000;
+                                            updateBuffer('maxLines', next);
+                                        }}
+                                        min={5000}
+                                        max={50000}
+                                        step={1000}
+                                        className="w-28"
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between mt-4">
+                                    <div>
+                                        <Label className="text-theme-text">{t('settings_view.terminal.save_buffer_on_disconnect')}</Label>
+                                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.save_buffer_on_disconnect_hint')}</p>
+                                    </div>
+                                    <Checkbox
+                                        id="save-buffer-on-disconnect"
+                                        checked={buffer.saveOnDisconnect}
+                                        onCheckedChange={(checked) => updateBuffer('saveOnDisconnect', checked as boolean)}
                                     />
                                 </div>
                             </div>

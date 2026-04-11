@@ -18,10 +18,9 @@ use tokio::sync::RwLock;
 
 use super::search::{SearchOptions, SearchResult, search_lines};
 
-/// Default maximum lines to keep in buffer
-/// 30K lines ≈ ~3.6 MB/session (vs 100K ≈ ~11 MB).
-/// Users can override via settings; 30K covers typical interactive work.
-pub const DEFAULT_MAX_LINES: usize = 30_000;
+/// Default maximum lines to keep in buffer.
+/// 8K lines keeps interactive history useful while reducing per-session memory pressure.
+pub const DEFAULT_MAX_LINES: usize = 8_000;
 
 /// Single line of terminal output
 #[derive(Debug, Clone, Serialize, Deserialize)]

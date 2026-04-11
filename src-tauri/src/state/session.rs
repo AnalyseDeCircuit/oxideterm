@@ -56,7 +56,7 @@ pub struct BufferConfig {
 }
 
 fn default_max_lines() -> usize {
-    100_000
+    8_000
 }
 
 fn default_save_on_disconnect() -> bool {
@@ -83,6 +83,24 @@ impl PersistedSession {
             version: 2, // Incremented for buffer support
             terminal_buffer: None,
             buffer_config: BufferConfig::default(),
+        }
+    }
+
+    /// Create a persisted session with explicit buffer config but no saved buffer payload.
+    pub fn with_config(
+        id: String,
+        config: SessionConfig,
+        order: usize,
+        buffer_config: BufferConfig,
+    ) -> Self {
+        Self {
+            id,
+            config,
+            created_at: Utc::now(),
+            order,
+            version: 2,
+            terminal_buffer: None,
+            buffer_config,
         }
     }
 
