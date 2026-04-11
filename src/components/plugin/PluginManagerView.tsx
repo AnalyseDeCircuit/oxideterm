@@ -583,7 +583,7 @@ export function PluginManagerView() {
     }
   }, [createId, createName]);
 
-  const handleInstallFromUrl = useCallback(async (overwrite = false) => {
+  const installFromUrl = useCallback(async (overwrite: boolean = false): Promise<void> => {
     let url = urlInput.trim();
     if (!url) return;
 
@@ -654,7 +654,7 @@ export function PluginManagerView() {
         });
         if (confirmed) {
           setUrlInstalling(false);
-          await handleInstallFromUrl(true);
+          await installFromUrl(true);
           return;
         }
         setUrlError(t('plugin.url_conflict_cancelled'));
@@ -832,14 +832,14 @@ export function PluginManagerView() {
                       type="url"
                       value={urlInput}
                       onChange={(e) => { setUrlInput(e.target.value); setUrlError(null); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && urlInput.trim() && !urlInstalling) handleInstallFromUrl(); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && urlInput.trim() && !urlInstalling) void installFromUrl(); }}
                       placeholder={t('plugin.url_placeholder')}
                       disabled={urlInstalling}
                       className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-theme-border bg-theme-bg text-theme-text placeholder:text-theme-text-muted focus:outline-none focus:ring-2 focus:ring-theme-accent/50 disabled:opacity-50"
                     />
                   </div>
                   <button
-                    onClick={handleInstallFromUrl}
+                    onClick={() => { void installFromUrl(); }}
                     disabled={urlInstalling || !urlInput.trim()}
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-theme-accent text-white hover:bg-theme-accent/80 transition-colors disabled:opacity-50"
                   >
