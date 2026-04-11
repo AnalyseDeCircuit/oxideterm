@@ -253,6 +253,9 @@
       "env_desc": "Variabili d'ambiente",
       "history": "Cronologia",
       "history_desc": "Cronologia dei comandi recente"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens non è abilitato. Abilitalo in Impostazioni → AI per iniziare."
     }
   }
 }

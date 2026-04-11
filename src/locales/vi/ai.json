@@ -253,6 +253,9 @@
       "env_desc": "Biến môi trường",
       "history": "Lịch sử",
       "history_desc": "Lịch sử lệnh gần đây"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens chưa được bật. Vui lòng bật trong Cài đặt → AI để bắt đầu."
     }
   }
 }

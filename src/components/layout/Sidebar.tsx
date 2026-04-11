@@ -691,7 +691,13 @@ export const Sidebar = () => {
     } else if (def.kind === 'tab') {
       createTab(def.key as Parameters<typeof createTab>[0]);
     } else if (def.kind === 'toggle' && def.key === 'ai') {
-      toggleAiSidebar();
+      if (!toggleAiSidebar()) {
+        toast({
+          title: t('ai:ai.chat.title'),
+          description: t('ai:ai.sidebar.not_enabled_hint'),
+          variant: 'warning',
+        });
+      }
     } else if (def.kind === 'action' && def.key === 'local_terminal') {
       if (backgroundSessions.size > 0) {
         setBgPopoverOpen(!bgPopoverOpen);

@@ -253,6 +253,9 @@
       "env_desc": "環境變數",
       "history": "歷史",
       "history_desc": "最近的命令歷史"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens 尚未啟用。請前往 設定 → AI 開啟後使用。"
     }
   }
 }

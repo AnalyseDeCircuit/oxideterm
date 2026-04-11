@@ -253,6 +253,9 @@
       "env_desc": "Umgebungsvariablen",
       "history": "Verlauf",
       "history_desc": "Letzter Befehlsverlauf"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens ist nicht aktiviert. Bitte aktivieren Sie es unter Einstellungen → AI."
     }
   }
 }

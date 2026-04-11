@@ -253,6 +253,9 @@
       "env_desc": "環境変数",
       "history": "履歴",
       "history_desc": "最近のコマンド履歴"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens が有効になっていません。設定 → AI から有効にしてください。"
     }
   }
 }

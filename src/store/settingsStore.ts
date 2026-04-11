@@ -810,7 +810,7 @@ interface SettingsStore {
   // AI sidebar actions
   setAiSidebarCollapsed: (collapsed: boolean) => void;
   setAiSidebarWidth: (width: number) => void;
-  toggleAiSidebar: () => void;
+  toggleAiSidebar: () => boolean;
   // Zen mode
   toggleZenMode: () => void;
 
@@ -1120,7 +1120,11 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     toggleAiSidebar: () => {
-      set((state) => {
+      const state = get();
+      if (!state.settings.ai.enabled) {
+        return false;
+      }
+      set(() => {
         const newSettings: PersistedSettingsV2 = {
           ...state.settings,
           sidebarUI: {
@@ -1131,6 +1135,7 @@ export const useSettingsStore = create<SettingsStore>()(
         persistSettings(newSettings);
         return { settings: newSettings };
       });
+      return true;
     },
 
     // ========== Zen Mode ==========

@@ -253,6 +253,9 @@
       "env_desc": "Variables d'environnement",
       "history": "Historique",
       "history_desc": "Historique récent des commandes"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens n'est pas activé. Veuillez l'activer dans Paramètres → AI pour commencer."
     }
   }
 }

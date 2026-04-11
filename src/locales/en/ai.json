@@ -253,6 +253,9 @@
       "env_desc": "Environment variables",
       "history": "History",
       "history_desc": "Recent command history"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens is not enabled. Please enable it in Settings → AI to get started."
     }
   }
 }

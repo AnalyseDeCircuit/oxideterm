@@ -253,6 +253,9 @@
       "env_desc": "환경 변수",
       "history": "기록",
       "history_desc": "최근 명령어 기록"
+    },
+    "sidebar": {
+      "not_enabled_hint": "OxideSens가 활성화되지 않았습니다. 설정 → AI에서 활성화해 주세요."
     }
   }
 }
