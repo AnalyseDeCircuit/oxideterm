@@ -2104,6 +2104,7 @@ async fn import_hosts(app: &tauri::AppHandle, params: Value) -> Result<Value, (i
             options: Default::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
+            updated_at: Some(chrono::Utc::now()),
             color: None,
             tags: vec!["ssh-config".to_string()],
             proxy_chain: Vec::new(),

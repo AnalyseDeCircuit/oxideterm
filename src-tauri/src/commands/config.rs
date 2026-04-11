@@ -385,8 +385,38 @@ fn sha256_hex<T: Serialize>(value: &T) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+fn parse_sync_timestamp(
+    value: &str,
+    field_name: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|time| time.with_timezone(&chrono::Utc))
+        .map_err(|e| format!("Invalid {} '{}': {}", field_name, value, e))
+}
+
 fn connection_sync_updated_at(conn: &SavedConnection) -> String {
-    conn.last_used_at.unwrap_or(conn.created_at).to_rfc3339()
+    conn.updated_at
+        .or(conn.last_used_at)
+        .unwrap_or(conn.created_at)
+        .to_rfc3339()
+}
+
+fn build_saved_connection_tombstone_record(
+    tombstone: &crate::config::types::DeletedConnectionTombstone,
+) -> Result<SavedConnectionSyncRecord, String> {
+    let revision = sha256_hex(&(
+        tombstone.id.as_str(),
+        tombstone.deleted_at.to_rfc3339(),
+        true,
+    ))?;
+
+    Ok(SavedConnectionSyncRecord {
+        id: tombstone.id.clone(),
+        revision,
+        updated_at: tombstone.deleted_at.to_rfc3339(),
+        deleted: true,
+        payload: None,
+    })
 }
 
 fn build_saved_connection_sync_record(
@@ -412,6 +442,13 @@ fn build_saved_connections_sync_snapshot(
         .iter()
         .map(build_saved_connection_sync_record)
         .collect::<Result<_, _>>()?;
+    records.extend(
+        config
+            .active_connection_tombstones()
+            .into_iter()
+            .map(build_saved_connection_tombstone_record)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     records.sort_by(|left, right| left.id.cmp(&right.id));
 
     let revision = sha256_hex(
@@ -515,6 +552,7 @@ fn build_synced_proxy_chain(
 
 fn build_saved_connection_from_sync_payload(
     payload: &ConnectionInfo,
+    record_updated_at: chrono::DateTime<chrono::Utc>,
     existing: Option<&SavedConnection>,
     preserve_auth: bool,
     keychain: &Keychain,
@@ -575,6 +613,7 @@ fn build_saved_connection_from_sync_payload(
                     .map_err(|e| format!("Invalid connection last_used_at '{}': {}", value, e))
             })
             .transpose()?,
+        updated_at: Some(record_updated_at),
         color: payload.color.clone(),
         tags: payload.tags.clone(),
         proxy_chain,
@@ -601,12 +640,32 @@ fn apply_saved_connections_snapshot_to_config(
     let mut side_effects = ApplySavedConnectionsSyncSideEffects::default();
 
     for record in &snapshot.records {
+        let record_updated_at =
+            parse_sync_timestamp(&record.updated_at, "saved connection sync updated_at")?;
+
         if record.deleted {
-            if let Some(removed) = config.remove_connection(&record.id) {
+            if let Some(existing) = config.get_connection(&record.id) {
+                let existing_updated_at = parse_sync_timestamp(
+                    &connection_sync_updated_at(existing),
+                    "local saved connection updated_at",
+                )?;
+
+                if existing_updated_at > record_updated_at {
+                    result.skipped += 1;
+                    result.conflicts += 1;
+                    continue;
+                }
+            }
+
+            if let Some(removed) =
+                config.remove_connection_with_tombstone_at(&record.id, record_updated_at)
+            {
                 side_effects.deleted_connection_ids.push(removed.id.clone());
                 side_effects
                     .keychain_ids_to_delete
                     .extend(collect_connection_keychain_ids(&removed));
+                result.applied += 1;
+            } else if config.upsert_connection_tombstone(record.id.clone(), record_updated_at) {
                 result.applied += 1;
             } else {
                 result.skipped += 1;
@@ -619,6 +678,14 @@ fn apply_saved_connections_snapshot_to_config(
             result.conflicts += 1;
             continue;
         };
+
+        if let Some(tombstone) = config.get_connection_tombstone(&record.id) {
+            if tombstone.deleted_at >= record_updated_at {
+                result.skipped += 1;
+                result.conflicts += 1;
+                continue;
+            }
+        }
 
         let existing_by_id = config.get_connection(&record.id).cloned();
         let existing_by_name = if existing_by_id.is_none() {
@@ -649,6 +716,7 @@ fn apply_saved_connections_snapshot_to_config(
         let baseline = existing_by_id.as_ref().or(existing_by_name.as_ref());
         let connection = build_saved_connection_from_sync_payload(
             payload,
+            record_updated_at,
             baseline,
             baseline.is_some() && strategy.preserves_local_auth(),
             keychain,
@@ -1119,7 +1187,9 @@ pub async fn save_connection(
                 &state.keychain,
             )?;
 
-            conn.last_used_at = Some(chrono::Utc::now());
+            let now = chrono::Utc::now();
+            conn.last_used_at = Some(now);
+            conn.updated_at = Some(now);
 
             conn.clone()
         } else {
@@ -1215,6 +1285,7 @@ pub async fn save_connection(
                 },
                 created_at: chrono::Utc::now(),
                 last_used_at: None,
+                updated_at: Some(chrono::Utc::now()),
                 color: request.color,
                 tags: request.tags,
                 proxy_chain,
@@ -1354,6 +1425,7 @@ mod tests {
             options: Default::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
+            updated_at: Some(chrono::Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: vec![ProxyHopConfig {
@@ -1415,6 +1487,7 @@ mod tests {
             },
             created_at: chrono::Utc::now(),
             last_used_at: None,
+            updated_at: Some(chrono::Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: Vec::new(),
@@ -1485,6 +1558,7 @@ mod tests {
             options: Default::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
+            updated_at: Some(chrono::Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: vec![
@@ -1556,6 +1630,117 @@ mod tests {
         assert_eq!(
             side_effects.keychain_ids_to_delete,
             vec!["kc-hop-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_saved_connections_sync_snapshot_includes_tombstones() {
+        let mut config = ConfigFile::default();
+        let deleted_at = chrono::Utc::now();
+        config.upsert_connection_tombstone("conn-deleted", deleted_at);
+
+        let snapshot = build_saved_connections_sync_snapshot(&config).unwrap();
+        let record = snapshot
+            .records
+            .iter()
+            .find(|candidate| candidate.id == "conn-deleted")
+            .unwrap();
+
+        assert!(record.deleted);
+        assert!(record.payload.is_none());
+        assert_eq!(record.updated_at, deleted_at.to_rfc3339());
+    }
+
+    #[test]
+    fn apply_saved_connections_snapshot_skips_payload_older_than_local_tombstone() {
+        let mut config = ConfigFile::default();
+        let deleted_at = chrono::Utc::now();
+        config.upsert_connection_tombstone("conn-1", deleted_at);
+
+        let snapshot = SavedConnectionsSyncSnapshot {
+            revision: "rev-3".to_string(),
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            records: vec![SavedConnectionSyncRecord {
+                id: "conn-1".to_string(),
+                revision: "rec-3".to_string(),
+                updated_at: (deleted_at - chrono::Duration::minutes(1)).to_rfc3339(),
+                deleted: false,
+                payload: Some(ConnectionInfo {
+                    id: "conn-1".to_string(),
+                    name: "Prod".to_string(),
+                    group: None,
+                    host: "prod.example.com".to_string(),
+                    port: 22,
+                    username: "root".to_string(),
+                    auth_type: "agent".to_string(),
+                    key_path: None,
+                    cert_path: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    last_used_at: None,
+                    color: None,
+                    tags: Vec::new(),
+                    agent_forwarding: false,
+                    proxy_chain: Vec::new(),
+                }),
+            }],
+        };
+
+        let (result, _side_effects) = apply_saved_connections_snapshot_to_config(
+            &mut config,
+            &snapshot,
+            SavedConnectionsConflictStrategy::Merge,
+            &Keychain::with_service("com.oxideterm.test"),
+        )
+        .unwrap();
+
+        assert_eq!(result.applied, 0);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.conflicts, 1);
+        assert!(config.get_connection("conn-1").is_none());
+        assert_eq!(
+            config
+                .get_connection_tombstone("conn-1")
+                .unwrap()
+                .deleted_at,
+            deleted_at
+        );
+    }
+
+    #[test]
+    fn apply_saved_connections_snapshot_records_remote_delete_tombstone_when_local_missing() {
+        let mut config = ConfigFile::default();
+        let deleted_at = chrono::Utc::now();
+
+        let snapshot = SavedConnectionsSyncSnapshot {
+            revision: "rev-4".to_string(),
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            records: vec![SavedConnectionSyncRecord {
+                id: "conn-1".to_string(),
+                revision: "rec-4".to_string(),
+                updated_at: deleted_at.to_rfc3339(),
+                deleted: true,
+                payload: None,
+            }],
+        };
+
+        let (result, _side_effects) = apply_saved_connections_snapshot_to_config(
+            &mut config,
+            &snapshot,
+            SavedConnectionsConflictStrategy::Merge,
+            &Keychain::with_service("com.oxideterm.test"),
+        )
+        .unwrap();
+
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.conflicts, 0);
+        assert!(config.get_connection("conn-1").is_none());
+        assert_eq!(
+            config
+                .get_connection_tombstone("conn-1")
+                .unwrap()
+                .deleted_at,
+            deleted_at
         );
     }
 }
@@ -1725,6 +1910,7 @@ pub async fn import_ssh_host(
         options: Default::default(),
         created_at: chrono::Utc::now(),
         last_used_at: None,
+        updated_at: Some(chrono::Utc::now()),
         color: None,
         tags: vec!["ssh-config".to_string()],
         proxy_chain: Vec::new(),
@@ -1809,6 +1995,7 @@ pub async fn import_ssh_hosts(
             options: Default::default(),
             created_at: chrono::Utc::now(),
             last_used_at: None,
+            updated_at: Some(chrono::Utc::now()),
             color: None,
             tags: vec!["ssh-config".to_string()],
             proxy_chain: Vec::new(),

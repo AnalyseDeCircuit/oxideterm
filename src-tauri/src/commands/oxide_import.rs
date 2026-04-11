@@ -375,6 +375,7 @@ fn build_saved_connection(
         options: imported.options,
         created_at,
         last_used_at,
+        updated_at: Some(last_used_at.unwrap_or(created_at)),
         color: imported.color,
         tags: imported.tags,
         proxy_chain: imported.proxy_chain,
@@ -403,6 +404,7 @@ fn merge_saved_connection(
         ),
         created_at: existing.created_at,
         last_used_at: existing.last_used_at,
+        updated_at: Some(Utc::now()),
         color: merge_optional_string(existing.color.clone(), imported.color),
         tags: merge_tags(&existing.tags, &imported.tags),
         proxy_chain: if imported_has_proxy_chain {
@@ -1099,6 +1101,7 @@ mod tests {
             },
             created_at: Utc::now(),
             last_used_at: None,
+            updated_at: Some(Utc::now()),
             color: Some("#112233".to_string()),
             tags: vec!["prod".to_string(), "linux".to_string()],
             proxy_chain: vec![ProxyHopConfig {
@@ -1226,6 +1229,7 @@ mod tests {
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,
+            updated_at: Some(Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: vec![ProxyHopConfig {

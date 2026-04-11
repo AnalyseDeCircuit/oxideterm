@@ -14,7 +14,6 @@
 
 use crate::bridge::WsBridge;
 use crate::session::{SessionConfig, SessionRegistry};
-use crate::state::BufferConfig;
 use crate::ssh::{
     AuthMethod, ClientHandler, SshSession,
     keyboard_interactive::{
@@ -23,6 +22,7 @@ use crate::ssh::{
         register_pending,
     },
 };
+use crate::state::BufferConfig;
 use russh::client::KeyboardInteractiveAuthResponse;
 use std::sync::Arc;
 use std::time::Duration;

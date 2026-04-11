@@ -142,7 +142,8 @@ impl SearchJobEntry {
 
     fn is_stale(&self, now: Instant) -> bool {
         self.with_state(|state| {
-            (state.done || self.is_cancelled()) && now.duration_since(state.updated_at) > SEARCH_JOB_RETENTION
+            (state.done || self.is_cancelled())
+                && now.duration_since(state.updated_at) > SEARCH_JOB_RETENTION
         })
     }
 
@@ -589,11 +590,7 @@ fn unavailable_archive_status() -> ArchiveHealthSnapshot {
 }
 
 fn normalize_match_limit(limit: usize) -> usize {
-    if limit == 0 {
-        usize::MAX
-    } else {
-        limit
-    }
+    if limit == 0 { usize::MAX } else { limit }
 }
 
 fn remaining_limit(limit: usize, emitted_matches: usize) -> usize {
@@ -610,7 +607,9 @@ async fn search_hot_layer(
     limit: usize,
 ) -> Result<(Vec<HistorySearchMatch>, usize, bool), String> {
     let snapshot = scroll_buffer.get_all().await;
-    let base_line = scroll_buffer.total_lines().saturating_sub(snapshot.len() as u64);
+    let base_line = scroll_buffer
+        .total_lines()
+        .saturating_sub(snapshot.len() as u64);
     let search_options = SearchOptions {
         max_matches: if limit == usize::MAX { 0 } else { limit },
         ..options
@@ -651,11 +650,13 @@ fn search_cold_chunk(
     let records = read_chunk_records(session_dir, chunk).map_err(|error| error.to_string())?;
     let lines: Vec<TerminalLine> = records
         .iter()
-        .map(|record| TerminalLine::with_ansi_timestamp(
-            record.text.clone(),
-            record.ansi_text.clone(),
-            record.timestamp,
-        ))
+        .map(|record| {
+            TerminalLine::with_ansi_timestamp(
+                record.text.clone(),
+                record.ansi_text.clone(),
+                record.timestamp,
+            )
+        })
         .collect();
 
     let search_options = SearchOptions {

@@ -235,7 +235,10 @@ mod tests {
         let bytes = session.to_bytes().unwrap();
         let deserialized = PersistedSession::from_bytes(&bytes).unwrap();
 
-        assert_eq!(deserialized.buffer_config.max_lines, buffer_config.max_lines);
+        assert_eq!(
+            deserialized.buffer_config.max_lines,
+            buffer_config.max_lines
+        );
     }
 
     #[test]

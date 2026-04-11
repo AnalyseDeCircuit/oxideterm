@@ -211,7 +211,11 @@ impl TerminalHistoryArchive {
             ..ArchiveTelemetry::default()
         }));
         let (tx, rx) = mpsc::sync_channel::<ArchiveCommand>(queue_capacity);
-        let state = ArchiveWriterState::new(session_dir.clone(), session_id.to_string(), telemetry.clone())?;
+        let state = ArchiveWriterState::new(
+            session_dir.clone(),
+            session_id.to_string(),
+            telemetry.clone(),
+        )?;
 
         thread::Builder::new()
             .name(format!("terminal-history-{session_id}"))
@@ -262,8 +266,7 @@ impl TerminalHistoryArchive {
                 telemetry.record_error("archive worker unavailable");
                 warn!(
                     "Terminal history archive worker unavailable for {:?}; dropped {} evicted line(s)",
-                    self.session_dir,
-                    line_count
+                    self.session_dir, line_count
                 );
             }
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
@@ -277,7 +280,8 @@ impl TerminalHistoryArchive {
             return Err(TerminalHistoryArchiveError::WorkerUnavailable);
         }
 
-        state.tx
+        state
+            .tx
             .send(ArchiveCommand::Flush(tx))
             .map_err(|_| TerminalHistoryArchiveError::WorkerUnavailable)?;
         lock_telemetry(&state.telemetry).mark_enqueued();
@@ -520,7 +524,10 @@ impl ArchiveWriterState {
         })
     }
 
-    fn append_lines(&mut self, lines: Vec<TerminalLine>) -> Result<(), TerminalHistoryArchiveError> {
+    fn append_lines(
+        &mut self,
+        lines: Vec<TerminalLine>,
+    ) -> Result<(), TerminalHistoryArchiveError> {
         for line in lines {
             self.append_line(line)?;
         }
@@ -616,7 +623,10 @@ impl ArchiveWriterState {
     }
 }
 
-fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), TerminalHistoryArchiveError> {
+fn write_json_atomic<T: Serialize>(
+    path: &Path,
+    value: &T,
+) -> Result<(), TerminalHistoryArchiveError> {
     let payload = serde_json::to_vec_pretty(value)?;
     write_bytes_atomic(path, &payload)
 }
@@ -628,14 +638,18 @@ fn write_bytes_atomic(path: &Path, payload: &[u8]) -> Result<(), TerminalHistory
 
     let temp_path = path.with_file_name(format!(
         "{}.tmp",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("archive")
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("archive")
     ));
     fs::write(&temp_path, payload)?;
     fs::rename(&temp_path, path)?;
     Ok(())
 }
 
-fn lock_telemetry(telemetry: &Arc<Mutex<ArchiveTelemetry>>) -> std::sync::MutexGuard<'_, ArchiveTelemetry> {
+fn lock_telemetry(
+    telemetry: &Arc<Mutex<ArchiveTelemetry>>,
+) -> std::sync::MutexGuard<'_, ArchiveTelemetry> {
     telemetry
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -649,7 +663,8 @@ mod tests {
     #[test]
     fn test_archive_flush_writes_manifest_and_chunk() {
         let temp_dir = TempDir::new().unwrap();
-        let archive = TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-1").unwrap();
+        let archive =
+            TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-1").unwrap();
 
         archive.append_lines(vec![
             TerminalLine::with_ansi_timestamp("hello".to_string(), None, 1),
@@ -680,7 +695,8 @@ mod tests {
     #[test]
     fn test_archive_delete_removes_session_directory() {
         let temp_dir = TempDir::new().unwrap();
-        let archive = TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-2").unwrap();
+        let archive =
+            TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-2").unwrap();
 
         let session_dir = archive.session_dir();
         assert!(session_dir.exists());
@@ -708,7 +724,8 @@ mod tests {
     #[test]
     fn test_read_chunk_records_and_excerpt() {
         let temp_dir = TempDir::new().unwrap();
-        let archive = TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-3").unwrap();
+        let archive =
+            TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-3").unwrap();
 
         archive.append_lines(vec![
             TerminalLine::with_ansi_timestamp("alpha".to_string(), None, 1),
@@ -732,9 +749,14 @@ mod tests {
     #[test]
     fn test_health_snapshot_reports_sealed_chunks() {
         let temp_dir = TempDir::new().unwrap();
-        let archive = TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-4").unwrap();
+        let archive =
+            TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "session-4").unwrap();
 
-        archive.append_lines(vec![TerminalLine::with_ansi_timestamp("line".to_string(), None, 1)]);
+        archive.append_lines(vec![TerminalLine::with_ansi_timestamp(
+            "line".to_string(),
+            None,
+            1,
+        )]);
         archive.flush().unwrap();
 
         let health = archive.health_snapshot();

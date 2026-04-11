@@ -205,7 +205,10 @@ pub fn run() {
         }
         Ok(_) => {}
         Err(e) => {
-            tracing::warn!("Failed to clean terminal history archives on startup: {}", e);
+            tracing::warn!(
+                "Failed to clean terminal history archives on startup: {}",
+                e
+            );
             write_startup_log(&format!(
                 "WARNING: terminal history archive cleanup failed: {}",
                 e

@@ -267,7 +267,6 @@ impl ScrollBuffer {
     pub fn total_lines(&self) -> u64 {
         self.total_lines.load(Ordering::Relaxed)
     }
-
 }
 
 impl Default for ScrollBuffer {
@@ -398,7 +397,9 @@ mod tests {
     #[tokio::test]
     async fn test_evicted_lines_are_forwarded_to_archive() {
         let temp_dir = TempDir::new().unwrap();
-        let archive = TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "buffer-archive").unwrap();
+        let archive =
+            TerminalHistoryArchive::new_in(temp_dir.path().to_path_buf(), "buffer-archive")
+                .unwrap();
         let session_dir = archive.session_dir();
         let buffer = ScrollBuffer::with_capacity_and_archive(2, Some(archive.clone()));
 

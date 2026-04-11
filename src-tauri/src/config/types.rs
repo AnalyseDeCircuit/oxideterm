@@ -5,12 +5,13 @@
 //!
 //! Data structures for saved connections with version support for migrations.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Current configuration version
 pub const CONFIG_VERSION: u32 = 1;
+pub const CONNECTION_TOMBSTONE_RETENTION_DAYS: i64 = 30;
 
 /// Proxy hop configuration for multi-hop connections
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +121,10 @@ pub struct SavedConnection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<DateTime<Utc>>,
 
+    /// Last configuration update timestamp used for sync conflict ordering
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+
     /// Custom color for UI (hex format)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -132,6 +137,12 @@ pub struct SavedConnection {
     /// Target server info is always in host/port/username fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<ProxyHopConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeletedConnectionTombstone {
+    pub id: String,
+    pub deleted_at: DateTime<Utc>,
 }
 
 fn default_port() -> u16 {
@@ -161,6 +172,7 @@ impl SavedConnection {
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,
+            updated_at: Some(Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: Vec::new(),
@@ -191,6 +203,7 @@ impl SavedConnection {
             options: ConnectionOptions::default(),
             created_at: Utc::now(),
             last_used_at: None,
+            updated_at: Some(Utc::now()),
             color: None,
             tags: Vec::new(),
             proxy_chain: Vec::new(),
@@ -199,7 +212,9 @@ impl SavedConnection {
 
     /// Update last used timestamp
     pub fn touch(&mut self) {
-        self.last_used_at = Some(Utc::now());
+        let now = Utc::now();
+        self.last_used_at = Some(now);
+        self.updated_at = Some(now);
     }
 
     /// Get display string (user@host:port)
@@ -228,6 +243,10 @@ pub struct ConfigFile {
     /// Recently used connection IDs (most recent first)
     #[serde(default)]
     pub recent: Vec<String>,
+
+    /// Saved-connection tombstones retained for multi-device delete propagation
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connection_tombstones: Vec<DeletedConnectionTombstone>,
 }
 
 impl Default for ConfigFile {
@@ -237,26 +256,95 @@ impl Default for ConfigFile {
             connections: Vec::new(),
             groups: Vec::new(),
             recent: Vec::new(),
+            connection_tombstones: Vec::new(),
         }
     }
 }
 
 impl ConfigFile {
+    fn tombstone_retention_cutoff() -> DateTime<Utc> {
+        Utc::now() - Duration::days(CONNECTION_TOMBSTONE_RETENTION_DAYS)
+    }
+
+    fn retain_active_tombstones(&mut self) {
+        let cutoff = Self::tombstone_retention_cutoff();
+        self.connection_tombstones
+            .retain(|tombstone| tombstone.deleted_at >= cutoff);
+    }
+
+    pub fn active_connection_tombstones(&self) -> Vec<&DeletedConnectionTombstone> {
+        let cutoff = Self::tombstone_retention_cutoff();
+        self.connection_tombstones
+            .iter()
+            .filter(|tombstone| tombstone.deleted_at >= cutoff)
+            .collect()
+    }
+
+    pub fn get_connection_tombstone(&self, id: &str) -> Option<&DeletedConnectionTombstone> {
+        let cutoff = Self::tombstone_retention_cutoff();
+        self.connection_tombstones
+            .iter()
+            .find(|tombstone| tombstone.id == id && tombstone.deleted_at >= cutoff)
+    }
+
+    pub fn upsert_connection_tombstone(
+        &mut self,
+        id: impl Into<String>,
+        deleted_at: DateTime<Utc>,
+    ) -> bool {
+        self.retain_active_tombstones();
+
+        let id = id.into();
+        self.recent.retain(|recent_id| recent_id != &id);
+
+        if let Some(existing) = self
+            .connection_tombstones
+            .iter_mut()
+            .find(|tombstone| tombstone.id == id)
+        {
+            if existing.deleted_at >= deleted_at {
+                return false;
+            }
+            existing.deleted_at = deleted_at;
+            return true;
+        }
+
+        self.connection_tombstones
+            .push(DeletedConnectionTombstone { id, deleted_at });
+        true
+    }
+
     /// Add a connection
     pub fn add_connection(&mut self, connection: SavedConnection) {
+        self.retain_active_tombstones();
+
         // Remove existing with same ID if any
         self.connections.retain(|c| c.id != connection.id);
+        self.connection_tombstones
+            .retain(|tombstone| tombstone.id != connection.id);
         self.connections.push(connection);
+    }
+
+    pub fn remove_connection_with_tombstone_at(
+        &mut self,
+        id: &str,
+        deleted_at: DateTime<Utc>,
+    ) -> Option<SavedConnection> {
+        self.retain_active_tombstones();
+
+        if let Some(pos) = self.connections.iter().position(|c| c.id == id) {
+            self.recent.retain(|r| r != id);
+            let removed = self.connections.remove(pos);
+            self.upsert_connection_tombstone(removed.id.clone(), deleted_at);
+            Some(removed)
+        } else {
+            None
+        }
     }
 
     /// Remove a connection by ID
     pub fn remove_connection(&mut self, id: &str) -> Option<SavedConnection> {
-        if let Some(pos) = self.connections.iter().position(|c| c.id == id) {
-            self.recent.retain(|r| r != id);
-            Some(self.connections.remove(pos))
-        } else {
-            None
-        }
+        self.remove_connection_with_tombstone_at(id, Utc::now())
     }
 
     /// Get connection by ID
@@ -347,6 +435,8 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(config.connections.len(), 0);
         assert_eq!(config.recent.len(), 0);
+        assert_eq!(config.connection_tombstones.len(), 1);
+        assert_eq!(config.connection_tombstones[0].id, id);
     }
 
     #[test]
@@ -504,6 +594,45 @@ mod tests {
     fn test_remove_connection_not_found() {
         let mut config = ConfigFile::default();
         assert!(config.remove_connection("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_add_connection_clears_matching_tombstone() {
+        let mut config = ConfigFile::default();
+        let conn = SavedConnection::new_password("Test", "host.com", 22, "user", "kc-1");
+        let id = conn.id.clone();
+
+        config.upsert_connection_tombstone(id.clone(), Utc::now());
+        config.add_connection(conn);
+
+        assert!(config.get_connection_tombstone(&id).is_none());
+    }
+
+    #[test]
+    fn test_upsert_connection_tombstone_keeps_newest_timestamp() {
+        let mut config = ConfigFile::default();
+        let deleted_at = Utc::now();
+        let older = deleted_at - Duration::minutes(5);
+        let newer = deleted_at + Duration::minutes(5);
+
+        assert!(config.upsert_connection_tombstone("conn-1", deleted_at));
+        assert!(!config.upsert_connection_tombstone("conn-1", older));
+        assert_eq!(
+            config
+                .get_connection_tombstone("conn-1")
+                .unwrap()
+                .deleted_at,
+            deleted_at
+        );
+
+        assert!(config.upsert_connection_tombstone("conn-1", newer));
+        assert_eq!(
+            config
+                .get_connection_tombstone("conn-1")
+                .unwrap()
+                .deleted_at,
+            newer
+        );
     }
 
     #[test]

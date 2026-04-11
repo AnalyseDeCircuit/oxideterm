@@ -152,7 +152,8 @@ impl SessionRegistry {
             session_id, config.username, config.host, config.port, order, buffer_config.max_lines
         );
 
-        let entry = SessionEntry::with_buffer_config(session_id.clone(), config, order, buffer_config);
+        let entry =
+            SessionEntry::with_buffer_config(session_id.clone(), config, order, buffer_config);
         self.sessions.insert(session_id.clone(), entry);
 
         Ok(session_id)
@@ -747,7 +748,8 @@ impl SessionRegistry {
                 )
             };
 
-            let persisted = crate::state::PersistedSession::with_config(id, config, order, buffer_config);
+            let persisted =
+                crate::state::PersistedSession::with_config(id, config, order, buffer_config);
 
             // Save asynchronously
             persistence
@@ -1011,9 +1013,7 @@ mod tests {
         let registry = SessionRegistry::new(store);
 
         let config = SessionConfig::with_password("example.com", 22, "user", "pass");
-        let buffer_config = BufferConfig {
-            max_lines: 8_000,
-        };
+        let buffer_config = BufferConfig { max_lines: 8_000 };
 
         let id = registry
             .create_session_with_buffer(config, buffer_config.clone())

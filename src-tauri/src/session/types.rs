@@ -11,8 +11,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::history_archive::TerminalHistoryArchive;
 use super::scroll_buffer::ScrollBuffer;
 use super::state::{SessionState, SessionStateMachine};
-use crate::state::BufferConfig;
 use crate::ssh::{HandleController, SessionCommand};
+use crate::state::BufferConfig;
 
 // Re-export AuthMethod from ssh module (single source of truth)
 pub use crate::ssh::AuthMethod;
@@ -296,7 +296,8 @@ fn create_terminal_history_archive(session_id: &str) -> Option<TerminalHistoryAr
         Err(error) => {
             tracing::warn!(
                 "Failed to initialize terminal history archive for session {}: {}",
-                session_id, error
+                session_id,
+                error
             );
             None
         }
