@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | 100+ MB Electron-Apps | **Tauri 2.0**: natives Rust-Backend, 25–40 MB Binärdatei |
 | KI an einen Anbieter gebunden | **OxideSens**: 40+ Werkzeuge, MCP-Protokoll, RAG-Wissensdatenbank — funktioniert mit OpenAI/Ollama/DeepSeek/jeder kompatiblen API |
 | Zugangsdaten in Klartextkonfiguration | **Verschlüsselt im Ruhezustand**: Passwörter und API-Schlüssel bleiben im OS-Schlüsselbund, Metadaten gespeicherter Verbindungen werden lokal versiegelt, und `.oxide`-Dateien sind mit ChaCha20-Poly1305 + Argon2id verschlüsselt |
-| Cloud-abhängig, Konto erforderlich | **Local-first**: kein Konto, keine Telemetrie, keine Cloud-Synchronisation — Ihre Daten bleiben auf Ihrem Gerät. KI-Schlüssel selbst bereitstellen |
+| Cloud-abhängig, Konto erforderlich | **Local-first**: kein Konto, keine Telemetrie — Ihre Daten bleiben standardmäßig auf Ihrem Gerät. KI-Schlüssel selbst bereitstellen. Cloud-Synchronisation optional via [offiziellem Plugin](#offizielle-plugins) |
 
 ---
 
@@ -289,6 +289,13 @@ Plattformübergreifende lokale Shell über `portable-pty 0.8`, Feature-gated hin
 - **Hintergrund-Galerie**: Hintergrundbilder pro Tab, 16 Tab-Typen, Steuerung von Deckkraft/Unschärfe/Anpassung
 - **CLI-Companion** (`oxt`): ~1 MB Binärdatei, JSON-RPC 2.0 über Unix Socket / Named Pipe, `status`/`list`/`ping` mit menschenlesbarer oder `--json`-Ausgabe
 - **WSL Graphics** ⚠️ experimentell: integrierter VNC-Viewer — 9 Desktop-Umgebungen + Einzelanwendungsmodus, WSLg-Erkennung, Xtigervnc + noVNC
+
+#### Offizielle Plugins
+
+| Plugin | Beschreibung | Repository |
+|---|---|---|
+| **Cloud Sync** | Verschlüsselte selbstgehostete Synchronisation — `.oxide`-Snapshots über WebDAV, HTTP JSON, Dropbox, Git oder S3 hochladen und importieren | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | Ein-Klick-Befehlsausführung — häufig verwendete Terminal-Befehle speichern, organisieren und ausführen mit Host-Filter | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 Sprachen in Aktion</summary>

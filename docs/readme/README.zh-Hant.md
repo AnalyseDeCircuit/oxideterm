@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | 100+ MB 的 Electron 應用 | **Tauri 2.0**：原生 Rust 後端，25–40 MB 二進位檔 |
 | AI 被鎖定在單一供應商 | **OxideSens**：40+ 工具、MCP 協定、RAG 知識庫——支援 OpenAI/Ollama/DeepSeek 及任何相容 API |
 | 憑證存放在明文設定檔中 | **靜態加密**：密碼和 API 金鑰保存在 OS 鑰匙圈中，已儲存連線的中繼資料會在本機密封儲存，`.oxide` 檔案使用 ChaCha20-Poly1305 + Argon2id 加密 |
-| 依賴雲端、需要註冊帳號 | **本地優先**：零帳號、零遙測、零雲端同步——資料留在你的裝置上。AI 金鑰自行提供 |
+| 依賴雲端、需要註冊帳號 | **本地優先**：零帳號、零遙測——資料預設留在你的裝置上。AI 金鑰自行提供。雲端同步透過[官方外掛](#官方外掛)按需啟用 |
 
 ---
 
@@ -289,6 +289,13 @@ CodeMirror 6 編輯器基於 SFTP 運作——預設無需伺服端安裝：
 - **背景相簿**：每分頁背景圖片，16 種分頁類型，透明度/模糊/適配控制
 - **CLI 伴隨工具**（`oxt`）：~1 MB 二進位檔，JSON-RPC 2.0 基於 Unix Socket / Named Pipe，`status`/`list`/`ping` 支援人類可讀或 `--json` 輸出
 - **WSL Graphics** ⚠️ 實驗性：內建 VNC 檢視器——9 種桌面環境 + 單應用模式，WSLg 偵測，Xtigervnc + noVNC
+
+#### 官方外掛
+
+| 外掛 | 說明 | 倉庫 |
+|---|---|---|
+| **Cloud Sync** | 加密自託管同步——透過 WebDAV、HTTP JSON、Dropbox、Git 或 S3 上傳和匯入 `.oxide` 快照 | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | 一鍵命令執行——儲存、組織和執行常用終端命令，支援按主機篩選 | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 種語言實際展示</summary>

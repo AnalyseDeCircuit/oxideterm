@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | App Electron da 100+ MB | **Tauri 2.0**: backend Rust nativo, binario da 25–40 MB |
 | IA vincolata a un provider | **OxideSens**: 40+ strumenti, protocollo MCP, knowledge base RAG — funziona con OpenAI/Ollama/DeepSeek/qualsiasi API compatibile |
 | Credenziali in file di configurazione in chiaro | **Cifratura a riposo**: password e chiavi API restano nel portachiavi del sistema operativo, i metadati delle connessioni salvate vengono sigillati localmente e i file `.oxide` sono cifrati con ChaCha20-Poly1305 + Argon2id |
-| Strumenti dipendenti dal cloud che richiedono un account | **Local-first**: zero account, zero telemetria, zero sincronizzazione cloud — i tuoi dati restano sul tuo dispositivo. Porta la tua chiave AI |
+| Strumenti dipendenti dal cloud che richiedono un account | **Local-first**: zero account, zero telemetria — i tuoi dati restano sul tuo dispositivo per impostazione predefinita. Porta la tua chiave AI. Sincronizzazione cloud opzionale tramite [plugin ufficiale](#plugin-ufficiali) |
 
 ---
 
@@ -289,6 +289,13 @@ Shell locale multipiattaforma tramite `portable-pty 0.8`, protetto dal feature g
 - **Galleria sfondi**: immagini di sfondo per tab, 16 tipi di tab, controllo opacità/sfocatura/adattamento
 - **Companion CLI** (`oxt`): binario di ~1 MB, JSON-RPC 2.0 tramite Unix Socket / Named Pipe, `status`/`list`/`ping` con output leggibile o `--json`
 - **WSL Graphics** ⚠️ sperimentale: visualizzatore VNC integrato — 9 ambienti desktop + modalità singola applicazione, rilevamento WSLg, Xtigervnc + noVNC
+
+#### Plugin ufficiali
+
+| Plugin | Descrizione | Repository |
+|---|---|---|
+| **Cloud Sync** | Sincronizzazione self-hosted crittografata — carica e importa snapshot `.oxide` tramite WebDAV, HTTP JSON, Dropbox, Git o S3 | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | Esecuzione comandi con un clic — salva, organizza ed esegui i comandi terminale più usati con filtro per host | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 lingue in azione</summary>

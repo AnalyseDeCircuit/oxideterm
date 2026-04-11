@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | 100+ MB Electron apps | **Tauri 2.0**: native Rust backend, 25–40 MB binary |
 | AI locked to one provider | **OxideSens**: 40+ tools, MCP protocol, RAG knowledge base — works with OpenAI/Ollama/DeepSeek/any compatible API |
 | Credentials stored in plain-text configs | **Encrypted at rest**: passwords and API keys stay in OS keychain, saved connection metadata is sealed locally, and `.oxide` files use ChaCha20-Poly1305 + Argon2id encryption |
-| Cloud-dependent, account-required tools | **Local-first**: zero accounts, zero telemetry, zero cloud sync — your data stays on your machine. Bring your own AI key |
+| Cloud-dependent, account-required tools | **Local-first**: zero accounts, zero telemetry — your data stays on your machine by default. Bring your own AI key. Cloud sync opt-in via [official plugin](#official-plugins) |
 
 ---
 
@@ -289,6 +289,13 @@ Cross-platform local shell via `portable-pty 0.8`, feature-gated behind `local-t
 - **Background gallery**: per-tab background images, 16 tab types, opacity/blur/fit control
 - **CLI companion** (`oxt`): ~1 MB binary, JSON-RPC 2.0 over Unix Socket / Named Pipe, `status`/`list`/`ping` with human or `--json` output
 - **WSL Graphics** ⚠️ experimental: built-in VNC viewer — 9 desktop environments + single-app mode, WSLg detection, Xtigervnc + noVNC
+
+#### Official Plugins
+
+| Plugin | Description | Repository |
+|---|---|---|
+| **Cloud Sync** | Encrypted self-hosted sync — upload and import `.oxide` snapshots via WebDAV, HTTP JSON, Dropbox, Git, or S3 | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | One-click command execution — save, organize, and run frequently used terminal commands with per-host filtering | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 languages in action</summary>

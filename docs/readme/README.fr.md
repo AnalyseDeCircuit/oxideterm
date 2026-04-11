@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | Applications Electron de 100+ Mo | **Tauri 2.0** : backend Rust natif, binaire de 25–40 Mo |
 | IA verrouillée sur un fournisseur | **OxideSens** : 40+ outils, protocole MCP, base de connaissances RAG — fonctionne avec OpenAI/Ollama/DeepSeek/toute API compatible |
 | Identifiants stockés en clair | **Chiffrement au repos** : mots de passe et clés API restent dans le trousseau OS, les métadonnées des connexions enregistrées sont scellées localement, et les fichiers `.oxide` sont chiffrés avec ChaCha20-Poly1305 + Argon2id |
-| Outils dépendants du cloud et nécessitant un compte | **Local d'abord** : zéro compte, zéro télémétrie, zéro synchronisation cloud — vos données restent sur votre machine. Clé AI à fournir soi-même |
+| Outils dépendants du cloud et nécessitant un compte | **Local d'abord** : zéro compte, zéro télémétrie — vos données restent sur votre machine par défaut. Clé AI à fournir soi-même. Synchronisation cloud en option via [plugin officiel](#plugins-officiels) |
 
 ---
 
@@ -289,6 +289,13 @@ Shell local multiplateforme via `portable-pty 0.8`, protégé par le feature gat
 - **Galerie d'arrière-plans** : images d'arrière-plan par onglet, 16 types d'onglets, contrôle opacité/flou/ajustement
 - **Companion CLI** (`oxt`) : binaire d'environ 1 Mo, JSON-RPC 2.0 via Unix Socket / Named Pipe, `status`/`list`/`ping` avec sortie humaine ou `--json`
 - **WSL Graphics** ⚠️ expérimental : visionneuse VNC intégrée — 9 environnements de bureau + mode application unique, détection WSLg, Xtigervnc + noVNC
+
+#### Plugins officiels
+
+| Plugin | Description | Dépôt |
+|---|---|---|
+| **Cloud Sync** | Synchronisation auto-hébergée chiffrée — téléchargez et importez des instantanés `.oxide` via WebDAV, HTTP JSON, Dropbox, Git ou S3 | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | Exécution de commandes en un clic — enregistrez, organisez et exécutez les commandes terminal fréquentes avec filtrage par hôte | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 langues en action</summary>

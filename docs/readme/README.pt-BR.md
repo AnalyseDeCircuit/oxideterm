@@ -72,7 +72,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | Apps Electron de 100+ MB | **Tauri 2.0**: backend Rust nativo, binário de 25–40 MB |
 | IA presa a um provedor | **OxideSens**: 40+ ferramentas, protocolo MCP, base de conhecimento RAG — funciona com OpenAI/Ollama/DeepSeek/qualquer API compatível |
 | Credenciais em arquivos de configuração em texto simples | **Criptografado em repouso**: senhas e chaves de API permanecem no chaveiro do sistema, os metadados das conexões salvas são selados localmente e os arquivos `.oxide` usam ChaCha20-Poly1305 + Argon2id |
-| Ferramentas dependentes da nuvem que exigem conta | **Local-first**: zero contas, zero telemetria, zero sincronização em nuvem — seus dados ficam no seu dispositivo. Traga sua própria chave de IA |
+| Ferramentas dependentes da nuvem que exigem conta | **Local-first**: zero contas, zero telemetria — seus dados ficam no seu dispositivo por padrão. Traga sua própria chave de IA. Sincronização em nuvem disponível via [plugin oficial](#plugins-oficiais) |
 
 ---
 
@@ -289,6 +289,13 @@ Shell local multiplataforma via `portable-pty 0.8`, protegido pelo feature gate 
 - **Galeria de fundos**: imagens de fundo por aba, 16 tipos de abas, controle de opacidade/desfoque/ajuste
 - **Companion CLI** (`oxt`): binário de ~1 MB, JSON-RPC 2.0 via Unix Socket / Named Pipe, `status`/`list`/`ping` com saída legível ou `--json`
 - **WSL Graphics** ⚠️ experimental: visualizador VNC integrado — 9 ambientes desktop + modo de aplicação única, detecção WSLg, Xtigervnc + noVNC
+
+#### Plugins oficiais
+
+| Plugin | Descrição | Repositório |
+|---|---|---|
+| **Cloud Sync** | Sincronização auto-hospedada criptografada — faça upload e importe snapshots `.oxide` via WebDAV, HTTP JSON, Dropbox, Git ou S3 | [oxideterm.cloud-sync](https://github.com/AnalyseDeCircuit/oxideterm.cloud-sync) |
+| **Quick Commands** | Execução de comandos com um clique — salve, organize e execute comandos de terminal frequentes com filtragem por host | [oxideterm.quick-commands](https://github.com/AnalyseDeCircuit/oxideterm.quick-commands) |
 
 <details>
 <summary>📸 11 idiomas em ação</summary>
