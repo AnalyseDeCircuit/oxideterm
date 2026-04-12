@@ -470,6 +470,8 @@ export type ImportPreview = Readonly<{
   hasEmbeddedKeys: boolean;
   totalForwards: number;
   hasAppSettings: boolean;
+  appSettingsKeys?: readonly string[];
+  appSettingsPreview?: Readonly<Record<string, string>>;
   pluginSettingsCount: number;
   pluginSettingsByPlugin: Readonly<Record<string, number>>;
   forwardDetails: ReadonlyArray<ImportPreviewForward>;

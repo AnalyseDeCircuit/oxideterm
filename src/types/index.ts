@@ -540,6 +540,10 @@ export interface ImportPreview {
   totalForwards: number;
   /** Whether the payload includes a global settings snapshot */
   hasAppSettings: boolean;
+  /** Top-level keys present in the imported app settings snapshot */
+  appSettingsKeys?: string[];
+  /** Stringified top-level app settings values for shallow diff preview */
+  appSettingsPreview?: Record<string, string>;
   /** Number of plugin settings entries bundled in the payload */
   pluginSettingsCount: number;
   /** Plugin settings grouped by plugin id */

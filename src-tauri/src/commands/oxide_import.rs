@@ -6,6 +6,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(unix)]
@@ -85,6 +86,12 @@ pub struct ImportPreview {
     pub total_forwards: usize,
     /// Whether the payload includes a global app settings snapshot.
     pub has_app_settings: bool,
+    /// Top-level app settings keys present in the imported snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub app_settings_keys: Vec<String>,
+    /// Stringified top-level app settings values for shallow diff preview.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub app_settings_preview: HashMap<String, String>,
     /// Number of plugin setting entries bundled in the payload.
     pub plugin_settings_count: usize,
     /// Plugin settings grouped by plugin id.
@@ -200,6 +207,30 @@ fn format_forward_preview_description(forward: &EncryptedForward) -> String {
         Some("") | None => summary,
         Some(description) => format!("{} ({})", description, summary),
     }
+}
+
+fn build_app_settings_preview(app_settings_json: Option<&str>) -> (Vec<String>, HashMap<String, String>) {
+    let Some(app_settings_json) = app_settings_json else {
+        return (Vec::new(), HashMap::new());
+    };
+
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(app_settings_json) else {
+        return (Vec::new(), HashMap::new());
+    };
+
+    let mut keys: Vec<String> = map.keys().cloned().collect();
+    keys.sort();
+
+    let mut preview = HashMap::new();
+    for key in &keys {
+        if let Some(value) = map.get(key) {
+            if let Ok(serialized) = serde_json::to_string(value) {
+                preview.insert(key.clone(), serialized);
+            }
+        }
+    }
+
+    (keys, preview)
 }
 
 /// Resolve name conflicts by appending a suffix like macOS does
@@ -690,6 +721,8 @@ pub async fn preview_oxide_import(
     let mut records: Vec<ImportPreviewRecord> = Vec::new();
     let mut plugin_settings_by_plugin: HashMap<String, usize> = HashMap::new();
     let mut forward_details: Vec<ForwardDetail> = Vec::new();
+    let (app_settings_keys, app_settings_preview) =
+        build_app_settings_preview(payload.app_settings_json.as_deref());
 
     for setting in &payload.plugin_settings {
         if let Some(plugin_id) = parse_plugin_id_from_setting_storage_key(&setting.storage_key) {
@@ -817,6 +850,8 @@ pub async fn preview_oxide_import(
         has_embedded_keys,
         total_forwards: payload.connections.iter().map(|c| c.forwards.len()).sum(),
         has_app_settings: payload.app_settings_json.is_some(),
+        app_settings_keys,
+        app_settings_preview,
         plugin_settings_count: payload.plugin_settings.len(),
         plugin_settings_by_plugin,
         forward_details,

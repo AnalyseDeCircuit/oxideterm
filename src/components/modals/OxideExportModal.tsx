@@ -62,6 +62,9 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
     || hasSelectedPluginSettings
     || selectedForwardIds.size > 0,
   );
+  const selectedPluginSettingCount = pluginGroupEntries.reduce((total, [pluginId, count]) => (
+    selectedPluginIds.has(pluginId) ? total + count : total
+  ), 0);
 
   const forwardGroups = allSavedForwards.reduce<Record<string, PersistedForwardInfo[]>>((groups, forward) => {
     const ownerLabel = forward.owner_connection_name || forward.owner_connection_id || '-';
@@ -568,6 +571,33 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
                 {t('modals.export.embed_keys_description')}
               </p>
             </div>
+          </div>
+
+          <div className="border border-theme-border rounded-md p-3 bg-theme-bg space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-theme-text">
+              <Shield className="h-4 w-4" />
+              {t('modals.export.content_summary_title')}
+            </div>
+            <ul className="space-y-1 text-xs text-theme-text-muted">
+              {effectiveConnectionIds.length > 0 && (
+                <li>{t('modals.export.content_summary_connections', { count: effectiveConnectionIds.length })}</li>
+              )}
+              {selectedForwardIds.size > 0 && (
+                <li>{t('modals.export.content_summary_forwards', { count: selectedForwardIds.size })}</li>
+              )}
+              {includeAppSettings && (
+                <li>{t('modals.export.content_summary_app_settings')}</li>
+              )}
+              {hasSelectedPluginSettings && (
+                <li>{t('modals.export.content_summary_plugin_settings', {
+                  plugins: selectedPluginIds.size,
+                  count: selectedPluginSettingCount,
+                })}</li>
+              )}
+              {embedKeys && (
+                <li>{t('modals.export.content_summary_embed_keys')}</li>
+              )}
+            </ul>
           </div>
 
           <div>
