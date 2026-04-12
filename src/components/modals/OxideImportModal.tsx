@@ -363,7 +363,7 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl gap-0 bg-theme-bg-elevated border-theme-border text-theme-text p-0 overflow-hidden">
+      <DialogContent className="max-w-2xl max-h-[85vh] gap-0 bg-theme-bg-elevated border-theme-border text-theme-text p-0 overflow-hidden flex flex-col">
         <DialogHeader className="flex flex-row items-center justify-between border-b border-theme-border px-6 py-4">
           <DialogTitle className="text-xl font-semibold text-theme-text-heading">{t('modals.import.title')}</DialogTitle>
           <DialogClose className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
@@ -372,7 +372,7 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
           </DialogClose>
         </DialogHeader>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {!fileData ? (
             <div className="text-center py-8">
               <Button onClick={handleSelectFile} className="bg-theme-accent text-white hover:bg-theme-accent-hover">
@@ -828,12 +828,16 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
                     )}
                     <p><span className="text-theme-text-muted">{t('modals.import.contains')}</span> {t('modals.import.connections_count', { count: metadata.num_connections })}</p>
                     {metadata.has_app_settings && (
-                      <p><span className="text-theme-text-muted">{t('modals.import.contains_app_settings')}</span> {t('common.yes')}</p>
+                      <p><span className="text-theme-text-muted">{t('modals.import.contains_app_settings')}</span> {t('modals.import.contains_app_settings_partial')}</p>
                     )}
                     {typeof metadata.plugin_settings_count === 'number' && metadata.plugin_settings_count > 0 && (
                       <p><span className="text-theme-text-muted">{t('modals.import.contains_plugin_settings')}</span> {t('modals.import.plugin_settings_count', { count: metadata.plugin_settings_count })}</p>
                     )}
                   </div>
+
+                  <p className="mt-3 text-xs text-theme-text-muted">
+                    {t('modals.import.partial_import_hint')}
+                  </p>
 
                   <div className="mt-3">
                     <p className="text-sm font-semibold text-theme-text">{t('modals.import.connection_list')}</p>
