@@ -13,7 +13,7 @@ import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { Label } from '../ui/label';
 import { useAppStore } from '../../store/appStore';
-import { exportOxideWithClientState } from '../../lib/oxideClientState';
+import { exportOxideWithClientState, type OxideExportProgress } from '../../lib/oxideClientState';
 import { api } from '../../lib/api';
 import { collectPluginSettingsSnapshot, parseSettingStorageKey } from '../../lib/plugin/pluginSettingsManager';
 import {
@@ -29,6 +29,40 @@ type OxideExportModalProps = {
 
 type ExportStage = 'idle' | 'reading_keys' | 'encrypting' | 'writing' | 'done';
 type PasswordStrength = 'weak' | 'fair' | 'strong';
+
+function mapExportProgressStage(stage: string, embedKeys: boolean): ExportStage {
+  switch (stage) {
+    case 'collecting_connections':
+      return embedKeys ? 'reading_keys' : 'encrypting';
+    case 'serializing_file':
+      return 'writing';
+    case 'computing_checksum':
+    case 'building_metadata':
+    case 'generating_salt_nonce':
+    case 'deriving_key':
+    case 'serializing_payload':
+    case 'encrypting_payload':
+    case 'finalizing_file':
+      return 'encrypting';
+    default:
+      return 'encrypting';
+  }
+}
+
+function getFallbackProgressPercent(stage: ExportStage): number {
+  switch (stage) {
+    case 'reading_keys':
+      return 12;
+    case 'encrypting':
+      return 40;
+    case 'writing':
+      return 96;
+    case 'done':
+      return 100;
+    default:
+      return 0;
+  }
+}
 
 export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
   const { t } = useTranslation();
@@ -54,6 +88,7 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
   const [embedKeys, setEmbedKeys] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportStage, setExportStage] = useState<ExportStage>('idle');
+  const [exportProgress, setExportProgress] = useState<OxideExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<ExportPreflightResult | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
@@ -164,6 +199,7 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
     setError(null);
     setPreflight(null);
     setExportStage('idle');
+    setExportProgress(null);
 
     void loadExportSources();
   }, [isOpen, loadExportSources]);
@@ -306,6 +342,9 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
   };
 
   const passwordStrength = password ? getPasswordStrength(password) : null;
+  const exportPercent = exportProgress && exportProgress.total > 0
+    ? Math.round((exportProgress.current / exportProgress.total) * 100)
+    : getFallbackProgressPercent(exportStage);
 
   const formatBytes = (bytes: number): string => {
     if (bytes < 1024) {
@@ -339,6 +378,7 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
     }
 
     setExporting(true);
+    setExportProgress(null);
 
     try {
       if (embedKeys && preflight && preflight.connectionsWithKeys > 0) {
@@ -359,9 +399,14 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
         includePluginSettings: hasSelectedPluginSettings,
         selectedPluginIds: hasSelectedPluginSettings ? Array.from(selectedPluginIds) : [],
         selectedForwardIds: Array.from(selectedForwardIds),
+        onProgress: (progress) => {
+          setExportStage(mapExportProgressStage(progress.stage, embedKeys));
+          setExportProgress(progress);
+        },
       });
 
       setExportStage('writing');
+      setExportProgress((prev) => prev ? { ...prev, current: prev.total } : { stage: 'serializing_file', current: 1, total: 1 });
       const savePath = await save({
         defaultPath: `oxide-export-${Date.now()}.oxide`,
         filters: [{ name: 'Oxide Config', extensions: ['oxide'] }],
@@ -370,16 +415,19 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
       if (savePath) {
         await writeFile(savePath, fileData);
         setExportStage('done');
+        setExportProgress((prev) => prev ? { ...prev, current: prev.total } : { stage: 'serializing_file', current: 1, total: 1 });
         localStorage.setItem('oxideterm:lastExportTimestamp', String(Date.now()));
         await new Promise((resolve) => setTimeout(resolve, 500));
         onClose();
       } else {
         setExportStage('idle');
+        setExportProgress(null);
       }
     } catch (err) {
       console.error('Export failed:', err);
       setError(`${t('modals.export.error_export_failed')}: ${err}`);
       setExportStage('idle');
+      setExportProgress(null);
     } finally {
       setExporting(false);
     }
@@ -765,6 +813,27 @@ export function OxideExportModal({ isOpen, onClose }: OxideExportModalProps) {
               <li>• {t('modals.export.security_keep_safe')}</li>
             </ul>
           </div>
+
+          {exporting && (
+            <div className="rounded-md border border-theme-border bg-theme-bg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3 text-sm text-theme-text">
+                <span className="font-medium">{getStageText()}</span>
+                <span className="text-theme-text-muted">{exportPercent}%</span>
+              </div>
+              <div
+                role="progressbar"
+                aria-valuenow={exportPercent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="h-2 rounded-full overflow-hidden bg-theme-bg-hover"
+              >
+                <div
+                  className="h-full bg-theme-accent transition-[width] duration-200 ease-out"
+                  style={{ width: `${exportPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end space-x-2 pt-2">
             <Button variant="outline" onClick={onClose} disabled={exporting} className="border-theme-border text-theme-text hover:bg-theme-bg-hover">

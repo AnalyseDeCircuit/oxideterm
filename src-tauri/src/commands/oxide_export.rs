@@ -8,6 +8,7 @@ use chrono::Utc;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::State;
+use tauri::ipc::Channel;
 use tracing::info;
 
 use crate::commands::config::ConfigState;
@@ -16,6 +17,7 @@ use crate::config::types::SavedAuth;
 use crate::oxide_file::{
     EncryptedAuth, EncryptedConnection, EncryptedForward, EncryptedPayload, EncryptedPluginSetting,
     EncryptedProxyHop, OxideMetadata, compute_checksum, encrypt_oxide_file,
+    encrypt_oxide_file_with_progress,
 };
 use zeroize::Zeroizing;
 
@@ -37,6 +39,31 @@ pub struct ExportPreflightResult {
     pub total_key_bytes: u64,
     /// Whether all connections can be exported
     pub can_export: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OxideExportProgressEvent {
+    pub stage: String,
+    pub current: usize,
+    pub total: usize,
+}
+
+fn emit_export_progress(
+    on_progress: Option<&Channel<OxideExportProgressEvent>>,
+    stage: &str,
+    current: usize,
+    total: usize,
+) {
+    let Some(channel) = on_progress else {
+        return;
+    };
+
+    let _ = channel.send(OxideExportProgressEvent {
+        stage: stage.to_string(),
+        current,
+        total,
+    });
 }
 
 /// Validate password strength.
@@ -254,12 +281,74 @@ pub async fn export_to_oxide(
     config_state: State<'_, Arc<ConfigState>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
 ) -> Result<Vec<u8>, String> {
+    export_to_oxide_inner(
+        connection_ids,
+        password,
+        description,
+        embed_keys,
+        selected_forward_ids,
+        app_settings_json,
+        plugin_settings,
+        config_state,
+        forwarding_registry,
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn export_to_oxide_with_progress(
+    connection_ids: Vec<String>,
+    password: String,
+    description: Option<String>,
+    embed_keys: Option<bool>,
+    selected_forward_ids: Option<Vec<String>>,
+    app_settings_json: Option<String>,
+    plugin_settings: Option<Vec<EncryptedPluginSetting>>,
+    on_progress: Channel<OxideExportProgressEvent>,
+    config_state: State<'_, Arc<ConfigState>>,
+    forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
+) -> Result<Vec<u8>, String> {
+    export_to_oxide_inner(
+        connection_ids,
+        password,
+        description,
+        embed_keys,
+        selected_forward_ids,
+        app_settings_json,
+        plugin_settings,
+        config_state,
+        forwarding_registry,
+        Some(on_progress),
+    )
+    .await
+}
+
+async fn export_to_oxide_inner(
+    connection_ids: Vec<String>,
+    password: String,
+    description: Option<String>,
+    embed_keys: Option<bool>,
+    selected_forward_ids: Option<Vec<String>>,
+    app_settings_json: Option<String>,
+    plugin_settings: Option<Vec<EncryptedPluginSetting>>,
+    config_state: State<'_, Arc<ConfigState>>,
+    forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
+    on_progress: Option<Channel<OxideExportProgressEvent>>,
+) -> Result<Vec<u8>, String> {
     let should_embed_keys = embed_keys.unwrap_or(false);
     info!(
         "Exporting {} connections to .oxide file (embed_keys={})",
         connection_ids.len(),
         should_embed_keys
     );
+
+    let total_steps = connection_ids.len() + 8;
+    let mut current_step = 0usize;
+    let report_progress = |stage: &str, current_step: &mut usize| {
+        *current_step += 1;
+        emit_export_progress(on_progress.as_ref(), stage, *current_step, total_steps);
+    };
 
     // 1. Validate password strength
     validate_password(&password)?;
@@ -426,6 +515,8 @@ pub async fn export_to_oxide(
             proxy_chain: encrypted_proxy_chain,
             forwards,
         });
+
+        report_progress("collecting_connections", &mut current_step);
     }
 
     // 3. Compute checksum and build payload
@@ -446,6 +537,7 @@ pub async fn export_to_oxide(
     };
     payload.checksum =
         compute_checksum(&payload).map_err(|e| format!("Failed to compute checksum: {:?}", e))?;
+    report_progress("computing_checksum", &mut current_step);
 
     // 4. Build metadata
     let metadata = OxideMetadata {
@@ -458,15 +550,24 @@ pub async fn export_to_oxide(
         plugin_settings_count: (!payload.plugin_settings.is_empty())
             .then_some(payload.plugin_settings.len()),
     };
+    report_progress("building_metadata", &mut current_step);
 
     // 5. Encrypt
-    let oxide_file = encrypt_oxide_file(&payload, &password, metadata)
-        .map_err(|e| format!("Encryption failed: {:?}", e))?;
+    let oxide_file = if on_progress.is_some() {
+        encrypt_oxide_file_with_progress(&payload, &password, metadata, |stage| {
+            report_progress(stage, &mut current_step);
+        })
+        .map_err(|e| format!("Encryption failed: {:?}", e))?
+    } else {
+        encrypt_oxide_file(&payload, &password, metadata)
+            .map_err(|e| format!("Encryption failed: {:?}", e))?
+    };
 
     // 6. Serialize to bytes
     let bytes = oxide_file
         .to_bytes()
         .map_err(|e| format!("Serialization failed: {:?}", e))?;
+    report_progress("serializing_file", &mut current_step);
 
     info!(
         "Successfully exported {} connections ({} bytes)",

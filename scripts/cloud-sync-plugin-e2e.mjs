@@ -490,16 +490,25 @@ function createBackendMock(kind, config) {
     const relativePath = url.pathname.startsWith(`${namespaceRoot}/`)
       ? decodePathSegments(url.pathname.slice(namespaceRoot.length + 1))
       : '';
+    const normalizedRequestPath = url.pathname.replace(/\/+$/, '');
     record({ backend: kind, method: request.method, url: request.url, logicalPath: relativePath || null });
 
     if (request.method === 'MKCOL') {
-      state.collections.add(url.pathname.replace(/\/+$/, ''));
+      state.collections.add(normalizedRequestPath);
       return response(201);
     }
     if (request.method === 'PROPFIND') {
-      return response(state.collections.has(url.pathname.replace(/\/+$/, '')) ? 207 : 404);
+      return response(state.collections.has(normalizedRequestPath) ? 207 : 404);
     }
     if (request.method === 'PUT') {
+      const logicalParent = relativePath.split('/').slice(0, -1).join('/');
+      const parentUrlPath = logicalParent
+        ? `${namespaceRoot}/${encodePathSegments(logicalParent)}`.replace(/\/+$/, '')
+        : namespaceRoot;
+      if (!state.collections.has(parentUrlPath)) {
+        return response(409);
+      }
+
       const bytes = parseBodyBytes(request);
       state.objects.set(relativePath, {
         bytes,

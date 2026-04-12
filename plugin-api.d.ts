@@ -34,6 +34,24 @@ export type PluginSidebarDef = {
   position: 'top' | 'bottom';
 };
 
+export type PluginOxideExportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host export invocation. */
+  stage: string;
+  /** Completed steps for this export invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this export invocation. */
+  total: number;
+}>;
+
+export type PluginOxideImportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host import invocation. */
+  stage: string;
+  /** Completed steps for this import invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this import invocation. */
+  total: number;
+}>;
+
 export type PluginSettingDef = {
   id: string;
   type: 'string' | 'number' | 'boolean' | 'select';
@@ -94,7 +112,15 @@ export type Disposable = {
   dispose(): void;
 };
 
-export type SshConnectionState = 'connecting' | 'authenticating' | 'active' | 'idle' | 'reconnecting' | 'disconnected' | 'error';
+export type SshConnectionState =
+  | 'connecting'
+  | 'active'
+  | 'idle'
+  | 'link_down'
+  | 'reconnecting'
+  | 'disconnecting'
+  | 'disconnected'
+  | { error: string };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snapshot Types (all deeply frozen at runtime)
@@ -622,12 +648,16 @@ export type PluginContext = Readonly<{
       includePluginSettings?: boolean;
       selectedPluginIds?: string[];
       selectedForwardIds?: string[];
+      onProgress?: (progress: PluginOxideExportProgress) => void;
     }): Promise<Uint8Array>;
     validateOxide(fileData: Uint8Array): Promise<OxideMetadata>;
     previewImport(
       fileData: Uint8Array,
       password: string,
-      options?: { conflictStrategy?: PluginSyncConflictStrategy },
+      options?: {
+        conflictStrategy?: PluginSyncConflictStrategy;
+        onProgress?: (progress: PluginOxideImportProgress) => void;
+      },
     ): Promise<ImportPreview>;
     importOxide(
       fileData: Uint8Array,
@@ -640,6 +670,7 @@ export type PluginContext = Readonly<{
         importPluginSettings?: boolean;
         selectedPluginIds?: string[];
         importForwards?: boolean;
+        onProgress?: (progress: PluginOxideImportProgress) => void;
       },
     ): Promise<ImportResult>;
   };

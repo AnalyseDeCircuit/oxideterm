@@ -658,10 +658,13 @@ pub fn run() {
         commands::plugin::delete_plugin_secret,
         // Oxide file export/import commands
         commands::oxide_export::export_to_oxide,
+        commands::oxide_export::export_to_oxide_with_progress,
         commands::oxide_export::preflight_export,
         commands::oxide_import::validate_oxide_file,
         commands::oxide_import::preview_oxide_import,
+        commands::oxide_import::preview_oxide_import_with_progress,
         commands::oxide_import::import_from_oxide,
+        commands::oxide_import::import_from_oxide_with_progress,
         // Port forwarding commands
         commands::create_port_forward,
         commands::stop_port_forward,
@@ -1001,10 +1004,13 @@ pub fn run() {
         commands::plugin::delete_plugin_secret,
         // Oxide file export/import commands
         commands::oxide_export::export_to_oxide,
+        commands::oxide_export::export_to_oxide_with_progress,
         commands::oxide_export::preflight_export,
         commands::oxide_import::validate_oxide_file,
         commands::oxide_import::preview_oxide_import,
+        commands::oxide_import::preview_oxide_import_with_progress,
         commands::oxide_import::import_from_oxide,
+        commands::oxide_import::import_from_oxide_with_progress,
         // Port forwarding commands
         commands::create_port_forward,
         commands::stop_port_forward,

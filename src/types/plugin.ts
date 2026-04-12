@@ -436,6 +436,24 @@ export type LocalSyncMetadata = Readonly<{
 /** Built-in conflict strategies for importing encrypted .oxide payloads */
 export type PluginSyncConflictStrategy = 'rename' | 'skip' | 'replace' | 'merge';
 
+export type PluginOxideExportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host export invocation. */
+  stage: string;
+  /** Completed steps for this export invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this export invocation. */
+  total: number;
+}>;
+
+export type PluginOxideImportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host import invocation. */
+  stage: string;
+  /** Completed steps for this import invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this import invocation. */
+  total: number;
+}>;
+
 /** ctx.sync — saved-connection sync and encrypted import/export helpers */
 export type PluginSyncAPI = {
   /** Current in-memory snapshot of saved connections */
@@ -467,6 +485,7 @@ export type PluginSyncAPI = {
     includePluginSettings?: boolean;
     selectedPluginIds?: string[];
     selectedForwardIds?: string[];
+    onProgress?: (progress: PluginOxideExportProgress) => void;
   }): Promise<Uint8Array>;
   /** Validate a .oxide payload and read metadata without decrypting */
   validateOxide(fileData: Uint8Array): Promise<Readonly<OxideMetadata>>;
@@ -474,7 +493,10 @@ export type PluginSyncAPI = {
   previewImport(
     fileData: Uint8Array,
     password: string,
-    options?: { conflictStrategy?: PluginSyncConflictStrategy },
+    options?: {
+      conflictStrategy?: PluginSyncConflictStrategy;
+      onProgress?: (progress: PluginOxideImportProgress) => void;
+    },
   ): Promise<Readonly<ImportPreview>>;
   /** Import an encrypted .oxide payload using a host-managed conflict strategy */
   importOxide(
@@ -488,6 +510,7 @@ export type PluginSyncAPI = {
       importPluginSettings?: boolean;
       selectedPluginIds?: string[];
       importForwards?: boolean;
+      onProgress?: (progress: PluginOxideImportProgress) => void;
     },
   ): Promise<Readonly<ImportResult>>;
 };

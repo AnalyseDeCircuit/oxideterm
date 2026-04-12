@@ -1250,7 +1250,7 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
   };
 
   const resolveExportConnectionIds = async (connectionIds?: string[]): Promise<string[]> => {
-    if (connectionIds && connectionIds.length > 0) {
+    if (connectionIds) {
       return [...connectionIds];
     }
     const currentConnections = useAppStore.getState().savedConnections;
@@ -1326,6 +1326,7 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         includePluginSettings: request.includePluginSettings ?? false,
         selectedPluginIds: request.selectedPluginIds,
         selectedForwardIds: request.selectedForwardIds,
+        onProgress: request.onProgress,
       });
       return fileData;
     },
@@ -1336,6 +1337,7 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
     async previewImport(fileData: Uint8Array, password: string, options): Promise<Readonly<ImportPreview>> {
       const preview = await previewOxideImport(fileData, password, {
         conflictStrategy: options?.conflictStrategy,
+        onProgress: options?.onProgress,
       });
       return toFrozenImportPreview(preview);
     },
@@ -1348,6 +1350,7 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         importPluginSettings: options?.importPluginSettings,
         selectedPluginIds: options?.selectedPluginIds,
         importForwards: options?.importForwards,
+        onProgress: options?.onProgress,
       });
 
       await useAppStore.getState().loadSavedConnections();

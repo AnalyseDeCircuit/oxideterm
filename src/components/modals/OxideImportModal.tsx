@@ -10,13 +10,63 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '.
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { importOxideWithClientState, previewOxideImport, validateOxideFile } from '../../lib/oxideClientState';
+import {
+  importOxideWithClientState,
+  previewOxideImport,
+  validateOxideFile,
+  type OxideImportProgress,
+} from '../../lib/oxideClientState';
 import { useAppStore } from '../../store/appStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { buildOxideAppSettingsSectionValueMap, useSettingsStore } from '../../store/settingsStore';
 import type { OxideMetadata, ImportResult, ImportPreview } from '../../types';
 
 type ImportConflictStrategy = 'rename' | 'skip' | 'replace' | 'merge';
+type ImportOperation = 'preview' | 'import' | null;
+type ImportStage = 'idle' | 'parsing' | 'decrypting' | 'analyzing' | 'applying' | 'saving' | 'done';
+
+function mapImportProgressStage(stage: string): ImportStage {
+  switch (stage) {
+    case 'parsing_file':
+      return 'parsing';
+    case 'deriving_key':
+    case 'decrypting_payload':
+    case 'deserializing_payload':
+    case 'verifying_checksum':
+      return 'decrypting';
+    case 'collecting_existing':
+    case 'building_preview':
+    case 'analyzing_preview':
+    case 'filtering_selection':
+    case 'preparing_connections':
+      return 'analyzing';
+    case 'applying_connections':
+      return 'applying';
+    case 'saving_config':
+      return 'saving';
+    default:
+      return 'decrypting';
+  }
+}
+
+function getFallbackImportPercent(stage: ImportStage, operation: ImportOperation): number {
+  switch (stage) {
+    case 'parsing':
+      return 8;
+    case 'decrypting':
+      return 32;
+    case 'analyzing':
+      return operation === 'preview' ? 72 : 58;
+    case 'applying':
+      return 82;
+    case 'saving':
+      return 96;
+    case 'done':
+      return 100;
+    default:
+      return 0;
+  }
+}
 
 interface OxideImportModalProps {
   isOpen: boolean;
@@ -32,6 +82,9 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [activeOperation, setActiveOperation] = useState<ImportOperation>(null);
+  const [progressStage, setProgressStage] = useState<ImportStage>('idle');
+  const [progressDetail, setProgressDetail] = useState<OxideImportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
@@ -82,6 +135,42 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
     || ((preview?.pluginSettingsCount ?? 0) > 0 && importPluginSettings)
     || ((preview?.totalForwards ?? 0) > 0 && importForwards),
   );
+  const progressPercent = progressDetail && progressDetail.total > 0
+    ? Math.round((progressDetail.current / progressDetail.total) * 100)
+    : getFallbackImportPercent(progressStage, activeOperation);
+
+  const progressLabel = (() => {
+    switch (progressStage) {
+      case 'parsing':
+        return t('modals.import.stage_parsing');
+      case 'decrypting':
+        return t('modals.import.stage_decrypting');
+      case 'analyzing':
+        return activeOperation === 'import'
+          ? t('modals.import.stage_preparing')
+          : t('modals.import.stage_analyzing');
+      case 'applying':
+        return t('modals.import.stage_applying');
+      case 'saving':
+        return t('modals.import.stage_saving');
+      case 'done':
+        return t('modals.import.stage_done');
+      default:
+        return activeOperation === 'import'
+          ? t('modals.import.importing')
+          : t('modals.import.previewing');
+    }
+  })();
+
+  const progressSummary = progressDetail
+    ? `${progressDetail.current}/${progressDetail.total}`
+    : null;
+
+  const handleImportProgress = (operation: Exclude<ImportOperation, null>) => (progress: OxideImportProgress) => {
+    setActiveOperation(operation);
+    setProgressStage(mapImportProgressStage(progress.stage));
+    setProgressDetail(progress);
+  };
 
   const resetImportState = () => {
     setPassword('');
@@ -95,6 +184,9 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
     setImportForwards(true);
     setConflictStrategy('rename');
     setExpandedAppSettingsSections(new Set());
+    setActiveOperation(null);
+    setProgressStage('idle');
+    setProgressDetail(null);
   };
 
   const formatPluginName = (pluginId: string) => {
@@ -301,10 +393,14 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
 
     setError(null);
     setPreviewing(true);
+    setActiveOperation('preview');
+    setProgressStage('parsing');
+    setProgressDetail(null);
 
     try {
       const previewResult: ImportPreview = await previewOxideImport(fileData, password, {
         conflictStrategy,
+        onProgress: handleImportProgress('preview'),
       });
       setPreview(previewResult);
       setSelectedNames(getSelectableNames(previewResult));
@@ -322,6 +418,7 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
         setError(`${t('modals.import.title')}: ${err}`);
       }
     } finally {
+      setProgressStage('done');
       setPreviewing(false);
     }
   };
@@ -334,6 +431,9 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
 
     setError(null);
     setImporting(true);
+    setActiveOperation('import');
+    setProgressStage('parsing');
+    setProgressDetail(null);
 
     try {
       const importResult: ImportResult = await importOxideWithClientState(fileData, password, {
@@ -346,6 +446,7 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
           ? (hasStructuredPluginPreview ? Array.from(selectedPluginIds) : undefined)
           : [],
         importForwards,
+        onProgress: handleImportProgress('import'),
       });
 
       setResult(importResult);
@@ -367,6 +468,7 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
         setError(`${t('modals.import.title')}: ${err}`);
       }
     } finally {
+      setProgressStage('done');
       setImporting(false);
     }
   };
@@ -563,6 +665,26 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
             </div>
           ) : preview ? (
             <>
+              {importing && (
+                <div className="border border-theme-border rounded-md p-4 space-y-3 bg-theme-bg mb-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-theme-text">{progressLabel}</p>
+                      {progressSummary && (
+                        <p className="text-xs text-theme-text-muted mt-1">{progressSummary}</p>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-theme-accent">{progressPercent}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-theme-bg-hover">
+                    <div
+                      className="h-full rounded-full bg-theme-accent transition-all duration-200"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="border border-theme-border rounded-md p-4 space-y-3 bg-theme-bg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -929,6 +1051,26 @@ export function OxideImportModal({ isOpen, onClose }: OxideImportModalProps) {
             </>
           ) : (
             <>
+              {previewing && (
+                <div className="border border-theme-border rounded-md p-4 space-y-3 bg-theme-bg">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-theme-text">{progressLabel}</p>
+                      {progressSummary && (
+                        <p className="text-xs text-theme-text-muted mt-1">{progressSummary}</p>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-theme-accent">{progressPercent}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-theme-bg-hover">
+                    <div
+                      className="h-full rounded-full bg-theme-accent transition-all duration-200"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {metadata && (
                 <div className="border border-theme-border rounded-md p-4 space-y-2 bg-theme-bg">
                   <h3 className="font-semibold text-theme-text">{t('modals.import.file_info')}</h3>

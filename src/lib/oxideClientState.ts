@@ -26,10 +26,27 @@ type ExportOxideRequest = {
   includePluginSettings?: boolean;
   selectedPluginIds?: string[];
   selectedForwardIds?: string[];
+  onProgress?: (progress: OxideExportProgress) => void;
+};
+
+export type OxideExportProgress = {
+  /** Discrete completed step count within a single export invocation. */
+  stage: string;
+  /** Completed steps, 1-based and bounded by total. */
+  current: number;
+  /** Total number of discrete steps for the current export invocation. */
+  total: number;
+};
+
+export type OxideImportProgress = {
+  stage: string;
+  current: number;
+  total: number;
 };
 
 type PreviewImportOptions = {
   conflictStrategy?: 'rename' | 'skip' | 'replace' | 'merge';
+  onProgress?: (progress: OxideImportProgress) => void;
 };
 
 type ImportOxideOptions = PreviewImportOptions & {
@@ -92,7 +109,7 @@ export async function exportOxideWithClientState(
         })
       : clientState.pluginSettings)
     : [];
-  const fileData = await invoke<number[]>('export_to_oxide', {
+  const invokeArgs = {
     connectionIds: request.connectionIds,
     password: request.password,
     description: request.description ?? null,
@@ -102,7 +119,22 @@ export async function exportOxideWithClientState(
     pluginSettings: filteredPluginSettings.length > 0
       ? filteredPluginSettings
       : null,
-  });
+  };
+
+  const fileData = request.onProgress
+    ? await (async () => {
+        const { Channel } = await import('@tauri-apps/api/core');
+        const channel = new Channel<OxideExportProgress>();
+        channel.onmessage = (progress) => {
+          request.onProgress?.(progress);
+        };
+
+        return invoke<number[]>('export_to_oxide_with_progress', {
+          ...invokeArgs,
+          onProgress: channel,
+        });
+      })()
+    : await invoke<number[]>('export_to_oxide', invokeArgs);
   return new Uint8Array(fileData);
 }
 
@@ -117,11 +149,26 @@ export async function previewOxideImport(
   password: string,
   options?: PreviewImportOptions,
 ): Promise<ImportPreview> {
-  return invoke<ImportPreview>('preview_oxide_import', {
+  const invokeArgs = {
     fileData: Array.from(fileData),
     password,
     conflictStrategy: options?.conflictStrategy ?? null,
-  });
+  };
+
+  return options?.onProgress
+    ? (async () => {
+        const { Channel } = await import('@tauri-apps/api/core');
+        const channel = new Channel<OxideImportProgress>();
+        channel.onmessage = (progress) => {
+          options.onProgress?.(progress);
+        };
+
+        return invoke<ImportPreview>('preview_oxide_import_with_progress', {
+          ...invokeArgs,
+          onProgress: channel,
+        });
+      })()
+    : invoke<ImportPreview>('preview_oxide_import', invokeArgs);
 }
 
 export async function importOxideWithClientState(
@@ -134,13 +181,27 @@ export async function importOxideWithClientState(
     : options?.selectedAppSettingsSections;
   const shouldImportApp = options?.importAppSettings !== false;
   const shouldImportPlugin = options?.importPluginSettings !== false;
-  const envelope = await invoke<ImportFromOxideEnvelope>('import_from_oxide', {
+  const invokeArgs = {
     fileData: Array.from(fileData),
     password,
     selectedNames: options?.selectedNames ?? null,
     conflictStrategy: options?.conflictStrategy ?? null,
     importForwards: options?.importForwards ?? null,
-  });
+  };
+  const envelope = options?.onProgress
+    ? await (async () => {
+        const { Channel } = await import('@tauri-apps/api/core');
+        const channel = new Channel<OxideImportProgress>();
+        channel.onmessage = (progress) => {
+          options.onProgress?.(progress);
+        };
+
+        return invoke<ImportFromOxideEnvelope>('import_from_oxide_with_progress', {
+          ...invokeArgs,
+          onProgress: channel,
+        });
+      })()
+    : await invoke<ImportFromOxideEnvelope>('import_from_oxide', invokeArgs);
 
   let importedAppSettings = false;
   if (shouldImportApp && envelope.appSettingsJson) {

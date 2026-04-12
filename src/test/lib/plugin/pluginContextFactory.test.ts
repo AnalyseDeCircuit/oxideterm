@@ -567,6 +567,32 @@ describe('pluginContextFactory', () => {
     expect(appStoreState.loadSavedConnections).toHaveBeenCalledTimes(3);
   });
 
+  it('preserves an explicit empty connection selection for oxide exports', async () => {
+    const context = buildPluginContext(manifest());
+
+    invokeMock.mockResolvedValueOnce([1, 2, 3]);
+
+    const exported = await context.sync.exportOxide({
+      connectionIds: [],
+      password: 'StrongPass!123',
+      includeAppSettings: true,
+      selectedAppSettingsSections: ['general'],
+      includePluginSettings: false,
+    });
+
+    expect(exported).toBeInstanceOf(Uint8Array);
+    expect(Array.from(exported)).toEqual([1, 2, 3]);
+    expect(invokeMock).toHaveBeenCalledWith('export_to_oxide', {
+      connectionIds: [],
+      password: 'StrongPass!123',
+      description: null,
+      embedKeys: null,
+      selectedForwardIds: null,
+      appSettingsJson: expect.any(String),
+      pluginSettings: null,
+    });
+  });
+
   it('exposes saved-forward sync helpers and syncable settings helpers', async () => {
     const context = buildPluginContext(manifest());
 

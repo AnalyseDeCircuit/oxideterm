@@ -196,6 +196,96 @@ async function loadPluginViaBlobUrl(pluginId: string, main: string): Promise<Plu
   }
 }
 
+function isRelativeModuleSpecifier(specifier: string): boolean {
+  return specifier.startsWith('./') || specifier.startsWith('../');
+}
+
+function resolvePluginModulePath(fromPath: string, specifier: string): string {
+  const baseUrl = new URL(`https://plugin.local/${normalizePluginRelativePath(fromPath)}`);
+  return normalizePluginRelativePath(new URL(specifier, baseUrl).pathname);
+}
+
+async function loadPluginPackageViaBlobUrls(pluginId: string, main: string): Promise<PluginModule> {
+  const blobUrls: string[] = [];
+  const moduleUrlCache = new Map<string, Promise<string>>();
+
+  const buildModuleUrl = async (modulePath: string): Promise<string> => {
+    const normalizedPath = normalizePluginRelativePath(modulePath);
+    const cached = moduleUrlCache.get(normalizedPath);
+    if (cached) {
+      return cached;
+    }
+
+    const pending = (async () => {
+      const fileBytes = await api.pluginReadFile(pluginId, normalizedPath);
+      const source = new TextDecoder().decode(new Uint8Array(fileBytes));
+
+      // Each file needs its own regex instance — the `g` flag makes the regex
+      // stateful (lastIndex), and recursive `await buildModuleUrl()` calls
+      // would corrupt the shared state causing duplicate / missing rewrites.
+      const importPattern = /((?:import|export)\s+(?:[^'"()]|\([^)]*\))*?\sfrom\s*)(['"])([^'"]+)\2|(\bimport\s*\(\s*)(['"])([^'"]+)\5(\s*\))/g;
+
+      let transformed = '';
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+
+      while ((match = importPattern.exec(source)) !== null) {
+        const [fullMatch] = match;
+        transformed += source.slice(lastIndex, match.index);
+
+        const staticPrefix = match[1];
+        const staticQuote = match[2];
+        const staticSpecifier = match[3];
+        const dynamicPrefix = match[4];
+        const dynamicQuote = match[5];
+        const dynamicSpecifier = match[6];
+        const dynamicSuffix = match[7];
+
+        if (staticSpecifier !== undefined) {
+          if (isRelativeModuleSpecifier(staticSpecifier)) {
+            const resolvedPath = resolvePluginModulePath(normalizedPath, staticSpecifier);
+            const resolvedUrl = await buildModuleUrl(resolvedPath);
+            transformed += `${staticPrefix}${staticQuote}${resolvedUrl}${staticQuote}`;
+          } else {
+            transformed += fullMatch;
+          }
+        } else if (dynamicSpecifier !== undefined) {
+          if (isRelativeModuleSpecifier(dynamicSpecifier)) {
+            const resolvedPath = resolvePluginModulePath(normalizedPath, dynamicSpecifier);
+            const resolvedUrl = await buildModuleUrl(resolvedPath);
+            transformed += `${dynamicPrefix}${dynamicQuote}${resolvedUrl}${dynamicQuote}${dynamicSuffix}`;
+          } else {
+            transformed += fullMatch;
+          }
+        } else {
+          transformed += fullMatch;
+        }
+
+        lastIndex = match.index + fullMatch.length;
+      }
+
+      transformed += source.slice(lastIndex);
+
+      const blobUrl = URL.createObjectURL(new Blob([transformed], { type: 'application/javascript' }));
+      blobUrls.push(blobUrl);
+      return blobUrl;
+    })();
+
+    moduleUrlCache.set(normalizedPath, pending);
+    return pending;
+  };
+
+  const entryUrl = await buildModuleUrl(main);
+
+  try {
+    return await import(/* @vite-ignore */ entryUrl);
+  } finally {
+    for (const blobUrl of blobUrls) {
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+}
+
 /** Cached plugin server port */
 let pluginServerPort: number | null = null;
 
@@ -279,15 +369,23 @@ export async function loadPlugin(manifest: PluginManifest): Promise<void> {
     let module: PluginModule;
 
     if (manifest.format === 'package') {
-      // Prefer asset URLs so package plugins stay same-origin inside the webview.
+      // Package plugins need relative ESM imports to preserve directory semantics.
+      // convertFileSrc() percent-encodes the full path, which collapses it into a
+      // single URL segment and breaks sibling imports such as ./panel.js.
       try {
-        module = await loadPluginViaAssetUrl(id, manifest.main);
-      } catch (assetErr) {
-        if (!isRecoverableAssetLoadError(assetErr)) {
-          throw assetErr;
+        module = await loadPluginPackageViaBlobUrls(id, manifest.main);
+      } catch (blobErr) {
+        console.warn(`[PluginLoader] Package blob load failed for plugin "${id}", trying asset URL fallback:`, blobErr);
+
+        try {
+          module = await loadPluginViaAssetUrl(id, manifest.main);
+        } catch (assetErr) {
+          if (!isRecoverableAssetLoadError(assetErr)) {
+            throw assetErr;
+          }
+          console.warn(`[PluginLoader] Asset URL load failed for plugin "${id}", falling back to localhost server:`, assetErr);
+          module = await loadPluginViaServer(id, manifest.main);
         }
-        console.warn(`[PluginLoader] Asset URL load failed for plugin "${id}", falling back to localhost server:`, assetErr);
-        module = await loadPluginViaServer(id, manifest.main);
       }
     } else {
       // Single-file bundle (default): load via Blob URL

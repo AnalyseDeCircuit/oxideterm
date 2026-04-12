@@ -117,6 +117,10 @@ fn build_request_binary(
             reqwest::Method::from_bytes(b"MKCOL").map_err(|e| e.to_string())?,
             url,
         ),
+        "PROPFIND" => client.request(
+            reqwest::Method::from_bytes(b"PROPFIND").map_err(|e| e.to_string())?,
+            url,
+        ),
         "HEAD" => client.head(url),
         other => return Err(format!("Unsupported HTTP method: {}", other)),
     };
@@ -393,4 +397,35 @@ pub async fn ai_fetch_stream_cancel(
         token.cancel();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_request_binary;
+    use std::collections::HashMap;
+
+    #[test]
+    fn build_request_binary_accepts_webdav_methods() {
+        let client = reqwest::Client::new();
+        let headers = HashMap::new();
+
+        let mkcol =
+            build_request_binary(&client, "http://127.0.0.1/example", "MKCOL", &headers, None)
+                .expect("MKCOL should be supported")
+                .build()
+                .expect("MKCOL request should build");
+        assert_eq!(mkcol.method().as_str(), "MKCOL");
+
+        let propfind = build_request_binary(
+            &client,
+            "http://127.0.0.1/example",
+            "PROPFIND",
+            &headers,
+            None,
+        )
+        .expect("PROPFIND should be supported")
+        .build()
+        .expect("PROPFIND request should build");
+        assert_eq!(propfind.method().as_str(), "PROPFIND");
+    }
 }

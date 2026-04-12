@@ -93,17 +93,32 @@ pub fn encrypt_oxide_file(
     password: &str,
     metadata: OxideMetadata,
 ) -> Result<OxideFile, OxideFileError> {
+    encrypt_oxide_file_with_progress(payload, password, metadata, |_| {})
+}
+
+pub fn encrypt_oxide_file_with_progress<F>(
+    payload: &EncryptedPayload,
+    password: &str,
+    metadata: OxideMetadata,
+    mut on_progress: F,
+) -> Result<OxideFile, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
     // 1. Generate random salt and nonce using cryptographically secure RNG
     let mut salt = [0u8; SALT_LEN];
     let mut nonce = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut salt);
     rand::rngs::OsRng.fill_bytes(&mut nonce);
+    on_progress("generating_salt_nonce");
 
     // 2. Derive encryption key from password using current KDF version
     let key = derive_key(password, &salt, kdf_flags::CURRENT_KDF)?;
+    on_progress("deriving_key");
 
     // 3. Serialize payload with MessagePack (supports tagged enums)
     let plaintext = Zeroizing::new(rmp_serde::to_vec_named(payload)?);
+    on_progress("serializing_payload");
 
     // 4. Encrypt with ChaCha20-Poly1305
     let cipher =
@@ -114,6 +129,7 @@ pub fn encrypt_oxide_file(
     let ciphertext = cipher
         .encrypt(nonce_obj, plaintext.as_ref())
         .map_err(|_| OxideFileError::EncryptionFailed)?;
+    on_progress("encrypting_payload");
 
     // 5. Split ciphertext and authentication tag
     // ChaCha20Poly1305 appends the 16-byte tag to the ciphertext
@@ -124,6 +140,7 @@ pub fn encrypt_oxide_file(
     let (encrypted_data, tag_slice) = ciphertext.split_at(ciphertext.len() - TAG_LEN);
     let mut tag = [0u8; TAG_LEN];
     tag.copy_from_slice(tag_slice);
+    on_progress("finalizing_file");
 
     Ok(OxideFile {
         metadata,
@@ -142,8 +159,20 @@ pub fn decrypt_oxide_file(
     oxide_file: &OxideFile,
     password: &str,
 ) -> Result<EncryptedPayload, OxideFileError> {
+    decrypt_oxide_file_with_progress(oxide_file, password, |_| {})
+}
+
+pub fn decrypt_oxide_file_with_progress<F>(
+    oxide_file: &OxideFile,
+    password: &str,
+    mut on_progress: F,
+) -> Result<EncryptedPayload, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
     // 1. Derive key from password and salt using file's KDF version
     let key = derive_key(password, &oxide_file.salt, oxide_file.kdf_version)?;
+    on_progress("deriving_key");
 
     // 2. Prepare cipher
     let cipher =
@@ -161,12 +190,15 @@ pub fn decrypt_oxide_file(
             .decrypt(nonce_obj, ciphertext_with_tag.as_ref())
             .map_err(|_| OxideFileError::DecryptionFailed)?,
     );
+    on_progress("decrypting_payload");
 
     // 5. Deserialize payload with MessagePack
     let payload: EncryptedPayload = rmp_serde::from_slice(&plaintext)?;
+    on_progress("deserializing_payload");
 
     // 6. Verify internal checksum
     verify_checksum(&payload)?;
+    on_progress("verifying_checksum");
 
     Ok(payload)
 }

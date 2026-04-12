@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const channelInstances = vi.hoisted(() => [] as Array<{ onmessage?: (message: unknown) => void }>);
 const applyImportedSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const exportOxideAppSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const collectPluginSettingsSnapshotMock = vi.hoisted(() => vi.fn());
@@ -8,6 +9,13 @@ const applyImportedPluginSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+  Channel: class MockChannel<T> {
+    onmessage?: (message: T) => void;
+
+    constructor() {
+      channelInstances.push(this as unknown as { onmessage?: (message: unknown) => void });
+    }
+  },
 }));
 
 vi.mock('@/store/settingsStore', () => ({
@@ -36,6 +44,7 @@ import { exportOxideWithClientState, importOxideWithClientState } from '@/lib/ox
 describe('oxideClientState', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    channelInstances.length = 0;
     exportOxideAppSettingsSnapshotMock.mockReturnValue('{"format":"oxide-settings-sections-v1"}');
     collectPluginSettingsSnapshotMock.mockReturnValue([
       { storageKey: 'oxide-plugin-plugin-a-setting-theme', serializedValue: '"night"' },
@@ -71,6 +80,31 @@ describe('oxideClientState', () => {
         serializedValue: '"compact"',
       }],
     });
+  });
+
+  it('forwards Rust-side export progress through the progress-aware export command', async () => {
+    const onProgress = vi.fn();
+    invokeMock.mockImplementationOnce(async (_command, args: { onProgress: { onmessage?: (message: unknown) => void } }) => {
+      args.onProgress.onmessage?.({ stage: 'deriving_key', current: 4, total: 9 });
+      return [7, 8, 9];
+    });
+
+    const result = await exportOxideWithClientState({
+      connectionIds: [],
+      password: '123456',
+      includeAppSettings: true,
+      selectedAppSettingsSections: ['general'],
+      includePluginSettings: false,
+      onProgress,
+    });
+
+    expect(Array.from(result)).toEqual([7, 8, 9]);
+    expect(invokeMock).toHaveBeenCalledWith('export_to_oxide_with_progress', expect.objectContaining({
+      connectionIds: [],
+      password: '123456',
+      onProgress: channelInstances[0],
+    }));
+    expect(onProgress).toHaveBeenCalledWith({ stage: 'deriving_key', current: 4, total: 9 });
   });
 
   it('respects import toggles and reports skipped client-side sections', async () => {

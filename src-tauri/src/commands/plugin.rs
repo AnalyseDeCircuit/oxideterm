@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
+use walkdir::WalkDir;
 
 use crate::commands::config::ConfigState;
 use crate::config::storage::config_dir;
@@ -214,6 +215,43 @@ fn plugin_secret_account_id(plugin_id: &str, key: &str) -> Result<String, String
     ))
 }
 
+fn allow_plugin_asset_tree(
+    scope: &tauri::scope::fs::Scope,
+    canonical_root: &std::path::Path,
+) -> Result<(), String> {
+    for entry in WalkDir::new(canonical_root).follow_links(false) {
+        let entry = entry.map_err(|e| format!("Failed to walk plugin asset tree: {}", e))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let canonical_file = entry.path().canonicalize().map_err(|e| {
+            format!(
+                "Failed to resolve plugin asset '{}': {}",
+                entry.path().display(),
+                e
+            )
+        })?;
+
+        if !canonical_file.starts_with(canonical_root) {
+            return Err(format!(
+                "Plugin asset '{}' escapes plugin directory",
+                canonical_file.display()
+            ));
+        }
+
+        scope.allow_file(&canonical_file).map_err(|e| {
+            format!(
+                "Failed to allow plugin asset '{}': {}",
+                canonical_file.display(),
+                e
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tauri Commands
 // ═══════════════════════════════════════════════════════════════════════════
@@ -357,9 +395,7 @@ pub fn allow_plugin_asset_entry(
         return Err("Plugin entry path cannot be a directory".to_string());
     }
 
-    app.asset_protocol_scope()
-        .allow_directory(&canonical_root, true)
-        .map_err(|e| format!("Failed to allow plugin directory: {}", e))?;
+    allow_plugin_asset_tree(&app.asset_protocol_scope(), &canonical_root)?;
 
     canonical_entry
         .to_str()

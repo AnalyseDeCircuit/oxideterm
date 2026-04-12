@@ -87,8 +87,14 @@ export type PluginManifest = {
 export type Disposable = { dispose(): void };
 
 export type SshConnectionState =
-  | 'disconnected' | 'connecting' | 'authenticating'
-  | 'active' | 'error' | 'idle' | 'link_down';
+  | 'connecting'
+  | 'active'
+  | 'idle'
+  | 'link_down'
+  | 'reconnecting'
+  | 'disconnecting'
+  | 'disconnected'
+  | { error: string };
 
 export type ConnectionSnapshot = Readonly<{
   id: string;
@@ -458,6 +464,24 @@ export type ExportPreflightResult = Readonly<{
 
 export type PluginSyncConflictStrategy = 'rename' | 'skip' | 'replace' | 'merge';
 
+export type PluginOxideExportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host export invocation. */
+  stage: string;
+  /** Completed steps for this export invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this export invocation. */
+  total: number;
+}>;
+
+export type PluginOxideImportProgress = Readonly<{
+  /** Discrete stage identifier emitted by a single host import invocation. */
+  stage: string;
+  /** Completed steps for this import invocation, not a 0-1 ratio. */
+  current: number;
+  /** Total discrete steps for this import invocation. */
+  total: number;
+}>;
+
 export type PluginSyncAPI = {
   listSavedConnections(): ReadonlyArray<SavedConnectionSnapshot>;
   refreshSavedConnections(): Promise<ReadonlyArray<SavedConnectionSnapshot>>;
@@ -480,12 +504,16 @@ export type PluginSyncAPI = {
     includePluginSettings?: boolean;
     selectedPluginIds?: string[];
     selectedForwardIds?: string[];
+    onProgress?: (progress: PluginOxideExportProgress) => void;
   }): Promise<Uint8Array>;
   validateOxide(fileData: Uint8Array): Promise<OxideMetadata>;
   previewImport(
     fileData: Uint8Array,
     password: string,
-    options?: { conflictStrategy?: PluginSyncConflictStrategy },
+    options?: {
+      conflictStrategy?: PluginSyncConflictStrategy;
+      onProgress?: (progress: PluginOxideImportProgress) => void;
+    },
   ): Promise<ImportPreview>;
   importOxide(
     fileData: Uint8Array,
@@ -498,6 +526,7 @@ export type PluginSyncAPI = {
       importPluginSettings?: boolean;
       selectedPluginIds?: string[];
       importForwards?: boolean;
+      onProgress?: (progress: PluginOxideImportProgress) => void;
     },
   ): Promise<ImportResult>;
 };

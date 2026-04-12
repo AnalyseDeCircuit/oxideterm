@@ -267,6 +267,34 @@ describe('OxideExportModal', () => {
     });
   });
 
+  it('shows fine-grained export progress while the backend reports substeps', async () => {
+    let resolveExport: ((value: Uint8Array) => void) | null = null;
+    exportOxideWithClientStateMock.mockImplementationOnce((request: { onProgress?: (progress: { stage: string; current: number; total: number }) => void }) => new Promise((resolve) => {
+      request.onProgress?.({ stage: 'deriving_key', current: 4, total: 9 });
+      resolveExport = resolve;
+    }));
+
+    render(<OxideExportModal isOpen onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('At least 6 characters; 12+ recommended with uppercase, lowercase, numbers, and symbols'), {
+      target: { value: '123456' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Re-enter password'), {
+      target: { value: '123456' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '44');
+    });
+    expect(screen.getAllByText('Encrypting').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveExport?.(new Uint8Array([1, 2, 3]));
+    });
+  });
+
 
   it('runs preflight once per selection change instead of looping on re-render', async () => {
     vi.useFakeTimers();
