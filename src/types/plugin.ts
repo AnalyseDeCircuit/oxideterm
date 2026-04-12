@@ -429,6 +429,8 @@ export type LocalSyncMetadata = Readonly<{
   savedConnectionsUpdatedAt: string;
   savedForwardsRevision?: string;
   settingsRevision?: string;
+  appSettingsSectionRevisions?: Readonly<Partial<Record<OxideAppSettingsSectionId, string>>>;
+  pluginSettingsRevisions?: Readonly<Record<string, string>>;
 }>;
 
 /** Built-in conflict strategies for importing encrypted .oxide payloads */

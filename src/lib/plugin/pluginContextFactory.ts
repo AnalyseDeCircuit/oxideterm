@@ -80,8 +80,13 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { usePluginStore } from '../../store/pluginStore';
 import { createPluginStorage } from './pluginStorage';
 import { pluginEventBridge } from './pluginEventBridge';
-import { createPluginSettingsManager } from './pluginSettingsManager';
+import { buildPluginSettingsRevisionMap, createPluginSettingsManager } from './pluginSettingsManager';
 import { createPluginI18nManager } from './pluginI18nManager';
+import {
+  OXIDE_APP_SETTINGS_SECTION_IDS,
+  exportOxideAppSettingsSnapshot,
+  type OxideAppSettingsSectionId,
+} from '../../store/settingsStore';
 import {
   exportOxideWithClientState,
   importOxideWithClientState,
@@ -356,6 +361,12 @@ function toFrozenLocalSyncMetadata(metadata: LocalSyncMetadata): LocalSyncMetada
     savedConnectionsUpdatedAt: metadata.savedConnectionsUpdatedAt,
     savedForwardsRevision: metadata.savedForwardsRevision,
     settingsRevision: metadata.settingsRevision,
+    appSettingsSectionRevisions: metadata.appSettingsSectionRevisions
+      ? freezeSnapshot(metadata.appSettingsSectionRevisions)
+      : undefined,
+    pluginSettingsRevisions: metadata.pluginSettingsRevisions
+      ? freezeSnapshot(metadata.pluginSettingsRevisions)
+      : undefined,
   });
 }
 
@@ -367,6 +378,17 @@ function simpleStableHash(value: unknown): string {
     hash = Math.imul(hash, 16777619);
   }
   return `fnv1a-${(hash >>> 0).toString(16)}`;
+}
+
+function buildAppSettingsSectionRevisionMap(): Partial<Record<OxideAppSettingsSectionId, string>> {
+  return Object.fromEntries(
+    OXIDE_APP_SETTINGS_SECTION_IDS.map((sectionId) => {
+      const snapshot = exportOxideAppSettingsSnapshot({
+        selectedSections: [sectionId],
+      });
+      return [sectionId, simpleStableHash(snapshot ?? `${sectionId}:empty`)];
+    }),
+  ) as Partial<Record<OxideAppSettingsSectionId, string>>;
 }
 
 function toSavedForwardSnapshot(forward: {
@@ -1279,6 +1301,8 @@ export function buildPluginContext(manifest: PluginManifest): PluginContext {
         ...metadata,
         savedForwardsRevision: savedForwardsSnapshot.revision,
         settingsRevision: syncableSettings.revision,
+        appSettingsSectionRevisions: buildAppSettingsSectionRevisionMap(),
+        pluginSettingsRevisions: buildPluginSettingsRevisionMap(),
       });
     },
     async preflightExport(connectionIds?: string[], options?: { embedKeys?: boolean }): Promise<Readonly<ExportPreflightResult>> {

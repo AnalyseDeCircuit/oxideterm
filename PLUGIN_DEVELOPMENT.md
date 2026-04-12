@@ -129,6 +129,8 @@ OxideTerm 插件系统遵循以下设计原则：
 
 `ctx.sync.importOxide()` 现在支持 `rename`、`skip`、`replace`、`merge` 四种策略。其中 `merge` 适合多端同步场景：宿主会保留现有连接 ID 与本地元数据，导入侧更新主连接字段，`tags` 做并集，本地已保存但导入缺失的 password / key passphrase / certificate passphrase 会继续复用；`.oxide` 中的端口转发规则会以 owner-bound saved forward 的形式一并导入导出，但导入时不会直接创建活跃转发。除了连接本身，`.oxide` 现在还可以携带全局 OxideTerm settings 快照和声明式 plugin settings 偏好快照；插件在导出时可通过 `ctx.sync.exportOxide({ includeAppSettings: true, selectedAppSettingsSections: ['general', 'appearance'], includePluginSettings: true, includeLocalTerminalEnvVars: false })` 精确控制要打包的宿主 settings section，并决定是否携带本地终端环境变量。对应地，`ctx.sync.importOxide()` 也支持 `selectedAppSettingsSections`，可以只导入快照中的部分 settings section；`ctx.sync.previewImport()` 会返回 `hasAppSettings`、`appSettingsSections`、`pluginSettingsCount`、`pluginSettingsByPlugin`、`forwardDetails` 以及记录级 `records`，插件可以直接渲染“为什么会重命名 / 跳过 / 替换 / 合并”，也可以提前提示用户这份快照会恢复哪些全局设置、插件偏好和保存转发。
 
+`ctx.sync.getLocalSyncMetadata()` 现在除了整体的 `savedConnectionsRevision`、`savedForwardsRevision`、`settingsRevision` 之外，还会返回 `appSettingsSectionRevisions` 和 `pluginSettingsRevisions`。同步插件可以基于这些 revision map 做 per-section / per-plugin 的脏检查与增量上传，而不必直接读取宿主内部 store 或 localStorage。
+
 ### 1.2 架构模型
 
 ```

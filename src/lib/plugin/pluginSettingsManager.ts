@@ -19,6 +19,15 @@ export type PluginSettingSnapshotEntry = {
   serializedValue: string;
 };
 
+function stableHashString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
+}
+
 type RegisteredManager = {
   notifyImportedSetting: (key: string, value: unknown) => void;
 };
@@ -68,6 +77,36 @@ export function collectPluginSettingsSnapshot(): PluginSettingSnapshotEntry[] {
 
   entries.sort((left, right) => left.storageKey.localeCompare(right.storageKey));
   return entries;
+}
+
+export function buildPluginSettingsRevisionMap(
+  entries: readonly PluginSettingSnapshotEntry[] = collectPluginSettingsSnapshot(),
+): Record<string, string> {
+  const groupedEntries = new Map<string, PluginSettingSnapshotEntry[]>();
+
+  for (const entry of entries) {
+    const parsed = parseSettingStorageKey(entry.storageKey);
+    if (!parsed) {
+      continue;
+    }
+
+    if (!groupedEntries.has(parsed.pluginId)) {
+      groupedEntries.set(parsed.pluginId, []);
+    }
+    groupedEntries.get(parsed.pluginId).push(entry);
+  }
+
+  return Object.fromEntries(
+    Array.from(groupedEntries.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([pluginId, pluginEntries]) => {
+        const normalized = pluginEntries
+          .slice()
+          .sort((left, right) => left.storageKey.localeCompare(right.storageKey))
+          .map((entry) => [entry.storageKey, entry.serializedValue]);
+        return [pluginId, stableHashString(JSON.stringify(normalized))];
+      }),
+  );
 }
 
 export function applyImportedPluginSettingsSnapshot(
