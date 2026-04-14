@@ -14,7 +14,10 @@ import { getProvider } from '../lib/ai/providerRegistry';
 import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
+import type { AiAssistantTurn, AiTurnPart, AiTurnToolCall } from '../lib/ai/turnModel/types';
 import { DEFAULT_SYSTEM_PROMPT, SUGGESTIONS_INSTRUCTION, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
+import { computePromptBudget, determineCompressionLevel } from '../lib/ai/promptBudget/policy';
+import { projectTurnToLegacyMessageFields } from '../lib/ai/turnModel/turnProjection';
 import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, hasDeniedCommands, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
@@ -967,6 +970,100 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       const persistedToolCalls: AiToolCall[] = [];
       let accumulatedContent = ''; // Preserves text from intermediate rounds for UI display
 
+      const buildAssistantTurn = (
+        content: string,
+        thinking: string | undefined,
+        toolCalls: AiToolCall[],
+        status: AiAssistantTurn['status'],
+      ): AiAssistantTurn => {
+        const parts: AiTurnPart[] = [];
+
+        if (thinking) {
+          parts.push({ type: 'thinking', text: thinking });
+        }
+
+        if (content) {
+          parts.push({ type: 'text', text: content });
+        }
+
+        for (const toolCall of toolCalls) {
+          parts.push({
+            type: 'tool_call',
+            id: toolCall.id,
+            name: toolCall.name,
+            argumentsText: toolCall.arguments,
+            status: toolCall.status === 'pending' || toolCall.status === 'pending_user_approval' ? 'partial' : 'complete',
+          });
+
+          if (toolCall.result) {
+            parts.push({
+              type: 'tool_result',
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              success: toolCall.result.success,
+              output: toolCall.result.output,
+              error: toolCall.result.error,
+              durationMs: toolCall.result.durationMs,
+              truncated: toolCall.result.truncated,
+            });
+          }
+        }
+
+        const toolRounds: AiAssistantTurn['toolRounds'] = toolCalls.length > 0
+          ? [{
+              id: `${assistantMessage.id}-round-final`,
+              round: 1,
+              toolCalls: toolCalls.map((toolCall): AiTurnToolCall => ({
+                id: toolCall.id,
+                name: toolCall.name,
+                argumentsText: toolCall.arguments,
+                approvalState: toolCall.status === 'pending_user_approval'
+                  ? 'pending'
+                  : toolCall.status === 'approved'
+                    ? 'approved'
+                    : toolCall.status === 'rejected'
+                      ? 'rejected'
+                      : undefined,
+                executionState: toolCall.status === 'running'
+                  ? 'running'
+                  : toolCall.status === 'completed'
+                    ? 'completed'
+                    : toolCall.status === 'error'
+                      ? 'error'
+                      : toolCall.status === 'pending'
+                        ? 'pending'
+                        : undefined,
+              })),
+            }]
+          : [];
+
+        return {
+          id: assistantMessage.id,
+          status,
+          parts,
+          toolRounds,
+          plainTextSummary: content,
+        };
+      };
+
+      const toUsableBudgetThreshold = (
+        rawWindowRatio: number,
+        systemBudget: number,
+        reserve: number,
+      ): number => {
+        const promptBudget = computePromptBudget({
+          contextWindow,
+          responseReserve: reserve,
+          systemBudget,
+        });
+
+        if (promptBudget.usablePromptBudget <= 0) {
+          return rawWindowRatio;
+        }
+
+        return (contextWindow * rawWindowRatio) / promptBudget.usablePromptBudget;
+      };
+
       const parseToolArguments = (rawArguments: string): Record<string, unknown> | null => {
         try {
           const parsed = JSON.parse(rawArguments);
@@ -1296,7 +1393,18 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         for (const m of apiMessages) {
           apiTokenEstimate += estimateTokens(m.content);
         }
-        if (apiTokenEstimate > contextWindow * 0.9) {
+        const toolLoopBudget = determineCompressionLevel({
+          contextWindow,
+          responseReserve: maxResponseTokens,
+          systemBudget: totalSystemTokens,
+          historyTokens: Math.max(0, apiTokenEstimate - totalSystemTokens),
+          canSummarize: false,
+          canLookupTranscript: false,
+          inToolLoop: true,
+          toolLoopStopThreshold: toUsableBudgetThreshold(0.9, totalSystemTokens, maxResponseTokens),
+        });
+
+        if (toolLoopBudget.level === 4) {
           fullContent = '[Tool use stopped: approaching context window limit]';
           updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
           break;
@@ -1325,6 +1433,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         parsedSuggestions = sugResult.suggestions;
       }
 
+      const assistantTurn = buildAssistantTurn(mainContent, parsedThinking, persistedToolCalls, 'complete');
+      const projectedAssistantMessage = projectTurnToLegacyMessageFields(assistantTurn);
+
       // Final update with parsed content
       set((state) => ({
         conversations: state.conversations.map((c) => {
@@ -1335,11 +1446,10 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               m.id === assistantMessage.id
                 ? {
                     ...m,
-                    content: mainContent,
-                    thinkingContent: parsedThinking,
+                    ...projectedAssistantMessage,
+                    turn: assistantTurn,
                     isThinkingStreaming: false,
                     isStreaming: false,
-                    ...(persistedToolCalls.length > 0 ? { toolCalls: [...persistedToolCalls] } : {}),
                     ...(parsedSuggestions ? { suggestions: parsedSuggestions } : {}),
                   }
                 : m
@@ -1440,7 +1550,30 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         for (const msg of postConv.messages) {
           totalTokens += estimateTokens(msg.content);
         }
-        if (totalTokens / cw >= COMPACTION_TRIGGER_THRESHOLD) {
+        const compactionDecision = determineCompressionLevel({
+          contextWindow: cw,
+          responseReserve: responseReserve(cw),
+          systemBudget: 0,
+          historyTokens: totalTokens,
+          canSummarize: true,
+          summaryEligibleTokens: totalTokens,
+          autoCompactThreshold: (() => {
+            const reserve = responseReserve(cw);
+            const promptBudget = computePromptBudget({
+              contextWindow: cw,
+              responseReserve: reserve,
+              systemBudget: 0,
+            });
+
+            if (promptBudget.usablePromptBudget <= 0) {
+              return COMPACTION_TRIGGER_THRESHOLD;
+            }
+
+            return (cw * COMPACTION_TRIGGER_THRESHOLD) / promptBudget.usablePromptBudget;
+          })(),
+        });
+
+        if (compactionDecision.level >= 2) {
           // Fire-and-forget — silent mode doesn't touch isLoading
           get().compactConversation(convId, { silent: true }).catch((e) => {
             console.warn('[AiChatStore] Auto-compaction failed:', e);

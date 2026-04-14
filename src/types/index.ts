@@ -1,6 +1,21 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+export type {
+  AiAssistantTurn,
+  AiConversationSessionMetadata,
+  AiConversationTurn,
+  AiDiagnosticEvent,
+  AiDiagnosticEventType,
+  AiTurnToolCall,
+  AiPendingSummary,
+  AiSummaryReference,
+  AiToolRound,
+  AiTranscriptReference,
+  AiTurnPart,
+  AiTurnSummaryMetadata,
+} from '../lib/ai/turnModel/types';
+
 // Session Types
 export type SessionState = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
 export type AuthType = 'password' | 'key' | 'default_key' | 'agent' | 'certificate' | 'keyboard_interactive';
@@ -1432,6 +1447,12 @@ export interface AiChatMessage {
   toolCalls?: AiToolCall[];
   /** Tool result (for messages representing a tool execution response) */
   toolResult?: AiToolResult;
+  /** Structured assistant turn projection (compatibility bridge during migration) */
+  turn?: import('../lib/ai/turnModel/types').AiAssistantTurn;
+  /** Reference to the backing transcript range, when available */
+  transcriptRef?: import('../lib/ai/turnModel/types').AiTranscriptReference;
+  /** Reference to the summary metadata backing this message, when available */
+  summaryRef?: import('../lib/ai/turnModel/types').AiSummaryReference;
   /** Optional metadata for special message types (e.g. compaction anchors) */
   metadata?: {
     /** Discriminator for special message types */
@@ -1468,6 +1489,8 @@ export interface AiConversation {
   title: string;
   /** Messages in the conversation */
   messages: AiChatMessage[];
+  /** Structured turns backing the conversation (optional during migration) */
+  turns?: import('../lib/ai/turnModel/types').AiConversationTurn[];
   /** Creation timestamp */
   createdAt: number;
   /** Last update timestamp */
