@@ -12,7 +12,11 @@ use chrono::{DateTime, Utc};
 use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::{debug, info};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::{debug, info, warn};
+
+use crate::state::LazyManagedStore;
 
 /// Stored transfer progress record (for persistence)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +210,13 @@ pub struct RedbProgressStore {
     db: redb::Database,
 }
 
+/// Lazily initialized progress store that opens the redb database on first use.
+pub struct LazyProgressStore {
+    inner: LazyManagedStore<RedbProgressStore>,
+    fallback: DummyProgressStore,
+    warned: AtomicBool,
+}
+
 /// Dummy progress store that doesn't persist (used when storage is unavailable)
 pub struct DummyProgressStore;
 
@@ -280,6 +291,37 @@ impl RedbProgressStore {
         })?;
 
         Ok(config_dir.join("sftp_progress.redb"))
+    }
+}
+
+impl LazyProgressStore {
+    /// Create a lazily initialized store from a fixed database path.
+    pub fn new(db_path: PathBuf) -> Self {
+        Self {
+            inner: LazyManagedStore::new("SFTP progress store", move || {
+                RedbProgressStore::new(&db_path)
+                    .map_err(|e| format!("Failed to initialize SFTP progress store: {}", e))
+            }),
+            fallback: DummyProgressStore,
+            warned: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a lazily initialized store using the default config directory path.
+    pub fn from_default_path() -> Result<Self, SftpError> {
+        Ok(Self::new(RedbProgressStore::default_path()?))
+    }
+
+    fn resolve(&self) -> Option<Arc<RedbProgressStore>> {
+        match self.inner.resolve() {
+            Ok(store) => Some(store),
+            Err(error) => {
+                if !self.warned.swap(true, Ordering::Relaxed) {
+                    warn!("{}; falling back to dummy SFTP progress store", error);
+                }
+                None
+            }
+        }
     }
 }
 
@@ -495,6 +537,60 @@ impl ProgressStore for RedbProgressStore {
     }
 }
 
+#[async_trait]
+impl ProgressStore for LazyProgressStore {
+    async fn save(&self, progress: &StoredTransferProgress) -> Result<(), SftpError> {
+        if let Some(store) = self.resolve() {
+            store.save(progress).await
+        } else {
+            self.fallback.save(progress).await
+        }
+    }
+
+    async fn load(&self, transfer_id: &str) -> Result<Option<StoredTransferProgress>, SftpError> {
+        if let Some(store) = self.resolve() {
+            store.load(transfer_id).await
+        } else {
+            self.fallback.load(transfer_id).await
+        }
+    }
+
+    async fn list_incomplete(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<StoredTransferProgress>, SftpError> {
+        if let Some(store) = self.resolve() {
+            store.list_incomplete(session_id).await
+        } else {
+            self.fallback.list_incomplete(session_id).await
+        }
+    }
+
+    async fn list_all_incomplete(&self) -> Result<Vec<StoredTransferProgress>, SftpError> {
+        if let Some(store) = self.resolve() {
+            store.list_all_incomplete().await
+        } else {
+            self.fallback.list_all_incomplete().await
+        }
+    }
+
+    async fn delete(&self, transfer_id: &str) -> Result<(), SftpError> {
+        if let Some(store) = self.resolve() {
+            store.delete(transfer_id).await
+        } else {
+            self.fallback.delete(transfer_id).await
+        }
+    }
+
+    async fn delete_for_session(&self, session_id: &str) -> Result<(), SftpError> {
+        if let Some(store) = self.resolve() {
+            store.delete_for_session(session_id).await
+        } else {
+            self.fallback.delete_for_session(session_id).await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +619,52 @@ mod tests {
         assert_eq!(loaded.transfer_id, "test-1");
         assert_eq!(loaded.total_bytes, 2048);
         assert_eq!(loaded.status, TransferStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn test_lazy_progress_store_defers_file_creation_until_first_use() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("lazy.redb");
+        let store = LazyProgressStore::new(db_path.clone());
+
+        assert!(!db_path.exists());
+
+        let progress = StoredTransferProgress::new(
+            "lazy-1".to_string(),
+            TransferType::Download,
+            "/remote/file.txt".into(),
+            "/local/file.txt".into(),
+            1024,
+            "session-1".to_string(),
+        );
+
+        store.save(&progress).await.unwrap();
+
+        assert!(db_path.exists());
+
+        let loaded = store.load("lazy-1").await.unwrap().unwrap();
+        assert_eq!(loaded.transfer_id, "lazy-1");
+    }
+
+    #[tokio::test]
+    async fn test_lazy_progress_store_falls_back_to_dummy_when_init_fails() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("missing-parent").join("lazy.redb");
+        let store = LazyProgressStore::new(db_path);
+
+        let progress = StoredTransferProgress::new(
+            "lazy-fail".to_string(),
+            TransferType::Download,
+            "/remote/file.txt".into(),
+            "/local/file.txt".into(),
+            1024,
+            "session-1".to_string(),
+        );
+
+        store.save(&progress).await.unwrap();
+
+        let loaded = store.load("lazy-fail").await.unwrap();
+        assert!(loaded.is_none());
     }
 
     #[tokio::test]

@@ -16,8 +16,8 @@ pub mod types;
 
 pub use error::SftpError;
 pub use progress::{
-    DummyProgressStore, ProgressStore, RedbProgressStore, StoredTransferProgress, TransferStatus,
-    TransferType,
+    DummyProgressStore, LazyProgressStore, ProgressStore, RedbProgressStore,
+    StoredTransferProgress, TransferStatus, TransferType,
 };
 pub use retry::{RetryConfig, calculate_backoff, is_retryable_error, transfer_with_retry};
 pub use session::{ResumeContext, SftpSession};

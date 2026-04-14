@@ -90,7 +90,7 @@ use commands::plugin_server::PluginFileServer;
 use commands::session_tree::SessionTreeState;
 use session::{AutoReconnectService, SessionRegistry};
 use sftp::session::SftpRegistry;
-use sftp::{ProgressStore, RedbProgressStore, TransferManager};
+use sftp::{LazyProgressStore, ProgressStore, TransferManager};
 use ssh::SshConnectionRegistry;
 use state::agent_history::AgentHistoryStore;
 use state::ai_chat::AiChatStore;
@@ -299,20 +299,12 @@ pub fn run() {
     let agent_registry = Arc::new(AgentRegistry::new());
 
     // Create progress store for transfer resume
-    let progress_store = match RedbProgressStore::default_path() {
-        Ok(path) => {
-            match RedbProgressStore::new(&path) {
-                Ok(store) => Arc::new(store),
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to create progress store at {:?}: {}. Resume disabled.",
-                        path,
-                        e
-                    );
-                    // Create a no-op store that doesn't persist
-                    Arc::new(crate::sftp::progress::DummyProgressStore) as Arc<dyn ProgressStore>
-                }
-            }
+    let progress_store = match LazyProgressStore::from_default_path() {
+        Ok(store) => {
+            write_startup_log(
+                "SFTP progress store registered for deferred initialization on first transfer use",
+            );
+            Arc::new(store) as Arc<dyn ProgressStore>
         }
         Err(e) => {
             tracing::warn!("Failed to get progress store path: {}. Resume disabled.", e);
