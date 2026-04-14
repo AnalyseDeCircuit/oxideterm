@@ -255,7 +255,9 @@ export async function processToolCalls(
     store().appendStep(toolStep);
 
     // Check approval
+    const isDangerousCommand = hasDeniedCommands(tc.name, parsedArgs);
     const autoApprove = shouldAutoApprove(tc.name, parsedArgs, task.autonomyLevel);
+    let dangerousCommandApproved = false;
 
     if (!autoApprove) {
       store().updateStep(toolStep.id, { status: 'pending' });
@@ -320,6 +322,7 @@ export async function processToolCalls(
       }
 
       store().setTaskStatus('executing');
+      dangerousCommandApproved = isDangerousCommand;
     }
 
     // Execute tool
@@ -328,7 +331,7 @@ export async function processToolCalls(
 
     let result: AiToolResult;
     try {
-      result = await executeTool(tc.name, parsedArgs, toolContext);
+      result = await executeTool(tc.name, parsedArgs, toolContext, { dangerousCommandApproved });
     } catch (err) {
       result = {
         toolCallId: tc.id,

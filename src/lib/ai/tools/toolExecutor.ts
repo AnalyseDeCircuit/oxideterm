@@ -26,7 +26,7 @@ import { nodeSftpListDir, nodeSftpPreview, nodeSftpStat, nodeSftpWrite } from '.
 import { api } from '../../api';
 import { ragSearch } from '../../api';
 import type { AiToolResult, AgentFileEntry, TabType } from '../../../types';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, hasDeniedCommands } from './toolDefinitions';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS } from './toolDefinitions';
 import { useSessionTreeStore } from '../../../store/sessionTreeStore';
 import { useAppStore } from '../../../store/appStore';
 import { useLocalTerminalStore } from '../../../store/localTerminalStore';
@@ -72,6 +72,10 @@ export type ToolExecutionContext = {
   activeAgentAvailable: boolean;
   /** If true, tabs created by tools won't steal focus (used by Agent mode) */
   skipFocus?: boolean;
+};
+
+export type ToolExecutionOptions = {
+  dangerousCommandApproved?: boolean;
 };
 
 /** Resolved target for a tool that requires a specific node */
@@ -121,6 +125,7 @@ export async function executeTool(
   toolName: string,
   args: Record<string, unknown>,
   context: ToolExecutionContext,
+  options: ToolExecutionOptions = {},
 ): Promise<AiToolResult> {
   const startTime = Date.now();
   const toolCallId = `exec-${Date.now()}`;
@@ -158,7 +163,7 @@ export async function executeTool(
         case 'local_get_terminal_info':
           return await execLocalGetTerminalInfo(startTime, toolCallId);
         case 'local_exec':
-          return await execLocalExec(args, startTime, toolCallId);
+          return await execLocalExec(args, startTime, toolCallId, options.dangerousCommandApproved === true);
         case 'local_get_drives':
           return await execLocalGetDrives(startTime, toolCallId);
         case 'open_local_terminal':
@@ -2111,20 +2116,23 @@ async function execLocalGetTerminalInfo(startTime: number, toolCallId: string): 
   }
 }
 
-async function execLocalExec(args: Record<string, unknown>, startTime: number, toolCallId: string): Promise<AiToolResult> {
+async function execLocalExec(
+  args: Record<string, unknown>,
+  startTime: number,
+  toolCallId: string,
+  dangerousCommandApproved: boolean,
+): Promise<AiToolResult> {
   const command = args.command as string | undefined;
   if (!command) {
     return { toolCallId, toolName: 'local_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
   }
-
-  const allowDangerous = hasDeniedCommands('local_exec', { command });
 
   try {
     const result = await api.localExecCommand(
       command,
       args.cwd as string | undefined,
       args.timeout_secs as number | undefined,
-      allowDangerous,
+      dangerousCommandApproved,
     );
 
     if (result.timedOut) {

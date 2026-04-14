@@ -54,7 +54,6 @@ const settingsState = vi.hoisted(() => ({
 }));
 
 const localExecCommandMock = vi.hoisted(() => vi.fn());
-const hasDeniedCommandsMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -74,14 +73,6 @@ vi.mock('@/lib/api', () => ({
   nodeSftpStat: vi.fn(),
   nodeSftpWrite: vi.fn(),
 }));
-
-vi.mock('@/lib/ai/tools/toolDefinitions', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/ai/tools/toolDefinitions')>('@/lib/ai/tools/toolDefinitions');
-  return {
-    ...actual,
-    hasDeniedCommands: hasDeniedCommandsMock,
-  };
-});
 
 vi.mock('@/store/settingsStore', () => ({
   useSettingsStore: {
@@ -168,8 +159,6 @@ import { executeTool } from '@/lib/ai/tools/toolExecutor';
 describe('toolExecutor get_settings sanitization', () => {
   beforeEach(() => {
     localExecCommandMock.mockReset();
-    hasDeniedCommandsMock.mockReset();
-    hasDeniedCommandsMock.mockReturnValue(false);
     settingsState.settings.ai.mcpServers[0].env = {
       API_TOKEN: 'super-secret',
       DEBUG: '1',
@@ -247,12 +236,28 @@ describe('toolExecutor get_settings sanitization', () => {
   });
 
   it('passes explicit dangerous-command approval through local_exec', async () => {
-    hasDeniedCommandsMock.mockReturnValue(true);
     localExecCommandMock.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, timedOut: false });
 
-    const result = await executeTool('local_exec', { command: 'sudo reboot', timeout_secs: 5 }, { activeNodeId: null, activeAgentAvailable: false });
+    const result = await executeTool(
+      'local_exec',
+      { command: 'sudo reboot', timeout_secs: 5 },
+      { activeNodeId: null, activeAgentAvailable: false },
+      { dangerousCommandApproved: true },
+    );
 
     expect(result.success).toBe(true);
     expect(localExecCommandMock).toHaveBeenCalledWith('sudo reboot', undefined, 5, true);
+  });
+
+  it('does not mark local_exec as approved unless caller passes explicit approval', async () => {
+    localExecCommandMock.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, timedOut: false });
+
+    await executeTool(
+      'local_exec',
+      { command: 'sudo reboot', timeout_secs: 5 },
+      { activeNodeId: null, activeAgentAvailable: false },
+    );
+
+    expect(localExecCommandMock).toHaveBeenCalledWith('sudo reboot', undefined, 5, false);
   });
 });

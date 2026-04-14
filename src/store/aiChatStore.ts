@@ -75,6 +75,7 @@ interface AiChatStore {
   // State
   conversations: AiConversation[];
   activeConversationId: string | null;
+  activeGenerationId: string | null;
   isLoading: boolean;
   isInitialized: boolean;
   error: string | null;
@@ -172,17 +173,54 @@ type ChatCompletionMessage = ProviderChatMessage;
 // on the same conversation when multiple sendMessage finally blocks fire together.
 const compactingConversations = new Set<string>();
 
+type PendingApprovalEntry = {
+  runId: string;
+  conversationId: string;
+  assistantMessageId: string;
+  resolve: (approved: boolean) => void;
+};
+
 /**
  * Pending tool approval resolvers.
  * Maps toolCallId → resolver function. When user approves/rejects,
  * the resolver is called with boolean, unblocking the sendMessage loop.
  */
-const pendingApprovalResolvers = new Map<string, (approved: boolean) => void>();
+const pendingApprovalResolvers = new Map<string, PendingApprovalEntry>();
+
+function updateToolCallStatusInMessage(
+  conversations: AiConversation[],
+  conversationId: string,
+  assistantMessageId: string,
+  toolCallId: string,
+  status: AiToolCall['status'],
+): AiConversation[] {
+  return conversations.map((conversation) => {
+    if (conversation.id !== conversationId) return conversation;
+
+    let conversationChanged = false;
+    const messages = conversation.messages.map((message) => {
+      if (message.id !== assistantMessageId || !message.toolCalls?.some((toolCall) => toolCall.id === toolCallId)) {
+        return message;
+      }
+
+      conversationChanged = true;
+      return {
+        ...message,
+        toolCalls: message.toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId ? { ...toolCall, status } : toolCall
+        ),
+      };
+    });
+
+    return conversationChanged ? { ...conversation, messages } : conversation;
+  });
+}
 
 export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   // Initial state
   conversations: [],
   activeConversationId: null,
+  activeGenerationId: null,
   isLoading: false,
   isInitialized: false,
   error: null,
@@ -810,8 +848,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     }
 
     // Create abort controller
+    const runId = `chat-${generateId()}`;
     const abortController = new AbortController();
-    set({ isLoading: true, error: null, abortController });
+    set({ isLoading: true, error: null, abortController, activeGenerationId: runId });
 
     try {
       let fullContent = '';
@@ -1014,6 +1053,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // Approve tools based on per-tool settings
         const availableToolNames = new Set(toolDefs?.map(t => t.name) ?? []);
         const pendingApprovalIds: string[] = [];
+        const dangerousPendingApprovalIds = new Set<string>();
+        const explicitlyApprovedDangerousToolIds = new Set<string>();
 
         for (const tc of toolCallEntries) {
           if (!availableToolNames.has(tc.name)) {
@@ -1042,6 +1083,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             // Deny-list commands always require explicit user approval.
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
+            dangerousPendingApprovalIds.add(tc.id);
           } else if (autoApproveTools[tc.name] === true) {
             tc.status = 'approved';
           } else {
@@ -1056,16 +1098,18 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         if (pendingApprovalIds.length > 0) {
           const approvalPromises = pendingApprovalIds.map((id) => {
             return new Promise<{ id: string; approved: boolean }>((resolve) => {
-              pendingApprovalResolvers.set(id, (approved) => resolve({ id, approved }));
+              pendingApprovalResolvers.set(id, {
+                runId,
+                conversationId: convId,
+                assistantMessageId: assistantMessage.id,
+                resolve: (approved) => resolve({ id, approved }),
+              });
             });
           });
 
-          // Capture signal reference locally to avoid null-ref race if abortController is cleared
-          const signal = get().abortController?.signal;
           const abortPromise = new Promise<null>((resolve) => {
-            if (!signal) { resolve(null); return; }
-            if (signal.aborted) { resolve(null); return; }
-            signal.addEventListener('abort', () => resolve(null), { once: true });
+            if (abortController.signal.aborted) { resolve(null); return; }
+            abortController.signal.addEventListener('abort', () => resolve(null), { once: true });
           });
 
           const results = await Promise.race([
@@ -1093,6 +1137,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               const tc = toolCallEntries.find(t => t.id === id);
               if (tc) {
                 tc.status = approved ? 'approved' : 'rejected';
+                if (approved && dangerousPendingApprovalIds.has(id)) {
+                  explicitlyApprovedDangerousToolIds.add(id);
+                }
                 if (!approved) {
                   tc.result = {
                     toolCallId: tc.id, toolName: tc.name,
@@ -1150,7 +1197,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           }
           parsedArgs = maybeParsedArgs;
 
-          const result = await executeTool(tc.name, parsedArgs, toolContext);
+          const result = await executeTool(tc.name, parsedArgs, toolContext, {
+            dangerousCommandApproved: explicitlyApprovedDangerousToolIds.has(tc.id),
+          });
           result.toolCallId = tc.id;
           tc.result = result;
           tc.status = result.success ? 'completed' : 'error';
@@ -1323,13 +1372,16 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         }));
       }
     } finally {
-      // Clean up any stale pending approval resolvers (e.g. after unexpected errors)
-      for (const [, resolver] of pendingApprovalResolvers) {
-        resolver(false);
+      // Clean up only this run's pending approval resolvers.
+      const pendingApprovalsForRun = [...pendingApprovalResolvers.entries()].filter(([, entry]) => entry.runId === runId);
+      for (const [toolCallId, entry] of pendingApprovalsForRun) {
+        pendingApprovalResolvers.delete(toolCallId);
+        entry.resolve(false);
       }
-      pendingApprovalResolvers.clear();
 
-      set({ isLoading: false, abortController: null });
+      if (get().activeGenerationId === runId) {
+        set({ isLoading: false, abortController: null, activeGenerationId: null });
+      }
 
       // ── Auto-compaction ──
       // After each completed message exchange, check if the conversation
@@ -1362,7 +1414,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     const { abortController } = get();
     if (abortController) {
       abortController.abort();
-      set({ abortController: null, isLoading: false });
+      set({ abortController: null, isLoading: false, activeGenerationId: null });
     }
   },
 
@@ -1746,41 +1798,31 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
   },
 
   resolveToolApproval: (toolCallId, approved) => {
-    const resolver = pendingApprovalResolvers.get(toolCallId);
-    if (resolver) {
-      resolver(approved);
+    const entry = pendingApprovalResolvers.get(toolCallId);
+    if (entry) {
+      entry.resolve(approved);
       pendingApprovalResolvers.delete(toolCallId);
 
-      // Immediately update tool call status in the UI with immutable update
-      // (must create new message/toolCalls references so React memo detects the change)
-      const { activeConversationId } = get();
-      if (activeConversationId) {
-        set((state) => ({
-          conversations: state.conversations.map((c) => {
-            if (c.id !== activeConversationId) return c;
-            const lastAssistantIdx = [...c.messages].reverse().findIndex(m => m.role === 'assistant');
-            if (lastAssistantIdx < 0) return c;
-            const msgIdx = c.messages.length - 1 - lastAssistantIdx;
-            const msg = c.messages[msgIdx];
-            if (!msg.toolCalls?.some(t => t.id === toolCallId)) return c;
-            return {
-              ...c,
-              messages: c.messages.map((m, i) =>
-                i === msgIdx
-                  ? {
-                      ...m,
-                      toolCalls: m.toolCalls!.map((t) =>
-                        t.id === toolCallId
-                          ? { ...t, status: approved ? 'approved' as const : 'rejected' as const }
-                          : t
-                      ),
-                    }
-                  : m
-              ),
-            };
-          }),
-        }));
+      const conversation = get().conversations.find((item) => item.id === entry.conversationId);
+      const assistantMessage = conversation?.messages.find((message) => message.id === entry.assistantMessageId);
+      if (!assistantMessage?.toolCalls?.some((toolCall) => toolCall.id === toolCallId)) {
+        console.warn('[AiChatStore] Tool approval target no longer exists:', {
+          conversationId: entry.conversationId,
+          assistantMessageId: entry.assistantMessageId,
+          toolCallId,
+        });
+        return;
       }
+
+      set((state) => ({
+        conversations: updateToolCallStatusInMessage(
+          state.conversations,
+          entry.conversationId,
+          entry.assistantMessageId,
+          toolCallId,
+          approved ? 'approved' : 'rejected',
+        ),
+      }));
     }
   },
 
@@ -1832,13 +1874,13 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       },
     ];
 
-    set({ isLoading: true, error: null });
+    const runId = `summary-${generateId()}`;
+    const abortController = new AbortController();
+    set({ isLoading: true, error: null, abortController, activeGenerationId: runId });
 
     try {
       const provider = getProvider(providerType);
       let summaryContent = '';
-      const abortController = new AbortController();
-      set({ abortController });
 
       for await (const event of provider.streamCompletion(
         { baseUrl: providerBaseUrl, model: providerModel, apiKey: apiKey || '' },
@@ -1894,7 +1936,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         set({ error: errorMessage });
       }
     } finally {
-      set({ isLoading: false, abortController: null });
+      if (get().activeGenerationId === runId) {
+        set({ isLoading: false, abortController: null, activeGenerationId: null });
+      }
     }
   },
 
@@ -2017,8 +2061,11 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     const compactMaxResponseTokens = aiSettings.modelMaxResponseTokens?.[providerId ?? '']?.[providerModel]
       ?? responseReserve(contextWindow);
 
+    const runId = silent ? null : `compact-${generateId()}`;
+    const abortController = silent ? null : new AbortController();
+
     if (!silent) {
-      set({ isLoading: true, error: null });
+      set({ isLoading: true, error: null, abortController, activeGenerationId: runId });
     } else {
       set({
         compactionInfo: {
@@ -2033,15 +2080,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     try {
       const provider = getProvider(providerType);
       let summaryContent = '';
-      const abortController = new AbortController();
-      if (!silent) {
-        set({ abortController });
-      }
+      const streamSignal = abortController?.signal ?? new AbortController().signal;
 
       for await (const event of provider.streamCompletion(
         { baseUrl: providerBaseUrl, model: providerModel, apiKey: apiKey || '', maxResponseTokens: compactMaxResponseTokens },
         summaryPrompt,
-        abortController.signal,
+        streamSignal,
       )) {
         if (event.type === 'content') {
           summaryContent += event.content;
@@ -2154,7 +2198,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       }
     } finally {
       if (!silent) {
-        set({ isLoading: false, abortController: null });
+        if (runId && get().activeGenerationId === runId) {
+          set({ isLoading: false, abortController: null, activeGenerationId: null });
+        }
       } else {
         set((state) => {
           if (

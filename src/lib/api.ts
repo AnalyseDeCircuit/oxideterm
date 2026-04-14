@@ -1604,9 +1604,9 @@ export const api = {
   /**
    * Execute a command locally and capture stdout/stderr (AI tool use).
    */
-  localExecCommand: async (command: string, cwd?: string, timeoutSecs?: number, allowDangerous?: boolean): Promise<import('../types').LocalExecResult> => {
+  localExecCommand: async (command: string, cwd?: string, timeoutSecs?: number, dangerousCommandApproved?: boolean): Promise<import('../types').LocalExecResult> => {
     if (USE_MOCK) return { stdout: '', stderr: '', exitCode: 0, timedOut: false };
-    return invoke('local_exec_command', { command, cwd, timeoutSecs, allowDangerous });
+    return invoke('local_exec_command', { command, cwd, timeoutSecs, dangerousCommandApproved });
   },
 
   // ═══════════════════════════════════════════════════════════════════════════

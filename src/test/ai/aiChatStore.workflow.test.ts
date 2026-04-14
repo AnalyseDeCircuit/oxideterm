@@ -9,6 +9,11 @@ const parseUserInputMock = vi.hoisted(() => vi.fn(() => ({
 })));
 const resolveSlashCommandMock = vi.hoisted(() => vi.fn());
 const getProviderMock = vi.hoisted(() => vi.fn());
+const contextFreeToolsMock = vi.hoisted(() => new Set(['local_exec']));
+const sessionIdToolsMock = vi.hoisted(() => new Set<string>());
+const getToolsForContextMock = vi.hoisted(() => vi.fn(() => []));
+const executeToolMock = vi.hoisted(() => vi.fn());
+const hasDeniedCommandsMock = vi.hoisted(() => vi.fn(() => false));
 const estimateTokensMock = vi.hoisted(() => vi.fn(() => 100));
 const getModelContextWindowMock = vi.hoisted(() => vi.fn(() => 1000));
 const responseReserveMock = vi.hoisted(() => vi.fn(() => 256));
@@ -116,12 +121,12 @@ vi.mock('@/lib/ai/constants', () => ({
 }));
 
 vi.mock('@/lib/ai/tools', () => ({
-  CONTEXT_FREE_TOOLS: [],
-  SESSION_ID_TOOLS: [],
-  getToolsForContext: vi.fn(() => []),
+  CONTEXT_FREE_TOOLS: contextFreeToolsMock,
+  SESSION_ID_TOOLS: sessionIdToolsMock,
+  getToolsForContext: getToolsForContextMock,
   isCommandDenied: vi.fn(() => false),
-  hasDeniedCommands: vi.fn(() => false),
-  executeTool: vi.fn(),
+  hasDeniedCommands: hasDeniedCommandsMock,
+  executeTool: executeToolMock,
 }));
 
 vi.mock('@/lib/ai/inputParser', () => ({
@@ -170,9 +175,9 @@ import type { AiConversation, AiChatMessage } from '@/types';
 
 const initialAiChatStoreState = useAiChatStore.getInitialState();
 
-function makeConversation(messages: AiChatMessage[] = []): AiConversation {
+function makeConversation(messages: AiChatMessage[] = [], id = 'conv-1'): AiConversation {
   return {
-    id: 'conv-1',
+    id,
     title: 'Conversation',
     createdAt: 1,
     updatedAt: 1,
@@ -185,6 +190,7 @@ function setConversation(messages: AiChatMessage[]) {
   useAiChatStore.setState({
     conversations: [makeConversation(messages)],
     activeConversationId: 'conv-1',
+    activeGenerationId: null,
     isLoading: false,
     isInitialized: true,
     error: null,
@@ -200,6 +206,14 @@ function streamText(content: string) {
   });
 }
 
+async function waitFor(predicate: () => boolean, attempts = 40) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('Condition not met in time');
+}
+
 describe('aiChatStore workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -213,11 +227,17 @@ describe('aiChatStore workflows', () => {
     buildContextReminderMock.mockReturnValue(null);
     resolveReferenceTypeMock.mockReturnValue(undefined);
     resolveAllReferencesMock.mockResolvedValue([]);
+    getToolsForContextMock.mockReset();
+    getToolsForContextMock.mockReturnValue([]);
+    executeToolMock.mockReset();
+    hasDeniedCommandsMock.mockReset();
+    hasDeniedCommandsMock.mockReturnValue(false);
     streamText('summary text');
     useAiChatStore.setState({
       ...initialAiChatStoreState,
       conversations: [],
       activeConversationId: null,
+      activeGenerationId: null,
       isLoading: false,
       isInitialized: true,
       error: null,
@@ -244,6 +264,108 @@ describe('aiChatStore workflows', () => {
 
     expect(createConversation).toHaveBeenCalledTimes(1);
     expect(providerStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the newer run state when an older aborted run finishes later', async () => {
+    setConversation([]);
+
+    providerStreamMock
+      .mockImplementationOnce(async function* (_config, _messages, signal: AbortSignal) {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        throw error;
+      })
+      .mockImplementationOnce(async function* (_config, _messages, signal: AbortSignal) {
+        yield { type: 'content', content: 'second run' };
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      });
+
+    const firstRun = useAiChatStore.getState().sendMessage('first run');
+    await waitFor(() => useAiChatStore.getState().isLoading);
+
+    useAiChatStore.getState().stopGeneration();
+
+    const secondRun = useAiChatStore.getState().sendMessage('second run');
+    await waitFor(() => {
+      const conversation = useAiChatStore.getState().conversations[0];
+      return conversation?.messages.some((message) => message.role === 'assistant' && message.content === 'second run');
+    });
+
+    await firstRun;
+
+    const stateAfterFirstRun = useAiChatStore.getState();
+    expect(stateAfterFirstRun.isLoading).toBe(true);
+    expect(stateAfterFirstRun.abortController).not.toBeNull();
+    expect(stateAfterFirstRun.activeGenerationId).not.toBeNull();
+
+    useAiChatStore.getState().stopGeneration();
+    await secondRun;
+  });
+
+  it('updates approval state on the originating conversation even after switching activeConversationId', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    setConversation([]);
+    getToolsForContextMock.mockReturnValue([
+      { name: 'local_exec', description: 'Run a local command' },
+    ]);
+    hasDeniedCommandsMock.mockReturnValue(true);
+    executeToolMock.mockResolvedValue({
+      toolCallId: 'tool-1',
+      toolName: 'local_exec',
+      success: true,
+      output: 'ok',
+    });
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-1', name: 'local_exec', arguments: JSON.stringify({ command: 'sudo reboot' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', content: 'done' };
+        yield { type: 'done' };
+      });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('needs approval');
+
+    await waitFor(() => {
+      const conversation = useAiChatStore.getState().conversations.find((item) => item.id === 'conv-1');
+      const assistant = conversation?.messages.find((message) => message.role === 'assistant');
+      return assistant?.toolCalls?.[0]?.status === 'pending_user_approval';
+    });
+
+    const currentState = useAiChatStore.getState();
+    useAiChatStore.setState({
+      conversations: [
+        ...currentState.conversations,
+        makeConversation([], 'conv-2'),
+      ],
+      activeConversationId: 'conv-2',
+    });
+
+    useAiChatStore.getState().resolveToolApproval('tool-1', true);
+    await sendPromise;
+
+    const originalConversation = useAiChatStore.getState().conversations.find((item) => item.id === 'conv-1');
+    const originalAssistant = originalConversation?.messages.find((message) => message.role === 'assistant');
+    expect(originalAssistant?.toolCalls?.[0]).toMatchObject({
+      id: 'tool-1',
+      status: 'completed',
+    });
+    expect(useAiChatStore.getState().activeConversationId).toBe('conv-2');
   });
 
   it('regenerateLastResponse truncates assistant replies and resends the last user message', async () => {
