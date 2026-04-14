@@ -11,6 +11,12 @@ use std::io::{Read, Write};
 use std::path::Path;
 use tracing::{debug, info, warn};
 
+pub enum HnswLoadOutcome {
+    Loaded(PersistedHnswIndex),
+    Missing,
+    Failed(String),
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // HNSW Builder Parameters
 // ═══════════════════════════════════════════════════════════════════════════
@@ -207,6 +213,14 @@ impl PersistedHnswIndex {
     /// Load a persisted index from file.
     /// Returns `None` if the file doesn't exist or is corrupt.
     pub fn load(path: &Path) -> Option<Self> {
+        match Self::load_detailed(path) {
+            HnswLoadOutcome::Loaded(index) => Some(index),
+            HnswLoadOutcome::Missing | HnswLoadOutcome::Failed(_) => None,
+        }
+    }
+
+    /// Load a persisted index from file with detailed outcome for lazy state machines.
+    pub fn load_detailed(path: &Path) -> HnswLoadOutcome {
         /// Maximum allowed compressed file size (512 MB).
         const MAX_INDEX_FILE_SIZE: u64 = 512 * 1024 * 1024;
         /// Maximum allowed decompressed data size (2 GB).
@@ -214,14 +228,14 @@ impl PersistedHnswIndex {
 
         if !path.exists() {
             debug!("No HNSW index file at {:?}", path);
-            return None;
+            return HnswLoadOutcome::Missing;
         }
 
         let mut file = match std::fs::File::open(path) {
             Ok(f) => f,
             Err(e) => {
                 warn!("Failed to open HNSW index file: {}", e);
-                return None;
+                return HnswLoadOutcome::Failed(format!("open: {e}"));
             }
         };
 
@@ -233,21 +247,24 @@ impl PersistedHnswIndex {
                     metadata.len(),
                     MAX_INDEX_FILE_SIZE
                 );
-                return None;
+                return HnswLoadOutcome::Failed(format!(
+                    "file too large: {} bytes exceeds {}",
+                    metadata.len(), MAX_INDEX_FILE_SIZE
+                ));
             }
         }
 
         let mut compressed = Vec::new();
         if let Err(e) = file.read_to_end(&mut compressed) {
             warn!("Failed to read HNSW index file: {}", e);
-            return None;
+            return HnswLoadOutcome::Failed(format!("read: {e}"));
         }
 
         let data = match zstd::decode_all(compressed.as_slice()) {
             Ok(d) => d,
             Err(e) => {
                 warn!("Failed to decompress HNSW index: {}", e);
-                return None;
+                return HnswLoadOutcome::Failed(format!("decompress: {e}"));
             }
         };
 
@@ -257,7 +274,10 @@ impl PersistedHnswIndex {
                 data.len(),
                 MAX_DECOMPRESSED_SIZE
             );
-            return None;
+            return HnswLoadOutcome::Failed(format!(
+                "decompressed data too large: {} bytes exceeds {}",
+                data.len(), MAX_DECOMPRESSED_SIZE
+            ));
         }
 
         match rmp_serde::from_slice::<Self>(&data) {
@@ -266,11 +286,11 @@ impl PersistedHnswIndex {
                     "HNSW index loaded: {} points, {} dimensions, model={}",
                     index.meta.point_count, index.meta.dimensions, index.meta.model_name
                 );
-                Some(index)
+                HnswLoadOutcome::Loaded(index)
             }
             Err(e) => {
                 warn!("Failed to deserialize HNSW index: {}", e);
-                None
+                HnswLoadOutcome::Failed(format!("deserialize: {e}"))
             }
         }
     }

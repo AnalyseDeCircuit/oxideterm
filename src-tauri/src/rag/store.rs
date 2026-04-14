@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::rag::error::RagError;
-use crate::rag::hnsw::{PersistedHnswIndex, hnsw_index_path};
+use crate::rag::hnsw::{HnswLoadOutcome, PersistedHnswIndex, hnsw_index_path};
 use crate::rag::types::*;
 use redb::{Database, ReadableTable, TableDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use tracing::{debug, info, warn};
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,13 +32,81 @@ const COMPRESSION_THRESHOLD: usize = 4096;
 // RagStore
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HnswIndexStatus {
+    Unloaded,
+    Loading,
+    Ready { point_count: usize, dimensions: usize },
+    Stale,
+    Missing,
+    Failed(String),
+}
+
+enum HnswRuntimeState {
+    Unloaded,
+    Loading,
+    Ready(Arc<PersistedHnswIndex>),
+    Stale,
+    Missing,
+    Failed(String),
+}
+
+struct HnswRuntime {
+    state: Mutex<HnswRuntimeState>,
+    ready: Condvar,
+    operation: Mutex<()>,
+    generation: AtomicU64,
+}
+
+impl HnswRuntime {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(HnswRuntimeState::Unloaded),
+            ready: Condvar::new(),
+            operation: Mutex::new(()),
+            generation: AtomicU64::new(0),
+        }
+    }
+}
+
 pub struct RagStore {
     db: Arc<Database>,
     data_dir: PathBuf,
-    hnsw_index: Arc<RwLock<Option<PersistedHnswIndex>>>,
+    hnsw_index: Arc<HnswRuntime>,
 }
 
 impl RagStore {
+    fn hnsw_operation_lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, RagError> {
+        self.hnsw_index
+            .operation
+            .lock()
+            .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))
+    }
+
+    fn set_hnsw_failed_state(&self, message: String) {
+        match self.hnsw_index.state.lock() {
+            Ok(mut guard) => {
+                *guard = HnswRuntimeState::Failed(message);
+                self.hnsw_index.ready.notify_all();
+            }
+            Err(e) => {
+                warn!("Failed to set HNSW failure state (lock poisoned): {}", e);
+            }
+        }
+    }
+
+    fn remove_hnsw_index_file(&self) -> Result<(), RagError> {
+        let hnsw_path = hnsw_index_path(&self.data_dir);
+        match std::fs::remove_file(&hnsw_path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(RagError::HnswIndex(format!(
+                "failed to remove HNSW index file {:?}: {}",
+                hnsw_path, e
+            ))),
+        }
+    }
+
     /// Open (or create) the RAG index database.
     pub fn new(data_dir: &Path) -> Result<Self, RagError> {
         let db_path = data_dir.join("rag_index.redb");
@@ -70,17 +139,97 @@ impl RagStore {
         }
         txn.commit()?;
 
-        // Try to load persisted HNSW index
-        let hnsw = PersistedHnswIndex::load(&hnsw_index_path(&data_dir));
-        if let Some(ref idx) = hnsw {
-            info!("Loaded HNSW index: {} points", idx.meta.point_count);
-        }
-
         Ok(Self {
             db: Arc::new(db),
             data_dir: data_dir.to_path_buf(),
-            hnsw_index: Arc::new(RwLock::new(hnsw)),
+            hnsw_index: Arc::new(HnswRuntime::new()),
         })
+    }
+
+    pub fn ensure_hnsw_loaded(&self) -> Result<Option<Arc<PersistedHnswIndex>>, RagError> {
+        let load_generation;
+        let mut state = self
+            .hnsw_index
+            .state
+            .lock()
+            .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))?;
+
+        loop {
+            match &*state {
+                HnswRuntimeState::Ready(index) => return Ok(Some(index.clone())),
+                HnswRuntimeState::Stale
+                | HnswRuntimeState::Missing
+                | HnswRuntimeState::Failed(_) => return Ok(None),
+                HnswRuntimeState::Loading => {
+                    state = self
+                        .hnsw_index
+                        .ready
+                        .wait(state)
+                        .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))?;
+                }
+                HnswRuntimeState::Unloaded => {
+                    *state = HnswRuntimeState::Loading;
+                    load_generation = self.hnsw_index.generation.load(Ordering::SeqCst);
+                    break;
+                }
+            }
+        }
+
+        drop(state);
+
+        let _operation_guard = self.hnsw_operation_lock()?;
+
+        let load_result = PersistedHnswIndex::load_detailed(&hnsw_index_path(&self.data_dir));
+
+        let mut state = self
+            .hnsw_index
+            .state
+            .lock()
+            .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))?;
+
+        let resolved = match (&*state, load_result) {
+            (HnswRuntimeState::Loading, HnswLoadOutcome::Loaded(index))
+                if self.hnsw_index.generation.load(Ordering::SeqCst) == load_generation =>
+            {
+                let index = Arc::new(index);
+                *state = HnswRuntimeState::Ready(index.clone());
+                Some(index)
+            }
+            (HnswRuntimeState::Loading, HnswLoadOutcome::Missing)
+                if self.hnsw_index.generation.load(Ordering::SeqCst) == load_generation =>
+            {
+                *state = HnswRuntimeState::Missing;
+                None
+            }
+            (HnswRuntimeState::Loading, HnswLoadOutcome::Failed(error))
+                if self.hnsw_index.generation.load(Ordering::SeqCst) == load_generation =>
+            {
+                *state = HnswRuntimeState::Failed(error);
+                None
+            }
+            (HnswRuntimeState::Ready(index), _) => Some(index.clone()),
+            _ => None,
+        };
+
+        self.hnsw_index.ready.notify_all();
+        Ok(resolved)
+    }
+
+    pub fn hnsw_status(&self) -> HnswIndexStatus {
+        match self.hnsw_index.state.lock() {
+            Ok(state) => match &*state {
+                HnswRuntimeState::Unloaded => HnswIndexStatus::Unloaded,
+                HnswRuntimeState::Loading => HnswIndexStatus::Loading,
+                HnswRuntimeState::Ready(index) => HnswIndexStatus::Ready {
+                    point_count: index.meta.point_count,
+                    dimensions: index.meta.dimensions,
+                },
+                HnswRuntimeState::Stale => HnswIndexStatus::Stale,
+                HnswRuntimeState::Missing => HnswIndexStatus::Missing,
+                HnswRuntimeState::Failed(error) => HnswIndexStatus::Failed(error.clone()),
+            },
+            Err(e) => HnswIndexStatus::Failed(format!("lock poisoned: {e}")),
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -188,7 +337,12 @@ impl RagStore {
         );
 
         // Invalidate HNSW index since embeddings were removed
-        self.invalidate_hnsw_index();
+        if let Err(e) = self.invalidate_hnsw_index() {
+            warn!(
+                "Collection {} deleted but HNSW invalidation failed: {}",
+                collection_id, e
+            );
+        }
 
         Ok(())
     }
@@ -406,7 +560,9 @@ impl RagStore {
         debug!("Removed document {}", doc_id);
 
         // Invalidate HNSW index since embeddings changed
-        self.invalidate_hnsw_index();
+        if let Err(e) = self.invalidate_hnsw_index() {
+            warn!("Document {} removed but HNSW invalidation failed: {}", doc_id, e);
+        }
 
         Ok(())
     }
@@ -601,11 +757,6 @@ impl RagStore {
     // HNSW Index Management
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// Get a reference to the HNSW index lock.
-    pub fn hnsw_index(&self) -> &Arc<RwLock<Option<PersistedHnswIndex>>> {
-        &self.hnsw_index
-    }
-
     /// Get the data directory path.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
@@ -627,37 +778,68 @@ impl RagStore {
 
     /// Rebuild the HNSW index from all stored embeddings and persist to disk.
     pub fn rebuild_hnsw_index(&self) -> Result<(), RagError> {
+        let rebuild_generation = self.hnsw_index.generation.load(Ordering::SeqCst);
         let embeddings = self.get_all_embeddings()?;
 
         let new_index = PersistedHnswIndex::build(&embeddings);
+        let hnsw_path = hnsw_index_path(&self.data_dir);
+        let _operation_guard = self.hnsw_operation_lock()?;
+
+        if self.hnsw_index.generation.load(Ordering::SeqCst) != rebuild_generation {
+            debug!("Discarded rebuilt HNSW index because it was invalidated during rebuild");
+            return Ok(());
+        }
 
         // Persist to file if we have an index
         if let Some(ref idx) = new_index {
-            idx.save(&hnsw_index_path(&self.data_dir))?;
+            if let Err(error) = idx.save(&hnsw_path) {
+                self.set_hnsw_failed_state(error.to_string());
+                return Err(error);
+            }
+        } else if let Err(error) = self.remove_hnsw_index_file() {
+            self.set_hnsw_failed_state(error.to_string());
+            return Err(error);
         }
 
         // Swap into memory
         let mut guard = self
             .hnsw_index
-            .write()
+            .state
+            .lock()
             .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))?;
-        *guard = new_index;
+        *guard = match new_index {
+            Some(index) => HnswRuntimeState::Ready(Arc::new(index)),
+            None => HnswRuntimeState::Missing,
+        };
+        self.hnsw_index.ready.notify_all();
+        debug!("HNSW index rebuild applied successfully");
 
         Ok(())
     }
 
     /// Invalidate (clear) the in-memory HNSW index, marking it as stale.
     /// The next search will fall back to brute-force until rebuild.
-    pub fn invalidate_hnsw_index(&self) {
-        match self.hnsw_index.write() {
-            Ok(mut guard) => {
-                *guard = None;
-                debug!("HNSW index invalidated");
-            }
-            Err(e) => {
-                warn!("Failed to invalidate HNSW index (lock poisoned): {}", e);
-            }
+    pub fn invalidate_hnsw_index(&self) -> Result<(), RagError> {
+        let _operation_guard = self.hnsw_operation_lock()?;
+
+        {
+            let mut guard = self
+                .hnsw_index
+                .state
+                .lock()
+                .map_err(|e| RagError::HnswIndex(format!("lock poisoned: {e}")))?;
+            self.hnsw_index.generation.fetch_add(1, Ordering::SeqCst);
+            *guard = HnswRuntimeState::Stale;
+            self.hnsw_index.ready.notify_all();
         }
+
+        if let Err(error) = self.remove_hnsw_index_file() {
+            self.set_hnsw_failed_state(error.to_string());
+            return Err(error);
+        }
+
+        debug!("HNSW index invalidated");
+        Ok(())
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -952,7 +1134,9 @@ impl RagStore {
         );
 
         // Invalidate HNSW index since embeddings changed
-        self.invalidate_hnsw_index();
+        if let Err(e) = self.invalidate_hnsw_index() {
+            warn!("Document {} updated but HNSW invalidation failed: {}", doc_id, e);
+        }
 
         Ok(updated_meta)
     }

@@ -11,7 +11,7 @@ use crate::rag::bm25;
 use crate::rag::chunker;
 use crate::rag::embedding;
 use crate::rag::search::{self, SearchMode};
-use crate::rag::store::RagStore;
+use crate::rag::store::{HnswIndexStatus, RagStore};
 use crate::rag::types::*;
 use crate::state::LazyManagedStore;
 use serde::{Deserialize, Serialize};
@@ -879,16 +879,19 @@ pub async fn rag_rebuild_hnsw_index(
         .map_err(|e| format!("spawn_blocking failed: {e}"))?
         .map_err(|e| e.to_string())?;
 
-    let msg = if let Ok(guard) = store.hnsw_index().read() {
-        match &*guard {
-            Some(idx) => format!(
-                "HNSW index rebuilt: {} points, {} dimensions",
-                idx.meta.point_count, idx.meta.dimensions
-            ),
-            None => "HNSW index cleared (no embeddings)".to_string(),
+    let msg = match store.hnsw_status() {
+        HnswIndexStatus::Ready {
+            point_count,
+            dimensions,
+        } => format!(
+            "HNSW index rebuilt: {} points, {} dimensions",
+            point_count, dimensions
+        ),
+        HnswIndexStatus::Missing => "HNSW index cleared (no embeddings)".to_string(),
+        HnswIndexStatus::Failed(error) => {
+            format!("HNSW rebuild completed but index is unavailable: {}", error)
         }
-    } else {
-        "HNSW index rebuilt".to_string()
+        _ => "HNSW index rebuilt".to_string(),
     };
 
     info!("{}", msg);

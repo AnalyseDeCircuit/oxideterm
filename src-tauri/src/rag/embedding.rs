@@ -5,7 +5,7 @@ use crate::rag::error::RagError;
 use crate::rag::store::RagStore;
 use crate::rag::types::EmbeddingRecord;
 use std::collections::HashSet;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Vector Search
@@ -47,22 +47,20 @@ pub fn search_vector(
     }
 
     // Try HNSW path first
-    if let Ok(guard) = store.hnsw_index().read() {
-        if let Some(ref index) = *guard {
-            if index.is_compatible(query_vector.len()) {
-                let allowed: HashSet<String> = chunk_ids.iter().cloned().collect();
-                let results = index.search(query_vector, top_k, Some(&allowed));
-                debug!(
-                    "HNSW search returned {} results (allowed set: {}, top_k: {})",
-                    results.len(),
-                    allowed.len(),
-                    top_k
-                );
-                if !results.is_empty() {
-                    return Ok(results);
-                }
-                // If HNSW returned nothing (all filtered out), fall through to brute-force
+    if let Some(index) = store.ensure_hnsw_loaded()? {
+        if index.is_compatible(query_vector.len()) {
+            let allowed: HashSet<String> = chunk_ids.iter().cloned().collect();
+            let results = index.search(query_vector, top_k, Some(&allowed));
+            debug!(
+                "HNSW search returned {} results (allowed set: {}, top_k: {})",
+                results.len(),
+                allowed.len(),
+                top_k
+            );
+            if !results.is_empty() {
+                return Ok(results);
             }
+            // If HNSW returned nothing (all filtered out), fall through to brute-force
         }
     }
 
@@ -133,7 +131,9 @@ pub fn store_embeddings(
     let count = embeddings.len();
     store.store_embeddings_batch(&embeddings)?;
     // Mark HNSW index as stale — will be rebuilt asynchronously
-    store.invalidate_hnsw_index();
+    if let Err(e) = store.invalidate_hnsw_index() {
+        warn!("Embeddings stored but HNSW invalidation failed: {}", e);
+    }
     Ok(count)
 }
 
@@ -163,8 +163,11 @@ fn l2_norm(v: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rag::hnsw::hnsw_index_path;
+    use crate::rag::store::HnswIndexStatus;
     use crate::rag::store::RagStore;
     use crate::rag::types::{DocCollection, DocFormat, DocMetadata, DocScope};
+    use tempfile::tempdir;
 
     fn temp_store(test_name: &str) -> RagStore {
         let dir = std::env::temp_dir().join(format!(
@@ -282,5 +285,48 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].chunk_id, "chunk-a");
         assert!(results.iter().any(|hit| hit.chunk_id == "chunk-b"));
+    }
+
+    #[test]
+    fn test_search_vector_lazy_loads_hnsw_on_first_use() {
+        let dir = tempdir().unwrap();
+        {
+            let store = RagStore::new(dir.path()).unwrap();
+            add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
+            add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
+            store.rebuild_hnsw_index().unwrap();
+        }
+
+        let reopened = RagStore::new(dir.path()).unwrap();
+        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Unloaded);
+
+        let results = search_vector(&reopened, &[0.9, 0.1], &[], 2).unwrap();
+
+        assert_eq!(results[0].chunk_id, "chunk-a");
+        assert!(matches!(
+            reopened.hnsw_status(),
+            HnswIndexStatus::Ready { .. }
+        ));
+    }
+
+    #[test]
+    fn test_invalidate_hnsw_keeps_search_on_bruteforce_path() {
+        let dir = tempdir().unwrap();
+        let store = RagStore::new(dir.path()).unwrap();
+        add_chunk_with_embedding(&store, "col-a", "doc-a", "chunk-a", "alpha", vec![1.0, 0.0]);
+        add_chunk_with_embedding(&store, "col-b", "doc-b", "chunk-b", "beta", vec![0.0, 1.0]);
+        store.rebuild_hnsw_index().unwrap();
+
+        let hnsw_path = hnsw_index_path(dir.path());
+        assert!(hnsw_path.exists());
+
+        store.invalidate_hnsw_index().unwrap();
+
+        assert_eq!(store.hnsw_status(), HnswIndexStatus::Stale);
+        assert!(!hnsw_path.exists());
+
+        let results = search_vector(&store, &[0.9, 0.1], &[], 2).unwrap();
+        assert_eq!(results[0].chunk_id, "chunk-a");
+        assert_eq!(store.hnsw_status(), HnswIndexStatus::Stale);
     }
 }
