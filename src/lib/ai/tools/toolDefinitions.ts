@@ -1510,7 +1510,8 @@ export function getToolsForContext(
 /**
  * Command deny-list for terminal_exec safety.
  * These patterns are checked against the command string before execution.
- * If any pattern matches, the command is rejected without prompting the user.
+ * If any pattern matches, the command must never be auto-approved and should
+ * require explicit user confirmation before execution.
  *
  * NOTE: Deny-lists are fundamentally incomplete. This is a defense-in-depth
  * measure, not a security boundary. The real boundary is user approval.
@@ -1590,4 +1591,24 @@ export const COMMAND_DENY_LIST: RegExp[] = [
  */
 export function isCommandDenied(command: string): boolean {
   return COMMAND_DENY_LIST.some((pattern) => pattern.test(command));
+}
+
+/**
+ * Return the specific commands in a tool payload that matched the deny-list.
+ * Tools without executable command strings return an empty array.
+ */
+export function getDeniedCommands(toolName: string, args: Record<string, unknown>): string[] {
+  if ((toolName === 'terminal_exec' || toolName === 'local_exec') && typeof args.command === 'string') {
+    return isCommandDenied(args.command) ? [args.command] : [];
+  }
+
+  if (toolName === 'batch_exec' && Array.isArray(args.commands)) {
+    return args.commands.filter((cmd): cmd is string => typeof cmd === 'string' && isCommandDenied(cmd));
+  }
+
+  return [];
+}
+
+export function hasDeniedCommands(toolName: string, args: Record<string, unknown>): boolean {
+  return getDeniedCommands(toolName, args).length > 0;
 }

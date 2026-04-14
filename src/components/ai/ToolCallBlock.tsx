@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitB
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import { useAiChatStore } from '../../store/aiChatStore';
-import { isCommandDenied } from '../../lib/ai/tools';
+import { hasDeniedCommands } from '../../lib/ai/tools';
 import type { AiToolCall } from '../../types';
 
 interface ToolCallBlockProps {
@@ -116,9 +116,16 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
   const isPendingApproval = call.status === 'pending_user_approval';
 
   // Check if this is a deny-listed command for showing a stronger warning
-  const isDenyListCommand = isPendingApproval &&
-    (call.name === 'terminal_exec' || call.name === 'local_exec') &&
-    (() => { try { const p = JSON.parse(call.arguments); return typeof p.command === 'string' && isCommandDenied(p.command); } catch { return false; } })();
+  const isDenyListCommand = isPendingApproval && (() => {
+    try {
+      const parsed = JSON.parse(call.arguments);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? hasDeniedCommands(call.name, parsed as Record<string, unknown>)
+        : false;
+    } catch {
+      return false;
+    }
+  })();
 
   return (
     <div className={cn(

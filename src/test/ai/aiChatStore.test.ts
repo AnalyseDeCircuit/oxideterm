@@ -71,6 +71,7 @@ vi.mock('@/lib/ai/tools', () => ({
   SESSION_ID_TOOLS: [],
   getToolsForContext: vi.fn(() => []),
   isCommandDenied: vi.fn(() => false),
+  hasDeniedCommands: vi.fn(() => false),
   executeTool: vi.fn(),
 }));
 

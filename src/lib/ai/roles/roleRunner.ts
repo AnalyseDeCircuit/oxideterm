@@ -12,7 +12,7 @@
 import { useAgentStore, registerApprovalResolver, removeApprovalResolver } from '../../../store/agentStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { useToastStore } from '../../../hooks/useToast';
-import { executeTool, READ_ONLY_TOOLS, isCommandDenied } from '../tools';
+import { executeTool, READ_ONLY_TOOLS, hasDeniedCommands } from '../tools';
 import { MAX_TOOL_CALLS_PER_ROUND, MAX_OUTPUT_BYTES } from '../agentConfig';
 import i18n from '../../../i18n';
 import type { ChatMessage, AiStreamProvider, AiToolDefinition } from '../providers';
@@ -153,15 +153,8 @@ export function shouldAutoApprove(
   args: Record<string, unknown>,
   autonomyLevel: AgentTask['autonomyLevel'],
 ): boolean {
-  if ((toolName === 'terminal_exec' || toolName === 'local_exec' || toolName === 'batch_exec') &&
-      typeof args.command === 'string' && isCommandDenied(args.command)) {
+  if (hasDeniedCommands(toolName, args)) {
     return false;
-  }
-  if (toolName === 'batch_exec') {
-    if (!Array.isArray(args.commands)) return false;
-    for (const cmd of args.commands) {
-      if (typeof cmd === 'string' && isCommandDenied(cmd)) return false;
-    }
   }
 
   switch (autonomyLevel) {

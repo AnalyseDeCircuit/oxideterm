@@ -15,7 +15,7 @@ import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
 import { DEFAULT_SYSTEM_PROMPT, SUGGESTIONS_INSTRUCTION, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, isCommandDenied, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, hasDeniedCommands, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
 import { PARTICIPANTS, resolveParticipant, mergeParticipantTools } from '../lib/ai/participants';
@@ -1028,16 +1028,18 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             continue;
           }
 
-          // Check if this is a command that matches the deny-list
-          const isDenyListed = (tc.name === 'terminal_exec' || tc.name === 'local_exec') && (() => {
+          // High-risk commands are still user-controlled, but they must never be auto-approved.
+          const isDenyListed = (() => {
             try {
               const parsed = JSON.parse(tc.arguments);
-              return typeof parsed.command === 'string' && isCommandDenied(parsed.command);
+              return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? hasDeniedCommands(tc.name, parsed as Record<string, unknown>)
+                : false;
             } catch { return false; }
           })();
 
           if (isDenyListed) {
-            // Deny-list commands always require explicit user approval
+            // Deny-list commands always require explicit user approval.
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
           } else if (autoApproveTools[tc.name] === true) {

@@ -26,7 +26,7 @@ import { nodeSftpListDir, nodeSftpPreview, nodeSftpStat, nodeSftpWrite } from '.
 import { api } from '../../api';
 import { ragSearch } from '../../api';
 import type { AiToolResult, AgentFileEntry, TabType } from '../../../types';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, isCommandDenied } from './toolDefinitions';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, hasDeniedCommands } from './toolDefinitions';
 import { useSessionTreeStore } from '../../../store/sessionTreeStore';
 import { useAppStore } from '../../../store/appStore';
 import { useLocalTerminalStore } from '../../../store/localTerminalStore';
@@ -384,10 +384,6 @@ async function execTerminalCommandToSession(
   const command = typeof args.command === 'string' ? args.command.trim() : '';
   if (!command) {
     return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
-  }
-
-  if (isCommandDenied(command)) {
-    return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Command rejected: matches deny-list pattern.', durationMs: Date.now() - startTime };
   }
 
   const paneId = findPaneBySessionId(sessionId);
@@ -1278,11 +1274,6 @@ async function execBatchExec(
       continue;
     }
 
-    if (isCommandDenied(cmd)) {
-      results.push(`[${i + 1}] $ ${cmd}\n⛔ Command rejected: matches deny-list pattern.`);
-      continue;
-    }
-
     // Pre-command snapshot: capture buffer line count BEFORE sending the command
     const preSnapshot = await readBufferLines(sessionId);
     const preSnapshotLineCount = preSnapshot?.length ?? null;
@@ -2126,11 +2117,14 @@ async function execLocalExec(args: Record<string, unknown>, startTime: number, t
     return { toolCallId, toolName: 'local_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
   }
 
+  const allowDangerous = hasDeniedCommands('local_exec', { command });
+
   try {
     const result = await api.localExecCommand(
       command,
       args.cwd as string | undefined,
       args.timeout_secs as number | undefined,
+      allowDangerous,
     );
 
     if (result.timedOut) {
@@ -2242,24 +2236,106 @@ function execGetSettings(args: Record<string, unknown>, startTime: number, toolC
   const section = args.section as string | undefined;
   const settings = useSettingsStore.getState().settings;
 
-  // Sanitize: strip sensitive fields from AI provider config before returning
-  const sanitize = (obj: unknown): unknown => {
-    if (typeof obj !== 'object' || obj === null) return obj;
-    const raw = obj as Record<string, unknown>;
-    // Filter AI providers to only expose safe fields
-    if ('providers' in raw && Array.isArray(raw.providers)) {
-      return {
-        ...raw,
-        providers: (raw.providers as Array<Record<string, unknown>>).map(p => ({
-          id: p.id,
-          name: p.name,
-          type: p.type,
-          enabled: p.enabled,
-          // baseUrl, apiKey, and other sensitive fields intentionally excluded
-        })),
-      };
+  const REDACTED_VALUE = '[redacted]';
+
+  const redactEnvValues = (value: unknown): Record<string, string> | undefined => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const entries = Object.keys(value as Record<string, unknown>)
+      .filter((key) => key.trim().length > 0)
+      .sort()
+      .map((key) => [key, REDACTED_VALUE] as const);
+    return Object.fromEntries(entries);
+  };
+
+  const redactSensitiveArgs = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+    const redacted: string[] = [];
+    let redactNext = false;
+
+    for (const entry of value) {
+      const arg = typeof entry === 'string' ? entry : String(entry);
+
+      if (redactNext) {
+        redacted.push(REDACTED_VALUE);
+        redactNext = false;
+        continue;
+      }
+
+      const trimmed = arg.trim();
+      const lower = trimmed.toLowerCase();
+      const isSensitiveFlag = /^--?(?:api[-_]?key|auth(?:orization)?|bearer|password|secret|token)\b/.test(lower);
+
+      if (isSensitiveFlag && trimmed.includes('=')) {
+        redacted.push(trimmed.replace(/=.*/, `=${REDACTED_VALUE}`));
+        continue;
+      }
+
+      if (isSensitiveFlag) {
+        redacted.push(trimmed);
+        redactNext = true;
+        continue;
+      }
+
+      redacted.push(trimmed);
     }
-    return raw;
+
+    return redacted;
+  };
+
+  const sanitizeAiSettings = (value: unknown): unknown => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+    const raw = value as Record<string, unknown>;
+    const providers = Array.isArray(raw.providers)
+      ? (raw.providers as Array<Record<string, unknown>>).map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          enabled: provider.enabled,
+        }))
+      : raw.providers;
+
+    const mcpServers = Array.isArray(raw.mcpServers)
+      ? (raw.mcpServers as Array<Record<string, unknown>>).map((server) => {
+          const env = redactEnvValues(server.env);
+          const args = redactSensitiveArgs(server.args);
+          return {
+            id: server.id,
+            name: server.name,
+            transport: server.transport,
+            url: server.url,
+            command: server.command,
+            ...(args !== undefined ? { args } : {}),
+            enabled: server.enabled,
+            retryOnDisconnect: server.retryOnDisconnect,
+            ...(env !== undefined ? { env } : {}),
+            ...(typeof server.authToken === 'string' && server.authToken.length > 0
+              ? { hasLegacyAuthToken: true }
+              : {}),
+          };
+        })
+      : raw.mcpServers;
+
+    return {
+      ...raw,
+      providers,
+      ...(mcpServers !== undefined ? { mcpServers } : {}),
+    };
+  };
+
+  const sanitizeLocalTerminalSettings = (value: unknown): unknown => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+    const raw = value as Record<string, unknown>;
+    const customEnvVars = redactEnvValues(raw.customEnvVars);
+    return {
+      ...raw,
+      ...(customEnvVars ? { customEnvVars } : {}),
+    };
+  };
+
+  const sanitizeSection = (sectionName: string, value: unknown): unknown => {
+    if (sectionName === 'ai') return sanitizeAiSettings(value);
+    if (sectionName === 'localTerminal') return sanitizeLocalTerminalSettings(value);
+    return value;
   };
 
   if (section) {
@@ -2267,15 +2343,14 @@ function execGetSettings(args: Record<string, unknown>, startTime: number, toolC
     if (sectionData === undefined) {
       return { toolCallId, toolName: 'get_settings', success: false, output: '', error: `Unknown settings section: ${section}`, durationMs: Date.now() - startTime };
     }
-    const safe = section === 'ai' ? sanitize(sectionData) : sectionData;
+    const safe = sanitizeSection(section, sectionData);
     return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safe, null, 2), durationMs: Date.now() - startTime };
   }
 
-  // Sanitize the full settings object: filter the ai section
+  // Sanitize the full settings object before exposing it to AI tools.
   const safeSettings = { ...settings as unknown as Record<string, unknown> };
-  if (safeSettings.ai) {
-    safeSettings.ai = sanitize(safeSettings.ai);
-  }
+  if (safeSettings.ai) safeSettings.ai = sanitizeAiSettings(safeSettings.ai);
+  if (safeSettings.localTerminal) safeSettings.localTerminal = sanitizeLocalTerminalSettings(safeSettings.localTerminal);
   return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safeSettings, null, 2), durationMs: Date.now() - startTime };
 }
 

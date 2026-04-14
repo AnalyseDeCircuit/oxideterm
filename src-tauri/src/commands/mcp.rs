@@ -267,10 +267,10 @@ where
 // Command Allowlist — Only these base commands may be spawned as MCP servers
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Allowed MCP server commands. Only the basename is checked (no path traversal).
-const MCP_ALLOWED_COMMANDS: &[&str] = &[
-    "npx", "node", "python", "python3", "uvx", "uv", "docker", "deno", "bun",
-];
+/// Allowed MCP server commands. Only dedicated package/container runners are
+/// allowed here; general-purpose interpreters are intentionally excluded.
+/// Only the basename is checked (no path traversal).
+const MCP_ALLOWED_COMMANDS: &[&str] = &["npx", "uvx", "docker"];
 
 /// Validate that the command is in the allowlist and contains no path separators
 /// (preventing path-traversal tricks like `../../bin/evil`).
@@ -301,9 +301,17 @@ fn validate_mcp_command(command: &str) -> Result<(), String> {
 
 /// Validate that no env variable tries to override dangerous variables.
 fn validate_mcp_env(env: &HashMap<String, String>) -> Result<(), String> {
-    const BLOCKED_ENV_KEYS: &[&str] = &["LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "LD_LIBRARY_PATH"];
+    const BLOCKED_ENV_KEYS: &[&str] = &[
+        "LD_PRELOAD",
+        "DYLD_INSERT_LIBRARIES",
+        "LD_LIBRARY_PATH",
+        "NODE_OPTIONS",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+    ];
     for key in env.keys() {
-        if BLOCKED_ENV_KEYS.contains(&key.as_str()) {
+        let normalized = key.trim().to_ascii_uppercase();
+        if BLOCKED_ENV_KEYS.contains(&normalized.as_str()) {
             return Err(format!("MCP env variable '{}' is not allowed", key));
         }
     }
@@ -679,7 +687,12 @@ mod tests {
     #[test]
     fn validate_mcp_command_rejects_paths_and_unknown_binaries() {
         assert!(validate_mcp_command("npx").is_ok());
+        assert!(validate_mcp_command("uvx").is_ok());
+        assert!(validate_mcp_command("docker").is_ok());
         assert!(validate_mcp_command("../npx").is_err());
+        assert!(validate_mcp_command("node").is_err());
+        assert!(validate_mcp_command("python3").is_err());
+        assert!(validate_mcp_command("uv").is_err());
         assert!(validate_mcp_command("/usr/bin/python3").is_err());
         assert!(validate_mcp_command("bash").is_err());
     }
@@ -688,6 +701,18 @@ mod tests {
     fn validate_mcp_env_blocks_injection_variables() {
         let mut env = HashMap::new();
         env.insert("LD_PRELOAD".to_string(), "evil.so".to_string());
+        assert!(validate_mcp_env(&env).is_err());
+
+        env.clear();
+        env.insert("Node_Options".to_string(), "--require ./evil.js".to_string());
+        assert!(validate_mcp_env(&env).is_err());
+
+        env.clear();
+        env.insert("PYTHONPATH".to_string(), "/tmp/evil".to_string());
+        assert!(validate_mcp_env(&env).is_err());
+
+        env.clear();
+        env.insert("PYTHONSTARTUP".to_string(), "/tmp/startup.py".to_string());
         assert!(validate_mcp_env(&env).is_err());
 
         env.clear();

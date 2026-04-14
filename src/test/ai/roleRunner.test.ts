@@ -7,6 +7,7 @@ const addApprovalMock = vi.hoisted(() => vi.fn());
 const addToastMock = vi.hoisted(() => vi.fn());
 const executeToolMock = vi.hoisted(() => vi.fn());
 const isCommandDeniedMock = vi.hoisted(() => vi.fn(() => false));
+const hasDeniedCommandsMock = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock('@/store/agentStore', () => ({
   useAgentStore: {
@@ -53,6 +54,7 @@ vi.mock('@/lib/ai/tools', () => ({
   executeTool: executeToolMock,
   READ_ONLY_TOOLS: new Set(['read_file', 'list_directory', 'grep_search']),
   isCommandDenied: isCommandDeniedMock,
+  hasDeniedCommands: hasDeniedCommandsMock,
 }));
 
 describe('roleRunner.processToolCalls', () => {
@@ -65,6 +67,8 @@ describe('roleRunner.processToolCalls', () => {
     executeToolMock.mockReset();
     isCommandDeniedMock.mockReset();
     isCommandDeniedMock.mockReturnValue(false);
+    hasDeniedCommandsMock.mockReset();
+    hasDeniedCommandsMock.mockReturnValue(false);
   });
 
   it('returns synthetic tool errors for calls beyond the per-round limit', async () => {
@@ -127,5 +131,13 @@ describe('roleRunner.processToolCalls', () => {
     const { shouldAutoApprove } = await import('@/lib/ai/roles');
 
     expect(shouldAutoApprove('read_file', { path: '/tmp/demo.txt' }, 'balanced')).toBe(true);
+  });
+
+  it('never auto-approves deny-listed command payloads', async () => {
+    const { shouldAutoApprove } = await import('@/lib/ai/roles');
+    hasDeniedCommandsMock.mockReturnValue(true);
+
+    expect(shouldAutoApprove('terminal_exec', { command: 'sudo reboot' }, 'autonomous')).toBe(false);
+    expect(shouldAutoApprove('batch_exec', { commands: ['echo ok', 'sudo reboot'] }, 'balanced')).toBe(false);
   });
 });

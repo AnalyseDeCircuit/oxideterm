@@ -1162,12 +1162,13 @@ pub async fn local_exec_command(
     command: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
+    allow_dangerous: Option<bool>,
 ) -> Result<LocalExecResult, String> {
     if command.trim().is_empty() {
         return Err("Command cannot be empty".to_string());
     }
 
-    if is_exec_denied(&command) {
+    if is_exec_denied(&command) && !allow_dangerous.unwrap_or(false) {
         return Err("Command denied for security reasons".to_string());
     }
 

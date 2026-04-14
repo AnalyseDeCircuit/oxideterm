@@ -30,5 +30,7 @@ export {
   TOOL_GROUPS,
   getToolsForContext,
   isCommandDenied,
+  getDeniedCommands,
+  hasDeniedCommands,
 } from './toolDefinitions';
 export { executeTool, type ToolExecutionContext } from './toolExecutor';
