@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::store::{StateError, StateStore};
+use super::{LazyStateStore, store::StateError};
 use crate::session::types::SessionConfig;
 
 /// Persisted session metadata (excludes runtime data)
@@ -102,12 +102,12 @@ impl PersistedSession {
 
 /// Session persistence operations
 pub struct SessionPersistence {
-    store: Arc<StateStore>,
+    store: Arc<LazyStateStore>,
 }
 
 impl SessionPersistence {
     /// Create a new session persistence handler
-    pub fn new(store: Arc<StateStore>) -> Self {
+    pub fn new(store: Arc<LazyStateStore>) -> Self {
         Self { store }
     }
 
@@ -200,10 +200,10 @@ mod tests {
     use crate::session::types::SessionConfig;
     use tempfile::TempDir;
 
-    fn create_test_store() -> (TempDir, Arc<StateStore>) {
+    fn create_test_store() -> (TempDir, Arc<LazyStateStore>) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.redb");
-        let store = Arc::new(StateStore::new(db_path).unwrap());
+        let store = Arc::new(LazyStateStore::new(db_path));
         (temp_dir, store)
     }
 

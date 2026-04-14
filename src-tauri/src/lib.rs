@@ -94,7 +94,7 @@ use sftp::{LazyProgressStore, ProgressStore, TransferManager};
 use ssh::SshConnectionRegistry;
 use state::agent_history::AgentHistoryStore;
 use state::ai_chat::AiChatStore;
-use state::{LazyManagedStore, StateStore};
+use state::{LazyManagedStore, LazyStateStore};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Arc;
@@ -175,21 +175,9 @@ pub fn run() {
 
     write_startup_log(&format!("State DB path: {:?}", state_db_path));
 
-    let state_store = match StateStore::new(state_db_path.clone()) {
-        Ok(store) => Arc::new(store),
-        Err(e) => {
-            let msg = format!(
-                "Failed to initialize state store at {:?}: {}",
-                state_db_path, e
-            );
-            tracing::error!("{}", msg);
-            write_startup_log(&msg);
-            show_startup_error("OxideTerm Startup Error", &msg);
-            return;
-        }
-    };
+    let state_store = Arc::new(LazyStateStore::new(state_db_path.clone()));
 
-    write_startup_log("State store initialized");
+    write_startup_log("State store registered for lazy initialization");
 
     match crate::session::cleanup_stale_terminal_history_archives() {
         Ok(removed) if removed > 0 => {

@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 use super::state::SessionState;
 use super::types::{SessionConfig, SessionEntry, SessionInfo, SessionStats};
 use crate::ssh::{HandleController, SessionCommand};
-use crate::state::{BufferConfig, PersistedSession, StateStore, session::SessionPersistence};
+use crate::state::{BufferConfig, LazyStateStore, PersistedSession, session::SessionPersistence};
 
 /// Default maximum concurrent sessions
 const DEFAULT_MAX_SESSIONS: usize = 20;
@@ -45,7 +45,7 @@ impl Default for SessionRegistry {
 
 impl SessionRegistry {
     /// Create a new session registry with state persistence
-    pub fn new(state_store: Arc<StateStore>) -> Self {
+    pub fn new(state_store: Arc<LazyStateStore>) -> Self {
         let persistence = SessionPersistence::new(state_store);
         Self {
             sessions: DashMap::new(),
@@ -1009,7 +1009,7 @@ mod tests {
     async fn test_persist_session_with_buffer_does_not_store_terminal_payload() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.redb");
-        let store = Arc::new(StateStore::new(db_path).unwrap());
+        let store = Arc::new(LazyStateStore::new(db_path));
         let registry = SessionRegistry::new(store);
 
         let config = SessionConfig::with_password("example.com", 22, "user", "pass");

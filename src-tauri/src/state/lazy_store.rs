@@ -23,6 +23,16 @@ impl<T> LazyManagedStore<T>
 where
     T: Send + Sync + 'static,
 {
+    fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+        if let Some(message) = payload.downcast_ref::<&str>() {
+            (*message).to_string()
+        } else if let Some(message) = payload.downcast_ref::<String>() {
+            message.clone()
+        } else {
+            "unknown panic".to_string()
+        }
+    }
+
     pub fn new(
         label: &'static str,
         init: impl Fn() -> Result<T, String> + Send + Sync + 'static,
@@ -61,7 +71,14 @@ where
         drop(state);
 
         tracing::info!("Initializing {} on first use", self.label);
-        let result = (self.init)();
+        let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.init)())) {
+            Ok(result) => result,
+            Err(payload) => Err(format!(
+                "{} initializer panicked: {}",
+                self.label,
+                Self::panic_message(payload)
+            )),
+        };
 
         let mut state = self
             .state
@@ -149,5 +166,18 @@ mod tests {
         assert_eq!(*first, 7);
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(init_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn panic_during_initialization_becomes_cached_failure() {
+        let store = LazyManagedStore::<usize>::new("panic store", move || {
+            panic!("kaboom");
+        });
+
+        let first = store.resolve().unwrap_err();
+        let second = store.resolve().unwrap_err();
+
+        assert!(first.contains("panic store initializer panicked: kaboom"));
+        assert_eq!(first, second);
     }
 }

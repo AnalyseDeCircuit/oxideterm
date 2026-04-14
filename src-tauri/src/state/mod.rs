@@ -8,6 +8,7 @@ pub mod agent_history;
 pub mod ai_chat;
 pub mod forwarding;
 pub mod lazy_store;
+pub mod lazy_state;
 pub mod session;
 pub mod store;
 
@@ -18,5 +19,6 @@ pub use ai_chat::{
 };
 pub use forwarding::PersistedForward;
 pub use lazy_store::LazyManagedStore;
+pub use lazy_state::LazyStateStore;
 pub use session::{BufferConfig, PersistedSession, SessionPersistence};
 pub use store::{StateError, StateStore};

@@ -19,7 +19,7 @@ use crate::commands::config::ConfigState;
 use crate::forwarding::{
     ForwardRule, ForwardRuleUpdate, ForwardStats, ForwardStatus, ForwardType, ForwardingManager,
 };
-use crate::state::{PersistedForward, StateError, StateStore, forwarding::ForwardPersistence};
+use crate::state::{LazyStateStore, PersistedForward, StateError, forwarding::ForwardPersistence};
 
 /// Global registry of forwarding managers (one per session)
 pub struct ForwardingRegistry {
@@ -37,7 +37,7 @@ impl ForwardingRegistry {
     }
 
     /// Create a new forwarding registry with state persistence
-    pub fn new_with_state(state_store: Arc<StateStore>) -> Self {
+    pub fn new_with_state(state_store: Arc<LazyStateStore>) -> Self {
         Self {
             managers: RwLock::new(HashMap::new()),
             persistence: Some(ForwardPersistence::new(state_store)),

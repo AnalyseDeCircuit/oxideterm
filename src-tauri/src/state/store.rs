@@ -32,6 +32,9 @@ const METADATA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("metad
 #[derive(Debug, Error)]
 #[allow(clippy::result_large_err)]
 pub enum StateError {
+    #[error("State store initialization failed: {0}")]
+    Initialization(String),
+
     #[error("Database error: {0}")]
     Database(#[from] redb::DatabaseError),
 

@@ -12,7 +12,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::store::{StateError, StateStore};
+use super::{LazyStateStore, store::StateError};
 use crate::forwarding::manager::ForwardRule;
 
 pub const FORWARD_TOMBSTONE_RETENTION_DAYS: i64 = 30;
@@ -162,7 +162,7 @@ impl DeletedPersistedForwardTombstone {
 
 /// Forward persistence operations
 pub struct ForwardPersistence {
-    store: Arc<StateStore>,
+    store: Arc<LazyStateStore>,
 }
 
 impl ForwardPersistence {
@@ -171,7 +171,7 @@ impl ForwardPersistence {
     }
 
     /// Create a new forward persistence handler
-    pub fn new(store: Arc<StateStore>) -> Self {
+    pub fn new(store: Arc<LazyStateStore>) -> Self {
         Self { store }
     }
 
@@ -554,10 +554,10 @@ mod tests {
     use crate::forwarding::manager::ForwardRule;
     use tempfile::TempDir;
 
-    fn create_test_store() -> (TempDir, Arc<StateStore>) {
+    fn create_test_store() -> (TempDir, Arc<LazyStateStore>) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.redb");
-        let store = Arc::new(StateStore::new(db_path).unwrap());
+        let store = Arc::new(LazyStateStore::new(db_path));
         (temp_dir, store)
     }
 
