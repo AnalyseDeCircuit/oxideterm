@@ -1,6 +1,12 @@
 import { parseSuggestions } from '../lib/ai/suggestionParser';
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiConversation, AiChatMessage, AiToolCall } from '../types';
+import type {
+  AiAssistantTurn,
+  AiConversationSessionMetadata,
+  AiTranscriptReference,
+} from '../lib/ai/turnModel/types';
+import { projectLegacyMessageToTurn } from '../lib/ai/turnModel/turnProjection';
 
 export interface FullConversationDto {
   id: string;
@@ -9,6 +15,7 @@ export interface FullConversationDto {
   updatedAt: number;
   sessionId: string | null;
   origin?: string;
+  sessionMetadata?: AiConversationSessionMetadata | null;
   messages: Array<{
     id: string;
     role: 'user' | 'assistant' | 'system' | 'tool';
@@ -16,6 +23,8 @@ export interface FullConversationDto {
     timestamp: number;
     toolCalls?: AiToolCall[];
     context: string | null;
+    turn?: AiAssistantTurn | null;
+    transcriptRef?: AiTranscriptReference | null;
   }>;
 }
 
@@ -34,13 +43,17 @@ export function generateTitle(firstMessage: string): string {
 }
 
 export function dtoToConversation(dto: FullConversationDto): AiConversation {
-  return {
+  return hydrateStructuredConversation({
     id: dto.id,
     title: dto.title,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
     sessionId: dto.sessionId ?? undefined,
     origin: dto.origin || 'sidebar',
+    sessionMetadata: dto.sessionMetadata ?? {
+      conversationId: dto.id,
+      origin: dto.origin || 'sidebar',
+    },
     messages: dto.messages.map((m) => {
       if (m.role === 'assistant') {
         let content = m.content;
@@ -59,6 +72,8 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
           toolCalls: m.toolCalls,
           timestamp: m.timestamp,
           context: m.context || undefined,
+          turn: m.turn ?? undefined,
+          transcriptRef: m.transcriptRef ?? undefined,
           ...(sugResult.suggestions.length > 0 ? { suggestions: sugResult.suggestions } : {}),
         };
       }
@@ -84,8 +99,107 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
         toolCalls: m.toolCalls,
         timestamp: m.timestamp,
         context: m.context || undefined,
+        turn: m.turn ?? undefined,
+        transcriptRef: m.transcriptRef ?? undefined,
       };
     }),
+  });
+}
+
+export function hydrateStructuredConversation(conversation: AiConversation): AiConversation {
+  const existingTurns = conversation.turns ?? [];
+  const usedTurnIds = new Set<string>();
+  const turns: NonNullable<AiConversation['turns']> = [];
+  let lastUserMessage: AiChatMessage | undefined;
+
+  const messages = conversation.messages.map((message) => {
+    if (message.role === 'user') {
+      lastUserMessage = message;
+      return message;
+    }
+
+    if (message.role !== 'assistant') {
+      return message;
+    }
+
+    const turn = message.turn ?? projectLegacyMessageToTurn(message);
+    const expectedTranscriptRef = {
+      conversationId: conversation.id,
+      startEntryId: lastUserMessage?.id,
+      endEntryId: message.id,
+    };
+    const transcriptRef = message.transcriptRef
+      && message.transcriptRef.conversationId === expectedTranscriptRef.conversationId
+      && message.transcriptRef.startEntryId === expectedTranscriptRef.startEntryId
+      && message.transcriptRef.endEntryId === expectedTranscriptRef.endEntryId
+      ? message.transcriptRef
+      : expectedTranscriptRef;
+    const matchingExistingTurn = existingTurns.find((existingTurn) => {
+      if (usedTurnIds.has(existingTurn.id)) return false;
+      return existingTurn.requestMessageId === (lastUserMessage?.id ?? message.id);
+    });
+
+    if (matchingExistingTurn) {
+      usedTurnIds.add(matchingExistingTurn.id);
+    }
+
+    const mergedRounds = turn.toolRounds.length > 0
+      ? turn.toolRounds.map((round, index) => {
+          const existingRound = matchingExistingTurn?.rounds.find((candidate) => candidate.id === round.id || candidate.round === round.round)
+            ?? matchingExistingTurn?.rounds[index];
+
+          if (!existingRound) {
+            return round;
+          }
+
+          return {
+            ...existingRound,
+            ...round,
+            responseText: round.responseText ?? existingRound.responseText,
+            retryCount: round.retryCount ?? existingRound.retryCount,
+            timestamp: round.timestamp ?? existingRound.timestamp,
+            statefulMarker: round.statefulMarker ?? existingRound.statefulMarker,
+            summary: round.summary ?? existingRound.summary,
+            summaryMetadata: round.summaryMetadata ?? existingRound.summaryMetadata,
+            toolCalls: round.toolCalls.map((toolCall, toolIndex) => ({
+              ...(existingRound.toolCalls.find((candidate) => candidate.id === toolCall.id) ?? existingRound.toolCalls[toolIndex] ?? {}),
+              ...toolCall,
+            })),
+          };
+        })
+      : (matchingExistingTurn?.rounds ?? []);
+
+    turns.push({
+      id: matchingExistingTurn?.id ?? `${lastUserMessage?.id ?? message.id}-${message.id}`,
+      requestMessageId: matchingExistingTurn?.requestMessageId ?? lastUserMessage?.id ?? message.id,
+      requestText: matchingExistingTurn?.requestText ?? lastUserMessage?.content ?? '',
+      startedAt: matchingExistingTurn?.startedAt ?? lastUserMessage?.timestamp ?? message.timestamp,
+      status: turn.status,
+      rounds: mergedRounds,
+      pendingSummaries: matchingExistingTurn?.pendingSummaries ?? [],
+    });
+
+    return {
+      ...message,
+      turn,
+      transcriptRef,
+    };
+  });
+
+  const firstUserMessage = messages.find((message) => message.role === 'user')?.content;
+
+  return {
+    ...conversation,
+    messages,
+    turns,
+    sessionMetadata: {
+      ...conversation.sessionMetadata,
+      conversationId: conversation.id,
+      origin: conversation.origin ?? conversation.sessionMetadata?.origin ?? 'sidebar',
+      ...(conversation.sessionMetadata?.firstUserMessage === undefined && firstUserMessage
+        ? { firstUserMessage }
+        : {}),
+    },
   };
 }
 

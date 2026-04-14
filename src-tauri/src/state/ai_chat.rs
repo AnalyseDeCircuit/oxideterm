@@ -17,6 +17,7 @@
 
 use redb::{Database, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 #[cfg(test)]
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -141,6 +142,12 @@ pub struct PersistedMessage {
     pub tool_calls: Vec<PersistedToolCall>,
     /// Context snapshot at send time
     pub context_snapshot: Option<ContextSnapshot>,
+    /// Structured assistant turn payload (optional during migration)
+    #[serde(default)]
+    pub turn: Option<Value>,
+    /// Transcript reference for the assistant output (optional during migration)
+    #[serde(default)]
+    pub transcript_ref: Option<Value>,
 }
 
 /// Conversation metadata (lightweight, for list display)
@@ -161,6 +168,9 @@ pub struct ConversationMeta {
     /// Origin: "sidebar", "inline", "cli" (defaults to "sidebar" for existing data)
     #[serde(default = "default_origin")]
     pub origin: String,
+    /// Session metadata for turn-first conversations (optional during migration)
+    #[serde(default)]
+    pub session_metadata: Option<Value>,
 }
 
 fn default_origin() -> String {
@@ -690,6 +700,7 @@ impl AiChatStore {
                     message_count: 1,
                     session_id: None,
                     origin: default_origin(),
+                    session_metadata: None,
                 }
             };
 
@@ -786,6 +797,7 @@ impl AiChatStore {
                     message_count: new_messages.len(),
                     session_id: None,
                     origin: default_origin(),
+                    session_metadata: None,
                 }
             };
 
@@ -977,6 +989,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         }
     }
 
@@ -994,6 +1007,8 @@ mod tests {
             timestamp,
             tool_calls: vec![],
             context_snapshot: None,
+            turn: None,
+            transcript_ref: None,
         }
     }
 
@@ -1010,6 +1025,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1037,6 +1053,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1057,6 +1074,8 @@ mod tests {
                 connection_info: Some("user@server.com".to_string()),
                 terminal_type: Some("ssh".to_string()),
             }),
+            turn: None,
+            transcript_ref: None,
         };
         store.save_message(message).unwrap();
 
@@ -1103,6 +1122,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1116,6 +1136,8 @@ mod tests {
                 timestamp: 1000 + i as i64,
                 tool_calls: vec![],
                 context_snapshot: None,
+                turn: None,
+                transcript_ref: None,
             };
             store.save_message(msg).unwrap();
         }
@@ -1158,6 +1180,7 @@ mod tests {
                 message_count: 0,
                 session_id: None,
                 origin: "sidebar".to_string(),
+                session_metadata: None,
             };
             store.create_conversation(&meta).unwrap();
 
@@ -1170,6 +1193,8 @@ mod tests {
                     timestamp: 1000_i64,
                     tool_calls: vec![],
                     context_snapshot: None,
+                    turn: None,
+                    transcript_ref: None,
                 };
                 store.save_message(msg).unwrap();
             }
@@ -1236,6 +1261,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1262,6 +1288,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1275,6 +1302,8 @@ mod tests {
                 timestamp: 1000 + i as i64,
                 tool_calls: vec![],
                 context_snapshot: None,
+                turn: None,
+                transcript_ref: None,
             };
             store.save_message(msg).unwrap();
         }
@@ -1299,6 +1328,7 @@ mod tests {
             message_count: 0,
             session_id: None,
             origin: "sidebar".to_string(),
+            session_metadata: None,
         };
         store.create_conversation(&meta).unwrap();
 
@@ -1310,6 +1340,8 @@ mod tests {
             timestamp: 1001,
             tool_calls: vec![],
             context_snapshot: None,
+            turn: None,
+            transcript_ref: None,
         };
         store.save_message(msg).unwrap();
 
@@ -1422,6 +1454,8 @@ mod tests {
                 connection_info: None,
                 terminal_type: None,
             }),
+            turn: None,
+            transcript_ref: None,
         };
 
         store.save_message(message).unwrap();
@@ -1465,6 +1499,8 @@ mod tests {
                 connection_info: None,
                 terminal_type: None,
             }),
+            turn: None,
+            transcript_ref: None,
         });
         set_test_force_compression_failure(false);
 
@@ -1526,6 +1562,8 @@ mod tests {
             timestamp: 3000,
             tool_calls: vec![],
             context_snapshot: None,
+            turn: None,
+            transcript_ref: None,
         };
 
         store

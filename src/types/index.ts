@@ -1491,6 +1491,8 @@ export interface AiConversation {
   messages: AiChatMessage[];
   /** Structured turns backing the conversation (optional during migration) */
   turns?: import('../lib/ai/turnModel/types').AiConversationTurn[];
+  /** Session-level metadata for turn-first chat flows */
+  sessionMetadata?: import('../lib/ai/turnModel/types').AiConversationSessionMetadata;
   /** Creation timestamp */
   createdAt: number;
   /** Last update timestamp */

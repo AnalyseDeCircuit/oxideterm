@@ -14,10 +14,17 @@ import { getProvider } from '../lib/ai/providerRegistry';
 import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
 import type { ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
 import type { AiChatMessage, AiConversation, AiToolCall } from '../types';
-import type { AiAssistantTurn, AiTurnPart, AiTurnToolCall } from '../lib/ai/turnModel/types';
+import type {
+  AiAssistantTurn,
+  AiConversationSessionMetadata,
+  AiConversationTurn,
+  AiTurnPart,
+} from '../lib/ai/turnModel/types';
 import { DEFAULT_SYSTEM_PROMPT, SUGGESTIONS_INSTRUCTION, COMPACTION_TRIGGER_THRESHOLD } from '../lib/ai/constants';
 import { computePromptBudget, determineCompressionLevel } from '../lib/ai/promptBudget/policy';
 import { projectTurnToLegacyMessageFields } from '../lib/ai/turnModel/turnProjection';
+import { createTurnAccumulator } from '../lib/ai/turnModel/turnAccumulator';
+import { getToolUseNegativeConstraint } from '../lib/ai/turnModel/toolUsePolicy';
 import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, hasDeniedCommands, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
@@ -31,6 +38,7 @@ import {
   dtoToConversation,
   encodeAnchorContent,
   generateTitle,
+  hydrateStructuredConversation,
   parseThinkingContent,
   type FullConversationDto,
 } from './aiChatStore.helpers';
@@ -63,6 +71,7 @@ interface ConversationMetaDto {
   updatedAt: number;
   messageCount: number;
   origin?: string;
+  sessionMetadata?: AiConversationSessionMetadata | null;
 }
 
 // Wrapper for list conversations response
@@ -158,7 +167,53 @@ function metaToConversation(meta: ConversationMetaDto): AiConversation {
     messages: [], // Will be loaded on demand
     messageCount: meta.messageCount,
     origin: meta.origin || 'sidebar',
+    sessionMetadata: meta.sessionMetadata ?? {
+      conversationId: meta.id,
+      origin: meta.origin || 'sidebar',
+    },
   };
+}
+
+function buildPersistedMessageRequest(
+  conversationId: string,
+  message: AiChatMessage,
+  contextSnapshot: ContextSnapshotDto | null,
+) {
+  return {
+    id: message.id,
+    conversationId,
+    role: message.role,
+    content: message.metadata?.type === 'compaction-anchor'
+      ? encodeAnchorContent(message.content, message.metadata)
+      : message.content,
+    timestamp: message.timestamp,
+    toolCalls: message.toolCalls || [],
+    contextSnapshot,
+    turn: message.turn ?? null,
+    transcriptRef: message.transcriptRef ?? null,
+  };
+}
+
+function buildConversationPersistenceRequest(conversation: Pick<AiConversation, 'id' | 'title' | 'origin' | 'sessionId' | 'sessionMetadata'>) {
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    sessionId: conversation.sessionId ?? null,
+    origin: conversation.origin ?? 'sidebar',
+    sessionMetadata: conversation.sessionMetadata ?? null,
+  };
+}
+
+async function persistConversationMetadata(
+  conversation: Pick<AiConversation, 'id' | 'title' | 'sessionMetadata'> | null | undefined,
+) {
+  if (!conversation) return;
+
+  await invoke('ai_chat_update_conversation', {
+    conversationId: conversation.id,
+    title: conversation.title,
+    sessionMetadata: conversation.sessionMetadata ?? null,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -215,8 +270,51 @@ function updateToolCallStatusInMessage(
       };
     });
 
-    return conversationChanged ? { ...conversation, messages } : conversation;
+    return conversationChanged
+      ? hydrateStructuredConversation({ ...conversation, messages })
+      : conversation;
   });
+}
+
+function upsertConversationTurn(
+  turns: AiConversation['turns'] | undefined,
+  nextTurn: AiConversationTurn,
+): AiConversationTurn[] {
+  const nextTurns = turns ? [...turns] : [];
+  const index = nextTurns.findIndex((turn) => turn.id === nextTurn.id);
+
+  if (index === -1) {
+    nextTurns.push(nextTurn);
+  } else {
+    nextTurns[index] = nextTurn;
+  }
+
+  return nextTurns;
+}
+
+function mergeConversationSessionMetadata(
+  existing: AiConversationSessionMetadata | undefined,
+  patch: Partial<AiConversationSessionMetadata> & Pick<AiConversationSessionMetadata, 'conversationId'>,
+): AiConversationSessionMetadata {
+  const next: AiConversationSessionMetadata = {
+    ...(existing ?? { conversationId: patch.conversationId }),
+    conversationId: patch.conversationId,
+  };
+
+  if (patch.firstUserMessage !== undefined) next.firstUserMessage = patch.firstUserMessage;
+  if (patch.origin !== undefined) next.origin = patch.origin;
+  if (patch.providerId !== undefined) next.providerId = patch.providerId;
+  if (patch.providerModel !== undefined) next.providerModel = patch.providerModel;
+  if (patch.activeParticipant !== undefined) next.activeParticipant = patch.activeParticipant;
+  if (patch.affectedSessionIds !== undefined) next.affectedSessionIds = patch.affectedSessionIds;
+  if (patch.affectedNodeIds !== undefined) next.affectedNodeIds = patch.affectedNodeIds;
+  if (patch.affectedTabIds !== undefined) next.affectedTabIds = patch.affectedTabIds;
+  if (patch.lastSummaryRoundId !== undefined) next.lastSummaryRoundId = patch.lastSummaryRoundId;
+  if (patch.lastSummaryAt !== undefined) next.lastSummaryAt = patch.lastSummaryAt;
+  if (patch.lastCompactedUntilEntryId !== undefined) next.lastCompactedUntilEntryId = patch.lastCompactedUntilEntryId;
+  if (patch.lastBudgetLevel !== undefined) next.lastBudgetLevel = patch.lastBudgetLevel;
+
+  return next;
 }
 
 export const useAiChatStore = create<AiChatStore>()((set, get) => ({
@@ -285,6 +383,11 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       messages: [],
       createdAt: now,
       updatedAt: now,
+      origin: 'sidebar',
+      sessionMetadata: {
+        conversationId: id,
+        origin: 'sidebar',
+      },
     };
 
     // Update local state immediately
@@ -296,12 +399,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     // Persist to backend
     try {
       await invoke('ai_chat_create_conversation', {
-        request: {
-          id,
-          title: conversation.title,
-          origin: 'sidebar',
-          createdAt: now,
-        },
+        request: buildConversationPersistenceRequest(conversation),
       });
     } catch (e) {
       console.warn('[AiChatStore] Failed to persist conversation:', e);
@@ -355,6 +453,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
   // Rename a conversation
   renameConversation: async (id, title) => {
+    const existingConversation = get().conversations.find((c) => c.id === id);
     set((state) => ({
       conversations: state.conversations.map((c) =>
         c.id === id ? { ...c, title, updatedAt: Date.now() } : c
@@ -362,10 +461,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     }));
 
     try {
-      await invoke('ai_chat_update_conversation', {
-        conversationId: id,
-        title,
-      });
+      await persistConversationMetadata(existingConversation ? { ...existingConversation, title } : null);
     } catch (e) {
       console.warn(`[AiChatStore] Failed to rename conversation ${id}:`, e);
     }
@@ -580,6 +676,11 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       timestamp: Date.now(),
       context: effectiveContext || undefined,
     };
+    const existingRequestMessage = skipUserMessage
+      ? get().conversations.find((c) => c.id === convId)?.messages.at(-1)
+      : undefined;
+    const requestMessageId = existingRequestMessage?.role === 'user' ? existingRequestMessage.id : userMessage.id;
+    const requestTimestamp = existingRequestMessage?.role === 'user' ? existingRequestMessage.timestamp : userMessage.timestamp;
     if (!skipUserMessage) {
       await _addMessage(convId, userMessage, sidebarContext);
     }
@@ -593,7 +694,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         ),
       }));
       try {
-        await invoke('ai_chat_update_conversation', { conversationId: convId, title });
+        const latestConversation = get().conversations.find((c) => c.id === convId);
+        await persistConversationMetadata(latestConversation ? { ...latestConversation, title } : null);
       } catch (e) {
         console.warn('[AiChatStore] Failed to update conversation title:', e);
       }
@@ -607,14 +709,59 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       timestamp: Date.now(),
       isStreaming: true,
     };
+    const conversationTurnId = generateId();
+    const transcriptRef = {
+      conversationId: convId,
+      startEntryId: requestMessageId,
+      endEntryId: assistantMessage.id,
+    };
+    const accumulator = createTurnAccumulator({ turnId: assistantMessage.id });
+    const buildConversationTurn = (turn: AiAssistantTurn): AiConversationTurn => ({
+      id: conversationTurnId,
+      requestMessageId,
+      requestText: cleanContent,
+      startedAt: requestTimestamp,
+      status: turn.status,
+      rounds: turn.toolRounds,
+      pendingSummaries: [],
+    });
+    const initialAssistantTurn = accumulator.snapshot();
     // Add to frontend state only — do NOT persist empty placeholder to backend.
     // Backend persistence happens after streaming completes (success or abort-with-content).
     set((state) => ({
       conversations: state.conversations.map((c) => {
         if (c.id !== convId) return c;
-        return { ...c, messages: [...c.messages, assistantMessage], updatedAt: Date.now() };
+        const existingSessionMetadata = c.sessionMetadata;
+        return {
+          ...c,
+          messages: [
+            ...c.messages,
+            {
+              ...assistantMessage,
+              turn: initialAssistantTurn,
+              transcriptRef,
+            },
+          ],
+          turns: upsertConversationTurn(c.turns, buildConversationTurn(initialAssistantTurn)),
+          sessionMetadata: mergeConversationSessionMetadata(existingSessionMetadata, {
+            conversationId: convId,
+            firstUserMessage: existingSessionMetadata?.firstUserMessage ?? (!skipUserMessage ? content : undefined),
+            origin: c.origin ?? 'sidebar',
+            providerId,
+            providerModel,
+            activeParticipant: parsed.participants[0]?.name,
+            affectedSessionIds: sidebarContext?.env.sessionId ? [sidebarContext.env.sessionId] : existingSessionMetadata?.affectedSessionIds,
+            affectedNodeIds: sidebarContext?.env.activeNodeId ? [sidebarContext.env.activeNodeId] : existingSessionMetadata?.affectedNodeIds,
+          }),
+          updatedAt: Date.now(),
+        };
       }),
     }));
+    try {
+      await persistConversationMetadata(get().conversations.find((c) => c.id === convId));
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to persist session metadata:', e);
+    }
 
     // Prepare messages for API
     const apiMessages: ChatCompletionMessage[] = [];
@@ -704,9 +851,18 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       aiSettings.userContextWindows,
     );
     const toolUseEnabled = aiSettings.toolUse?.enabled === true;
+    const userOverride = providerId
+      ? aiSettings.modelMaxResponseTokens?.[providerId]?.[providerModel]
+      : undefined;
+    const maxResponseTokens = userOverride ?? responseReserve(contextWindow);
 
     if (contextWindow >= 8192) {
       systemPrompt += SUGGESTIONS_INSTRUCTION;
+    }
+
+    const toolUseNegativeConstraint = getToolUseNegativeConstraint(toolUseEnabled);
+    if (toolUseNegativeConstraint) {
+      systemPrompt += `\n\n## Tool Use Policy\n${toolUseNegativeConstraint}`;
     }
 
     // Tool use guidance — slim version focusing on routing & key principles.
@@ -823,8 +979,36 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     // Anchor content counts towards system tokens budget
     const anchorTokens = anchorMsg ? estimateTokens(anchorMsg.content) : 0;
     const totalSystemTokens = systemTokens + anchorTokens;
+    const estimatedHistoryTokens = regularMessages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
+    const sendBudgetDecision = determineCompressionLevel({
+      contextWindow,
+      responseReserve: maxResponseTokens,
+      systemBudget: totalSystemTokens,
+      historyTokens: estimatedHistoryTokens,
+      trimmableHistoryTokens: estimatedHistoryTokens,
+      canSummarize: false,
+      canLookupTranscript: false,
+    });
 
     const trimResult = trimHistoryToTokenBudget(regularMessages, contextWindow, totalSystemTokens, 0);
+
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== convId) return c;
+        return {
+          ...c,
+          sessionMetadata: mergeConversationSessionMetadata(c.sessionMetadata, {
+            conversationId: convId,
+            lastBudgetLevel: sendBudgetDecision.level,
+          }),
+        };
+      }),
+    }));
+    try {
+      await persistConversationMetadata(get().conversations.find((c) => c.id === convId));
+    } catch (e) {
+      console.warn('[AiChatStore] Failed to persist budget metadata:', e);
+    }
 
     // Inject anchor as system context if present
     if (anchorMsg) {
@@ -868,21 +1052,43 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 50; // ms - throttle updates for smoother streaming
 
-      const updateContent = (content: string, force = false, isThinkingStreaming = false, toolCalls?: AiToolCall[]) => {
+      const updateAssistantSnapshot = (
+        force = false,
+        isThinkingStreaming = false,
+        options?: { suggestions?: AiChatMessage['suggestions']; isStreaming?: boolean },
+      ) => {
         const now = Date.now();
         if (!force && now - lastUpdateTime < UPDATE_INTERVAL) return;
         lastUpdateTime = now;
-        
+
+        const turnSnapshot = accumulator.snapshot();
+        const projected = projectTurnToLegacyMessageFields(turnSnapshot);
+
         set((state) => ({
           conversations: state.conversations.map((c) => {
             if (c.id !== convId) return c;
+
             return {
               ...c,
-              messages: c.messages.map((m) =>
-                m.id === assistantMessage.id 
-                  ? { ...m, content, isThinkingStreaming, ...(toolCalls !== undefined ? { toolCalls: toolCalls.map(tc => ({ ...tc })) } : {}) } 
-                  : m
-              ),
+              messages: c.messages.map((m) => {
+                if (m.id !== assistantMessage.id) return m;
+
+                const nextMessage: AiChatMessage = {
+                  ...m,
+                  ...projected,
+                  turn: turnSnapshot,
+                  transcriptRef,
+                  isThinkingStreaming,
+                  isStreaming: options?.isStreaming ?? turnSnapshot.status === 'streaming',
+                };
+
+                if (options?.suggestions !== undefined) {
+                  nextMessage.suggestions = options.suggestions;
+                }
+
+                return nextMessage;
+              }),
+              turns: upsertConversationTurn(c.turns, buildConversationTurn(turnSnapshot)),
               updatedAt: now,
             };
           }),
@@ -895,12 +1101,6 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
 
       const provider = getProvider(providerType);
       let thinkingContent = '';
-
-      // Calculate dynamic maxResponseTokens (user override > dynamic default)
-      const userOverride = providerId
-        ? aiSettings.modelMaxResponseTokens?.[providerId]?.[providerModel]
-        : undefined;
-      const maxResponseTokens = userOverride ?? responseReserve(contextWindow);
 
       // Tool use configuration
       const autoApproveTools = aiSettings.toolUse?.autoApproveTools ?? {};
@@ -970,80 +1170,35 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       const persistedToolCalls: AiToolCall[] = [];
       let accumulatedContent = ''; // Preserves text from intermediate rounds for UI display
 
-      const buildAssistantTurn = (
-        content: string,
-        thinking: string | undefined,
-        toolCalls: AiToolCall[],
-        status: AiAssistantTurn['status'],
-      ): AiAssistantTurn => {
-        const parts: AiTurnPart[] = [];
+      const appendSyntheticRejectedToolCalls = (
+        toolCalls: Array<{ id: string; name: string; arguments: string }>,
+        error: string,
+      ) => {
+        if (toolCalls.length === 0) return;
 
-        if (thinking) {
-          parts.push({ type: 'thinking', text: thinking });
-        }
+        accumulator.startRound(Math.max(round, 1));
 
-        if (content) {
-          parts.push({ type: 'text', text: content });
-        }
+        const rejectedToolCalls: AiToolCall[] = toolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+          status: 'rejected',
+          result: {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            success: false,
+            output: '',
+            error,
+          },
+        }));
 
-        for (const toolCall of toolCalls) {
-          parts.push({
-            type: 'tool_call',
-            id: toolCall.id,
-            name: toolCall.name,
-            argumentsText: toolCall.arguments,
-            status: toolCall.status === 'pending' || toolCall.status === 'pending_user_approval' ? 'partial' : 'complete',
-          });
-
-          if (toolCall.result) {
-            parts.push({
-              type: 'tool_result',
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              success: toolCall.result.success,
-              output: toolCall.result.output,
-              error: toolCall.result.error,
-              durationMs: toolCall.result.durationMs,
-              truncated: toolCall.result.truncated,
-            });
+        persistedToolCalls.push(...rejectedToolCalls);
+        accumulator.syncToolCalls(persistedToolCalls);
+        for (const rejectedToolCall of rejectedToolCalls) {
+          if (rejectedToolCall.result) {
+            accumulator.onToolResult(rejectedToolCall.result, rejectedToolCall.name);
           }
         }
-
-        const toolRounds: AiAssistantTurn['toolRounds'] = toolCalls.length > 0
-          ? [{
-              id: `${assistantMessage.id}-round-final`,
-              round: 1,
-              toolCalls: toolCalls.map((toolCall): AiTurnToolCall => ({
-                id: toolCall.id,
-                name: toolCall.name,
-                argumentsText: toolCall.arguments,
-                approvalState: toolCall.status === 'pending_user_approval'
-                  ? 'pending'
-                  : toolCall.status === 'approved'
-                    ? 'approved'
-                    : toolCall.status === 'rejected'
-                      ? 'rejected'
-                      : undefined,
-                executionState: toolCall.status === 'running'
-                  ? 'running'
-                  : toolCall.status === 'completed'
-                    ? 'completed'
-                    : toolCall.status === 'error'
-                      ? 'error'
-                      : toolCall.status === 'pending'
-                        ? 'pending'
-                        : undefined,
-              })),
-            }]
-          : [];
-
-        return {
-          id: assistantMessage.id,
-          status,
-          parts,
-          toolRounds,
-          plainTextSummary: content,
-        };
       };
 
       const toUsableBudgetThreshold = (
@@ -1111,16 +1266,34 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           switch (event.type) {
             case 'content':
               fullContent += event.content;
-              updateContent(accumulatedContent + fullContent, false, false);
+              accumulator.onContent(event.content);
+              updateAssistantSnapshot(false, false);
               break;
             case 'thinking':
               thinkingContent += event.content;
-              updateContent(accumulatedContent + (fullContent || '...'), false, true);
+              accumulator.onThinking(event.content);
+              updateAssistantSnapshot(false, true);
+              break;
+            case 'tool_call':
+              accumulator.onToolCallPartial({
+                id: event.id,
+                name: event.name,
+                argumentsText: event.arguments,
+              });
+              updateAssistantSnapshot(true, false);
               break;
             case 'tool_call_complete':
+              accumulator.onToolCallComplete({
+                id: event.id,
+                name: event.name,
+                argumentsText: event.arguments,
+              });
               completedToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
+              updateAssistantSnapshot(true, false);
               break;
             case 'error':
+              accumulator.onError(event.message);
+              updateAssistantSnapshot(true, false, { isStreaming: false });
               throw new Error(event.message);
             case 'done':
               break;
@@ -1134,15 +1307,19 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
 
         if (!toolContext) {
           // Tool use not enabled but model generated tool calls — append error and stop
+          appendSyntheticRejectedToolCalls(completedToolCalls, 'Tool execution unavailable: tool use is not enabled.');
           fullContent += '\n\n[Tool execution unavailable: tool use is not enabled]';
-          updateContent(accumulatedContent + fullContent, true, false);
+          accumulator.onContent('\n\n[Tool execution unavailable: tool use is not enabled]');
+          updateAssistantSnapshot(true, false);
           break;
         }
 
         toolContext = await resolveToolContext();
         if (!toolContext) {
+          appendSyntheticRejectedToolCalls(completedToolCalls, 'Tool execution unavailable: tool use is not enabled.');
           fullContent += '\n\n[Tool execution unavailable: tool use is not enabled]';
-          updateContent(accumulatedContent + fullContent, true, false);
+          accumulator.onContent('\n\n[Tool execution unavailable: tool use is not enabled]');
+          updateAssistantSnapshot(true, false);
           break;
         }
 
@@ -1152,12 +1329,19 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         if (currentToolContext.activeNodeId === null) {
           const needsNode = completedToolCalls.some(tc => !canRunWithoutActiveNode(tc));
           if (needsNode) {
+            appendSyntheticRejectedToolCalls(
+              completedToolCalls,
+              'The requested tools require an active terminal session or explicit node_id/session_id.',
+            );
+            let unavailableText = '';
             if (currentToolContext.activeTerminalType === 'local_terminal' && currentToolContext.activeSessionId) {
-              fullContent += '\n\n[The active tab is a local terminal. Remote node tools such as read_file, list_directory, grep_search, and write_file require an SSH node_id. For local machine tasks, use local_exec or terminal_exec against the current local session. To inspect an SSH host, switch to an SSH terminal tab or use list_sessions and pass node_id explicitly.]';
+              unavailableText = '\n\n[The active tab is a local terminal. Remote node tools such as read_file, list_directory, grep_search, and write_file require an SSH node_id. For local machine tasks, use local_exec or terminal_exec against the current local session. To inspect an SSH host, switch to an SSH terminal tab or use list_sessions and pass node_id explicitly.]';
             } else {
-              fullContent += '\n\n[Some tools require an active terminal session. Please open a terminal tab first, or use list_sessions to discover available sessions and pass node_id or session_id explicitly.]';
+              unavailableText = '\n\n[Some tools require an active terminal session. Please open a terminal tab first, or use list_sessions to discover available sessions and pass node_id or session_id explicitly.]';
             }
-            updateContent(accumulatedContent + fullContent, true, false);
+            fullContent += unavailableText;
+            accumulator.onContent(unavailableText);
+            updateAssistantSnapshot(true, false);
             break;
           }
         }
@@ -1165,8 +1349,10 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // Guard against infinite loops
         round++;
         if (round > MAX_TOOL_ROUNDS) {
+          appendSyntheticRejectedToolCalls(completedToolCalls, 'Tool use limit reached.');
           fullContent += '\n\n[Tool use limit reached]';
-          updateContent(accumulatedContent + fullContent, true, false);
+          accumulator.onContent('\n\n[Tool use limit reached]');
+          updateAssistantSnapshot(true, false);
           break;
         }
 
@@ -1181,10 +1367,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           arguments: tc.arguments,
           status: 'pending' as const,
         }));
+        accumulator.startRound(round);
         persistedToolCalls.push(...toolCallEntries);
+        accumulator.syncToolCalls(persistedToolCalls);
 
         // Show tool calls in UI immediately
-        updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+        updateAssistantSnapshot(true, false);
 
         // Approve tools based on per-tool settings
         const availableToolNames = new Set(toolDefs?.map(t => t.name) ?? []);
@@ -1202,6 +1390,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               output: '',
               error: 'Tool not available in current context.',
             };
+            accumulator.onToolResult(tc.result, tc.name);
             continue;
           }
 
@@ -1228,7 +1417,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             pendingApprovalIds.push(tc.id);
           }
         }
-        updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+        accumulator.syncToolCalls(persistedToolCalls);
+        updateAssistantSnapshot(true, false);
 
         // Wait for user to approve/reject pending tools
         if (pendingApprovalIds.length > 0) {
@@ -1286,7 +1476,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               }
             }
           }
-          updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+          accumulator.syncToolCalls(persistedToolCalls);
+          updateAssistantSnapshot(true, false);
         }
 
         // Execute approved tools
@@ -1294,6 +1485,11 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         for (const tc of toolCallEntries) {
           if (tc.status !== 'approved') {
             tc.status = 'rejected';
+            if (tc.result) {
+              accumulator.onToolResult(tc.result, tc.name);
+            }
+            accumulator.syncToolCalls(persistedToolCalls);
+            updateAssistantSnapshot(true, false);
             toolResultMessages.push({
               role: 'tool',
               content: JSON.stringify({ error: tc.result?.error || 'Tool call was rejected by the user.' }),
@@ -1304,12 +1500,16 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           }
 
           tc.status = 'running';
-          updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+          accumulator.syncToolCalls(persistedToolCalls);
+          updateAssistantSnapshot(true, false);
 
           // Check abort before each tool execution
           if (abortController.signal.aborted) {
             tc.status = 'rejected';
             tc.result = { toolCallId: tc.id, toolName: tc.name, success: false, output: '', error: 'Generation was stopped.' };
+            accumulator.onToolResult(tc.result, tc.name);
+            accumulator.syncToolCalls(persistedToolCalls);
+            updateAssistantSnapshot(true, false);
             toolResultMessages.push({ role: 'tool', content: JSON.stringify({ error: 'Generation was stopped.' }), tool_call_id: tc.id, tool_name: tc.name });
             continue;
           }
@@ -1328,7 +1528,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               tool_call_id: tc.id,
               tool_name: tc.name,
             });
-            updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+            accumulator.onToolResult(tc.result, tc.name);
+            accumulator.syncToolCalls(persistedToolCalls);
+            updateAssistantSnapshot(true, false);
             continue;
           }
           parsedArgs = maybeParsedArgs;
@@ -1340,7 +1542,9 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           result.toolCallId = tc.id;
           tc.result = result;
           tc.status = result.success ? 'completed' : 'error';
-          updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+          accumulator.onToolResult(result, tc.name);
+          accumulator.syncToolCalls(persistedToolCalls);
+          updateAssistantSnapshot(true, false);
 
           toolResultMessages.push({
             role: 'tool',
@@ -1384,6 +1588,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // Accumulate content for UI display, reset for next API round
         if (fullContent) {
           accumulatedContent += fullContent + '\n\n';
+          accumulator.onContent('\n\n');
+          updateAssistantSnapshot(true, false);
         }
         fullContent = '';
         thinkingContent = '';
@@ -1406,20 +1612,23 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
 
         if (toolLoopBudget.level === 4) {
           fullContent = '[Tool use stopped: approaching context window limit]';
-          updateContent(accumulatedContent + fullContent, true, false, [...persistedToolCalls]);
+          accumulator.onContent(fullContent);
+          updateAssistantSnapshot(true, false);
           break;
         }
       }
 
-      // Combine accumulated + final content for display
-      const displayContent = accumulatedContent + fullContent;
+      accumulator.setStatus('complete');
+      let assistantTurn = accumulator.snapshot();
+      const projectedSnapshot = projectTurnToLegacyMessageFields(assistantTurn);
+      const displayContent = projectedSnapshot.content;
 
       // For providers that handle thinking natively (Anthropic), use extracted thinking
       // For others (OpenAI-compatible), parse <thinking> tags from content
       let mainContent = displayContent;
-      let parsedThinking = thinkingContent || undefined;
+      let parsedThinking = projectedSnapshot.thinkingContent;
 
-      if (!thinkingContent && displayContent.includes('<thinking>')) {
+      if (!parsedThinking && displayContent.includes('<thinking>')) {
         const parsedThink = parseThinkingContent(displayContent);
         mainContent = parsedThink.content;
         parsedThinking = parsedThink.thinkingContent;
@@ -1433,7 +1642,20 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         parsedSuggestions = sugResult.suggestions;
       }
 
-      const assistantTurn = buildAssistantTurn(mainContent, parsedThinking, persistedToolCalls, 'complete');
+      if (mainContent !== projectedSnapshot.content || parsedThinking !== projectedSnapshot.thinkingContent) {
+        const structuredParts = assistantTurn.parts.filter((part) => part.type !== 'text' && part.type !== 'thinking');
+        assistantTurn = {
+          ...assistantTurn,
+          status: 'complete',
+          parts: [
+            ...(parsedThinking ? [{ type: 'thinking', text: parsedThinking } satisfies AiTurnPart] : []),
+            ...(mainContent ? [{ type: 'text', text: mainContent } satisfies AiTurnPart] : []),
+            ...structuredParts,
+          ],
+          plainTextSummary: mainContent,
+        };
+      }
+
       const projectedAssistantMessage = projectTurnToLegacyMessageFields(assistantTurn);
 
       // Final update with parsed content
@@ -1448,12 +1670,14 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
                     ...m,
                     ...projectedAssistantMessage,
                     turn: assistantTurn,
+                    transcriptRef,
                     isThinkingStreaming: false,
                     isStreaming: false,
                     ...(parsedSuggestions ? { suggestions: parsedSuggestions } : {}),
                   }
                 : m
             ),
+            turns: upsertConversationTurn(c.turns, buildConversationTurn(assistantTurn)),
             updatedAt: Date.now(),
           };
         }),
@@ -1462,16 +1686,15 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       // Persist final content to backend (first persist — placeholder was local-only)
       try {
         await invoke('ai_chat_save_message', {
-          request: {
-            id: assistantMessage.id,
-            conversationId: convId,
-            role: 'assistant',
-            content: displayContent, // Store accumulated content from all rounds
-            timestamp: assistantMessage.timestamp,
+          request: buildPersistedMessageRequest(convId, {
+            ...assistantMessage,
+            ...projectedAssistantMessage,
+            turn: assistantTurn,
+            transcriptRef,
             toolCalls: persistedToolCalls,
-            contextSnapshot: null,
-          },
+          }, null),
         });
+        await persistConversationMetadata(get().conversations.find((c) => c.id === convId));
       } catch (e) {
         console.warn('[AiChatStore] Failed to persist final message content:', e);
       }
@@ -1487,25 +1710,36 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           set((state) => ({
             conversations: state.conversations.map((c) =>
               c.id === convId
-                ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+                ? hydrateStructuredConversation({ ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) })
                 : c
             ),
           }));
         } else {
           // Partial content — keep it and persist to backend
           _setStreaming(convId, assistantMessage.id, false);
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id !== convId) return c;
+              return hydrateStructuredConversation({
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantMessage.id && m.turn
+                    ? {
+                        ...m,
+                        isStreaming: false,
+                        isThinkingStreaming: false,
+                        turn: { ...m.turn, status: 'complete' },
+                      }
+                    : m
+                ),
+              });
+            }),
+          }));
           try {
             await invoke('ai_chat_save_message', {
-              request: {
-                id: assistantMessage.id,
-                conversationId: convId,
-                role: 'assistant',
-                content: currentMsg.content,
-                timestamp: assistantMessage.timestamp,
-                toolCalls: currentMsg.toolCalls || [],
-                contextSnapshot: null,
-              },
+              request: buildPersistedMessageRequest(convId, currentMsg, null),
             });
+            await persistConversationMetadata(get().conversations.find((c) => c.id === convId));
           } catch (persistErr) {
             console.warn('[AiChatStore] Failed to persist aborted message:', persistErr);
           }
@@ -1517,7 +1751,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         set((state) => ({
           conversations: state.conversations.map((c) =>
             c.id === convId
-              ? { ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) }
+              ? hydrateStructuredConversation({ ...c, messages: c.messages.filter((m) => m.id !== assistantMessage.id) })
               : c
           ),
         }));
@@ -1617,11 +1851,11 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     set((state) => ({
       conversations: state.conversations.map((c) =>
         c.id === activeConversationId
-          ? {
+          ? hydrateStructuredConversation({
               ...c,
               messages: c.messages.slice(0, lastUserMessageIndex + 1),
               updatedAt: Date.now(),
-            }
+            })
           : c
       ),
     }));
@@ -1690,7 +1924,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     set((state) => ({
       conversations: state.conversations.map((c) =>
         c.id === activeConversationId
-          ? { ...c, messages: c.messages.slice(0, msgIndex), updatedAt: Date.now() }
+          ? hydrateStructuredConversation({ ...c, messages: c.messages.slice(0, msgIndex), updatedAt: Date.now() })
           : c
       ),
     }));
@@ -1708,12 +1942,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // First message — delete all messages by recreating the conversation
         await invoke('ai_chat_delete_conversation', { conversationId: activeConversationId });
         await invoke('ai_chat_create_conversation', {
-          request: {
-            id: activeConversationId,
-            title: conversation.title,
-            sessionId: conversation.sessionId ?? null,
-            origin: conversation.origin ?? 'sidebar',
-          },
+          request: buildConversationPersistenceRequest(conversation),
         });
       }
     } catch (e) {
@@ -1722,7 +1951,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       set((state) => ({
         conversations: state.conversations.map((c) =>
           c.id === activeConversationId
-            ? { ...c, messages: conversation.messages, updatedAt: conversation.updatedAt }
+            ? hydrateStructuredConversation({ ...c, messages: conversation.messages, updatedAt: conversation.updatedAt })
             : c
         ),
       }));
@@ -1740,12 +1969,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       return {
         conversations: state.conversations.map((c) =>
           c.id === activeConversationId
-            ? {
+            ? hydrateStructuredConversation({
                 ...c,
                 messages: c.messages.map((m, i) =>
                   i === msgIndex ? { ...m, branches: branchData } : m
                 ),
-              }
+              })
             : c
         ),
       };
@@ -1795,6 +2024,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         i === 0 ? { ...m, branches: updatedBranches } : m
       ),
     ];
+    const normalizedConversation = hydrateStructuredConversation({
+      ...conversation,
+      messages: newMessages,
+      updatedAt: Date.now(),
+    });
+    const normalizedTargetTail = normalizedConversation.messages.slice(msgIndex);
 
     // ── Backend sync ──
     // Delete everything from the branch point onwards, then re-save the target tail.
@@ -1810,36 +2045,21 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // Branch point is the first message — recreate conversation
         await invoke('ai_chat_delete_conversation', { conversationId: activeConversationId });
         await invoke('ai_chat_create_conversation', {
-          request: {
-            id: activeConversationId,
-            title: conversation.title,
-            sessionId: conversation.sessionId ?? null,
-            origin: conversation.origin ?? 'sidebar',
-          },
+          request: buildConversationPersistenceRequest(conversation),
         });
       }
 
       // Re-save target branch messages to backend
-      for (const msg of targetTail) {
-        const persistContent = msg.metadata?.type === 'compaction-anchor'
-          ? encodeAnchorContent(msg.content, msg.metadata)
-          : msg.content;
+      for (const msg of normalizedTargetTail) {
         await invoke('ai_chat_save_message', {
-          request: {
-            id: msg.id,
-            conversationId: activeConversationId,
-            role: msg.role,
-            content: persistContent,
-            timestamp: msg.timestamp,
-            contextSnapshot: null,
-          },
+          request: buildPersistedMessageRequest(activeConversationId, msg, null),
         });
       }
       // Backend sync succeeded — apply to frontend
       set((state) => ({
         conversations: state.conversations.map((c) =>
           c.id === activeConversationId
-            ? { ...c, messages: newMessages, updatedAt: Date.now() }
+            ? normalizedConversation
             : c
         ),
       }));
@@ -1863,10 +2083,16 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
 
     // Remove from local state (optimistic update)
     const updatedMessages = conversation.messages.filter((m) => m.id !== messageId);
+    const normalizedUpdatedConversation = hydrateStructuredConversation({
+      ...conversation,
+      messages: updatedMessages,
+      updatedAt: Date.now(),
+    });
+    const normalizedUpdatedMessages = normalizedUpdatedConversation.messages;
     set((state) => ({
       conversations: state.conversations.map((c) =>
         c.id === activeConversationId
-          ? { ...c, messages: updatedMessages, updatedAt: Date.now() }
+          ? normalizedUpdatedConversation
           : c
       ),
     }));
@@ -1876,7 +2102,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     try {
       // If there are remaining messages, we need to re-persist them all
       // Using replace_conversation_messages with the last message
-      if (updatedMessages.length > 0) {
+      if (normalizedUpdatedMessages.length > 0) {
         // Delete everything after the message before the deleted one, then re-add
         // Simpler approach: use delete_messages_after with the message before deleted
         if (msgIndex > 0) {
@@ -1886,48 +2112,27 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             afterMessageId: prevMessage.id,
           });
           // Re-save messages that were after the deleted one
-          for (const msg of updatedMessages.slice(msgIndex)) {
+          for (const msg of normalizedUpdatedMessages.slice(msgIndex)) {
             await invoke('ai_chat_save_message', {
-              request: {
-                id: msg.id,
-                conversationId: activeConversationId,
-                role: msg.role,
-                content: msg.content,
-                timestamp: msg.timestamp,
-                contextSnapshot: null,
-              },
+              request: buildPersistedMessageRequest(activeConversationId, msg, null),
             });
           }
         } else {
           // Deleted message was the first — rebuild via replace + re-save
           // Use replace_conversation_messages with the new first message to
           // atomically clear all old messages and insert the new head.
-          const [head, ...rest] = updatedMessages;
+          const [head, ...rest] = normalizedUpdatedMessages;
           await invoke('ai_chat_replace_conversation_messages', {
             request: {
               conversationId: activeConversationId,
               title: conversation.title,
-              message: {
-                id: head.id,
-                conversationId: activeConversationId,
-                role: head.role,
-                content: head.content,
-                timestamp: head.timestamp,
-                contextSnapshot: null,
-              },
+              message: buildPersistedMessageRequest(activeConversationId, head, null),
             },
           });
           // Re-save the remaining messages after the new head
           for (const msg of rest) {
             await invoke('ai_chat_save_message', {
-              request: {
-                id: msg.id,
-                conversationId: activeConversationId,
-                role: msg.role,
-                content: msg.content,
-                timestamp: msg.timestamp,
-                contextSnapshot: null,
-              },
+              request: buildPersistedMessageRequest(activeConversationId, msg, null),
             });
           }
         }
@@ -1935,12 +2140,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // No messages left — delete and recreate the conversation
         await invoke('ai_chat_delete_conversation', { conversationId: activeConversationId });
         await invoke('ai_chat_create_conversation', {
-          request: {
-            id: activeConversationId,
-            title: conversation.title,
-            sessionId: conversation.sessionId ?? null,
-            origin: conversation.origin ?? 'sidebar',
-          },
+          request: buildConversationPersistenceRequest(conversation),
         });
       }
     } catch (e) {
@@ -1949,7 +2149,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       set((state) => ({
         conversations: state.conversations.map((c) =>
           c.id === activeConversationId
-            ? { ...c, messages: conversation.messages, updatedAt: conversation.updatedAt }
+            ? hydrateStructuredConversation({ ...c, messages: conversation.messages, updatedAt: conversation.updatedAt })
             : c
         ),
       }));
@@ -2078,6 +2278,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         content: `📋 **${i18n.t('ai.context.summary_prefix', { count: originalCount })}**\n\n${summaryContent}`,
         timestamp: Date.now(),
       };
+      const normalizedSummaryConversation = hydrateStructuredConversation({
+        ...conversation,
+        messages: [summaryMessage],
+        updatedAt: Date.now(),
+      });
+      const [normalizedSummaryMessage] = normalizedSummaryConversation.messages;
 
       // Atomically replace all messages in a single backend transaction.
       // If the command fails, local state is untouched and the error bubbles
@@ -2086,14 +2292,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         request: {
           conversationId: activeConversationId,
           title: conversation.title,
-          message: {
-            id: summaryMessage.id,
-            conversationId: activeConversationId,
-            role: summaryMessage.role,
-            content: summaryMessage.content,
-            timestamp: summaryMessage.timestamp,
-            contextSnapshot: null,
-          },
+          message: buildPersistedMessageRequest(activeConversationId, normalizedSummaryMessage, null),
         },
       });
 
@@ -2101,7 +2300,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       set((state) => ({
         conversations: state.conversations.map((c) => {
           if (c.id !== activeConversationId) return c;
-          return { ...c, messages: [summaryMessage], updatedAt: Date.now() };
+          return normalizedSummaryConversation;
         }),
       }));
     } catch (e) {
@@ -2309,25 +2508,31 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       };
 
       const newMessages = [anchorMessage, ...toKeep, ...appendedMessages];
+      const normalizedCompactedConversation = hydrateStructuredConversation({
+        ...latestConversation,
+        title: latestConversation.title,
+        messages: newMessages,
+        messageCount: newMessages.length,
+        updatedAt: Date.now(),
+        sessionMetadata: mergeConversationSessionMetadata(latestConversation.sessionMetadata, {
+          conversationId: convId,
+          lastCompactedUntilEntryId: toCompact.at(-1)?.id,
+          lastSummaryAt: anchorMessage.timestamp,
+        }),
+      });
+      const normalizedCompactedMessages = normalizedCompactedConversation.messages;
 
       await invoke('ai_chat_replace_conversation_message_list', {
         request: {
           conversationId: convId,
           title: latestConversation.title,
           expectedMessageIds: latestMessageIds,
-          messages: newMessages.map((msg) => ({
-            id: msg.id,
-            conversationId: convId,
-            role: msg.role,
-            content: msg.metadata?.type === 'compaction-anchor'
-              ? encodeAnchorContent(msg.content, msg.metadata)
-              : msg.content,
-            timestamp: msg.timestamp,
-            toolCalls: msg.toolCalls || [],
-            contextSnapshot: null,
+          messages: normalizedCompactedMessages.map((msg) => ({
+            ...buildPersistedMessageRequest(convId, msg, null),
           })),
         },
       });
+      await persistConversationMetadata(normalizedCompactedConversation);
 
       const postPersistConversation = get().conversations.find((c) => c.id === convId);
       const postPersistMessageIds = postPersistConversation?.messages.map((message) => message.id) ?? [];
@@ -2337,19 +2542,18 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       const postPersistAppended = sharesLatestPrefixAfterPersist && postPersistConversation
         ? postPersistConversation.messages.slice(latestMessageIds.length)
         : [];
-      const finalMessages = [...newMessages, ...postPersistAppended];
+      const finalMessages = [...normalizedCompactedMessages, ...postPersistAppended];
 
       // Update local state
       set((state) => ({
         conversations: state.conversations.map((c) => {
           if (c.id !== convId) return c;
-          return {
-            ...c,
-            title: latestConversation.title,
+          return hydrateStructuredConversation({
+            ...normalizedCompactedConversation,
             messages: finalMessages,
             messageCount: finalMessages.length,
             updatedAt: Date.now(),
-          };
+          });
         }),
         compactionInfo: silent
           ? {
@@ -2400,7 +2604,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     set((state) => ({
       conversations: state.conversations.map((c) => {
         if (c.id !== conversationId) return c;
-        return { ...c, messages: [...c.messages, message], updatedAt: Date.now() };
+        return hydrateStructuredConversation({ ...c, messages: [...c.messages, message], updatedAt: Date.now() });
       }),
     }));
 
@@ -2418,15 +2622,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         : null;
 
       await invoke('ai_chat_save_message', {
-        request: {
-          id: message.id,
-          conversationId,
-          role: message.role,
-          content: message.content,
-          timestamp: message.timestamp,
-          toolCalls: message.toolCalls || [],
-          contextSnapshot,
-        },
+        request: buildPersistedMessageRequest(conversationId, message, contextSnapshot),
       });
     } catch (e) {
       console.warn('[AiChatStore] Failed to persist message:', e);

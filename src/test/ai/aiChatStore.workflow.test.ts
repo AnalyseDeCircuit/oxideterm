@@ -369,7 +369,95 @@ describe('aiChatStore workflows', () => {
       id: 'tool-1',
       status: 'completed',
     });
+    expect(originalAssistant?.turn?.toolRounds[0]?.toolCalls[0]).toMatchObject({
+      id: 'tool-1',
+      executionState: 'completed',
+    });
     expect(useAiChatStore.getState().activeConversationId).toBe('conv-2');
+  });
+
+  it('injects the disabled-tools negative constraint into the system prompt', async () => {
+    setConversation([]);
+    streamText('plain answer');
+
+    await useAiChatStore.getState().sendMessage('what files are here?');
+
+    const providerMessages = providerStreamMock.mock.calls[0]?.[1];
+    expect(providerMessages?.[0]?.role).toBe('system');
+    expect(providerMessages?.[0]?.content).toContain('TOOL CALLING IS CURRENTLY DISABLED');
+  });
+
+  it('stores turn snapshots and session metadata for sidebar sends', async () => {
+    setConversation([]);
+    streamText('assistant answer');
+
+    await useAiChatStore.getState().sendMessage('first question');
+
+    const conversation = useAiChatStore.getState().conversations[0];
+    const userMessage = conversation.messages.find((message) => message.role === 'user');
+    const assistantMessage = conversation.messages.find((message) => message.role === 'assistant');
+
+    expect(assistantMessage?.turn?.parts).toEqual([
+      expect.objectContaining({ type: 'text', text: 'assistant answer' }),
+    ]);
+    expect(assistantMessage?.transcriptRef).toEqual({
+      conversationId: 'conv-1',
+      startEntryId: userMessage?.id,
+      endEntryId: assistantMessage?.id,
+    });
+    expect(conversation.turns?.[0]).toMatchObject({
+      requestMessageId: userMessage?.id,
+      requestText: 'first question',
+      status: 'complete',
+    });
+    expect(conversation.sessionMetadata).toMatchObject({
+      conversationId: 'conv-1',
+      firstUserMessage: 'first question',
+      origin: 'sidebar',
+      providerId: 'provider-1',
+      providerModel: 'mock-model',
+      lastBudgetLevel: 0,
+    });
+  });
+
+  it('records synthetic rejected tool calls with preserved arguments when tools are disabled', async () => {
+    setConversation([]);
+    providerStreamMock.mockImplementation(async function* () {
+      yield { type: 'tool_call_complete', id: 'tool-disabled-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+      yield { type: 'done' };
+    });
+
+    await useAiChatStore.getState().sendMessage('run pwd');
+
+    const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+    expect(assistantMessage?.toolCalls?.[0]).toMatchObject({
+      id: 'tool-disabled-1',
+      arguments: '{"command":"pwd"}',
+      status: 'rejected',
+      result: expect.objectContaining({ error: 'Tool execution unavailable: tool use is not enabled.' }),
+    });
+  });
+
+  it('reuses the existing user message as the request anchor when skipUserMessage is true', async () => {
+    setConversation([
+      { id: 'u-existing', role: 'user', content: 'persisted prompt', timestamp: 1 },
+    ]);
+    streamText('regenerated answer');
+
+    await useAiChatStore.getState().sendMessage('persisted prompt', undefined, { skipUserMessage: true });
+
+    const conversation = useAiChatStore.getState().conversations[0];
+    const assistantMessage = conversation.messages.find((message) => message.role === 'assistant');
+
+    expect(assistantMessage?.transcriptRef).toEqual({
+      conversationId: 'conv-1',
+      startEntryId: 'u-existing',
+      endEntryId: assistantMessage?.id,
+    });
+    expect(conversation.turns?.[0]).toMatchObject({
+      requestMessageId: 'u-existing',
+      requestText: 'persisted prompt',
+    });
   });
 
   it('regenerateLastResponse truncates assistant replies and resends the last user message', async () => {
@@ -438,10 +526,22 @@ describe('aiChatStore workflows', () => {
         title: 'Conversation',
         sessionId: null,
         origin: 'sidebar',
+        sessionMetadata: null,
       },
     });
     expect(invokeMock).toHaveBeenNthCalledWith(3, 'ai_chat_save_message', expect.objectContaining({
       request: expect.objectContaining({ id: 'user-old', role: 'user' }),
+    }));
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'ai_chat_save_message', expect.objectContaining({
+      request: expect.objectContaining({
+        id: 'assistant-old',
+        role: 'assistant',
+        transcriptRef: {
+          conversationId: 'conv-1',
+          startEntryId: 'user-old',
+          endEntryId: 'assistant-old',
+        },
+      }),
     }));
     expect(useAiChatStore.getState().conversations[0].messages[0]).toMatchObject({
       id: 'user-old',
@@ -501,6 +601,18 @@ describe('aiChatStore workflows', () => {
         ]),
       }),
     }));
+    expect(invokeMock).toHaveBeenCalledWith('ai_chat_update_conversation', {
+      conversationId: 'conv-1',
+      title: 'Conversation',
+      sessionMetadata: expect.objectContaining({
+        conversationId: 'conv-1',
+        lastCompactedUntilEntryId: 'u-2',
+      }),
+    });
+    expect(useAiChatStore.getState().conversations[0].sessionMetadata).toMatchObject({
+      conversationId: 'conv-1',
+      lastCompactedUntilEntryId: 'u-2',
+    });
   });
 
   it('silent compaction refreshes the active conversation immediately', async () => {

@@ -1235,6 +1235,7 @@ async fn ask<W: AsyncWriteExt + Unpin>(
                 message_count: 0,
                 session_id: session_id.clone(),
                 origin: "cli".to_string(),
+                session_metadata: None,
             };
             let _ = store.create_conversation(&meta);
         }
@@ -1259,6 +1260,8 @@ async fn ask<W: AsyncWriteExt + Unpin>(
             timestamp: now,
             tool_calls: vec![],
             context_snapshot: None,
+            turn: None,
+            transcript_ref: None,
         };
         let _ = store.save_message(user_msg);
     }
@@ -1320,6 +1323,8 @@ async fn ask<W: AsyncWriteExt + Unpin>(
                 timestamp: now,
                 tool_calls: vec![],
                 context_snapshot: None,
+                turn: None,
+                transcript_ref: None,
             };
             let _ = store.save_message(assistant_msg);
         }

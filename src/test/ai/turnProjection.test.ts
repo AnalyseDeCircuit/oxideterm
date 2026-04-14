@@ -144,4 +144,48 @@ describe('turnProjection', () => {
       }),
     ]);
   });
+
+  it('preserves rejected status when a rejected tool call also has a failure result', () => {
+    const turn: AiAssistantTurn = {
+      id: 'turn-rejected',
+      status: 'complete',
+      plainTextSummary: 'rejected tool',
+      parts: [
+        { type: 'text', text: 'tool was rejected' },
+        {
+          type: 'tool_result',
+          toolCallId: 'call-rejected',
+          toolName: 'terminal_exec',
+          success: false,
+          output: '',
+          error: 'Tool disabled',
+        },
+      ],
+      toolRounds: [
+        {
+          id: 'round-rejected',
+          round: 1,
+          toolCalls: [
+            {
+              id: 'call-rejected',
+              name: 'terminal_exec',
+              argumentsText: '{"command":"pwd"}',
+              approvalState: 'rejected',
+              executionState: 'error',
+            },
+          ],
+        },
+      ],
+    };
+
+    const projected = projectTurnToLegacyMessageFields(turn);
+
+    expect(projected.toolCalls).toEqual([
+      expect.objectContaining({
+        id: 'call-rejected',
+        arguments: '{"command":"pwd"}',
+        status: 'rejected',
+      }),
+    ]);
+  });
 });

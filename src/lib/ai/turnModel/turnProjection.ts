@@ -27,10 +27,10 @@ export function getTurnThinkingContent(turn: AiAssistantTurn): string | undefine
 }
 
 function mapToolStatus(toolCall: AiTurnToolCall): AiToolCall['status'] {
+  if (toolCall.approvalState === 'rejected') return 'rejected';
   if (toolCall.executionState === 'completed') return 'completed';
   if (toolCall.executionState === 'error') return 'error';
   if (toolCall.executionState === 'running') return 'running';
-  if (toolCall.approvalState === 'rejected') return 'rejected';
   if (toolCall.approvalState === 'approved') return 'approved';
   if (toolCall.approvalState === 'pending') return 'pending_user_approval';
   return 'pending';
@@ -38,6 +38,81 @@ function mapToolStatus(toolCall: AiTurnToolCall): AiToolCall['status'] {
 
 function mapStreamingToolCallStatus(part: Extract<AiTurnPart, { type: 'tool_call' }>): AiToolCall['status'] {
   return part.status === 'partial' ? 'pending' : 'running';
+}
+
+function mapLegacyToolCall(toolCall: AiToolCall): AiTurnToolCall {
+  return {
+    id: toolCall.id,
+    name: toolCall.name,
+    argumentsText: toolCall.arguments,
+    approvalState: toolCall.status === 'pending_user_approval'
+      ? 'pending'
+      : toolCall.status === 'approved'
+        ? 'approved'
+        : toolCall.status === 'rejected'
+          ? 'rejected'
+          : undefined,
+    executionState: toolCall.status === 'running'
+      ? 'running'
+      : toolCall.status === 'completed'
+        ? 'completed'
+        : toolCall.status === 'error'
+          ? 'error'
+          : toolCall.status === 'pending'
+            ? 'pending'
+            : undefined,
+  };
+}
+
+export function projectLegacyMessageToTurn(
+  message: Pick<AiChatMessage, 'id' | 'content' | 'thinkingContent' | 'toolCalls'>,
+): AiAssistantTurn {
+  const parts: AiAssistantTurn['parts'] = [];
+
+  if (message.thinkingContent) {
+    parts.push({ type: 'thinking', text: message.thinkingContent });
+  }
+
+  if (message.content) {
+    parts.push({ type: 'text', text: message.content });
+  }
+
+  for (const toolCall of message.toolCalls ?? []) {
+    parts.push({
+      type: 'tool_call',
+      id: toolCall.id,
+      name: toolCall.name,
+      argumentsText: toolCall.arguments,
+      status: toolCall.status === 'pending' || toolCall.status === 'pending_user_approval' ? 'partial' : 'complete',
+    });
+
+    if (toolCall.result) {
+      parts.push({
+        type: 'tool_result',
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        success: toolCall.result.success,
+        output: toolCall.result.output,
+        error: toolCall.result.error,
+        durationMs: toolCall.result.durationMs,
+        truncated: toolCall.result.truncated,
+      });
+    }
+  }
+
+  return {
+    id: message.id,
+    status: 'complete',
+    parts,
+    toolRounds: (message.toolCalls?.length ?? 0) > 0
+      ? [{
+          id: `${message.id}-round-legacy`,
+          round: 1,
+          toolCalls: (message.toolCalls ?? []).map(mapLegacyToolCall),
+        }]
+      : [],
+    plainTextSummary: message.content,
+  };
 }
 
 function collectToolResults(turn: AiAssistantTurn): Map<string, AiToolResult> {

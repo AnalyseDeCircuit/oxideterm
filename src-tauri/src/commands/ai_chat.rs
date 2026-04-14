@@ -14,6 +14,7 @@ use crate::state::{
     PersistedMessage, PersistedToolCall,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
 use tauri::State;
 
@@ -30,6 +31,8 @@ pub struct CreateConversationRequest {
     pub session_id: Option<String>,
     #[serde(default = "default_origin")]
     pub origin: String,
+    #[serde(default)]
+    pub session_metadata: Option<Value>,
 }
 
 fn default_origin() -> String {
@@ -48,6 +51,10 @@ pub struct SaveMessageRequest {
     #[serde(default)]
     pub tool_calls: Vec<PersistedToolCall>,
     pub context_snapshot: Option<ContextSnapshotRequest>,
+    #[serde(default)]
+    pub turn: Option<Value>,
+    #[serde(default)]
+    pub transcript_ref: Option<Value>,
 }
 
 /// Request to atomically replace all messages in a conversation
@@ -100,6 +107,7 @@ pub struct ConversationMetaResponse {
     pub message_count: usize,
     pub session_id: Option<String>,
     pub origin: String,
+    pub session_metadata: Option<Value>,
 }
 
 /// Full conversation response
@@ -112,6 +120,7 @@ pub struct FullConversationResponse {
     pub updated_at: i64,
     pub session_id: Option<String>,
     pub origin: String,
+    pub session_metadata: Option<Value>,
     pub messages: Vec<MessageResponse>,
 }
 
@@ -126,6 +135,8 @@ pub struct MessageResponse {
     #[serde(default)]
     pub tool_calls: Vec<PersistedToolCall>,
     pub context: Option<String>, // Simplified: just the buffer_tail for display
+    pub turn: Option<Value>,
+    pub transcript_ref: Option<Value>,
 }
 
 /// Stats response
@@ -176,6 +187,7 @@ pub async fn ai_chat_list_conversations(
                 message_count: m.message_count,
                 session_id: m.session_id,
                 origin: m.origin,
+                session_metadata: m.session_metadata,
             })
             .collect(),
     };
@@ -201,6 +213,7 @@ pub async fn ai_chat_get_conversation(
         updated_at: full.meta.updated_at,
         session_id: full.meta.session_id,
         origin: full.meta.origin,
+        session_metadata: full.meta.session_metadata,
         messages: full
             .messages
             .into_iter()
@@ -212,6 +225,8 @@ pub async fn ai_chat_get_conversation(
                 tool_calls: m.tool_calls,
                 // Return buffer_tail as context for compatibility
                 context: m.context_snapshot.and_then(|c| c.buffer_tail),
+                turn: m.turn,
+                transcript_ref: m.transcript_ref,
             })
             .collect(),
     };
@@ -236,6 +251,7 @@ pub async fn ai_chat_create_conversation(
         message_count: 0,
         session_id: request.session_id,
         origin: request.origin,
+        session_metadata: request.session_metadata,
     };
 
     store.create_conversation(&meta).map_err(|e| e.to_string())
@@ -247,6 +263,7 @@ pub async fn ai_chat_update_conversation(
     store: State<'_, LazyManagedStore<AiChatStore>>,
     conversation_id: String,
     title: String,
+    session_metadata: Option<Value>,
 ) -> Result<(), String> {
     let store = require_ai_chat_store(&store)?;
     // Get existing conversation first
@@ -262,6 +279,7 @@ pub async fn ai_chat_update_conversation(
         message_count: full.meta.message_count,
         session_id: full.meta.session_id,
         origin: full.meta.origin,
+        session_metadata: session_metadata.or(full.meta.session_metadata),
     };
 
     store
@@ -304,6 +322,8 @@ pub async fn ai_chat_save_message(
             connection_info: c.connection_info,
             terminal_type: c.terminal_type,
         }),
+        turn: request.turn,
+        transcript_ref: request.transcript_ref,
     };
 
     store.save_message(message).map_err(|e| e.to_string())
@@ -372,6 +392,8 @@ pub async fn ai_chat_replace_conversation_messages(
             connection_info: c.connection_info,
             terminal_type: c.terminal_type,
         }),
+        turn: request.message.turn,
+        transcript_ref: request.message.transcript_ref,
     };
 
     store
@@ -407,6 +429,8 @@ pub async fn ai_chat_replace_conversation_message_list(
                 connection_info: c.connection_info,
                 terminal_type: c.terminal_type,
             }),
+            turn: message.turn,
+            transcript_ref: message.transcript_ref,
         })
         .collect::<Vec<_>>();
 
