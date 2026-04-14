@@ -19,6 +19,8 @@ import type { ChatMessage, AiStreamProvider, AiToolDefinition } from '../provide
 import type { AgentStep, AgentApproval, AgentTask, AiToolResult } from '../../../types';
 import type { ToolExecutionContext } from '../tools';
 import { sanitizeApiMessages } from '../contextSanitizer';
+import { createTurnAccumulator } from '../turnModel/turnAccumulator';
+import type { AiAssistantTurn, AiToolRound } from '../turnModel/types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -28,6 +30,7 @@ import { sanitizeApiMessages } from '../contextSanitizer';
 export type SingleShotResult = {
   text: string;
   thinkingContent: string;
+  turn: AiAssistantTurn;
 };
 
 /** Collected tool call from streaming */
@@ -42,6 +45,8 @@ export type StreamResult = {
   text: string;
   thinkingContent: string;
   toolCalls: CollectedToolCall[];
+  turn: AiAssistantTurn;
+  toolRounds: AiToolRound[];
 };
 
 /** Config for an LLM provider call */
@@ -60,6 +65,35 @@ export type ToolCallOutcome = {
   resultMessage: ChatMessage;
 };
 
+function getThinkingContent(turn: AiAssistantTurn): string {
+  return turn.parts
+    .filter((part): part is Extract<AiAssistantTurn['parts'][number], { type: 'thinking' }> => part.type === 'thinking')
+    .map((part) => part.text)
+    .join('');
+}
+
+function getCollectedToolCalls(toolRounds: readonly AiToolRound[]): CollectedToolCall[] {
+  return toolRounds.flatMap((round) => round.toolCalls.map((toolCall) => ({
+    id: toolCall.id,
+    name: toolCall.name,
+    arguments: toolCall.argumentsText,
+  })));
+}
+
+function attachRoundResponseText(turn: AiAssistantTurn): AiAssistantTurn {
+  if (turn.toolRounds.length === 0 || !turn.plainTextSummary) {
+    return turn;
+  }
+
+  const toolRounds = turn.toolRounds.map((round, index) => (
+    index === turn.toolRounds.length - 1 && !round.responseText
+      ? { ...round, responseText: turn.plainTextSummary }
+      : round
+  ));
+
+  return { ...turn, toolRounds };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // streamCompletion — shared LLM streaming logic
 // ═══════════════════════════════════════════════════════════════════════════
@@ -74,9 +108,7 @@ export async function streamCompletion(
   tools: AiToolDefinition[],
   signal: AbortSignal,
 ): Promise<StreamResult> {
-  let text = '';
-  let thinkingContent = '';
-  const toolCallMap = new Map<string, CollectedToolCall>();
+  const accumulator = createTurnAccumulator({ turnId: crypto.randomUUID() });
 
   const config = {
     baseUrl: llmConfig.baseUrl,
@@ -90,40 +122,38 @@ export async function streamCompletion(
 
     switch (event.type) {
       case 'content':
-        text += event.content;
+        accumulator.onContent(event.content);
         break;
       case 'thinking':
-        thinkingContent += event.content;
+        accumulator.onThinking(event.content);
         break;
       case 'tool_call': {
         if (!event.id) break;
-        const existing = toolCallMap.get(event.id);
-        if (existing) {
-          existing.arguments = event.arguments;
-        } else {
-          toolCallMap.set(event.id, { id: event.id, name: event.name, arguments: event.arguments });
-        }
+        accumulator.onToolCallPartial({ id: event.id, name: event.name, argumentsText: event.arguments });
         break;
       }
       case 'tool_call_complete': {
         if (!event.id) break;
-        const existing = toolCallMap.get(event.id);
-        if (existing) {
-          existing.arguments = event.arguments;
-        } else {
-          toolCallMap.set(event.id, { id: event.id, name: event.name, arguments: event.arguments });
-        }
+        accumulator.onToolCallComplete({ id: event.id, name: event.name, argumentsText: event.arguments });
         break;
       }
+      case 'done':
+        break;
       case 'error':
+        accumulator.onError(event.message);
         throw new Error(event.message);
     }
   }
 
+  accumulator.setStatus('complete');
+  const turn = attachRoundResponseText(accumulator.snapshot());
+
   return {
-    text,
-    thinkingContent,
-    toolCalls: [...toolCallMap.values()],
+    text: turn.plainTextSummary,
+    thinkingContent: getThinkingContent(turn),
+    toolCalls: getCollectedToolCalls(turn.toolRounds),
+    turn,
+    toolRounds: turn.toolRounds,
   };
 }
 
@@ -141,7 +171,7 @@ export async function runSingleShot(
   signal: AbortSignal,
 ): Promise<SingleShotResult> {
   const result = await streamCompletion(llmConfig, messages, [], signal);
-  return { text: result.text, thinkingContent: result.thinkingContent };
+  return { text: result.text, thinkingContent: result.thinkingContent, turn: result.turn };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

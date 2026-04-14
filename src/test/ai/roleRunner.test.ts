@@ -57,6 +57,98 @@ vi.mock('@/lib/ai/tools', () => ({
   hasDeniedCommands: hasDeniedCommandsMock,
 }));
 
+describe('roleRunner.streamCompletion', () => {
+  it('builds a structured assistant turn from streamed provider events', async () => {
+    const { streamCompletion } = await import('@/lib/ai/roles');
+
+    const provider = {
+      type: 'openai' as const,
+      displayName: 'Mock Provider',
+      async *streamCompletion() {
+        yield { type: 'thinking' as const, content: 'reasoning ' };
+        yield { type: 'content' as const, content: 'hello ' };
+        yield { type: 'tool_call' as const, id: 'tool-1', name: 'read_file', arguments: '{"path":"/tmp/a"' };
+        yield { type: 'tool_call_complete' as const, id: 'tool-1', name: 'read_file', arguments: '{"path":"/tmp/a"}' };
+        yield { type: 'content' as const, content: 'world' };
+        yield { type: 'done' as const };
+      },
+    };
+
+    const result = await streamCompletion(
+      {
+        provider,
+        baseUrl: 'https://example.com',
+        model: 'mock-model',
+        apiKey: 'mock-key',
+      },
+      [{ role: 'user', content: 'read file' }],
+      [],
+      new AbortController().signal,
+    );
+
+    expect(result.text).toBe('hello world');
+    expect(result.thinkingContent).toBe('reasoning ');
+    expect(result.toolCalls).toEqual([
+      { id: 'tool-1', name: 'read_file', arguments: '{"path":"/tmp/a"}' },
+    ]);
+    expect(result.turn.plainTextSummary).toBe('hello world');
+    expect(result.turn.status).toBe('complete');
+    expect(result.turn.parts).toEqual([
+      { type: 'thinking', text: 'reasoning ', streaming: false },
+      { type: 'text', text: 'hello ' },
+      { type: 'tool_call', id: 'tool-1', name: 'read_file', argumentsText: '{"path":"/tmp/a"}', status: 'complete' },
+      { type: 'text', text: 'world' },
+    ]);
+    expect(result.toolRounds).toEqual([
+      expect.objectContaining({
+        round: 1,
+        responseText: 'hello world',
+        toolCalls: [
+          expect.objectContaining({
+            id: 'tool-1',
+            name: 'read_file',
+            argumentsText: '{"path":"/tmp/a"}',
+            executionState: 'pending',
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('runSingleShot keeps the structured turn while preserving legacy text fields', async () => {
+    const { runSingleShot } = await import('@/lib/ai/roles');
+
+    const provider = {
+      type: 'openai' as const,
+      displayName: 'Mock Provider',
+      async *streamCompletion() {
+        yield { type: 'thinking' as const, content: 'plan' };
+        yield { type: 'content' as const, content: 'answer' };
+        yield { type: 'done' as const };
+      },
+    };
+
+    const result = await runSingleShot(
+      {
+        provider,
+        baseUrl: 'https://example.com',
+        model: 'mock-model',
+        apiKey: 'mock-key',
+      },
+      [{ role: 'user', content: 'do a plan' }],
+      new AbortController().signal,
+    );
+
+    expect(result.text).toBe('answer');
+    expect(result.thinkingContent).toBe('plan');
+    expect(result.turn.plainTextSummary).toBe('answer');
+    expect(result.turn.parts).toEqual([
+      { type: 'thinking', text: 'plan', streaming: false },
+      { type: 'text', text: 'answer' },
+    ]);
+  });
+});
+
 describe('roleRunner.processToolCalls', () => {
   beforeEach(() => {
     appendStepMock.mockReset();

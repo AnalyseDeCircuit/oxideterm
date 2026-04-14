@@ -281,9 +281,11 @@ export function createTurnAccumulator(options: CreateTurnAccumulatorOptions): Tu
 
     setStatus(nextStatus) {
       status = nextStatus;
-      const lastPart = parts[parts.length - 1];
-      if (lastPart?.type === 'thinking' && lastPart.streaming) {
-        parts[parts.length - 1] = { ...lastPart, streaming: nextStatus === 'streaming' };
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index];
+        if (part?.type === 'thinking' && part.streaming !== (nextStatus === 'streaming')) {
+          parts[index] = { ...part, streaming: nextStatus === 'streaming' };
+        }
       }
     },
 

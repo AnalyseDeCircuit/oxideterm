@@ -701,7 +701,16 @@ async function executeTask(task: AgentTask, signal: AbortSignal): Promise<{ next
     const budget = contextWindow - reserve;
     const trimmed = trimMessages(messages, budget);
     const streamResult = await streamCompletion(executorConfig, trimmed, tools, signal);
-    const { text: responseText, thinkingContent, toolCalls: collectedToolCalls } = streamResult;
+    const responseText = streamResult.turn.plainTextSummary;
+    const thinkingContent = streamResult.turn.parts
+      .filter((part): part is Extract<typeof streamResult.turn.parts[number], { type: 'thinking' }> => part.type === 'thinking')
+      .map((part) => part.text)
+      .join('');
+    const collectedToolCalls = streamResult.toolRounds.flatMap((toolRound) => toolRound.toolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      arguments: toolCall.argumentsText,
+    })));
 
     const responseMessage: ChatMessage = { role: 'assistant', content: responseText };
     if (thinkingContent) {

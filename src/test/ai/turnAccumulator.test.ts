@@ -53,6 +53,7 @@ describe('turnAccumulator', () => {
 
     expect(snapshot.status).toBe('complete');
     expect(snapshot.parts.map((part) => part.type)).toEqual(['thinking', 'text', 'tool_call', 'tool_result']);
+    expect(snapshot.parts[0]).toMatchObject({ type: 'thinking', streaming: false });
     expect(snapshot.parts[2]).toMatchObject({
       type: 'tool_call',
       id: 'call-1',
