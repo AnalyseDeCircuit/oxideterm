@@ -46,6 +46,7 @@ import {
   generateTitle,
   hydrateStructuredConversation,
   parseThinkingContent,
+  projectAssistantMessage,
   type FullConversationDto,
   rebuildConversationFromTranscript,
   type TranscriptResponseDto,
@@ -205,19 +206,23 @@ function buildPersistedMessageRequest(
   message: AiChatMessage,
   contextSnapshot: ContextSnapshotDto | null,
 ) {
+  const normalizedMessage = message.role === 'assistant'
+    ? projectAssistantMessage(message)
+    : message;
+
   return {
-    id: message.id,
+    id: normalizedMessage.id,
     conversationId,
-    role: message.role,
-    content: message.metadata?.type === 'compaction-anchor'
-      ? encodeAnchorContent(message.content, message.metadata)
-      : message.content,
-    timestamp: message.timestamp,
-    toolCalls: message.toolCalls || [],
+    role: normalizedMessage.role,
+    content: normalizedMessage.metadata?.type === 'compaction-anchor'
+      ? encodeAnchorContent(normalizedMessage.content, normalizedMessage.metadata)
+      : normalizedMessage.content,
+    timestamp: normalizedMessage.timestamp,
+    toolCalls: normalizedMessage.toolCalls || [],
     contextSnapshot,
-    turn: message.turn ?? null,
-    transcriptRef: message.transcriptRef ?? null,
-    summaryRef: message.summaryRef ?? null,
+    turn: normalizedMessage.turn ?? null,
+    transcriptRef: normalizedMessage.transcriptRef ?? null,
+    summaryRef: normalizedMessage.summaryRef ?? null,
   };
 }
 
@@ -1345,7 +1350,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     set({ isLoading: true, error: null, abortController, activeGenerationId: runId });
 
     try {
-      let fullContent = '';
+      let roundResponseText = '';
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 50; // ms - throttle updates for smoother streaming
       let hardDenyRetryCount = 0;
@@ -1361,7 +1366,6 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         lastUpdateTime = now;
 
         const turnSnapshot = accumulator.snapshot();
-        const projected = projectTurnToLegacyMessageFields(turnSnapshot);
 
         set((state) => ({
           conversations: state.conversations.map((c) => {
@@ -1372,14 +1376,13 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               messages: c.messages.map((m) => {
                 if (m.id !== assistantMessage.id) return m;
 
-                const nextMessage: AiChatMessage = {
+                const nextMessage = projectAssistantMessage({
                   ...m,
-                  ...projected,
                   turn: turnSnapshot,
                   transcriptRef,
                   isThinkingStreaming,
                   isStreaming: options?.isStreaming ?? turnSnapshot.status === 'streaming',
-                };
+                });
 
                 if (options?.suggestions !== undefined) {
                   nextMessage.suggestions = options.suggestions;
@@ -1399,7 +1402,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       // ════════════════════════════════════════════════════════════════════
 
       const provider = getProvider(providerType);
-      let thinkingContent = '';
+      let roundReasoningContent = '';
 
       // Tool use configuration
       const autoApproveTools = aiSettings.toolUse?.autoApproveTools ?? {};
@@ -1466,8 +1469,6 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       const MAX_TOOL_ROUNDS = 10;
       const MAX_TOOL_CALLS_PER_ROUND = 8;
       let round = 0;
-      const persistedToolCalls: AiToolCall[] = [];
-
       const appendGuardrail = (
         code: 'tool-use-disabled' | 'tool-context-missing' | 'tool-budget-limit' | 'tool-disabled-hard-deny',
         message: string,
@@ -1540,8 +1541,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           },
         }));
 
-        persistedToolCalls.push(...rejectedToolCalls);
-        accumulator.syncToolCalls(persistedToolCalls);
+        accumulator.syncToolCalls(rejectedToolCalls);
         for (const rejectedToolCall of rejectedToolCalls) {
           queueDiagnosticEvent('tool_call', {
             logicalRound: rejectedRound.round,
@@ -1701,7 +1701,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         )) {
           switch (event.type) {
             case 'content':
-              fullContent += event.content;
+              roundResponseText += event.content;
 
               if (!toolUseEnabled && !sawStructuredToolCall) {
                 if (hardDenyDetection) {
@@ -1748,7 +1748,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               updateAssistantSnapshot(false, false);
               break;
             case 'thinking':
-              thinkingContent += event.content;
+              roundReasoningContent += event.content;
 
               if (!toolUseEnabled && !sawStructuredToolCall && (isBufferingForHardDeny || hardDenyDetection)) {
                 bufferedThinkingText += event.content;
@@ -1919,8 +1919,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               tool_name: PSEUDO_TOOL_RETRY_TOOL_NAME,
             });
             hardDenyRetryCount += 1;
-            fullContent = '';
-            thinkingContent = '';
+            roundResponseText = '';
+            roundReasoningContent = '';
             bufferedThinkingText = '';
             continue;
           }
@@ -2002,8 +2002,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           status: 'pending' as const,
         }));
         const currentRound = accumulator.startRound(round);
-        persistedToolCalls.push(...toolCallEntries);
-        accumulator.syncToolCalls(persistedToolCalls);
+        accumulator.syncToolCalls(toolCallEntries);
         queueTranscriptEntry('assistant_round', {
           round: currentRound.round,
           roundId: currentRound.id,
@@ -2113,7 +2112,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             pendingApprovalIds.push(tc.id);
           }
         }
-        accumulator.syncToolCalls(persistedToolCalls);
+        accumulator.syncToolCalls(toolCallEntries);
         updateAssistantSnapshot(true, false);
 
         // Wait for user to approve/reject pending tools
@@ -2216,7 +2215,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               }
             }
           }
-          accumulator.syncToolCalls(persistedToolCalls);
+          accumulator.syncToolCalls(toolCallEntries);
           updateAssistantSnapshot(true, false);
         }
 
@@ -2228,7 +2227,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             if (tc.result) {
               accumulator.onToolResult(tc.result, tc.name);
             }
-            accumulator.syncToolCalls(persistedToolCalls);
+            accumulator.syncToolCalls(toolCallEntries);
             updateAssistantSnapshot(true, false);
             toolResultMessages.push({
               role: 'tool',
@@ -2240,7 +2239,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           }
 
           tc.status = 'running';
-          accumulator.syncToolCalls(persistedToolCalls);
+          accumulator.syncToolCalls(toolCallEntries);
           updateAssistantSnapshot(true, false);
 
           // Check abort before each tool execution
@@ -2248,7 +2247,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             tc.status = 'rejected';
             tc.result = { toolCallId: tc.id, toolName: tc.name, success: false, output: '', error: 'Generation was stopped.' };
             accumulator.onToolResult(tc.result, tc.name);
-            accumulator.syncToolCalls(persistedToolCalls);
+            accumulator.syncToolCalls(toolCallEntries);
             updateAssistantSnapshot(true, false);
             queueDiagnosticEvent('tool_result', {
               logicalRound: currentRound.round,
@@ -2291,7 +2290,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               tool_name: tc.name,
             });
             accumulator.onToolResult(tc.result, tc.name);
-            accumulator.syncToolCalls(persistedToolCalls);
+            accumulator.syncToolCalls(toolCallEntries);
             queueDiagnosticEvent('tool_result', {
               logicalRound: currentRound.round,
               toolCallId: tc.result.toolCallId,
@@ -2327,7 +2326,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           tc.result = result;
           tc.status = result.success ? 'completed' : 'error';
           accumulator.onToolResult(result, tc.name);
-          accumulator.syncToolCalls(persistedToolCalls);
+          accumulator.syncToolCalls(toolCallEntries);
           queueDiagnosticEvent('tool_result', {
             logicalRound: currentRound.round,
             toolCallId: result.toolCallId,
@@ -2368,11 +2367,11 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         // Include reasoning_content for thinking models (Kimi K2.5, DeepSeek-R1)
         const assistantMsg: ProviderChatMessage = {
           role: 'assistant',
-          content: fullContent,
+          content: roundResponseText,
           tool_calls: completedToolCalls.map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.arguments })),
         };
-        if (thinkingContent) {
-          assistantMsg.reasoning_content = thinkingContent;
+        if (roundReasoningContent) {
+          assistantMsg.reasoning_content = roundReasoningContent;
         }
         apiMessages.push(assistantMsg);
         for (const trm of toolResultMessages) {
@@ -2396,12 +2395,12 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         }
 
         // Preserve text emitted before tool calls so follow-up rounds keep the assistant context.
-        if (fullContent) {
+        if (roundResponseText) {
           accumulator.onContent('\n\n');
           updateAssistantSnapshot(true, false);
         }
-        fullContent = '';
-        thinkingContent = '';
+        roundResponseText = '';
+        roundReasoningContent = '';
 
         // Token budget check: estimate apiMessages size and break if exceeding context window
         let apiTokenEstimate = 0;
@@ -2490,7 +2489,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             ...c,
             messages: c.messages.map((m) =>
               m.id === assistantMessage.id
-                ? {
+                ? projectAssistantMessage({
                     ...m,
                     ...projectedAssistantMessage,
                     turn: assistantTurn,
@@ -2498,7 +2497,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
                     isThinkingStreaming: false,
                     isStreaming: false,
                     ...(parsedSuggestions ? { suggestions: parsedSuggestions } : {}),
-                  }
+                  })
                 : m
             ),
             turns: upsertConversationTurn(c.turns, buildConversationTurn(assistantTurn)),
@@ -2514,7 +2513,6 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           ...projectedAssistantMessage,
           turn: assistantTurn,
           transcriptRef,
-          toolCalls: persistedToolCalls,
         });
         await persistConversationMetadata(get().conversations.find((c) => c.id === convId));
         await flushDiagnosticEvents();

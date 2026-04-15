@@ -4,6 +4,72 @@ import { dtoToConversation, encodeAnchorContent, hydrateStructuredConversation, 
 import type { AiConversation } from '@/types';
 
 describe('hydrateStructuredConversation', () => {
+  it('prefers turn-derived projection over stale persisted legacy assistant fields', () => {
+    const conversation = dtoToConversation({
+      id: 'conv-1',
+      title: 'Conversation',
+      createdAt: 1,
+      updatedAt: 2,
+      sessionId: null,
+      origin: 'sidebar',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'hello',
+          timestamp: 1,
+          context: null,
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'stale projection',
+          timestamp: 2,
+          context: null,
+          toolCalls: [{
+            id: 'tool-stale',
+            name: 'local_exec',
+            arguments: '{"command":"pwd"}',
+            status: 'completed',
+            result: {
+              toolCallId: 'tool-stale',
+              toolName: 'local_exec',
+              success: true,
+              output: 'stale',
+            },
+          }],
+          turn: {
+            id: 'assistant-1',
+            status: 'complete',
+            plainTextSummary: 'fresh projection',
+            parts: [
+              { type: 'thinking', text: 'inspect state' },
+              { type: 'text', text: 'fresh projection' },
+              { type: 'tool_call', id: 'tool-fresh', name: 'list_sessions', argumentsText: '{}', status: 'complete' },
+              { type: 'tool_result', toolCallId: 'tool-fresh', toolName: 'list_sessions', success: true, output: '[]' },
+            ],
+            toolRounds: [{
+              id: 'round-1',
+              round: 1,
+              toolCalls: [{
+                id: 'tool-fresh',
+                name: 'list_sessions',
+                argumentsText: '{}',
+                executionState: 'completed',
+              }],
+            }],
+          },
+        },
+      ],
+    });
+
+    expect(conversation.messages[1]).toMatchObject({
+      content: 'fresh projection',
+      thinkingContent: 'inspect state',
+      toolCalls: [expect.objectContaining({ id: 'tool-fresh', name: 'list_sessions' })],
+    });
+  });
+
   it('preserves existing turn identity and pending summaries while rebuilding assistant projections', () => {
     const conversation: AiConversation = {
       id: 'conv-1',

@@ -266,13 +266,10 @@ function buildAssistantMessageFromTranscript(
     toolRounds: rounds,
     plainTextSummary: assistantState.plainTextSummary ?? '',
   };
-  const projected = projectTurnToLegacyMessageFields(turn);
-  const suggestions = parseSuggestions(projected.content);
-
-  const nextMessage: AiChatMessage = {
+  return projectAssistantMessage({
     id: assistantState.messageId,
     role: 'assistant',
-    content: suggestions.cleanContent,
+    content: turn.plainTextSummary,
     timestamp: fallback?.timestamp ?? assistantState.timestamp,
     context: fallback?.context,
     turn,
@@ -282,16 +279,49 @@ function buildAssistantMessageFromTranscript(
       endEntryId: assistantState.endEntryId,
     },
     summaryRef: fallback?.summaryRef,
+  });
+}
+
+export function projectAssistantMessage(message: AiChatMessage): AiChatMessage {
+  if (message.role !== 'assistant') {
+    return message;
+  }
+
+  const turn = message.turn ?? projectLegacyMessageToTurn(message);
+  const projected = projectTurnToLegacyMessageFields(turn);
+
+  let content = projected.content;
+  let thinkingContent = projected.thinkingContent;
+
+  if (!thinkingContent && content.includes('<thinking>')) {
+    const parsed = parseThinkingContent(content);
+    content = parsed.content;
+    thinkingContent = parsed.thinkingContent;
+  }
+
+  const suggestions = parseSuggestions(content);
+  const nextMessage: AiChatMessage = {
+    ...message,
+    content: suggestions.cleanContent,
+    turn,
   };
 
-  if (projected.thinkingContent) {
-    nextMessage.thinkingContent = projected.thinkingContent;
+  if (thinkingContent) {
+    nextMessage.thinkingContent = thinkingContent;
+  } else {
+    delete nextMessage.thinkingContent;
   }
-  if (projected.toolCalls) {
+
+  if (projected.toolCalls && projected.toolCalls.length > 0) {
     nextMessage.toolCalls = projected.toolCalls;
+  } else {
+    delete nextMessage.toolCalls;
   }
+
   if (suggestions.suggestions.length > 0) {
     nextMessage.suggestions = suggestions.suggestions;
+  } else {
+    delete nextMessage.suggestions;
   }
 
   return nextMessage;
@@ -373,27 +403,17 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
     },
     messages: dto.messages.map((m) => {
       if (m.role === 'assistant') {
-        let content = m.content;
-        let thinkingContent: string | undefined;
-        if (content.includes('<thinking>')) {
-          const parsed = parseThinkingContent(content);
-          content = parsed.content;
-          thinkingContent = parsed.thinkingContent;
-        }
-        const sugResult = parseSuggestions(content);
-        return {
+        return projectAssistantMessage({
           id: m.id,
           role: m.role as 'assistant',
-          content: sugResult.cleanContent,
-          thinkingContent,
-          toolCalls: m.toolCalls,
+          content: m.content,
           timestamp: m.timestamp,
           context: m.context || undefined,
           turn: m.turn ?? undefined,
           transcriptRef: m.transcriptRef ?? undefined,
           summaryRef: m.summaryRef ?? undefined,
-          ...(sugResult.suggestions.length > 0 ? { suggestions: sugResult.suggestions } : {}),
-        };
+          ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+        });
       }
 
       if (m.role === 'system') {
@@ -835,11 +855,11 @@ export function hydrateStructuredConversation(conversation: AiConversation): AiC
       pendingSummaries: normalizedSummaryState.unresolved,
     });
 
-    return {
+    return projectAssistantMessage({
       ...message,
       turn: normalizedTurn,
       transcriptRef,
-    };
+    });
   });
 
   const firstUserMessage = messages.find((message) => message.role === 'user')?.content;

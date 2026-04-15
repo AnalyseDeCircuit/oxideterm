@@ -498,7 +498,9 @@ pub async fn ai_chat_save_message(
         summary_ref: request.summary_ref,
     };
 
-    store.save_message(message).map_err(|e| e.to_string())
+    store
+        .save_message_with_transcript_entries(message, Vec::new())
+        .map_err(|e| e.to_string())
 }
 
 /// Append transcript entries for a conversation.
