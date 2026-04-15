@@ -37,7 +37,7 @@ import type { TestConnectionRequest, TestConnectionResponse } from '../../lib/ap
 import { buildTestConnectionRequest } from '../../lib/testConnectionRequest';
 import { AddJumpServerDialog } from './AddJumpServerDialog';
 import { HostKeyConfirmDialog } from './HostKeyConfirmDialog';
-import { Plus, Trash2, Key, Lock, ChevronDown, ChevronRight, Shield, Info } from 'lucide-react';
+import { Plus, Trash2, Key, Lock, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useToast } from '../../hooks/useToast';
 import {

@@ -1,7 +1,7 @@
 # Third-Party Notices (Frontend)
 
 This file lists third-party components used by the frontend (including transitive production dependencies) and their declared licenses.
-Generated: 2026-04-11T13:07:15.125Z
+Generated: 2026-04-15T13:04:25.108Z
 
 ## Summary
 - MIT: 228
@@ -38,7 +38,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | @codemirror/lang-go | 6.0.1 | MIT | https://github.com/codemirror/lang-go#readme |
 | @codemirror/lang-html | 6.4.11 | MIT | https://github.com/codemirror/lang-html#readme |
 | @codemirror/lang-java | 6.0.2 | MIT | https://github.com/codemirror/lang-java#readme |
-| @codemirror/lang-javascript | 6.2.4 | MIT | https://github.com/codemirror/lang-javascript#readme |
+| @codemirror/lang-javascript | 6.2.5 | MIT | https://github.com/codemirror/lang-javascript#readme |
 | @codemirror/lang-json | 6.0.2 | MIT | https://github.com/codemirror/lang-json#readme |
 | @codemirror/lang-markdown | 6.5.0 | MIT | https://github.com/codemirror/lang-markdown#readme |
 | @codemirror/lang-php | 6.0.2 | MIT | https://github.com/codemirror/lang-php#readme |
@@ -49,7 +49,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | @codemirror/lang-yaml | 6.1.2 | MIT | https://github.com/codemirror/lang-yaml#readme |
 | @codemirror/language | 6.12.1 | MIT | https://github.com/codemirror/language#readme |
 | @codemirror/legacy-modes | 6.5.2 | MIT | https://github.com/codemirror/legacy-modes#readme |
-| @codemirror/lint | 6.9.2 | MIT | https://github.com/codemirror/lint#readme |
+| @codemirror/lint | 6.9.5 | MIT | https://github.com/codemirror/lint#readme |
 | @codemirror/search | 6.6.0 | MIT | https://github.com/codemirror/search#readme |
 | @codemirror/state | 6.6.0 | MIT | https://github.com/codemirror/state#readme |
 | @codemirror/theme-one-dark | 6.1.3 | MIT | https://github.com/codemirror/theme-one-dark#readme |
@@ -64,7 +64,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | @floating-ui/utils | 0.2.10 | MIT | https://floating-ui.com |
 | @iconify/types | 2.0.0 | MIT | https://github.com/iconify/iconify |
 | @iconify/utils | 3.1.0 | MIT | https://iconify.design/docs/libraries/utils/ |
-| @lezer/common | 1.5.0 | MIT | https://github.com/lezer-parser/common#readme |
+| @lezer/common | 1.5.0, 1.5.2 | MIT | https://github.com/lezer-parser/common#readme |
 | @lezer/cpp | 1.1.5 | MIT | https://github.com/lezer-parser/cpp#readme |
 | @lezer/css | 1.3.0 | MIT | https://github.com/lezer-parser/css#readme |
 | @lezer/go | 1.0.1 | MIT | https://github.com/lezer-parser/go#readme |
@@ -73,7 +73,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | @lezer/java | 1.1.3 | MIT | https://github.com/lezer-parser/java#readme |
 | @lezer/javascript | 1.5.4 | MIT | https://github.com/lezer-parser/javascript#readme |
 | @lezer/json | 1.0.3 | MIT | https://github.com/lezer-parser/json#readme |
-| @lezer/lr | 1.4.7 | MIT | https://github.com/lezer-parser/lr#readme |
+| @lezer/lr | 1.4.7, 1.4.8 | MIT | https://github.com/lezer-parser/lr#readme |
 | @lezer/markdown | 1.6.3 | MIT | https://github.com/lezer-parser/markdown#readme |
 | @lezer/php | 1.0.5 | MIT | https://github.com/lezer-parser/php#readme |
 | @lezer/python | 1.1.18 | MIT | https://github.com/lezer-parser/python#readme |
@@ -129,7 +129,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | @tanstack/virtual-core | 3.13.23 | MIT | https://tanstack.com/virtual |
 | @tauri-apps/api | 2.10.1 | Apache-2.0 OR MIT | https://github.com/tauri-apps/tauri#readme |
 | @tauri-apps/plugin-clipboard-manager | 2.3.2 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
-| @tauri-apps/plugin-dialog | 2.6.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
+| @tauri-apps/plugin-dialog | 2.7.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-fs | 2.5.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-opener | 2.5.3 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
 | @tauri-apps/plugin-process | 2.3.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace#readme |
@@ -287,10 +287,10 @@ Generated: 2026-04-11T13:07:15.125Z
 | process-nextick-args | 2.0.1 | MIT | https://github.com/calvinmetcalf/process-nextick-args |
 | react | 19.2.3 | MIT | https://react.dev/ |
 | react-dom | 19.2.3 | MIT | https://react.dev/ |
-| react-i18next | 16.5.3 | MIT | https://github.com/i18next/react-i18next |
+| react-i18next | 16.6.5 | MIT | https://github.com/i18next/react-i18next |
 | react-remove-scroll | 2.7.2 | MIT | https://github.com/theKashey/react-remove-scroll#readme |
 | react-remove-scroll-bar | 2.3.8 | MIT | https://github.com/theKashey/react-remove-scroll-bar#readme |
-| react-resizable-panels | 4.9.0 | MIT | https://react-resizable-panels.vercel.app/ |
+| react-resizable-panels | 4.10.0 | MIT | https://react-resizable-panels.vercel.app/ |
 | react-style-singleton | 2.2.3 | MIT | https://github.com/theKashey/react-style-singleton#readme |
 | readable-stream | 2.3.8 | MIT | https://github.com/nodejs/readable-stream#readme |
 | robust-predicates | 3.0.2 | Unlicense | https://github.com/mourner/robust-predicates#readme |
@@ -306,7 +306,7 @@ Generated: 2026-04-11T13:07:15.125Z
 | style-mod | 4.1.3 | MIT | https://github.com/marijnh/style-mod#readme |
 | stylis | 4.3.6 | MIT | https://github.com/thysultan/stylis.js |
 | tailwind-merge | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
-| tinyexec | 1.0.2 | MIT | https://github.com/tinylibs/tinyexec#readme |
+| tinyexec | 1.1.1 | MIT | https://github.com/tinylibs/tinyexec#readme |
 | ts-dedent | 2.2.0 | MIT | https://github.com/tamino-martinius/node-ts-dedent#readme |
 | tslib | 2.8.1 | 0BSD | https://www.typescriptlang.org/ |
 | typescript | 5.9.3 | Apache-2.0 | https://www.typescriptlang.org/ |

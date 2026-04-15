@@ -441,7 +441,7 @@ describe('aiChatStore workflows', () => {
     await waitFor(() => pendingSaves.length === 2);
 
     const [olderSave, newerSave] = pendingSaves;
-    expect(newerSave.request.projectionUpdatedAt).toBeGreaterThan(olderSave.request.projectionUpdatedAt);
+    expect(newerSave.request.projectionUpdatedAt as number).toBeGreaterThan(olderSave.request.projectionUpdatedAt as number);
 
     newerSave.resolve();
     await newerSavePromise;

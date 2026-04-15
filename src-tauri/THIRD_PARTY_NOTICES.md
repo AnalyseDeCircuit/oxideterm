@@ -1,7 +1,7 @@
 # Third-Party Notices (Backend / Rust)
 
 This file lists third-party crates used by the Rust backend and their detected licenses (including transitive dependencies).
-Generated: 2026-04-11T13:07:03.088Z
+Generated: 2026-04-15T13:04:30.355Z
 
 ## Summary
 - MIT: 687
@@ -447,7 +447,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
 | rand | 0.7.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand | 0.8.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand | 0.9.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| rand | 0.9.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_chacha | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_chacha | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_chacha | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -572,7 +572,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | tauri-macros | 2.5.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-clipboard-manager | 2.3.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tauri-plugin-dialog | 2.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tauri-plugin-dialog | 2.7.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-fs | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-opener | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tauri-plugin-process | 2.3.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -595,7 +595,7 @@ This report does not attempt to interpret SPDX boolean logic beyond simple group
 | time-macros | 0.2.27 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tiny-keccak | 2.0.2 | CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tinystr | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tokio | 1.51.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| tokio | 1.51.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-macros | 2.7.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-rustls | 0.26.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-tungstenite | 0.24.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
