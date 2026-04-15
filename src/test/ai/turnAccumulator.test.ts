@@ -121,6 +121,31 @@ describe('turnAccumulator', () => {
     expect(snapshot.toolRounds[1]).toMatchObject({ round: 2, toolCalls: [expect.objectContaining({ id: 'call-2' })] });
   });
 
+  it('can set and clear a transient round marker without affecting other round data', () => {
+    const accumulator = createTurnAccumulator({ turnId: 'turn-marker' });
+
+    const round = accumulator.startRound(1);
+    accumulator.onToolCallComplete({
+      id: 'call-marker',
+      name: 'local_exec',
+      argumentsText: '{"command":"pwd"}',
+    });
+
+    accumulator.setRoundStatefulMarker(round.id, 'awaiting-summary');
+    expect(accumulator.snapshot().toolRounds[0]).toMatchObject({
+      id: round.id,
+      statefulMarker: 'awaiting-summary',
+      toolCalls: [expect.objectContaining({ id: 'call-marker' })],
+    });
+
+    accumulator.setRoundStatefulMarker(round.id, undefined);
+    expect(accumulator.snapshot().toolRounds[0]).toMatchObject({
+      id: round.id,
+      statefulMarker: undefined,
+      toolCalls: [expect.objectContaining({ id: 'call-marker' })],
+    });
+  });
+
   it('captures error parts and marks the snapshot as error', () => {
     const accumulator = createTurnAccumulator({ turnId: 'turn-4' });
 

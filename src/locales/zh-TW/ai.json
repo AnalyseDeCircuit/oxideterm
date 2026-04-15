@@ -123,6 +123,7 @@
       "condensed_label": "早期呼叫（已壓縮）",
       "deny_list_warning": "安全敏感指令",
       "approval_required": "需要核准",
+      "awaiting_summary": "正在整理工具結果...",
       "approve": "核准",
       "reject": "拒絕",
       "tool_names": {

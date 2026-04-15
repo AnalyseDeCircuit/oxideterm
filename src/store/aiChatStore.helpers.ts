@@ -822,7 +822,9 @@ export function hydrateStructuredConversation(conversation: AiConversation): AiC
             responseText: round.responseText ?? existingRound.responseText,
             retryCount: round.retryCount ?? existingRound.retryCount,
             timestamp: round.timestamp ?? existingRound.timestamp,
-            statefulMarker: round.statefulMarker ?? existingRound.statefulMarker,
+            statefulMarker: Object.prototype.hasOwnProperty.call(round, 'statefulMarker')
+              ? round.statefulMarker
+              : existingRound.statefulMarker,
             summary: round.summary ?? existingRound.summary,
             summaryMetadata: round.summaryMetadata ?? existingRound.summaryMetadata,
             toolCalls: round.toolCalls.map((toolCall, toolIndex) => ({

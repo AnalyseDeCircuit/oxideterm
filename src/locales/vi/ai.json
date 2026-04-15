@@ -123,6 +123,7 @@
       "condensed_label": "Lệnh gọi trước (đã nén)",
       "deny_list_warning": "Lệnh nhạy cảm bảo mật",
       "approval_required": "Cần phê duyệt",
+      "awaiting_summary": "Đang sắp xếp kết quả công cụ...",
       "approve": "Phê duyệt",
       "reject": "Từ chối",
       "tool_names": {

@@ -184,6 +184,21 @@ function formatArgs(argsJson: string): string {
   }
 }
 
+function getLatestRoundMarker(toolRounds?: AiToolRound[]): string | undefined {
+  if (!toolRounds || toolRounds.length === 0) {
+    return undefined;
+  }
+
+  for (let index = toolRounds.length - 1; index >= 0; index -= 1) {
+    const marker = toolRounds[index]?.statefulMarker;
+    if (marker !== undefined) {
+      return marker;
+    }
+  }
+
+  return undefined;
+}
+
 const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -332,6 +347,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls, toolRounds
   const { t } = useTranslation();
   const [showEarly, setShowEarly] = useState(false);
   const normalizedToolCalls = normalizeToolCalls(toolCalls, toolRounds, turnParts);
+  const latestRoundMarker = getLatestRoundMarker(toolRounds);
 
   if (normalizedToolCalls.length === 0) return null;
 
@@ -388,6 +404,13 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolCalls, toolRounds
       {recentCalls.map((call) => (
         <ToolCallItem key={call.id} call={call} />
       ))}
+
+      {latestRoundMarker === 'awaiting-summary' && (
+        <div className="flex items-center gap-2 rounded-md border border-theme-border/20 bg-theme-bg-hover/20 px-2.5 py-2 text-[11px] text-theme-text-muted/60">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-theme-accent/70" />
+          <span>{t('ai.tool_use.awaiting_summary')}</span>
+        </div>
+      )}
     </div>
   );
 });

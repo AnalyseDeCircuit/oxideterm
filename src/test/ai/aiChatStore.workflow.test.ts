@@ -426,7 +426,57 @@ describe('aiChatStore workflows', () => {
       expect.objectContaining({ type: 'thinking', text: 'Let me inspect that first.' }),
       expect.objectContaining({ type: 'error', message: 'The engine is currently overloaded, please try again later' }),
     ]));
+    expect(assistantMessage?.turn?.toolRounds[0]?.statefulMarker).toBeUndefined();
     expect(useAiChatStore.getState().error).toBe('The engine is currently overloaded, please try again later');
+  });
+
+  it('shows and clears a transient post-tool waiting marker before the follow-up summary arrives', async () => {
+    let releaseSummary!: () => void;
+
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
+    setConversation([]);
+    getToolsForContextMock.mockReturnValue([
+      { name: 'local_exec', description: 'Run a local command', parameters: {} },
+    ]);
+    executeToolMock.mockResolvedValue({
+      toolCallId: 'tool-wait-1',
+      toolName: 'local_exec',
+      success: true,
+      output: 'pwd',
+    });
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-wait-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        await new Promise<void>((resolve) => {
+          releaseSummary = resolve;
+        });
+        yield { type: 'content', content: 'final answer' };
+        yield { type: 'done' };
+      });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('check the current directory');
+
+    await waitFor(() => {
+      const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+      return assistantMessage?.turn?.toolRounds[0]?.statefulMarker === 'awaiting-summary' && typeof releaseSummary === 'function';
+    });
+
+    expect(useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant')?.turn?.toolRounds[0]).toMatchObject({
+      statefulMarker: 'awaiting-summary',
+      toolCalls: [expect.objectContaining({ id: 'tool-wait-1', executionState: 'completed' })],
+    });
+
+    releaseSummary();
+    await sendPromise;
+
+    const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+    expect(assistantMessage?.content).toBe('final answer');
+    expect(assistantMessage?.turn?.toolRounds[0]?.statefulMarker).toBeUndefined();
   });
 
   it('injects the disabled-tools negative constraint into the system prompt', async () => {

@@ -13,6 +13,7 @@ import type {
 
 export interface TurnAccumulator {
   startRound(roundNumber?: number): AiToolRound;
+  setRoundStatefulMarker(roundId: string, marker?: string): void;
   onContent(text: string): void;
   onThinking(text: string): void;
   onToolCallPartial(call: { id: string; name: string; argumentsText: string }): void;
@@ -211,6 +212,15 @@ export function createTurnAccumulator(options: CreateTurnAccumulatorOptions): Tu
       }
 
       return getOpenRound();
+    },
+
+    setRoundStatefulMarker(roundId, marker) {
+      const round = toolRounds.find((candidate) => candidate.id === roundId);
+      if (!round) {
+        return;
+      }
+
+      round.statefulMarker = marker;
     },
 
     onContent(text) {

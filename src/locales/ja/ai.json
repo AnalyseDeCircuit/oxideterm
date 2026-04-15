@@ -123,6 +123,7 @@
       "condensed_label": "初期呼び出し（圧縮済み）",
       "deny_list_warning": "セキュリティ上注意が必要なコマンド",
       "approval_required": "承認が必要",
+      "awaiting_summary": "ツール結果を整理しています...",
       "approve": "承認",
       "reject": "拒否",
       "tool_names": {

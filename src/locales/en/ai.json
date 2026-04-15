@@ -123,6 +123,7 @@
       "condensed_label": "Earlier calls (condensed for AI)",
       "deny_list_warning": "Security-sensitive command",
       "approval_required": "Requires approval",
+      "awaiting_summary": "Organizing tool results...",
       "approve": "Approve",
       "reject": "Reject",
       "tool_names": {

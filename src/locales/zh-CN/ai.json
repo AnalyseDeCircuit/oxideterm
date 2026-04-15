@@ -123,6 +123,7 @@
       "condensed_label": "早期调用（已压缩）",
       "deny_list_warning": "安全敏感命令",
       "approval_required": "需要审批",
+      "awaiting_summary": "正在整理工具结果...",
       "approve": "批准",
       "reject": "拒绝",
       "tool_names": {

@@ -123,6 +123,7 @@
       "condensed_label": "Frühere Aufrufe (komprimiert)",
       "deny_list_warning": "Sicherheitsrelevanter Befehl",
       "approval_required": "Genehmigung erforderlich",
+      "awaiting_summary": "Tool-Ergebnisse werden aufbereitet...",
       "approve": "Genehmigen",
       "reject": "Ablehnen",
       "tool_names": {

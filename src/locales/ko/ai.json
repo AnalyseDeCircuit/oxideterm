@@ -123,6 +123,7 @@
       "condensed_label": "이전 호출 (압축됨)",
       "deny_list_warning": "보안 민감 명령",
       "approval_required": "승인 필요",
+      "awaiting_summary": "도구 결과를 정리하는 중...",
       "approve": "승인",
       "reject": "거부",
       "tool_names": {

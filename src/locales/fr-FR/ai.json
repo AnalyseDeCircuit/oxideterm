@@ -123,6 +123,7 @@
       "condensed_label": "Appels antérieurs (condensés)",
       "deny_list_warning": "Commande sensible à la sécurité",
       "approval_required": "Approbation requise",
+      "awaiting_summary": "Organisation des résultats des outils...",
       "approve": "Approuver",
       "reject": "Rejeter",
       "tool_names": {

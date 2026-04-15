@@ -1460,6 +1460,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
     const abortController = new AbortController();
     set({ isLoading: true, error: null, abortController, activeGenerationId: runId });
 
+    let clearAwaitingToolSummaryMarker: ((force?: boolean) => void) | null = null;
+
     try {
       let roundResponseText = '';
       let lastUpdateTime = 0;
@@ -1507,6 +1509,24 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             };
           }),
         }));
+      };
+
+      let awaitingToolSummaryRoundId: string | null = null;
+
+      const setAwaitingToolSummaryMarker = (roundId: string) => {
+        awaitingToolSummaryRoundId = roundId;
+        accumulator.setRoundStatefulMarker(roundId, 'awaiting-summary');
+        updateAssistantSnapshot(true, false);
+      };
+
+      clearAwaitingToolSummaryMarker = (force = false) => {
+        if (!awaitingToolSummaryRoundId) {
+          return;
+        }
+
+        accumulator.setRoundStatefulMarker(awaitingToolSummaryRoundId, undefined);
+        awaitingToolSummaryRoundId = null;
+        updateAssistantSnapshot(force, false);
       };
 
       // ════════════════════════════════════════════════════════════════════
@@ -1813,6 +1833,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         )) {
           switch (event.type) {
             case 'content':
+              clearAwaitingToolSummaryMarker(true);
               roundResponseText += event.content;
 
               if (!toolUseEnabled && !sawStructuredToolCall) {
@@ -1860,6 +1881,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               updateAssistantSnapshot(false, false);
               break;
             case 'thinking':
+              clearAwaitingToolSummaryMarker(true);
               roundReasoningContent += event.content;
 
               if (!toolUseEnabled && !sawStructuredToolCall && (isBufferingForHardDeny || hardDenyDetection)) {
@@ -1871,6 +1893,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               updateAssistantSnapshot(false, true);
               break;
             case 'tool_call':
+              clearAwaitingToolSummaryMarker(true);
               sawStructuredToolCall = true;
               if (bufferedAssistantText && !hardDenyDetection) {
                 flushBufferedAssistantText(true);
@@ -1883,6 +1906,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               updateAssistantSnapshot(true, false);
               break;
             case 'tool_call_complete':
+              clearAwaitingToolSummaryMarker(true);
               sawStructuredToolCall = true;
               if (bufferedAssistantText && !hardDenyDetection) {
                 flushBufferedAssistantText(true);
@@ -1896,6 +1920,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
               updateAssistantSnapshot(true, false);
               break;
             case 'error':
+              clearAwaitingToolSummaryMarker(true);
               accumulator.onError(event.message);
               queueDiagnosticEvent('error', {
                 logicalRound: round + 1,
@@ -2039,6 +2064,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
 
           break;
         }
+
+        clearAwaitingToolSummaryMarker(true);
 
         if (completedToolCalls.length === 0) break;
 
@@ -2546,6 +2573,8 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
           break;
         }
 
+        setAwaitingToolSummaryMarker(currentRound.id);
+
         try {
           await flushTranscriptEntries();
         } catch (e) {
@@ -2558,6 +2587,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         }
       }
 
+      clearAwaitingToolSummaryMarker(true);
       accumulator.setStatus('complete');
       let assistantTurn = accumulator.snapshot();
       const projectedSnapshot = projectTurnToLegacyMessageFields(assistantTurn);
@@ -2638,6 +2668,7 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
         console.warn('[AiChatStore] Failed to persist final message content:', e);
       }
     } catch (e) {
+      clearAwaitingToolSummaryMarker?.(true);
       // Treat any error during an active abort as an intentional stop, not a failure
       const wasAborted = abortController.signal.aborted || (e instanceof Error && e.name === 'AbortError');
       if (wasAborted) {
