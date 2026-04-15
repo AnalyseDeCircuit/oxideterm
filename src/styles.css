@@ -1147,10 +1147,6 @@ html {
   box-sizing: border-box;
 }
 
-.xterm .xterm-highlight-background {
-  background: var(--xterm-highlight-bg, rgba(245, 158, 11, 0.25));
-}
-
 .xterm .xterm-highlight-underline {
   border-bottom: 2px solid var(--xterm-highlight-bg, var(--xterm-highlight-fg, #f59e0b));
 }

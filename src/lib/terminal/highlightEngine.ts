@@ -136,25 +136,35 @@ function overlap(start: number, end: number, otherStart: number, otherEnd: numbe
 }
 
 function applyDecorationClasses(element: HTMLElement, rule: RuntimeHighlightRule): void {
-  element.classList.add('xterm-highlight-decoration', `xterm-highlight-${rule.renderMode ?? 'background'}`);
+  const renderMode = rule.renderMode ?? 'background';
+  const usesOverlayStyles = renderMode !== 'background';
+
+  element.classList.add('xterm-highlight-decoration');
+  element.classList.remove('xterm-highlight-background', 'xterm-highlight-underline', 'xterm-highlight-outline');
+  if (usesOverlayStyles) {
+    element.classList.add(`xterm-highlight-${renderMode}`);
+  }
   element.dataset.highlightRuleId = rule.id;
 
-  if (rule.background) {
+  if (usesOverlayStyles && rule.background) {
     element.style.setProperty('--xterm-highlight-bg', rule.background);
   } else {
     element.style.removeProperty('--xterm-highlight-bg');
   }
 
-  if (rule.foreground) {
+  if (usesOverlayStyles && rule.foreground) {
     element.style.setProperty('--xterm-highlight-fg', rule.foreground);
   } else {
     element.style.removeProperty('--xterm-highlight-fg');
   }
 
-  if ((rule.renderMode ?? 'background') === 'background' && rule.background) {
-    element.style.backgroundColor = rule.background;
-  }
+  // Background mode uses xterm's native decoration colors instead of a DOM overlay.
+  element.style.backgroundColor = '';
 }
+
+export const __testOnly = {
+  applyDecorationClasses,
+};
 
 export class HighlightEngine {
   private term: Terminal;
