@@ -93,6 +93,7 @@ export type NotificationPush = Omit<NotificationItem, 'id' | 'createdAtMs' | 'st
   id?: string;
   createdAtMs?: number;
   actions?: NotificationAction[];
+  preserveReadStatusOnDedupe?: boolean;
 };
 
 type NotificationCenterState = {
@@ -120,11 +121,19 @@ export const useNotificationCenterStore = create<NotificationCenterState>((set) 
   unreadCriticalCount: 0,
 
   push: (incoming) => set((state) => {
+    const {
+      preserveReadStatusOnDedupe = false,
+      id,
+      createdAtMs,
+      actions,
+      ...payload
+    } = incoming;
+
     const item: NotificationItem = {
-      ...incoming,
-      id: incoming.id ?? crypto.randomUUID(),
-      createdAtMs: incoming.createdAtMs ?? Date.now(),
-      actions: incoming.actions ?? [],
+      ...payload,
+      id: id ?? crypto.randomUUID(),
+      createdAtMs: createdAtMs ?? Date.now(),
+      actions: actions ?? [],
       status: 'unread',
     };
 
@@ -140,12 +149,15 @@ export const useNotificationCenterStore = create<NotificationCenterState>((set) 
         const existing = newItems[existingIdx];
         newItems[existingIdx] = {
           ...existing,
+          kind: item.kind,
+          source: item.source,
+          scope: item.scope,
           createdAtMs: item.createdAtMs,
           title: item.title,
           body: item.body,
           severity: item.severity,
           actions: item.actions,
-          status: 'unread',
+          status: preserveReadStatusOnDedupe ? existing.status : 'unread',
         };
         return {
           items: newItems,

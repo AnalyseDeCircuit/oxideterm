@@ -3,6 +3,7 @@
 
 import { create } from 'zustand';
 import { api } from '../lib/api';
+import { pushNotification } from '../lib/notificationCenter';
 import { useToastStore } from '../hooks/useToast';
 import { useSettingsStore } from './settingsStore';
 import i18n from '../i18n';
@@ -64,11 +65,19 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
       ]);
       set({ shells, defaultShell, shellsLoaded: true });
     } catch (error) {
+      const errorMessage = String(error);
       console.error('Failed to load shells:', error);
       useToastStore.getState().addToast({
         title: i18n.t('local_shell.toast.load_shells_failed'),
-        description: String(error),
+        description: errorMessage,
         variant: 'error',
+      });
+      pushNotification({
+        kind: 'health',
+        severity: 'error',
+        title: i18n.t('local_shell.toast.load_shells_failed'),
+        body: errorMessage,
+        dedupeKey: 'local-shells-load-failed',
       });
     }
   },
@@ -134,11 +143,19 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
 
       return response.info;
     } catch (error) {
+      const errorMessage = String(error);
       console.error('Failed to create local terminal:', error);
       useToastStore.getState().addToast({
         title: i18n.t('local_shell.toast.create_failed'),
-        description: String(error),
+        description: errorMessage,
         variant: 'error',
+      });
+      pushNotification({
+        kind: 'health',
+        severity: 'error',
+        title: i18n.t('local_shell.toast.create_failed'),
+        body: errorMessage,
+        dedupeKey: `local-terminal-create-failed:${request?.shellPath ?? 'default'}`,
       });
       throw error;
     }
@@ -272,11 +289,19 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
 
       return bgInfo;
     } catch (error) {
+      const errorMessage = String(error);
       console.error('Failed to detach terminal:', error);
       useToastStore.getState().addToast({
         title: i18n.t('local_shell.toast.detach_failed'),
-        description: String(error),
+        description: errorMessage,
         variant: 'error',
+      });
+      pushNotification({
+        kind: 'health',
+        severity: 'error',
+        title: i18n.t('local_shell.toast.detach_failed'),
+        body: errorMessage,
+        dedupeKey: `local-terminal-detach-failed:${sessionId}`,
       });
       throw error;
     }
@@ -319,11 +344,19 @@ export const useLocalTerminalStore = create<LocalTerminalStore>((set, get) => ({
 
       return replay;
     } catch (error) {
+      const errorMessage = String(error);
       console.error('Failed to attach terminal:', error);
       useToastStore.getState().addToast({
         title: i18n.t('local_shell.toast.attach_failed'),
-        description: String(error),
+        description: errorMessage,
         variant: 'error',
+      });
+      pushNotification({
+        kind: 'health',
+        severity: 'error',
+        title: i18n.t('local_shell.toast.attach_failed'),
+        body: errorMessage,
+        dedupeKey: `local-terminal-attach-failed:${sessionId}`,
       });
       throw error;
     }

@@ -217,19 +217,15 @@ export const NotificationsPanel = () => {
 
         <div className="flex items-center gap-1">
           {unreadCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={markAllRead}
-                >
-                  <CheckCheck className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('notifications.actions.mark_all_read')}</TooltipContent>
-            </Tooltip>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[10px]"
+              onClick={markAllRead}
+            >
+              <CheckCheck className="h-3 w-3" />
+              {t('notifications.actions.mark_all_read')}
+            </Button>
           )}
           {items.length > 0 && (
             <Tooltip>

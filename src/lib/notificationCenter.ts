@@ -18,6 +18,7 @@ type NotifyOptions = {
   connectionId?: string;
   dedupeKey?: string;
   source?: NotificationSource;
+  preserveReadStatusOnDedupe?: boolean;
 };
 
 function inferConnectionKind(text?: string): NotificationKind {
@@ -35,7 +36,17 @@ function inferConnectionKind(text?: string): NotificationKind {
 }
 
 export function pushNotification(options: NotifyOptions) {
-  const { kind, severity, title, body, nodeId, connectionId, dedupeKey, source } = options;
+  const {
+    kind,
+    severity,
+    title,
+    body,
+    nodeId,
+    connectionId,
+    dedupeKey,
+    source,
+    preserveReadStatusOnDedupe,
+  } = options;
 
   const scope: NotificationItem['scope'] = nodeId
     ? { type: 'node', nodeId }
@@ -51,6 +62,7 @@ export function pushNotification(options: NotifyOptions) {
     source: source ?? { type: 'system' },
     scope,
     dedupeKey,
+    preserveReadStatusOnDedupe,
   });
 }
 

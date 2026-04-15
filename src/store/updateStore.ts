@@ -16,6 +16,8 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { retryWithExponentialBackoff } from '@/lib/retry';
 import { useSettingsStore } from '@/store/settingsStore';
+import { pushNotification } from '@/lib/notificationCenter';
+import i18n from '@/i18n';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -158,9 +160,17 @@ async function legacyDownload(set: SetFn, get: GetFn) {
       set({ stage: 'ready', downloadedBytes: totalLen });
     }
   } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
     set({
       stage: 'error',
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage,
+    });
+    pushNotification({
+      kind: 'update',
+      severity: 'error',
+      title: i18n.t('settings_view.help.update_error'),
+      body: errorMessage,
+      dedupeKey: `update-error:${get().newVersion ?? 'unknown'}`,
     });
   }
 }
@@ -219,6 +229,14 @@ export const useUpdateStore = create<UpdateState>()(
                 releaseDate: result.date ?? null,
                 lastCheckedAt: Date.now(),
               });
+              pushNotification({
+                kind: 'update',
+                severity: 'info',
+                title: i18n.t('settings_view.help.update_available'),
+                body: `v${result.version}`,
+                dedupeKey: `update-available:${result.version}`,
+                preserveReadStatusOnDedupe: true,
+              });
             } else {
               set({ stage: 'up-to-date', lastCheckedAt: Date.now() });
             }
@@ -243,6 +261,14 @@ export const useUpdateStore = create<UpdateState>()(
                 releaseDate: update.date ?? null,
                 lastCheckedAt: Date.now(),
               });
+              pushNotification({
+                kind: 'update',
+                severity: 'info',
+                title: i18n.t('settings_view.help.update_available'),
+                body: `v${update.version}`,
+                dedupeKey: `update-available:${update.version}`,
+                preserveReadStatusOnDedupe: true,
+              });
             } else {
               _updateRef = null;
               set({ stage: 'up-to-date', lastCheckedAt: Date.now() });
@@ -259,6 +285,13 @@ export const useUpdateStore = create<UpdateState>()(
             set({ stage: 'up-to-date', lastCheckedAt: Date.now() });
           } else {
             set({ stage: 'error', errorMessage: msg, lastCheckedAt: Date.now() });
+            pushNotification({
+              kind: 'update',
+              severity: 'error',
+              title: i18n.t('settings_view.help.update_error'),
+              body: msg,
+              dedupeKey: `update-check-error:${msg}`,
+            });
           }
         }
       },
@@ -409,12 +442,27 @@ export const useUpdateStore = create<UpdateState>()(
                   downloadSpeed: 0,
                   etaSeconds: null,
                 });
+                pushNotification({
+                  kind: 'update',
+                  severity: 'info',
+                  title: i18n.t('settings_view.help.ready_to_restart'),
+                  body: get().newVersion ? `v${get().newVersion}` : undefined,
+                  dedupeKey: `update-ready:${get().newVersion ?? 'unknown'}`,
+                  preserveReadStatusOnDedupe: true,
+                });
                 break;
 
               case 'error':
                 set({
                   stage: 'error',
                   errorMessage: payload.errorMessage || 'Unknown error',
+                });
+                pushNotification({
+                  kind: 'update',
+                  severity: 'error',
+                  title: i18n.t('settings_view.help.update_error'),
+                  body: payload.errorMessage || 'Unknown error',
+                  dedupeKey: `update-error:${payload.errorCode ?? get().newVersion ?? 'unknown'}`,
                 });
                 break;
 
