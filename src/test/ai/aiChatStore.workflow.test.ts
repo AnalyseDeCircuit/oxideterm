@@ -228,6 +228,7 @@ async function waitFor(predicate: () => boolean, attempts = 40) {
 describe('aiChatStore workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invokeMock.mockReset();
     settingsStoreMock.state.settings.ai.enabled = true;
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
@@ -330,6 +331,135 @@ describe('aiChatStore workflows', () => {
 
     useAiChatStore.getState().stopGeneration();
     await secondRun;
+  });
+
+  it('keeps the newer assistant snapshot after same-message save callbacks resolve out of order', async () => {
+    setConversation([]);
+
+    const persistedMessages = new Map<string, Record<string, unknown>>();
+    let backendUpdatedAt = 1;
+    const pendingSaves: Array<{
+      request: Record<string, unknown>;
+      resolve: () => void;
+    }> = [];
+
+    const applySave = (request: Record<string, unknown>) => {
+      const messageId = request.id as string;
+      const incomingProjectionUpdatedAt = (request.projectionUpdatedAt as number | undefined) ?? (request.timestamp as number);
+      const existing = persistedMessages.get(messageId);
+      const existingProjectionUpdatedAt = existing
+        ? ((existing.projectionUpdatedAt as number | undefined) ?? (existing.timestamp as number))
+        : Number.NEGATIVE_INFINITY;
+
+      if (incomingProjectionUpdatedAt < existingProjectionUpdatedAt) {
+        backendUpdatedAt = Math.max(backendUpdatedAt, incomingProjectionUpdatedAt);
+        return;
+      }
+
+      persistedMessages.set(messageId, {
+        id: request.id,
+        role: request.role,
+        content: request.content,
+        timestamp: request.timestamp,
+        toolCalls: request.toolCalls,
+        context: null,
+        turn: request.turn,
+        transcriptRef: request.transcriptRef,
+        summaryRef: request.summaryRef,
+        projectionUpdatedAt: incomingProjectionUpdatedAt,
+      });
+      backendUpdatedAt = Math.max(backendUpdatedAt, incomingProjectionUpdatedAt);
+    };
+
+    invokeMock.mockImplementation((command: string, payload?: { request?: Record<string, unknown>; conversationId?: string }) => {
+      switch (command) {
+        case 'ai_chat_save_message': {
+          const request = payload?.request;
+          if (!request) {
+            return Promise.resolve(undefined);
+          }
+
+          return new Promise<void>((resolve) => {
+            pendingSaves.push({
+              request,
+              resolve: () => {
+                applySave(request);
+                resolve();
+              },
+            });
+          });
+        }
+        case 'ai_chat_get_conversation':
+          return Promise.resolve({
+            id: payload?.conversationId ?? 'conv-1',
+            title: 'Conversation',
+            createdAt: 1,
+            updatedAt: backendUpdatedAt,
+            sessionId: null,
+            origin: 'sidebar',
+            messages: Array.from(persistedMessages.values())
+              .sort((left, right) => (left.timestamp as number) - (right.timestamp as number))
+              .map(({ projectionUpdatedAt: _projectionUpdatedAt, ...message }) => message),
+          });
+        case 'ai_chat_get_transcript':
+          return Promise.resolve({ entries: [] });
+        default:
+          return Promise.resolve(undefined);
+      }
+    });
+
+    const olderMessage: AiChatMessage = {
+      id: 'assistant-shared',
+      role: 'assistant',
+      content: 'older snapshot',
+      timestamp: 10,
+      turn: {
+        id: 'assistant-shared',
+        status: 'complete',
+        plainTextSummary: 'older snapshot',
+        parts: [{ type: 'text', text: 'older snapshot' }],
+        toolRounds: [],
+      },
+    };
+    const newerMessage: AiChatMessage = {
+      id: 'assistant-shared',
+      role: 'assistant',
+      content: 'newer snapshot',
+      timestamp: 10,
+      turn: {
+        id: 'assistant-shared',
+        status: 'complete',
+        plainTextSummary: 'newer snapshot',
+        parts: [{ type: 'text', text: 'newer snapshot' }],
+        toolRounds: [],
+      },
+    };
+
+    const olderSavePromise = useAiChatStore.getState()._addMessage('conv-1', olderMessage);
+    const newerSavePromise = useAiChatStore.getState()._addMessage('conv-1', newerMessage);
+
+    await waitFor(() => pendingSaves.length === 2);
+
+    const [olderSave, newerSave] = pendingSaves;
+    expect(newerSave.request.projectionUpdatedAt).toBeGreaterThan(olderSave.request.projectionUpdatedAt);
+
+    newerSave.resolve();
+    await newerSavePromise;
+    olderSave.resolve();
+    await olderSavePromise;
+
+    await useAiChatStore.getState()._loadConversation('conv-1');
+
+    const reloadedConversation = useAiChatStore.getState().conversations[0];
+    const reloadedMessages = reloadedConversation.messages.filter((message) => message.id === 'assistant-shared');
+
+    expect(reloadedMessages).toHaveLength(1);
+    expect(reloadedMessages[0]).toMatchObject({
+      content: 'newer snapshot',
+      turn: expect.objectContaining({
+        plainTextSummary: 'newer snapshot',
+      }),
+    });
   });
 
   it('updates approval state on the originating conversation even after switching activeConversationId', async () => {
