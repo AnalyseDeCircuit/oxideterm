@@ -83,7 +83,11 @@ export function attachTerminalSmartCopy(
 
     if (options.onPasteShortcut && matchAction(event, 'terminal') === 'terminal.paste') {
       consumeKeyboardEvent(event);
-      options.onPasteShortcut();
+      // Only the initial keydown should trigger paste. Matching keyup events
+      // still need to be consumed so the native paste path does not run later.
+      if (event.type === 'keydown' && !event.repeat) {
+        options.onPasteShortcut();
+      }
       return false;
     }
 
