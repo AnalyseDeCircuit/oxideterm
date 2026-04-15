@@ -229,6 +229,7 @@ describe('aiChatStore workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invokeMock.mockReset();
+    providerStreamMock.mockReset();
     settingsStoreMock.state.settings.ai.enabled = true;
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
@@ -491,7 +492,7 @@ describe('aiChatStore workflows', () => {
     await waitFor(() => {
       const conversation = useAiChatStore.getState().conversations.find((item) => item.id === 'conv-1');
       const assistant = conversation?.messages.find((message) => message.role === 'assistant');
-      return assistant?.toolCalls?.[0]?.status === 'pending_user_approval';
+      return assistant?.turn?.toolRounds[0]?.toolCalls[0]?.approvalState === 'pending';
     });
 
     const currentState = useAiChatStore.getState();
