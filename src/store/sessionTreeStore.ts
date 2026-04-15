@@ -211,16 +211,6 @@ interface SessionTreeStore {
   getTerminalsForNode: (nodeId: string) => string[];
   /** 通过终端 ID 查找所属节点 */
   getNodeByTerminalId: (terminalId: string) => UnifiedFlatNode | undefined;
-  /** 添加 KBI (2FA) 认证后的会话 (隔离流程) */
-  addKbiSession: (params: {
-    sessionId: string;
-    wsPort: number;
-    wsToken: string;
-    host: string;
-    port: number;
-    username: string;
-    displayName: string;
-  }) => Promise<void>;
   
   // ========== SFTP Management ==========
   /** 打开节点的 SFTP 会话 */
@@ -1474,84 +1464,6 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
       const nodeId = get().terminalNodeMap.get(terminalId);
       if (!nodeId) return undefined;
       return get().getNode(nodeId);
-    },
-
-    /**
-     * Add a KBI (2FA) session to the tree.
-     * 
-     * This is a special path for sessions created via the isolated ssh_connect_kbi flow.
-     * Unlike regular connections, KBI sessions bypass addRootNode+connectNode because
-     * the authentication is interactive and the session is already established by the time
-     * we need to add it to the tree.
-     */
-    addKbiSession: async (params) => {
-      const { sessionId, wsPort, wsToken, host, port, username, displayName } = params;
-      
-      console.debug(`[SessionTree] Adding KBI session: ${sessionId} for ${displayName}`);
-      
-      try {
-        // 1. Create a root node for this KBI session
-        // We use a special request with keyboard_interactive auth type
-        const nodeId = await api.addRootNode({
-          displayName,
-          host,
-          port,
-          username,
-          authType: 'keyboard_interactive',
-        });
-        
-        console.debug(`[SessionTree] KBI root node created: ${nodeId}`);
-        
-        // 2. The session is already connected via KBI, so we need to update the node state
-        await api.updateTreeNodeState(nodeId, 'connected');
-
-        // Set the terminal session (which was created during KBI flow)
-        await api.setTreeNodeTerminal(nodeId, sessionId);
-        
-        // 3. Update appStore with the session info so TerminalView can connect
-        // We directly update the sessions Map since there's no dedicated addSession method
-        const { useAppStore } = await import('./appStore');
-        const sessionInfo = {
-          id: sessionId,
-          host,
-          port,
-          username,
-          name: displayName,
-          state: 'connected' as const,
-          ws_url: `ws://127.0.0.1:${wsPort}`,
-          ws_token: wsToken,
-          auth_type: 'keyboard_interactive' as const,
-          color: '#4ade80', // Green for KBI sessions
-          uptime_secs: 0,
-          order: Date.now(), // Use timestamp for ordering
-        };
-        
-        useAppStore.setState((state) => {
-          const newSessions = new Map(state.sessions);
-          newSessions.set(sessionId, sessionInfo);
-          return { sessions: newSessions };
-        });
-        
-        // Also create a tab for the terminal
-        useAppStore.getState().createTab('terminal', sessionId);
-        
-        // 4. Update local state maps
-        set((state) => ({
-          nodeTerminalMap: new Map(state.nodeTerminalMap).set(nodeId, [
-            ...(state.nodeTerminalMap.get(nodeId) || []),
-            sessionId,
-          ]),
-          terminalNodeMap: new Map(state.terminalNodeMap).set(sessionId, nodeId),
-        }));
-        
-        // 5. Refresh the tree from backend to get consistent state
-        await get().fetchTree();
-        
-        console.debug(`[SessionTree] KBI session ${sessionId} added to tree under node ${nodeId}`);
-      } catch (error) {
-        console.error(`[SessionTree] Failed to add KBI session:`, error);
-        throw error;
-      }
     },
     
     // ========== SFTP Management ==========

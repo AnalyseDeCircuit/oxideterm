@@ -12,8 +12,9 @@ use russh::*;
 use tracing::{debug, info, warn};
 
 use super::auth::{
-    DEFAULT_AUTH_TIMEOUT_SECS, authenticate_certificate_best_algo, authenticate_password,
-    authenticate_publickey_best_algo, build_client_config, ensure_auth_success,
+    DEFAULT_AUTH_TIMEOUT_SECS, authenticate_certificate_best_algo,
+    authenticate_keyboard_interactive, authenticate_password, authenticate_publickey_best_algo,
+    build_client_config, ensure_auth_success,
     load_certificate_auth_material, load_private_key_material, try_kbi_auth_chain,
     try_password_as_kbi_fallback,
 };
@@ -131,11 +132,14 @@ impl SshClient {
                     .await?
             }
             AuthMethod::KeyboardInteractive => {
-                // KeyboardInteractive is handled by the separate KBI flow (commands/kbi.rs)
-                // This path should never be reached - KBI uses ssh_connect_kbi command
-                return Err(SshError::AuthenticationFailed(
-                    "KeyboardInteractive must be initiated via ssh_connect_kbi command".to_string(),
-                ));
+                let Some(app) = app_handle else {
+                    return Err(SshError::AuthenticationFailed(
+                        "KeyboardInteractive requires an interactive UI context".to_string(),
+                    ));
+                };
+
+                authenticate_keyboard_interactive(&mut handle, &self.config.username, app).await?;
+                client::AuthResult::Success
             }
         };
 

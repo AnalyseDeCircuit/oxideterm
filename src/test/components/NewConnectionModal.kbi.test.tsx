@@ -1,6 +1,4 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 
@@ -13,13 +11,14 @@ const apiMocks = vi.hoisted(() => ({
 const appStoreState = vi.hoisted(() => ({
   modals: { newConnection: true },
   toggleModal: vi.fn(),
+  createTab: vi.fn(),
   quickConnectData: null as null | { host: string; port: number; username: string },
 }));
 
 const sessionTreeState = vi.hoisted(() => ({
   addRootNode: vi.fn(),
   connectNode: vi.fn(),
-  addKbiSession: vi.fn().mockResolvedValue(undefined),
+  createTerminalForNode: vi.fn(),
 }));
 
 const toastState = vi.hoisted(() => ({
@@ -61,17 +60,19 @@ vi.mock('react-i18next', () => ({
 
 import { NewConnectionModal } from '@/components/modals/NewConnectionModal';
 
-describe('NewConnectionModal KBI flow', () => {
+describe('NewConnectionModal terminal creation flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appStoreState.modals.newConnection = true;
     appStoreState.quickConnectData = null;
     apiMocks.getGroups.mockResolvedValue([]);
     apiMocks.isAgentAvailable.mockResolvedValue(true);
-    vi.mocked(invoke).mockResolvedValue(undefined as never);
+    sessionTreeState.addRootNode.mockResolvedValue('node-kbi');
+    sessionTreeState.connectNode.mockResolvedValue(undefined);
+    sessionTreeState.createTerminalForNode.mockResolvedValue('term-kbi');
   });
 
-  it('passes agentForwarding to ssh_connect_kbi', async () => {
+  it('routes keyboard-interactive connects through SessionTree and creates a terminal', async () => {
     await act(async () => {
       render(<NewConnectionModal />);
     });
@@ -94,23 +95,51 @@ describe('NewConnectionModal KBI flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'modals.new_connection.connect' }));
 
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('ssh_connect_kbi', expect.objectContaining({
+      expect(sessionTreeState.addRootNode).toHaveBeenCalledWith(expect.objectContaining({
         host: 'server.example.com',
         username: 'alice',
+        authType: 'keyboard_interactive',
         agentForwarding: true,
-        maxBufferLines: 7000,
       }));
+    });
+    await waitFor(() => {
+      expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-kbi');
+      expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith('node-kbi', 120, 40);
+      expect(appStoreState.createTab).toHaveBeenCalledWith('terminal', 'term-kbi');
+      expect(appStoreState.toggleModal).toHaveBeenCalledWith('newConnection', false);
     });
   });
 
-  it('mounts the real standalone KbiDialog listeners before connect', async () => {
+  it('creates a terminal for direct password connections too', async () => {
+    sessionTreeState.addRootNode.mockResolvedValue('node-password');
+    sessionTreeState.createTerminalForNode.mockResolvedValue('term-password');
+
     await act(async () => {
       render(<NewConnectionModal />);
     });
 
+    fireEvent.change(screen.getByLabelText('modals.new_connection.target_host *'), {
+      target: { value: 'password.example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('modals.new_connection.target_username *'), {
+      target: { value: 'bob' },
+    });
+    fireEvent.change(screen.getByLabelText('modals.new_connection.password'), {
+      target: { value: 'secret' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'modals.new_connection.connect' }));
+
     await waitFor(() => {
-      expect(listen).toHaveBeenCalledWith('ssh_kbi_prompt', expect.any(Function));
-      expect(listen).toHaveBeenCalledWith('ssh_kbi_result', expect.any(Function));
+      expect(sessionTreeState.addRootNode).toHaveBeenCalledWith(expect.objectContaining({
+        host: 'password.example.com',
+        username: 'bob',
+        authType: 'password',
+        password: 'secret',
+      }));
+      expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-password');
+      expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith('node-password', 120, 40);
+      expect(appStoreState.createTab).toHaveBeenCalledWith('terminal', 'term-password');
     });
   });
 });

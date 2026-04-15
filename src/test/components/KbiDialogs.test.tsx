@@ -131,7 +131,7 @@ describe('KBI dialogs', () => {
     expect(screen.queryByLabelText('Prompt B')).not.toBeInTheDocument();
   });
 
-  it('GlobalKbiDialog cancels overlapping chained prompts and closes on matching success', async () => {
+  it('GlobalKbiDialog handles standalone prompts and closes on matching success', async () => {
     render(<GlobalKbiDialog />);
 
     await waitFor(() => {
@@ -139,38 +139,22 @@ describe('KBI dialogs', () => {
     });
 
     emitTauriEvent('ssh_kbi_prompt', {
-      authFlowId: 'chain-a',
+      authFlowId: 'standalone-a',
       name: 'OTP',
-      instructions: 'Enter chained code A',
-      prompts: [{ prompt: 'Chained prompt A', echo: false }],
-      chained: true,
+      instructions: 'Enter standalone code A',
+      prompts: [{ prompt: 'Standalone prompt A', echo: false }],
+      chained: false,
     });
 
-    expect(await screen.findByLabelText('Chained prompt A')).toBeInTheDocument();
-    vi.mocked(invoke).mockClear();
-
-    emitTauriEvent('ssh_kbi_prompt', {
-      authFlowId: 'chain-b',
-      name: 'OTP',
-      instructions: 'Enter chained code B',
-      prompts: [{ prompt: 'Chained prompt B', echo: false }],
-      chained: true,
-    });
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledTimes(1);
-      expect(invoke).toHaveBeenCalledWith('ssh_kbi_cancel', {
-        request: { authFlowId: 'chain-b' },
-      });
-    });
+    expect(await screen.findByLabelText('Standalone prompt A')).toBeInTheDocument();
 
     emitTauriEvent('ssh_kbi_result', {
-      authFlowId: 'chain-a',
+      authFlowId: 'standalone-a',
       success: true,
     });
 
     await waitFor(() => {
-      expect(screen.queryByLabelText('Chained prompt A')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Standalone prompt A')).not.toBeInTheDocument();
     });
   });
 });

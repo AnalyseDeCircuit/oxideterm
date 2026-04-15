@@ -160,8 +160,8 @@ fn build_auth(
 
 fn build_root_auth(request: &ConnectServerRequest) -> Result<AuthMethod, String> {
     if request.auth_type == "keyboard_interactive" {
-        // Standalone KBI sessions are already authenticated through ssh_connect_kbi.
-        // The tree only needs metadata to represent the existing direct session.
+        // Direct root nodes may opt into keyboard-interactive authentication.
+        // Tree children / proxy paths still reject it through build_auth().
         return Ok(AuthMethod::KeyboardInteractive);
     }
 

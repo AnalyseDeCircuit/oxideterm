@@ -4,13 +4,11 @@
 /**
  * Global Keyboard-Interactive Dialog for Multi-Step Auth Chaining
  *
- * Always mounted in App.tsx. Handles KBI prompts that arise from
- * multi-step authentication (e.g. key auth → server requests 2FA via KBI).
- * Only processes events with `chained: true`.
+ * Always mounted in App.tsx. Handles all SSH keyboard-interactive prompts,
+ * including standalone direct auth and multi-step auth chaining.
  *
- * Unlike the standalone KbiDialog (used in NewConnectionModal), this dialog
- * does NOT manage session creation — the normal connect flow handles that.
- * It simply collects user responses and forwards them to the backend.
+ * Session creation is handled by the surrounding connect flow. This dialog
+ * only collects user responses and forwards them to the backend.
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -74,11 +72,9 @@ export const GlobalKbiDialog = () => {
   useEffect(() => {
     let mounted = true;
 
-    // Listen for chained KBI prompt events only
+    // Listen for all KBI prompt events
     listen<KbiPromptEvent>('ssh_kbi_prompt', (event) => {
       if (!mounted) return;
-      // Only handle chained auth prompts
-      if (!event.payload.chained) return;
 
       if (!currentAuthFlowIdRef.current) {
         activatePrompt(event.payload);
@@ -112,8 +108,6 @@ export const GlobalKbiDialog = () => {
       clearTimer();
 
       if (event.payload.success) {
-        // Chained auth succeeded — just close the dialog.
-        // Session creation is handled by the normal connect flow.
         currentAuthFlowIdRef.current = null;
         setCurrentPrompt(null);
       } else {

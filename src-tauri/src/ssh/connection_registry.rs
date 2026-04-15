@@ -910,12 +910,7 @@ impl SshConnectionRegistry {
                     passphrase: passphrase.clone(),
                 },
                 AuthMethod::Agent => SshAuthMethod::Agent,
-                AuthMethod::KeyboardInteractive => {
-                    // KBI sessions must use the dedicated ssh_connect_kbi command
-                    return Err(ConnectionRegistryError::ConnectionFailed(
-                        "KeyboardInteractive must use ssh_connect_kbi command".to_string(),
-                    ));
-                }
+                AuthMethod::KeyboardInteractive => SshAuthMethod::KeyboardInteractive,
             },
             timeout_secs: 30,
             cols: config.cols,

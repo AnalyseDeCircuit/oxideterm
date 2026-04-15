@@ -4,7 +4,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store/appStore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -38,7 +37,6 @@ import type { TestConnectionRequest, TestConnectionResponse } from '../../lib/ap
 import { buildTestConnectionRequest } from '../../lib/testConnectionRequest';
 import { AddJumpServerDialog } from './AddJumpServerDialog';
 import { HostKeyConfirmDialog } from './HostKeyConfirmDialog';
-import { KbiDialog } from './KbiDialog';
 import { Plus, Trash2, Key, Lock, ChevronDown, ChevronRight, Shield, Info } from 'lucide-react';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useToast } from '../../hooks/useToast';
@@ -56,16 +54,13 @@ export const NewConnectionModal = () => {
   const { 
     modals, 
     toggleModal,
-    quickConnectData
+    quickConnectData,
+    createTab,
   } = useAppStore();
-  const { addRootNode, connectNode, addKbiSession } = useSessionTreeStore();
+  const { addRootNode, connectNode, createTerminalForNode } = useSessionTreeStore();
   const { success: toastSuccess, error: toastError } = useToast();
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
-  
-  // KBI (2FA) specific state
-  const [, setKbiFlowActive] = useState(false);
-  const [kbiError, setKbiError] = useState<string | null>(null);
   
   // Form State
   const [name, setName] = useState('');
@@ -227,74 +222,6 @@ export const NewConnectionModal = () => {
     return host && username;
   };
 
-  // Handle KBI success - add the session to SessionTree
-  const handleKbiSuccess = useCallback(async (sessionId: string, wsPort: number, wsToken: string) => {
-    console.log(`KBI auth succeeded, session: ${sessionId}, ws://127.0.0.1:${wsPort}`);
-    setKbiFlowActive(false);
-    setKbiError(null);
-    
-    try {
-      // Add the KBI session to SessionTree
-      // This is a special path since KBI doesn't go through addRootNode+connectNode
-      await addKbiSession({
-        sessionId,
-        wsPort,
-        wsToken,
-        host,
-        port: parseInt(port) || 22,
-        username,
-        displayName: name || `${username}@${host}`,
-      });
-      
-      toggleModal('newConnection', false);
-    } catch (e) {
-      console.error('Failed to add KBI session to tree:', e);
-      setKbiError(String(e));
-    }
-  }, [host, port, username, name, addKbiSession, toggleModal]);
-
-  // Handle KBI failure/cancel
-  const handleKbiFailure = useCallback((error: string) => {
-    console.log(`KBI auth failed: ${error}`);
-    setKbiFlowActive(false);
-    setKbiError(error);
-    setLoading(false);
-  }, []);
-
-  // Start KBI connection flow
-  const handleKbiConnect = async () => {
-    if (!host || !username) return;
-    if (proxyServers.length > 0) {
-      setKbiError('2FA via proxy chain is not supported. Please use direct connection.');
-      return;
-    }
-
-    setLoading(true);
-    setKbiError(null);
-    setKbiFlowActive(true);
-
-    try {
-      const { useSettingsStore, deriveBackendHotLines } = await import('../../store/settingsStore');
-      const scrollback = useSettingsStore.getState().settings.terminal.scrollback;
-      // Initiate KBI auth flow - this will trigger ssh_kbi_prompt events
-      await invoke('ssh_connect_kbi', {
-        host,
-        port: parseInt(port) || 22,
-        username,
-        cols: 120,
-        rows: 40,
-        displayName: name || undefined,
-        agentForwarding,
-        maxBufferLines: deriveBackendHotLines(scrollback),
-      });
-    } catch (e) {
-      console.error('Failed to start KBI flow:', e);
-      setKbiFlowActive(false);
-      setKbiError(String(e));
-      setLoading(false);
-    }
-  };
-
   const handleConnect = async () => {
     if (proxyServers.length > 0) {
       if (!proxyServers.every(server => server.host && server.username)) return;
@@ -302,14 +229,12 @@ export const NewConnectionModal = () => {
       if (!host || !username) return;
     }
 
-    // Special handling for KBI - use separate flow
-    if (authType === 'keyboard_interactive') {
-      await handleKbiConnect();
-      return;
-    }
-
     setLoading(true);
     try {
+      if (authType === 'keyboard_interactive' && proxyServers.length > 0) {
+        throw new Error(t('sessionManager.toast.proxy_hop_kbi_unsupported'));
+      }
+
       // 使用 SessionTree 的 addRootNode API 创建节点
       const request = {
         displayName: name || undefined,
@@ -331,6 +256,9 @@ export const NewConnectionModal = () => {
       
       // 自动连接新创建的节点（与 Saved Connection 流程一致）
       await connectNode(nodeId);
+
+      const terminalId = await createTerminalForNode(nodeId, 120, 40);
+      createTab('terminal', terminalId);
       
       toggleModal('newConnection', false);
 
@@ -467,12 +395,6 @@ export const NewConnectionModal = () => {
 
   return (
     <>
-      {/* Keep mounted so listeners are ready before the backend emits the first prompt. */}
-      <KbiDialog
-        onSuccess={handleKbiSuccess}
-        onFailure={handleKbiFailure}
-      />
-
       <HostKeyConfirmDialog
         open={!!testHostKeyStatus && testHostKeyStatus.status === 'unknown'}
         onClose={() => {
@@ -497,7 +419,6 @@ export const NewConnectionModal = () => {
         if (!open) {
           setPassword('');
           setPassphrase('');
-          setKbiError(null);
           setAgentForwarding(false);
           setTestHostKeyStatus(null);
           setPendingTestRequest(null);
@@ -519,16 +440,6 @@ export const NewConnectionModal = () => {
               {t('modals.new_connection.description')}
             </DialogDescription>
           </DialogHeader>
-          
-          {/* KBI Error display */}
-          {kbiError && (
-            <div className="mx-4 mt-2 p-3 bg-red-950/30 border border-red-900/50 rounded text-sm text-red-400 shrink-0">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                <span>{t('modals.new_connection.twofa_error')}: {kbiError}</span>
-              </div>
-            </div>
-          )}
           
           <div className="flex-1 overflow-y-auto min-h-0">
           <div className="space-y-6 p-4">
