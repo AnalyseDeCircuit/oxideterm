@@ -64,7 +64,14 @@
     "forwards_prefix": "포워딩",
     "ide": "IDE",
     "session_manager": "세션 관리자",
-    "plugin_manager": "플러그인"
+    "activity": "활동",
+    "plugin_manager": "플러그인",
+    "notifications": "알림",
+    "event_log": "이벤트 로그"
+  },
+  "activity": {
+    "title": "활동",
+    "description": "알림과 연결 이벤트를 한곳에서 확인하세요."
   },
   "ide": {
     "loading_project": "프로젝트 로딩 중...",

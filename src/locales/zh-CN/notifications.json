@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "通知",
+    "filter": {
+      "all": "全部",
+      "unread": "未读"
+    },
+    "empty": {
+      "no_notifications": "暂无通知",
+      "no_unread": "已全部读完"
+    },
+    "actions": {
+      "mark_all_read": "全部标为已读",
+      "dismiss_all": "全部清除",
+      "dismiss": "清除",
+      "open": "打开",
+      "retry": "重试",
+      "view": "查看",
+      "copy": "复制",
+      "navigate": "前往",
+      "run_command": "运行",
+      "open_url": "打开链接"
+    },
+    "kind": {
+      "connection": "连接",
+      "security": "安全",
+      "transfer": "传输",
+      "update": "更新",
+      "health": "系统状况",
+      "plugin": "插件",
+      "agent": "代理"
+    },
+    "time": {
+      "just_now": "刚刚",
+      "minutes_ago": "{{count}}分钟前",
+      "hours_ago": "{{count}}小时前",
+      "days_ago": "{{count}}天前"
+    }
+  }
+}

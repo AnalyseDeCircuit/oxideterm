@@ -64,7 +64,14 @@
     "forwards_prefix": "Forwards",
     "ide": "IDE",
     "session_manager": "Session Manager",
-    "plugin_manager": "Plugins"
+    "activity": "Activity",
+    "plugin_manager": "Plugins",
+    "notifications": "Notifications",
+    "event_log": "Event Log"
+  },
+  "activity": {
+    "title": "Activity",
+    "description": "Review notifications and connection events in one place."
   },
   "ide": {
     "loading_project": "Loading project...",

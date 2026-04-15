@@ -20,6 +20,7 @@ pub mod graphics;
 pub mod launcher;
 #[cfg(feature = "local-terminal")]
 pub mod local;
+pub mod notification;
 pub mod oxide_file;
 pub mod path_utils;
 pub mod rag;

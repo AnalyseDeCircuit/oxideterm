@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "Notifications",
+    "filter": {
+      "all": "All",
+      "unread": "Unread"
+    },
+    "empty": {
+      "no_notifications": "No notifications",
+      "no_unread": "All caught up"
+    },
+    "actions": {
+      "mark_all_read": "Mark all as read",
+      "dismiss_all": "Dismiss all",
+      "dismiss": "Dismiss",
+      "open": "Open",
+      "retry": "Retry",
+      "view": "View",
+      "copy": "Copy",
+      "navigate": "Go to",
+      "run_command": "Run",
+      "open_url": "Open URL"
+    },
+    "kind": {
+      "connection": "Connection",
+      "security": "Security",
+      "transfer": "Transfer",
+      "update": "Update",
+      "health": "Health",
+      "plugin": "Plugin",
+      "agent": "Agent"
+    },
+    "time": {
+      "just_now": "Just now",
+      "minutes_ago": "{{count}}m ago",
+      "hours_ago": "{{count}}h ago",
+      "days_ago": "{{count}}d ago"
+    }
+  }
+}

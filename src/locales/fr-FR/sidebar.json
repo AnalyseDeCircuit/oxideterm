@@ -30,7 +30,9 @@
       "session_manager": "Gestionnaire de sessions",
       "open_session_manager": "Ouvrir le gestionnaire de sessions",
       "plugins": "Extensions",
-      "event_log": "Journal d'événements"
+      "activity": "Activité",
+      "event_log": "Journal d'événements",
+      "notifications": "Notifications"
     },
     "tooltips": {
       "settings": "Paramètres",

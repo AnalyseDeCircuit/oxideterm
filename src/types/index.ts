@@ -414,7 +414,7 @@ export interface PersistedSessionInfo {
 }
 
 // Tab Types
-export type TabType = 'terminal' | 'sftp' | 'forwards' | 'settings' | 'connection_monitor' | 'connection_pool' | 'topology' | 'local_terminal' | 'ide' | 'file_manager' | 'session_manager' | 'plugin' | 'plugin_manager' | 'graphics' | 'launcher' | 'ai_agent';
+export type TabType = 'terminal' | 'sftp' | 'forwards' | 'settings' | 'connection_monitor' | 'connection_pool' | 'topology' | 'local_terminal' | 'ide' | 'file_manager' | 'session_manager' | 'plugin' | 'plugin_manager' | 'graphics' | 'launcher' | 'ai_agent' | 'activity' | 'notifications' | 'event_log';
 
 // Local exec result (AI tool use)
 export type LocalExecResult = {

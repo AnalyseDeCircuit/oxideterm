@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "通知",
+    "filter": {
+      "all": "全部",
+      "unread": "未讀"
+    },
+    "empty": {
+      "no_notifications": "目前沒有通知",
+      "no_unread": "已全部讀完"
+    },
+    "actions": {
+      "mark_all_read": "全部標為已讀",
+      "dismiss_all": "全部清除",
+      "dismiss": "清除",
+      "open": "開啟",
+      "retry": "重試",
+      "view": "檢視",
+      "copy": "複製",
+      "navigate": "前往",
+      "run_command": "執行",
+      "open_url": "開啟連結"
+    },
+    "kind": {
+      "connection": "連線",
+      "security": "安全",
+      "transfer": "傳輸",
+      "update": "更新",
+      "health": "系統狀況",
+      "plugin": "外掛",
+      "agent": "代理"
+    },
+    "time": {
+      "just_now": "剛剛",
+      "minutes_ago": "{{count}}分鐘前",
+      "hours_ago": "{{count}}小時前",
+      "days_ago": "{{count}}天前"
+    }
+  }
+}

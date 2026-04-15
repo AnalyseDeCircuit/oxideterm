@@ -84,7 +84,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useBroadcastStore } from '@/store/broadcastStore';
 import { useLocalTerminalStore } from '@/store/localTerminalStore';
 import { usePluginStore } from '@/store/pluginStore';
-import { useEventLogStore } from '@/store/eventLogStore';
+import { useActivityStore } from '@/store/activityStore';
+
 import { connectToSaved } from '@/lib/connectToSaved';
 import { useToast } from '@/hooks/useToast';
 import { getAllThemeNames } from '@/lib/themes';
@@ -291,7 +292,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onOpenChan
         icon: <Rows className="h-4 w-4" />,
         shortcut: getCommandShortcut('cmd:toggle_panel'),
         action: () => {
-          useEventLogStore.getState().togglePanel();
+          useActivityStore.getState().setActiveView('event_log');
+          useAppStore.getState().createTab('activity');
         },
       },
       {

@@ -30,7 +30,9 @@
       "session_manager": "Sitzungsmanager",
       "open_session_manager": "Sitzungsmanager öffnen",
       "plugins": "Plugins",
-      "event_log": "Ereignisprotokoll"
+      "activity": "Aktivität",
+      "event_log": "Ereignisprotokoll",
+      "notifications": "Benachrichtigungen"
     },
     "tooltips": {
       "settings": "Einstellungen",

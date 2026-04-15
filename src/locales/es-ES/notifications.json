@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "Notificaciones",
+    "filter": {
+      "all": "Todas",
+      "unread": "No leídas"
+    },
+    "empty": {
+      "no_notifications": "Sin notificaciones",
+      "no_unread": "Todo al día"
+    },
+    "actions": {
+      "mark_all_read": "Marcar todo como leído",
+      "dismiss_all": "Descartar todo",
+      "dismiss": "Descartar",
+      "open": "Abrir",
+      "retry": "Reintentar",
+      "view": "Ver",
+      "copy": "Copiar",
+      "navigate": "Ir a",
+      "run_command": "Ejecutar",
+      "open_url": "Abrir URL"
+    },
+    "kind": {
+      "connection": "Conexión",
+      "security": "Seguridad",
+      "transfer": "Transferencia",
+      "update": "Actualización",
+      "health": "Salud",
+      "plugin": "Plugin",
+      "agent": "Agente"
+    },
+    "time": {
+      "just_now": "Ahora mismo",
+      "minutes_ago": "Hace {{count}} min",
+      "hours_ago": "Hace {{count}} h",
+      "days_ago": "Hace {{count}} d"
+    }
+  }
+}

@@ -35,8 +35,9 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { useFontSizeHUD } from './components/ui/FontSizeHUD';
 import { useRecordingStore } from './store/recordingStore';
 import { useCommandPaletteStore } from './store/commandPaletteStore';
-import { useEventLogStore } from './store/eventLogStore';
 import { useBroadcastStore } from './store/broadcastStore';
+import { useActivityStore } from './store/activityStore';
+import { initNotificationListener, teardownNotificationListener } from './store/notificationCenterStore';
 
 function App() {
   // Initialize global event listeners
@@ -109,6 +110,9 @@ function App() {
     initializePluginSystem().catch(err => {
       console.error('Failed to initialize plugin system:', err);
     });
+    initNotificationListener().catch(err => {
+      console.error('Failed to initialize notification listener:', err);
+    });
     return () => {
       bridgeCleanup();
       transferBridgeCleanup();
@@ -119,6 +123,7 @@ function App() {
         bridgePromise.then(() => nodeStateBridgeCleanup?.());
       }
       toastCleanup();
+      teardownNotificationListener();
     };
   }, []);
 
@@ -318,7 +323,10 @@ function App() {
     'app.goToTab8': () => useAppStore.getState().goToTab(7),
     'app.goToTab9': () => useAppStore.getState().goToTab(8),
     // ── Palette actions ──
-    'palette.eventLog': () => useEventLogStore.getState().togglePanel(),
+    'palette.eventLog': () => {
+      useActivityStore.getState().setActiveView('event_log');
+      useAppStore.getState().createTab('activity');
+    },
     'palette.aiSidebar': () => useSettingsStore.getState().toggleAiSidebar(),
     'palette.broadcast': () => useBroadcastStore.getState().toggle(),
     // ── Split actions ──

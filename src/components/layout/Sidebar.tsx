@@ -25,6 +25,7 @@ import {
   LayoutList,
   Puzzle,
   Monitor,
+  Bell,
 } from 'lucide-react';
 import { platform } from '../../lib/platform';
 import { useAppStore } from '../../store/appStore';
@@ -32,6 +33,8 @@ import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
 import { usePluginStore } from '../../store/pluginStore';
+import { useNotificationCenterStore } from '../../store/notificationCenterStore';
+import { useEventLogStore } from '../../store/eventLogStore';
 
 import { resolvePluginIcon } from '../../lib/plugin/pluginIconResolver';
 import { useToast } from '../../hooks/useToast';
@@ -122,6 +125,14 @@ export const Sidebar = () => {
   const createLocalTerminal = useLocalTerminalStore((s) => s.createTerminal);
   const localTerminals = useLocalTerminalStore((s) => s.terminals);
   const backgroundSessions = useLocalTerminalStore((s) => s.backgroundSessions);
+
+  // Notification center
+  const notificationUnreadCount = useNotificationCenterStore((s) => s.unreadCount);
+  const notificationUnreadCriticalCount = useNotificationCenterStore((s) => s.unreadCriticalCount);
+
+  // Event log
+  const eventLogUnreadCount = useEventLogStore((s) => s.unreadCount);
+  const eventLogUnreadErrors = useEventLogStore((s) => s.unreadErrors);
 
   // Toast hook (需要在所有使用 toast 的 useCallback 之前声明)
   const { toast } = useToast();
@@ -657,17 +668,25 @@ export const Sidebar = () => {
     { kind: 'tab', key: 'connection_pool', icon: Terminal, titleKey: 'sidebar.panels.connection_pool', badge: connections.size > 0 ? connections.size : undefined, badgeColor: 'bg-green-500' },
     { kind: 'tab', key: 'connection_monitor', icon: Activity, titleKey: 'sidebar.panels.connection_monitor' },
     { kind: 'tab', key: 'topology', icon: Network, titleKey: 'sidebar.panels.connection_matrix' },
-    { kind: 'toggle', key: 'ai', icon: Sparkles, titleKey: 'sidebar.panels.ai' },
-    { kind: 'tab', key: 'ai_agent', icon: Bot, titleKey: 'agent.tabTitle' },
+    { kind: 'tab', key: 'plugin_manager', icon: Puzzle, titleKey: 'sidebar.panels.plugins' },
     // Plugin-registered sidebar panels
     ...pluginPanelDefs,
+    { kind: 'toggle', key: 'ai', icon: Sparkles, titleKey: 'sidebar.panels.ai' },
+    { kind: 'tab', key: 'ai_agent', icon: Bot, titleKey: 'agent.tabTitle' },
   ];
 
   const bottomButtons: SidebarButtonDef[] = [
     { kind: 'action', key: 'local_terminal', icon: Square, titleKey: 'sidebar.actions.new_local_terminal', badge: (localTerminals.size + backgroundSessions.size) > 0 ? (localTerminals.size + backgroundSessions.size) : undefined, badgeColor: backgroundSessions.size > 0 ? 'bg-amber-500' : 'bg-blue-500' },
     { kind: 'tab', key: 'file_manager', icon: FolderOpen, titleKey: 'sidebar.panels.files' },
     ...(!platform.isLinux ? [{ kind: 'tab' as const, key: platform.isMac ? 'launcher' as const : 'graphics' as const, icon: Monitor, titleKey: platform.isMac ? 'launcher.tabTitle' : 'graphics.tab_title' }] : []),
-    { kind: 'tab', key: 'plugin_manager', icon: Puzzle, titleKey: 'sidebar.panels.plugins' },
+    {
+      kind: 'tab',
+      key: 'activity',
+      icon: Bell,
+      titleKey: 'sidebar.panels.activity',
+      badge: (notificationUnreadCount + eventLogUnreadCount) > 0 ? (notificationUnreadCount + eventLogUnreadCount) : undefined,
+      badgeColor: notificationUnreadCriticalCount > 0 || eventLogUnreadErrors > 0 ? 'bg-red-500' : 'bg-blue-500',
+    },
     { kind: 'tab', key: 'settings', icon: Settings, titleKey: 'sidebar.tooltips.settings' },
   ];
 

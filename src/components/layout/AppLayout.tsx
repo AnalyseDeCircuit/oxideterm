@@ -1,13 +1,13 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group as PanelGroup } from 'react-resizable-panels';
 import { Sidebar } from './Sidebar';
 import { AiSidebar } from './AiSidebar';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { EventLogPanel } from './EventLogPanel';
+import { ActivityPanel } from './ActivityPanel';
 import { TabBar } from './TabBar';
 import { useAppStore, getSession } from '../../store/appStore';
 import { TerminalView } from '../terminal/TerminalView';
@@ -25,7 +25,8 @@ import { Plus, Terminal as TerminalIcon } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
-import { useEventLogStore } from '../../store/eventLogStore';
+import { useActivityStore } from '../../store/activityStore';
+
 import { useTabBgActive } from '../../hooks/useTabBackground';
 import { platform } from '../../lib/platform';
 
@@ -160,10 +161,7 @@ export const AppLayout = () => {
   const { tabs, activeTabId, setActivePaneId, closePane } = useAppStore();
   const monitorBgActive = useTabBgActive('connection_monitor');
   const zenMode = useSettingsStore((s) => s.settings.sidebarUI.zenMode);
-  const eventLogOpen = useEventLogStore((s) => s.isOpen);
-  const eventLogPanelSize = useEventLogStore((s) => s.panelSize);
-  const setEventLogPanelSize = useEventLogStore((s) => s.setPanelSize);
-  const pendingEventLogPanelSizeRef = useRef<number | null>(null);
+
 
   // Zen mode hint — show briefly on enter
   const [showZenHint, setShowZenHint] = useState(false);
@@ -198,32 +196,50 @@ export const AppLayout = () => {
     closePane(tabId, paneId);
   }, [closePane]);
 
-  const flushEventLogPanelSize = useCallback(() => {
-    const pendingSize = pendingEventLogPanelSizeRef.current;
-    if (pendingSize === null) return;
-    pendingEventLogPanelSizeRef.current = null;
-    setEventLogPanelSize(pendingSize);
-  }, [setEventLogPanelSize]);
-
-  const handleEventLogPanelResize = useCallback<NonNullable<ComponentProps<typeof Panel>['onResize']>>((panelSize) => {
-    const normalizedSize = parseFloat(String(panelSize).replace('%', ''));
-    if (Number.isNaN(normalizedSize)) return;
-
-    pendingEventLogPanelSizeRef.current = Math.min(90, Math.max(8, normalizedSize));
-  }, []);
-
   useEffect(() => {
-    window.addEventListener('pointerup', flushEventLogPanelSize);
-    window.addEventListener('mouseup', flushEventLogPanelSize);
-    window.addEventListener('touchend', flushEventLogPanelSize);
+    const legacyTabs = tabs.filter((tab) => tab.type === 'notifications' || tab.type === 'event_log');
+    if (legacyTabs.length === 0) {
+      return;
+    }
 
-    return () => {
-      window.removeEventListener('pointerup', flushEventLogPanelSize);
-      window.removeEventListener('mouseup', flushEventLogPanelSize);
-      window.removeEventListener('touchend', flushEventLogPanelSize);
-      flushEventLogPanelSize();
-    };
-  }, [flushEventLogPanelSize]);
+    const activeLegacyTab = legacyTabs.find((tab) => tab.id === activeTabId) ?? legacyTabs[0];
+    useActivityStore.getState().setActiveView(activeLegacyTab.type === 'event_log' ? 'event_log' : 'notifications');
+
+    useAppStore.setState((state) => {
+      const currentLegacyTabs = state.tabs.filter((tab) => tab.type === 'notifications' || tab.type === 'event_log');
+      if (currentLegacyTabs.length === 0) {
+        return state;
+      }
+
+      const nonLegacyTabs = state.tabs.filter((tab) => tab.type !== 'notifications' && tab.type !== 'event_log');
+      const existingActivityTab = nonLegacyTabs.find((tab) => tab.type === 'activity');
+      const wasLegacyTabActive = !!state.activeTabId && currentLegacyTabs.some((tab) => tab.id === state.activeTabId);
+
+      if (existingActivityTab) {
+        return {
+          ...state,
+          tabs: nonLegacyTabs,
+          activeTabId: wasLegacyTabActive ? existingActivityTab.id : state.activeTabId,
+        };
+      }
+
+      const sourceTab = currentLegacyTabs.find((tab) => tab.id === state.activeTabId) ?? currentLegacyTabs[0];
+      const activityTab = {
+        ...sourceTab,
+        type: 'activity' as const,
+        title: t('tabs.activity'),
+        icon: '🔔',
+      };
+
+      return {
+        ...state,
+        tabs: [...nonLegacyTabs, activityTab],
+        activeTabId: wasLegacyTabActive ? activityTab.id : state.activeTabId,
+      };
+    });
+  }, [activeTabId, tabs, t]);
+
+
 
   return (
     <div className="flex flex-col h-screen w-screen bg-theme-bg text-theme-text overflow-hidden">
@@ -397,6 +413,11 @@ export const AppLayout = () => {
                       </ErrorBoundary>
                     </TabBgWrapper>
                   )}
+                  {tab.type === 'activity' && (
+                    <TabBgWrapper tabType="activity">
+                      <ActivityPanel />
+                    </TabBgWrapper>
+                  )}
                 </TabActiveProvider>
                 </div>
                 );
@@ -406,22 +427,7 @@ export const AppLayout = () => {
             </div>
           </Panel>
 
-          {/* Event Log Bottom Panel */}
-          {eventLogOpen && !zenMode && (
-            <>
-              <PanelResizeHandle className="h-1 group relative cursor-row-resize">
-                <div className="absolute inset-x-0 top-0 bottom-0 bg-theme-border/50 group-hover:bg-theme-accent/50 group-active:bg-theme-accent transition-colors" />
-              </PanelResizeHandle>
-              <Panel
-                defaultSize={eventLogPanelSize}
-                minSize={8}
-                collapsible
-                onResize={handleEventLogPanelResize}
-              >
-                <EventLogPanel />
-              </Panel>
-            </>
-          )}
+
         </PanelGroup>
         <PluginStatusBar />
       </div>

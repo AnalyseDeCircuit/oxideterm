@@ -64,7 +64,14 @@
     "forwards_prefix": "Encaminhamentos",
     "ide": "IDE",
     "session_manager": "Gerenciador de sessões",
-    "plugin_manager": "Plugins"
+    "activity": "Atividade",
+    "plugin_manager": "Plugins",
+    "notifications": "Notificações",
+    "event_log": "Log de eventos"
+  },
+  "activity": {
+    "title": "Atividade",
+    "description": "Confira notificações e eventos de conexão em um só lugar."
   },
   "ide": {
     "loading_project": "Carregando projeto...",

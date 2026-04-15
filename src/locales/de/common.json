@@ -64,7 +64,14 @@
     "forwards_prefix": "Weiterleitungen",
     "ide": "IDE",
     "session_manager": "Sitzungsmanager",
-    "plugin_manager": "Plugins"
+    "activity": "Aktivität",
+    "plugin_manager": "Plugins",
+    "notifications": "Benachrichtigungen",
+    "event_log": "Ereignisprotokoll"
+  },
+  "activity": {
+    "title": "Aktivität",
+    "description": "Benachrichtigungen und Verbindungsereignisse an einem Ort prüfen."
   },
   "ide": {
     "loading_project": "Projekt wird geladen...",

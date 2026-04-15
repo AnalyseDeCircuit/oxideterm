@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 /**
- * EventLogPanel — VS Code Problems-style bottom panel
+ * EventLogPanel — VS Code Problems-style event log (tab view)
  *
  * Aggregates connection lifecycle, reconnect pipeline, and node state events
  * into a filterable, scrollable event log.
@@ -15,7 +15,6 @@ import {
   AlertTriangle,
   XCircle,
   Trash2,
-  ChevronDown,
   Filter,
   Search,
 } from 'lucide-react';
@@ -152,7 +151,6 @@ export const EventLogPanel = () => {
   const filter = useEventLogStore((s) => s.filter);
   const setFilter = useEventLogStore((s) => s.setFilter);
   const clear = useEventLogStore((s) => s.clear);
-  const closePanel = useEventLogStore((s) => s.closePanel);
   const markRead = useEventLogStore((s) => s.markRead);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -219,7 +217,7 @@ export const EventLogPanel = () => {
   }, [filter.category, setFilter]);
 
   return (
-    <div className="h-full flex flex-col bg-theme-bg border-t border-theme-border select-none">
+    <div className="h-full flex flex-col bg-theme-bg select-none">
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1 bg-theme-bg-panel border-b border-theme-border shrink-0">
         {/* Title */}
@@ -306,20 +304,6 @@ export const EventLogPanel = () => {
           <TooltipContent>{t('event_log.clear')}</TooltipContent>
         </Tooltip>
 
-        {/* Close */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={closePanel}
-            >
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t('event_log.close')}</TooltipContent>
-        </Tooltip>
       </div>
 
       {/* Event list */}

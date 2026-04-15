@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "通知",
+    "filter": {
+      "all": "すべて",
+      "unread": "未読"
+    },
+    "empty": {
+      "no_notifications": "通知はありません",
+      "no_unread": "すべて既読です"
+    },
+    "actions": {
+      "mark_all_read": "すべて既読にする",
+      "dismiss_all": "すべて削除",
+      "dismiss": "削除",
+      "open": "開く",
+      "retry": "再試行",
+      "view": "表示",
+      "copy": "コピー",
+      "navigate": "移動",
+      "run_command": "実行",
+      "open_url": "URLを開く"
+    },
+    "kind": {
+      "connection": "接続",
+      "security": "セキュリティ",
+      "transfer": "転送",
+      "update": "アップデート",
+      "health": "ヘルス",
+      "plugin": "プラグイン",
+      "agent": "エージェント"
+    },
+    "time": {
+      "just_now": "たった今",
+      "minutes_ago": "{{count}}分前",
+      "hours_ago": "{{count}}時間前",
+      "days_ago": "{{count}}日前"
+    }
+  }
+}

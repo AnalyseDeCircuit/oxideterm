@@ -5,12 +5,12 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { refreshOpenPluginTabTitles } from './lib/plugin/pluginI18nManager';
 
-// 命名空间列表（每种语言对应 22 个 JSON 文件）
+// 命名空间列表（每种语言对应 23 个 JSON 文件）
 const NAMESPACES = [
   'common', 'sidebar', 'settings', 'connections', 'forwards', 'modals',
   'sessions', 'settings_view', 'sftp', 'terminal', 'topology', 'ai',
   'editor', 'ide', 'fileManager', 'profiler', 'sessionManager', 'plugin',
-  'graphics', 'launcher', 'eventLog', 'agent',
+  'graphics', 'launcher', 'eventLog', 'agent', 'notifications',
 ] as const;
 
 // Vite 动态 glob：按需加载每个语言的 JSON 文件

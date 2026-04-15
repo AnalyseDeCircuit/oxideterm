@@ -30,7 +30,9 @@
       "session_manager": "会话管理器",
       "open_session_manager": "打开会话管理器",
       "plugins": "插件",
-      "event_log": "事件日志"
+      "activity": "活动",
+      "event_log": "事件日志",
+      "notifications": "通知中心"
     },
     "tooltips": {
       "settings": "设置",

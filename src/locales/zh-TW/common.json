@@ -64,7 +64,14 @@
     "forwards_prefix": "轉發",
     "ide": "IDE",
     "session_manager": "工作階段管理器",
-    "plugin_manager": "外掛"
+    "activity": "活動",
+    "plugin_manager": "外掛",
+    "notifications": "通知中心",
+    "event_log": "事件日誌"
+  },
+  "activity": {
+    "title": "活動",
+    "description": "在一處查看通知和連線事件。"
   },
   "ide": {
     "loading_project": "正在載入專案...",

@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "filter": {
+      "all": "Alle",
+      "unread": "Ungelesen"
+    },
+    "empty": {
+      "no_notifications": "Keine Benachrichtigungen",
+      "no_unread": "Alles gelesen"
+    },
+    "actions": {
+      "mark_all_read": "Alle als gelesen markieren",
+      "dismiss_all": "Alle verwerfen",
+      "dismiss": "Verwerfen",
+      "open": "Öffnen",
+      "retry": "Erneut versuchen",
+      "view": "Anzeigen",
+      "copy": "Kopieren",
+      "navigate": "Gehe zu",
+      "run_command": "Ausführen",
+      "open_url": "URL öffnen"
+    },
+    "kind": {
+      "connection": "Verbindung",
+      "security": "Sicherheit",
+      "transfer": "Übertragung",
+      "update": "Aktualisierung",
+      "health": "Zustand",
+      "plugin": "Plugin",
+      "agent": "Agent"
+    },
+    "time": {
+      "just_now": "Gerade eben",
+      "minutes_ago": "Vor {{count}} Min.",
+      "hours_ago": "Vor {{count}} Std.",
+      "days_ago": "Vor {{count}} T."
+    }
+  }
+}

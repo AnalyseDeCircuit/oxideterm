@@ -64,7 +64,14 @@
     "forwards_prefix": "Inoltri",
     "ide": "IDE",
     "session_manager": "Gestore sessioni",
-    "plugin_manager": "Plugin"
+    "activity": "Attività",
+    "plugin_manager": "Plugin",
+    "notifications": "Notifiche",
+    "event_log": "Registro eventi"
+  },
+  "activity": {
+    "title": "Attività",
+    "description": "Consulta notifiche ed eventi di connessione in un unico posto."
   },
   "ide": {
     "loading_project": "Caricamento progetto...",

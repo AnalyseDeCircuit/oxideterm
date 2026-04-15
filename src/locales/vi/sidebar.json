@@ -30,7 +30,9 @@
       "session_manager": "Quản lý phiên",
       "open_session_manager": "Mở quản lý phiên",
       "plugins": "Plugin",
-      "event_log": "Nhật ký sự kiện"
+      "activity": "Hoạt động",
+      "event_log": "Nhật ký sự kiện",
+      "notifications": "Thông báo"
     },
     "tooltips": {
       "settings": "Cài đặt",

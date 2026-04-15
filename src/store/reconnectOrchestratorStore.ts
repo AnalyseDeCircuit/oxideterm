@@ -24,6 +24,8 @@ import { useToastStore } from '../hooks/useToast';
 import { slog } from '../lib/structuredLog';
 import i18n from '../i18n';
 import type { ForwardRule, IncompleteTransferInfo } from '../types';
+import { useNotificationCenterStore } from './notificationCenterStore';
+import type { NotificationSeverity, NotificationKind } from './notificationCenterStore';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -216,6 +218,24 @@ function toast(
     title: i18n.t(titleKey, params ?? {}),
     variant,
     duration: variant === 'error' ? 8000 : 5000,
+  });
+}
+
+function notify(
+  kind: NotificationKind,
+  severity: NotificationSeverity,
+  title: string,
+  body?: string,
+  dedupeKey?: string,
+) {
+  useNotificationCenterStore.getState().push({
+    kind,
+    severity,
+    title,
+    body,
+    source: { type: 'system' },
+    scope: { type: 'global' },
+    dedupeKey,
   });
 }
 
@@ -944,6 +964,7 @@ async function phaseSshConnect(nodeId: string): Promise<boolean> {
     exitPhase(nodeId, 'failed', msg);
     updateJob(nodeId, { status: 'failed', error: msg, endedAt: Date.now() });
     toast('connections.reconnect.failed', 'error', { error: msg });
+    notify('connection', 'error', i18n.t('connections.reconnect.failed', { error: msg }), undefined, `reconnect-failed:${nodeId}`);
     return false;
   }
 }

@@ -30,7 +30,9 @@
       "session_manager": "セッションマネージャー",
       "open_session_manager": "セッションマネージャーを開く",
       "plugins": "プラグイン",
-      "event_log": "イベントログ"
+      "activity": "アクティビティ",
+      "event_log": "イベントログ",
+      "notifications": "通知"
     },
     "tooltips": {
       "settings": "設定",

@@ -64,7 +64,14 @@
     "forwards_prefix": "转发",
     "ide": "IDE",
     "session_manager": "会话管理器",
-    "plugin_manager": "插件"
+    "activity": "活动",
+    "plugin_manager": "插件",
+    "notifications": "通知中心",
+    "event_log": "事件日志"
+  },
+  "activity": {
+    "title": "活动",
+    "description": "在一处查看通知和连接事件。"
   },
   "ide": {
     "loading_project": "正在加载项目...",

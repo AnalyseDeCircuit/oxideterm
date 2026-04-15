@@ -30,7 +30,9 @@
       "session_manager": "Session Manager",
       "open_session_manager": "Open Session Manager",
       "plugins": "Plugins",
-      "event_log": "Event Log"
+      "activity": "Activity",
+      "event_log": "Event Log",
+      "notifications": "Notifications"
     },
     "tooltips": {
       "settings": "Settings",

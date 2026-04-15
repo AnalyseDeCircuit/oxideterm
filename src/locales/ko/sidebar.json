@@ -30,7 +30,9 @@
       "session_manager": "세션 관리자",
       "open_session_manager": "세션 관리자 열기",
       "plugins": "플러그인",
-      "event_log": "이벤트 로그"
+      "activity": "활동",
+      "event_log": "이벤트 로그",
+      "notifications": "알림"
     },
     "tooltips": {
       "settings": "설정",

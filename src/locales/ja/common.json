@@ -64,7 +64,14 @@
     "forwards_prefix": "転送",
     "ide": "IDE",
     "session_manager": "セッションマネージャー",
-    "plugin_manager": "プラグイン"
+    "activity": "アクティビティ",
+    "plugin_manager": "プラグイン",
+    "notifications": "通知",
+    "event_log": "イベントログ"
+  },
+  "activity": {
+    "title": "アクティビティ",
+    "description": "通知と接続イベントを1か所で確認できます。"
   },
   "ide": {
     "loading_project": "プロジェクトを読み込み中...",

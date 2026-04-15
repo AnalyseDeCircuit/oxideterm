@@ -64,7 +64,14 @@
     "forwards_prefix": "Reenvío",
     "ide": "IDE",
     "session_manager": "Gestor de sesiones",
-    "plugin_manager": "Complementos"
+    "activity": "Actividad",
+    "plugin_manager": "Complementos",
+    "notifications": "Notificaciones",
+    "event_log": "Registro de eventos"
+  },
+  "activity": {
+    "title": "Actividad",
+    "description": "Revisa notificaciones y eventos de conexión en un solo lugar."
   },
   "ide": {
     "loading_project": "Cargando proyecto...",

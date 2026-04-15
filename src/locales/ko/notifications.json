@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "알림",
+    "filter": {
+      "all": "전체",
+      "unread": "읽지 않음"
+    },
+    "empty": {
+      "no_notifications": "알림이 없습니다",
+      "no_unread": "모두 확인했습니다"
+    },
+    "actions": {
+      "mark_all_read": "모두 읽음으로 표시",
+      "dismiss_all": "모두 지우기",
+      "dismiss": "지우기",
+      "open": "열기",
+      "retry": "재시도",
+      "view": "보기",
+      "copy": "복사",
+      "navigate": "이동",
+      "run_command": "실행",
+      "open_url": "URL 열기"
+    },
+    "kind": {
+      "connection": "연결",
+      "security": "보안",
+      "transfer": "전송",
+      "update": "업데이트",
+      "health": "상태",
+      "plugin": "플러그인",
+      "agent": "에이전트"
+    },
+    "time": {
+      "just_now": "방금",
+      "minutes_ago": "{{count}}분 전",
+      "hours_ago": "{{count}}시간 전",
+      "days_ago": "{{count}}일 전"
+    }
+  }
+}

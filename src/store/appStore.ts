@@ -9,6 +9,7 @@ import { useSettingsStore, type SidebarSection } from './settingsStore';
 import i18n from '../i18n';
 import { useSessionTreeStore } from './sessionTreeStore';
 import { useLocalTerminalStore } from './localTerminalStore';
+import { useActivityStore } from './activityStore';
 import { 
   SessionInfo, 
   Tab, 
@@ -647,6 +648,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
+    if (type === 'notifications' || type === 'event_log') {
+      useActivityStore.getState().setActiveView(type === 'event_log' ? 'event_log' : 'notifications');
+      type = 'activity';
+    }
+
     // nodeId is required for SFTP/IDE/Forwards tabs — auto-migrate from sessionId if missing
     if ((type === 'sftp' || type === 'ide' || type === 'forwards') && !options?.nodeId && sessionId) {
       const node = useSessionTreeStore.getState().getNodeByTerminalId(sessionId);
@@ -659,7 +665,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     // Handle global/singleton tabs
-    if (type === 'settings' || type === 'connection_monitor' || type === 'connection_pool' || type === 'topology' || type === 'file_manager' || type === 'session_manager' || type === 'plugin_manager' || type === 'graphics' || type === 'launcher' || type === 'ai_agent') {
+    if (type === 'settings' || type === 'connection_monitor' || type === 'connection_pool' || type === 'topology' || type === 'file_manager' || type === 'session_manager' || type === 'plugin_manager' || type === 'graphics' || type === 'launcher' || type === 'ai_agent' || type === 'activity') {
       const existingTab = get().tabs.find(t => t.type === type);
       if (existingTab) {
         if (!options?.skipFocus) set({ activeTabId: existingTab.id });
@@ -696,6 +702,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } else if (type === 'ai_agent') {
         title = i18n.t('agent.tabTitle', 'AI Agent');
         icon = '🤖';
+      } else if (type === 'activity') {
+        title = i18n.t('tabs.activity', 'Activity');
+        icon = '🔔';
       }
 
       const newTab: Tab = {

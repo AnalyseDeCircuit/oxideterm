@@ -1,0 +1,40 @@
+{
+  "notifications": {
+    "title": "Thông báo",
+    "filter": {
+      "all": "Tất cả",
+      "unread": "Chưa đọc"
+    },
+    "empty": {
+      "no_notifications": "Không có thông báo",
+      "no_unread": "Đã đọc hết"
+    },
+    "actions": {
+      "mark_all_read": "Đánh dấu tất cả đã đọc",
+      "dismiss_all": "Xóa tất cả",
+      "dismiss": "Xóa",
+      "open": "Mở",
+      "retry": "Thử lại",
+      "view": "Xem",
+      "copy": "Sao chép",
+      "navigate": "Đi tới",
+      "run_command": "Chạy",
+      "open_url": "Mở URL"
+    },
+    "kind": {
+      "connection": "Kết nối",
+      "security": "Bảo mật",
+      "transfer": "Truyền tải",
+      "update": "Cập nhật",
+      "health": "Tình trạng",
+      "plugin": "Plugin",
+      "agent": "Agent"
+    },
+    "time": {
+      "just_now": "Vừa xong",
+      "minutes_ago": "{{count}} phút trước",
+      "hours_ago": "{{count}} giờ trước",
+      "days_ago": "{{count}} ngày trước"
+    }
+  }
+}

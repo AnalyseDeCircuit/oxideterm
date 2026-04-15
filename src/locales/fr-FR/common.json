@@ -64,7 +64,14 @@
     "forwards_prefix": "Transferts",
     "ide": "IDE",
     "session_manager": "Gestionnaire de sessions",
-    "plugin_manager": "Extensions"
+    "activity": "Activité",
+    "plugin_manager": "Extensions",
+    "notifications": "Notifications",
+    "event_log": "Journal d'événements"
+  },
+  "activity": {
+    "title": "Activité",
+    "description": "Consultez les notifications et les événements de connexion au même endroit."
   },
   "ide": {
     "loading_project": "Chargement du projet...",

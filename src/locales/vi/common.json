@@ -64,7 +64,14 @@
     "forwards_prefix": "Chuyển tiếp",
     "ide": "IDE",
     "session_manager": "Quản lý phiên",
-    "plugin_manager": "Plugin"
+    "activity": "Hoạt động",
+    "plugin_manager": "Plugin",
+    "notifications": "Thông báo",
+    "event_log": "Nhật ký sự kiện"
+  },
+  "activity": {
+    "title": "Hoạt động",
+    "description": "Xem thông báo và sự kiện kết nối tại một nơi."
   },
   "ide": {
     "loading_project": "Đang tải dự án...",

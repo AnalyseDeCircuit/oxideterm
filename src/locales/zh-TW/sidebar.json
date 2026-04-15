@@ -30,7 +30,9 @@
       "session_manager": "工作階段管理器",
       "open_session_manager": "開啟工作階段管理器",
       "plugins": "外掛",
-      "event_log": "事件日誌"
+      "activity": "活動",
+      "event_log": "事件日誌",
+      "notifications": "通知中心"
     },
     "tooltips": {
       "settings": "設定",
