@@ -31,7 +31,7 @@ vi.mock('@/components/ai/ThinkingBlock', () => ({
 
 vi.mock('@/components/ai/ToolCallBlock', () => ({
   ToolCallBlock: ({ toolRounds }: { toolRounds?: Array<{ id: string }> }) => (
-    <div data-testid="tool-call-block">{toolRounds?.length ?? 0}</div>
+    <div data-testid="tool-call-block">{toolRounds?.[0]?.id ?? 'part-level'}</div>
   ),
 }));
 
@@ -159,6 +159,63 @@ describe('ChatMessage', () => {
 
     render(<ChatMessage message={message} />);
 
-    expect(screen.getByTestId('tool-call-block')).toHaveTextContent('0');
+    expect(screen.getByTestId('tool-call-block')).toHaveTextContent('part-level');
+  });
+
+  it('renders tool blocks in chronological order between text segments', () => {
+    const message: AiChatMessage = {
+      id: 'assistant-5',
+      role: 'assistant',
+      content: 'legacy content',
+      timestamp: 5,
+      turn: {
+        id: 'assistant-5',
+        status: 'complete',
+        plainTextSummary: 'before middle after',
+        toolRounds: [
+          {
+            id: 'round-1',
+            round: 1,
+            toolCalls: [
+              { id: 'tool-1', name: 'read_file', argumentsText: '{"path":"/tmp/a"}', executionState: 'completed' },
+            ],
+          },
+          {
+            id: 'round-2',
+            round: 2,
+            toolCalls: [
+              { id: 'tool-2', name: 'read_file', argumentsText: '{"path":"/tmp/b"}', executionState: 'completed' },
+            ],
+          },
+        ],
+        parts: [
+          { type: 'text', text: 'before text' },
+          { type: 'tool_call', id: 'tool-1', name: 'read_file', argumentsText: '{"path":"/tmp/a"}', status: 'complete' },
+          { type: 'tool_result', toolCallId: 'tool-1', toolName: 'read_file', success: true, output: 'A' },
+          { type: 'text', text: 'middle text' },
+          { type: 'tool_call', id: 'tool-2', name: 'read_file', argumentsText: '{"path":"/tmp/b"}', status: 'complete' },
+          { type: 'tool_result', toolCallId: 'tool-2', toolName: 'read_file', success: true, output: 'B' },
+          { type: 'text', text: 'after text' },
+        ],
+      },
+    };
+
+    const { container } = render(<ChatMessage message={message} />);
+
+    const before = screen.getByText('before text');
+    const middle = screen.getByText('middle text');
+    const after = screen.getByText('after text');
+    const [firstToolBlock, secondToolBlock] = screen.getAllByTestId('tool-call-block');
+
+    const orderedText = container.textContent ?? '';
+    expect(orderedText.indexOf('before text')).toBeLessThan(orderedText.indexOf('round-1'));
+    expect(orderedText.indexOf('round-1')).toBeLessThan(orderedText.indexOf('middle text'));
+    expect(orderedText.indexOf('middle text')).toBeLessThan(orderedText.indexOf('round-2'));
+    expect(orderedText.indexOf('round-2')).toBeLessThan(orderedText.indexOf('after text'));
+
+    expect(before.compareDocumentPosition(firstToolBlock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(firstToolBlock.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(middle.compareDocumentPosition(secondToolBlock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(secondToolBlock.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

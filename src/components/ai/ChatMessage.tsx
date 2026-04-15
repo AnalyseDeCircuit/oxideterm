@@ -13,7 +13,7 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallBlock } from './ToolCallBlock';
 import { GuardrailBlock } from './GuardrailBlock';
 import { WarningBlock } from './WarningBlock';
-import { getTurnTextContent, getTurnThinkingContent } from '../../lib/ai/turnModel/turnProjection';
+import { buildAssistantDisplaySegments, getTurnTextContent } from '../../lib/ai/turnModel/turnProjection';
 import { hasPartialSuggestionsBlock, parseSuggestions } from '../../lib/ai/suggestionParser';
 
 interface ChatMessageProps {
@@ -55,6 +55,24 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function stripStreamingSuggestions(value: string, isStreaming: boolean): string {
+  if (!isStreaming) {
+    return value;
+  }
+
+  const parsed = parseSuggestions(value);
+  if (parsed.suggestions.length > 0) {
+    return parsed.cleanContent;
+  }
+
+  if (hasPartialSuggestionsBlock(value)) {
+    const startIndex = value.indexOf('<suggestions>');
+    return startIndex >= 0 ? value.slice(0, startIndex).trimEnd() : value;
+  }
+
+  return value;
+}
+
 // Custom comparison for memo - only re-render when content actually changes
 function arePropsEqual(prev: ChatMessageProps, next: ChatMessageProps): boolean {
   return (
@@ -90,71 +108,44 @@ export const ChatMessage = memo(function ChatMessage({
   const [editContent, setEditContent] = useState('');
   const [copied, setCopied] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const guardrailParts = useMemo(() => (
-    !isUser
-      ? message.turn?.parts.filter((part) => part.type === 'guardrail') ?? []
-      : []
+  const isStreaming = Boolean(message.isStreaming);
+  const turnDisplaySegments = useMemo(() => (
+    !isUser && message.turn ? buildAssistantDisplaySegments(message.turn) : []
   ), [isUser, message.turn]);
-  const warningParts = useMemo(() => (
-    !isUser
-      ? message.turn?.parts.filter((part) => part.type === 'warning' || part.type === 'error') ?? []
-      : []
-  ), [isUser, message.turn]);
-  const visibleToolRounds = useMemo(() => (
-    !isUser ? message.turn?.toolRounds ?? [] : []
-  ), [isUser, message.turn]);
-  const hasPartLevelToolCalls = useMemo(() => (
-    !isUser && Boolean(message.turn?.parts.some((part) => part.type === 'tool_call'))
-  ), [isUser, message.turn]);
+  const shouldRenderFallbackToolBlock = useMemo(() => {
+    if (isUser || !message.turn) {
+      return false;
+    }
+
+    const hasToolSegment = turnDisplaySegments.some((segment) => segment.kind === 'tool');
+    if (hasToolSegment) {
+      return false;
+    }
+
+    return (message.toolCalls?.length ?? 0) > 0
+      || message.turn.toolRounds.length > 0
+      || message.turn.parts.some((part) => part.type === 'tool_call');
+  }, [isUser, message.toolCalls, message.turn, turnDisplaySegments]);
   const visibleContent = useMemo(() => {
     if (isUser) {
       return message.content;
     }
 
-    const stripStreamingSuggestions = (value: string) => {
-      if (!message.isStreaming) {
-        return value;
-      }
-
-      const parsed = parseSuggestions(value);
-      if (parsed.suggestions.length > 0) {
-        return parsed.cleanContent;
-      }
-
-      if (hasPartialSuggestionsBlock(value)) {
-        const startIndex = value.indexOf('<suggestions>');
-        return startIndex >= 0 ? value.slice(0, startIndex).trimEnd() : value;
-      }
-
-      return value;
-    };
-
     if (message.turn) {
       const turnTextContent = getTurnTextContent(message.turn);
       if (turnTextContent) {
-        return stripStreamingSuggestions(turnTextContent);
+        return stripStreamingSuggestions(turnTextContent, isStreaming);
       }
 
       const hasStructuredFeedback = message.turn.parts.some((part) => (
         part.type === 'guardrail' || part.type === 'warning' || part.type === 'error'
       ));
 
-      return hasStructuredFeedback ? '' : stripStreamingSuggestions(message.content);
+      return hasStructuredFeedback ? '' : stripStreamingSuggestions(message.content, isStreaming);
     }
 
-    return stripStreamingSuggestions(message.content);
-  }, [isUser, message.content, message.isStreaming, message.turn]);
-  const visibleThinkingContent = useMemo(() => {
-    if (isUser) {
-      return undefined;
-    }
-
-    if (message.turn) {
-      return getTurnThinkingContent(message.turn) ?? message.thinkingContent;
-    }
-
-    return message.thinkingContent;
-  }, [isUser, message.thinkingContent, message.turn]);
+    return stripStreamingSuggestions(message.content, isStreaming);
+  }, [isStreaming, isUser, message.content, message.turn]);
 
   // Inject styles on mount
   useEffect(() => {
@@ -325,40 +316,6 @@ export const ChatMessage = memo(function ChatMessage({
 
       {/* Content — user messages get prominent bubble with accent color */}
       <div className={`mt-1 ${isUser ? 'bg-theme-accent/10 border border-theme-accent/20 px-3 py-2 rounded-md shadow-sm ring-1 ring-theme-accent/5' : ''}`}>
-        {/* Thinking Block */}
-        {!isUser && visibleThinkingContent && (
-          <ThinkingBlock
-            content={visibleThinkingContent}
-            isStreaming={message.isThinkingStreaming}
-          />
-        )}
-
-        {!isUser && guardrailParts.length > 0 && (
-          <div className="mb-2 space-y-2">
-            {guardrailParts.map((part, index) => (
-              <GuardrailBlock key={`${message.id}-guardrail-${index}`} part={part} />
-            ))}
-          </div>
-        )}
-
-        {!isUser && warningParts.length > 0 && (
-          <div className="mb-2 space-y-2">
-            {warningParts.map((part, index) => (
-              <WarningBlock key={`${message.id}-warning-${index}`} part={part} />
-            ))}
-          </div>
-        )}
-
-        {/* Tool Calls Block */}
-        {!isUser && ((message.toolCalls?.length ?? 0) > 0 || visibleToolRounds.length > 0 || hasPartLevelToolCalls) && (
-          <ToolCallBlock
-            toolCalls={message.toolCalls}
-            toolRounds={visibleToolRounds}
-            turnParts={message.turn?.parts}
-            totalRounds={visibleToolRounds.length || message.toolCalls?.length}
-          />
-        )}
-
         {/* Edit mode for user messages */}
         {isUser && isEditing ? (
           <div className="flex flex-col gap-1.5">
@@ -408,13 +365,65 @@ export const ChatMessage = memo(function ChatMessage({
           </div>
         ) : (
           <>
-            <div
-              ref={contentRef}
-              className="md-content selection:bg-theme-accent/20"
-              onClick={handleClick}
-              dangerouslySetInnerHTML={{ __html: renderedHtml }}
-            />
-            {message.isStreaming && (
+            {!isUser && turnDisplaySegments.length > 0 ? (
+              <div ref={contentRef} onClick={handleClick}>
+                {turnDisplaySegments.map((segment, index) => {
+                  if (segment.kind === 'thinking') {
+                    return (
+                      <ThinkingBlock
+                        key={`${message.id}-thinking-${index}`}
+                        content={segment.text}
+                        isStreaming={Boolean(segment.streaming)}
+                      />
+                    );
+                  }
+
+                  if (segment.kind === 'guardrail') {
+                    return <GuardrailBlock key={`${message.id}-guardrail-${index}`} part={segment.part} />;
+                  }
+
+                  if (segment.kind === 'warning') {
+                    return <WarningBlock key={`${message.id}-warning-${index}`} part={segment.part} />;
+                  }
+
+                  if (segment.kind === 'tool') {
+                    return (
+                      <ToolCallBlock
+                        key={`${message.id}-tool-${index}`}
+                        toolRounds={segment.toolRounds}
+                        turnParts={segment.toolParts}
+                        totalRounds={segment.toolRounds?.length}
+                      />
+                    );
+                  }
+
+                  const segmentHtml = renderMarkdown(stripStreamingSuggestions(segment.text, isStreaming));
+                  return (
+                    <div
+                      key={`${message.id}-text-${index}`}
+                      className="md-content mb-2 selection:bg-theme-accent/20 last:mb-0"
+                      dangerouslySetInnerHTML={{ __html: segmentHtml }}
+                    />
+                  );
+                })}
+                {shouldRenderFallbackToolBlock && (
+                  <ToolCallBlock
+                    toolCalls={message.toolCalls}
+                    toolRounds={message.turn?.toolRounds}
+                    turnParts={message.turn?.parts}
+                    totalRounds={message.turn?.toolRounds.length || message.toolCalls?.length}
+                  />
+                )}
+              </div>
+            ) : (
+              <div
+                ref={contentRef}
+                className="md-content selection:bg-theme-accent/20"
+                onClick={handleClick}
+                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+              />
+            )}
+            {isStreaming && (
               <span className="inline-block w-1.5 h-4 ml-0.5 bg-theme-accent/60 animate-pulse align-middle" />
             )}
           </>
@@ -446,7 +455,7 @@ export const ChatMessage = memo(function ChatMessage({
         )}
 
         {/* Action Buttons */}
-        {!message.isStreaming && !isEditing && (
+        {!isStreaming && !isEditing && (
           <div className="mt-1.5 flex items-center gap-0.5">
             {/* Edit button — user messages only */}
             {isUser && onEdit && (
@@ -516,7 +525,7 @@ export const ChatMessage = memo(function ChatMessage({
         )}
 
         {/* Follow-Up Suggestion Chips */}
-        {!isUser && isLastAssistant && !message.isStreaming && message.suggestions && message.suggestions.length > 0 && onSuggestionClick && (
+        {!isUser && isLastAssistant && !isStreaming && message.suggestions && message.suggestions.length > 0 && onSuggestionClick && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {message.suggestions.map((s, i) => (
               <button

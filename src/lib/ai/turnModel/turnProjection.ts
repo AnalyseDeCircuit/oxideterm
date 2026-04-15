@@ -2,9 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import type { AiChatMessage, AiToolCall, AiToolResult } from '../../../types';
-import type { AiAssistantTurn, AiTurnPart, AiTurnToolCall } from './types';
+import type { AiAssistantTurn, AiToolRound, AiTurnPart, AiTurnToolCall } from './types';
 
 export type LegacyProjectedMessageFields = Pick<AiChatMessage, 'content' | 'thinkingContent' | 'toolCalls'>;
+export type AiAssistantDisplaySegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'thinking'; text: string; streaming?: boolean }
+  | { kind: 'guardrail'; part: Extract<AiTurnPart, { type: 'guardrail' }> }
+  | { kind: 'warning'; part: Extract<AiTurnPart, { type: 'warning' | 'error' }> }
+  | {
+      kind: 'tool';
+      toolParts: Array<Extract<AiTurnPart, { type: 'tool_call' | 'tool_result' }>>;
+      toolRounds?: [AiToolRound];
+    };
 
 function isPartType<TType extends AiTurnPart['type']>(part: AiTurnPart, type: TType): part is Extract<AiTurnPart, { type: TType }> {
   return part.type === type;
@@ -176,6 +186,68 @@ function getFallbackContent(turn: AiAssistantTurn): string {
     ))
     .map((part) => part.message)
     .join('\n\n');
+}
+
+function getToolPartRound(part: Extract<AiTurnPart, { type: 'tool_call' | 'tool_result' }>, toolRounds: AiToolRound[]): AiToolRound | undefined {
+  const toolCallId = part.type === 'tool_call' ? part.id : part.toolCallId;
+  return toolRounds.find((round) => round.toolCalls.some((toolCall) => toolCall.id === toolCallId));
+}
+
+export function buildAssistantDisplaySegments(turn: AiAssistantTurn): AiAssistantDisplaySegment[] {
+  const segments: AiAssistantDisplaySegment[] = [];
+  let bufferedToolParts: Array<Extract<AiTurnPart, { type: 'tool_call' | 'tool_result' }>> = [];
+  let bufferedToolRound: AiToolRound | undefined;
+
+  const flushBufferedToolParts = () => {
+    if (bufferedToolParts.length === 0) {
+      return;
+    }
+
+    segments.push({
+      kind: 'tool',
+      toolParts: bufferedToolParts,
+      toolRounds: bufferedToolRound ? [bufferedToolRound] : undefined,
+    });
+    bufferedToolParts = [];
+    bufferedToolRound = undefined;
+  };
+
+  for (const part of turn.parts) {
+    if (isPartType(part, 'tool_call') || isPartType(part, 'tool_result')) {
+      const nextRound = getToolPartRound(part, turn.toolRounds);
+      if (bufferedToolParts.length > 0 && bufferedToolRound?.id !== nextRound?.id) {
+        flushBufferedToolParts();
+      }
+
+      bufferedToolParts.push(part);
+      bufferedToolRound ??= nextRound;
+      continue;
+    }
+
+    flushBufferedToolParts();
+
+    if (isPartType(part, 'text')) {
+      segments.push({ kind: 'text', text: part.text });
+      continue;
+    }
+
+    if (isPartType(part, 'thinking')) {
+      segments.push({ kind: 'thinking', text: part.text, streaming: part.streaming });
+      continue;
+    }
+
+    if (isPartType(part, 'guardrail')) {
+      segments.push({ kind: 'guardrail', part });
+      continue;
+    }
+
+    if (isPartType(part, 'warning') || isPartType(part, 'error')) {
+      segments.push({ kind: 'warning', part });
+    }
+  }
+
+  flushBufferedToolParts();
+  return segments;
 }
 
 export function projectTurnToLegacyMessageFields(turn: AiAssistantTurn): LegacyProjectedMessageFields {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { projectTurnToLegacyMessageFields } from '@/lib/ai/turnModel/turnProjection';
+import { buildAssistantDisplaySegments, projectTurnToLegacyMessageFields } from '@/lib/ai/turnModel/turnProjection';
 import type { AiAssistantTurn } from '@/lib/ai/turnModel/types';
 
 describe('turnProjection', () => {
@@ -186,6 +186,43 @@ describe('turnProjection', () => {
         arguments: '{"command":"pwd"}',
         status: 'rejected',
       }),
+    ]);
+  });
+
+  it('builds display segments in chronological order across text and tool rounds', () => {
+    const turn: AiAssistantTurn = {
+      id: 'turn-timeline',
+      status: 'complete',
+      plainTextSummary: 'before middle after',
+      parts: [
+        { type: 'text', text: 'before' },
+        { type: 'tool_call', id: 'call-1', name: 'read_file', argumentsText: '{"path":"/tmp/a"}', status: 'complete' },
+        { type: 'tool_result', toolCallId: 'call-1', toolName: 'read_file', success: true, output: 'A' },
+        { type: 'text', text: 'middle' },
+        { type: 'tool_call', id: 'call-2', name: 'read_file', argumentsText: '{"path":"/tmp/b"}', status: 'complete' },
+        { type: 'tool_result', toolCallId: 'call-2', toolName: 'read_file', success: true, output: 'B' },
+        { type: 'text', text: 'after' },
+      ],
+      toolRounds: [
+        {
+          id: 'round-1',
+          round: 1,
+          toolCalls: [{ id: 'call-1', name: 'read_file', argumentsText: '{"path":"/tmp/a"}', executionState: 'completed' }],
+        },
+        {
+          id: 'round-2',
+          round: 2,
+          toolCalls: [{ id: 'call-2', name: 'read_file', argumentsText: '{"path":"/tmp/b"}', executionState: 'completed' }],
+        },
+      ],
+    };
+
+    expect(buildAssistantDisplaySegments(turn)).toEqual([
+      { kind: 'text', text: 'before' },
+      expect.objectContaining({ kind: 'tool', toolRounds: [expect.objectContaining({ id: 'round-1' })] }),
+      { kind: 'text', text: 'middle' },
+      expect.objectContaining({ kind: 'tool', toolRounds: [expect.objectContaining({ id: 'round-2' })] }),
+      { kind: 'text', text: 'after' },
     ]);
   });
 });
