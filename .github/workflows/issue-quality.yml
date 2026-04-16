@@ -1,0 +1,166 @@
+name: Issue Quality Gate
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    name: Validate issue quality
+    runs-on: ubuntu-latest
+    # Skip issues opened by maintainer, bots, or collaborators
+    if: >-
+      github.event.issue.author_association != 'OWNER' &&
+      github.event.issue.author_association != 'MEMBER' &&
+      github.event.issue.author_association != 'COLLABORATOR' &&
+      !endsWith(github.actor, '[bot]')
+    steps:
+      - name: Check issue body
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const body = (issue.body || '').trim();
+            const title = (issue.title || '').trim();
+            const labels = issue.labels.map(l => l.name);
+
+            const problems = [];
+
+            // ── 1. Body too short (likely low-effort) ──
+            // Be lenient: 15 chars is ~one short Chinese sentence
+            if (body.length < 15) {
+              problems.push('body_too_short');
+            }
+
+            // ── 2. Title too short ──
+            if (title.length < 5) {
+              problems.push('title_too_short');
+            }
+
+            // ── 3. Bug report without any diagnostic info ──
+            // Only enforce on bug-labeled issues; look for version pattern, log, screenshot, error, or code block
+            if (labels.includes('bug')) {
+              const hasVersion = /\d+\.\d+/.test(body);
+              const hasCodeBlock = /```/.test(body);
+              const hasImage = /!\[.*\]\(|<img/i.test(body);
+              const hasLogHint = /error|log|stacktrace|panic|crash|failed|exception/i.test(body);
+
+              if (!hasVersion && !hasCodeBlock && !hasImage && !hasLogHint) {
+                problems.push('bug_no_diagnostics');
+              }
+            }
+
+            // ── 4. Feature request without rationale ──
+            if (labels.includes('enhancement')) {
+              // Check the "Problem or use case" section isn't filled with filler
+              const fillerPatterns = /^(n\/?a|none|no|nothing|nope|null|无|没有|不知道|你.*想|you.*figure)/im;
+              if (fillerPatterns.test(body)) {
+                problems.push('filler_answer');
+              }
+            }
+
+            // ── 5. Copy-paste parrot: same sentence repeated across template sections ──
+            // Extract text between H3 headers (### ), dedupe blanks, compare
+            const sections = body.split(/^###\s+/m)
+              .map(s => s.replace(/^[^\n]*\n/, '').trim())  // drop the header line itself
+              .filter(s => s.length > 10);                   // ignore very short / checkbox-only sections
+
+            if (sections.length >= 3) {
+              const unique = new Set(sections.map(s => s.replace(/\s+/g, '')));
+              // If 3+ sections but only 1–2 unique texts → parrot
+              if (unique.size <= Math.floor(sections.length / 2)) {
+                problems.push('copy_paste');
+              }
+            }
+
+            // ── 6. Fake version number ──
+            // Extract claimed version from body (e.g. "1.2.1" or "v1.2.1")
+            const versionMatch = body.match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[\w.]+)?)/m);
+            if (versionMatch) {
+              const claimed = versionMatch[1];
+              try {
+                const { data: tags } = await github.rest.repos.listTags({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 100,
+                });
+                const tagNames = tags.map(t => t.name.replace(/^v/, ''));
+                if (!tagNames.includes(claimed)) {
+                  problems.push('unknown_version');
+                }
+              } catch (e) {
+                console.log('Tag lookup failed, skipping version check:', e.message);
+              }
+            }
+
+            // ── Decide ──
+            if (problems.length === 0) {
+              console.log('Issue passed quality gate.');
+              return;
+            }
+
+            console.log(`Quality issues found: ${problems.join(', ')}`);
+
+            // Build a friendly bilingual comment
+            let comment = '👋 Thanks for opening this issue!\n\n';
+            comment += 'It looks like some information is missing, which makes it hard to investigate. ';
+            comment += 'This issue has been **closed automatically** — please don\'t take it personally!\n\n';
+
+            comment += '感谢提交 Issue！看起来缺少一些关键信息，这会让排查变得很困难。';
+            comment += '此 Issue 已被**自动关闭**——请不要介意！\n\n';
+
+            if (problems.includes('body_too_short')) {
+              comment += '- **Description too short** — please describe the problem in detail.\n';
+              comment += '  **描述太短** — 请详细描述问题。\n';
+            }
+            if (problems.includes('title_too_short')) {
+              comment += '- **Title too short** — please use a descriptive title.\n';
+              comment += '  **标题太短** — 请使用描述性的标题。\n';
+            }
+            if (problems.includes('bug_no_diagnostics')) {
+              comment += '- **No diagnostic info** — for bug reports, please include: OxideTerm version, platform, error messages or logs, and steps to reproduce.\n';
+              comment += '  **缺少诊断信息** — Bug 报告请附上：OxideTerm 版本、平台、错误信息或日志、复现步骤。\n';
+              comment += '  💡 Tip: Settings → Help & About → Diagnostics → Open Log Directory\n';
+            }
+            if (problems.includes('filler_answer')) {
+              comment += '- **Placeholder answers detected** — please describe your actual use case instead of writing "N/A".\n';
+              comment += '  **检测到占位回答** — 请描述你的实际使用场景，不要填写"N/A"或"无"。\n';
+            }
+            if (problems.includes('copy_paste')) {
+              comment += '- **Same text pasted in multiple fields** — please fill in each section separately: what problem you have, how you\'d like it solved, and what alternatives you considered.\n';
+              comment += '  **多个字段粘贴了相同内容** — 请分别填写：你遇到了什么问题、期望怎么解决、考虑过哪些替代方案。\n';
+            }
+            if (problems.includes('unknown_version')) {
+              comment += '- **Version number not found** — the version you entered does not match any released version of OxideTerm. Please check: Settings → Help & About, or the title bar.\n';
+              comment += '  **版本号不存在** — 你填写的版本号不对应任何已发布的 OxideTerm 版本。请确认：设置 → 帮助与关于，或标题栏。\n';
+            }
+
+            comment += '\nPlease reopen this issue (or open a new one) with the missing info. We\'re happy to help!\n';
+            comment += '请补充信息后重新打开此 Issue（或新建一个）。我们很乐意帮忙！\n';
+
+            // Add label, comment, and close
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: ['incomplete']
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: comment
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              state: 'closed',
+              state_reason: 'not_planned'
+            });
