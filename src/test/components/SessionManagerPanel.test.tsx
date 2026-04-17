@@ -46,6 +46,7 @@ const sessionManagerState = vi.hoisted(() => ({
   setSelectedGroup: vi.fn(),
   expandedGroups: new Set<string>(),
   toggleExpand: vi.fn(),
+  expandPath: vi.fn(),
   searchQuery: '',
   setSearchQuery: vi.fn(),
   sortField: 'last_used_at',
@@ -90,7 +91,9 @@ vi.mock('@/lib/connectToSaved', () => ({
 }));
 
 vi.mock('@/components/sessionManager/FolderTree', () => ({
-  FolderTree: () => <div>folder-tree</div>,
+  FolderTree: ({ onRequestCreateGroup }: { onRequestCreateGroup?: () => void }) => (
+    <button onClick={onRequestCreateGroup}>new-group</button>
+  ),
 }));
 
 vi.mock('@/components/sessionManager/ManagerToolbar', () => ({
@@ -169,6 +172,7 @@ vi.mock('@/components/modals/OxideImportModal', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     saveConnection: vi.fn(),
+    createGroup: vi.fn(),
     deleteConnection: vi.fn(),
     getSavedConnectionForConnect: vi.fn(),
     sshPreflight: vi.fn(),
@@ -512,6 +516,26 @@ describe('SessionManagerPanel', () => {
     await waitFor(() => {
       expect(api.deleteConnection).toHaveBeenCalledWith('conn-1');
       expect(sessionManagerState.refresh).toHaveBeenCalled();
+      expect(dispatchEventSpy).toHaveBeenCalled();
+    });
+  });
+
+  it('creates a group from the folder tree shortcut and selects it', async () => {
+    const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent');
+
+    render(<SessionManagerPanel />);
+    fireEvent.click(screen.getByText('new-group'));
+
+    fireEvent.change(screen.getByPlaceholderText('sessionManager.folder_tree.new_group_placeholder'), {
+      target: { value: 'Production/Core' },
+    });
+    fireEvent.click(screen.getByText('common.create'));
+
+    await waitFor(() => {
+      expect(api.createGroup).toHaveBeenCalledWith('Production/Core');
+      expect(sessionManagerState.refresh).toHaveBeenCalled();
+      expect(sessionManagerState.expandPath).toHaveBeenCalledWith('Production/Core');
+      expect(sessionManagerState.setSelectedGroup).toHaveBeenCalledWith('Production/Core');
       expect(dispatchEventSpy).toHaveBeenCalled();
     });
   });

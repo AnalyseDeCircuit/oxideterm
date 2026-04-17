@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, Clock, Inbox } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, Clock, Inbox, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '../ui/context-menu';
 import type { FolderNode } from './useSessionManager';
 
 type FolderTreeProps = {
@@ -14,6 +21,7 @@ type FolderTreeProps = {
   ungroupedCount: number;
   onSelectGroup: (group: string | null) => void;
   onToggleExpand: (path: string) => void;
+  onRequestCreateGroup: () => void;
 };
 
 const TreeNode = ({
@@ -95,69 +103,89 @@ export const FolderTree = ({
   ungroupedCount,
   onSelectGroup,
   onToggleExpand,
+  onRequestCreateGroup,
 }: FolderTreeProps) => {
   const { t } = useTranslation();
 
   return (
-    <div className="h-full flex flex-col text-theme-text select-none min-w-0">
-      {/* Pinned top: All Connections */}
-      <div className="shrink-0 pt-2 px-1">
-        <div
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors min-w-0',
-            selectedGroup === null && 'bg-theme-bg-active font-medium'
-          )}
-          onClick={() => onSelectGroup(null)}
-        >
-          <Inbox className="h-4 w-4 text-blue-400 shrink-0" />
-          <span className="flex-1 truncate">{t('sessionManager.folder_tree.all_connections')}</span>
-          <span className="text-xs text-theme-text-muted tabular-nums">{totalCount}</span>
-        </div>
-      </div>
-
-      {/* Scrollable middle: Group tree + Ungrouped */}
-      <div className="flex-1 overflow-y-auto min-h-0 min-w-0 px-1 py-1">
-        {folderTree.map(node => (
-          <TreeNode
-            key={node.fullPath}
-            node={node}
-            depth={0}
-            selectedGroup={selectedGroup}
-            expandedGroups={expandedGroups}
-            onSelectGroup={onSelectGroup}
-            onToggleExpand={onToggleExpand}
-          />
-        ))}
-
-        {/* Ungrouped (inside scrollable area, right after groups) */}
-        {ungroupedCount > 0 && (
-          <div
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors mt-0.5 min-w-0',
-              selectedGroup === '__ungrouped__' && 'bg-theme-bg-active font-medium'
-            )}
-            onClick={() => onSelectGroup('__ungrouped__')}
-          >
-            <Folder className="h-4 w-4 text-theme-text-muted shrink-0" />
-            <span className="flex-1 truncate">{t('sessionManager.folder_tree.ungrouped')}</span>
-            <span className="text-xs text-theme-text-muted tabular-nums">{ungroupedCount}</span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="h-full flex flex-col text-theme-text select-none min-w-0">
+          {/* Pinned top: All Connections */}
+          <div className="shrink-0 pt-2 px-1 space-y-1.5">
+            <div
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors min-w-0',
+                selectedGroup === null && 'bg-theme-bg-active font-medium'
+              )}
+              onClick={() => onSelectGroup(null)}
+            >
+              <Inbox className="h-4 w-4 text-blue-400 shrink-0" />
+              <span className="flex-1 truncate">{t('sessionManager.folder_tree.all_connections')}</span>
+              <span className="text-xs text-theme-text-muted tabular-nums">{totalCount}</span>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2 border-dashed border-theme-border text-theme-text-muted hover:text-theme-text"
+              onClick={onRequestCreateGroup}
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="truncate">{t('sessionManager.folder_tree.new_group')}</span>
+            </Button>
           </div>
-        )}
-      </div>
 
-      {/* Pinned bottom: Recent */}
-      <div className="shrink-0 border-t border-theme-border px-1 py-1.5">
-        <div
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors min-w-0',
-            selectedGroup === '__recent__' && 'bg-theme-bg-active font-medium'
-          )}
-          onClick={() => onSelectGroup('__recent__')}
-        >
-          <Clock className="h-4 w-4 text-theme-text-muted shrink-0" />
-          <span className="flex-1 truncate">{t('sessionManager.folder_tree.recent')}</span>
+          {/* Scrollable middle: Group tree + Ungrouped */}
+          <div className="flex-1 overflow-y-auto min-h-0 min-w-0 px-1 py-1">
+            {folderTree.map(node => (
+              <TreeNode
+                key={node.fullPath}
+                node={node}
+                depth={0}
+                selectedGroup={selectedGroup}
+                expandedGroups={expandedGroups}
+                onSelectGroup={onSelectGroup}
+                onToggleExpand={onToggleExpand}
+              />
+            ))}
+
+            {/* Ungrouped (inside scrollable area, right after groups) */}
+            {ungroupedCount > 0 && (
+              <div
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors mt-0.5 min-w-0',
+                  selectedGroup === '__ungrouped__' && 'bg-theme-bg-active font-medium'
+                )}
+                onClick={() => onSelectGroup('__ungrouped__')}
+              >
+                <Folder className="h-4 w-4 text-theme-text-muted shrink-0" />
+                <span className="flex-1 truncate">{t('sessionManager.folder_tree.ungrouped')}</span>
+                <span className="text-xs text-theme-text-muted tabular-nums">{ungroupedCount}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Pinned bottom: Recent */}
+          <div className="shrink-0 border-t border-theme-border px-1 py-1.5">
+            <div
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer rounded-md text-sm hover:bg-theme-bg-hover transition-colors min-w-0',
+                selectedGroup === '__recent__' && 'bg-theme-bg-active font-medium'
+              )}
+              onClick={() => onSelectGroup('__recent__')}
+            >
+              <Clock className="h-4 w-4 text-theme-text-muted shrink-0" />
+              <span className="flex-1 truncate">{t('sessionManager.folder_tree.recent')}</span>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onRequestCreateGroup}>
+          {t('sessionManager.folder_tree.new_group')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };

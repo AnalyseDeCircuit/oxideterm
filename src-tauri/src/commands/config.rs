@@ -1038,6 +1038,8 @@ pub async fn save_connection(
     state: State<'_, Arc<ConfigState>>,
     request: SaveConnectionRequest,
 ) -> Result<ConnectionInfo, String> {
+    let normalized_group = normalize_optional_group_name(request.group.as_deref())?;
+
     let connection = {
         let mut config = state.config.write();
 
@@ -1168,7 +1170,7 @@ pub async fn save_connection(
             }
 
             conn.name = request.name;
-            conn.group = request.group;
+            conn.group = normalized_group.clone();
             conn.host = request.host;
             conn.port = request.port;
             conn.username = request.username;
@@ -1269,7 +1271,7 @@ pub async fn save_connection(
                 }
             }
 
-            let group = request.group.clone();
+            let group = normalized_group.clone();
             let conn = SavedConnection {
                 id: uuid::Uuid::new_v4().to_string(),
                 version: crate::config::CONFIG_VERSION,
@@ -1310,6 +1312,26 @@ pub async fn save_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_group_name_rejects_empty_path_segments() {
+        assert_eq!(validate_group_name("Prod/Core").unwrap(), "Prod/Core");
+        assert!(validate_group_name("/Prod").is_err());
+        assert!(validate_group_name("Prod/").is_err());
+        assert!(validate_group_name("Prod//Core").is_err());
+        assert!(validate_group_name("   ").is_err());
+    }
+
+    #[test]
+    fn normalize_optional_group_name_treats_blank_as_none() {
+        assert_eq!(normalize_optional_group_name(None).unwrap(), None);
+        assert_eq!(normalize_optional_group_name(Some("   ")).unwrap(), None);
+        assert_eq!(
+            normalize_optional_group_name(Some("Prod/Core")).unwrap(),
+            Some("Prod/Core".to_string())
+        );
+        assert!(normalize_optional_group_name(Some("Prod//Core")).is_err());
+    }
 
     #[test]
     fn build_saved_auth_for_update_preserves_saved_password_when_no_new_password_is_provided() {
@@ -2032,9 +2054,32 @@ pub async fn get_ssh_config_path() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+fn validate_group_name(name: &str) -> Result<String, String> {
+    let normalized = name.trim();
+    if normalized.is_empty() {
+        return Err("Group name cannot be empty".to_string());
+    }
+
+    let parts: Vec<&str> = normalized.split('/').collect();
+    if parts.iter().any(|part| part.trim().is_empty()) {
+        return Err("Group path cannot contain empty segments".to_string());
+    }
+
+    Ok(normalized.to_string())
+}
+
+fn normalize_optional_group_name(name: Option<&str>) -> Result<Option<String>, String> {
+    match name.map(str::trim) {
+        Some("") => Ok(None),
+        Some(group) => validate_group_name(group).map(Some),
+        None => Ok(None),
+    }
+}
+
 /// Create groups
 #[tauri::command]
 pub async fn create_group(state: State<'_, Arc<ConfigState>>, name: String) -> Result<(), String> {
+    let name = validate_group_name(&name)?;
     {
         let mut config = state.config.write();
         if !config.groups.contains(&name) {

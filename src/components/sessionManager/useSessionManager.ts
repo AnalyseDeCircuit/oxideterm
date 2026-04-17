@@ -263,6 +263,17 @@ export function useSessionManager() {
     });
   }, []);
 
+  const expandPath = useCallback((path: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      const parts = path.split('/').filter(Boolean);
+      for (let index = 1; index < parts.length; index += 1) {
+        next.add(parts.slice(0, index).join('/'));
+      }
+      return next;
+    });
+  }, []);
+
   return {
     // Data
     connections: filteredConnections,
@@ -277,6 +288,7 @@ export function useSessionManager() {
     setSelectedGroup,
     expandedGroups,
     toggleExpand,
+    expandPath,
 
     // Table
     searchQuery,

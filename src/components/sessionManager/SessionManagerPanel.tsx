@@ -20,12 +20,32 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { useTabBgActive } from '../../hooks/useTabBackground';
 import { api } from '../../lib/api';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import {
   buildSavedConnectionTestRequest,
   buildTestConnectionRequest,
   requiresSavedConnectionPasswordPrompt,
 } from '../../lib/testConnectionRequest';
 import type { ConnectionInfo, HostKeyStatus } from '../../types';
 import type { EditConnectionSubmitPayload } from '../modals/EditConnectionModal';
+
+const isValidGroupPath = (name: string) => {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return false;
+  }
+
+  return trimmedName.split('/').every(part => part.trim().length > 0);
+};
 
 export const SessionManagerPanel = () => {
   const { t } = useTranslation();
@@ -45,6 +65,7 @@ export const SessionManagerPanel = () => {
     setSelectedGroup,
     expandedGroups,
     toggleExpand,
+    expandPath,
     searchQuery,
     setSearchQuery,
     sortField,
@@ -68,6 +89,9 @@ export const SessionManagerPanel = () => {
     request: Parameters<typeof api.testConnection>[0];
   } | null>(null);
   const [hostKeyActionLoading, setHostKeyActionLoading] = useState(false);
+  const [createGroupDialogOpen, setCreateGroupDialogOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
 
   const notifySavedConnectionsChanged = useCallback(() => {
     window.dispatchEvent(new CustomEvent('saved-connections-changed', {
@@ -313,6 +337,43 @@ export const SessionManagerPanel = () => {
     await refresh();
   }, [refresh]);
 
+  const handleOpenCreateGroupDialog = useCallback(() => {
+    setNewGroupName('');
+    setCreateGroupDialogOpen(true);
+  }, []);
+
+  const handleCreateGroupFromTree = useCallback(async () => {
+    const trimmedGroupName = newGroupName.trim();
+    if (!isValidGroupPath(trimmedGroupName)) {
+      return;
+    }
+
+    setCreatingGroup(true);
+    try {
+      await api.createGroup(trimmedGroupName);
+      setCreateGroupDialogOpen(false);
+      setNewGroupName('');
+      await refresh();
+      expandPath(trimmedGroupName);
+      setSelectedGroup(trimmedGroupName);
+      notifySavedConnectionsChanged();
+      toast({
+        title: t('sessionManager.toast.group_created'),
+        description: trimmedGroupName,
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Failed to create group from Session Manager:', error);
+      toast({
+        title: t('sessionManager.toast.create_group_failed'),
+        description: String(error),
+        variant: 'error',
+      });
+    } finally {
+      setCreatingGroup(false);
+    }
+  }, [expandPath, newGroupName, notifySavedConnectionsChanged, refresh, setSelectedGroup, t, toast]);
+
   return (
     <div className={`h-full w-full flex flex-col text-theme-text ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
       {/* Toolbar */}
@@ -340,6 +401,7 @@ export const SessionManagerPanel = () => {
             ungroupedCount={ungroupedCount}
             onSelectGroup={setSelectedGroup}
             onToggleExpand={toggleExpand}
+            onRequestCreateGroup={handleOpenCreateGroupDialog}
           />
         </div>
 
@@ -411,6 +473,61 @@ export const SessionManagerPanel = () => {
         }}
         loading={hostKeyActionLoading}
       />
+
+      <Dialog
+        open={createGroupDialogOpen}
+        onOpenChange={(open) => {
+          setCreateGroupDialogOpen(open);
+          if (!open) {
+            setNewGroupName('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px] bg-theme-bg-elevated border-theme-border text-theme-text">
+          <DialogHeader>
+            <DialogTitle>{t('sessionManager.folder_tree.new_group')}</DialogTitle>
+            <DialogDescription>
+              {t('sessionManager.folder_tree.new_group_description')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-4 py-2 space-y-2">
+            <Label htmlFor="session-manager-new-group-name" className="text-theme-text">
+              {t('sessionManager.folder_tree.new_group')}
+            </Label>
+            <Input
+              id="session-manager-new-group-name"
+              autoFocus
+              value={newGroupName}
+              onChange={(event) => setNewGroupName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && isValidGroupPath(newGroupName) && !creatingGroup) {
+                  event.preventDefault();
+                  void handleCreateGroupFromTree();
+                }
+              }}
+              placeholder={t('sessionManager.folder_tree.new_group_placeholder')}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setCreateGroupDialogOpen(false);
+                setNewGroupName('');
+              }}
+              disabled={creatingGroup}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => void handleCreateGroupFromTree()}
+              disabled={!isValidGroupPath(newGroupName) || creatingGroup}
+            >
+              {creatingGroup ? t('common.loading', { defaultValue: 'Loading...' }) : t('common.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <OxideExportModal
         isOpen={showExport}
