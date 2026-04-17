@@ -41,15 +41,19 @@ pub enum HostKeyStatus {
         /// SHA256 fingerprint (e.g., "SHA256:abc123...")
         fingerprint: String,
         /// Key type (e.g., "ssh-ed25519", "ssh-rsa")
+        #[serde(rename = "keyType")]
         key_type: String,
     },
     /// Host key changed from known_hosts - possible MITM attack!
     Changed {
         /// Expected fingerprint from known_hosts
+        #[serde(rename = "expectedFingerprint")]
         expected_fingerprint: String,
         /// Actual fingerprint from server
+        #[serde(rename = "actualFingerprint")]
         actual_fingerprint: String,
         /// Key type
+        #[serde(rename = "keyType")]
         key_type: String,
     },
     /// Connection error during preflight
