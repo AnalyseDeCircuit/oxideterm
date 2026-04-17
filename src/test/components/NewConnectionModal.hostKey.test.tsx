@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   getGroups: vi.fn().mockResolvedValue([]),
   isAgentAvailable: vi.fn().mockResolvedValue(true),
   sshPreflight: vi.fn(),
+  preflightTreeNode: vi.fn(),
   sshRemoveHostKey: vi.fn().mockResolvedValue(undefined),
   testConnection: vi.fn(),
 }));
@@ -39,6 +40,8 @@ const sessionTreeState = vi.hoisted(() => ({
   addRootNode: vi.fn(),
   connectNode: vi.fn(),
   createTerminalForNode: vi.fn(),
+  expandManualPreset: vi.fn(),
+  removeNode: vi.fn(),
 }));
 
 const toastState = vi.hoisted(() => ({
@@ -107,9 +110,15 @@ describe('NewConnectionModal host key flows', () => {
     appStoreState.quickConnectData = null;
     apiMocks.getGroups.mockResolvedValue([]);
     apiMocks.isAgentAvailable.mockResolvedValue(true);
+    apiMocks.preflightTreeNode.mockResolvedValue({ status: 'verified' });
     sessionTreeState.addRootNode.mockResolvedValue('node-1');
     sessionTreeState.connectNode.mockResolvedValue(undefined);
     sessionTreeState.createTerminalForNode.mockResolvedValue('terminal-1');
+    sessionTreeState.expandManualPreset.mockResolvedValue({
+      targetNodeId: 'node-target',
+      pathNodeIds: ['node-jump', 'node-target'],
+      chainDepth: 2,
+    });
   });
 
   it('keeps the dialog visible if removing a changed key is followed by a preflight error', async () => {
@@ -394,5 +403,55 @@ describe('NewConnectionModal host key flows', () => {
     });
 
     expect(screen.queryByText('accept-host-key')).not.toBeInTheDocument();
+  });
+
+  it('prompts for a later proxy hop host key and resumes the chain after accept', async () => {
+    appStoreState.quickConnectData = {
+      name: 'proxy-target',
+      host: 'target.internal',
+      port: 22,
+      username: 'alice',
+      proxyChain: [
+        {
+          id: 'jump-1',
+          host: 'jump.example.com',
+          port: 22,
+          username: 'bob',
+          auth_type: 'agent',
+        },
+      ],
+    };
+    apiMocks.preflightTreeNode
+      .mockResolvedValueOnce({ status: 'verified' })
+      .mockResolvedValueOnce({
+        status: 'unknown',
+        fingerprint: 'SHA256:target',
+        keyType: 'ssh-ed25519',
+      });
+
+    await act(async () => {
+      render(<NewConnectionModal />);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'modals.new_connection.connect' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('host-key-dialog-state')).toHaveTextContent('unknown');
+    });
+
+    expect(apiMocks.preflightTreeNode).toHaveBeenNthCalledWith(1, 'node-jump');
+    expect(apiMocks.preflightTreeNode).toHaveBeenNthCalledWith(2, 'node-target');
+    expect(sessionTreeState.connectNode).toHaveBeenNthCalledWith(1, 'node-jump');
+
+    fireEvent.click(screen.getByText('accept-host-key'));
+
+    await waitFor(() => {
+      expect(sessionTreeState.connectNode).toHaveBeenNthCalledWith(2, 'node-target', {
+        trustHostKey: true,
+        expectedHostKeyFingerprint: 'SHA256:target',
+      });
+    });
+
+    expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith('node-target', 120, 40);
   });
 });

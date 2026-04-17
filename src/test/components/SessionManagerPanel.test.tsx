@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 
 const connectToSavedMock = vi.hoisted(() => vi.fn());
+const continueConnectToSavedPlanMock = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => vi.fn());
 
 const sessionManagerState = vi.hoisted(() => ({
@@ -88,6 +89,7 @@ vi.mock('@/store/appStore', () => ({
 
 vi.mock('@/lib/connectToSaved', () => ({
   connectToSaved: connectToSavedMock,
+  continueConnectToSavedPlan: continueConnectToSavedPlanMock,
 }));
 
 vi.mock('@/components/sessionManager/FolderTree', () => ({
@@ -182,6 +184,7 @@ vi.mock('@/lib/api', () => ({
 }));
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: () => undefined },
   useTranslation: () => ({
     t: (key: string) => key,
   }),
@@ -194,6 +197,58 @@ describe('SessionManagerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.sshPreflight).mockResolvedValue({ status: 'verified' });
+  });
+
+  it('shows saved-connection host key confirmation and resumes via continueConnectToSavedPlan', async () => {
+    connectToSavedMock.mockImplementation(async (_id: string, options: { onHostKeyChallenge?: (challenge: unknown) => void }) => {
+      options.onHostKeyChallenge?.({
+        pendingPlan: {
+          connectionId: 'conn-1',
+          plan: {
+            targetNodeId: 'node-target',
+            cleanupNodeId: 'node-target',
+            currentIndex: 1,
+            steps: [
+              { nodeId: 'node-jump', host: 'jump.example.com', port: 22 },
+              { nodeId: 'node-target', host: 'target.example.com', port: 22 },
+            ],
+          },
+        },
+        host: 'target.example.com',
+        port: 22,
+        status: {
+          status: 'unknown',
+          fingerprint: 'SHA256:target',
+          keyType: 'ssh-ed25519',
+        },
+      });
+    });
+    continueConnectToSavedPlanMock.mockResolvedValue({ nodeId: 'node-target', sessionId: 'term-target' });
+
+    render(<SessionManagerPanel />);
+    fireEvent.click(screen.getByText('connect-row'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('host-key-dialog')).toHaveTextContent('target.example.com:22');
+    });
+
+    fireEvent.click(screen.getByText('accept-host-key'));
+
+    await waitFor(() => {
+      expect(continueConnectToSavedPlanMock).toHaveBeenCalledWith(expect.objectContaining({
+        plan: expect.objectContaining({
+          currentIndex: 1,
+          steps: [
+            expect.objectContaining({ nodeId: 'node-jump' }),
+            expect.objectContaining({
+              nodeId: 'node-target',
+              trustHostKey: true,
+              expectedHostKeyFingerprint: 'SHA256:target',
+            }),
+          ],
+        }),
+      }), expect.any(Object));
+    });
   });
 
   it('opens the connect password modal instead of the properties modal for missing-password failures', async () => {

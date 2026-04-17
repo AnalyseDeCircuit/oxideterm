@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 use crate::session::AuthMethod;
 use crate::session::tree::{FlatNode, NodeConnection, NodeOrigin, NodeState, SessionTree};
 use crate::session::types::SessionConfig;
-use crate::ssh::SshConnectionRegistry;
+use crate::ssh::{HostKeyStatus, SshConnectionRegistry, check_host_key};
 use zeroize::Zeroizing;
 
 use super::forwarding::ForwardingRegistry;
@@ -819,6 +819,47 @@ pub struct ConnectTreeNodeResponse {
     pub node_id: String,
     pub ssh_connection_id: String,
     pub parent_connection_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn preflight_tree_node(
+    state: State<'_, Arc<SessionTreeState>>,
+    connection_registry: State<'_, Arc<SshConnectionRegistry>>,
+    node_id: String,
+) -> Result<HostKeyStatus, String> {
+    let (host, port, parent_node_id) = {
+        let tree = state.tree.read().await;
+        let node = tree
+            .get_node(&node_id)
+            .ok_or_else(|| format!("Node not found: {}", node_id))?;
+
+        (
+            node.connection.host.clone(),
+            node.connection.port,
+            node.parent_id.clone(),
+        )
+    };
+
+    if let Some(parent_id) = parent_node_id {
+        let parent_ssh_id = {
+            let tree = state.tree.read().await;
+            let parent_node = tree
+                .get_node(&parent_id)
+                .ok_or_else(|| format!("Parent node not found: {}", parent_id))?;
+
+            parent_node
+                .ssh_connection_id
+                .clone()
+                .ok_or_else(|| format!("Parent node {} has no SSH connection", parent_id))?
+        };
+
+        connection_registry
+            .preflight_tunneled_host_key(&parent_ssh_id, &host, port, 10)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Ok(check_host_key(&host, port, 10).await)
+    }
 }
 
 /// 连接会话树中的节点

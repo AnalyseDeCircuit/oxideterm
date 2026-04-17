@@ -347,6 +347,54 @@ pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKey
     }
 }
 
+/// Perform a preflight check over an already-established stream.
+///
+/// This is used for session-tree child nodes that are only reachable through an
+/// existing jump host tunnel.
+pub async fn check_host_key_via_stream(
+    host: &str,
+    port: u16,
+    stream: russh::ChannelStream<russh::client::Msg>,
+    timeout_secs: u64,
+) -> HostKeyStatus {
+    if get_host_key_cache().get_verified(host, port).is_some() {
+        debug!("Using cached verification for {}:{} via stream", host, port);
+        return HostKeyStatus::Verified;
+    }
+
+    debug!("Starting preflight check via stream for {}:{}", host, port);
+
+    let handler = PreflightHandler::new(host.to_string(), port);
+    let result_ref = handler.result.clone();
+
+    let ssh_config = Config {
+        inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
+        ..Default::default()
+    };
+
+    let connect_result = tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        client::connect_stream(Arc::new(ssh_config), stream, handler),
+    )
+    .await;
+
+    if let Some(status) = result_ref.lock().await.take() {
+        return status;
+    }
+
+    match connect_result {
+        Ok(Ok(_)) => HostKeyStatus::Error {
+            message: "Unexpected: stream connection completed during preflight".to_string(),
+        },
+        Ok(Err(e)) => HostKeyStatus::Error {
+            message: format!("Connection failed via stream: {}", e),
+        },
+        Err(_) => HostKeyStatus::Error {
+            message: format!("Connection timeout after {}s", timeout_secs),
+        },
+    }
+}
+
 /// Add a host key to known_hosts (called after user confirms Unknown status)
 pub fn accept_host_key(host: &str, port: u16, fingerprint: &str) -> Result<(), String> {
     // Note: We can't directly add from fingerprint alone - we need the full public key.

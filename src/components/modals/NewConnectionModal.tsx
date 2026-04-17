@@ -34,6 +34,11 @@ import { ProxyHopConfig } from '../../types';
 import { api } from '../../lib/api';
 import type { HostKeyStatus } from '../../types';
 import type { TestConnectionRequest, TestConnectionResponse } from '../../lib/api';
+import {
+  cleanupSessionTreeConnectPlan,
+  continueSessionTreeConnectPlan,
+  type SessionTreeConnectPlan,
+} from '../../lib/sessionTreeConnectPlan';
 import { buildTestConnectionRequest } from '../../lib/testConnectionRequest';
 import { AddJumpServerDialog } from './AddJumpServerDialog';
 import { HostKeyConfirmDialog } from './HostKeyConfirmDialog';
@@ -49,13 +54,6 @@ import {
 
 const SAVE_CONNECTION_KEY = 'oxideterm.saveConnection';
 
-type ConnectHostKeyStep = {
-  host: string;
-  port: number;
-  trustHostKey?: boolean;
-  expectedHostKeyFingerprint?: string;
-};
-
 type ConnectFormRequest = {
   displayName?: string;
   host: string;
@@ -67,12 +65,6 @@ type ConnectFormRequest = {
   certPath?: string;
   passphrase?: string;
   agentForwarding?: boolean;
-};
-
-type PendingProxyConnectPlan = {
-  request: ConnectFormRequest;
-  steps: ConnectHostKeyStep[];
-  currentIndex: number;
 };
 
 export const NewConnectionModal = () => {
@@ -121,7 +113,7 @@ export const NewConnectionModal = () => {
   const [agentForwarding, setAgentForwarding] = useState(false);
   const [connectHostKeyStatus, setConnectHostKeyStatus] = useState<HostKeyStatus | null>(null);
   const [pendingConnectRequest, setPendingConnectRequest] = useState<ConnectFormRequest | null>(null);
-  const [pendingProxyConnectPlan, setPendingProxyConnectPlan] = useState<PendingProxyConnectPlan | null>(null);
+  const [pendingProxyConnectPlan, setPendingProxyConnectPlan] = useState<SessionTreeConnectPlan | null>(null);
   const [testHostKeyStatus, setTestHostKeyStatus] = useState<HostKeyStatus | null>(null);
   const [pendingTestRequest, setPendingTestRequest] = useState<TestConnectionRequest | null>(null);
   const isComposingRef = useRef(false);
@@ -153,62 +145,8 @@ export const NewConnectionModal = () => {
     );
   }, [formatTestFailure, t, toastError, toastSuccess]);
 
-  const executeConnect = useCallback(async (
-    request: ConnectFormRequest,
-    options?: { trustHostKey?: boolean; expectedHostKeyFingerprint?: string },
-    chainOptions?: ConnectHostKeyStep[],
-  ) => {
-    let nodeId: string;
-    let terminalId: string;
-
-    if (proxyServers.length > 0) {
-      const expandResult = await expandManualPreset({
-        savedConnectionId: `manual:${Date.now()}`,
-        hops: proxyServers.map((hop) => ({
-          host: hop.host,
-          port: hop.port,
-          username: hop.username,
-          authType: hop.auth_type,
-          password: hop.password,
-          keyPath: hop.key_path,
-          certPath: hop.cert_path,
-          passphrase: hop.passphrase,
-          agentForwarding: hop.agent_forwarding,
-        })),
-        target: {
-          host: request.host,
-          port: request.port,
-          username: request.username,
-          authType: request.authType === 'keyboard_interactive' ? 'password' : request.authType,
-          password: request.password,
-          keyPath: request.keyPath,
-          certPath: request.certPath,
-          passphrase: request.passphrase,
-          agentForwarding: request.agentForwarding,
-        },
-      });
-
-      nodeId = expandResult.targetNodeId;
-      for (let index = 0; index < expandResult.pathNodeIds.length; index += 1) {
-        const stepOptions = chainOptions?.[index];
-        await connectNode(expandResult.pathNodeIds[index], stepOptions ? {
-          trustHostKey: stepOptions.trustHostKey,
-          expectedHostKeyFingerprint: stepOptions.expectedHostKeyFingerprint,
-        } : undefined);
-
-        if (index < expandResult.pathNodeIds.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-      terminalId = await createTerminalForNode(nodeId, 120, 40);
-    } else {
-      nodeId = await addRootNode(request);
-      console.log(`Root node created: ${nodeId}`);
-
-      await connectNode(nodeId, options);
-      terminalId = await createTerminalForNode(nodeId, 120, 40);
-    }
-
+  const finalizeConnectedNode = useCallback(async (request: ConnectFormRequest, nodeId: string) => {
+    const terminalId = await createTerminalForNode(nodeId, 120, 40);
     createTab('terminal', terminalId);
 
     setConnectHostKeyStatus(null);
@@ -248,12 +186,9 @@ export const NewConnectionModal = () => {
     setPassword('');
     setPassphrase('');
   }, [
-    addRootNode,
     authType,
-    connectNode,
     createTab,
     createTerminalForNode,
-    expandManualPreset,
     group,
     keyPath,
     name,
@@ -267,29 +202,44 @@ export const NewConnectionModal = () => {
     certPath,
   ]);
 
-  const continueProxyConnectPlan = useCallback(async (plan: PendingProxyConnectPlan) => {
-    for (let index = plan.currentIndex; index < plan.steps.length; index += 1) {
-      const step = plan.steps[index];
-      const preflight = await api.sshPreflight({ host: step.host, port: step.port });
+  const executeConnect = useCallback(async (
+    request: ConnectFormRequest,
+    options?: { trustHostKey?: boolean; expectedHostKeyFingerprint?: string },
+  ) => {
+    const nodeId = await addRootNode(request);
+    await connectNode(nodeId, options);
+    await finalizeConnectedNode(request, nodeId);
+  }, [addRootNode, connectNode, finalizeConnectedNode]);
 
-      if (preflight.status === 'verified') {
-        continue;
-      }
+  const continueProxyConnectPlan = useCallback(async (
+    request: ConnectFormRequest,
+    plan: SessionTreeConnectPlan,
+  ) => {
+    const challenge = await continueSessionTreeConnectPlan(plan);
 
-      if (preflight.status === 'unknown' || preflight.status === 'changed') {
-        setPendingProxyConnectPlan({ ...plan, currentIndex: index });
-        setConnectHostKeyStatus(preflight);
-        return;
-      }
-
-      setPendingProxyConnectPlan(null);
-      setConnectHostKeyStatus(null);
-      toastError(t('modals.new_connection.connect_failed'), preflight.message);
-      return;
+    if (challenge) {
+      setPendingConnectRequest(request);
+      setPendingProxyConnectPlan(challenge.plan);
+      setConnectHostKeyStatus(challenge.status);
+      return false;
     }
 
-    await executeConnect(plan.request, undefined, plan.steps);
-  }, [executeConnect, t, toastError]);
+    await finalizeConnectedNode(request, plan.targetNodeId);
+    return true;
+  }, [finalizeConnectedNode]);
+
+  const resetPendingProxyConnectPlan = useCallback(() => {
+    const planToCleanup = pendingProxyConnectPlan;
+    setConnectHostKeyStatus(null);
+    setPendingConnectRequest(null);
+    setPendingProxyConnectPlan(null);
+
+    if (planToCleanup) {
+      void cleanupSessionTreeConnectPlan(planToCleanup).catch((error) => {
+        console.warn('Failed to clean up pending proxy connect plan:', error);
+      });
+    }
+  }, [pendingProxyConnectPlan]);
 
   // Enter key submit (with IME guard)
   const handleFormKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -422,6 +372,7 @@ export const NewConnectionModal = () => {
     }
 
     setLoading(true);
+  let createdProxyPlan: SessionTreeConnectPlan | null = null;
     try {
       if (authType === 'keyboard_interactive' && kbiDisabledForProxyChain) {
         throw new Error(t('sessionManager.toast.proxy_hop_kbi_unsupported'));
@@ -442,14 +393,51 @@ export const NewConnectionModal = () => {
       };
 
       if (proxyServers.length > 0) {
-        await continueProxyConnectPlan({
-          request,
-          // Only the first hop is guaranteed to be directly reachable from the client.
-          // Later hops and the target may only exist behind the already-established tunnel,
-          // so preflighting them locally causes false negatives on valid proxy topologies.
-          steps: [{ host: proxyServers[0].host, port: proxyServers[0].port }],
-          currentIndex: 0,
+        const expandResult = await expandManualPreset({
+          savedConnectionId: `manual:${Date.now()}`,
+          hops: proxyServers.map((hop) => ({
+            host: hop.host,
+            port: hop.port,
+            username: hop.username,
+            authType: hop.auth_type,
+            password: hop.password,
+            keyPath: hop.key_path,
+            certPath: hop.cert_path,
+            passphrase: hop.passphrase,
+            agentForwarding: hop.agent_forwarding,
+          })),
+          target: {
+            host: request.host,
+            port: request.port,
+            username: request.username,
+            authType: request.authType === 'keyboard_interactive' ? 'password' : request.authType,
+            password: request.password,
+            keyPath: request.keyPath,
+            certPath: request.certPath,
+            passphrase: request.passphrase,
+            agentForwarding: request.agentForwarding,
+          },
         });
+
+        createdProxyPlan = {
+          targetNodeId: expandResult.targetNodeId,
+          cleanupNodeId: expandResult.targetNodeId,
+          currentIndex: 0,
+          steps: expandResult.pathNodeIds.map((nodeId, index) => {
+            const endpoint = index < proxyServers.length
+              ? proxyServers[index]
+              : { host: request.host, port: request.port };
+
+            return {
+              nodeId,
+              host: endpoint.host,
+              port: endpoint.port,
+            };
+          }),
+        };
+
+        await continueProxyConnectPlan(request, createdProxyPlan);
+        createdProxyPlan = null;
         return;
       }
 
@@ -468,6 +456,11 @@ export const NewConnectionModal = () => {
 
       toastError(t('modals.new_connection.connect_failed'), preflight.message);
     } catch (e) {
+      if (createdProxyPlan) {
+        await cleanupSessionTreeConnectPlan(createdProxyPlan).catch((cleanupError) => {
+          console.warn('Failed to clean up failed proxy connect plan:', cleanupError);
+        });
+      }
       console.error(e);
       toastError(
         t('modals.new_connection.connect_failed'),
@@ -570,6 +563,10 @@ export const NewConnectionModal = () => {
     setLoading(true);
     try {
       if (pendingProxyConnectPlan) {
+        if (!pendingConnectRequest) {
+          return;
+        }
+
         const steps = pendingProxyConnectPlan.steps.map((step, index) => (
           index === pendingProxyConnectPlan.currentIndex
             ? {
@@ -580,10 +577,9 @@ export const NewConnectionModal = () => {
             : step
         ));
 
-        await continueProxyConnectPlan({
+        await continueProxyConnectPlan(pendingConnectRequest, {
           ...pendingProxyConnectPlan,
           steps,
-          currentIndex: pendingProxyConnectPlan.currentIndex + 1,
         });
         return;
       }
@@ -600,6 +596,9 @@ export const NewConnectionModal = () => {
       console.error(e);
       setConnectHostKeyStatus(null);
       setPendingConnectRequest(null);
+      await cleanupSessionTreeConnectPlan(pendingProxyConnectPlan).catch((cleanupError) => {
+        console.warn('Failed to clean up pending proxy plan after accept failure:', cleanupError);
+      });
       setPendingProxyConnectPlan(null);
       toastError(t('modals.new_connection.connect_failed'), String(e));
     } finally {
@@ -650,15 +649,15 @@ export const NewConnectionModal = () => {
       });
 
       if (pendingProxyConnectPlan) {
-        if (preflight.status === 'verified') {
-          await continueProxyConnectPlan({
-            ...pendingProxyConnectPlan,
-            currentIndex: pendingProxyConnectPlan.currentIndex + 1,
-          });
+        if (!pendingConnectRequest) {
           return;
         }
 
-        setConnectHostKeyStatus(preflight);
+        if (preflight.status === 'verified') {
+          await continueProxyConnectPlan(pendingConnectRequest, pendingProxyConnectPlan);
+        } else {
+          setConnectHostKeyStatus(preflight);
+        }
         return;
       }
 
@@ -686,9 +685,7 @@ export const NewConnectionModal = () => {
         open={!!connectHostKeyStatus && connectHostKeyStatus.status !== 'verified'}
         onClose={() => {
           if (!loading) {
-            setConnectHostKeyStatus(null);
-            setPendingConnectRequest(null);
-            setPendingProxyConnectPlan(null);
+            resetPendingProxyConnectPlan();
           }
         }}
         status={connectHostKeyStatus}
@@ -697,9 +694,7 @@ export const NewConnectionModal = () => {
         onAccept={handleAcceptConnectHostKey}
         onRemoveSavedKey={handleRemoveChangedConnectKey}
         onCancel={() => {
-          setConnectHostKeyStatus(null);
-          setPendingConnectRequest(null);
-          setPendingProxyConnectPlan(null);
+          resetPendingProxyConnectPlan();
         }}
         loading={loading}
       />
@@ -730,9 +725,7 @@ export const NewConnectionModal = () => {
           setPassword('');
           setPassphrase('');
           setAgentForwarding(false);
-          setConnectHostKeyStatus(null);
-          setPendingConnectRequest(null);
-          setPendingProxyConnectPlan(null);
+          resetPendingProxyConnectPlan();
           setTestHostKeyStatus(null);
           setPendingTestRequest(null);
           // 清除代理链中的密码

@@ -4,16 +4,18 @@ import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 const apiMocks = vi.hoisted(() => ({
   getSavedConnectionForConnect: vi.fn(),
   markConnectionUsed: vi.fn().mockResolvedValue(undefined),
+  preflightTreeNode: vi.fn(),
 }));
 
 const sessionTreeState = vi.hoisted(() => ({
   nodes: [] as any[],
   selectedNodeId: null as string | null,
   expandManualPreset: vi.fn(),
-  connectNodeWithAncestors: vi.fn(),
+  connectNode: vi.fn(),
   createTerminalForNode: vi.fn(),
   addRootNode: vi.fn(),
   getNode: vi.fn(),
+  removeNode: vi.fn(),
 }));
 
 const appStoreState = vi.hoisted(() => ({
@@ -40,9 +42,10 @@ describe('connectToSaved', () => {
     sessionTreeState.selectedNodeId = null;
     appStoreState.tabs = [];
     appStoreState.activeTabId = null;
+    apiMocks.preflightTreeNode.mockResolvedValue({ status: 'verified' });
   });
 
-  it('expands proxy chains, connects the chain, and creates a target terminal', async () => {
+  it('expands proxy chains, connects each hop, and creates a target terminal', async () => {
     apiMocks.getSavedConnectionForConnect.mockResolvedValue({
       host: 'target.example.com',
       port: 22,
@@ -61,8 +64,12 @@ describe('connectToSaved', () => {
         },
       ],
     });
-    sessionTreeState.expandManualPreset.mockResolvedValue({ targetNodeId: 'node-target', chainDepth: 2 });
-    sessionTreeState.connectNodeWithAncestors.mockResolvedValue(['node-target']);
+    sessionTreeState.expandManualPreset.mockResolvedValue({
+      targetNodeId: 'node-target',
+      pathNodeIds: ['node-jump', 'node-target'],
+      chainDepth: 2,
+    });
+    sessionTreeState.connectNode.mockResolvedValue(undefined);
     sessionTreeState.createTerminalForNode.mockResolvedValue('term-target');
     const createTab = vi.fn();
 
@@ -86,7 +93,10 @@ describe('connectToSaved', () => {
         }),
       ],
     }));
-    expect(sessionTreeState.connectNodeWithAncestors).toHaveBeenCalledWith('node-target');
+    expect(apiMocks.preflightTreeNode).toHaveBeenNthCalledWith(1, 'node-jump');
+    expect(apiMocks.preflightTreeNode).toHaveBeenNthCalledWith(2, 'node-target');
+    expect(sessionTreeState.connectNode).toHaveBeenNthCalledWith(1, 'node-jump');
+    expect(sessionTreeState.connectNode).toHaveBeenNthCalledWith(2, 'node-target');
     expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith('node-target');
     expect(createTab).toHaveBeenCalledWith('terminal', 'term-target');
     expect(apiMocks.markConnectionUsed).toHaveBeenCalledWith('saved-1');
@@ -117,7 +127,7 @@ describe('connectToSaved', () => {
       agent_forwarding: true,
       proxy_chain: [],
     });
-    sessionTreeState.connectNodeWithAncestors.mockResolvedValue(['node-1']);
+    sessionTreeState.connectNode.mockResolvedValue(undefined);
     sessionTreeState.createTerminalForNode.mockResolvedValue('term-1');
     const createTab = vi.fn();
 
@@ -127,7 +137,8 @@ describe('connectToSaved', () => {
       t: (key: string) => key,
     });
 
-    expect(sessionTreeState.connectNodeWithAncestors).toHaveBeenCalledWith('node-1');
+    expect(apiMocks.preflightTreeNode).toHaveBeenCalledWith('node-1');
+    expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-1');
     expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith('node-1');
     expect(createTab).toHaveBeenCalledWith('terminal', 'term-1');
     expect(sessionTreeState.selectedNodeId).toBe('node-1');
@@ -144,7 +155,7 @@ describe('connectToSaved', () => {
       proxy_chain: [],
     });
     sessionTreeState.addRootNode.mockResolvedValue('node-forwarded');
-    sessionTreeState.connectNodeWithAncestors.mockResolvedValue(['node-forwarded']);
+    sessionTreeState.connectNode.mockResolvedValue(undefined);
     sessionTreeState.createTerminalForNode.mockResolvedValue('term-forwarded');
 
     await connectToSaved('saved-forwarded', {
@@ -158,6 +169,8 @@ describe('connectToSaved', () => {
       username: 'alice',
       agentForwarding: true,
     }));
+    expect(apiMocks.preflightTreeNode).toHaveBeenCalledWith('node-forwarded');
+    expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-forwarded');
   });
 
   it('activates an existing direct terminal tab instead of opening a duplicate', async () => {
@@ -233,7 +246,7 @@ describe('connectToSaved', () => {
 
     expect(onError).toHaveBeenCalledWith('saved-missing-password', 'missing-password');
     expect(sessionTreeState.addRootNode).not.toHaveBeenCalled();
-    expect(sessionTreeState.connectNodeWithAncestors).not.toHaveBeenCalled();
+    expect(sessionTreeState.connectNode).not.toHaveBeenCalled();
   });
 
   it('treats an explicitly empty saved password as a valid password auth value', async () => {
@@ -261,7 +274,7 @@ describe('connectToSaved', () => {
       authType: 'password',
       password: '',
     }));
-    expect(sessionTreeState.connectNodeWithAncestors).toHaveBeenCalled();
+    expect(sessionTreeState.connectNode).toHaveBeenCalled();
   });
 
   it('reuses an active node without prompting for password when a terminal already exists', async () => {
@@ -337,5 +350,55 @@ describe('connectToSaved', () => {
     }));
     expect(onError).toHaveBeenCalledWith('saved-kbi-hop', 'connect-failed');
     expect(sessionTreeState.expandManualPreset).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a host key challenge for a later proxy hop without opening a terminal yet', async () => {
+    const onHostKeyChallenge = vi.fn();
+
+    apiMocks.getSavedConnectionForConnect.mockResolvedValue({
+      host: 'target.example.com',
+      port: 22,
+      username: 'target',
+      auth_type: 'agent',
+      agent_forwarding: false,
+      proxy_chain: [
+        {
+          host: 'jump.example.com',
+          port: 2222,
+          username: 'jump',
+          auth_type: 'agent',
+          agent_forwarding: false,
+        },
+      ],
+    });
+    sessionTreeState.expandManualPreset.mockResolvedValue({
+      targetNodeId: 'node-target',
+      pathNodeIds: ['node-jump', 'node-target'],
+      chainDepth: 2,
+    });
+    apiMocks.preflightTreeNode
+      .mockResolvedValueOnce({ status: 'verified' })
+      .mockResolvedValueOnce({
+        status: 'unknown',
+        fingerprint: 'SHA256:target',
+        keyType: 'ssh-ed25519',
+      });
+
+    const result = await connectToSaved('saved-hop-hostkey', {
+      createTab: vi.fn(),
+      toast: vi.fn(),
+      t: (key: string) => key,
+      onHostKeyChallenge,
+    });
+
+    expect(result).toBeNull();
+    expect(sessionTreeState.connectNode).toHaveBeenCalledTimes(1);
+    expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-jump');
+    expect(sessionTreeState.createTerminalForNode).not.toHaveBeenCalled();
+    expect(onHostKeyChallenge).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'target.example.com',
+      port: 22,
+      status: expect.objectContaining({ status: 'unknown' }),
+    }));
   });
 });

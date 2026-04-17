@@ -13,8 +13,13 @@ import { EditConnectionModal } from '../modals/EditConnectionModal';
 import { EditConnectionPropertiesModal } from '../modals/EditConnectionPropertiesModal';
 import { HostKeyConfirmDialog } from '../modals/HostKeyConfirmDialog';
 import { buildSaveConnectionRequestFromSaved } from '../../lib/buildSaveConnectionRequestFromSaved';
-import { connectToSaved } from '../../lib/connectToSaved';
+import {
+  connectToSaved,
+  continueConnectToSavedPlan,
+  type PendingSavedConnectionPlan,
+} from '../../lib/connectToSaved';
 import { findUnsupportedProxyHopAuth } from '../../lib/proxyHopSupport';
+import { cleanupSessionTreeConnectPlan } from '../../lib/sessionTreeConnectPlan';
 import { useAppStore } from '../../store/appStore';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -85,11 +90,14 @@ export const SessionManagerPanel = () => {
   const [connectPromptConnectionId, setConnectPromptConnectionId] = useState<string | null>(null);
   const [connectPromptAction, setConnectPromptAction] = useState<'connect' | 'test'>('connect');
   const [testHostKeyStatus, setTestHostKeyStatus] = useState<HostKeyStatus | null>(null);
+  const [connectHostKeyStatus, setConnectHostKeyStatus] = useState<HostKeyStatus | null>(null);
+  const [pendingSavedConnectPlan, setPendingSavedConnectPlan] = useState<PendingSavedConnectionPlan | null>(null);
   const [pendingTestConnection, setPendingTestConnection] = useState<{
     label: string;
     request: Parameters<typeof api.testConnection>[0];
   } | null>(null);
   const [hostKeyActionLoading, setHostKeyActionLoading] = useState(false);
+  const [connectHostKeyActionLoading, setConnectHostKeyActionLoading] = useState(false);
   const [createGroupDialogOpen, setCreateGroupDialogOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -100,22 +108,100 @@ export const SessionManagerPanel = () => {
     }));
   }, []);
 
+  const getConnectToSavedOptions = useCallback(() => ({
+    createTab,
+    toast,
+    t,
+    onError: (id: string, reason?: 'missing-password' | 'connect-failed') => {
+      if (reason === 'missing-password') {
+        setConnectPromptAction('connect');
+        setConnectPromptConnectionId(id);
+        return;
+      }
+      setEditingConnectionId(id);
+    },
+    onHostKeyChallenge: ({
+      pendingPlan,
+      status,
+    }: {
+      pendingPlan: PendingSavedConnectionPlan;
+      status: Extract<HostKeyStatus, { status: 'unknown' } | { status: 'changed' }>;
+    }) => {
+      setPendingSavedConnectPlan(pendingPlan);
+      setConnectHostKeyStatus(status);
+    },
+  }), [createTab, t, toast]);
+
+  const resetPendingSavedConnectPlan = useCallback(() => {
+    const planToCleanup = pendingSavedConnectPlan;
+    setPendingSavedConnectPlan(null);
+    setConnectHostKeyStatus(null);
+
+    if (planToCleanup) {
+      void cleanupSessionTreeConnectPlan(planToCleanup.plan).catch((error) => {
+        console.warn('Failed to clean up pending saved connection plan:', error);
+      });
+    }
+  }, [pendingSavedConnectPlan]);
+
   // Connect action
   const handleConnect = useCallback(async (connectionId: string) => {
-    await connectToSaved(connectionId, {
-      createTab,
-      toast,
-      t,
-      onError: (id, reason) => {
-        if (reason === 'missing-password') {
-          setConnectPromptAction('connect');
-          setConnectPromptConnectionId(id);
-          return;
-        }
-        setEditingConnectionId(id);
-      },
-    });
-  }, [createTab, toast, t]);
+    await connectToSaved(connectionId, getConnectToSavedOptions());
+  }, [getConnectToSavedOptions]);
+
+  const handleAcceptConnectHostKey = useCallback(async (persist: boolean) => {
+    if (!pendingSavedConnectPlan || !connectHostKeyStatus || connectHostKeyStatus.status !== 'unknown') {
+      return;
+    }
+
+    setConnectHostKeyActionLoading(true);
+    try {
+      const { currentIndex, steps } = pendingSavedConnectPlan.plan;
+      const result = await continueConnectToSavedPlan({
+        ...pendingSavedConnectPlan,
+        plan: {
+          ...pendingSavedConnectPlan.plan,
+          steps: steps.map((step, index) => index === currentIndex ? {
+            ...step,
+            trustHostKey: persist,
+            expectedHostKeyFingerprint: connectHostKeyStatus.fingerprint,
+          } : step),
+        },
+      }, getConnectToSavedOptions());
+
+      if (result) {
+        setPendingSavedConnectPlan(null);
+        setConnectHostKeyStatus(null);
+      }
+    } finally {
+      setConnectHostKeyActionLoading(false);
+    }
+  }, [connectHostKeyStatus, getConnectToSavedOptions, pendingSavedConnectPlan]);
+
+  const handleRemoveChangedConnectHostKey = useCallback(async () => {
+    if (!pendingSavedConnectPlan || !connectHostKeyStatus || connectHostKeyStatus.status !== 'changed') {
+      return;
+    }
+
+    const currentStep = pendingSavedConnectPlan.plan.steps[pendingSavedConnectPlan.plan.currentIndex];
+    setConnectHostKeyActionLoading(true);
+    try {
+      await api.sshRemoveHostKey({
+        host: currentStep.host,
+        port: currentStep.port,
+        keyType: connectHostKeyStatus.keyType,
+        expectedFingerprint: connectHostKeyStatus.expectedFingerprint,
+      });
+
+      const result = await continueConnectToSavedPlan(pendingSavedConnectPlan, getConnectToSavedOptions());
+      if (result) {
+        setPendingSavedConnectPlan(null);
+        setConnectHostKeyStatus(null);
+      }
+    } finally {
+      setConnectHostKeyActionLoading(false);
+    }
+  }, [connectHostKeyStatus, getConnectToSavedOptions, pendingSavedConnectPlan]);
 
   // Edit action
   const handleEdit = useCallback((connectionId: string) => {
@@ -456,6 +542,18 @@ export const SessionManagerPanel = () => {
         action={connectPromptAction}
         onSubmit={connectPromptAction === 'test' ? handlePromptTestConnection : undefined}
         onConnect={connectPromptAction === 'connect' ? refresh : undefined}
+      />
+
+      <HostKeyConfirmDialog
+        open={!!connectHostKeyStatus && connectHostKeyStatus.status !== 'verified'}
+        onClose={resetPendingSavedConnectPlan}
+        status={connectHostKeyStatus}
+        host={pendingSavedConnectPlan?.plan.steps[pendingSavedConnectPlan.plan.currentIndex]?.host ?? ''}
+        port={pendingSavedConnectPlan?.plan.steps[pendingSavedConnectPlan.plan.currentIndex]?.port ?? 22}
+        onAccept={handleAcceptConnectHostKey}
+        onRemoveSavedKey={handleRemoveChangedConnectHostKey}
+        onCancel={resetPendingSavedConnectPlan}
+        loading={connectHostKeyActionLoading}
       />
 
       <HostKeyConfirmDialog

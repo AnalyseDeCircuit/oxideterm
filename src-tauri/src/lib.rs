@@ -564,6 +564,7 @@ pub fn run() {
         commands::get_session_tree_summary,
         commands::add_root_node,
         commands::tree_drill_down,
+        commands::preflight_tree_node,
         commands::expand_manual_preset,
         // Auto-route commands (auto-generated from saved connections)
         commands::get_topology_nodes,
@@ -918,6 +919,7 @@ pub fn run() {
         commands::get_session_tree,
         commands::get_session_tree_summary,
         commands::add_root_node,
+        commands::preflight_tree_node,
         commands::tree_drill_down,
         commands::expand_manual_preset,
         // Auto-route commands (auto-generated from saved connections)

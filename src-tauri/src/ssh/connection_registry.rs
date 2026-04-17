@@ -45,6 +45,7 @@ use super::auth::{
     try_none_auth_probe, try_password_as_kbi_fallback,
 };
 use super::handle_owner::HandleController;
+use super::preflight::{HostKeyStatus, check_host_key_via_stream};
 use super::{AuthMethod as SshAuthMethod, SshClient, SshConfig};
 use crate::session::{AuthMethod, RemoteEnvInfo, SessionConfig};
 use crate::sftp::error::SftpError;
@@ -1058,14 +1059,19 @@ impl SshConnectionRegistry {
         // 4. 在隧道上建立新的 SSH 连接
         let connection_id = uuid::Uuid::new_v4().to_string();
 
-        // 创建 SSH 配置（非严格主机密钥检查，因为是隧道连接）
         // Defense-in-depth: native keepalive as safety net (see HEARTBEAT_INTERVAL)
         let ssh_config = build_client_config();
 
-        let handler = super::client::ClientHandler::new(
+        // Child nodes still need strict host key verification. The only
+        // difference is transport reachability: the SSH handshake happens over
+        // the parent tunnel instead of a direct socket.
+        let handler = super::client::ClientHandler::with_trust(
             target_config.host.clone(),
             target_config.port,
-            false, // 隧道连接不严格检查主机密钥
+            true,
+            target_config.trust_host_key,
+            target_config.agent_forwarding,
+            target_config.expected_host_key_fingerprint.clone(),
         );
 
         // 使用 russh::connect_stream 在隧道上建立 SSH
@@ -1381,6 +1387,44 @@ impl SshConnectionRegistry {
         }
 
         Ok(connection_id)
+    }
+
+    pub async fn preflight_tunneled_host_key(
+        self: &Arc<Self>,
+        parent_connection_id: &str,
+        host: &str,
+        port: u16,
+        timeout_secs: u64,
+    ) -> Result<HostKeyStatus, ConnectionRegistryError> {
+        let parent_entry = self
+            .connections
+            .get(parent_connection_id)
+            .ok_or_else(|| ConnectionRegistryError::NotFound(parent_connection_id.to_string()))?;
+
+        let parent_conn = parent_entry.value().clone();
+        drop(parent_entry);
+
+        let parent_state = parent_conn.state().await;
+        if parent_state != ConnectionState::Active && parent_state != ConnectionState::Idle {
+            return Err(ConnectionRegistryError::InvalidState(format!(
+                "Parent connection {} is not in Active/Idle state: {:?}",
+                parent_connection_id, parent_state
+            )));
+        }
+
+        let channel = parent_conn
+            .handle_controller
+            .open_direct_tcpip(host, port as u32, "127.0.0.1", 0)
+            .await
+            .map_err(|e| {
+                ConnectionRegistryError::ConnectionFailed(format!(
+                    "Failed to open direct-tcpip channel: {}",
+                    e
+                ))
+            })?;
+
+        let stream = channel.into_stream();
+        Ok(check_host_key_via_stream(host, port, stream, timeout_secs).await)
     }
 
     /// 根据配置查找已存在的连接

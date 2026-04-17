@@ -357,26 +357,26 @@ jobs:
             // Arch: x64 (Intel/AMD 64-bit), arm64 (ARM 64-bit)
             const renameRules = [
               // macOS DMG
-              { match: /^OxideTerm[^.]*[_-](aarch64|arm64)\.dmg$/i, newName: `OxideTerm_${version}_macos_arm64.dmg` },
-              { match: /^OxideTerm[^.]*[_-](x64|x86_64)\.dmg$/i, newName: `OxideTerm_${version}_macos_x64.dmg` },
+              { match: /^OxideTerm.*[_-](aarch64|arm64)\.dmg$/i, newName: `OxideTerm_${version}_macos_arm64.dmg` },
+              { match: /^OxideTerm.*[_-](x64|x86_64)\.dmg$/i, newName: `OxideTerm_${version}_macos_x64.dmg` },
               // macOS updater (.app.tar.gz)
-              { match: /^OxideTerm[^.]*[_-](aarch64|arm64)\.app\.tar\.gz$/i, newName: `OxideTerm_${version}_macos_arm64.app.tar.gz` },
-              { match: /^OxideTerm[^.]*[_-](x64|x86_64)\.app\.tar\.gz$/i, newName: `OxideTerm_${version}_macos_x64.app.tar.gz` },
+              { match: /^OxideTerm.*[_-](aarch64|arm64)\.app\.tar\.gz$/i, newName: `OxideTerm_${version}_macos_arm64.app.tar.gz` },
+              { match: /^OxideTerm.*[_-](x64|x86_64)\.app\.tar\.gz$/i, newName: `OxideTerm_${version}_macos_x64.app.tar.gz` },
               // Linux .deb
-              { match: /^oxideterm[^.]*[_-](amd64|x86_64|x64)\.deb$/i, newName: `OxideTerm_${version}_linux_x64.deb` },
-              { match: /^oxideterm[^.]*[_-](arm64|aarch64)\.deb$/i, newName: `OxideTerm_${version}_linux_arm64.deb` },
+              { match: /^OxideTerm.*[_-](amd64|x86_64|x64)\.deb$/i, newName: `OxideTerm_${version}_linux_x64.deb` },
+              { match: /^OxideTerm.*[_-](arm64|aarch64)\.deb$/i, newName: `OxideTerm_${version}_linux_arm64.deb` },
               // Linux .rpm
-              { match: /^oxideterm[^.]*[._-](x86_64|amd64|x64)\.rpm$/i, newName: `OxideTerm_${version}_linux_x64.rpm` },
-              { match: /^oxideterm[^.]*[._-](aarch64|arm64)\.rpm$/i, newName: `OxideTerm_${version}_linux_arm64.rpm` },
+              { match: /^OxideTerm.*[._-](x86_64|amd64|x64)\.rpm$/i, newName: `OxideTerm_${version}_linux_x64.rpm` },
+              { match: /^OxideTerm.*[._-](aarch64|arm64)\.rpm$/i, newName: `OxideTerm_${version}_linux_arm64.rpm` },
               // Linux .AppImage
-              { match: /^OxideTerm[^.]*[_-](amd64|x86_64|x64)\.AppImage$/i, newName: `OxideTerm_${version}_linux_x64.AppImage` },
-              { match: /^OxideTerm[^.]*[_-](aarch64|arm64)\.AppImage$/i, newName: `OxideTerm_${version}_linux_arm64.AppImage` },
+              { match: /^OxideTerm.*[_-](amd64|x86_64|x64)\.AppImage$/i, newName: `OxideTerm_${version}_linux_x64.AppImage` },
+              { match: /^OxideTerm.*[_-](aarch64|arm64)\.AppImage$/i, newName: `OxideTerm_${version}_linux_arm64.AppImage` },
               // Windows NSIS installer
-              { match: /^OxideTerm[^.]*[_-](x64|x86_64|amd64)-setup\.exe$/i, newName: `OxideTerm_${version}_windows_x64-setup.exe` },
-              { match: /^OxideTerm[^.]*[_-](arm64|aarch64)-setup\.exe$/i, newName: `OxideTerm_${version}_windows_arm64-setup.exe` },
+              { match: /^OxideTerm.*[_-](x64|x86_64|amd64)-setup\.exe$/i, newName: `OxideTerm_${version}_windows_x64-setup.exe` },
+              { match: /^OxideTerm.*[_-](arm64|aarch64)-setup\.exe$/i, newName: `OxideTerm_${version}_windows_arm64-setup.exe` },
               // Windows NSIS updater (.nsis.zip)
-              { match: /^OxideTerm[^.]*[_-](x64|x86_64|amd64)-setup\.nsis\.zip$/i, newName: `OxideTerm_${version}_windows_x64-setup.nsis.zip` },
-              { match: /^OxideTerm[^.]*[_-](arm64|aarch64)-setup\.nsis\.zip$/i, newName: `OxideTerm_${version}_windows_arm64-setup.nsis.zip` },
+              { match: /^OxideTerm.*[_-](x64|x86_64|amd64)-setup\.nsis\.zip$/i, newName: `OxideTerm_${version}_windows_x64-setup.nsis.zip` },
+              { match: /^OxideTerm.*[_-](arm64|aarch64)-setup\.nsis\.zip$/i, newName: `OxideTerm_${version}_windows_arm64-setup.nsis.zip` },
             ];
 
             const renames = [];

@@ -4,10 +4,15 @@
 import { api } from './api';
 import { findUnsupportedProxyHopAuth } from './proxyHopSupport';
 import { notifyConnectionIssue } from './notificationCenter';
+import {
+  cleanupSessionTreeConnectPlan,
+  continueSessionTreeConnectPlan,
+  type SessionTreeConnectPlan,
+} from './sessionTreeConnectPlan';
 import { requiresSavedConnectionPasswordPrompt } from './testConnectionRequest';
 import { useSessionTreeStore } from '../store/sessionTreeStore';
 import { useAppStore } from '../store/appStore';
-import type { UnifiedFlatNode } from '../types';
+import type { HostKeyStatus, UnifiedFlatNode } from '../types';
 import type { ToastVariant } from '../hooks/useToast';
 
 export type ConnectToSavedOptions = {
@@ -15,12 +20,130 @@ export type ConnectToSavedOptions = {
   toast: (props: { title: string; description: string; variant?: ToastVariant }) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   onError?: (connectionId: string, reason?: 'missing-password' | 'connect-failed') => void;
+  onHostKeyChallenge?: (challenge: ConnectToSavedHostKeyChallenge) => void;
 };
 
 export type ConnectToSavedResult = {
   nodeId: string;
   sessionId: string;
 };
+
+export type PendingSavedConnectionPlan = {
+  connectionId: string;
+  plan: SessionTreeConnectPlan;
+};
+
+export type ConnectToSavedHostKeyChallenge = {
+  pendingPlan: PendingSavedConnectionPlan;
+  host: string;
+  port: number;
+  status: Extract<HostKeyStatus, { status: 'unknown' } | { status: 'changed' }>;
+};
+
+async function finalizeConnectedSavedNode(
+  connectionId: string,
+  nodeId: string,
+  options: ConnectToSavedOptions,
+): Promise<ConnectToSavedResult> {
+  const { createTab } = options;
+  let sessionId: string;
+
+  const updatedNode = useSessionTreeStore.getState().getNode(nodeId);
+  const terminalIds = updatedNode?.runtime?.terminalIds || [];
+
+  if (terminalIds.length > 0) {
+    sessionId = terminalIds[0];
+    const existingTab = useAppStore.getState().tabs.find(tab => tab.sessionId === terminalIds[0] && tab.type === 'terminal');
+    if (existingTab) {
+      useAppStore.setState({ activeTabId: existingTab.id });
+    } else {
+      createTab('terminal', terminalIds[0]);
+    }
+  } else {
+    const { createTerminalForNode } = useSessionTreeStore.getState();
+    const terminalId = await createTerminalForNode(nodeId);
+    createTab('terminal', terminalId);
+    sessionId = terminalId;
+  }
+
+  await api.markConnectionUsed(connectionId);
+  return { nodeId, sessionId };
+}
+
+async function runSavedConnectionPlan(
+  pendingPlan: PendingSavedConnectionPlan,
+  options: ConnectToSavedOptions,
+): Promise<ConnectToSavedResult | null> {
+  const challenge = await continueSessionTreeConnectPlan(pendingPlan.plan);
+
+  if (challenge) {
+    options.onHostKeyChallenge?.({
+      pendingPlan: { ...pendingPlan, plan: challenge.plan },
+      host: challenge.step.host,
+      port: challenge.step.port,
+      status: challenge.status,
+    });
+    return null;
+  }
+
+  if (pendingPlan.plan.steps.length > 1) {
+    options.toast({
+      title: options.t('connections.toast.proxy_chain_established'),
+      description: options.t('connections.toast.proxy_chain_desc', { depth: pendingPlan.plan.steps.length }),
+      variant: 'success',
+    });
+  }
+
+  return finalizeConnectedSavedNode(pendingPlan.connectionId, pendingPlan.plan.targetNodeId, options);
+}
+
+function shouldSuppressSavedConnectionError(errorMsg: string) {
+  return errorMsg.includes('already connecting')
+    || errorMsg.includes('already connected')
+    || errorMsg.includes('CHAIN_LOCK_BUSY')
+    || errorMsg.includes('NODE_LOCK_BUSY');
+}
+
+async function handleSavedConnectionFailure(
+  connectionId: string,
+  error: unknown,
+  options: ConnectToSavedOptions,
+  pendingPlan?: PendingSavedConnectionPlan,
+): Promise<null> {
+  const { t, onError } = options;
+  const errorMsg = String(error);
+
+  console.error('Failed to connect to saved connection:', error);
+
+  if (pendingPlan) {
+    await cleanupSessionTreeConnectPlan(pendingPlan.plan).catch((cleanupError) => {
+      console.warn('Failed to clean up partial saved connection plan:', cleanupError);
+    });
+  }
+
+  if (!shouldSuppressSavedConnectionError(errorMsg)) {
+    notifyConnectionIssue({
+      title: t('connection.errors.generic_title', { defaultValue: 'Connection Error' }),
+      body: errorMsg,
+      severity: 'error',
+      dedupeKey: `saved-connection-failed:${connectionId}`,
+    });
+    onError?.(connectionId, 'connect-failed');
+  }
+
+  return null;
+}
+
+export async function continueConnectToSavedPlan(
+  pendingPlan: PendingSavedConnectionPlan,
+  options: ConnectToSavedOptions,
+): Promise<ConnectToSavedResult | null> {
+  try {
+    return await runSavedConnectionPlan(pendingPlan, options);
+  } catch (error) {
+    return handleSavedConnectionFailure(pendingPlan.connectionId, error, options, pendingPlan);
+  }
+}
 
 /**
  * Connect to a saved connection configuration.
@@ -35,7 +158,7 @@ export async function connectToSaved(
   connectionId: string,
   options: ConnectToSavedOptions,
 ): Promise<ConnectToSavedResult | null> {
-  const { createTab, toast, t, onError } = options;
+  const { toast, t, onError } = options;
 
   const mapAuthType = (authType: string): 'password' | 'key' | 'agent' | 'certificate' | undefined => {
     if (authType === 'agent') return 'agent';
@@ -84,7 +207,7 @@ export async function connectToSaved(
         return null;
       }
 
-      const { expandManualPreset, connectNodeWithAncestors, createTerminalForNode } = useSessionTreeStore.getState();
+      const { expandManualPreset } = useSessionTreeStore.getState();
 
       const hops = savedConn.proxy_chain.map((hop: { host: string; port: number; username: string; auth_type: string; password?: string; key_path?: string; cert_path?: string; passphrase?: string; agent_forwarding: boolean }) => ({
         host: hop.host,
@@ -116,27 +239,24 @@ export async function connectToSaved(
         target,
       };
 
-      // Step 1: Expand preset chain into tree nodes (no connections yet)
       const expandResult = await expandManualPreset(request);
 
-      // Step 2: Connect the entire chain using linear connector
-      await connectNodeWithAncestors(expandResult.targetNodeId);
-
-      // Step 3: Create terminal for target node and open tab
-      const terminalId = await createTerminalForNode(expandResult.targetNodeId);
-      createTab('terminal', terminalId);
-
-      toast({
-        title: t('connections.toast.proxy_chain_established'),
-        description: t('connections.toast.proxy_chain_desc', { depth: expandResult.chainDepth }),
-        variant: 'success',
-      });
-
-      await api.markConnectionUsed(connectionId);
-      return {
-        nodeId: expandResult.targetNodeId,
-        sessionId: terminalId,
-      };
+      return continueConnectToSavedPlan({
+        connectionId,
+        plan: {
+          targetNodeId: expandResult.targetNodeId,
+          cleanupNodeId: expandResult.targetNodeId,
+          currentIndex: 0,
+          steps: expandResult.pathNodeIds.map((nodeId, index) => {
+            const endpoint = index < hops.length ? hops[index] : target;
+            return {
+              nodeId,
+              host: endpoint.host,
+              port: endpoint.port,
+            };
+          }),
+        },
+      }, options);
     }
 
     // ========== Direct connection (no proxy_chain) ==========
@@ -164,8 +284,14 @@ export async function connectToSaved(
       useSessionTreeStore.setState({ selectedNodeId: nodeId });
 
       if (existingNode.runtime.status === 'idle' || existingNode.runtime.status === 'error') {
-        const { connectNodeWithAncestors } = useSessionTreeStore.getState();
-        await connectNodeWithAncestors(nodeId);
+        return continueConnectToSavedPlan({
+          connectionId,
+          plan: {
+            targetNodeId: nodeId,
+            currentIndex: 0,
+            steps: [{ nodeId, host: savedConn.host, port: savedConn.port }],
+          },
+        }, options);
       }
     } else {
       nodeId = await addRootNode({
@@ -181,54 +307,19 @@ export async function connectToSaved(
         agentForwarding: savedConn.agent_forwarding,
       });
 
-      const { connectNodeWithAncestors } = useSessionTreeStore.getState();
-      await connectNodeWithAncestors(nodeId);
+      return continueConnectToSavedPlan({
+        connectionId,
+        plan: {
+          targetNodeId: nodeId,
+          cleanupNodeId: nodeId,
+          currentIndex: 0,
+          steps: [{ nodeId, host: savedConn.host, port: savedConn.port }],
+        },
+      }, options);
     }
 
-    // Check if target already has a terminal — create one + open tab if not
-    const updatedNode = useSessionTreeStore.getState().getNode(nodeId);
-    const terminalIds = updatedNode?.runtime?.terminalIds || [];
-
-    if (terminalIds.length > 0) {
-      // Reuse existing terminal
-      sessionId = terminalIds[0];
-      const existingTab = useAppStore.getState().tabs.find(tab => tab.sessionId === terminalIds[0] && tab.type === 'terminal');
-      if (existingTab) {
-        useAppStore.setState({ activeTabId: existingTab.id });
-      } else {
-        createTab('terminal', terminalIds[0]);
-      }
-    } else {
-      // Create new terminal
-      const { createTerminalForNode } = useSessionTreeStore.getState();
-      const terminalId = await createTerminalForNode(nodeId);
-      createTab('terminal', terminalId);
-      sessionId = terminalId;
-    }
-
-    await api.markConnectionUsed(connectionId);
-    return { nodeId, sessionId };
+    return finalizeConnectedSavedNode(connectionId, nodeId, options);
   } catch (error) {
-    console.error('Failed to connect to saved connection:', error);
-    const errorMsg = String(error);
-    if (!errorMsg.includes('already connecting') &&
-      !errorMsg.includes('already connected') &&
-      !errorMsg.includes('CHAIN_LOCK_BUSY') &&
-      !errorMsg.includes('NODE_LOCK_BUSY')) {
-      notifyConnectionIssue({
-        title: t('connection.errors.generic_title', { defaultValue: 'Connection Error' }),
-        body: errorMsg,
-        severity: 'error',
-        dedupeKey: `saved-connection-failed:${connectionId}`,
-      });
-    }
-
-    if (!errorMsg.includes('already connecting') &&
-      !errorMsg.includes('already connected') &&
-      !errorMsg.includes('CHAIN_LOCK_BUSY') &&
-      !errorMsg.includes('NODE_LOCK_BUSY')) {
-      onError?.(connectionId, 'connect-failed');
-    }
-    return null;
+    return handleSavedConnectionFailure(connectionId, error, options);
   }
 }

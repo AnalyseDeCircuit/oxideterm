@@ -1340,6 +1340,11 @@ export const api = {
     return invoke('connect_tree_node', { request });
   },
 
+  preflightTreeNode: async (nodeId: string): Promise<import('../types').HostKeyStatus> => {
+    if (USE_MOCK) return { status: 'verified' };
+    return invoke('preflight_tree_node', { nodeId });
+  },
+
   /**
    * 断开树节点（断开 SSH 连接）
    */
