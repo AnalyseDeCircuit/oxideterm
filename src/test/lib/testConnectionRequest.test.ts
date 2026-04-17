@@ -9,7 +9,8 @@ import {
 describe('testConnectionRequest helpers', () => {
   it('detects saved password connections without stored passwords', () => {
     expect(requiresSavedConnectionPasswordPrompt({ auth_type: 'password', password: undefined })).toBe(true);
-    expect(requiresSavedConnectionPasswordPrompt({ auth_type: 'password', password: null })).toBe(true);
+    // null can arrive from JSON deserialization even though TS type says string | undefined
+    expect(requiresSavedConnectionPasswordPrompt({ auth_type: 'password', password: null as unknown as undefined })).toBe(true);
     expect(requiresSavedConnectionPasswordPrompt({ auth_type: 'password', password: '' })).toBe(false);
     expect(requiresSavedConnectionPasswordPrompt({ auth_type: 'key', password: undefined })).toBe(false);
   });
