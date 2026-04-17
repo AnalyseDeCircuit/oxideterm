@@ -155,14 +155,20 @@ fn show_startup_error(_title: &str, _message: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // On Linux, disable WebKitGTK DMA-BUF renderer to prevent EGL_BAD_PARAMETER
-    // crashes on AMD Wayland setups (especially AppImage with bundled libs).
-    // This must be set before any WebKitGTK initialization.
+    // On Linux, disable WebKitGTK DMA-BUF renderer and compositing mode to
+    // prevent EGL_BAD_PARAMETER crashes and blank-window rendering failures
+    // on AMD Wayland setups (especially AppImage with bundled libs).
+    // Both must be set before any WebKitGTK initialization.
     #[cfg(target_os = "linux")]
     {
         if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
             unsafe {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+        if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
+            unsafe {
+                std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
             }
         }
     }
