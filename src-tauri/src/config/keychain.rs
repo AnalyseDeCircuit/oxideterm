@@ -136,6 +136,7 @@ pub enum KeychainError {
 /// through the regular `keyring` crate — no `SecAccessControl` entitlements needed.
 pub struct Keychain {
     service: String,
+    portable_passthrough: bool,
     /// When true (macOS only), `get()` will prompt Touch ID before returning
     /// the secret. Store/delete/exists use keyring directly without auth.
     #[cfg(target_os = "macos")]
@@ -144,6 +145,9 @@ pub struct Keychain {
 
 impl Keychain {
     fn uses_portable_backend(&self) -> Result<bool, KeychainError> {
+        if !self.portable_passthrough {
+            return Ok(false);
+        }
         super::portable::is_portable_mode().map_err(|e| KeychainError::PortableState(e.to_string()))
     }
 
@@ -165,6 +169,7 @@ impl Keychain {
     pub fn new() -> Self {
         Self {
             service: SERVICE_NAME.to_string(),
+            portable_passthrough: true,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
         }
@@ -174,6 +179,17 @@ impl Keychain {
     pub fn with_service(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
+            portable_passthrough: true,
+            #[cfg(target_os = "macos")]
+            use_biometrics: false,
+        }
+    }
+
+    /// Create with a custom service but always use the OS keychain.
+    pub fn with_system_service(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            portable_passthrough: false,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
         }
@@ -190,6 +206,17 @@ impl Keychain {
     pub fn with_biometrics(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
+            portable_passthrough: true,
+            #[cfg(target_os = "macos")]
+            use_biometrics: true,
+        }
+    }
+
+    /// Create a biometric-gated keychain that always uses the OS backend.
+    pub fn with_system_biometrics(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            portable_passthrough: false,
             #[cfg(target_os = "macos")]
             use_biometrics: true,
         }

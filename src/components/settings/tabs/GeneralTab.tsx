@@ -7,6 +7,8 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { ArrowDownToLine, ArrowUpToLine, Loader2, TerminalSquare, Trash2 } from 'lucide-react';
 import { OxideExportModal } from '@/components/modals/OxideExportModal';
 import { OxideImportModal } from '@/components/modals/OxideImportModal';
+import { PortableBiometricBindingDialog } from '@/components/settings/portable/PortableBiometricBindingDialog';
+import { PortablePasswordChangeDialog } from '@/components/settings/portable/PortablePasswordChangeDialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -44,6 +46,21 @@ export const GeneralTab = ({ general, setLanguage, portableStatus }: GeneralTabP
     const [migrationSummary, setMigrationSummary] = useState<PortableMigrationSummaryResponse | null>(null);
     const [exportModalOpen, setExportModalOpen] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
+    const [portableRuntime, setPortableRuntime] = useState<PortableStatusResponse | null>(portableStatus);
+    const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+    const [biometricDialogOpen, setBiometricDialogOpen] = useState(false);
+    const [portableActionError, setPortableActionError] = useState<string | null>(null);
+    const [portableActionPending, setPortableActionPending] = useState<'changePassword' | 'enableBiometric' | 'disableBiometric' | null>(null);
+
+    useEffect(() => {
+        setPortableRuntime(portableStatus);
+    }, [portableStatus]);
+
+    const portableActivationLabel = portableRuntime?.activation === 'config'
+        ? t('settings_view.general.portable_activation_config')
+        : portableRuntime?.activation === 'marker'
+            ? t('settings_view.general.portable_activation_marker')
+            : t('settings_view.general.portable_activation_disabled');
 
     useEffect(() => {
         let cancelled = false;
@@ -221,6 +238,132 @@ export const GeneralTab = ({ general, setLanguage, portableStatus }: GeneralTabP
 
             <div className="rounded-lg border border-theme-border bg-theme-bg-card p-5">
                 <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">
+                    {t('settings_view.general.portable_runtime')}
+                </h4>
+                <div className="space-y-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.general.portable_runtime')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">
+                            {portableRuntime?.isPortable
+                                ? t('settings_view.general.portable_runtime_hint')
+                                : t('settings_view.general.portable_runtime_disabled_hint')}
+                        </p>
+                    </div>
+
+                    {portableRuntime?.isPortable ? (
+                        <>
+                            <div className="space-y-3 rounded-md border border-theme-border bg-theme-bg p-3">
+                                <div>
+                                    <p className="text-xs text-theme-text-muted">{t('settings_view.general.portable_root_dir')}</p>
+                                    <code className="mt-1 block rounded bg-theme-bg-subtle px-3 py-2 text-xs text-theme-text font-mono break-all">
+                                        {portableRuntime.portableRootDir}
+                                    </code>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-theme-text-muted">{t('settings_view.general.portable_activation')}</p>
+                                    <div className="mt-1 rounded bg-theme-bg-subtle px-3 py-2 text-xs text-theme-text">
+                                        {portableActivationLabel}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-theme-text-muted">{t('settings_view.general.portable_config_path')}</p>
+                                    <code className="mt-1 block rounded bg-theme-bg-subtle px-3 py-2 text-xs text-theme-text font-mono break-all">
+                                        {portableRuntime.configPath}
+                                    </code>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-theme-text-muted">{t('settings_view.general.portable_instance_lock_path')}</p>
+                                    <code className="mt-1 block rounded bg-theme-bg-subtle px-3 py-2 text-xs text-theme-text font-mono break-all">
+                                        {portableRuntime.instanceLockPath || t('settings_view.general.portable_instance_lock_unavailable')}
+                                    </code>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-md border border-theme-border bg-theme-bg p-3">
+                                <div>
+                                    <Label className="text-theme-text">{t('settings_view.general.portable_biometric')}</Label>
+                                    <p className="text-xs text-theme-text-muted mt-0.5">
+                                        {portableRuntime.supportsBiometricBinding
+                                            ? portableRuntime.hasBiometricBinding
+                                                ? t('settings_view.general.portable_biometric_bound')
+                                                : t('settings_view.general.portable_biometric_unbound')
+                                            : t('settings_view.general.portable_biometric_unsupported')}
+                                    </p>
+                                </div>
+
+                                <div className="flex flex-wrap gap-3">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            setPortableActionError(null);
+                                            setChangePasswordOpen(true);
+                                        }}
+                                    >
+                                        {t('settings_view.general.portable_change_password')}
+                                    </Button>
+
+                                    {portableRuntime.supportsBiometricBinding && !portableRuntime.hasBiometricBinding && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setPortableActionError(null);
+                                                setBiometricDialogOpen(true);
+                                            }}
+                                        >
+                                            {t('settings_view.general.portable_enable_biometric')}
+                                        </Button>
+                                    )}
+
+                                    {portableRuntime.supportsBiometricBinding && portableRuntime.hasBiometricBinding && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={portableActionPending === 'disableBiometric'}
+                                            onClick={async () => {
+                                                const confirmed = await confirm({
+                                                    title: t('settings_view.general.portable_disable_biometric'),
+                                                    description: t('settings_view.general.portable_disable_biometric_confirm'),
+                                                });
+                                                if (!confirmed) return;
+
+                                                setPortableActionPending('disableBiometric');
+                                                setPortableActionError(null);
+                                                try {
+                                                    const nextStatus = await api.disablePortableBiometricUnlock();
+                                                    setPortableRuntime(nextStatus);
+                                                    toastSuccess(t('settings_view.general.portable_biometric_disabled'));
+                                                } catch (error) {
+                                                    setPortableActionError(String(error));
+                                                    toastError(String(error));
+                                                } finally {
+                                                    setPortableActionPending(null);
+                                                }
+                                            }}
+                                        >
+                                            {t('settings_view.general.portable_disable_biometric')}
+                                        </Button>
+                                    )}
+                                </div>
+
+                                {portableActionError && (
+                                    <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300" role="alert">
+                                        {portableActionError}
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="rounded-md border border-theme-border bg-theme-bg px-3 py-3 text-xs text-theme-text-muted">
+                            {t('settings_view.general.portable_runtime_disabled_hint')}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="rounded-lg border border-theme-border bg-theme-bg-card p-5">
+                <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">
                     {t('settings_view.general.portable_migration')}
                 </h4>
                 <div className="space-y-4">
@@ -364,6 +507,48 @@ export const GeneralTab = ({ general, setLanguage, portableStatus }: GeneralTabP
             </div>
             <OxideExportModal isOpen={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="portableMigration" />
             <OxideImportModal isOpen={importModalOpen} onClose={() => setImportModalOpen(false)} mode="portableMigration" />
+            <PortablePasswordChangeDialog
+                open={changePasswordOpen}
+                pending={portableActionPending === 'changePassword'}
+                errorMessage={portableActionError}
+                onOpenChange={setChangePasswordOpen}
+                onSubmit={async (currentPassword, newPassword) => {
+                    setPortableActionPending('changePassword');
+                    setPortableActionError(null);
+                    try {
+                        const nextStatus = await api.changePortableKeystorePassword(currentPassword, newPassword);
+                        setPortableRuntime(nextStatus);
+                        setChangePasswordOpen(false);
+                        toastSuccess(t('settings_view.general.portable_password_changed'));
+                    } catch (error) {
+                        setPortableActionError(String(error));
+                        toastError(String(error));
+                    } finally {
+                        setPortableActionPending(null);
+                    }
+                }}
+            />
+            <PortableBiometricBindingDialog
+                open={biometricDialogOpen}
+                pending={portableActionPending === 'enableBiometric'}
+                errorMessage={portableActionError}
+                onOpenChange={setBiometricDialogOpen}
+                onSubmit={async (password) => {
+                    setPortableActionPending('enableBiometric');
+                    setPortableActionError(null);
+                    try {
+                        const nextStatus = await api.enablePortableBiometricUnlock(password);
+                        setPortableRuntime(nextStatus);
+                        setBiometricDialogOpen(false);
+                        toastSuccess(t('settings_view.general.portable_biometric_enabled'));
+                    } catch (error) {
+                        setPortableActionError(String(error));
+                        toastError(String(error));
+                    } finally {
+                        setPortableActionPending(null);
+                    }
+                }}
+            />
             {ConfirmDialog}
         </div>
     );

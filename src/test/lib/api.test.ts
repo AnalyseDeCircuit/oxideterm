@@ -15,11 +15,20 @@ describe('portable API bindings', () => {
 
     vi.mocked(invoke).mockResolvedValueOnce({
       isPortable: false,
+      activation: 'disabled',
+      hostKind: 'executableDir',
       status: 'disabled',
       canLaunchApp: true,
       hasKeystore: false,
       isUnlocked: false,
       keystorePath: null,
+      portableRootDir: '/mock/OxideTerm',
+      markerPath: '/mock/OxideTerm/portable',
+      configPath: '/mock/OxideTerm/portable.json',
+      instanceLockPath: null,
+      supportsBiometricBinding: false,
+      hasBiometricBinding: false,
+      canBiometricUnlock: false,
     });
 
     await api.getPortableStatus();
@@ -34,11 +43,20 @@ describe('portable API bindings', () => {
 
     vi.mocked(invoke).mockResolvedValueOnce({
       isPortable: true,
+      activation: 'marker',
+      hostKind: 'executableDir',
       status: 'unlocked',
       canLaunchApp: true,
       hasKeystore: true,
       isUnlocked: true,
       keystorePath: '/portable/data/keystore.vault',
+      portableRootDir: '/portable',
+      markerPath: '/portable/portable',
+      configPath: '/portable/portable.json',
+      instanceLockPath: '/portable/data/.portable.lock',
+      supportsBiometricBinding: false,
+      hasBiometricBinding: false,
+      canBiometricUnlock: false,
     });
 
     await api.setupPortableKeystore('secret123');
@@ -53,11 +71,20 @@ describe('portable API bindings', () => {
 
     vi.mocked(invoke).mockResolvedValueOnce({
       isPortable: true,
+      activation: 'marker',
+      hostKind: 'executableDir',
       status: 'unlocked',
       canLaunchApp: true,
       hasKeystore: true,
       isUnlocked: true,
       keystorePath: '/portable/data/keystore.vault',
+      portableRootDir: '/portable',
+      markerPath: '/portable/portable',
+      configPath: '/portable/portable.json',
+      instanceLockPath: '/portable/data/.portable.lock',
+      supportsBiometricBinding: false,
+      hasBiometricBinding: false,
+      canBiometricUnlock: false,
     });
 
     await api.unlockPortableKeystore('secret123');
@@ -65,14 +92,51 @@ describe('portable API bindings', () => {
     expect(invoke).toHaveBeenCalledWith('unlock_portable_keystore', { password: 'secret123' });
   });
 
+  it('calls unlock_portable_keystore_with_biometrics without args', async () => {
+    (window as typeof window & {
+      __TAURI_INTERNALS__?: { invoke?: () => void };
+    }).__TAURI_INTERNALS__ = { invoke: () => undefined };
+
+    vi.mocked(invoke).mockResolvedValueOnce({
+      isPortable: true,
+      activation: 'marker',
+      hostKind: 'executableDir',
+      status: 'unlocked',
+      canLaunchApp: true,
+      hasKeystore: true,
+      isUnlocked: true,
+      keystorePath: '/portable/data/keystore.vault',
+      portableRootDir: '/portable',
+      markerPath: '/portable/portable',
+      configPath: '/portable/portable.json',
+      instanceLockPath: '/portable/data/.portable.lock',
+      supportsBiometricBinding: true,
+      hasBiometricBinding: true,
+      canBiometricUnlock: false,
+    });
+
+    await api.unlockPortableKeystoreWithBiometrics();
+
+    expect(invoke).toHaveBeenCalledWith('unlock_portable_keystore_with_biometrics');
+  });
+
   it('returns a safe disabled status when tauri runtime is unavailable', async () => {
     await expect(api.getPortableStatus()).resolves.toEqual({
       isPortable: false,
+      activation: 'disabled',
+      hostKind: 'executableDir',
       status: 'disabled',
       canLaunchApp: true,
       hasKeystore: false,
       isUnlocked: false,
       keystorePath: null,
+      portableRootDir: '/mock/OxideTerm',
+      markerPath: '/mock/OxideTerm/portable',
+      configPath: '/mock/OxideTerm/portable.json',
+      instanceLockPath: null,
+      supportsBiometricBinding: false,
+      hasBiometricBinding: false,
+      canBiometricUnlock: false,
     });
 
     expect(invoke).not.toHaveBeenCalled();

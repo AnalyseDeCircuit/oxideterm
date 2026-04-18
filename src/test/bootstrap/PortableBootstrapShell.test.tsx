@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const setupPortableKeystoreMock = vi.hoisted(() => vi.fn());
 const unlockPortableKeystoreMock = vi.hoisted(() => vi.fn());
+const unlockPortableKeystoreWithBiometricsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -14,6 +15,7 @@ vi.mock('@/lib/api', () => ({
   api: {
     setupPortableKeystore: setupPortableKeystoreMock,
     unlockPortableKeystore: unlockPortableKeystoreMock,
+    unlockPortableKeystoreWithBiometrics: unlockPortableKeystoreWithBiometricsMock,
   },
 }));
 
@@ -40,6 +42,36 @@ vi.mock('@/components/ui/label', () => ({
 
 import { PortableBootstrapShell } from '@/components/bootstrap/PortableBootstrapShell';
 
+const defaultInfo = {
+  isPortable: true,
+  activation: 'marker' as const,
+  hostKind: 'executableDir' as const,
+  exeDir: '/portable',
+  hostDir: '/portable',
+  markerPath: '/portable/portable',
+  configPath: '/portable/portable.json',
+  dataDir: '/portable/data',
+  instanceLockPath: '/portable/data/.portable.lock',
+};
+
+const unlockedStatus = {
+  isPortable: true,
+  activation: 'marker' as const,
+  hostKind: 'executableDir' as const,
+  status: 'unlocked' as const,
+  canLaunchApp: true,
+  hasKeystore: true,
+  isUnlocked: true,
+  keystorePath: '/portable/data/keystore.vault',
+  portableRootDir: '/portable',
+  markerPath: '/portable/portable',
+  configPath: '/portable/portable.json',
+  instanceLockPath: '/portable/data/.portable.lock',
+  supportsBiometricBinding: false,
+  hasBiometricBinding: false,
+  canBiometricUnlock: false,
+};
+
 describe('PortableBootstrapShell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -47,30 +79,27 @@ describe('PortableBootstrapShell', () => {
 
   it('completes setup flow and promotes app launch readiness', async () => {
     const onReady = vi.fn();
-    setupPortableKeystoreMock.mockResolvedValue({
-      isPortable: true,
-      status: 'unlocked',
-      canLaunchApp: true,
-      hasKeystore: true,
-      isUnlocked: true,
-      keystorePath: '/portable/data/keystore.vault',
-    });
+    setupPortableKeystoreMock.mockResolvedValue(unlockedStatus);
 
     render(
       <PortableBootstrapShell
-        info={{
-          isPortable: true,
-          exeDir: '/portable',
-          markerPath: '/portable/portable',
-          dataDir: '/portable/data',
-        }}
+        info={defaultInfo}
         status={{
           isPortable: true,
+          activation: 'marker',
+          hostKind: 'executableDir',
           status: 'needsSetup',
           canLaunchApp: false,
           hasKeystore: false,
           isUnlocked: false,
           keystorePath: null,
+          portableRootDir: '/portable',
+          markerPath: '/portable/portable',
+          configPath: '/portable/portable.json',
+          instanceLockPath: '/portable/data/.portable.lock',
+          supportsBiometricBinding: false,
+          hasBiometricBinding: false,
+          canBiometricUnlock: false,
         }}
         onReady={onReady}
       />,
@@ -97,19 +126,23 @@ describe('PortableBootstrapShell', () => {
   it('blocks setup submission when passwords do not match', async () => {
     render(
       <PortableBootstrapShell
-        info={{
-          isPortable: true,
-          exeDir: '/portable',
-          markerPath: '/portable/portable',
-          dataDir: '/portable/data',
-        }}
+        info={defaultInfo}
         status={{
           isPortable: true,
+          activation: 'marker',
+          hostKind: 'executableDir',
           status: 'needsSetup',
           canLaunchApp: false,
           hasKeystore: false,
           isUnlocked: false,
           keystorePath: null,
+          portableRootDir: '/portable',
+          markerPath: '/portable/portable',
+          configPath: '/portable/portable.json',
+          instanceLockPath: '/portable/data/.portable.lock',
+          supportsBiometricBinding: false,
+          hasBiometricBinding: false,
+          canBiometricUnlock: false,
         }}
         onReady={vi.fn()}
       />,
@@ -130,30 +163,27 @@ describe('PortableBootstrapShell', () => {
 
   it('completes unlock flow when a keystore already exists', async () => {
     const onReady = vi.fn();
-    unlockPortableKeystoreMock.mockResolvedValue({
-      isPortable: true,
-      status: 'unlocked',
-      canLaunchApp: true,
-      hasKeystore: true,
-      isUnlocked: true,
-      keystorePath: '/portable/data/keystore.vault',
-    });
+    unlockPortableKeystoreMock.mockResolvedValue(unlockedStatus);
 
     render(
       <PortableBootstrapShell
-        info={{
-          isPortable: true,
-          exeDir: '/portable',
-          markerPath: '/portable/portable',
-          dataDir: '/portable/data',
-        }}
+        info={defaultInfo}
         status={{
           isPortable: true,
+          activation: 'marker',
+          hostKind: 'executableDir',
           status: 'locked',
           canLaunchApp: false,
           hasKeystore: true,
           isUnlocked: false,
           keystorePath: '/portable/data/keystore.vault',
+          portableRootDir: '/portable',
+          markerPath: '/portable/portable',
+          configPath: '/portable/portable.json',
+          instanceLockPath: '/portable/data/.portable.lock',
+          supportsBiometricBinding: false,
+          hasBiometricBinding: false,
+          canBiometricUnlock: false,
         }}
         onReady={onReady}
       />,
@@ -176,30 +206,27 @@ describe('PortableBootstrapShell', () => {
 
   it('submits setup with Enter from the confirmation field', async () => {
     const onReady = vi.fn();
-    setupPortableKeystoreMock.mockResolvedValue({
-      isPortable: true,
-      status: 'unlocked',
-      canLaunchApp: true,
-      hasKeystore: true,
-      isUnlocked: true,
-      keystorePath: '/portable/data/keystore.vault',
-    });
+    setupPortableKeystoreMock.mockResolvedValue(unlockedStatus);
 
     render(
       <PortableBootstrapShell
-        info={{
-          isPortable: true,
-          exeDir: '/portable',
-          markerPath: '/portable/portable',
-          dataDir: '/portable/data',
-        }}
+        info={defaultInfo}
         status={{
           isPortable: true,
+          activation: 'marker',
+          hostKind: 'executableDir',
           status: 'needsSetup',
           canLaunchApp: false,
           hasKeystore: false,
           isUnlocked: false,
           keystorePath: null,
+          portableRootDir: '/portable',
+          markerPath: '/portable/portable',
+          configPath: '/portable/portable.json',
+          instanceLockPath: '/portable/data/.portable.lock',
+          supportsBiometricBinding: false,
+          hasBiometricBinding: false,
+          canBiometricUnlock: false,
         }}
         onReady={onReady}
       />,
@@ -217,6 +244,48 @@ describe('PortableBootstrapShell', () => {
     await waitFor(() => {
       expect(setupPortableKeystoreMock).toHaveBeenCalledWith('secret123');
       expect(onReady).toHaveBeenCalled();
+    });
+  });
+
+  it('shows biometric unlock when available and uses the biometric command', async () => {
+    const onReady = vi.fn();
+    unlockPortableKeystoreWithBiometricsMock.mockResolvedValue({
+      ...unlockedStatus,
+      supportsBiometricBinding: true,
+      hasBiometricBinding: true,
+    });
+
+    render(
+      <PortableBootstrapShell
+        info={defaultInfo}
+        status={{
+          isPortable: true,
+          activation: 'marker',
+          hostKind: 'executableDir',
+          status: 'locked',
+          canLaunchApp: false,
+          hasKeystore: true,
+          isUnlocked: false,
+          keystorePath: '/portable/data/keystore.vault',
+          portableRootDir: '/portable',
+          markerPath: '/portable/portable',
+          configPath: '/portable/portable.json',
+          instanceLockPath: '/portable/data/.portable.lock',
+          supportsBiometricBinding: true,
+          hasBiometricBinding: true,
+          canBiometricUnlock: true,
+        }}
+        onReady={onReady}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'portable_bootstrap.biometric_unlock_cta' }));
+
+    await waitFor(() => {
+      expect(unlockPortableKeystoreWithBiometricsMock).toHaveBeenCalledTimes(1);
+      expect(onReady).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'unlocked',
+      }));
     });
   });
 });

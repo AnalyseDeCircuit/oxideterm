@@ -923,21 +923,37 @@ export type DataDirInfo = {
 }
 
 export type PortableBootstrapStatus = 'disabled' | 'needsSetup' | 'locked' | 'unlocked';
+export type PortableActivationKind = 'disabled' | 'marker' | 'config';
+export type PortableHostKind = 'executableDir' | 'macAppSibling' | 'macAppBundle' | 'linuxAppImageDir';
 
 export type PortableInfoResponse = {
   isPortable: boolean;
+  activation: PortableActivationKind;
+  hostKind: PortableHostKind;
   exeDir: string;
+  hostDir: string;
   markerPath: string;
+  configPath: string;
   dataDir: string;
+  instanceLockPath: string;
 }
 
 export type PortableStatusResponse = {
   isPortable: boolean;
+  activation: PortableActivationKind;
+  hostKind: PortableHostKind;
   status: PortableBootstrapStatus;
   canLaunchApp: boolean;
   hasKeystore: boolean;
   isUnlocked: boolean;
   keystorePath: string | null;
+  portableRootDir: string;
+  markerPath: string;
+  configPath: string;
+  instanceLockPath: string | null;
+  supportsBiometricBinding: boolean;
+  hasBiometricBinding: boolean;
+  canBiometricUnlock: boolean;
 }
 
 export type PortableMigrationSummaryResponse = {

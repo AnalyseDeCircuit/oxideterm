@@ -196,6 +196,14 @@ pub fn run() {
         portable_bootstrap_status
     ));
 
+    if let Err(e) = config::acquire_portable_instance_lock() {
+        let msg = format!("Failed to acquire portable instance lock: {}", e);
+        tracing::error!("{}", msg);
+        write_startup_log(&msg);
+        show_startup_error("OxideTerm Portable Lock", &msg);
+        return;
+    }
+
     // Initialize state store
     let state_db_path = match config::storage::config_dir() {
         Ok(dir) => dir.join("state.redb"),
@@ -635,6 +643,10 @@ pub fn run() {
         commands::get_portable_migration_summary,
         commands::setup_portable_keystore,
         commands::unlock_portable_keystore,
+        commands::unlock_portable_keystore_with_biometrics,
+        commands::change_portable_keystore_password,
+        commands::enable_portable_biometric_unlock,
+        commands::disable_portable_biometric_unlock,
         commands::reset_portable_keystore,
         commands::config::get_data_directory,
         commands::config::set_data_directory,
@@ -998,6 +1010,10 @@ pub fn run() {
         commands::get_portable_migration_summary,
         commands::setup_portable_keystore,
         commands::unlock_portable_keystore,
+        commands::unlock_portable_keystore_with_biometrics,
+        commands::change_portable_keystore_password,
+        commands::enable_portable_biometric_unlock,
+        commands::disable_portable_biometric_unlock,
         commands::reset_portable_keystore,
         commands::config::get_data_directory,
         commands::config::set_data_directory,

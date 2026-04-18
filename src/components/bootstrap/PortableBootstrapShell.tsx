@@ -20,7 +20,7 @@ export function PortableBootstrapShell({ info, status, onReady }: PortableBootst
   const { t } = useTranslation();
   const [setupOpen, setSetupOpen] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'setup' | 'unlock' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'setup' | 'unlock' | 'biometricUnlock' | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
@@ -60,10 +60,29 @@ export function PortableBootstrapShell({ info, status, onReady }: PortableBootst
     }
   };
 
+  const handleBiometricUnlock = async () => {
+    setPendingAction('biometricUnlock');
+    setUnlockError(null);
+
+    try {
+      const nextStatus = await api.unlockPortableKeystoreWithBiometrics();
+      onReady(nextStatus);
+    } catch (error) {
+      setUnlockError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
   const isNeedsSetup = status.status === 'needsSetup';
   const statusLabel = isNeedsSetup
     ? t('portable_bootstrap.status_needs_setup')
     : t('portable_bootstrap.status_locked');
+  const activationLabel = info.activation === 'config'
+    ? t('portable_bootstrap.activation_config')
+    : info.activation === 'marker'
+      ? t('portable_bootstrap.activation_marker')
+      : t('portable_bootstrap.activation_disabled');
 
   return (
     <div className="min-h-screen bg-theme-bg text-theme-text">
@@ -106,6 +125,36 @@ export function PortableBootstrapShell({ info, status, onReady }: PortableBootst
                     {status.keystorePath || t('portable_bootstrap.keystore_pending')}
                   </p>
                 </div>
+
+                <div className="rounded-2xl border border-theme-border bg-theme-bg-elevated/80 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-theme-text">
+                    <ShieldCheck className="h-4 w-4 text-theme-accent" />
+                    {t('portable_bootstrap.activation_label')}
+                  </div>
+                  <p className="mt-3 rounded-xl bg-theme-bg px-3 py-2 text-xs text-theme-text-muted">
+                    {activationLabel}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-theme-border bg-theme-bg-elevated/80 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-theme-text">
+                    <HardDrive className="h-4 w-4 text-theme-accent" />
+                    {t('portable_bootstrap.host_dir_label')}
+                  </div>
+                  <p className="mt-3 break-all rounded-xl bg-theme-bg px-3 py-2 font-mono text-xs text-theme-text-muted">
+                    {info.hostDir}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-theme-border bg-theme-bg-elevated/80 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-theme-text">
+                    <KeyRound className="h-4 w-4 text-theme-accent" />
+                    {t('portable_bootstrap.config_path_label')}
+                  </div>
+                  <p className="mt-3 break-all rounded-xl bg-theme-bg px-3 py-2 font-mono text-xs text-theme-text-muted">
+                    {info.configPath}
+                  </p>
+                </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-theme-border bg-theme-bg-elevated/60 p-4">
@@ -141,14 +190,42 @@ export function PortableBootstrapShell({ info, status, onReady }: PortableBootst
                     : t('portable_bootstrap.unlock_description')}
                 </p>
 
-                <Button
-                  className="mt-5 w-full"
-                  onClick={() => (isNeedsSetup ? setSetupOpen(true) : setUnlockOpen(true))}
-                >
-                  {isNeedsSetup
-                    ? t('portable_bootstrap.setup_cta')
-                    : t('portable_bootstrap.unlock_cta')}
-                </Button>
+                <div className="mt-5 space-y-3">
+                  {!isNeedsSetup && status.canBiometricUnlock && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={pendingAction === 'biometricUnlock'}
+                      onClick={() => void handleBiometricUnlock()}
+                    >
+                      {pendingAction === 'biometricUnlock'
+                        ? t('portable_bootstrap.biometric_unlock_pending')
+                        : t('portable_bootstrap.biometric_unlock_cta')}
+                    </Button>
+                  )}
+
+                  <Button
+                    className="w-full"
+                    disabled={pendingAction === 'biometricUnlock'}
+                    onClick={() => (isNeedsSetup ? setSetupOpen(true) : setUnlockOpen(true))}
+                  >
+                    {isNeedsSetup
+                      ? t('portable_bootstrap.setup_cta')
+                      : t('portable_bootstrap.unlock_cta')}
+                  </Button>
+
+                  {!isNeedsSetup && status.canBiometricUnlock && (
+                    <p className="text-xs leading-5 text-theme-text-muted">
+                      {t('portable_bootstrap.biometric_unlock_hint')}
+                    </p>
+                  )}
+
+                  {unlockError && !unlockOpen && (
+                    <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300" role="alert">
+                      {unlockError}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-theme-border bg-theme-bg-elevated/50 p-5">

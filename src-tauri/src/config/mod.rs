@@ -24,9 +24,11 @@ pub mod touch_id;
 
 pub use keychain::{Keychain, KeychainError};
 pub use portable::{
-    PortableBootstrapStatus, PortableError, PortableInfo, initialize_portable_runtime,
-    is_portable_mode, portable_aware_app_data_dir, portable_bootstrap_status,
-    portable_can_launch_full_app, portable_data_dir, portable_info, set_portable_bootstrap_status,
+    PortableActivationKind, PortableBootstrapStatus, PortableError, PortableHostKind,
+    PortableInfo, acquire_portable_instance_lock, initialize_portable_runtime, is_portable_mode,
+    portable_aware_app_data_dir, portable_bootstrap_status, portable_can_launch_full_app,
+    portable_data_dir, portable_info, portable_instance_lock_path,
+    set_portable_bootstrap_status,
 };
 pub use portable_keystore::PortableKeystoreError;
 pub use ssh_config::{

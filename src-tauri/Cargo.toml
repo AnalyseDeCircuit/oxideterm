@@ -137,6 +137,7 @@ sha2 = "0.10"
 zeroize = { version = "1.7", features = ["serde"] }
 rand = "0.8"
 subtle = "2.5"  # Constant-time comparison for security tokens
+fs2 = "0.4"
 
 # Terminal & Search
 vte = "0.14"

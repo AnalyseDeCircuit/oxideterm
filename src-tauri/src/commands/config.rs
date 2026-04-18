@@ -354,6 +354,51 @@ impl ConfigState {
         Ok(())
     }
 
+    pub async fn unlock_portable_keystore_with_biometrics(&self) -> Result<(), String> {
+        if !crate::config::is_portable_mode().map_err(|e| e.to_string())? {
+            return Err("Portable biometric unlock is only available in portable mode".to_string());
+        }
+
+        let password = crate::config::portable_keystore::read_biometric_bound_password()
+            .map_err(|e| e.to_string())?;
+        self.unlock_portable_keystore(&password).await
+    }
+
+    pub async fn change_portable_keystore_password(
+        &self,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), String> {
+        if !crate::config::is_portable_mode().map_err(|e| e.to_string())? {
+            return Err("Portable password changes are only available in portable mode".to_string());
+        }
+
+        crate::config::portable_keystore::change_portable_keystore_password(
+            current_password,
+            new_password,
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    pub async fn enable_portable_biometric_unlock(&self, password: &str) -> Result<(), String> {
+        if !crate::config::is_portable_mode().map_err(|e| e.to_string())? {
+            return Err("Portable biometric binding is only available in portable mode".to_string());
+        }
+
+        crate::config::portable_keystore::verify_portable_keystore_password(password)
+            .map_err(|e| e.to_string())?;
+        crate::config::portable_keystore::bind_biometric_unlock(password)
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn disable_portable_biometric_unlock(&self) -> Result<(), String> {
+        if !crate::config::is_portable_mode().map_err(|e| e.to_string())? {
+            return Err("Portable biometric binding is only available in portable mode".to_string());
+        }
+
+        crate::config::portable_keystore::clear_biometric_binding().map_err(|e| e.to_string())
+    }
+
     pub async fn reset_portable_keystore(&self) -> Result<(), String> {
         if !crate::config::is_portable_mode().map_err(|e| e.to_string())? {
             return Err("Portable reset is only available in portable mode".to_string());

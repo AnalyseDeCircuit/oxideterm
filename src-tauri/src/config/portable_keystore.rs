@@ -8,6 +8,7 @@ use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use parking_lot::RwLock;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ const PORTABLE_KEYSTORE_FORMAT: &str = "oxideterm.portable.keystore";
 const PORTABLE_KEYSTORE_VERSION: u32 = 1;
 const PORTABLE_KEYSTORE_NONCE_LEN: usize = 12;
 const PORTABLE_KEYSTORE_SALT_LEN: usize = 32;
+const PORTABLE_BIOMETRIC_SERVICE: &str = "com.oxideterm.portable.biometric";
 
 #[derive(Debug, thiserror::Error)]
 pub enum PortableKeystoreError {
@@ -63,6 +65,12 @@ pub enum PortableKeystoreError {
 
     #[error("Portable keystore decryption failed")]
     DecryptionFailed,
+
+    #[error("Biometric unlock is not available on this device")]
+    BiometricUnavailable,
+
+    #[error("Biometric binding error: {0}")]
+    Biometric(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -90,6 +98,30 @@ struct PortableKeystoreSession {
 
 static PORTABLE_KEYSTORE_SESSION: LazyLock<RwLock<Option<PortableKeystoreSession>>> =
     LazyLock::new(|| RwLock::new(None));
+
+fn biometric_binding_account() -> Result<String, PortableKeystoreError> {
+    let binding_key = portable_keystore_file_path()?
+        .ok_or(PortableKeystoreError::NotPortableMode)?
+        .to_string_lossy()
+        .to_string();
+    let digest = Sha256::digest(binding_key.as_bytes());
+    let suffix: String = digest[..16].iter().map(|byte| format!("{:02x}", byte)).collect();
+    Ok(format!("portable-master-{}", suffix))
+}
+
+fn biometric_keychain() -> super::keychain::Keychain {
+    super::keychain::Keychain::with_system_biometrics(PORTABLE_BIOMETRIC_SERVICE)
+}
+
+#[cfg(target_os = "macos")]
+pub fn supports_biometric_binding() -> bool {
+    super::touch_id::is_biometric_available()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn supports_biometric_binding() -> bool {
+    false
+}
 
 fn portable_keystore_path() -> Result<PathBuf, PortableKeystoreError> {
     let data_dir = super::portable_data_dir()
@@ -242,7 +274,105 @@ pub fn delete_portable_keystore() -> Result<(), PortableKeystoreError> {
     if path.exists() {
         fs::remove_file(path)?;
     }
+    let _ = clear_biometric_binding();
     Ok(())
+}
+
+pub fn verify_portable_keystore_password(password: &str) -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    if !path.exists() {
+        return Err(PortableKeystoreError::Missing);
+    }
+    load_session_from_path(&path, password).map(|_| ())
+}
+
+pub fn change_portable_keystore_password(
+    current_password: &str,
+    new_password: &str,
+) -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    if !path.exists() {
+        return Err(PortableKeystoreError::Missing);
+    }
+
+    let current_session = load_session_from_path(&path, current_password)?;
+    let mut new_salt = [0u8; PORTABLE_KEYSTORE_SALT_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut new_salt);
+    let new_key = derive_key(
+        new_password,
+        &new_salt,
+        crate::oxide_file::format::kdf_flags::CURRENT_KDF,
+    )?;
+    let next_session = PortableKeystoreSession {
+        salt: new_salt,
+        key: new_key,
+        payload: current_session.payload,
+    };
+
+    let had_biometric_binding = has_biometric_binding()?;
+    if had_biometric_binding {
+        bind_biometric_unlock(new_password)?;
+    }
+
+    if let Err(err) = persist_session_to_path(&path, &next_session) {
+        if had_biometric_binding {
+            let _ = bind_biometric_unlock(current_password);
+        }
+        return Err(err);
+    }
+
+    *PORTABLE_KEYSTORE_SESSION.write() = Some(next_session);
+    Ok(())
+}
+
+pub fn has_biometric_binding() -> Result<bool, PortableKeystoreError> {
+    match super::is_portable_mode() {
+        Ok(true) => {}
+        Ok(false) => return Ok(false),
+        Err(_) => return Ok(false),
+    }
+
+    if !supports_biometric_binding() {
+        return Ok(false);
+    }
+
+    let account = biometric_binding_account()?;
+    biometric_keychain()
+        .exists(&account)
+        .map_err(|err| PortableKeystoreError::Biometric(err.to_string()))
+}
+
+pub fn bind_biometric_unlock(password: &str) -> Result<(), PortableKeystoreError> {
+    if !supports_biometric_binding() {
+        return Err(PortableKeystoreError::BiometricUnavailable);
+    }
+
+    let account = biometric_binding_account()?;
+    biometric_keychain()
+        .store(&account, password)
+        .map_err(|err| PortableKeystoreError::Biometric(err.to_string()))
+}
+
+pub fn clear_biometric_binding() -> Result<(), PortableKeystoreError> {
+    if !supports_biometric_binding() {
+        return Ok(());
+    }
+
+    let account = biometric_binding_account()?;
+    biometric_keychain()
+        .delete(&account)
+        .map_err(|err| PortableKeystoreError::Biometric(err.to_string()))
+}
+
+pub fn read_biometric_bound_password() -> Result<String, PortableKeystoreError> {
+    if !supports_biometric_binding() {
+        return Err(PortableKeystoreError::BiometricUnavailable);
+    }
+
+    let account = biometric_binding_account()?;
+    biometric_keychain()
+        .get(&account)
+        .map_err(|err| PortableKeystoreError::Biometric(err.to_string()))
 }
 
 pub fn store_secret(
@@ -371,5 +501,46 @@ mod tests {
 
         let err = load_session_from_path(&path, "secret123").unwrap_err();
         assert!(matches!(err, PortableKeystoreError::Json(_)));
+    }
+
+    #[test]
+    fn change_password_reencrypts_payload() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let mut session = sample_session("secret123");
+        session
+            .payload
+            .services
+            .entry("svc".to_string())
+            .or_default()
+            .insert("account".to_string(), "value".to_string());
+
+        persist_session_to_path(&path, &session).unwrap();
+
+        let restored = load_session_from_path(&path, "secret123").unwrap();
+        let mut new_salt = [0u8; PORTABLE_KEYSTORE_SALT_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut new_salt);
+        let rewritten = PortableKeystoreSession {
+            salt: new_salt,
+            key: derive_key("new-secret123", &new_salt, kdf_flags::CURRENT_KDF).unwrap(),
+            payload: restored.payload,
+        };
+        persist_session_to_path(&path, &rewritten).unwrap();
+
+        assert!(load_session_from_path(&path, "secret123").is_err());
+        let updated = load_session_from_path(&path, "new-secret123").unwrap();
+        assert_eq!(
+            updated
+                .payload
+                .services
+                .get("svc")
+                .and_then(|accounts| accounts.get("account")),
+            Some(&"value".to_string())
+        );
+    }
+
+    #[test]
+    fn biometric_binding_is_false_outside_portable_mode() {
+        assert!(!has_biometric_binding().unwrap());
     }
 }

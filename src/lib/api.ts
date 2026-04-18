@@ -636,9 +636,14 @@ export const api = {
     if (USE_MOCK || !hasTauriRuntime()) {
       return {
         isPortable: false,
+        activation: 'disabled',
+        hostKind: 'executableDir',
         exeDir: '/mock/OxideTerm',
+        hostDir: '/mock/OxideTerm',
         markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
         dataDir: '/mock/OxideTerm/data',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
       };
     }
     return invoke('get_portable_info');
@@ -648,11 +653,20 @@ export const api = {
     if (USE_MOCK || !hasTauriRuntime()) {
       return {
         isPortable: false,
+        activation: 'disabled',
+        hostKind: 'executableDir',
         status: 'disabled',
         canLaunchApp: true,
         hasKeystore: false,
         isUnlocked: false,
         keystorePath: null,
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: null,
+        supportsBiometricBinding: false,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
       };
     }
     return invoke('get_portable_status');
@@ -674,11 +688,20 @@ export const api = {
     if (USE_MOCK) {
       return {
         isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
         status: 'unlocked',
         canLaunchApp: true,
         hasKeystore: true,
         isUnlocked: true,
         keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: false,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
       };
     }
     return invoke('setup_portable_keystore', { password });
@@ -688,25 +711,138 @@ export const api = {
     if (USE_MOCK) {
       return {
         isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
         status: 'unlocked',
         canLaunchApp: true,
         hasKeystore: true,
         isUnlocked: true,
         keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: false,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
       };
     }
     return invoke('unlock_portable_keystore', { password });
+  },
+
+  unlockPortableKeystoreWithBiometrics: async (): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: true,
+        hasBiometricBinding: true,
+        canBiometricUnlock: false,
+      };
+    }
+    return invoke('unlock_portable_keystore_with_biometrics');
+  },
+
+  changePortableKeystorePassword: async (
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: false,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
+      };
+    }
+    return invoke('change_portable_keystore_password', { currentPassword, newPassword });
+  },
+
+  enablePortableBiometricUnlock: async (password: string): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: true,
+        hasBiometricBinding: true,
+        canBiometricUnlock: false,
+      };
+    }
+    return invoke('enable_portable_biometric_unlock', { password });
+  },
+
+  disablePortableBiometricUnlock: async (): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: true,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
+      };
+    }
+    return invoke('disable_portable_biometric_unlock');
   },
 
   resetPortableKeystore: async (): Promise<PortableStatusResponse> => {
     if (USE_MOCK) {
       return {
         isPortable: true,
+        activation: 'marker',
+        hostKind: 'executableDir',
         status: 'needsSetup',
         canLaunchApp: false,
         hasKeystore: false,
         isUnlocked: false,
         keystorePath: '/mock/OxideTerm/data/keystore.vault',
+        portableRootDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        configPath: '/mock/OxideTerm/portable.json',
+        instanceLockPath: '/mock/OxideTerm/data/.portable.lock',
+        supportsBiometricBinding: false,
+        hasBiometricBinding: false,
+        canBiometricUnlock: false,
       };
     }
     return invoke('reset_portable_keystore');
