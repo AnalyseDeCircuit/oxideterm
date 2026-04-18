@@ -26,8 +26,9 @@ use tauri::{AppHandle, Emitter, State};
 use tracing::{debug, info, warn};
 
 use crate::agent::{
-    AgentDeployer, AgentRegistry, AgentSession, AgentStatus, DeployError, GitStatusResult,
-    GrepMatch, ListTreeResult, ReadFileResult, SymbolIndexResult, SymbolInfo, WriteFileResult,
+    AgentDeployer, AgentRegistry, AgentSession, AgentStatus, DeployError, FileEntry,
+    GitStatusResult, GrepMatch, ListTreeResult, ReadFileResult, SymbolIndexResult, SymbolInfo,
+    WriteFileResult,
 };
 use crate::router::NodeRouter;
 
@@ -267,6 +268,26 @@ pub async fn node_agent_write_file(
         .write_file(&path, &content, expect_hash.as_deref())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// List directory contents (single level) via agent.
+#[tauri::command]
+pub async fn node_agent_list_dir(
+    node_id: String,
+    path: String,
+    router: State<'_, Arc<NodeRouter>>,
+    agent_registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<Vec<FileEntry>, String> {
+    let resolved = router
+        .resolve_connection(&node_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session = agent_registry
+        .get(&resolved.connection_id)
+        .ok_or_else(|| "Agent not deployed".to_string())?;
+
+    session.list_dir(&path).await.map_err(|e| e.to_string())
 }
 
 /// List directory tree (recursive) via agent — returns entries + truncation metadata.

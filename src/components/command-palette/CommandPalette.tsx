@@ -536,6 +536,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onOpenChan
           const s = useSettingsStore.getState();
           if (s.settings.sidebarUI.collapsed) s.toggleSidebar();
           s.setSidebarSection('saved');
+          useAppStore.getState().createTab('session_manager');
         },
       },
       {

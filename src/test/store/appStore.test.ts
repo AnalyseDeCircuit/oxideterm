@@ -18,7 +18,15 @@ const settingsStoreMock = vi.hoisted(() => {
       buffer: {
         maxLines: 5000,
       },
+      ide: {
+        autoSave: false,
+        agentMode: 'disabled' as const,
+      },
     },
+    getIde: vi.fn(() => ({
+      autoSave: false,
+      agentMode: 'disabled' as const,
+    })),
   };
 
   const store = Object.assign(
@@ -77,6 +85,14 @@ const localTerminalStoreMock = vi.hoisted(() => {
   return { state, store };
 });
 
+const agentServiceMocks = vi.hoisted(() => ({
+  invalidateAgentCache: vi.fn(),
+  ensureAgent: vi.fn(),
+  isAgentReady: vi.fn(),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+}));
+
 vi.mock('@/lib/api', () => ({
   api: apiMocks,
 }));
@@ -99,6 +115,8 @@ vi.mock('@/store/localTerminalStore', () => ({
   useLocalTerminalStore: localTerminalStoreMock.store,
 }));
 
+vi.mock('@/lib/agentService', () => agentServiceMocks);
+
 vi.mock('@/lib/topologyResolver', () => ({
   topologyResolver: {
     getNodeId: vi.fn(),
@@ -113,6 +131,7 @@ vi.mock('@/i18n', () => ({
 }));
 
 import { useAppStore } from '@/store/appStore';
+import { useIdeStore } from '@/store/ideStore';
 import { topologyResolver } from '@/lib/topologyResolver';
 import type { RemoteEnvInfo, SessionInfo, SshConnectionInfo } from '@/types';
 
@@ -176,10 +195,35 @@ function resetAppStore() {
   });
 }
 
+function resetIdeStore() {
+  localStorage.clear();
+  useIdeStore.setState({
+    nodeId: null,
+    terminalSessionId: null,
+    project: null,
+    tabs: [],
+    activeTabId: null,
+    treeWidth: 280,
+    terminalHeight: 200,
+    terminalVisible: false,
+    splitDirection: null,
+    splitActiveTabId: null,
+    expandedPaths: new Set<string>(),
+    treeRefreshSignal: {},
+    conflictState: null,
+    pendingScroll: null,
+    cachedProjectPath: null,
+    cachedTabPaths: [],
+    cachedNodeId: null,
+    lastClosedAt: null,
+  });
+}
+
 describe('appStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetAppStore();
+    resetIdeStore();
     vi.mocked(topologyResolver.getNodeId).mockReturnValue(undefined);
   });
 
@@ -332,5 +376,74 @@ describe('appStore', () => {
         state: 'idle',
       }),
     );
+  });
+
+  it('closeTab clears ideStore when the last IDE tab closes', async () => {
+    useIdeStore.setState({
+      nodeId: 'node-1',
+      project: { rootPath: '/srv/app', name: 'app', isGitRepo: false },
+      expandedPaths: new Set(['/srv/app']),
+      cachedProjectPath: '/srv/app',
+      cachedNodeId: 'node-1',
+      tabs: [
+        {
+          id: 'ide-file-1',
+          path: '/srv/app/main.ts',
+          name: 'main.ts',
+          language: 'typescript',
+          content: 'console.log(1)',
+          originalContent: 'console.log(1)',
+          isDirty: false,
+          isLoading: false,
+          isPinned: false,
+          lastAccessTime: 1,
+          contentVersion: 0,
+        },
+      ],
+      activeTabId: 'ide-file-1',
+    });
+
+    useAppStore.setState({
+      tabs: [
+        { id: 'ide-root-1', type: 'ide', title: 'IDE: Remote', nodeId: 'node-1', sessionId: 'session-1' },
+      ],
+      activeTabId: 'ide-root-1',
+    });
+
+    await useAppStore.getState().closeTab('ide-root-1');
+
+    expect(useAppStore.getState().tabs).toEqual([]);
+    expect(useIdeStore.getState().project).toBeNull();
+    expect(useIdeStore.getState().nodeId).toBeNull();
+    expect(useIdeStore.getState().cachedProjectPath).toBeNull();
+    expect(agentServiceMocks.invalidateAgentCache).toHaveBeenCalledWith('node-1');
+  });
+
+  it('closeTab keeps ideStore when another IDE tab is still open', async () => {
+    useIdeStore.setState({
+      nodeId: 'node-2',
+      project: { rootPath: '/srv/other', name: 'other', isGitRepo: false },
+      expandedPaths: new Set(['/srv/other']),
+      cachedProjectPath: '/srv/other',
+      cachedNodeId: 'node-2',
+    });
+
+    useAppStore.setState({
+      tabs: [
+        { id: 'ide-root-1', type: 'ide', title: 'IDE 1', nodeId: 'node-1', sessionId: 'session-1' },
+        { id: 'ide-root-2', type: 'ide', title: 'IDE 2', nodeId: 'node-2', sessionId: 'session-2' },
+      ],
+      activeTabId: 'ide-root-1',
+    });
+
+    await useAppStore.getState().closeTab('ide-root-1');
+
+    expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['ide-root-2']);
+    expect(useIdeStore.getState().project).toEqual({
+      rootPath: '/srv/other',
+      name: 'other',
+      isGitRepo: false,
+    });
+    expect(agentServiceMocks.invalidateAgentCache).not.toHaveBeenCalled();
   });
 });

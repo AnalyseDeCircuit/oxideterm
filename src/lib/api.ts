@@ -2118,6 +2118,7 @@ import type {
   AgentStatus,
   AgentReadFileResult,
   AgentWriteFileResult,
+  AgentFileEntry,
   AgentListTreeResult,
   AgentGrepMatch,
   AgentGitStatusResult,
@@ -2146,6 +2147,12 @@ export const nodeAgentWriteFile = (
   nodeId: string, path: string, content: string, expectHash?: string
 ): Promise<AgentWriteFileResult> =>
   invoke('node_agent_write_file', { nodeId, path, content, expectHash });
+
+/** List directory contents (single level) via agent */
+export const nodeAgentListDir = (
+  nodeId: string, path: string
+): Promise<AgentFileEntry[]> =>
+  invoke('node_agent_list_dir', { nodeId, path });
 
 /** List directory tree (recursive) via agent — returns entries + truncation metadata */
 export const nodeAgentListTree = (

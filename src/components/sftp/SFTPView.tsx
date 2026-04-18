@@ -752,7 +752,6 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
   // Memory key: always nodeId for path persistence across reconnects
   const memoryKey = nodeId;
 
-  // Get session info for display (host, username) from sessionTreeStore
   const treeNode = useSessionTreeStore(state => state.getNode(nodeId));
   const session = treeNode ? getSession(treeNode.runtime.connectionId || '') : undefined;
   const { error: toastError } = useToast();

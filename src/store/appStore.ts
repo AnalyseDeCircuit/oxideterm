@@ -885,6 +885,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
         activeTabId: newActiveId
       };
     });
+
+    if (tabType === 'ide') {
+      const hasRemainingIdeTabs = get().tabs.some(t => t.type === 'ide');
+
+      if (!hasRemainingIdeTabs) {
+        try {
+          const { useIdeStore } = await import('./ideStore');
+          useIdeStore.getState().closeProject(true);
+        } catch (e) {
+          console.warn('[closeTab] Failed to close IDE project:', e);
+        }
+      }
+
+      return;
+    }
     
     // 非终端类型的 Tab 无需额外清理
     if (tabType !== 'terminal' && tabType !== 'local_terminal') {

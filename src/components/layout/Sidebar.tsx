@@ -16,7 +16,6 @@ import {
   Link2,
   Activity,
   Network,
-  Database,
   Sparkles,
   Bot,
   Square,
@@ -747,8 +746,7 @@ export const Sidebar = () => {
 
   const topButtons: SidebarButtonDef[] = [
     { kind: 'section', key: 'sessions', icon: Link2, titleKey: 'sidebar.panels.sessions', separator: true },
-    { kind: 'section', key: 'saved', icon: Database, titleKey: 'sidebar.panels.saved' },
-    { kind: 'tab', key: 'session_manager', icon: LayoutList, titleKey: 'sidebar.panels.session_manager' },
+    { kind: 'section', key: 'saved', icon: LayoutList, titleKey: 'sidebar.panels.session_manager' },
     { kind: 'tab', key: 'connection_pool', icon: Terminal, titleKey: 'sidebar.panels.connection_pool', badge: connections.size > 0 ? connections.size : undefined, badgeColor: 'bg-green-500' },
     { kind: 'tab', key: 'connection_monitor', icon: Activity, titleKey: 'sidebar.panels.connection_monitor' },
     { kind: 'tab', key: 'topology', icon: Network, titleKey: 'sidebar.panels.connection_matrix' },
@@ -791,6 +789,7 @@ export const Sidebar = () => {
     if (def.kind === 'section') {
       setSidebarSection(def.key as Parameters<typeof setSidebarSection>[0]);
       if (collapsed) toggleSidebar();
+      if (def.key === 'saved') createTab('session_manager');
     } else if (def.kind === 'tab') {
       createTab(def.key as Parameters<typeof createTab>[0]);
     } else if (def.kind === 'toggle' && def.key === 'ai') {
@@ -1085,18 +1084,7 @@ export const Sidebar = () => {
                 })()}
               </div>
 
-              {/* Open Session Manager button */}
-              <div className="shrink-0 border-t border-theme-border px-2 py-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-1.5 text-xs min-w-0"
-                  onClick={() => createTab('session_manager')}
-                >
-                  <LayoutList className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{t('sidebar.panels.open_session_manager')}</span>
-                </Button>
-              </div>
+
             </div>
           )}
 

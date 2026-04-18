@@ -57,6 +57,16 @@ pub struct SftpSession {
     cwd: String,
 }
 
+fn classify_list_entry_file_type(entry_file_type: FileType, target_file_type: Option<FileType>) -> FileType {
+    match entry_file_type {
+        FileType::Symlink => match target_file_type {
+            Some(FileType::Directory) => FileType::Directory,
+            _ => FileType::Symlink,
+        },
+        other => other,
+    }
+}
+
 impl SftpSession {
     /// Create a new SFTP session from a HandleController
     pub async fn new(
@@ -146,7 +156,7 @@ impl SftpSession {
             let metadata = entry.metadata();
 
             // Determine file type
-            let file_type = if metadata.is_dir() {
+            let entry_file_type = if metadata.is_dir() {
                 FileType::Directory
             } else if metadata.is_symlink() {
                 FileType::Symlink
@@ -157,11 +167,19 @@ impl SftpSession {
             };
 
             // Get symlink target if applicable
-            let symlink_target = if file_type == FileType::Symlink {
+            let symlink_target = if entry_file_type == FileType::Symlink {
                 self.sftp.read_link(&full_path).await.ok()
             } else {
                 None
             };
+
+            let target_file_type = if entry_file_type == FileType::Symlink {
+                self.stat(&full_path).await.ok().map(|info| info.file_type)
+            } else {
+                None
+            };
+
+            let file_type = classify_list_entry_file_type(entry_file_type, target_file_type);
 
             // Convert permissions to octal string
             let permissions = metadata
@@ -178,7 +196,7 @@ impl SftpSession {
                 permissions,
                 owner: metadata.uid.map(|u: u32| u.to_string()),
                 group: metadata.gid.map(|g: u32| g.to_string()),
-                is_symlink: file_type == FileType::Symlink,
+                is_symlink: entry_file_type == FileType::Symlink,
                 symlink_target,
             });
         }
@@ -2581,8 +2599,9 @@ impl Default for SftpRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_missing_file_error_message, recursion_depth_error};
+    use super::{classify_list_entry_file_type, is_missing_file_error_message, recursion_depth_error};
     use crate::sftp::error::SftpError;
+    use crate::sftp::types::FileType;
 
     #[test]
     fn missing_file_error_classifier_matches_known_messages() {
@@ -2602,5 +2621,25 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn classify_list_entry_file_type_treats_symlink_to_directory_as_directory() {
+        assert_eq!(
+            classify_list_entry_file_type(FileType::Symlink, Some(FileType::Directory)),
+            FileType::Directory,
+        );
+    }
+
+    #[test]
+    fn classify_list_entry_file_type_keeps_non_directory_symlink_as_symlink() {
+        assert_eq!(
+            classify_list_entry_file_type(FileType::Symlink, Some(FileType::File)),
+            FileType::Symlink,
+        );
+        assert_eq!(
+            classify_list_entry_file_type(FileType::Symlink, None),
+            FileType::Symlink,
+        );
     }
 }

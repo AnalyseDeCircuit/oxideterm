@@ -27,6 +27,7 @@ const apiMocks = vi.hoisted(() => ({
   nodeAgentStatus: vi.fn(),
   nodeAgentReadFile: vi.fn(),
   nodeAgentWriteFile: vi.fn(),
+  nodeAgentListDir: vi.fn(),
   nodeAgentListTree: vi.fn(),
   nodeAgentGrep: vi.fn(),
   nodeAgentGitStatus: vi.fn(),
@@ -47,7 +48,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@/lib/api', () => apiMocks);
 
-import { ensureAgent, invalidateAgentCache, readFile, watchDirectory } from '@/lib/agentService';
+import { ensureAgent, invalidateAgentCache, listDir, readFile, watchDirectory } from '@/lib/agentService';
 
 function resetApiMocks(): void {
   Object.values(apiMocks).forEach((mockFn) => {
@@ -177,5 +178,72 @@ describe('agentService.watchDirectory', () => {
 
     await firstUnlisten?.();
     await secondUnlisten?.();
+  });
+});
+
+describe('agentService.listDir', () => {
+  beforeEach(() => {
+    resetApiMocks();
+    eventMocks.clear();
+    invalidateAgentCache('node-1');
+  });
+
+  it('uses the agent single-level listDir API when the agent is ready', async () => {
+    apiMocks.nodeAgentStatus.mockResolvedValue({ type: 'ready', version: '1.0.0', arch: 'x86_64', pid: 42 });
+    apiMocks.nodeAgentListDir.mockResolvedValue([
+      {
+        name: 'app.yml',
+        path: '/srv/app/app.yml',
+        file_type: 'file',
+        size: 12,
+        mtime: 123,
+        permissions: '644',
+      },
+    ]);
+
+    const files = await listDir('node-1', '/srv/app');
+
+    expect(apiMocks.nodeAgentListDir).toHaveBeenCalledWith('node-1', '/srv/app');
+    expect(apiMocks.nodeAgentListTree).not.toHaveBeenCalled();
+    expect(files).toEqual([
+      {
+        name: 'app.yml',
+        path: '/srv/app/app.yml',
+        file_type: 'File',
+        size: 12,
+        modified: 123,
+        permissions: '644',
+      },
+    ]);
+  });
+
+  it('falls back to SFTP list_dir if the agent directory listing fails', async () => {
+    apiMocks.nodeAgentStatus.mockResolvedValue({ type: 'ready', version: '1.0.0', arch: 'x86_64', pid: 42 });
+    apiMocks.nodeAgentListDir.mockRejectedValueOnce(new Error('channel closed'));
+    apiMocks.nodeSftpListDir.mockResolvedValue([
+      {
+        name: 'fallback.txt',
+        path: '/srv/app/fallback.txt',
+        file_type: 'File',
+        size: 7,
+        modified: 99,
+        permissions: '644',
+      },
+    ]);
+
+    const files = await listDir('node-1', '/srv/app');
+
+    expect(apiMocks.nodeAgentListDir).toHaveBeenCalledWith('node-1', '/srv/app');
+    expect(apiMocks.nodeSftpListDir).toHaveBeenCalledWith('node-1', '/srv/app');
+    expect(files).toEqual([
+      {
+        name: 'fallback.txt',
+        path: '/srv/app/fallback.txt',
+        file_type: 'File',
+        size: 7,
+        modified: 99,
+        permissions: '644',
+      },
+    ]);
   });
 });
