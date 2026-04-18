@@ -38,8 +38,17 @@ import { useCommandPaletteStore } from './store/commandPaletteStore';
 import { useBroadcastStore } from './store/broadcastStore';
 import { useActivityStore } from './store/activityStore';
 import { initNotificationListener, teardownNotificationListener } from './store/notificationCenterStore';
+import type { PortableStatusResponse } from './types';
 
-function App() {
+type AppProps = {
+  portableStatus?: PortableStatusResponse | null;
+};
+
+type AppContentProps = {
+  updatesEnabled: boolean;
+};
+
+function AppContent({ updatesEnabled }: AppContentProps) {
   // Initialize global event listeners
   // useReconnectEvents 已废弃，由 useConnectionEvents 统一处理连接事件
   useNetworkStatus();
@@ -356,13 +365,21 @@ function App() {
 
   // Startup update check — silent, fires once after 8s
   useEffect(() => {
+    if (!updatesEnabled) {
+      return;
+    }
+
     useUpdateStore.getState().initAutoUpdateCheck(8000);
     const unlisten = useUpdateStore.getState().initResumableListeners();
     return unlisten;
-  }, []);
+  }, [updatesEnabled]);
 
   // Post-update: re-install CLI companion on Windows (copy-based, not symlink)
   useEffect(() => {
+    if (!updatesEnabled) {
+      return;
+    }
+
     (async () => {
       try {
         const { getVersion } = await import('@tauri-apps/api/app');
@@ -385,7 +402,7 @@ function App() {
         // Non-critical — don't block startup
       }
     })();
-  }, []);
+  }, [updatesEnabled]);
 
   // Setup SessionTree state sync
   useEffect(() => {
@@ -398,7 +415,7 @@ function App() {
       <TooltipProvider delayDuration={300} skipDelayDuration={100}>
         <AppLayout />
         <Toaster />
-        <UpdateNotification />
+        {updatesEnabled && <UpdateNotification />}
         <PluginProgressHost />
         <AutoRouteModal />
         <OnboardingModal />
@@ -421,6 +438,14 @@ function App() {
       </TooltipProvider>
     </ErrorBoundary>
   );
+}
+
+function App({ portableStatus }: AppProps) {
+  if (portableStatus && !portableStatus.canLaunchApp) {
+    return null;
+  }
+
+  return <AppContent updatesEnabled={!(portableStatus?.isPortable ?? false)} />;
 }
 
 export default App;

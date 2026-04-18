@@ -18,6 +18,10 @@ import { platform } from '@/lib/platform';
 import { getShortcutCategories } from '@/lib/shortcuts';
 import { APP_AUTHOR, APP_GITHUB } from '@/lib/identity';
 
+type HelpAboutSectionProps = {
+    isPortableMode?: boolean | null;
+};
+
 const formatBytes = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -38,7 +42,7 @@ const formatEta = (seconds: number): string => {
     return remainderSeconds > 0 ? `~${minutes}m ${remainderSeconds}s` : `~${minutes}m`;
 };
 
-export const HelpAboutSection = () => {
+export const HelpAboutSection = ({ isPortableMode = null }: HelpAboutSectionProps) => {
     const { t } = useTranslation();
     const [appVersion, setAppVersion] = useState<string>('...');
     const updater = useUpdateStore();
@@ -78,71 +82,101 @@ export const HelpAboutSection = () => {
                         <span className="text-theme-text font-mono">{appVersion}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <div>
-                            <span className="text-theme-text-muted">{t('settings_view.help.update_channel')}</span>
-                            <p className="text-xs text-theme-text-muted/60 mt-0.5">{t('settings_view.help.update_channel_hint')}</p>
-                        </div>
-                        <Select
-                            value={updateChannel}
-                            onValueChange={(value) => updateGeneral('updateChannel', value as UpdateChannel)}
-                        >
-                            <SelectTrigger className="w-[140px]">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="stable">{t('settings_view.help.channel_stable')}</SelectItem>
-                                <SelectItem value="beta">{t('settings_view.help.channel_beta')}</SelectItem>
-                            </SelectContent>
-                        </Select>
+                        {isPortableMode === true ? (
+                            <>
+                                <div>
+                                    <span className="text-theme-text-muted">{t('settings_view.help.portable_mode')}</span>
+                                    <p className="text-xs text-theme-text-muted/60 mt-0.5">{t('settings_view.help.portable_mode_hint')}</p>
+                                </div>
+                                <span className="rounded-full border border-theme-border bg-theme-bg-elevated px-3 py-1 text-xs font-medium text-theme-text">
+                                    {t('settings_view.help.updates_manual_only')}
+                                </span>
+                            </>
+                        ) : isPortableMode === false ? (
+                            <>
+                                <div>
+                                    <span className="text-theme-text-muted">{t('settings_view.help.update_channel')}</span>
+                                    <p className="text-xs text-theme-text-muted/60 mt-0.5">{t('settings_view.help.update_channel_hint')}</p>
+                                </div>
+                                <Select
+                                    value={updateChannel}
+                                    onValueChange={(value) => updateGeneral('updateChannel', value as UpdateChannel)}
+                                >
+                                    <SelectTrigger className="w-[140px]">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="stable">{t('settings_view.help.channel_stable')}</SelectItem>
+                                        <SelectItem value="beta">{t('settings_view.help.channel_beta')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </>
+                        ) : (
+                            <div className="flex w-full justify-end">
+                                <Loader2 className="h-4 w-4 animate-spin text-theme-text-muted" aria-hidden="true" />
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-theme-border/50 space-y-3">
-                    <div className="flex items-center gap-3">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => updater.checkForUpdate()}
-                            disabled={updater.stage === 'checking' || updater.stage === 'downloading' || updater.stage === 'verifying' || updater.stage === 'installing' || updater.stage === 'ready'}
-                            className="gap-2 shrink-0"
-                        >
-                            {updater.stage === 'checking'
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                : <RefreshCw className="h-3.5 w-3.5" />}
-                            {t('settings_view.help.check_update')}
-                        </Button>
+                    {isPortableMode === true ? (
+                        <div className="rounded-md border border-theme-border/60 bg-theme-bg-elevated/70 p-4">
+                            <div className="flex items-center gap-2 text-sm font-medium text-theme-text">
+                                <Shield className="h-4 w-4 text-amber-400" />
+                                {t('settings_view.help.updates_manual_only')}
+                            </div>
+                            <p className="mt-2 text-sm leading-6 text-theme-text-muted">
+                                {t('settings_view.help.updates_manual_only_hint')}
+                            </p>
+                        </div>
+                    ) : isPortableMode === false ? (
+                        <>
+                            <div className="flex items-center gap-3">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => updater.checkForUpdate()}
+                                    disabled={updater.stage === 'checking' || updater.stage === 'downloading' || updater.stage === 'verifying' || updater.stage === 'installing' || updater.stage === 'ready'}
+                                    className="gap-2 shrink-0"
+                                >
+                                    {updater.stage === 'checking'
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <RefreshCw className="h-3.5 w-3.5" />}
+                                    {t('settings_view.help.check_update')}
+                                </Button>
 
-                        {updater.stage === 'checking' && (
-                            <span className="text-sm text-theme-text-muted">{t('settings_view.help.checking')}</span>
-                        )}
-                        {updater.stage === 'up-to-date' && (
-                            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                                {t('settings_view.help.up_to_date')}
-                            </span>
-                        )}
-                        {(updater.stage === 'verifying' || updater.stage === 'installing') && (
-                            <span className="text-sm text-theme-text-muted">
-                                {updater.stage === 'verifying' ? t('settings_view.help.verifying') : t('settings_view.help.installing')}
-                                {updater.attempt > 1 && ` (${t('settings_view.help.retry')} #${updater.attempt})`}
-                            </span>
-                        )}
-                        {updater.stage === 'ready' && (
-                            <span className="text-sm text-emerald-400">{t('settings_view.help.ready_to_restart')}</span>
-                        )}
-                        {updater.stage === 'error' && (
-                            <span className="text-sm text-red-400 truncate">{updater.errorMessage || t('settings_view.help.update_error')}</span>
-                        )}
+                                {updater.stage === 'checking' && (
+                                    <span className="text-sm text-theme-text-muted">{t('settings_view.help.checking')}</span>
+                                )}
+                                {updater.stage === 'up-to-date' && (
+                                    <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                        {t('settings_view.help.up_to_date')}
+                                    </span>
+                                )}
+                                {(updater.stage === 'verifying' || updater.stage === 'installing') && (
+                                    <span className="text-sm text-theme-text-muted">
+                                        {updater.stage === 'verifying' ? t('settings_view.help.verifying') : t('settings_view.help.installing')}
+                                        {updater.attempt > 1 && ` (${t('settings_view.help.retry')} #${updater.attempt})`}
+                                    </span>
+                                )}
+                                {updater.stage === 'ready' && (
+                                    <span className="text-sm text-emerald-400">{t('settings_view.help.ready_to_restart')}</span>
+                                )}
+                                {updater.stage === 'error' && (
+                                    <span className="text-sm text-red-400 truncate">{updater.errorMessage || t('settings_view.help.update_error')}</span>
+                                )}
 
-                        {updater.stage === 'ready' && (
-                            <Button variant="default" size="sm" onClick={updater.restartApp} className="gap-2 shrink-0 ml-auto">
-                                <RotateCw className="h-3.5 w-3.5" />
-                                {t('settings_view.help.restart_now')}
-                            </Button>
-                        )}
-                    </div>
+                                {updater.stage === 'ready' && (
+                                    <Button variant="default" size="sm" onClick={updater.restartApp} className="gap-2 shrink-0 ml-auto">
+                                        <RotateCw className="h-3.5 w-3.5" />
+                                        {t('settings_view.help.restart_now')}
+                                    </Button>
+                                )}
+                            </div>
 
-                    {updater.stage === 'available' && (
+                            {updater.stage === 'available' && (
                         <div className="space-y-3">
                             <div className="flex items-center gap-2 text-sm">
                                 <span className="text-theme-text">{t('settings_view.help.update_available')}</span>
@@ -181,9 +215,9 @@ export const HelpAboutSection = () => {
                                 </Button>
                             </div>
                         </div>
-                    )}
+                            )}
 
-                    {updater.stage === 'downloading' && (
+                            {updater.stage === 'downloading' && (
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <span className="text-sm text-theme-text-muted">
@@ -222,9 +256,9 @@ export const HelpAboutSection = () => {
                                 </span>
                             </div>
                         </div>
-                    )}
+                            )}
 
-                    {updater.skippedVersion && updater.stage === 'idle' && (
+                            {updater.skippedVersion && updater.stage === 'idle' && (
                         <div className="flex items-center gap-2 text-xs text-theme-text-muted">
                             <SkipForward className="h-3 w-3 shrink-0" />
                             <span>{t('settings_view.help.skipped_version', { version: updater.skippedVersion })}</span>
@@ -232,7 +266,9 @@ export const HelpAboutSection = () => {
                                 {t('settings_view.help.clear_skip')}
                             </button>
                         </div>
-                    )}
+                            )}
+                        </>
+                    ) : null}
                 </div>
             </div>
 

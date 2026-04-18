@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "설정",
+    "portable_badge": "포터블 모드 사용 중",
+    "portable_description": "OxideTerm이 포터블 폴더에서 실행 중입니다. 데이터는 실행 파일 옆에 저장되며 자동 업데이트는 비활성화됩니다.",
     "local_terminal": {
       "title": "로컬 터미널",
       "description": "로컬 터미널 쉘과 기본 설정을 구성합니다.",
@@ -615,6 +617,10 @@
       "installing": "설치 중...",
       "skipped_version": "건너뛴 버전: v{{version}}",
       "clear_skip": "해제",
+      "portable_mode": "포터블 모드",
+      "portable_mode_hint": "현재 세션은 포터블 부트스트랩 흐름을 사용하며 데이터를 실행 파일 옆에 보관합니다.",
+      "updates_manual_only": "수동 업데이트만 지원",
+      "updates_manual_only_hint": "포터블 모드에서는 자동 업데이트 확인과 앱 내 설치가 비활성화됩니다. 업데이트하려면 포터블 폴더 전체를 더 최신 OxideTerm 빌드로 교체하세요.",
       "update_channel": "업데이트 채널",
       "update_channel_hint": "Beta 채널은 사전 릴리스 빌드를 수신합니다",
       "channel_stable": "안정 버전",

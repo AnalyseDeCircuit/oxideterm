@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "Settings",
+    "portable_badge": "Portable Mode Active",
+    "portable_description": "OxideTerm is running from a portable folder. Data stays beside the executable and automatic updates are disabled.",
     "local_terminal": {
       "title": "Local Terminal",
       "description": "Configure local terminal shell and preferences.",
@@ -615,6 +617,10 @@
       "installing": "Installing...",
       "skipped_version": "Skipped: v{{version}}",
       "clear_skip": "Clear",
+      "portable_mode": "Portable Mode",
+      "portable_mode_hint": "This session is using the portable bootstrap flow and keeps its data next to the executable.",
+      "updates_manual_only": "Manual updates only",
+      "updates_manual_only_hint": "Automatic update checks and in-app installs are disabled in portable mode. Replace the portable folder with a newer OxideTerm build to update.",
       "update_channel": "Update Channel",
       "update_channel_hint": "Beta channel receives pre-release builds",
       "channel_stable": "Stable",

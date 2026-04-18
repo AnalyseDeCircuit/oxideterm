@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "設定",
+    "portable_badge": "可攜模式已啟用",
+    "portable_description": "OxideTerm 目前正從可攜資料夾執行。資料會保留在可執行檔旁邊，且自動更新已停用。",
     "local_terminal": {
       "title": "本機終端機",
       "description": "設定本機終端機 Shell 和偏好設定。",
@@ -615,6 +617,10 @@
       "installing": "正在安裝...",
       "skipped_version": "已跳過: v{{version}}",
       "clear_skip": "清除",
+      "portable_mode": "可攜模式",
+      "portable_mode_hint": "目前工作階段正使用可攜模式啟動流程，資料會保存在可執行檔旁邊。",
+      "updates_manual_only": "僅支援手動更新",
+      "updates_manual_only_hint": "可攜模式下已停用自動檢查更新與應用內安裝。需要更新時，請以較新的 OxideTerm 版本取代整個可攜資料夾。",
       "update_channel": "更新通道",
       "update_channel_hint": "Beta 通道接收預發布版本",
       "channel_stable": "穩定版",

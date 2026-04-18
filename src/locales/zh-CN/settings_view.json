@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "设置",
+    "portable_badge": "便携模式已启用",
+    "portable_description": "OxideTerm 当前正从便携文件夹运行。数据会保存在可执行文件旁边，且自动更新已被禁用。",
     "local_terminal": {
       "title": "本地终端",
       "description": "配置本地终端 Shell 和偏好设置。",
@@ -615,6 +617,10 @@
       "installing": "正在安装...",
       "skipped_version": "已跳过: v{{version}}",
       "clear_skip": "清除",
+      "portable_mode": "便携模式",
+      "portable_mode_hint": "当前会话正在使用便携模式引导流程，数据会保存在可执行文件旁边。",
+      "updates_manual_only": "仅支持手动更新",
+      "updates_manual_only_hint": "便携模式下已禁用自动检查更新和应用内安装。需要更新时，请用较新的 OxideTerm 构建替换整个便携文件夹。",
       "update_channel": "更新通道",
       "update_channel_hint": "Beta 通道接收预发布构建",
       "channel_stable": "稳定版",

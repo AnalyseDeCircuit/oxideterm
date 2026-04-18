@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "設定",
+    "portable_badge": "ポータブルモード有効",
+    "portable_description": "OxideTerm はポータブルフォルダーから実行中です。データは実行ファイルの横に保存され、自動更新は無効になります。",
     "local_terminal": {
       "title": "ローカルターミナル",
       "description": "ローカルターミナルのシェルと環境設定を構成します。",
@@ -615,6 +617,10 @@
       "installing": "インストール中...",
       "skipped_version": "スキップ済み: v{{version}}",
       "clear_skip": "解除",
+      "portable_mode": "ポータブルモード",
+      "portable_mode_hint": "このセッションではポータブル起動フローを使用しており、データは実行ファイルの横に保存されます。",
+      "updates_manual_only": "更新は手動のみ",
+      "updates_manual_only_hint": "ポータブルモードでは自動更新チェックとアプリ内インストールが無効です。更新するには、ポータブルフォルダー全体を新しい OxideTerm ビルドに置き換えてください。",
       "update_channel": "更新チャンネル",
       "update_channel_hint": "Beta チャンネルはプレリリースビルドを受信します",
       "channel_stable": "安定版",

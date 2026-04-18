@@ -915,6 +915,24 @@ export type DataDirInfo = {
   can_change: boolean;
 }
 
+export type PortableBootstrapStatus = 'disabled' | 'needsSetup' | 'locked' | 'unlocked';
+
+export type PortableInfoResponse = {
+  isPortable: boolean;
+  exeDir: string;
+  markerPath: string;
+  dataDir: string;
+}
+
+export type PortableStatusResponse = {
+  isPortable: boolean;
+  status: PortableBootstrapStatus;
+  canLaunchApp: boolean;
+  hasKeystore: boolean;
+  isUnlocked: boolean;
+  keystorePath: string | null;
+}
+
 export type DataDirCheck = {
   has_existing_data: boolean;
   files_found: string[];

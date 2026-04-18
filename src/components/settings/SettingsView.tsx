@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTabBgActive } from '@/hooks/useTabBackground';
@@ -31,6 +31,8 @@ import { ReconnectTab } from '@/components/settings/tabs/ReconnectTab';
 import { SftpTab } from '@/components/settings/tabs/SftpTab';
 import { IdeTab } from '@/components/settings/tabs/IdeTab';
 import { AiTab } from '@/components/settings/tabs/AiTab';
+import { api } from '@/lib/api';
+import type { PortableStatusResponse } from '@/types';
 
 export const SettingsView = () => {
     const { t } = useTranslation();
@@ -38,11 +40,30 @@ export const SettingsView = () => {
     const { confirm: confirmDialog, ConfirmDialog } = useConfirm();
     const bgActive = useTabBgActive('settings');
     const [activeTab, setActiveTab] = useState('general');
+    const [portableStatus, setPortableStatus] = useState<PortableStatusResponse | null | undefined>(undefined);
 
     const { settings, updateTerminal, updateAppearance, updateConnectionDefaults, updateAi, updateSftp, updateIde, updateReconnect, updateConnectionPool, setLanguage, addProvider, removeProvider, updateProvider, setActiveProvider, refreshProviderModels, setUserContextWindow } = useSettingsStore();
     const { general, terminal, appearance, connectionDefaults, ai, sftp, ide, reconnect } = settings;
     const [showAiConfirm, setShowAiConfirm] = useState(false);
     const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        api.getPortableStatus()
+            .then((status) => {
+                if (!cancelled) {
+                    setPortableStatus(status);
+                }
+            })
+            .catch((error) => {
+                console.warn('Failed to load portable status:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     return (
         <div className={`flex h-full w-full text-theme-text ${bgActive ? '' : 'bg-theme-bg'}`} data-bg-active={bgActive || undefined}>
@@ -50,6 +71,12 @@ export const SettingsView = () => {
             <div className="w-56 bg-theme-bg-panel border-r border-theme-border flex flex-col pt-6 pb-4 min-h-0">
                 <div className="px-5 mb-6">
                     <h2 className="text-xl font-semibold text-theme-text-heading">{t('settings_view.title')}</h2>
+                    {portableStatus?.isPortable && (
+                        <div className="mt-3 rounded-lg border border-theme-border bg-theme-bg-elevated/80 px-3 py-2">
+                            <div className="text-sm font-medium text-theme-text">{t('settings_view.portable_badge')}</div>
+                            <div className="mt-1 text-xs leading-5 text-theme-text-muted">{t('settings_view.portable_description')}</div>
+                        </div>
+                    )}
                 </div>
                 <div className="space-y-1 px-3 flex-1 overflow-y-auto min-h-0">
                     {/* ── 基础 ── */}
@@ -217,7 +244,7 @@ export const SettingsView = () => {
                     {activeTab === 'reconnect' && <ReconnectTab reconnect={reconnect} updateReconnect={updateReconnect} />}
 
                     {activeTab === 'help' && (
-                        <HelpAboutSection />
+                        <HelpAboutSection isPortableMode={portableStatus ? portableStatus.isPortable : portableStatus ?? null} />
                     )}
 
                     {activeTab === 'keybindings' && (

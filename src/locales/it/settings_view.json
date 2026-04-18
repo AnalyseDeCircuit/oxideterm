@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "Impostazioni",
+    "portable_badge": "Modalità portatile attiva",
+    "portable_description": "OxideTerm è in esecuzione da una cartella portatile. I dati restano accanto all'eseguibile e gli aggiornamenti automatici sono disattivati.",
     "local_terminal": {
       "title": "Terminale Locale",
       "description": "Configura shell e preferenze del terminale locale.",
@@ -615,6 +617,10 @@
       "installing": "Installazione in corso...",
       "skipped_version": "Ignorata: v{{version}}",
       "clear_skip": "Cancella",
+      "portable_mode": "Modalità portatile",
+      "portable_mode_hint": "Questa sessione usa il flusso di bootstrap portatile e conserva i dati accanto all'eseguibile.",
+      "updates_manual_only": "Solo aggiornamenti manuali",
+      "updates_manual_only_hint": "In modalità portatile i controlli automatici degli aggiornamenti e le installazioni interne all'app sono disattivati. Per aggiornare, sostituisci l'intera cartella portatile con una build più recente di OxideTerm.",
       "update_channel": "Canale di aggiornamento",
       "update_channel_hint": "Il canale beta riceve le build pre-release",
       "channel_stable": "Stabile",

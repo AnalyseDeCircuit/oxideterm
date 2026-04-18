@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "Cài đặt",
+    "portable_badge": "Chế độ portable đang bật",
+    "portable_description": "OxideTerm đang chạy từ một thư mục portable. Dữ liệu được giữ cạnh tệp thực thi và cập nhật tự động bị tắt.",
     "local_terminal": {
       "title": "Terminal cục bộ",
       "description": "Cấu hình shell và tùy chọn terminal cục bộ.",
@@ -615,6 +617,10 @@
       "installing": "Đang cài đặt...",
       "skipped_version": "Đã bỏ qua: v{{version}}",
       "clear_skip": "Xóa",
+      "portable_mode": "Chế độ portable",
+      "portable_mode_hint": "Phiên hiện tại đang dùng luồng bootstrap portable và giữ dữ liệu cạnh tệp thực thi.",
+      "updates_manual_only": "Chỉ cập nhật thủ công",
+      "updates_manual_only_hint": "Trong chế độ portable, việc tự động kiểm tra cập nhật và cài đặt trong ứng dụng đều bị tắt. Để cập nhật, hãy thay toàn bộ thư mục portable bằng bản dựng OxideTerm mới hơn.",
       "update_channel": "Kênh cập nhật",
       "update_channel_hint": "Kênh Beta nhận các bản dựng phát hành trước",
       "channel_stable": "Ổn định",

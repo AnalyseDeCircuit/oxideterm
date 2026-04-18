@@ -1,6 +1,8 @@
 {
   "settings_view": {
     "title": "Paramètres",
+    "portable_badge": "Mode portable actif",
+    "portable_description": "OxideTerm est exécuté depuis un dossier portable. Les données restent à côté de l'exécutable et les mises à jour automatiques sont désactivées.",
     "local_terminal": {
       "title": "Terminal local",
       "description": "Configurer le shell du terminal local et les préférences.",
@@ -615,6 +617,10 @@
       "installing": "Installation...",
       "skipped_version": "Ignorée : v{{version}}",
       "clear_skip": "Effacer",
+      "portable_mode": "Mode portable",
+      "portable_mode_hint": "Cette session utilise le flux d'amorçage portable et conserve ses données à côté de l'exécutable.",
+      "updates_manual_only": "Mises à jour manuelles uniquement",
+      "updates_manual_only_hint": "La vérification automatique des mises à jour et l'installation intégrée sont désactivées en mode portable. Pour mettre à jour, remplacez tout le dossier portable par une version plus récente d'OxideTerm.",
       "update_channel": "Canal de mise à jour",
       "update_channel_hint": "Le canal bêta reçoit les versions pré-release",
       "channel_stable": "Stable",

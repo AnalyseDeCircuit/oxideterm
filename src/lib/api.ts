@@ -18,6 +18,8 @@ import {
   SshBatchImportResult,
   DataDirInfo,
   DataDirCheck,
+  PortableInfoResponse,
+  PortableStatusResponse,
   SshKeyInfo,
   PersistedSessionInfo,
   PersistedForwardInfo,
@@ -65,6 +67,22 @@ import type { PluginManifest, UrlInstallResult } from '../types/plugin';
 const USE_MOCK = false;
 const TERMINAL_HISTORY_POLL_INTERVAL_MS = 40;
 const TERMINAL_HISTORY_SEARCH_TIMEOUT_MS = 60_000;
+
+function hasTauriRuntime(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const candidate = window as typeof window & {
+    __TAURI_INTERNALS__?: {
+      invoke?: unknown;
+      transformCallback?: unknown;
+    };
+  };
+
+  return typeof candidate.__TAURI_INTERNALS__?.invoke === 'function'
+    || typeof candidate.__TAURI_INTERNALS__?.transformCallback === 'function';
+}
 
 type TestConnectionRequestOptions = {
   trust_host_key?: boolean;
@@ -611,6 +629,74 @@ export const api = {
       can_change: true,
     };
     return invoke('get_data_directory');
+  },
+
+  getPortableInfo: async (): Promise<PortableInfoResponse> => {
+    if (USE_MOCK || !hasTauriRuntime()) {
+      return {
+        isPortable: false,
+        exeDir: '/mock/OxideTerm',
+        markerPath: '/mock/OxideTerm/portable',
+        dataDir: '/mock/OxideTerm/data',
+      };
+    }
+    return invoke('get_portable_info');
+  },
+
+  getPortableStatus: async (): Promise<PortableStatusResponse> => {
+    if (USE_MOCK || !hasTauriRuntime()) {
+      return {
+        isPortable: false,
+        status: 'disabled',
+        canLaunchApp: true,
+        hasKeystore: false,
+        isUnlocked: false,
+        keystorePath: null,
+      };
+    }
+    return invoke('get_portable_status');
+  },
+
+  setupPortableKeystore: async (password: string): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+      };
+    }
+    return invoke('setup_portable_keystore', { password });
+  },
+
+  unlockPortableKeystore: async (password: string): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        status: 'unlocked',
+        canLaunchApp: true,
+        hasKeystore: true,
+        isUnlocked: true,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+      };
+    }
+    return invoke('unlock_portable_keystore', { password });
+  },
+
+  resetPortableKeystore: async (): Promise<PortableStatusResponse> => {
+    if (USE_MOCK) {
+      return {
+        isPortable: true,
+        status: 'needsSetup',
+        canLaunchApp: false,
+        hasKeystore: false,
+        isUnlocked: false,
+        keystorePath: '/mock/OxideTerm/data/keystore.vault',
+      };
+    }
+    return invoke('reset_portable_keystore');
   },
 
   setDataDirectory: async (newPath: string): Promise<boolean> => {
