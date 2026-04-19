@@ -1,0 +1,29 @@
+Ask AI a question (pipe context via stdin)
+
+Usage: ask [OPTIONS] [PROMPT]...
+
+Arguments:
+  [PROMPT]...
+          Prompt text (remaining args joined)
+
+Options:
+  -s, --session <SESSION>
+          Attach terminal buffer from a session as context
+
+  -m, --model <MODEL>
+          AI model to use (overrides default)
+
+  -p, --provider <PROVIDER>
+          Provider type: openai, anthropic, gemini, ollama
+
+      --no-stream
+          Disable streaming (wait for full response)
+
+      --raw
+          Force raw text output (no markdown rendering)
+
+  -c, --continue <CONTINUE>
+          Continue a previous conversation by ID
+
+  -h, --help
+          Print help

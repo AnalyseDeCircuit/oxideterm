@@ -1,0 +1,41 @@
+OxideTerm CLI companion — control OxideTerm from the command line
+
+Usage: oxt [OPTIONS] <COMMAND>
+
+Commands:
+  status       Show OxideTerm status
+  list         List resources
+  health       Show connection health
+  disconnect   Disconnect a session
+  forward      Manage port forwarding
+  config       Query saved configuration
+  ask          Ask AI a question (pipe context via stdin)
+  exec         Generate code/commands with AI (code-only output)
+  connect      Connect to a saved connection (opens in GUI)
+  open         Open a new local terminal tab
+  focus        Focus an existing session tab
+  attach       Attach to a running session (mirror terminal I/O)
+  sftp         SFTP file operations
+  import       Import connections from ~/.ssh/config
+  ping         Ping the GUI (connectivity check)
+  version      Show version information
+  completions  Generate shell completions
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Force JSON output (default: auto-detect based on terminal/pipe)
+
+      --timeout <TIMEOUT>
+          IPC timeout in milliseconds
+          
+          [default: 30000]
+
+      --socket <SOCKET>
+          Custom socket path (debugging)
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version

@@ -105,7 +105,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **Port Forwarding** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), lock-free message-passing I/O, auto-restore on reconnect, death reporting, idle timeout |
 | **AI (OxideSens)** | Inline panel (`⌘I`) + sidebar chat, terminal buffer capture (single/all panes), multi-source context (IDE/SFTP/Git), 40+ autonomous tools, MCP server integration, RAG knowledge base (BM25 + vector hybrid search), streaming SSE |
 | **Plugins** | Runtime ESM loading, 18 API namespaces, 24 UI Kit components, frozen API + Proxy ACL, circuit breaker, auto-disable on errors |
-| **CLI** | `oxt` companion: JSON-RPC 2.0 over Unix Socket / Named Pipe, `status`/`list`/`ping`, human + JSON output |
+| **CLI** | `oxt` companion: JSON-RPC 2.0 over Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI, human + JSON output |
 | **Security** | .oxide encrypted export (ChaCha20-Poly1305 + Argon2id 256 MB), encrypted local config at rest, OS keychain, Touch ID (macOS), portable encrypted keystore, host key TOFU, `zeroize` memory clearing |
 | **i18n** | 11 languages: EN, 简体中文, 繁體中文, 日本語, 한국어, FR, DE, ES, IT, PT-BR, VI |
 
@@ -290,7 +290,7 @@ Cross-platform local shell via `portable-pty 0.8`, feature-gated behind `local-t
 - **Session recording**: asciicast v2 format, full record and playback
 - **Broadcast input**: type once, send to all split panes — batch server operations
 - **Background gallery**: per-tab background images, 16 tab types, opacity/blur/fit control
-- **CLI companion** (`oxt`): ~1 MB binary, JSON-RPC 2.0 over Unix Socket / Named Pipe, `status`/`list`/`ping` with human or `--json` output
+- **CLI companion** (`oxt`): ~1 MB binary, JSON-RPC 2.0 over Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI with human or `--json` output
 - **WSL Graphics** ⚠️ experimental: built-in VNC viewer — 9 desktop environments + single-app mode, WSLg detection, Xtigervnc + noVNC
 
 #### Official Plugins

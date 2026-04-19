@@ -105,9 +105,9 @@
 | `1001` | `ERR_NOT_CONNECTED` | 无活跃连接（保留） |
 | `1003` | `ERR_TIMEOUT` | 操作超时（保留） |
 
-## 可用方法（17 个 + 1 个流式）
+## 可用方法（22 个普通方法 + 1 个流式方法）
 
-> 说明：`ask` 被归类为流式方法（服务端通过 `stream_chunk` 通知推送增量文本），其余为普通 JSON-RPC 请求/响应。
+> 说明：`ask` 被归类为流式方法（服务端通过 `stream_chunk` 通知推送增量文本），其余为普通 JSON-RPC 请求/响应。`exec` 不是独立服务端 RPC，而是 CLI 端对 `ask + exec_mode=true` 的受控包装。
 
 ### 方法总览
 
@@ -118,6 +118,8 @@
 | 会话/标签操作 | `disconnect`、`connect`、`open_tab`、`focus_tab`、`attach` |
 | 转发管理 | `create_forward`、`delete_forward` |
 | 配置读取 | `config_list`、`config_get` |
+| SFTP | `sftp_ls`、`sftp_get`、`sftp_put` |
+| 导入 | `import_list`、`import_hosts` |
 | AI（流式） | `ask` |
 
 ### `status`
@@ -353,6 +355,26 @@
 
 查询单个连接详情（不返回密码或私钥内容）。
 
+### `sftp_ls`
+
+列出远端目录内容。
+
+### `sftp_get`
+
+从远端下载文件到本地路径。
+
+### `sftp_put`
+
+把本地文件上传到远端路径。
+
+### `import_list`
+
+列出 `~/.ssh/config` 中可导入的主机条目及其导入状态。
+
+### `import_hosts`
+
+把一个或多个 SSH config host 导入为 OxideTerm 已保存连接。
+
 ### `ask`（流式）
 
 AI 提问接口。支持：
@@ -379,6 +401,19 @@ AI 提问接口。支持：
   "conversation_id": "b1d0..."
 }
 ```
+
+### `exec` 不是独立 RPC
+
+`oxt exec` 是 CLI 层的受控包装，不是单独的服务端方法。
+
+当前行为是：
+
+1. CLI 仍然调用 `ask`
+2. 额外传入 `exec_mode=true`
+3. 服务端根据 `exec_mode` 切换更偏命令/代码生成的系统提示
+4. CLI 直接流式输出结果，不在本地执行任何生成内容
+
+这条边界在 Phase 0 固化，后续增强不能把 `exec` 偷偷扩展成自动执行入口。
 
 ## CLI 使用说明
 
@@ -459,6 +494,16 @@ oxt attach <session-id-or-name>
 oxt forward add 8080:localhost:80 --session <session-id>
 oxt forward remove <forward-id> --session <session-id>
 
+# SFTP
+oxt sftp ls --session <session-id> /var/log
+oxt sftp get --session <session-id> /remote/file ./local-file
+oxt sftp put --session <session-id> ./local-file /remote/file
+
+# 从 ~/.ssh/config 导入
+oxt import list
+oxt import add my-prod my-staging
+oxt import add --all
+
 # 配置查询
 oxt config list
 oxt config get <connection-name-or-id>
@@ -480,6 +525,21 @@ oxt completions powershell
 | `--json` | 自动检测 | 强制 JSON 输出（默认：管道时输出 JSON，终端时输出人类可读格式） |
 | `--timeout <ms>` | `30000` | IPC 超时时间（毫秒） |
 | `--socket <path>` | 平台默认值 | 自定义 socket/管道路径（用于调试） |
+
+### 退出码（Phase 0 最小契约）
+
+Phase 0 先固定最小退出码契约，后续阶段可以细化，但不能破坏下面三项：
+
+| 退出码 | 含义 | 当前来源 |
+|---|---|---|
+| `0` | 成功执行，或正常显示 help/version | 正常命令路径、Clap help/version |
+| `1` | 命令运行期失败 | IPC 失败、兼容性错误、RPC 返回错误、目标不存在等 |
+| `2` | CLI 参数或用法错误 | Clap 参数解析失败、未知子命令、缺少必需参数 |
+
+说明：
+
+1. Phase 0 只承诺这三个最小出口。
+2. 后续阶段若细化运行期错误码，只能在 `1` 的基础上拆分，不得改变 `0` 和 `2` 的含义。
 
 ### 输出模式
 
@@ -528,6 +588,16 @@ $ oxt list forwards
   abc123de   local    127.0.0.1:8080           localhost:80             active     Web server
   abc123de   dynamic  127.0.0.1:1080           SOCKS5                   active     SOCKS5 Proxy
 
+# SFTP：查看目录与传输文件
+$ oxt sftp ls --session abc123 /var/log
+$ oxt sftp get --session abc123 /var/log/app.log ./app.log
+$ oxt sftp put --session abc123 ./nginx.conf /etc/nginx/nginx.conf
+
+# 导入 ~/.ssh/config
+$ oxt import list
+$ oxt import add prod jumpbox
+$ oxt import add --all
+
 # 断开会话（按名称）
 $ oxt disconnect prod-server
 Disconnected session: abc123...
@@ -552,6 +622,9 @@ $ oxt ask "summarize this" --provider openai
 ...
 Conversation: b1d0...
 $ oxt ask --continue b1d0... "give me concise version"
+
+# Exec：仍然走 ask RPC，只是切换 exec_mode
+$ oxt exec "write a bash script to rotate logs"
 
 # Attach：会话镜像，`~.` 退出
 $ oxt attach prod-server

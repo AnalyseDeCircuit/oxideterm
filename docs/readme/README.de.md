@@ -105,7 +105,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **Portweiterleitung** | Lokal (-L), Remote (-R), dynamisches SOCKS5 (-D), lock-freie Message-Passing-I/O, automatische Wiederherstellung bei Reconnect, Ausfallberichterstattung, Leerlauf-Timeout |
 | **KI (OxideSens)** | Inline-Panel (`⌘I`) + Seitenleisten-Chat, Terminal-Buffer-Erfassung (einzelnes/alle Fenster), Multi-Quellen-Kontext (IDE/SFTP/Git), 40+ autonome Werkzeuge, MCP-Server-Integration, RAG-Wissensdatenbank (BM25 + Vektor-Hybridsuche), SSE-Streaming |
 | **Plugins** | Laufzeit-ESM-Laden, 18 API-Namensräume, 24 UI-Kit-Komponenten, eingefrorene API + Proxy-ACL, Circuit Breaker, automatische Deaktivierung bei Fehlern |
-| **CLI** | `oxt`-Companion: JSON-RPC 2.0 über Unix Socket / Named Pipe, `status`/`list`/`ping`, menschenlesbare + JSON-Ausgabe |
+| **CLI** | `oxt`-Companion: JSON-RPC 2.0 über Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI, menschenlesbare + JSON-Ausgabe |
 | **Sicherheit** | .oxide-verschlüsselter Export (ChaCha20-Poly1305 + Argon2id 256 MB), lokal verschlüsselte Konfiguration im Ruhezustand, Betriebssystem-Schlüsselbund, Touch ID (macOS), portabler verschlüsselter Schlüsselspeicher, Host-Key-TOFU, `zeroize`-Speicherbereinigung |
 | **i18n** | 11 Sprachen: EN, 简体中文, 繁體中文, 日本語, 한국어, FR, DE, ES, IT, PT-BR, VI |
 
@@ -290,7 +290,7 @@ Plattformübergreifende lokale Shell über `portable-pty 0.8`, Feature-gated hin
 - **Sitzungsaufzeichnung**: asciicast v2-Format, vollständige Aufzeichnung und Wiedergabe
 - **Broadcast-Eingabe**: einmal tippen, an alle geteilten Fenster senden — Batch-Server-Operationen
 - **Hintergrund-Galerie**: Hintergrundbilder pro Tab, 16 Tab-Typen, Steuerung von Deckkraft/Unschärfe/Anpassung
-- **CLI-Companion** (`oxt`): ~1 MB Binärdatei, JSON-RPC 2.0 über Unix Socket / Named Pipe, `status`/`list`/`ping` mit menschenlesbarer oder `--json`-Ausgabe
+- **CLI-Companion** (`oxt`): ~1 MB Binärdatei, JSON-RPC 2.0 über Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI mit menschenlesbarer oder `--json`-Ausgabe
 - **WSL Graphics** ⚠️ experimentell: integrierter VNC-Viewer — 9 Desktop-Umgebungen + Einzelanwendungsmodus, WSLg-Erkennung, Xtigervnc + noVNC
 
 #### Offizielle Plugins

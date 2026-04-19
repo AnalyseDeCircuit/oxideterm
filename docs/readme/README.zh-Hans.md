@@ -105,7 +105,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **端口转发** | 本地（-L）、远程（-R）、动态 SOCKS5（-D）、无锁消息传递 I/O、重连自动恢复、终止报告、空闲超时 |
 | **AI（OxideSens）** | 内联面板（`⌘I`）+ 侧边栏聊天、终端缓冲区捕获（单窗格/所有窗格）、多源上下文（IDE/SFTP/Git）、40+ 自主工具、MCP 服务器集成、RAG 知识库（BM25 + 向量混合搜索）、SSE 流式输出 |
 | **插件** | 运行时 ESM 加载、18 个 API 命名空间、24 个 UI Kit 组件、冻结 API + Proxy ACL、熔断器、错误时自动禁用 |
-| **CLI** | `oxt` 伴侣工具：JSON-RPC 2.0 基于 Unix Socket / Named Pipe、`status`/`list`/`ping`、人类可读 + JSON 输出 |
+| **CLI** | `oxt` 伴侣工具：JSON-RPC 2.0 基于 Unix Socket / Named Pipe、status/health/list/forward/config/connect/focus/attach/SFTP/import/AI、人类可读 + JSON 输出 |
 | **安全** | .oxide 加密导出（ChaCha20-Poly1305 + Argon2id 256 MB）、本地配置静态加密、OS 密钥链、Touch ID（macOS）、便携式加密密钥库、主机密钥 TOFU、`zeroize` 内存清除 |
 | **国际化** | 11 种语言：EN、简体中文、繁體中文、日本語、한국어、FR、DE、ES、IT、PT-BR、VI |
 
@@ -290,7 +290,7 @@ CodeMirror 6 编辑器基于 SFTP 运行——默认无需服务端安装：
 - **会话录制**：asciicast v2 格式，完整录制和回放
 - **广播输入**：输入一次，发送到所有分屏窗格——批量服务器操作
 - **背景画廊**：每标签页背景图片，16 种标签类型，透明度/模糊/适配控制
-- **CLI 伴侣工具**（`oxt`）：~1 MB 二进制文件，JSON-RPC 2.0 基于 Unix Socket / Named Pipe，`status`/`list`/`ping` 支持人类可读或 `--json` 输出
+- **CLI 伴侣工具**（`oxt`）：~1 MB 二进制文件，JSON-RPC 2.0 基于 Unix Socket / Named Pipe，status/health/list/forward/config/connect/focus/attach/SFTP/import/AI 支持人类可读或 `--json` 输出
 - **WSL Graphics** ⚠️ 实验性：内置 VNC 查看器——9 种桌面环境 + 单应用模式，WSLg 检测，Xtigervnc + noVNC
 
 #### 官方插件

@@ -105,7 +105,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **Port forwarding** | Locale (-L), remoto (-R), SOCKS5 dinamico (-D), I/O message-passing senza lock, ripristino automatico alla riconnessione, report di terminazione, timeout di inattività |
 | **IA (OxideSens)** | Pannello inline (`⌘I`) + chat laterale, cattura buffer terminale (pannello singolo/tutti), contesto multi-sorgente (IDE/SFTP/Git), 40+ strumenti autonomi, integrazione server MCP, knowledge base RAG (ricerca ibrida BM25 + vettori), streaming SSE |
 | **Plugin** | Caricamento ESM runtime, 18 namespace API, 24 componenti UI Kit, API congelata + ACL Proxy, circuit breaker, disattivazione automatica in caso di errori |
-| **CLI** | Companion `oxt`: JSON-RPC 2.0 tramite Unix Socket / Named Pipe, `status`/`list`/`ping`, output leggibile + JSON |
+| **CLI** | Companion `oxt`: JSON-RPC 2.0 tramite Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI, output leggibile + JSON |
 | **Sicurezza** | Export .oxide crittografato (ChaCha20-Poly1305 + Argon2id 256 MB), configurazione locale cifrata a riposo, portachiavi OS, Touch ID (macOS), keystore crittografato portatile, TOFU chiave host, pulizia memoria `zeroize` |
 | **i18n** | 11 lingue: EN, 简体中文, 繁體中文, 日本語, 한국어, FR, DE, ES, IT, PT-BR, VI |
 
@@ -290,7 +290,7 @@ Shell locale multipiattaforma tramite `portable-pty 0.8`, protetto dal feature g
 - **Registrazione sessioni**: formato asciicast v2, registrazione e riproduzione complete
 - **Broadcast input**: digita una volta, invia a tutti i pannelli divisi — operazioni batch sui server
 - **Galleria sfondi**: immagini di sfondo per tab, 16 tipi di tab, controllo opacità/sfocatura/adattamento
-- **Companion CLI** (`oxt`): binario di ~1 MB, JSON-RPC 2.0 tramite Unix Socket / Named Pipe, `status`/`list`/`ping` con output leggibile o `--json`
+- **Companion CLI** (`oxt`): binario di ~1 MB, JSON-RPC 2.0 tramite Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI con output leggibile o `--json`
 - **WSL Graphics** ⚠️ sperimentale: visualizzatore VNC integrato — 9 ambienti desktop + modalità singola applicazione, rilevamento WSLg, Xtigervnc + noVNC
 
 #### Plugin ufficiali

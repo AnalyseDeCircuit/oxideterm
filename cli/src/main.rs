@@ -1517,8 +1517,62 @@ fn run_attach(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_compatibility, protocol_ranges_overlap, read_stdin_from_reader};
+    use super::{check_compatibility, protocol_ranges_overlap, read_stdin_from_reader, Cli};
+    use clap::CommandFactory;
     use std::io::Cursor;
+
+    fn render_help(path: &[&str]) -> String {
+        let mut command = Cli::command().term_width(100);
+        let mut current = &mut command;
+
+        for segment in path {
+            current = current
+                .find_subcommand_mut(segment)
+                .unwrap_or_else(|| panic!("missing subcommand: {segment}"));
+        }
+
+        let mut output = Vec::new();
+        current.write_long_help(&mut output).unwrap();
+        String::from_utf8(output).unwrap()
+    }
+
+    fn normalize_help(text: &str) -> String {
+        text.replace("\r\n", "\n")
+            .trim_end_matches('\n')
+            .to_string()
+    }
+
+    #[test]
+    fn main_help_matches_snapshot() {
+        assert_eq!(
+            normalize_help(&render_help(&[])),
+            normalize_help(include_str!("../tests/snapshots/oxt-help.txt"))
+        );
+    }
+
+    #[test]
+    fn list_help_matches_snapshot() {
+        assert_eq!(
+            normalize_help(&render_help(&["list"])),
+            normalize_help(include_str!("../tests/snapshots/oxt-list-help.txt"))
+        );
+    }
+
+    #[test]
+    fn forward_help_matches_snapshot() {
+        assert_eq!(
+            normalize_help(&render_help(&["forward"])),
+            normalize_help(include_str!("../tests/snapshots/oxt-forward-help.txt"))
+        );
+    }
+
+    #[test]
+    fn ask_help_matches_snapshot() {
+        assert_eq!(
+            normalize_help(&render_help(&["ask"])),
+            normalize_help(include_str!("../tests/snapshots/oxt-ask-help.txt"))
+        );
+    }
 
     #[test]
     fn stdin_reader_accepts_exact_limit() {
