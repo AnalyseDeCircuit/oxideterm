@@ -7,6 +7,7 @@
 `oxt` CLI 是一个独立的命令行二进制程序，通过 IPC（进程间通信）与正在运行的 OxideTerm GUI 进行通信。用户可以在终端或 shell 脚本中：
 
 - 查询 OxideTerm 状态与健康信息
+- 运行 `oxt doctor` 诊断安装、PATH、endpoint 与 CLI API 兼容性
 - 列出连接、会话、本地终端与端口转发
 - 执行连接、断开、聚焦、附着（mirror）等会话操作
 - 创建/删除端口转发规则
@@ -433,9 +434,33 @@ CLI 工具已捆绑在 OxideTerm 应用包内，安装步骤：
 
 请确保安装目录已添加到 `$PATH`。
 
+### 诊断
+
+安装或升级后优先运行：
+
+```bash
+oxt doctor
+oxt doctor --json
+```
+
+`doctor` 会固定检查下面几类问题：
+
+1. 当前 CLI 二进制路径
+2. `PATH` 是否能命中 `oxt`
+3. 当前实际生效的 socket / pipe 解析结果
+4. endpoint 是否存在、类型是否正确
+5. endpoint ownership 是否匹配当前用户（Unix）
+6. GUI 是否可连接
+7. CLI API 是否与 GUI 兼容
+
+检查项状态固定为 `ok`、`warn`、`fail`。即使 GUI 没启动，`doctor` 也会继续输出本地诊断结果。
+
 ### 命令
 
 ```bash
+# 诊断安装、PATH、endpoint 与兼容性
+oxt doctor
+
 # 查看 OxideTerm 状态
 oxt status
 
@@ -533,7 +558,7 @@ Phase 0 先固定最小退出码契约，后续阶段可以细化，但不能破
 | 退出码 | 含义 | 当前来源 |
 |---|---|---|
 | `0` | 成功执行，或正常显示 help/version | 正常命令路径、Clap help/version |
-| `1` | 命令运行期失败 | IPC 失败、兼容性错误、RPC 返回错误、目标不存在等 |
+| `1` | 命令运行期失败 | IPC 失败、兼容性错误、doctor 发现失败项、RPC 返回错误、目标不存在等 |
 | `2` | CLI 参数或用法错误 | Clap 参数解析失败、未知子命令、缺少必需参数 |
 
 说明：
@@ -558,6 +583,13 @@ CLI 会自动检测 stdout 是否为终端：
 ### 示例
 
 ```bash
+# 先做诊断
+$ oxt doctor
+Doctor summary: 5 ok, 2 warning(s), 0 failed
+
+# 机器可读诊断
+$ oxt doctor --json | jq '.items[] | select(.status == "fail")'
+
 # 人类可读格式的状态信息
 $ oxt status
 OxideTerm v0.21.0
@@ -636,6 +668,8 @@ $ oxt attach prod-server
 |---|---|---|
 | `OXIDETERM_SOCK` | macOS/Linux | 覆盖默认 socket 路径 |
 | `OXIDETERM_PIPE` | Windows | 覆盖默认命名管道路径 |
+
+`oxt doctor` 会把 `--socket` 或环境变量覆写直接显示在诊断结果中，方便排查“为什么命中了意外 endpoint”。
 
 ## 安全性
 

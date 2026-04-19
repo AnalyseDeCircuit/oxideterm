@@ -13,6 +13,168 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_RESPONSE_BYTES: usize = 4_194_304;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndpointSource {
+    CliFlag,
+    Environment,
+    Default,
+}
+
+impl EndpointSource {
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::CliFlag => "CLI flag (--socket)",
+            #[cfg(unix)]
+            Self::Environment => "environment variable (OXIDETERM_SOCK)",
+            #[cfg(windows)]
+            Self::Environment => "environment variable (OXIDETERM_PIPE)",
+            Self::Default => "default endpoint",
+        }
+    }
+
+    pub fn is_override(self) -> bool {
+        !matches!(self, Self::Default)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EndpointResolution {
+    #[cfg(unix)]
+    path: std::path::PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
+    source: EndpointSource,
+}
+
+impl EndpointResolution {
+    pub fn source(&self) -> EndpointSource {
+        self.source
+    }
+
+    pub fn display(&self) -> String {
+        #[cfg(unix)]
+        {
+            self.path.display().to_string()
+        }
+
+        #[cfg(windows)]
+        {
+            self.pipe_name.clone()
+        }
+    }
+
+    #[cfg(unix)]
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    #[cfg(windows)]
+    pub fn pipe_name(&self) -> &str {
+        &self.pipe_name
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EndpointInspection {
+    pub exists: bool,
+    pub kind: Option<String>,
+    pub metadata_error: Option<String>,
+    pub ownership_matches: Option<bool>,
+    pub owner_uid: Option<u32>,
+    pub current_uid: Option<u32>,
+}
+
+pub fn resolve_endpoint(custom_path: Option<&str>) -> Result<EndpointResolution, String> {
+    #[cfg(unix)]
+    {
+        let (path, source) = if let Some(path) = custom_path {
+            (std::path::PathBuf::from(path), EndpointSource::CliFlag)
+        } else if let Ok(path) = std::env::var("OXIDETERM_SOCK") {
+            (std::path::PathBuf::from(path), EndpointSource::Environment)
+        } else {
+            (
+                dirs::home_dir()
+                    .ok_or("Cannot determine home directory")?
+                    .join(".oxideterm")
+                    .join("oxt.sock"),
+                EndpointSource::Default,
+            )
+        };
+
+        Ok(EndpointResolution { path, source })
+    }
+
+    #[cfg(windows)]
+    {
+        let (pipe_name, source) = if let Some(path) = custom_path {
+            (path.to_string(), EndpointSource::CliFlag)
+        } else if let Ok(path) = std::env::var("OXIDETERM_PIPE") {
+            (path, EndpointSource::Environment)
+        } else {
+            (
+                format!(r"\\.\pipe\OxideTerm-CLI-{}", whoami::username()),
+                EndpointSource::Default,
+            )
+        };
+
+        Ok(EndpointResolution { pipe_name, source })
+    }
+}
+
+pub fn inspect_endpoint(endpoint: &EndpointResolution) -> EndpointInspection {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+        let mut inspection = EndpointInspection::default();
+        let path = endpoint.path();
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {
+                inspection.exists = true;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return inspection;
+            }
+            Err(error) => {
+                inspection.metadata_error = Some(format!("Cannot inspect endpoint: {error}"));
+                return inspection;
+            }
+        }
+
+        match std::fs::metadata(path) {
+            Ok(metadata) => {
+                let file_type = metadata.file_type();
+                inspection.kind = Some(if file_type.is_socket() {
+                    "socket".to_string()
+                } else if file_type.is_dir() {
+                    "directory".to_string()
+                } else if file_type.is_file() {
+                    "file".to_string()
+                } else {
+                    "other".to_string()
+                });
+
+                let socket_uid = metadata.uid();
+                let current_uid = unsafe { libc::getuid() };
+                inspection.owner_uid = Some(socket_uid);
+                inspection.current_uid = Some(current_uid);
+                inspection.ownership_matches = Some(socket_uid == current_uid);
+            }
+            Err(error) => {
+                inspection.metadata_error = Some(format!("Cannot inspect endpoint: {error}"));
+            }
+        }
+
+        inspection
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = endpoint;
+        EndpointInspection::default()
+    }
+}
+
 /// A connection to the running OxideTerm GUI.
 pub struct IpcConnection {
     #[cfg(unix)]
@@ -30,6 +192,14 @@ struct PipeStream {
 impl IpcConnection {
     /// Connect to the running OxideTerm GUI.
     pub fn connect(custom_path: Option<&str>, timeout_ms: u64) -> Result<Self, String> {
+        let endpoint = resolve_endpoint(custom_path)?;
+        Self::connect_resolved(&endpoint, timeout_ms)
+    }
+
+    pub fn connect_resolved(
+        endpoint: &EndpointResolution,
+        timeout_ms: u64,
+    ) -> Result<Self, String> {
         #[cfg(unix)]
         let timeout = std::time::Duration::from_millis(timeout_ms);
         #[cfg(not(unix))]
@@ -37,34 +207,28 @@ impl IpcConnection {
 
         #[cfg(unix)]
         {
-            let path = if let Some(p) = custom_path {
-                std::path::PathBuf::from(p)
-            } else if let Ok(p) = std::env::var("OXIDETERM_SOCK") {
-                std::path::PathBuf::from(p)
-            } else {
-                dirs::home_dir()
-                    .ok_or("Cannot determine home directory")?
-                    .join(".oxideterm")
-                    .join("oxt.sock")
-            };
-
-            if !path.exists() {
+            let path = endpoint.path();
+            let inspection = inspect_endpoint(endpoint);
+            if let Some(error) = inspection.metadata_error.as_deref() {
+                return Err(error.to_string());
+            }
+            if !inspection.exists {
                 return Err(format!(
                     "OxideTerm is not running (socket not found: {})\n\
                      Start OxideTerm first, or use 'oxt list connections' for saved data.",
                     path.display()
                 ));
             }
-
-            // Verify socket ownership matches current user (prevent interception)
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                let metadata =
-                    std::fs::metadata(&path).map_err(|e| format!("Cannot stat socket: {e}"))?;
-                let socket_uid = metadata.uid();
-                let current_uid = unsafe { libc::getuid() };
-                if socket_uid != current_uid {
+            if inspection.kind.as_deref() != Some("socket") {
+                return Err(format!(
+                    "Endpoint exists but is not a Unix socket: {}",
+                    path.display()
+                ));
+            }
+            if let Some(false) = inspection.ownership_matches {
+                if let (Some(socket_uid), Some(current_uid)) =
+                    (inspection.owner_uid, inspection.current_uid)
+                {
                     return Err(format!(
                         "Socket ownership mismatch: socket owned by uid {socket_uid}, \
                          but current user is uid {current_uid}. \
@@ -72,8 +236,7 @@ impl IpcConnection {
                     ));
                 }
             }
-
-            let stream = std::os::unix::net::UnixStream::connect(&path)
+            let stream = std::os::unix::net::UnixStream::connect(path)
                 .map_err(|e| format!("Failed to connect to OxideTerm: {e}"))?;
             stream
                 .set_read_timeout(Some(timeout))
@@ -90,19 +253,13 @@ impl IpcConnection {
 
         #[cfg(windows)]
         {
-            let pipe_name = if let Some(p) = custom_path {
-                p.to_string()
-            } else if let Ok(p) = std::env::var("OXIDETERM_PIPE") {
-                p
-            } else {
-                format!(r"\\.\pipe\OxideTerm-CLI-{}", whoami::username())
-            };
+            let pipe_name = endpoint.pipe_name();
 
             use std::fs::OpenOptions;
             let handle = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(&pipe_name)
+                .open(pipe_name)
                 .map_err(|e| {
                     format!(
                         "OxideTerm is not running (pipe not found: {pipe_name})\n\
@@ -335,7 +492,10 @@ fn take_complete_line(pending: &mut Vec<u8>) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_line_from_reader, read_response_from_reader, MAX_RESPONSE_BYTES};
+    use super::{
+        inspect_endpoint, read_line_from_reader, read_response_from_reader, resolve_endpoint,
+        EndpointSource, MAX_RESPONSE_BYTES,
+    };
     use std::io::{self, Cursor, Read};
 
     struct ChunkedReader {
@@ -440,5 +600,73 @@ mod tests {
             read_response_from_reader(&mut reader, &mut pending, 5, &mut |_text| {}).unwrap_err();
 
         assert_eq!(err, "[401] denied");
+    }
+
+    #[test]
+    fn cli_flag_endpoint_override_wins() {
+        let endpoint = resolve_endpoint(Some("/tmp/custom-oxt.sock")).unwrap();
+
+        assert_eq!(endpoint.source(), EndpointSource::CliFlag);
+        #[cfg(unix)]
+        assert_eq!(
+            endpoint.path(),
+            std::path::Path::new("/tmp/custom-oxt.sock")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_endpoint_uses_home_directory() {
+        let endpoint = resolve_endpoint(None).unwrap();
+
+        assert_eq!(endpoint.source(), EndpointSource::Default);
+        assert!(endpoint.path().ends_with(".oxideterm/oxt.sock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_endpoint_reports_missing_socket() {
+        let endpoint = resolve_endpoint(Some("/tmp/oxt-nonexistent-test.sock")).unwrap();
+
+        let inspection = inspect_endpoint(&endpoint);
+
+        assert!(!inspection.exists);
+        assert!(inspection.kind.is_none());
+        assert!(inspection.ownership_matches.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_endpoint_reports_socket_metadata() {
+        let socket_path =
+            std::env::temp_dir().join(format!("oxt-test-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        let endpoint = resolve_endpoint(Some(socket_path.to_str().unwrap())).unwrap();
+
+        let inspection = inspect_endpoint(&endpoint);
+
+        drop(listener);
+        let _ = std::fs::remove_file(&socket_path);
+
+        assert!(inspection.exists);
+        assert_eq!(inspection.kind.as_deref(), Some("socket"));
+        assert_eq!(inspection.ownership_matches, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_endpoint_surfaces_metadata_error_for_broken_symlink() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let broken_target = temp_dir.path().join("missing.sock");
+        let endpoint_path = temp_dir.path().join("oxt.sock");
+        std::os::unix::fs::symlink(&broken_target, &endpoint_path).unwrap();
+        let endpoint = resolve_endpoint(Some(endpoint_path.to_str().unwrap())).unwrap();
+
+        let inspection = inspect_endpoint(&endpoint);
+
+        assert!(inspection.exists);
+        assert!(inspection.metadata_error.is_some());
+        assert!(inspection.kind.is_none());
     }
 }

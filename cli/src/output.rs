@@ -7,6 +7,7 @@
 //! - Terminal: human-readable colored tables
 //! - Pipe: structured JSON
 
+use crate::DoctorReport;
 use std::io::IsTerminal;
 
 use serde_json::Value;
@@ -42,6 +43,18 @@ impl OutputMode {
             }
             Self::Json => {
                 println!("{}", serde_json::to_string(value).unwrap_or_default());
+            }
+        }
+    }
+
+    /// Print doctor diagnostics.
+    pub fn print_doctor(&self, report: &DoctorReport) {
+        match self {
+            Self::Json => {
+                println!("{}", serde_json::to_string(report).unwrap_or_default());
+            }
+            Self::Human => {
+                print!("{}", render_doctor_human(report));
             }
         }
     }
@@ -806,5 +819,98 @@ fn format_file_size(bytes: u64) -> String {
         format!("{:.1}K", bytes as f64 / KB as f64)
     } else {
         format!("{bytes}B")
+    }
+}
+
+fn render_doctor_human(report: &DoctorReport) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Doctor summary: {} ok, {} warning(s), {} failed",
+        report
+            .items
+            .len()
+            .saturating_sub(report.warnings + report.failures),
+        report.warnings,
+        report.failures
+    );
+    let _ = writeln!(out, "CLI version: {}", report.cli_version);
+    if let Some(binary_path) = report.binary_path.as_deref() {
+        let _ = writeln!(out, "Binary:      {binary_path}");
+    }
+    if let Some(endpoint) = report.endpoint.value.as_deref() {
+        match report.endpoint.source.as_deref() {
+            Some(source) => {
+                let _ = writeln!(out, "Endpoint:    {endpoint} ({source})");
+            }
+            None => {
+                let _ = writeln!(out, "Endpoint:    {endpoint}");
+            }
+        }
+    }
+    let _ = writeln!(out);
+
+    for check in &report.items {
+        let _ = writeln!(
+            out,
+            "[{}] {}: {}",
+            check.status.label(),
+            check.title,
+            sanitize_display(&check.summary)
+        );
+        if let Some(detail) = check.detail.as_deref() {
+            let _ = writeln!(out, "      {}", sanitize_display(detail));
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_doctor_human;
+    use crate::{DoctorCheck, DoctorEndpoint, DoctorReport, DoctorStatus};
+
+    #[test]
+    fn doctor_renderer_includes_summary_and_details() {
+        let report = DoctorReport {
+            ok: false,
+            cli_version: "1.2.5",
+            binary_path: Some("/tmp/oxt".to_string()),
+            endpoint: DoctorEndpoint {
+                value: Some("/tmp/oxt.sock".to_string()),
+                source: Some("CLI flag (--socket)".to_string()),
+            },
+            warnings: 1,
+            failures: 1,
+            items: vec![
+                DoctorCheck {
+                    id: "path_lookup",
+                    title: "PATH lookup",
+                    status: DoctorStatus::Warn,
+                    summary: "oxt was not found in PATH".to_string(),
+                    detail: Some("Expected install path: /Users/test/.local/bin/oxt".to_string()),
+                },
+                DoctorCheck {
+                    id: "gui_connectivity",
+                    title: "GUI connectivity",
+                    status: DoctorStatus::Fail,
+                    summary: "Failed to connect to the OxideTerm GUI".to_string(),
+                    detail: Some("socket not found".to_string()),
+                },
+            ],
+        };
+
+        let rendered = render_doctor_human(&report);
+
+        assert!(rendered.contains("Doctor summary: 0 ok, 1 warning(s), 1 failed"));
+        assert!(rendered.contains("Endpoint:    /tmp/oxt.sock (CLI flag (--socket))"));
+        assert!(rendered.contains("[warn] PATH lookup: oxt was not found in PATH"));
+        assert!(
+            rendered.contains("[fail] GUI connectivity: Failed to connect to the OxideTerm GUI")
+        );
+        assert!(rendered.contains("Expected install path"));
     }
 }

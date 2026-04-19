@@ -25,6 +25,81 @@ struct CompatibilityReport {
     error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DoctorStatus {
+    Ok,
+    Warn,
+    Fail,
+}
+
+impl DoctorStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DoctorCheck {
+    id: &'static str,
+    title: &'static str,
+    status: DoctorStatus,
+    summary: String,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+struct DoctorEndpoint {
+    value: Option<String>,
+    source: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DoctorReport {
+    ok: bool,
+    cli_version: &'static str,
+    binary_path: Option<String>,
+    endpoint: DoctorEndpoint,
+    warnings: usize,
+    failures: usize,
+    items: Vec<DoctorCheck>,
+}
+
+impl DoctorReport {
+    fn new() -> Self {
+        Self {
+            ok: true,
+            cli_version: env!("CARGO_PKG_VERSION"),
+            binary_path: None,
+            endpoint: DoctorEndpoint::default(),
+            warnings: 0,
+            failures: 0,
+            items: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, check: DoctorCheck) {
+        match check.status {
+            DoctorStatus::Warn => self.warnings += 1,
+            DoctorStatus::Fail => self.failures += 1,
+            DoctorStatus::Ok => {}
+        }
+        self.items.push(check);
+        self.ok = self.failures == 0;
+    }
+}
+
+#[derive(Debug)]
+struct PathCandidate {
+    path: std::path::PathBuf,
+    executable: bool,
+    broken_symlink: bool,
+}
+
 #[derive(Parser)]
 #[command(
     name = "oxt",
@@ -172,6 +247,9 @@ enum Commands {
     /// Ping the GUI (connectivity check)
     Ping,
 
+    /// Diagnose CLI installation and GUI connectivity
+    Doctor,
+
     /// Show version information
     Version,
 
@@ -299,27 +377,39 @@ fn main() {
 
     let result = run(&cli, &out);
 
-    if let Err(e) = result {
-        if out.is_json() {
-            let err = serde_json::json!({ "error": e });
-            eprintln!("{}", serde_json::to_string(&err).unwrap_or_default());
-        } else {
-            eprintln!("error: {e}");
+    match result {
+        Ok(code) => {
+            if code != 0 {
+                std::process::exit(code);
+            }
         }
-        std::process::exit(1);
+        Err(e) => {
+            if out.is_json() {
+                let err = serde_json::json!({ "error": e });
+                eprintln!("{}", serde_json::to_string(&err).unwrap_or_default());
+            } else {
+                eprintln!("error: {e}");
+            }
+            std::process::exit(1);
+        }
     }
 }
 
-fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
+fn run(cli: &Cli, out: &output::OutputMode) -> Result<i32, String> {
     // Commands that don't need IPC
     match &cli.command {
         Commands::Version => {
             out.print_version();
-            return Ok(());
+            return Ok(0);
         }
         Commands::Completions { shell } => {
             clap_complete::generate(*shell, &mut Cli::command(), "oxt", &mut std::io::stdout());
-            return Ok(());
+            return Ok(0);
+        }
+        Commands::Doctor => {
+            let report = build_doctor_report(cli);
+            out.print_doctor(&report);
+            return Ok(if report.ok { 0 } else { 1 });
         }
         _ => {}
     }
@@ -654,7 +744,7 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
                     } else {
                         return Err("No aliases specified. Usage: oxt import add <alias1> <alias2> ... or --all".to_string());
                     }
-                    return Ok(());
+                    return Ok(0);
                 }
 
                 let resp = conn.call(
@@ -751,12 +841,581 @@ fn run(cli: &Cli, out: &output::OutputMode) -> Result<(), String> {
         Commands::Attach { target } => {
             return_if_incompatible(&compatibility)?;
             emit_compatibility_notice(out, compatibility.warning.as_deref());
-            return run_attach(&mut conn, out, target.as_deref());
+            run_attach(&mut conn, out, target.as_deref())?;
+            return Ok(0);
         }
-        Commands::Version | Commands::Completions { .. } => unreachable!(),
+        Commands::Version | Commands::Completions { .. } | Commands::Doctor => unreachable!(),
     }
 
-    Ok(())
+    Ok(0)
+}
+
+fn build_doctor_report(cli: &Cli) -> DoctorReport {
+    let mut report = DoctorReport::new();
+
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => {
+            report.binary_path = Some(path.display().to_string());
+            report.push(doctor_check(
+                "binary_path",
+                "CLI binary path",
+                DoctorStatus::Ok,
+                format!("Running {}", path.display()),
+                None,
+            ));
+            Some(path)
+        }
+        Err(error) => {
+            report.push(doctor_check(
+                "binary_path",
+                "CLI binary path",
+                DoctorStatus::Fail,
+                "Unable to determine the current CLI binary path".to_string(),
+                Some(error.to_string()),
+            ));
+            None
+        }
+    };
+
+    report.push(build_path_check(current_exe.as_deref()));
+
+    let endpoint = match connect::resolve_endpoint(cli.socket.as_deref()) {
+        Ok(endpoint) => {
+            let display = endpoint.display();
+            report.endpoint.value = Some(display.clone());
+            report.endpoint.source = Some(endpoint.source().description().to_string());
+            let status = if endpoint.source().is_override() {
+                DoctorStatus::Warn
+            } else {
+                DoctorStatus::Ok
+            };
+            let summary = if endpoint.source().is_override() {
+                format!("Using {}: {display}", endpoint.source().description())
+            } else {
+                format!("Using default endpoint: {display}")
+            };
+            report.push(doctor_check(
+                "endpoint_resolution",
+                "Endpoint resolution",
+                status,
+                summary,
+                None,
+            ));
+            Some(endpoint)
+        }
+        Err(error) => {
+            report.push(doctor_check(
+                "endpoint_resolution",
+                "Endpoint resolution",
+                DoctorStatus::Fail,
+                "Unable to resolve the IPC endpoint".to_string(),
+                Some(error),
+            ));
+            None
+        }
+    };
+
+    if let Some(endpoint) = endpoint.as_ref() {
+        let inspection = connect::inspect_endpoint(endpoint);
+        report.push(build_endpoint_presence_check(endpoint, &inspection));
+        report.push(build_endpoint_ownership_check(&inspection));
+
+        match connect::IpcConnection::connect_resolved(endpoint, cli.timeout) {
+            Ok(mut conn) => match conn.call("status", serde_json::json!({})) {
+                Ok(status) => {
+                    let version = status
+                        .get("version")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("unknown");
+                    let pid = status.get("pid").and_then(|value| value.as_u64());
+                    let summary = match pid {
+                        Some(pid) => format!("Connected to OxideTerm {version} (pid {pid})"),
+                        None => format!("Connected to OxideTerm {version}"),
+                    };
+                    report.push(doctor_check(
+                        "gui_connectivity",
+                        "GUI connectivity",
+                        DoctorStatus::Ok,
+                        summary,
+                        None,
+                    ));
+                    report.push(build_compatibility_check(&status));
+                }
+                Err(error) => {
+                    report.push(doctor_check(
+                        "gui_connectivity",
+                        "GUI connectivity",
+                        DoctorStatus::Fail,
+                        "Connected to the endpoint, but the GUI did not return status".to_string(),
+                        Some(error),
+                    ));
+                    report.push(doctor_check(
+                        "cli_api_compatibility",
+                        "CLI API compatibility",
+                        DoctorStatus::Warn,
+                        "Compatibility was not checked because status probing failed".to_string(),
+                        None,
+                    ));
+                }
+            },
+            Err(error) => {
+                report.push(doctor_check(
+                    "gui_connectivity",
+                    "GUI connectivity",
+                    DoctorStatus::Fail,
+                    "Failed to connect to the OxideTerm GUI".to_string(),
+                    Some(error),
+                ));
+                report.push(doctor_check(
+                    "cli_api_compatibility",
+                    "CLI API compatibility",
+                    DoctorStatus::Warn,
+                    "Compatibility was not checked because the GUI is unreachable".to_string(),
+                    None,
+                ));
+            }
+        }
+    } else {
+        report.push(doctor_check(
+            "endpoint_presence",
+            "Endpoint presence",
+            DoctorStatus::Warn,
+            "Endpoint presence was not checked because endpoint resolution failed".to_string(),
+            None,
+        ));
+        report.push(doctor_check(
+            "endpoint_ownership",
+            "Endpoint ownership",
+            DoctorStatus::Warn,
+            "Endpoint ownership was not checked because endpoint resolution failed".to_string(),
+            None,
+        ));
+        report.push(doctor_check(
+            "gui_connectivity",
+            "GUI connectivity",
+            DoctorStatus::Warn,
+            "GUI connectivity was not checked because endpoint resolution failed".to_string(),
+            None,
+        ));
+        report.push(doctor_check(
+            "cli_api_compatibility",
+            "CLI API compatibility",
+            DoctorStatus::Warn,
+            "Compatibility was not checked because endpoint resolution failed".to_string(),
+            None,
+        ));
+    }
+
+    report
+}
+
+fn doctor_check(
+    id: &'static str,
+    title: &'static str,
+    status: DoctorStatus,
+    summary: String,
+    detail: Option<String>,
+) -> DoctorCheck {
+    DoctorCheck {
+        id,
+        title,
+        status,
+        summary,
+        detail,
+    }
+}
+
+fn build_path_check(current_exe: Option<&std::path::Path>) -> DoctorCheck {
+    let Some(current_exe) = current_exe else {
+        return doctor_check(
+            "path_lookup",
+            "PATH lookup",
+            DoctorStatus::Warn,
+            "PATH lookup was skipped because the current executable path is unavailable"
+                .to_string(),
+            None,
+        );
+    };
+
+    let binary_name = cli_binary_name();
+    match find_command_in_path(binary_name) {
+        Ok(Some(candidate)) => {
+            if candidate.broken_symlink {
+                return doctor_check(
+                    "path_lookup",
+                    "PATH lookup",
+                    DoctorStatus::Warn,
+                    format!(
+                        "{binary_name} resolves to a broken symlink: {}",
+                        candidate.path.display()
+                    ),
+                    Some(format!(
+                        "Reinstall the bundled CLI or remove the stale PATH entry. Expected install path: {}",
+                        expected_cli_install_path()
+                    )),
+                );
+            }
+
+            if !candidate.executable {
+                return doctor_check(
+                    "path_lookup",
+                    "PATH lookup",
+                    DoctorStatus::Warn,
+                    format!(
+                        "{binary_name} resolves to a non-executable file: {}",
+                        candidate.path.display()
+                    ),
+                    Some(
+                        "Fix the file permissions or remove the conflicting PATH entry before reinstalling the CLI"
+                            .to_string(),
+                    ),
+                );
+            }
+
+            let current_canonical = current_exe
+                .canonicalize()
+                .unwrap_or_else(|_| current_exe.to_path_buf());
+            let found_canonical = candidate
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| candidate.path.clone());
+            if current_canonical == found_canonical {
+                doctor_check(
+                    "path_lookup",
+                    "PATH lookup",
+                    DoctorStatus::Ok,
+                    format!("{binary_name} resolves to {}", candidate.path.display()),
+                    None,
+                )
+            } else {
+                doctor_check(
+                    "path_lookup",
+                    "PATH lookup",
+                    DoctorStatus::Warn,
+                    format!(
+                        "{binary_name} resolves to a different binary: {}",
+                        candidate.path.display()
+                    ),
+                    Some(format!(
+                        "Current executable is {}. Reinstall the bundled CLI or adjust PATH order. Expected install path: {}",
+                        current_exe.display(),
+                        expected_cli_install_path()
+                    )),
+                )
+            }
+        }
+        Ok(None) => doctor_check(
+            "path_lookup",
+            "PATH lookup",
+            DoctorStatus::Warn,
+            format!("{binary_name} was not found in PATH"),
+            Some(format!(
+                "Install the bundled CLI or add its directory to PATH. Expected install path: {}",
+                expected_cli_install_path()
+            )),
+        ),
+        Err(error) => doctor_check(
+            "path_lookup",
+            "PATH lookup",
+            DoctorStatus::Warn,
+            "Failed to inspect PATH".to_string(),
+            Some(error),
+        ),
+    }
+}
+
+fn build_endpoint_presence_check(
+    endpoint: &connect::EndpointResolution,
+    inspection: &connect::EndpointInspection,
+) -> DoctorCheck {
+    #[cfg(windows)]
+    {
+        let _ = inspection;
+        return doctor_check(
+            "endpoint_presence",
+            "Endpoint presence",
+            DoctorStatus::Warn,
+            format!(
+                "Named pipe presence is not statically probed on Windows: {}",
+                endpoint.display()
+            ),
+            Some("Use the GUI connectivity check below as the authoritative signal".to_string()),
+        );
+    }
+
+    if let Some(error) = inspection.metadata_error.as_ref() {
+        return doctor_check(
+            "endpoint_presence",
+            "Endpoint presence",
+            DoctorStatus::Fail,
+            format!("Unable to inspect endpoint: {}", endpoint.display()),
+            Some(error.clone()),
+        );
+    }
+
+    if !inspection.exists {
+        return doctor_check(
+            "endpoint_presence",
+            "Endpoint presence",
+            DoctorStatus::Fail,
+            format!("Endpoint not found: {}", endpoint.display()),
+            Some("Start OxideTerm, or pass --socket/--pipe if you are targeting a non-default endpoint".to_string()),
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        if inspection.kind.as_deref() != Some("socket") {
+            return doctor_check(
+                "endpoint_presence",
+                "Endpoint presence",
+                DoctorStatus::Fail,
+                format!(
+                    "Endpoint exists but is not a Unix socket: {}",
+                    endpoint.display()
+                ),
+                inspection
+                    .kind
+                    .as_ref()
+                    .map(|kind| format!("Detected endpoint type: {kind}")),
+            );
+        }
+    }
+
+    doctor_check(
+        "endpoint_presence",
+        "Endpoint presence",
+        DoctorStatus::Ok,
+        format!("Endpoint exists: {}", endpoint.display()),
+        None,
+    )
+}
+
+fn build_endpoint_ownership_check(inspection: &connect::EndpointInspection) -> DoctorCheck {
+    #[cfg(unix)]
+    {
+        if !inspection.exists {
+            return doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Warn,
+                "Ownership was not checked because the endpoint is missing".to_string(),
+                None,
+            );
+        }
+
+        if let Some(error) = inspection.metadata_error.as_ref() {
+            return doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Fail,
+                "Unable to inspect endpoint ownership".to_string(),
+                Some(error.clone()),
+            );
+        }
+
+        if inspection.kind.as_deref() != Some("socket") {
+            return doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Warn,
+                "Ownership was not checked because the endpoint is not a Unix socket".to_string(),
+                inspection
+                    .kind
+                    .as_ref()
+                    .map(|kind| format!("Detected endpoint type: {kind}")),
+            );
+        }
+
+        match (
+            inspection.ownership_matches,
+            inspection.owner_uid,
+            inspection.current_uid,
+        ) {
+            (Some(true), Some(owner_uid), Some(current_uid)) => doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Ok,
+                format!("Endpoint owner uid {owner_uid} matches current uid {current_uid}"),
+                None,
+            ),
+            (Some(false), Some(owner_uid), Some(current_uid)) => doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Fail,
+                format!("Endpoint owner uid {owner_uid} does not match current uid {current_uid}"),
+                Some("This can indicate a stale socket or a local security issue".to_string()),
+            ),
+            _ => doctor_check(
+                "endpoint_ownership",
+                "Endpoint ownership",
+                DoctorStatus::Warn,
+                "Ownership information is unavailable for this endpoint".to_string(),
+                None,
+            ),
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = inspection;
+        doctor_check(
+            "endpoint_ownership",
+            "Endpoint ownership",
+            DoctorStatus::Warn,
+            "Named pipe ownership checks are not yet implemented on Windows".to_string(),
+            None,
+        )
+    }
+}
+
+fn build_compatibility_check(status: &serde_json::Value) -> DoctorCheck {
+    let compatibility = check_compatibility(status.clone());
+    if let Some(error) = compatibility.error {
+        return doctor_check(
+            "cli_api_compatibility",
+            "CLI API compatibility",
+            DoctorStatus::Fail,
+            error,
+            None,
+        );
+    }
+    if let Some(warning) = compatibility.warning {
+        return doctor_check(
+            "cli_api_compatibility",
+            "CLI API compatibility",
+            DoctorStatus::Warn,
+            warning,
+            None,
+        );
+    }
+
+    let server_version = status
+        .pointer("/cli_api/version")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(CLI_API_CURRENT_VERSION);
+    let server_min = status
+        .pointer("/cli_api/min_supported")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(server_version);
+
+    doctor_check(
+        "cli_api_compatibility",
+        "CLI API compatibility",
+        DoctorStatus::Ok,
+        format!(
+            "CLI API ranges overlap: client {}-{}, server {}-{}",
+            CLI_API_MIN_SUPPORTED_VERSION, CLI_API_CURRENT_VERSION, server_min, server_version
+        ),
+        None,
+    )
+}
+
+fn expected_cli_install_path() -> String {
+    #[cfg(unix)]
+    {
+        if let Some(home) = dirs::home_dir() {
+            return home
+                .join(".local")
+                .join("bin")
+                .join("oxt")
+                .display()
+                .to_string();
+        }
+        "/usr/local/bin/oxt".to_string()
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(local_app_data) = dirs::data_local_dir() {
+            return local_app_data
+                .join("OxideTerm")
+                .join("bin")
+                .join("oxt.exe")
+                .display()
+                .to_string();
+        }
+        "oxt.exe".to_string()
+    }
+}
+
+fn cli_binary_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "oxt.exe"
+    }
+
+    #[cfg(not(windows))]
+    {
+        "oxt"
+    }
+}
+
+fn find_command_in_path(binary_name: &str) -> Result<Option<PathCandidate>, String> {
+    let path_var = std::env::var_os("PATH").ok_or("PATH is not set")?;
+
+    #[cfg(windows)]
+    {
+        let mut candidates = vec![binary_name.to_string()];
+        if !binary_name.contains('.') {
+            if let Some(pathext) = std::env::var_os("PATHEXT") {
+                for ext in std::env::split_paths(&std::path::PathBuf::from(pathext)) {
+                    let ext = ext.to_string_lossy();
+                    candidates.push(format!("{binary_name}{ext}"));
+                }
+            }
+        }
+
+        for dir in std::env::split_paths(&path_var) {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if path.is_file() {
+                    return Ok(Some(PathCandidate {
+                        path,
+                        executable: true,
+                        broken_symlink: false,
+                    }));
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
+        for dir in std::env::split_paths(&path_var) {
+            let path = dir.join(binary_name);
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+
+            if metadata.file_type().is_symlink() && !path.exists() {
+                return Ok(Some(PathCandidate {
+                    path,
+                    executable: false,
+                    broken_symlink: true,
+                }));
+            }
+
+            let executable = std::fs::metadata(&path)
+                .map(|target| target.is_file() && (target.permissions().mode() & 0o111 != 0))
+                .unwrap_or(false);
+
+            if metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || metadata.file_type().is_socket()
+            {
+                return Ok(Some(PathCandidate {
+                    path,
+                    executable,
+                    broken_symlink: false,
+                }));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn fetch_compatibility_report(
@@ -1517,9 +2176,16 @@ fn run_attach(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_compatibility, protocol_ranges_overlap, read_stdin_from_reader, Cli};
+    use super::{
+        build_compatibility_check, build_endpoint_ownership_check, build_path_check,
+        check_compatibility, protocol_ranges_overlap, read_stdin_from_reader, Cli, DoctorStatus,
+    };
+    use crate::connect;
     use clap::CommandFactory;
     use std::io::Cursor;
+    use std::sync::Mutex;
+
+    static PATH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn render_help(path: &[&str]) -> String {
         let mut command = Cli::command().term_width(100);
@@ -1571,6 +2237,14 @@ mod tests {
         assert_eq!(
             normalize_help(&render_help(&["ask"])),
             normalize_help(include_str!("../tests/snapshots/oxt-ask-help.txt"))
+        );
+    }
+
+    #[test]
+    fn doctor_help_matches_snapshot() {
+        assert_eq!(
+            normalize_help(&render_help(&["doctor"])),
+            normalize_help(include_str!("../tests/snapshots/oxt-doctor-help.txt"))
         );
     }
 
@@ -1649,5 +2323,102 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("CLI API mismatch"));
+    }
+
+    #[test]
+    fn compatibility_check_builds_ok_doctor_item() {
+        let check = build_compatibility_check(&serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "cli_api": { "version": 1, "min_supported": 1 },
+            "sessions": 0,
+            "connections": { "ssh": 0, "local": 0 }
+        }));
+
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.summary.contains("CLI API ranges overlap"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_lookup_warns_on_non_executable_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let path_dir = temp_dir.path().join("path-dir");
+        let current_dir = temp_dir.path().join("current-dir");
+        std::fs::create_dir_all(&path_dir).unwrap();
+        std::fs::create_dir_all(&current_dir).unwrap();
+
+        let path_hit = path_dir.join("oxt");
+        let current_exe = current_dir.join("oxt");
+        std::fs::write(&path_hit, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&current_exe, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path_hit, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths([path_dir.as_path(), current_dir.as_path()]).unwrap(),
+        );
+
+        let check = build_path_check(Some(&current_exe));
+
+        match old_path {
+            Some(old_path) => std::env::set_var("PATH", old_path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.summary.contains("non-executable file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_lookup_warns_on_broken_symlink() {
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let path_dir = temp_dir.path().join("path-dir");
+        let current_dir = temp_dir.path().join("current-dir");
+        std::fs::create_dir_all(&path_dir).unwrap();
+        std::fs::create_dir_all(&current_dir).unwrap();
+
+        let broken_target = path_dir.join("missing-oxt");
+        let path_hit = path_dir.join("oxt");
+        let current_exe = current_dir.join("oxt");
+        std::fs::write(&current_exe, b"#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(&broken_target, &path_hit).unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths([path_dir.as_path(), current_dir.as_path()]).unwrap(),
+        );
+
+        let check = build_path_check(Some(&current_exe));
+
+        match old_path {
+            Some(old_path) => std::env::set_var("PATH", old_path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.summary.contains("broken symlink"));
+    }
+
+    #[test]
+    fn ownership_check_skips_non_socket_endpoints() {
+        let check = build_endpoint_ownership_check(&connect::EndpointInspection {
+            exists: true,
+            kind: Some("file".to_string()),
+            metadata_error: None,
+            ownership_matches: Some(true),
+            owner_uid: Some(501),
+            current_uid: Some(501),
+        });
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.summary.contains("not a Unix socket"));
     }
 }

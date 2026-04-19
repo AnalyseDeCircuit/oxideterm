@@ -1,0 +1,7 @@
+Diagnose CLI installation and GUI connectivity
+
+Usage: doctor
+
+Options:
+  -h, --help
+          Print help
