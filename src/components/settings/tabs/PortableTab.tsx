@@ -62,12 +62,17 @@ export const PortableTab = () => {
         : portableRuntime?.activation === 'marker'
             ? t('settings_view.general.portable_activation_marker')
             : t('settings_view.general.portable_activation_disabled');
+    const isPortableRuntime = portableRuntime?.isPortable ?? migrationSummary?.isPortable ?? false;
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div>
                 <h3 className="text-2xl font-medium text-theme-text-heading mb-2">{t('settings_view.general.portable_runtime')}</h3>
-                <p className="text-theme-text-muted">{t('settings_view.portable_description')}</p>
+                <p className="text-theme-text-muted">
+                    {isPortableRuntime
+                        ? t('settings_view.portable_description')
+                        : t('settings_view.general.portable_runtime_disabled_hint')}
+                </p>
             </div>
             <Separator />
 

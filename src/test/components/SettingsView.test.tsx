@@ -275,4 +275,41 @@ describe('SettingsView portable loading', () => {
       expect(screen.getByText('settings_view.general.portable_migration_export')).toBeInTheDocument();
     });
   });
+
+  it('shows the disabled portable runtime copy when the profile is not portable', async () => {
+    apiMocks.getPortableStatus.mockResolvedValueOnce({
+      isPortable: false,
+      activation: 'disabled',
+      hostKind: 'macAppBundle',
+      status: 'disabled',
+      canLaunchApp: true,
+      hasKeystore: false,
+      isUnlocked: false,
+      keystorePath: null,
+      portableRootDir: '/Applications/OxideTerm.app',
+      markerPath: '/Applications/portable',
+      configPath: '/Applications/portable.json',
+      instanceLockPath: null,
+      supportsBiometricBinding: true,
+      hasBiometricBinding: false,
+      canBiometricUnlock: false,
+    });
+    apiMocks.getPortableMigrationSummary.mockResolvedValueOnce({
+      isPortable: false,
+      currentDataDir: '/Users/test/.oxideterm',
+      portableDataDir: '/Applications/data',
+      exportablePortableSecretCount: 1,
+    });
+
+    render(<SettingsView />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings_view.general.portable_runtime' }));
+
+    await waitFor(() => {
+      expect(apiMocks.getPortableStatus).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByText('settings_view.general.portable_runtime_disabled_hint').length).toBeGreaterThan(0);
+    });
+
+    expect(screen.queryByText('settings_view.portable_description')).not.toBeInTheDocument();
+  });
 });
