@@ -1426,6 +1426,12 @@ describe('aiChatStore workflows', () => {
       expect.objectContaining({ role: 'system', content: expect.stringContaining('CONTEXT BLOCK') }),
       expect.objectContaining({ role: 'system', content: 'REMINDER' }),
     ]));
+    const firstNonSystemIndex = providerMessages.findIndex((message) => message.role !== 'system');
+    const reminderIndex = providerMessages.findIndex(
+      (message) => message.role === 'system' && message.content === 'REMINDER',
+    );
+    expect(reminderIndex).toBeGreaterThanOrEqual(0);
+    expect(firstNonSystemIndex).toBeGreaterThan(reminderIndex);
   });
 
   it('reuses a pre-sampled sidebar context without gathering again', async () => {
@@ -1499,6 +1505,12 @@ describe('aiChatStore workflows', () => {
       expect.objectContaining({ role: 'system', content: expect.stringContaining('EXPLICIT BUFFER') }),
       expect.objectContaining({ role: 'system', content: 'PRE-SAMPLED REMINDER' }),
     ]));
+    const firstNonSystemIndex = providerMessages.findIndex((message) => message.role !== 'system');
+    const reminderIndex = providerMessages.findIndex(
+      (message) => message.role === 'system' && message.content === 'PRE-SAMPLED REMINDER',
+    );
+    expect(reminderIndex).toBeGreaterThanOrEqual(0);
+    expect(firstNonSystemIndex).toBeGreaterThan(reminderIndex);
   });
 
   it('captures default sidebar context before async reference resolution starts', async () => {

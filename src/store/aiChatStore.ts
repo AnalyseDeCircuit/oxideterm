@@ -1455,6 +1455,11 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       console.warn('[AiChatStore] Failed to persist session/budget metadata:', e);
     }
 
+    // Keep all system messages at the front for providers that reject
+    // mid-conversation system prompts.
+    const contextReminder = sidebarContext ? buildContextReminder(sidebarContext) : null;
+    const hasSubstantialHistory = trimResult.messages.length > 2;
+
     // Inject anchor as system context if present
     if (historyState.anchorMsg) {
       apiMessages.push({
@@ -1470,23 +1475,21 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
       });
     }
 
+    // Inject a compact context reminder before conversation history.
+    // This prevents stale context from confusing the LLM about which
+    // tab/terminal is active when the user switches mid-conversation.
+    // Only needed when there's enough history that the original system prompt
+    // environment info may be stale or far away in the context window.
+    if (contextReminder && hasSubstantialHistory) {
+      apiMessages.push({ role: 'system', content: contextReminder });
+    }
+
     for (const msg of trimResult.messages) {
       if ((msg.role === 'user' || msg.role === 'assistant') && msg.content.trim() !== '') {
         // For the current user message, use cleanContent (stripped of /@ # tokens)
         const msgContent = msg.id === userMessage.id ? cleanContent : msg.content;
         apiMessages.push({ role: msg.role, content: msgContent });
       }
-    }
-
-    // Inject a compact context reminder after all history messages.
-    // This prevents stale context from confusing the LLM about which
-    // tab/terminal is active when the user switches mid-conversation.
-    // Only needed when there's enough history that the original system prompt
-    // environment info may be stale or far away in the context window.
-    const contextReminder = sidebarContext ? buildContextReminder(sidebarContext) : null;
-    const hasSubstantialHistory = trimResult.messages.length > 2;
-    if (contextReminder && hasSubstantialHistory) {
-      apiMessages.push({ role: 'system', content: contextReminder });
     }
 
     // Track trimmed messages for UI notification
