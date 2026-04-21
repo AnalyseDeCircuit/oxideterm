@@ -1,6 +1,6 @@
 # trzsz Integration Baseline
 
-Status: Phase 3 completed on 2026-04-21
+Status: Phase 0.5 completed on 2026-04-22
 
 This directory is the OxideTerm-owned adapter boundary for trzsz integration. Phase 0 deliberately avoids runtime logic changes and only freezes upstream metadata, repository layout, and the future file map.
 
@@ -152,10 +152,26 @@ Implemented outputs:
 Modified files:
 
 - `src/lib/terminal/trzsz/README.md`
+- `src/lib/terminal/trzsz/UPSTREAM_DIFF.md`
+- `scripts/local-verify.cjs`
+- `package.json`
 
 New files:
 
 - `scripts/check-trzsz-version.cjs`
+- `scripts/trzsz-regression.cjs`
+- `src/test/lib/terminal/trzsz/TauriFileReader.test.ts`
+
+Phase 0.5 completed on `2026-04-22`.
+
+Implemented outputs:
+
+1. `UPSTREAM_DIFF.md` now records the vendored upstream repository, npm version, commit, modified file list, and per-file maintenance rationale next to the vendored fork.
+2. `scripts/check-trzsz-version.cjs` now verifies that the frozen version and commit recorded in `README.md`, `UPSTREAM_DIFF.md`, and `upstream/comm.ts` stay in sync and that every documented vendored file still exists.
+3. `scripts/trzsz-regression.cjs` now provides a repeatable maintenance matrix covering single-file upload, directory upload, single-file download, directory download, cancel cleanup, malicious path rejection, and full frontend/Rust suites.
+4. `src/test/lib/terminal/trzsz/TauriFileReader.test.ts` now gives the maintenance matrix an explicit frontend anchor for upload-reader semantics and recursive directory upload entry hydration.
+5. `package.json` now exposes `pnpm trzsz:check-fork`, `pnpm trzsz:regression:list`, `pnpm trzsz:regression`, and `pnpm trzsz:maintain` as the stable fork-maintenance entrypoints.
+6. `scripts/local-verify.cjs` now prints a post-verify maintainer hint that points directly at the trzsz fork metadata and regression entrypoints.
 
 ### Phase 4
 

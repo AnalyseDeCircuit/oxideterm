@@ -90,6 +90,9 @@ function main() {
   }
 
   console.log("\n[local-verify] All requested steps passed.");
+  console.log(
+    "[local-verify] trzsz fork maintenance: pnpm trzsz:maintain (details: src/lib/terminal/trzsz/UPSTREAM_DIFF.md).",
+  );
 }
 
 main();
