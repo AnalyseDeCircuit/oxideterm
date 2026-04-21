@@ -20,16 +20,23 @@ type Handler = (event: KeyboardEvent) => boolean;
 
 function createTerminalMock() {
   let handler: Handler | null = null;
+  let selectionHandler: (() => void) | null = null;
 
   return {
     term: {
       attachCustomKeyEventHandler: vi.fn((nextHandler: Handler) => {
         handler = nextHandler;
       }),
+      onSelectionChange: vi.fn((nextHandler: () => void) => {
+        selectionHandler = nextHandler;
+        return { dispose: vi.fn() };
+      }),
       hasSelection: vi.fn(() => false),
       getSelection: vi.fn(() => ''),
+      modes: { mouseTrackingMode: 'none' },
     } as unknown as Terminal,
     getHandler: () => handler,
+    triggerSelectionChange: () => selectionHandler?.(),
   };
 }
 
@@ -45,6 +52,7 @@ describe('attachTerminalSmartCopy', () => {
     vi.clearAllMocks();
     setOverrides(new Map());
     vi.mocked(writeSystemClipboardText).mockResolvedValue(true);
+    vi.useRealTimers();
   });
 
   it('copies the current selection and consumes Ctrl+C when enabled', () => {
@@ -229,5 +237,52 @@ describe('attachTerminalSmartCopy', () => {
 
     expect(handled).toBe(true);
     expect(onPasteShortcut).not.toHaveBeenCalled();
+  });
+
+  it('copies the selection after it stabilizes when copy-on-select is enabled', async () => {
+    vi.useFakeTimers();
+    const { term, triggerSelectionChange } = createTerminalMock();
+    const copyText = vi.mocked(writeSystemClipboardText);
+    const getSelection = vi.mocked(term.getSelection);
+
+    getSelection.mockReturnValue('copied by mouse');
+
+    attachTerminalSmartCopy(term, {
+      isActive: () => true,
+      isEnabled: () => true,
+      isCopyOnSelectEnabled: () => true,
+    });
+
+    triggerSelectionChange();
+    vi.advanceTimersByTime(119);
+    expect(copyText).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+
+    expect(copyText).toHaveBeenCalledWith('copied by mouse');
+  });
+
+  it('pastes on middle click when the feature is enabled', () => {
+    const { term } = createTerminalMock();
+    const onPasteShortcut = vi.fn();
+    const container = document.createElement('div');
+
+    attachTerminalSmartCopy(term, {
+      isActive: () => true,
+      isEnabled: () => true,
+      isMiddleClickPasteEnabled: () => true,
+      onPasteShortcut,
+      container,
+    });
+
+    const event = new MouseEvent('mouseup', { button: 1, bubbles: true, cancelable: true });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    const stopPropagation = vi.spyOn(event, 'stopPropagation');
+    container.dispatchEvent(event);
+
+    expect(onPasteShortcut).toHaveBeenCalledOnce();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
   });
 });

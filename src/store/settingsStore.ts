@@ -138,6 +138,8 @@ export interface TerminalSettings {
   pasteProtection: boolean; // Confirm before pasting multi-line content
   smartCopy: boolean; // Ctrl+C copies selection on Windows/Linux, otherwise passes SIGINT
   osc52Clipboard: boolean;  // Allow remote programs to write system clipboard via OSC 52
+  copyOnSelect: boolean; // Copy terminal selection to the system clipboard when it stabilizes
+  middleClickPaste: boolean; // Paste clipboard contents on middle-click when mouse tracking is inactive
   selectionRequiresShift: boolean; // Require Shift + drag before starting text selection
   // Background image settings
   backgroundEnabled: boolean;        // Master toggle — false = no bg image anywhere
@@ -374,6 +376,8 @@ const defaultTerminalSettings: TerminalSettings = {
   pasteProtection: true,  // Default enabled for safety
   smartCopy: true,
   osc52Clipboard: true,  // Default enabled: allow remote programs to write system clipboard via OSC 52
+  copyOnSelect: false,
+  middleClickPaste: false,
   selectionRequiresShift: false,
   // Background image defaults
   backgroundEnabled: true,
@@ -1537,6 +1541,8 @@ const TERMINAL_BEHAVIOR_KEYS: Array<keyof TerminalSettings> = [
   'pasteProtection',
   'smartCopy',
   'osc52Clipboard',
+  'copyOnSelect',
+  'middleClickPaste',
   'selectionRequiresShift',
   'highlightRules',
 ];

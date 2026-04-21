@@ -7,12 +7,18 @@ import { platform } from '@/lib/platform';
 import { writeSystemClipboardText } from '@/lib/clipboardSupport';
 
 type Disposable = { dispose: () => void };
+type SelectionDisposable = { dispose: () => void };
 
 type TerminalSmartCopyOptions = {
   isActive: () => boolean;
   isEnabled: () => boolean;
+  isCopyOnSelectEnabled?: () => boolean;
+  isMiddleClickPasteEnabled?: () => boolean;
   onPasteShortcut?: () => void;
+  container?: HTMLElement | null;
 };
+
+const COPY_ON_SELECT_DEBOUNCE_MS = 120;
 
 function isSmartCopyShortcut(event: KeyboardEvent): boolean {
   if (event.type !== 'keydown') return false;
@@ -51,6 +57,90 @@ function copySelection(selection: string): void {
 function consumeKeyboardEvent(event: KeyboardEvent): void {
   event.preventDefault();
   event.stopPropagation();
+}
+
+function consumeMouseEvent(event: MouseEvent): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function installCopyOnSelect(
+  term: Terminal,
+  options: TerminalSmartCopyOptions,
+): Disposable {
+  if (!options.isCopyOnSelectEnabled) {
+    return { dispose: () => undefined };
+  }
+
+  let copyTimer: number | null = null;
+  const clearCopyTimer = () => {
+    if (copyTimer !== null) {
+      window.clearTimeout(copyTimer);
+      copyTimer = null;
+    }
+  };
+
+  const selectionDisposable: SelectionDisposable | undefined = term.onSelectionChange?.(() => {
+    if (!options.isActive() || !options.isCopyOnSelectEnabled?.()) {
+      clearCopyTimer();
+      return;
+    }
+
+    const selection = term.getSelection();
+    if (!selection) {
+      clearCopyTimer();
+      return;
+    }
+
+    clearCopyTimer();
+    copyTimer = window.setTimeout(() => {
+      copyTimer = null;
+      const currentSelection = term.getSelection();
+      if (!currentSelection || !options.isActive() || !options.isCopyOnSelectEnabled?.()) {
+        return;
+      }
+      copySelection(currentSelection);
+    }, COPY_ON_SELECT_DEBOUNCE_MS);
+  });
+
+  return {
+    dispose: () => {
+      clearCopyTimer();
+      selectionDisposable?.dispose();
+    },
+  };
+}
+
+function installMiddleClickPaste(
+  term: Terminal,
+  options: TerminalSmartCopyOptions,
+): Disposable {
+  const container = options.container;
+  if (!container || !options.isMiddleClickPasteEnabled || !options.onPasteShortcut) {
+    return { dispose: () => undefined };
+  }
+
+  const handleMouseUp = (event: MouseEvent) => {
+    if (event.button !== 1) {
+      return;
+    }
+    if (!options.isActive() || !options.isMiddleClickPasteEnabled?.()) {
+      return;
+    }
+    if (term.modes.mouseTrackingMode !== 'none') {
+      return;
+    }
+
+    consumeMouseEvent(event);
+    options.onPasteShortcut?.();
+  };
+
+  container.addEventListener('mouseup', handleMouseUp);
+  return {
+    dispose: () => {
+      container.removeEventListener('mouseup', handleMouseUp);
+    },
+  };
 }
 
 export function attachTerminalSmartCopy(
@@ -94,8 +184,13 @@ export function attachTerminalSmartCopy(
     return true;
   });
 
+  const copyOnSelectDisposable = installCopyOnSelect(term, options);
+  const middleClickPasteDisposable = installMiddleClickPaste(term, options);
+
   return {
     dispose: () => {
+      copyOnSelectDisposable.dispose();
+      middleClickPasteDisposable.dispose();
       term.attachCustomKeyEventHandler(() => true);
     },
   };

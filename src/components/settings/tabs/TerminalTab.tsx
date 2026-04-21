@@ -259,6 +259,20 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
                 )}
                 <div className="flex items-center justify-between mt-4">
                     <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.copy_on_select')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.copy_on_select_hint')}</p>
+                    </div>
+                    <Checkbox id="copy-on-select" checked={terminal.copyOnSelect} onCheckedChange={(checked) => updateTerminal('copyOnSelect', checked as boolean)} />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.middle_click_paste')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.middle_click_paste_hint')}</p>
+                    </div>
+                    <Checkbox id="middle-click-paste" checked={terminal.middleClickPaste} onCheckedChange={(checked) => updateTerminal('middleClickPaste', checked as boolean)} />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
                         <Label className="text-theme-text">{t('settings_view.terminal.selection_requires_shift')}</Label>
                         <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.selection_requires_shift_hint')}</p>
                     </div>

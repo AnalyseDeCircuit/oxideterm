@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,11 @@ export const EditConnectionPropertiesModal = ({
   const [keyPath, setKeyPath] = useState('');
   const [certPath, setCertPath] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordLoaded, setPasswordLoaded] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
   const [group, setGroup] = useState('');
   const [color, setColor] = useState('');
   const [groups, setGroups] = useState<string[]>([]);
@@ -74,11 +80,40 @@ export const EditConnectionPropertiesModal = ({
       setKeyPath(connection.key_path || '');
       setCertPath(connection.cert_path || '');
       setPassphrase('');
+      setPassword('');
+      setPasswordLoaded(false);
+      setPasswordVisible(false);
+      setPasswordLoading(false);
+      setPasswordError('');
       setGroup(connection.group || 'Ungrouped');
       setColor(connection.color || '');
       api.getGroups().then(setGroups).catch(() => setGroups([]));
     }
   }, [isOpen, connection]);
+
+  const handlePasswordVisibilityToggle = async () => {
+    const conn = connectionRef.current;
+    if (!conn) return;
+
+    if (passwordLoaded) {
+      setPasswordVisible((prev) => !prev);
+      return;
+    }
+
+    setPasswordLoading(true);
+    setPasswordError('');
+    try {
+      const storedPassword = await api.getConnectionPassword(conn.id);
+      setPassword(storedPassword);
+      setPasswordLoaded(true);
+      setPasswordVisible(true);
+    } catch (e) {
+      console.error('Failed to load saved password:', e);
+      setPasswordError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
 
   const handleBrowseKey = async () => {
     try {
@@ -133,6 +168,7 @@ export const EditConnectionPropertiesModal = ({
         port: parseInt(port) || 22,
         username,
         auth_type: authType,
+        password: authType === 'password' && passwordLoaded ? password : undefined,
         key_path: (authType === 'key' || authType === 'certificate') ? keyPath : undefined,
         cert_path: authType === 'certificate' ? certPath : undefined,
         passphrase: (authType === 'key' || authType === 'certificate') && passphrase ? passphrase : undefined,
@@ -218,9 +254,39 @@ export const EditConnectionPropertiesModal = ({
               </TabsList>
 
               <TabsContent value="password">
-                <p className="text-xs text-theme-text-muted pt-2">
-                  {t('sessionManager.edit_properties.password_hint')}
-                </p>
+                <div className="space-y-2 pt-2">
+                  <Label htmlFor="edit-password">{t('sessionManager.edit_properties.saved_password')}</Label>
+                  <div className="relative">
+                    <Input
+                      id="edit-password"
+                      type={passwordVisible ? 'text' : 'password'}
+                      value={passwordLoaded ? password : ''}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={t('sessionManager.edit_properties.password_placeholder')}
+                      className="pr-11"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      radius="sm"
+                      onClick={handlePasswordVisibilityToggle}
+                      disabled={passwordLoading}
+                      className="absolute right-1 top-1 h-7 w-7 text-theme-text-muted hover:text-theme-text"
+                      aria-label={passwordVisible
+                        ? t('sessionManager.edit_properties.hide_password')
+                        : t('sessionManager.edit_properties.show_password')}
+                    >
+                      {passwordLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : passwordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-theme-text-muted">
+                    {t('sessionManager.edit_properties.password_hint')}
+                  </p>
+                  {passwordError && (
+                    <p className="text-xs text-theme-error">{passwordError}</p>
+                  )}
+                </div>
               </TabsContent>
 
               <TabsContent value="key">

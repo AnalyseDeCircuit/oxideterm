@@ -1123,12 +1123,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       clipboardAddonRef.current = addon;
     });
 
-    smartCopyDisposableRef.current = attachTerminalSmartCopy(term, {
-      isActive: () => isActiveRef.current,
-      isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
-      onPasteShortcut: handlePasteShortcut,
-    });
-
     highlightEngineRef.current = new HighlightEngine(term, getEffectiveHighlightRules(terminalSettings.highlightRules), {
       onRulesAutoDisabled: handleHighlightRulesAutoDisabled,
     });
@@ -1223,6 +1217,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     loadRenderer();
 
     term.open(containerRef.current);
+    smartCopyDisposableRef.current = attachTerminalSmartCopy(term, {
+      isActive: () => isActiveRef.current,
+      isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
+      isCopyOnSelectEnabled: () => useSettingsStore.getState().settings.terminal.copyOnSelect,
+      isMiddleClickPasteEnabled: () => useSettingsStore.getState().settings.terminal.middleClickPaste,
+      onPasteShortcut: handlePasteShortcut,
+      container: containerRef.current,
+    });
     selectionGestureRef.current = installShiftSelectionGuard(
       term,
       () => useSettingsStore.getState().settings.terminal.selectionRequiresShift,

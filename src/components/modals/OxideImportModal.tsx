@@ -271,6 +271,12 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
         return t('settings_view.terminal.smart_copy');
       case 'osc52Clipboard':
         return t('settings_view.terminal.osc52_clipboard');
+      case 'copyOnSelect':
+        return t('settings_view.terminal.copy_on_select');
+      case 'middleClickPaste':
+        return t('settings_view.terminal.middle_click_paste');
+      case 'selectionRequiresShift':
+        return t('settings_view.terminal.selection_requires_shift');
       case 'sidebarCollapsedDefault':
         return t('modals.settings.appearance.sidebar_collapse');
       case 'uiDensity':

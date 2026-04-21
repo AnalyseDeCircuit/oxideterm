@@ -217,6 +217,42 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.terminal.selectionRequiresShift).toBe(false);
   });
 
+  it('defaults copyOnSelect and middleClickPaste to false when omitted', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.copyOnSelect).toBe(false);
+    expect(useSettingsStore.getState().settings.terminal.middleClickPaste).toBe(false);
+  });
+
+  it('preserves explicit copyOnSelect and middleClickPaste settings on load and update', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: {
+        theme: 'default',
+        renderer: 'auto',
+        copyOnSelect: true,
+        middleClickPaste: true,
+      },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.copyOnSelect).toBe(true);
+    expect(useSettingsStore.getState().settings.terminal.middleClickPaste).toBe(true);
+
+    useSettingsStore.getState().updateTerminal('copyOnSelect', false);
+    useSettingsStore.getState().updateTerminal('middleClickPaste', false);
+
+    expect(useSettingsStore.getState().settings.terminal.copyOnSelect).toBe(false);
+    expect(useSettingsStore.getState().settings.terminal.middleClickPaste).toBe(false);
+    const persisted = JSON.parse(localStorage.getItem('oxide-settings-v2') || '{}');
+    expect(persisted.terminal.copyOnSelect).toBe(false);
+    expect(persisted.terminal.middleClickPaste).toBe(false);
+  });
+
   it('preserves an explicit selectionRequiresShift setting on load and update', async () => {
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
       terminal: { theme: 'default', renderer: 'auto', selectionRequiresShift: true },
