@@ -245,16 +245,15 @@ describe('TrzszController', () => {
   it('keeps cleanup protocol pinned to the original transport after the controller runtime is invalidated', async () => {
     vi.useFakeTimers();
 
-    const writeServerOutput = vi.fn();
-    const transport = createTransportMock();
-    const cleanupOwner = vi.fn(async () => undefined);
-    let runtimeCurrent = true;
-    let resolveSaveRoot: ((value: TrzszSaveRoot | undefined) => void) | null = null;
-    vi.mocked(chooseSaveRoot).mockImplementation(
-      () => new Promise((resolve) => {
-        resolveSaveRoot = resolve;
-      }),
-    );
+	    const writeServerOutput = vi.fn();
+	    const transport = createTransportMock();
+	    const cleanupOwner = vi.fn(async () => undefined);
+	    let runtimeCurrent = true;
+	    let finishSaveRootSelection!: (value: TrzszSaveRoot | undefined) => void;
+	    const saveRootSelection = new Promise<TrzszSaveRoot | undefined>((resolve) => {
+	      finishSaveRootSelection = resolve;
+	    });
+	    vi.mocked(chooseSaveRoot).mockImplementation(() => saveRootSelection);
 
     const controller = new TrzszController({
       sessionId: 'session-stale',
@@ -272,16 +271,16 @@ describe('TrzszController', () => {
     controller.processServerOutput(new TextEncoder().encode('::TRZSZ:TRANSFER:S:1.1.6:12345678\r\n'));
 
     await vi.runAllTimersAsync();
-    await flushMicrotasks();
-    vi.mocked(notifyTrzszTransferEvent).mockClear();
-
-    runtimeCurrent = false;
-    controller.dispose();
-    resolveSaveRoot?.({
-      rootPath: '/tmp/trzsz-downloads',
-      displayName: 'downloads',
-      maps: new Map(),
-    });
+	    await flushMicrotasks();
+		    vi.mocked(notifyTrzszTransferEvent).mockClear();
+		
+		    runtimeCurrent = false;
+		    controller.dispose();
+		    finishSaveRootSelection({
+		      rootPath: '/tmp/trzsz-downloads',
+		      displayName: 'downloads',
+		      maps: new Map(),
+		    });
 
     await vi.runAllTimersAsync();
     await flushMicrotasks();

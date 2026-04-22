@@ -2167,12 +2167,11 @@ export const SFTPView = ({ nodeId }: { nodeId: string }) => {
              isPathEditable={isRemotePathEditing}
              pathInputValue={remotePathInput}
              onPathInputChange={(v) => { setRemotePathInput(v); setIsRemotePathEditing(true); }}
-             onPathInputSubmit={handleRemotePathSubmit}
-             onPathEditStart={() => { setRemotePathInput(remotePath); setIsRemotePathEditing(true); }}
-             onPathEditCancel={() => { setRemotePathInput(remotePath); setIsRemotePathEditing(false); }}
-             isRemote={true}
-             t={t}
-           />
+	             onPathInputSubmit={handleRemotePathSubmit}
+	             onPathEditStart={() => { setRemotePathInput(remotePath); setIsRemotePathEditing(true); }}
+	             onPathEditCancel={() => { setRemotePathInput(remotePath); setIsRemotePathEditing(false); }}
+	             t={t}
+	           />
         </div>
       </div>
       

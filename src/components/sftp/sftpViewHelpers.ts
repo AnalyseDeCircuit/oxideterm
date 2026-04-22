@@ -41,6 +41,10 @@ export type ExternalUploadCandidate = {
   fileInfo: FileInfo;
 };
 
+function isDefined<T>(value: T | null): value is T {
+  return value !== null;
+}
+
 export function normalizeSftpTransferPath(path: string): string {
   if (!path) {
     return '';
@@ -152,7 +156,7 @@ export async function buildExternalUploadCandidates(
     } satisfies ExternalUploadCandidate;
   }));
 
-  return candidates.filter((candidate): candidate is ExternalUploadCandidate => candidate !== null);
+  return candidates.filter(isDefined);
 }
 
 function findUniquePathCandidate<T extends ProgressMatchCandidate>(
