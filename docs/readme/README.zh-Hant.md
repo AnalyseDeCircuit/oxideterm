@@ -212,18 +212,7 @@ impl Signer for AgentSigner { /* challenge-response via Agent IPC */ }
 - **供應商**：OpenAI、Ollama、DeepSeek、OneAPI 或任何 `/v1/chat/completions` 端點
 - **安全**：API 金鑰儲存於 OS 鑰匙圈；macOS 上金鑰讀取受 **Touch ID** 透過 `LAContext` 保護——無需授權簽章或程式碼簽署，每次工作階段首次驗證後快取
 
-### 💻 IDE 模式——遠端編輯
-
-CodeMirror 6 編輯器基於 SFTP 運作——預設無需伺服端安裝：
-
-- **檔案樹**：延遲載入目錄，帶 Git 狀態指示器（已修改/未追蹤/已新增）
-- **24 語言模式**：14 種原生 CodeMirror + 透過 `@codemirror/legacy-modes` 提供的傳統模式
-- **衝突解決**：樂觀 mtime 鎖定——覆寫前偵測遠端變更
-- **事件驅動 Git**：儲存、建立、刪除、重新命名及終端 Enter 按鍵時自動重新整理
-- **狀態閘控**：當 `readiness !== 'ready'` 時阻止所有 IO，Key-Driven Reset 在重連時強制完整重新掛載
-- **遠端 Agent**（可選）：~1 MB Rust 二進位檔，在 x86_64/aarch64 Linux 上自動部署。其他架構需要使用者自行從原始碼建置 Agent 並手動上傳。提供增強檔案樹、符號搜尋和檔案監視功能。
-
-### 🔀 連接埠轉發——無鎖 I/O
+###  連接埠轉發——無鎖 I/O
 
 完整的本機（-L）、遠端（-R）和動態 SOCKS5（-D）轉發：
 
@@ -297,6 +286,7 @@ CodeMirror 6 編輯器基於 SFTP 運作——預設無需伺服端安裝：
 
 ### 更多功能
 
+- **IDE 模式**：CodeMirror 6 基於 SFTP，24 種語言，帶 Git 狀態的檔案樹，多標籤，衝突解決——Linux 可選遠端 Agent（~1 MB）以增強功能
 - **資源分析器**：透過持久 SSH 通道讀取 `/proc/stat` 取得即時 CPU/記憶體/網路資料，基於增量計算，非 Linux 環境自動降級為僅 RTT
 - **自訂主題引擎**：30+ 內建主題，視覺化編輯器即時預覽，20 個 xterm.js 欄位 + 24 個 UI 顏色變數，從終端調色盤自動推導 UI 顏色
 - **工作階段錄製**：asciicast v2 格式，完整錄製和回放

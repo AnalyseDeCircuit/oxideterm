@@ -212,18 +212,7 @@ Asistente de IA centrado en la privacidad con dos modos de interacción:
 - **Proveedores**: OpenAI, Ollama, DeepSeek, OneAPI, o cualquier endpoint `/v1/chat/completions`
 - **Seguridad**: claves API almacenadas en el llavero del SO; en macOS, la lectura de claves protegida por **Touch ID** vía `LAContext` — sin entitlements ni firma de código requeridos, en caché tras la primera autenticación por sesión
 
-### 💻 Modo IDE — Edición remota
-
-Editor CodeMirror 6 operando sobre SFTP — sin instalación del lado del servidor requerida por defecto:
-
-- **Árbol de archivos**: carga diferida de directorios con indicadores de estado Git (modificado/sin seguimiento/añadido)
-- **24 modos de lenguaje**: 14 nativos de CodeMirror + modos heredados vía `@codemirror/legacy-modes`
-- **Resolución de conflictos**: bloqueo optimista por mtime — detecta cambios remotos antes de sobrescribir
-- **Git basado en eventos**: actualización automática al guardar, crear, eliminar, renombrar y pulsar Enter en el terminal
-- **State Gating**: todas las E/S bloqueadas cuando `readiness !== 'ready'`, Key-Driven Reset fuerza remontaje completo en reconexión
-- **Agente remoto** (opcional): binario Rust de ~1 MB, desplegado automáticamente en x86_64/aarch64 Linux. En otras arquitecturas, el usuario debe compilar el agente desde el código fuente y cargarlo manualmente. Habilita árbol de archivos mejorado, búsqueda de símbolos y vigilancia de archivos.
-
-### 🔀 Reenvío de puertos — I/O sin bloqueo
+###  Reenvío de puertos — I/O sin bloqueo
 
 Reenvío local (-L), remoto (-R) y dinámico SOCKS5 (-D) completo:
 
@@ -297,6 +286,7 @@ Shell local multiplataforma vía `portable-pty 0.8`, protegido por feature gate 
 
 ### Y más
 
+- **Modo IDE**: CodeMirror 6 vía SFTP, 24 lenguajes, árbol de archivos con estado Git, multi-pestaña, resolución de conflictos — agente remoto opcional (~1 MB) para funcionalidades mejoradas en Linux
 - **Perfilador de recursos**: CPU/memoria/red en vivo vía canal SSH persistente leyendo `/proc/stat`, cálculo basado en deltas, degradación automática a solo RTT en sistemas no Linux
 - **Motor de temas personalizado**: 30+ temas integrados, editor visual con vista previa en vivo, 20 campos xterm.js + 24 variables de color UI, derivación automática de colores UI desde la paleta del terminal
 - **Grabación de sesiones**: formato asciicast v2, grabación y reproducción completas

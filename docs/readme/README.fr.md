@@ -212,18 +212,7 @@ Assistant IA axé sur la confidentialité avec deux modes d'interaction :
 - **Fournisseurs** : OpenAI, Ollama, DeepSeek, OneAPI, ou tout endpoint `/v1/chat/completions`
 - **Sécurité** : clés API stockées dans le trousseau OS ; sur macOS, la lecture des clés est protégée par **Touch ID** via `LAContext` — aucun entitlement ni signature de code requis, mis en cache après la première authentification par session
 
-### 💻 Mode IDE — Édition distante
-
-Éditeur CodeMirror 6 opérant via SFTP — aucune installation côté serveur requise par défaut :
-
-- **Arborescence de fichiers** : chargement paresseux des répertoires avec indicateurs de statut Git (modifié/non suivi/ajouté)
-- **24 modes de langage** : 14 natifs CodeMirror + modes hérités via `@codemirror/legacy-modes`
-- **Résolution de conflits** : verrouillage optimiste par mtime — détecte les modifications distantes avant l'écrasement
-- **Git événementiel** : rafraîchissement automatique à la sauvegarde, création, suppression, renommage et touche Entrée du terminal
-- **State Gating** : toutes les E/S bloquées quand `readiness !== 'ready'`, Key-Driven Reset force un remontage complet à la reconnexion
-- **Agent distant** (optionnel) : binaire Rust d'environ 1 Mo, déployé automatiquement sur x86_64/aarch64 Linux. Sur les autres architectures, l'utilisateur doit compiler l'agent depuis les sources puis le téléverser manuellement. Active l'arborescence améliorée, la recherche de symboles et la surveillance de fichiers.
-
-### 🔀 Redirection de ports — I/O sans verrou
+###  Redirection de ports — I/O sans verrou
 
 Redirection locale (-L), distante (-R) et dynamique SOCKS5 (-D) complète :
 
@@ -297,6 +286,7 @@ Shell local multiplateforme via `portable-pty 0.8`, protégé par le feature gat
 
 ### Et plus encore
 
+- **Mode IDE** : CodeMirror 6 via SFTP, 24 langages, arborescence avec statut Git, multi-onglets, résolution de conflits — agent distant optionnel (~1 Mo) pour des fonctionnalités améliorées sur Linux
 - **Profileur de ressources** : CPU/mémoire/réseau en direct via canal SSH persistant lisant `/proc/stat`, calcul basé sur les deltas, dégradation automatique vers RTT-only sur les systèmes non-Linux
 - **Moteur de thèmes personnalisé** : 30+ thèmes intégrés, éditeur visuel avec aperçu en direct, 20 champs xterm.js + 24 variables de couleur UI, dérivation automatique des couleurs UI depuis la palette du terminal
 - **Enregistrement de session** : format asciicast v2, enregistrement et lecture complets

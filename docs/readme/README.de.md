@@ -212,18 +212,7 @@ Datenschutzorientierter KI-Assistent mit zwei Interaktionsmodi:
 - **Anbieter**: OpenAI, Ollama, DeepSeek, OneAPI oder jeder `/v1/chat/completions`-Endpunkt
 - **Sicherheit**: API-Schlüssel im Betriebssystem-Schlüsselbund gespeichert; unter macOS wird der Schlüsselzugriff durch **Touch ID** über `LAContext` geschützt — keine Entitlements oder Code-Signierung erforderlich, nach der ersten Authentifizierung pro Sitzung zwischengespeichert
 
-### 💻 IDE-Modus — Remote-Bearbeitung
-
-CodeMirror 6-Editor über SFTP — standardmäßig keine serverseitige Installation erforderlich:
-
-- **Dateibaum**: Lazy-Loading-Verzeichnisse mit Git-Statusindikatoren (geändert/nicht verfolgt/hinzugefügt)
-- **24 Sprachmodi**: 14 native CodeMirror + Legacy-Modi über `@codemirror/legacy-modes`
-- **Konfliktlösung**: optimistisches mtime-Locking — erkennt Remote-Änderungen vor dem Überschreiben
-- **Ereignisgesteuertes Git**: automatische Aktualisierung bei Speichern, Erstellen, Löschen, Umbenennen und Terminal-Enter-Tastendruck
-- **State Gating**: alle I/O-Operationen blockiert wenn `readiness !== 'ready'`, Key-Driven Reset erzwingt vollständiges Remount bei Reconnect
-- **Remote-Agent** (optional): ~1 MB Rust-Binärdatei, automatisches Deployment auf x86_64/aarch64 Linux. Auf anderen Architekturen muss der Agent aus dem Quellcode gebaut und manuell hochgeladen werden. Aktiviert erweiterten Dateibaum, Symbolsuche und Dateiüberwachung.
-
-### 🔀 Portweiterleitung — Lock-freie I/O
+###  Portweiterleitung — Lock-freie I/O
 
 Vollständige lokale (-L), Remote- (-R) und dynamische SOCKS5-Weiterleitung (-D):
 
@@ -297,6 +286,7 @@ Plattformübergreifende lokale Shell über `portable-pty 0.8`, Feature-gated hin
 
 ### Und mehr
 
+- **IDE-Modus**: CodeMirror 6 über SFTP, 24 Sprachen, Dateibaum mit Git-Status, Multi-Tab, Konflikterkennung — optionaler Remote-Agent (~1 MB) für erweiterte Funktionen unter Linux
 - **Ressourcen-Profiler**: Live CPU/Speicher/Netzwerk über persistenten SSH-Kanal, liest `/proc/stat`, deltabasierte Berechnung, automatischer Fallback auf RTT-only bei Nicht-Linux-Systemen
 - **Benutzerdefinierte Design-Engine**: 30+ integrierte Designs, visueller Editor mit Live-Vorschau, 20 xterm.js-Felder + 24 UI-Farbvariablen, automatische Ableitung der UI-Farben aus der Terminal-Palette
 - **Sitzungsaufzeichnung**: asciicast v2-Format, vollständige Aufzeichnung und Wiedergabe

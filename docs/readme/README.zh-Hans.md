@@ -212,18 +212,7 @@ impl Signer for AgentSigner { /* challenge-response via Agent IPC */ }
 - **供应商**：OpenAI、Ollama、DeepSeek、OneAPI 或任何 `/v1/chat/completions` 端点
 - **安全**：API 密钥存储在 OS 密钥链；macOS 上密钥读取受 **Touch ID** 通过 `LAContext` 保护——无需授权签名或代码签名，每次会话首次认证后缓存
 
-### 💻 IDE 模式——远程编辑
-
-CodeMirror 6 编辑器基于 SFTP 运行——默认无需服务端安装：
-
-- **文件树**：延迟加载目录，带 Git 状态指示器（已修改/未跟踪/已添加）
-- **24 语言模式**：14 种原生 CodeMirror + 通过 `@codemirror/legacy-modes` 提供的传统模式
-- **冲突解决**：乐观 mtime 锁定——覆盖前检测远端变更
-- **事件驱动 Git**：保存、创建、删除、重命名及终端回车按键时自动刷新
-- **状态门控**：当 `readiness !== 'ready'` 时阻止所有 IO，Key-Driven Reset 在重连时强制完整重载
-- **远程 Agent**（可选）：~1 MB Rust 二进制文件，在 x86_64/aarch64 Linux 上自动部署。其他架构需要用户自行从源码构建 Agent 并手动上传。提供增强文件树、符号搜索和文件监视功能。
-
-### 🔀 端口转发——无锁 I/O
+###  端口转发——无锁 I/O
 
 完整的本地（-L）、远程（-R）和动态 SOCKS5（-D）转发：
 
@@ -297,6 +286,7 @@ CodeMirror 6 编辑器基于 SFTP 运行——默认无需服务端安装：
 
 ### 更多功能
 
+- **IDE 模式**：CodeMirror 6 基于 SFTP，24 种语言，带 Git 状态的文件树，多标签，冲突解决——Linux 可选远程 Agent（~1 MB）以增强功能
 - **资源分析器**：通过持久 SSH 通道读取 `/proc/stat` 获取实时 CPU/内存/网络数据，基于增量计算，非 Linux 环境自动降级为仅 RTT
 - **自定义主题引擎**：30+ 内置主题，可视化编辑器实时预览，20 个 xterm.js 字段 + 24 个 UI 颜色变量，从终端调色板自动推导 UI 颜色
 - **会话录制**：asciicast v2 格式，完整录制和回放

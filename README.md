@@ -212,18 +212,7 @@ Privacy-first AI assistant with dual interaction modes:
 - **Providers**: OpenAI, Ollama, DeepSeek, OneAPI, or any `/v1/chat/completions` endpoint
 - **Security**: API keys stored in OS keychain; on macOS, key reads gated behind **Touch ID** via `LAContext` — no entitlements or code-signing required, cached after first auth per session
 
-### 💻 IDE Mode — Remote Editing
-
-CodeMirror 6 editor operating over SFTP — no server-side installation required by default:
-
-- **File tree**: lazy-loaded directories with Git status indicators (modified/untracked/added)
-- **24 language modes**: 14 native CodeMirror + 10 legacy modes via `@codemirror/legacy-modes`
-- **Conflict resolution**: optimistic mtime locking — detects remote changes before overwriting
-- **Event-driven Git**: auto-refresh on save, create, delete, rename, and terminal Enter keypress
-- **State Gating**: all IO blocked when `readiness !== 'ready'`, Key-Driven Reset forces full remount on reconnect
-- **Remote agent** (optional): ~1 MB Rust binary, auto-deployed on x86_64/aarch64 Linux. Other architectures must build the agent from source and upload it manually. Enables enhanced file tree, symbol search, and file watching.
-
-### 🔀 Port Forwarding — Lock-Free I/O
+###  Port Forwarding — Lock-Free I/O
 
 Full local (-L), remote (-R), and dynamic SOCKS5 (-D) forwarding:
 
@@ -297,6 +286,7 @@ Cross-platform local shell via `portable-pty 0.8`, feature-gated behind `local-t
 
 ### And More
 
+- **IDE Mode**: CodeMirror 6 over SFTP, 24 languages, file tree with Git status, multi-tab, conflict resolution — optional remote agent (~1 MB) for enhanced features on Linux
 - **Resource profiler**: live CPU/memory/network via persistent SSH channel reading `/proc/stat`, delta-based calculation, auto-degrades to RTT-only on non-Linux
 - **Custom theme engine**: 31 built-in themes, visual editor with live preview, 20 xterm.js fields + 24 UI color variables, auto-derive UI colors from terminal palette
 - **Session recording**: asciicast v2 format, full record and playback
