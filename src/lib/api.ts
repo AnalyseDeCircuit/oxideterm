@@ -685,6 +685,11 @@ export const api = {
     return invoke('frontend_ready');
   },
 
+  getLinuxWebviewProfile: async (): Promise<'accelerated' | 'safe' | null> => {
+    if (USE_MOCK || !hasTauriRuntime()) return null;
+    return invoke<'accelerated' | 'safe' | null>('get_linux_webview_profile');
+  },
+
   getPortableStatus: async (): Promise<PortableStatusResponse> => {
     if (USE_MOCK || !hasTauriRuntime()) {
       return {

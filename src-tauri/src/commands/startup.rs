@@ -215,6 +215,16 @@ pub async fn frontend_ready(state: State<'_, LinuxStartupRecoveryState>) -> Resu
     state.mark_frontend_ready().await
 }
 
+#[tauri::command]
+pub fn get_linux_webview_profile(
+    state: State<'_, LinuxStartupRecoveryState>,
+) -> Result<Option<String>, String> {
+    Ok(state
+        .inner
+        .decision
+        .map(|decision| decision.profile().as_str().to_string()))
+}
+
 pub fn configure_linux_startup_recovery() -> LinuxStartupRecoveryState {
     #[cfg(target_os = "linux")]
     {

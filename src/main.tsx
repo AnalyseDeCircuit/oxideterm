@@ -12,6 +12,7 @@ import { initializeSettings } from './store/settingsStore'
 import { Button } from '@/components/ui/button'
 import { PortableBootstrapShell } from '@/components/bootstrap/PortableBootstrapShell'
 import { api } from '@/lib/api'
+import { applyLinuxWebviewProfile } from '@/lib/linuxWebviewProfile'
 import type { PortableInfoResponse, PortableStatusResponse } from './types'
 
 // Dev-only: register fault injection API (window.__faultInjection)
@@ -55,6 +56,14 @@ function getBootstrapErrorCopy(): BootstrapErrorCopy {
 
 // Prefetch portable status at module level (runs in parallel with i18n loading)
 const portableReady = fetchPortableBootstrapSnapshot();
+const linuxWebviewProfileReady = api.getLinuxWebviewProfile()
+  .then((profile) => {
+    applyLinuxWebviewProfile(profile);
+  })
+  .catch((err) => {
+    console.warn('Failed to load Linux WebView profile:', err);
+    applyLinuxWebviewProfile(null);
+  });
 
 function BootstrapGateApp({ initialSnapshot }: { initialSnapshot: PortableBootstrapSnapshot }) {
   const [snapshot, setSnapshot] = useState<PortableBootstrapSnapshot>(initialSnapshot);
@@ -171,7 +180,7 @@ const i18nStartupReady = i18nReady.catch((err) => {
 // Wait for both i18n and portable status before rendering.
 // portableReady starts at module load (parallel with i18n), so the
 // combined wait is max(i18n, portable) rather than i18n + portable.
-Promise.all([i18nStartupReady, portableReady])
+Promise.all([i18nStartupReady, portableReady, linuxWebviewProfileReady])
   .then(([, snapshot]) => {
     mountApp(snapshot);
   })
