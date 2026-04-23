@@ -54,13 +54,8 @@ type RuntimeEventHandler<K extends EventKey> = (payload: RuntimeEventMap[K]) => 
 
 class RuntimeEventHub {
   private handlers = new Map<EventKey, Set<(payload: unknown) => void>>();
-  private unlisteners: UnlistenFn[] = [];
-  private startPromise: Promise<void> | null = null;
-  private active = false;
-
-  initialize(): Promise<void> {
-    return this.ensureStarted();
-  }
+  private unlisteners = new Map<EventKey, UnlistenFn>();
+  private startPromises = new Map<EventKey, Promise<void>>();
 
   subscribe<K extends EventKey>(event: K, handler: RuntimeEventHandler<K>): () => void {
     let set = this.handlers.get(event);
@@ -69,7 +64,7 @@ class RuntimeEventHub {
       this.handlers.set(event, set);
     }
     set.add(handler as (payload: unknown) => void);
-    void this.ensureStarted();
+    void this.ensureStarted(event);
 
     return () => {
       const current = this.handlers.get(event);
@@ -79,8 +74,8 @@ class RuntimeEventHub {
           this.handlers.delete(event);
         }
       }
-      if (this.totalHandlerCount() === 0) {
-        void this.teardown();
+      if (!this.handlers.has(event)) {
+        void this.teardown(event);
       }
     };
   }
@@ -98,82 +93,82 @@ class RuntimeEventHub {
     }
   }
 
-  private totalHandlerCount(): number {
-    let count = 0;
-    for (const set of this.handlers.values()) count += set.size;
-    return count;
+  private getListenerFactory<K extends EventKey>(event: K): Promise<UnlistenFn> {
+    switch (event) {
+      case 'connectionStatusChanged':
+        return listen<ConnectionStatusEvent>('connection_status_changed', (tauriEvent) => {
+          this.emit('connectionStatusChanged', tauriEvent.payload);
+        });
+      case 'envDetected':
+        return listen<EnvDetectedEvent>('env:detected', (tauriEvent) => {
+          this.emit('envDetected', tauriEvent.payload);
+        });
+      case 'nodeState':
+        return listen<NodeStateEvent>('node:state', (tauriEvent) => {
+          this.emit('nodeState', tauriEvent.payload);
+        });
+      case 'forwardEvent':
+        return listen<ForwardRuntimeEvent>('forward-event', (tauriEvent) => {
+          this.emit('forwardEvent', tauriEvent.payload);
+        });
+      case 'profilerUpdate':
+        return listen<ProfilerUpdateEvent>('profiler:update', (tauriEvent) => {
+          this.emit('profilerUpdate', tauriEvent.payload);
+        });
+    }
   }
 
-  private async ensureStarted(): Promise<void> {
-    if (this.active) return;
-    if (this.startPromise) return this.startPromise;
+  private async ensureStarted<K extends EventKey>(event: K): Promise<void> {
+    if (this.unlisteners.has(event)) return;
+    const existing = this.startPromises.get(event);
+    if (existing) return existing;
 
-    this.startPromise = (async () => {
-      const unlisteners = await Promise.all([
-        listen<ConnectionStatusEvent>('connection_status_changed', (event) => {
-          this.emit('connectionStatusChanged', event.payload);
-        }),
-        listen<EnvDetectedEvent>('env:detected', (event) => {
-          this.emit('envDetected', event.payload);
-        }),
-        listen<NodeStateEvent>('node:state', (event) => {
-          this.emit('nodeState', event.payload);
-        }),
-        listen<ForwardRuntimeEvent>('forward-event', (event) => {
-          this.emit('forwardEvent', event.payload);
-        }),
-        listen<ProfilerUpdateEvent>('profiler:update', (event) => {
-          this.emit('profilerUpdate', event.payload);
-        }),
-      ]);
-
-      this.unlisteners = unlisteners;
-      this.active = true;
-    })()
+    const startPromise = this.getListenerFactory(event)
+      .then((unlisten) => {
+        this.unlisteners.set(event, unlisten);
+      })
       .catch((error) => {
-        console.error('[RuntimeEventHub] Failed to initialize runtime listeners:', error);
+        console.error(`[RuntimeEventHub] Failed to initialize ${event} listener:`, error);
         throw error;
       })
       .finally(() => {
-        this.startPromise = null;
+        this.startPromises.delete(event);
       });
 
-    await this.startPromise;
+    this.startPromises.set(event, startPromise);
+    await startPromise;
 
-    if (this.totalHandlerCount() === 0) {
-      await this.teardown();
+    if (!this.handlers.has(event)) {
+      await this.teardown(event);
     }
   }
 
-  private async teardown(): Promise<void> {
-    if (this.startPromise) {
-      await this.startPromise.catch(() => undefined);
+  private async teardown<K extends EventKey>(event: K): Promise<void> {
+    const pending = this.startPromises.get(event);
+    if (pending) {
+      await pending.catch(() => undefined);
     }
-    if (!this.active) return;
 
-    for (const unlisten of this.unlisteners) {
-      try {
-        unlisten();
-      } catch (error) {
-        console.error('[RuntimeEventHub] Failed to unlisten runtime event:', error);
-      }
+    const unlisten = this.unlisteners.get(event);
+    if (!unlisten) return;
+
+    try {
+      unlisten();
+    } catch (error) {
+      console.error(`[RuntimeEventHub] Failed to unlisten ${event}:`, error);
     }
-    this.unlisteners = [];
-    this.active = false;
+    this.unlisteners.delete(event);
   }
 
   async resetForTests(): Promise<void> {
     this.handlers.clear();
-    await this.teardown();
-    this.startPromise = null;
+    const events = Array.from(this.unlisteners.keys());
+    await Promise.all(events.map((event) => this.teardown(event)));
+    this.startPromises.clear();
   }
 }
 
 export const runtimeEventHub = new RuntimeEventHub();
-
-export function initializeRuntimeEventHub(): Promise<void> {
-  return runtimeEventHub.initialize();
-}
 
 export function resetRuntimeEventHubForTests(): Promise<void> {
   return runtimeEventHub.resetForTests();

@@ -5,14 +5,16 @@
  * useNodeState — 订阅单个节点的实时状态 (Oxide-Next Phase 3)
  *
  * 设计目标：
- *   - 应用级 bridge 统一接收 "node:state" Tauri 事件并写入全局缓存
- *   - 节点快照由全局同步器按树节点集合惰性拉取
- *   - hook 只负责读取 store，不再自行监听 Tauri 事件或拉取快照
+ *   - node:state 事件统一进入全局缓存（refcount bridge）
+ *   - hook 只负责读取 store，不再自行直连 Tauri 事件
+ *   - 首个相关视图挂载时才激活 bridge，避免应用启动即常驻监听
  *
  * 参考: docs/reference/OXIDE_NEXT_ARCHITECTURE.md §4.2
  */
 
+import { useEffect } from 'react';
 import { useNodeStateStore } from '../store/nodeStateStore';
+import { retainNodeStateBridge } from '../store/nodeStateStore';
 import type { NodeState } from '../types';
 
 /** useNodeState 返回值 */
@@ -57,6 +59,11 @@ export function useNodeState(nodeId: string | undefined): UseNodeStateResult {
   const ready = useNodeStateStore((store) =>
     nodeId ? store.getEntry(nodeId).ready : false,
   );
+
+  useEffect(() => {
+    const release = retainNodeStateBridge();
+    return release;
+  }, []);
 
   return { state, generation, ready };
 }

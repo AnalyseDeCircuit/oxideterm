@@ -22,6 +22,14 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -47,6 +55,16 @@ type RuleRowProps = {
   runtimeRule?: RuntimeHighlightRule;
   onChange: (patch: Partial<HighlightRule>) => void;
   onDelete: () => void;
+};
+
+type HighlightPresetGroup = 'logs' | 'network' | 'system' | 'identity';
+
+type HighlightPresetItem = {
+  id: string;
+  label: string;
+  shortcut: string;
+  group: HighlightPresetGroup;
+  onSelect: () => void;
 };
 
 function renderPreviewLine(line: string, rules: RuntimeHighlightRule[]) {
@@ -303,6 +321,8 @@ export const TerminalHighlightRulesSection = ({ rules, updateRules }: TerminalHi
     t('settings_view.terminal.highlight_rules.preview_line_error'),
     t('settings_view.terminal.highlight_rules.preview_line_warning'),
     t('settings_view.terminal.highlight_rules.preview_line_ok'),
+    t('settings_view.terminal.highlight_rules.preview_line_trace'),
+    t('settings_view.terminal.highlight_rules.preview_line_audit'),
   ], [t]);
 
   const setRules = (nextRules: HighlightRule[]) => {
@@ -360,6 +380,190 @@ export const TerminalHighlightRulesSection = ({ rules, updateRules }: TerminalHi
     }));
   };
 
+  const addTimestampPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_timestamp'),
+      pattern: String.raw`\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\b`,
+      isRegex: true,
+      background: '#334155',
+      foreground: '#f8fafc',
+    }));
+  };
+
+  const addUrlPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_url'),
+      pattern: String.raw`https?:\/\/[^
+\s)\],;]+[^\s)\],.;:]`,
+      isRegex: true,
+      background: '#6d28d9',
+      foreground: '#f5f3ff',
+    }));
+  };
+
+  const addPortPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_port'),
+      pattern: String.raw`\b(?:(?:localhost|(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}|[A-Za-z][A-Za-z0-9-]*|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+):(?:6553[0-5]|655[0-2]\d|65[0-4]\d{2}|6[0-4]\d{3}|[1-5]?\d{1,4})|port\s+(?:6553[0-5]|655[0-2]\d|65[0-4]\d{2}|6[0-4]\d{3}|[1-5]?\d{1,4}))\b`,
+      isRegex: true,
+      background: '#be185d',
+      foreground: '#fff1f2',
+    }));
+  };
+
+  const addPathPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_path'),
+      pattern: String.raw`(?:\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n\s]+|\/(?:[\w-]+|\.[\w-]+)(?:\/[\w.-]+)*)`,
+      isRegex: true,
+      background: '#365314',
+      foreground: '#f7fee7',
+    }));
+  };
+
+  const addUuidPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_uuid'),
+      pattern: String.raw`\b[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\b`,
+      isRegex: true,
+      background: '#7c2d12',
+      foreground: '#fff7ed',
+    }));
+  };
+
+  const addEmailPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_email'),
+      pattern: String.raw`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`,
+      isRegex: true,
+      background: '#0f766e',
+      foreground: '#ecfeff',
+    }));
+  };
+
+  const addDomainPreset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_domain'),
+      pattern: String.raw`\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}\b`,
+      isRegex: true,
+      background: '#1e3a8a',
+      foreground: '#dbeafe',
+    }));
+  };
+
+  const addSha256Preset = () => {
+    addRule(createDefaultHighlightRule({
+      label: t('settings_view.terminal.highlight_rules.preset_label_sha256'),
+      pattern: String.raw`\b[A-Fa-f0-9]{64}\b`,
+      isRegex: true,
+      background: '#78350f',
+      foreground: '#fef3c7',
+    }));
+  };
+
+  const presetItems: HighlightPresetItem[] = [
+    {
+      id: 'status',
+      label: t('settings_view.terminal.highlight_rules.preset_status'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_warning'),
+      group: 'logs',
+      onSelect: addStatusPreset,
+    },
+    {
+      id: 'timestamp',
+      label: t('settings_view.terminal.highlight_rules.preset_timestamp'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_timestamp'),
+      group: 'logs',
+      onSelect: addTimestampPreset,
+    },
+    {
+      id: 'ip',
+      label: t('settings_view.terminal.highlight_rules.preset_ip'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_ip'),
+      group: 'network',
+      onSelect: addIpPreset,
+    },
+    {
+      id: 'mac',
+      label: t('settings_view.terminal.highlight_rules.preset_mac'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_mac'),
+      group: 'network',
+      onSelect: addMacPreset,
+    },
+    {
+      id: 'url',
+      label: t('settings_view.terminal.highlight_rules.preset_url'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_url'),
+      group: 'network',
+      onSelect: addUrlPreset,
+    },
+    {
+      id: 'port',
+      label: t('settings_view.terminal.highlight_rules.preset_port'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_port'),
+      group: 'network',
+      onSelect: addPortPreset,
+    },
+    {
+      id: 'email',
+      label: t('settings_view.terminal.highlight_rules.preset_email'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_email'),
+      group: 'network',
+      onSelect: addEmailPreset,
+    },
+    {
+      id: 'domain',
+      label: t('settings_view.terminal.highlight_rules.preset_domain'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_domain'),
+      group: 'network',
+      onSelect: addDomainPreset,
+    },
+    {
+      id: 'path',
+      label: t('settings_view.terminal.highlight_rules.preset_path'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_path'),
+      group: 'system',
+      onSelect: addPathPreset,
+    },
+    {
+      id: 'uuid',
+      label: t('settings_view.terminal.highlight_rules.preset_uuid'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_uuid'),
+      group: 'identity',
+      onSelect: addUuidPreset,
+    },
+    {
+      id: 'sha256',
+      label: t('settings_view.terminal.highlight_rules.preset_sha256'),
+      shortcut: t('settings_view.terminal.highlight_rules.preset_label_sha256'),
+      group: 'identity',
+      onSelect: addSha256Preset,
+    },
+  ];
+
+  const presetGroups: Array<{ id: HighlightPresetGroup; label: string; items: HighlightPresetItem[] }> = [
+    {
+      id: 'logs',
+      label: t('settings_view.terminal.highlight_rules.preset_group_logs'),
+      items: presetItems.filter((item) => item.group === 'logs'),
+    },
+    {
+      id: 'network',
+      label: t('settings_view.terminal.highlight_rules.preset_group_network'),
+      items: presetItems.filter((item) => item.group === 'network'),
+    },
+    {
+      id: 'system',
+      label: t('settings_view.terminal.highlight_rules.preset_group_system'),
+      items: presetItems.filter((item) => item.group === 'system'),
+    },
+    {
+      id: 'identity',
+      label: t('settings_view.terminal.highlight_rules.preset_group_identity'),
+      items: presetItems.filter((item) => item.group === 'identity'),
+    },
+  ];
+
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) {
       return;
@@ -380,16 +584,28 @@ export const TerminalHighlightRulesSection = ({ rules, updateRules }: TerminalHi
           <p className="mt-1 max-w-2xl text-xs text-theme-text-muted">{t('settings_view.terminal.highlight_rules.description')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={addStatusPreset} disabled={rules.length >= MAX_HIGHLIGHT_RULES}>
-            <Wand2 className="mr-1 h-4 w-4" />
-            {t('settings_view.terminal.highlight_rules.preset_status')}
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={addIpPreset} disabled={rules.length >= MAX_HIGHLIGHT_RULES}>
-            {t('settings_view.terminal.highlight_rules.preset_ip')}
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={addMacPreset} disabled={rules.length >= MAX_HIGHLIGHT_RULES}>
-            {t('settings_view.terminal.highlight_rules.preset_mac')}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="outline" disabled={rules.length >= MAX_HIGHLIGHT_RULES}>
+                <Wand2 className="mr-1 h-4 w-4" />
+                {t('settings_view.terminal.highlight_rules.add_preset')}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              {presetGroups.map((group, groupIndex) => (
+                <div key={group.id}>
+                  {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
+                  <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
+                  {group.items.map((item) => (
+                    <DropdownMenuItem key={item.id} onClick={item.onSelect}>
+                      <span>{item.label}</span>
+                      <span className="ml-auto text-xs text-theme-text-muted">{item.shortcut}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button type="button" size="sm" onClick={() => addRule()} disabled={rules.length >= MAX_HIGHLIGHT_RULES}>
             <Plus className="mr-1 h-4 w-4" />
             {t('settings_view.terminal.highlight_rules.add_rule')}

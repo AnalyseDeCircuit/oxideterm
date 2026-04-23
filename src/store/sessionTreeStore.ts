@@ -2160,10 +2160,6 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
 export function setupTreeStoreSubscriptions() {
   const store = useSessionTreeStore.getState();
   
-  // 启动周期性状态同步（每 30 秒）
-  // 可以通过 stopPeriodicSync() 停止
-  store.startPeriodicSync(30000);
-  
   // 首次启动时立即进行一次同步
   store.syncFromBackend().then(report => {
     if (report.driftCount > 0) {

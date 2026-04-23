@@ -59,6 +59,8 @@ export const useProfilerStore = create<ProfilerStore>((set, get) => ({
   _generations: new Map(),
 
   startProfiler: async (connectionId: string) => {
+    retainProfilerBridge();
+
     const state = get();
     const existing = state.connections.get(connectionId);
     if (existing?.isRunning) return; // idempotent

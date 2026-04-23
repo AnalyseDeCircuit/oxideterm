@@ -166,6 +166,10 @@ interface AgentStore {
   activeTask: AgentTask | null;
   /** Historical completed tasks (lightweight metadata only) */
   taskHistory: AgentTaskMeta[];
+  /** Whether history metadata has been loaded from persistence */
+  isHistoryInitialized: boolean;
+  /** Whether history metadata is currently loading */
+  isHistoryInitializing: boolean;
   /** Default autonomy level for new tasks */
   autonomyLevel: AutonomyLevel;
   /** Whether an agent is currently running */
@@ -283,6 +287,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   // ─── Initial State ────────────────────────────────────────────────────
   activeTask: null,
   taskHistory: [],
+  isHistoryInitialized: false,
+  isHistoryInitializing: false,
   autonomyLevel: 'balanced',
   isRunning: false,
   pendingApprovals: [],
@@ -875,6 +881,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   initHistory: async () => {
+    if (get().isHistoryInitialized || get().isHistoryInitializing) return;
+    set({ isHistoryInitializing: true });
+
     try {
       // Load lightweight metadata only (no steps)
       const jsonList = await api.agentHistoryListMeta(50);
@@ -886,7 +895,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           console.warn('[AgentStore] Skipping unparseable task meta from backend');
         }
       }
-      set({ taskHistory: metas });
+      set({ taskHistory: metas, isHistoryInitialized: true, isHistoryInitializing: false });
 
       // Check for crash-recovery checkpoint
       const checkpoint = await api.agentHistoryLoadCheckpoint();
@@ -920,6 +929,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       }
     } catch (e) {
       console.warn('[AgentStore] Failed to load task history from backend:', e);
+      set({ isHistoryInitialized: true, isHistoryInitializing: false });
     }
   },
 }));

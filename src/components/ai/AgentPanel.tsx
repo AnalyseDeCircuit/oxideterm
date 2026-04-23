@@ -1271,6 +1271,8 @@ export const AgentPanel = () => {
   const activeTask = useAgentStore((s) => s.activeTask);
   const startTask = useAgentStore((s) => s.startTask);
   const isRunning = useAgentStore((s) => s.isRunning);
+  const isHistoryInitialized = useAgentStore((s) => s.isHistoryInitialized);
+  const isHistoryInitializing = useAgentStore((s) => s.isHistoryInitializing);
 
   // Local provider / model selection
   const aiSettings = useSettingsStore((s) => s.settings.ai);
@@ -1340,6 +1342,30 @@ export const AgentPanel = () => {
     },
     [providerId, model, startTask],
   );
+
+  useEffect(() => {
+    if (!isHistoryInitialized && !isHistoryInitializing) {
+      void useAgentStore.getState().initHistory();
+    }
+
+    let cancelled = false;
+    const bootstrapMcp = async () => {
+      try {
+        const { useMcpRegistry } = await import('../../lib/ai/mcp');
+        if (!cancelled) {
+          await useMcpRegistry.getState().connectAll();
+        }
+      } catch (e) {
+        console.warn('[AgentPanel] Failed to initialize MCP registry on demand:', e);
+      }
+    };
+
+    void bootstrapMcp();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isHistoryInitialized, isHistoryInitializing]);
 
   return (
     <div className="flex flex-col h-full bg-theme-bg">

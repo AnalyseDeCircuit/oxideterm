@@ -75,7 +75,7 @@ describe('useForwardEvents', () => {
   it('registers the backend listener and unsubscribes on unmount', async () => {
     const { unmount } = renderHook(() => useForwardEvents({}));
 
-    await waitFor(() => expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(1));
     expect(tauriForwardMocks.count('forward-event')).toBe(1);
 
     unmount();
@@ -97,7 +97,7 @@ describe('useForwardEvents', () => {
       }),
     );
 
-    await waitFor(() => expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(1));
 
     tauriForwardMocks.emit('forward-event', {
       type: 'statusChanged',
@@ -146,7 +146,7 @@ describe('useForwardEvents', () => {
     tauriForwardMocks.setDeferred(true);
     const { unmount } = renderHook(() => useForwardEvents({}));
 
-    expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(5);
+    expect(tauriForwardMocks.listen).toHaveBeenCalledTimes(1);
     unmount();
     tauriForwardMocks.resolvePending();
     await waitFor(() => expect(tauriForwardMocks.count('forward-event')).toBe(0));

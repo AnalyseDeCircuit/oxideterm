@@ -186,6 +186,27 @@ export function AiChatPanel() {
     }
   }, [error, init, isInitialized]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrapMcp = async () => {
+      try {
+        const { useMcpRegistry } = await import('../../lib/ai/mcp');
+        if (!cancelled) {
+          await useMcpRegistry.getState().connectAll();
+        }
+      } catch (e) {
+        console.warn('[AiChatPanel] Failed to initialize MCP registry on demand:', e);
+      }
+    };
+
+    void bootstrapMcp();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

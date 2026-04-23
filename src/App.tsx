@@ -13,10 +13,9 @@ import { useConnectionEvents } from './hooks/useConnectionEvents';
 import { useCliEvents } from './hooks/useCliEvents';
 import { useEventLogCapture } from './hooks/useEventLogCapture';
 import { setupTreeStoreSubscriptions, cleanupTreeStoreSubscriptions } from './store/sessionTreeStore';
+import { useSessionTreeStore } from './store/sessionTreeStore';
 import { useLocalTerminalStore } from './store/localTerminalStore';
 import { useAppStore } from './store/appStore';
-import { retainNodeStateBridge } from './store/nodeStateStore';
-import { retainProfilerBridge } from './store/profilerStore';
 import { useSettingsStore } from './store/settingsStore';
 import { useSplitPaneActions } from './hooks/useSplitPaneShortcuts';
 import { useKeybindingDispatcher } from './hooks/useKeybindingDispatcher';
@@ -24,7 +23,6 @@ import type { ActionId } from './lib/keybindingRegistry';
 import { preloadTerminalFonts } from './lib/fontLoader';
 import { initializePluginSystem } from './lib/plugin/pluginLoader';
 import { setupConnectionBridge, setupNodeStateBridge, setupTransferBridge, pluginEventBridge } from './lib/plugin/pluginEventBridge';
-import { initializeRuntimeEventHub } from './lib/runtimeEventHub';
 import { useToastStore } from './hooks/useToast';
 import { useUpdateStore } from './store/updateStore';
 import { PluginConfirmDialog } from './components/plugin/PluginConfirmDialog';
@@ -84,6 +82,22 @@ function AppContent({ updatesEnabled }: AppContentProps) {
     const tab = s.tabs.find(t => t.id === s.activeTabId);
     return tab?.type === 'terminal' || tab?.type === 'local_terminal';
   });
+  const activeTabType = useAppStore((s) => {
+    const activeTab = s.tabs.find((tab) => tab.id === s.activeTabId);
+    return activeTab?.type ?? null;
+  });
+  const sidebarCollapsed = useSettingsStore((s) => s.settings.sidebarUI.collapsed);
+  const sidebarActiveSection = useSettingsStore((s) => s.settings.sidebarUI.activeSection);
+  const zenMode = useSettingsStore((s) => s.settings.sidebarUI.zenMode);
+
+  const shouldRunSessionTreeSync = useMemo(() => {
+    const treeVisibleInSidebar = !zenMode && !sidebarCollapsed && sidebarActiveSection === 'sessions';
+    const treeRelatedTab = activeTabType === 'topology'
+      || activeTabType === 'sftp'
+      || activeTabType === 'ide'
+      || activeTabType === 'forwards';
+    return treeVisibleInSidebar || treeRelatedTab;
+  }, [activeTabType, sidebarActiveSection, sidebarCollapsed, zenMode]);
 
   // Preload fonts based on user settings (lazy load CJK font)
   // Delayed 500ms to let Tauri window and PTY initialize first
@@ -98,12 +112,8 @@ function AppContent({ updatesEnabled }: AppContentProps) {
 
   // Initialize plugin system (discover + load enabled plugins)
   useEffect(() => {
-    void initializeRuntimeEventHub();
-
     const bridgeCleanup = setupConnectionBridge(useAppStore);
     const transferBridgeCleanup = setupTransferBridge();
-    const nodeStateStoreCleanup = retainNodeStateBridge();
-    const profilerBridgeCleanup = retainProfilerBridge();
     let nodeStateBridgeCleanup: (() => void) | undefined;
     let nodeStateBridgeResolved = false;
 
@@ -132,8 +142,6 @@ function AppContent({ updatesEnabled }: AppContentProps) {
     return () => {
       bridgeCleanup();
       transferBridgeCleanup();
-      nodeStateStoreCleanup();
-      profilerBridgeCleanup();
       if (nodeStateBridgeResolved) {
         nodeStateBridgeCleanup?.();
       } else {
@@ -143,35 +151,6 @@ function AppContent({ updatesEnabled }: AppContentProps) {
       toastCleanup();
       teardownNotificationListener();
     };
-  }, []);
-
-  // Load agent task history from backend persistence
-  useEffect(() => {
-    (async () => {
-      // Auto-connect enabled MCP servers
-      try {
-        const { useMcpRegistry } = await import('./lib/ai/mcp');
-        await useMcpRegistry.getState().connectAll();
-      } catch (e) {
-        console.warn('Failed to auto-connect MCP servers:', e);
-      }
-
-      try {
-        const { useAgentStore } = await import('./store/agentStore');
-        await useAgentStore.getState().initHistory();
-      } catch (e) {
-        console.warn('Failed to load agent history:', e);
-        try {
-          const { useToastStore } = await import('./hooks/useToast');
-          useToastStore.getState().addToast({
-            title: 'Agent history failed to load',
-            variant: 'warning',
-          });
-        } catch (toastErr) {
-          console.error('Failed to show agent history warning:', toastErr);
-        }
-      }
-    })();
   }, []);
 
   // Sync SFTP settings to backend on app startup
@@ -418,6 +397,19 @@ function AppContent({ updatesEnabled }: AppContentProps) {
     setupTreeStoreSubscriptions();
     return () => cleanupTreeStoreSubscriptions();
   }, []);
+
+  useEffect(() => {
+    const store = useSessionTreeStore.getState();
+    if (shouldRunSessionTreeSync) {
+      store.startPeriodicSync(30000);
+    } else {
+      store.stopPeriodicSync();
+    }
+
+    return () => {
+      store.stopPeriodicSync();
+    };
+  }, [shouldRunSessionTreeSync]);
 
   return (
     <ErrorBoundary>
