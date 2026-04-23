@@ -17,6 +17,8 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { cn } from '../../lib/utils';
+import { linuxBackdropBlurClass } from '../../lib/linuxWebviewProfile';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -459,7 +461,10 @@ function StatusOverlay({ status, error }: { status: Status; error: string | null
   if (!content) return null;
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-background/70 backdrop-blur-sm z-20">
+    <div className={cn(
+      "absolute inset-0 flex items-center justify-center bg-background/70 z-20",
+      linuxBackdropBlurClass("backdrop-blur-sm"),
+    )}>
       <div className="flex flex-col items-center gap-3">
         {content.icon}
         <span className="text-sm text-muted-foreground">{content.text}</span>

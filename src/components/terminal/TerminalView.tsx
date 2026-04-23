@@ -16,6 +16,7 @@ import { triggerGitRefresh } from '../../store/ideStore';
 import { api } from '../../lib/api';
 import { getTerminalTheme } from '../../lib/themes';
 import { getFontFamily } from '../../lib/fontFamily';
+import { linuxBackdropBlurClass } from '../../lib/linuxWebviewProfile';
 import { useTerminalViewShortcuts } from '../../hooks/useTerminalKeyboard';
 import { SearchBar, DeepSearchState } from './SearchBar';
 import { AiInlinePanel, type CursorPosition } from './AiInlinePanel';
@@ -28,6 +29,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { Lock, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
+import { cn } from '../../lib/utils';
 import { 
   registerTerminalBuffer, 
   unregisterTerminalBuffer, 
@@ -2737,7 +2739,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
        {/* Input Lock Overlay - shown during reconnection */}
        {inputLocked && (
-         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">
+         <div className={cn(
+           "absolute inset-0 bg-black/40 flex items-center justify-center z-10",
+           linuxBackdropBlurClass("backdrop-blur-sm"),
+         )}>
            <div className="bg-theme-bg-panel/95 border border-theme-border rounded-lg px-6 py-4 flex flex-col items-center gap-3 shadow-xl">
              <div className="flex items-center gap-2 text-amber-400">
                {connectionStatus === 'reconnecting' ? (

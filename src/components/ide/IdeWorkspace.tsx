@@ -19,6 +19,8 @@ import { IdeSearchPanel } from './IdeSearchPanel';
 import { IdeAgentOptInDialog } from './dialogs/IdeAgentOptInDialog';
 import { useAgentStatus } from './hooks/useAgentStatus';
 import { useIdeWatchEvents } from './hooks/useIdeWatchEvents';
+import { cn } from '../../lib/utils';
+import { linuxBackdropBlurClass } from '../../lib/linuxWebviewProfile';
 
 interface IdeWorkspaceProps {
   nodeId: string;
@@ -166,7 +168,10 @@ export function IdeWorkspace({ nodeId, rootPath }: IdeWorkspaceProps) {
     <div className={`flex flex-col h-full ${bgActive ? '' : 'bg-theme-bg'} relative`} data-bg-active={bgActive || undefined}>
       {/* 断线遮罩 */}
       {isDisconnected && project && (
-        <div className="absolute inset-0 z-40 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center gap-3 pointer-events-auto">
+        <div className={cn(
+          "absolute inset-0 z-40 bg-black/50 flex flex-col items-center justify-center gap-3 pointer-events-auto",
+          linuxBackdropBlurClass("backdrop-blur-sm"),
+        )}>
           <WifiOff className="w-10 h-10 text-amber-400" />
           <span className="text-sm text-theme-text-muted">
             {t('ide.disconnected_overlay', 'Connection lost. Waiting for reconnect…')}

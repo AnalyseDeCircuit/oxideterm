@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { linuxBackdropBlurClass } from '@/lib/linuxWebviewProfile';
 import { useTranslation } from 'react-i18next';
 import { 
   X, 
@@ -263,7 +264,10 @@ export const QuickLook: React.FC<QuickLookProps> = ({
 
   return createPortal(
     <div 
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center overflow-auto"
+      className={cn(
+        "fixed inset-0 z-50 bg-black/80 flex items-center justify-center overflow-auto",
+        linuxBackdropBlurClass("backdrop-blur-sm"),
+      )}
       onMouseDown={e => {
         // Only close when clicking directly on the backdrop itself.
         // During CSS resize-drag the mouse can leave the panel bounds;
