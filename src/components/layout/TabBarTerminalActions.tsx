@@ -28,6 +28,7 @@ import { cn } from '../../lib/utils';
 import { useRecordingStore } from '../../store/recordingStore';
 import { useAppStore, findPaneById } from '../../store/appStore';
 import { useLocalTerminalStore } from '../../store/localTerminalStore';
+import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useBroadcastStore } from '../../store/broadcastStore';
 import { getAllEntries } from '../../lib/terminalRegistry';
 import { MAX_PANES_PER_TAB } from '../../types';
@@ -96,6 +97,10 @@ const BroadcastDropdown: React.FC<BroadcastDropdownProps> = ({
         return tab?.title ?? t('terminal.broadcast.local_terminal');
       }
       // SSH terminal — use session name
+      const node = useSessionTreeStore.getState().getNodeByTerminalId(e.sessionId);
+      if (node?.displayName?.trim()) {
+        return node.displayName.trim();
+      }
       const session = sessions.get(e.sessionId);
       return session ? `${session.name} (${session.host})` : e.sessionId.slice(0, 8);
     },

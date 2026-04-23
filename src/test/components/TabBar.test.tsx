@@ -25,6 +25,8 @@ const appStoreState = vi.hoisted(() => ({
 
 const sessionTreeStoreState = vi.hoisted(() => ({
   terminalNodeMap: new Map([['session-1', 'node-1']]),
+  getNodeByTerminalId: vi.fn((_: string): unknown => undefined),
+  getNode: vi.fn((_: string): unknown => undefined),
   closeTerminalForNode: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -135,6 +137,8 @@ describe('TabBar', () => {
       ['conn-1', { id: 'conn-1', state: 'active' }],
     ]);
     sessionTreeStoreState.terminalNodeMap = new Map([['session-1', 'node-1']]);
+    sessionTreeStoreState.getNodeByTerminalId.mockImplementation(() => undefined);
+    sessionTreeStoreState.getNode.mockImplementation(() => undefined);
 
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -170,6 +174,17 @@ describe('TabBar', () => {
     expect(appStoreState.closeTerminalSession).not.toHaveBeenCalled();
     expect(sessionTreeStoreState.closeTerminalForNode).not.toHaveBeenCalled();
     expect(appStoreState.closeTab).not.toHaveBeenCalled();
+  });
+
+  it('prefers node displayName over username-host session names for terminal tabs', () => {
+    sessionTreeStoreState.getNodeByTerminalId.mockImplementation((terminalId: string) => (
+      terminalId === 'session-1' ? { id: 'node-1', displayName: 'Production DB' } : undefined
+    ));
+
+    render(<TabBar />);
+
+    expect(screen.getByText('Production DB')).toBeInTheDocument();
+    expect(screen.queryByText('SSH 1')).not.toBeInTheDocument();
   });
 
   it('closes the SSH terminal tab after confirmation', async () => {

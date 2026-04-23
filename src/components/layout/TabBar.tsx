@@ -105,6 +105,27 @@ const ConnectionDot = ({ state }: { state: string }) => {
 };
 
 // Get dynamic tab title (non-hook version for use in render)
+const resolveSessionDisplayName = (
+  tab: Tab,
+  sessions: Map<string, { name: string }>,
+): string | null => {
+  if (tab.type === 'local_terminal' || !tab.sessionId) {
+    return null;
+  }
+
+  const treeStore = useSessionTreeStore.getState();
+  const resolvedNode = tab.nodeId
+    ? treeStore.getNode(tab.nodeId)
+    : treeStore.getNodeByTerminalId(tab.sessionId);
+
+  if (resolvedNode?.displayName?.trim()) {
+    return resolvedNode.displayName.trim();
+  }
+
+  const session = sessions.get(tab.sessionId);
+  return session?.name ?? null;
+};
+
 const getTabTitle = (
   tab: Tab,
   sessions: Map<string, { name: string }>,
@@ -149,8 +170,7 @@ const getTabTitle = (
   if (tab.type === 'terminal' || tab.type === 'local_terminal') {
     // Get session name from sessionId if exists
     if (tab.sessionId) {
-      const session = sessions.get(tab.sessionId);
-      const sessionName = session?.name || tab.title;
+      const sessionName = resolveSessionDisplayName(tab, sessions) || tab.title;
 
       if (tab.type === 'terminal') {
         return sessionName + paneCountSuffix;
@@ -165,8 +185,7 @@ const getTabTitle = (
 
   // For session-based tabs (SFTP, Forwards)
   if (tab.sessionId) {
-    const session = sessions.get(tab.sessionId);
-    const sessionName = session?.name || tab.title;
+    const sessionName = resolveSessionDisplayName(tab, sessions) || tab.title;
 
     switch (tab.type) {
       case 'sftp':
