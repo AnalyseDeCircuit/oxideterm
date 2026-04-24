@@ -1481,6 +1481,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       forceViewportTransparent(containerRef.current);
     }
 
+    terminalRef.current = term;
+    fitAddonRef.current = fitAddon;
+
     if (isTerminalContainerRenderable(containerRef.current)) {
       fitAddon.fit();
     }
@@ -1488,8 +1491,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       focusTerminal('soft');
     }
 
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
     syncTrzszController();
     
     const prefillHistory = async (): Promise<boolean> => {

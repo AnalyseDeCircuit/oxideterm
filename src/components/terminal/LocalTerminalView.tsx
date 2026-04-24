@@ -706,6 +706,9 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
+    if (isActiveRef.current) {
+      focusTerminal('soft');
+    }
 
     const writeWelcomeMessage = () => {
       term.writeln(`\x1b[32m${t('terminal.local.title')}\x1b[0m`);

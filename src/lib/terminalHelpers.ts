@@ -176,6 +176,10 @@ function isElementEditable(element: Element): boolean {
   return false;
 }
 
+function isTerminalOwnedFocus(element: Element): boolean {
+  return Boolean(element.closest('.xterm, .terminal-container, [data-terminal-container="true"]'));
+}
+
 export function shouldAutoFocusTerminal(
   container: HTMLElement | null,
   activeElement: Element | null = typeof document !== 'undefined' ? document.activeElement : null,
@@ -183,6 +187,7 @@ export function shouldAutoFocusTerminal(
   if (!isTerminalContainerRenderable(container)) return false;
   if (!activeElement || activeElement === document.body) return true;
   if (container?.contains(activeElement)) return true;
+  if (isTerminalOwnedFocus(activeElement)) return true;
   return !isElementEditable(activeElement);
 }
 

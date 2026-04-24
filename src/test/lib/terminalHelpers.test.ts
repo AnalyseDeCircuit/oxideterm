@@ -223,6 +223,25 @@ describe('shouldAutoFocusTerminal', () => {
     input.remove();
     container.remove();
   });
+
+  it('allows focus transfer from another terminal helper input', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    Object.defineProperty(container, 'getBoundingClientRect', {
+      value: () => ({ width: 800, height: 600 }),
+    });
+
+    const oldTerminal = document.createElement('div');
+    oldTerminal.className = 'xterm';
+    const helperInput = document.createElement('textarea');
+    oldTerminal.appendChild(helperInput);
+    document.body.appendChild(oldTerminal);
+
+    expect(shouldAutoFocusTerminal(container, helperInput)).toBe(true);
+
+    oldTerminal.remove();
+    container.remove();
+  });
 });
 
 describe('shouldFocusTerminalFromClick', () => {
