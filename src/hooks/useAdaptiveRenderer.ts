@@ -16,8 +16,8 @@
  * ## How it works
  *
  * - Callers push data via `scheduleWrite(chunk)`.
- * - In **boost / normal** mode, a single `requestAnimationFrame` collects all
- *   pending chunks and issues one `terminal.write(combined)`.
+ * - In **boost / normal** mode, a single `requestAnimationFrame` collects
+ *   pending chunks and writes bounded batches within a frame budget.
  *   On ≥120Hz displays the browser naturally fires RAF at the panel refresh
  *   rate — no extra timers needed.
  * - In **idle** mode, RAF is cancelled and a `setTimeout` loop fires at a
@@ -68,6 +68,24 @@ const IDLE_INTERVAL_MAX_MS = 1_000;
 const IDLE_INTERVAL_GROWTH = 1.5;
 /** Maximum bytes to concatenate into a single xterm.write batch. */
 const MAX_WRITE_BATCH_BYTES = 256 * 1024;
+
+/** After user input, prefer smaller chunks for lower terminal echo latency. */
+const INTERACTIVE_PRIORITY_WINDOW_MS = 220;
+
+/** Sustained output threshold where throughput batching beats latency tuning. */
+const THROUGHPUT_PENDING_BYTES_THRESHOLD = 512 * 1024;
+
+const INTERACTIVE_WRITE_BATCH_BYTES = 32 * 1024;
+const NORMAL_WRITE_BATCH_BYTES = 128 * 1024;
+const THROUGHPUT_WRITE_BATCH_BYTES = MAX_WRITE_BATCH_BYTES;
+
+const INTERACTIVE_MAX_BATCHES_PER_FRAME = 1;
+const NORMAL_MAX_BATCHES_PER_FRAME = 2;
+const THROUGHPUT_MAX_BATCHES_PER_FRAME = 4;
+
+const INTERACTIVE_FRAME_BUDGET_MS = 3;
+const NORMAL_FRAME_BUDGET_MS = 5;
+const THROUGHPUT_FRAME_BUDGET_MS = 8;
 
 // ─── FlowControl Constants ────────────────────────────────────────────
 
@@ -226,6 +244,48 @@ export function buildWriteBatches(
   return batches;
 }
 
+export type AdaptiveFlushPlan = {
+  priority: 'interactive' | 'normal' | 'throughput';
+  maxBatchBytes: number;
+  maxBatchesPerFrame: number;
+  frameBudgetMs: number;
+};
+
+export function getAdaptiveFlushPlan(params: {
+  now: number;
+  lastUserInputAt: number;
+  pendingBytes: number;
+  tier: RenderTier;
+}): AdaptiveFlushPlan {
+  const recentlyInteractive =
+    params.lastUserInputAt > 0 && params.now - params.lastUserInputAt <= INTERACTIVE_PRIORITY_WINDOW_MS;
+
+  if (recentlyInteractive && params.pendingBytes < THROUGHPUT_PENDING_BYTES_THRESHOLD) {
+    return {
+      priority: 'interactive',
+      maxBatchBytes: INTERACTIVE_WRITE_BATCH_BYTES,
+      maxBatchesPerFrame: INTERACTIVE_MAX_BATCHES_PER_FRAME,
+      frameBudgetMs: INTERACTIVE_FRAME_BUDGET_MS,
+    };
+  }
+
+  if (params.tier === 'boost' || params.pendingBytes >= THROUGHPUT_PENDING_BYTES_THRESHOLD) {
+    return {
+      priority: 'throughput',
+      maxBatchBytes: THROUGHPUT_WRITE_BATCH_BYTES,
+      maxBatchesPerFrame: THROUGHPUT_MAX_BATCHES_PER_FRAME,
+      frameBudgetMs: THROUGHPUT_FRAME_BUDGET_MS,
+    };
+  }
+
+  return {
+    priority: 'normal',
+    maxBatchBytes: NORMAL_WRITE_BATCH_BYTES,
+    maxBatchesPerFrame: NORMAL_MAX_BATCHES_PER_FRAME,
+    frameBudgetMs: NORMAL_FRAME_BUDGET_MS,
+  };
+}
+
 function hasLineBreak(data: Uint8Array): boolean {
   for (const byte of data) {
     if (byte === 0x0a) return true;
@@ -277,12 +337,14 @@ export function useAdaptiveRenderer(opts: UseAdaptiveRendererOptions): AdaptiveR
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Current idle interval (grows over time)
   const idleIntervalRef = useRef(IDLE_INTERVAL_MIN_MS);
+  const lastUserInputAtRef = useRef(0);
 
   // WPS tracking (rolling window)
   const writeTimestampsRef = useRef<number[]>([]);
 
   // Track whether we're "alive" (component mounted)
   const mountedRef = useRef(true);
+  const flushRef = useRef<() => void>(() => {});
 
   // ── FlowControl state ─────────────────────────────────────────────
 
@@ -293,17 +355,61 @@ export function useAdaptiveRenderer(opts: UseAdaptiveRendererOptions): AdaptiveR
 
   // ── Helpers ───────────────────────────────────────────────────────
 
-  /** Concatenate all pending chunks and write to terminal in one call. */
+  const scheduleDeferredFlush = useCallback(() => {
+    if (!mountedRef.current || pendingRef.current.length === 0) return;
+
+    if (tierRef.current === 'idle' || document.hidden) {
+      if (timerIdRef.current === null) {
+        timerIdRef.current = setTimeout(() => {
+          timerIdRef.current = null;
+          if (!mountedRef.current) return;
+          flushRef.current();
+        }, IDLE_INTERVAL_MIN_MS);
+      }
+      return;
+    }
+
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
+        if (!mountedRef.current) return;
+        flushRef.current();
+      });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Write pending chunks using frame-budgeted batches. */
   const flush = useCallback(() => {
     const term = terminalRef.current;
     const pending = pendingRef.current;
     if (!term || pending.length === 0) return;
     pendingRef.current = [];
-    const batches = buildWriteBatches(pending);
+    const now = performance.now();
+    const pendingBytes = pending.reduce((sum, chunk) => sum + chunk.length, 0);
+    const plan = getAdaptiveFlushPlan({
+      now,
+      lastUserInputAt: lastUserInputAtRef.current,
+      pendingBytes,
+      tier: tierRef.current,
+    });
+    const batches = buildWriteBatches(pending, plan.maxBatchBytes);
+    const deferredBatches: Uint8Array[] = [];
+    const frameStart = performance.now();
+    let writtenThisFrame = 0;
 
     for (const batch of batches) {
+      const overBatchLimit = writtenThisFrame >= plan.maxBatchesPerFrame;
+      const overFrameBudget =
+        writtenThisFrame > 0 && performance.now() - frameStart >= plan.frameBudgetMs;
+
+      if (overBatchLimit || overFrameBudget) {
+        deferredBatches.push(batch);
+        continue;
+      }
+
       // FlowControl: track pending xterm callbacks
       pendingCallbacksRef.current++;
+      writtenThisFrame++;
       term.write(batch, () => {
         pendingCallbacksRef.current--;
         // If below low watermark and was blocked, drain backpressure queue
@@ -326,20 +432,26 @@ export function useAdaptiveRenderer(opts: UseAdaptiveRendererOptions): AdaptiveR
       });
     }
 
+    if (deferredBatches.length > 0) {
+      pendingRef.current = deferredBatches.concat(pendingRef.current);
+      scheduleDeferredFlush();
+    }
+
     // Enter blocked state if above high watermark
     if (pendingCallbacksRef.current >= FLOW_HIGH_WATERMARK) {
       blockedRef.current = true;
     }
 
     // Track WPS
-    const now = performance.now();
-    writeTimestampsRef.current.push(now);
+    const writeNow = performance.now();
+    writeTimestampsRef.current.push(writeNow);
     // Keep only last 2 seconds of timestamps
-    const cutoff = now - 2_000;
+    const cutoff = writeNow - 2_000;
     while (writeTimestampsRef.current.length > 0 && writeTimestampsRef.current[0] < cutoff) {
       writeTimestampsRef.current.shift();
     }
-  }, [terminalRef]);
+  }, [terminalRef, scheduleDeferredFlush]);
+  flushRef.current = flush;
 
   // ── Tier transition logic ─────────────────────────────────────────
 
@@ -545,6 +657,7 @@ export function useAdaptiveRenderer(opts: UseAdaptiveRendererOptions): AdaptiveR
   // ── notifyUserInput ───────────────────────────────────────────────
 
   const notifyUserInput = useCallback(() => {
+    lastUserInputAtRef.current = performance.now();
     if (tierRef.current === 'idle') {
       exitIdle();
     }

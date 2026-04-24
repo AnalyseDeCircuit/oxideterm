@@ -1,6 +1,11 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { buildWriteBatches, findCursorControlBoundary, useAdaptiveRenderer } from '@/hooks/useAdaptiveRenderer';
+import {
+  buildWriteBatches,
+  findCursorControlBoundary,
+  getAdaptiveFlushPlan,
+  useAdaptiveRenderer,
+} from '@/hooks/useAdaptiveRenderer';
 import { adaptiveRendererIssue26Fixtures } from '@/test/fixtures/adaptiveRendererIssue26Fixtures';
 
 function textEncoder(input: string): Uint8Array {
@@ -95,6 +100,21 @@ describe('useAdaptiveRenderer', () => {
     expect(writes).toEqual(['42%\r\x1b[2K43%']);
   });
 
+  it('spreads very large output bursts across multiple animation frames', () => {
+    const { writes, scheduleWrite, flushRaf } = createRendererHarness();
+    const largeOutput = new Uint8Array((256 * 1024 * 4) + 1);
+    largeOutput.fill(97);
+
+    scheduleWrite(largeOutput);
+    flushRaf();
+
+    expect(writes).toHaveLength(4);
+
+    flushRaf();
+
+    expect(writes).toHaveLength(5);
+  });
+
   it('flushes a pending single-line chunk before a later redraw chunk arrives', () => {
     const { writes, scheduleWrite, flushRaf, hasPendingRaf } = createRendererHarness();
 
@@ -161,5 +181,32 @@ describe('buildWriteBatches', () => {
       'abcde',
       'fghij',
     ]);
+  });
+});
+
+describe('getAdaptiveFlushPlan', () => {
+  it('uses small low-latency batches shortly after user input', () => {
+    const plan = getAdaptiveFlushPlan({
+      now: 1_100,
+      lastUserInputAt: 1_000,
+      pendingBytes: 64 * 1024,
+      tier: 'boost',
+    });
+
+    expect(plan.priority).toBe('interactive');
+    expect(plan.maxBatchesPerFrame).toBe(1);
+    expect(plan.maxBatchBytes).toBeLessThan(64 * 1024);
+  });
+
+  it('switches to throughput batches for sustained output', () => {
+    const plan = getAdaptiveFlushPlan({
+      now: 1_500,
+      lastUserInputAt: 1_000,
+      pendingBytes: 768 * 1024,
+      tier: 'normal',
+    });
+
+    expect(plan.priority).toBe('throughput');
+    expect(plan.maxBatchesPerFrame).toBeGreaterThan(1);
   });
 });

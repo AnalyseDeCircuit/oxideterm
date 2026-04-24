@@ -16,6 +16,7 @@
 
 // Font loading state cache
 const fontLoadingState = new Map<string, Promise<boolean>>();
+const TERMINAL_FONT_OPEN_TIMEOUT_MS = 250;
 
 // Track if Regular weight is loaded (for deduping terminal refresh)
 let mapleRegularLoaded = false;
@@ -164,6 +165,50 @@ export async function preloadTerminalFonts(fontFamily: string): Promise<void> {
   }
   
   await Promise.all(tasks);
+}
+
+function getBundledTerminalFontFamily(fontFamily: string): string | null {
+  switch (fontFamily) {
+    case 'jetbrains':
+      return 'JetBrains Mono NF (Subset)';
+    case 'meslo':
+      return 'MesloLGM NF (Subset)';
+    case 'maple':
+      return 'Maple Mono NF CN (Subset)';
+    default:
+      return null;
+  }
+}
+
+function delay(ms: number): Promise<false> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(false), ms);
+  });
+}
+
+/**
+ * Wait briefly for the selected bundled terminal font before xterm.open().
+ * This keeps cell metrics from being calculated against a fallback font on
+ * warm starts while preserving old startup behavior on slow cold loads.
+ */
+export async function prepareTerminalFontForOpen(
+  fontFamily: string,
+  timeoutMs: number = TERMINAL_FONT_OPEN_TIMEOUT_MS,
+): Promise<boolean> {
+  if (typeof document === 'undefined' || !document.fonts) {
+    return false;
+  }
+
+  const bundledFamily = getBundledTerminalFontFamily(fontFamily);
+  if (!bundledFamily) {
+    return false;
+  }
+
+  const loadPromise = fontFamily === 'maple'
+    ? preloadMapleMonoRegular()
+    : preloadFont(bundledFamily, [400, 700], ['normal']);
+
+  return Promise.race([loadPromise, delay(timeoutMs)]);
 }
 
 /**

@@ -38,7 +38,7 @@ import {
   touchTerminalEntry,
   notifyTerminalOutput 
 } from '../../lib/terminalRegistry';
-import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
+import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useReconnectOrchestratorStore } from '../../store/reconnectOrchestratorStore';
@@ -302,6 +302,26 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Get terminal settings from unified store (read early for adaptive renderer)
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
   const inBandTransferSettings = terminalSettings.inBandTransfer;
+  const [fontOpenReady, setFontOpenReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (terminalRef.current) {
+      void prepareTerminalFontForOpen(terminalSettings.fontFamily);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setFontOpenReady(false);
+    void prepareTerminalFontForOpen(terminalSettings.fontFamily).finally(() => {
+      if (!cancelled) {
+        setFontOpenReady(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [terminalSettings.fontFamily]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -1272,6 +1292,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Font family resolver — see src/lib/fontFamily.ts
 
   useEffect(() => {
+    if (!fontOpenReady) return;
     if (!containerRef.current || terminalRef.current) return;
     
     isMountedRef.current = true; // Reset mount state
@@ -2111,7 +2132,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         term.dispose();
         terminalRef.current = null;
     };
-  }, [sessionId, syncRemotePtySize, syncTrzszController, disposeTrzszController]); // Only remount on session change — bg image is handled dynamically
+  }, [fontOpenReady, sessionId, syncRemotePtySize, syncTrzszController, disposeTrzszController]); // Only remount on session change — bg image is handled dynamically
 
   useEffect(() => {
     selectionGestureRef.current?.refresh();

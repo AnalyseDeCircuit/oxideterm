@@ -45,7 +45,7 @@ import {
   touchTerminalEntry,
   notifyTerminalOutput 
 } from '../../lib/terminalRegistry';
-import { onMapleRegularLoaded, ensureCJKFallback } from '../../lib/fontLoader';
+import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { api } from '../../lib/api';
 import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
 import {
@@ -156,6 +156,26 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
   // Get terminal settings (read early for adaptive renderer)
   const terminalSettings = useSettingsStore((state) => state.settings.terminal);
+  const [fontOpenReady, setFontOpenReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (terminalRef.current) {
+      void prepareTerminalFontForOpen(terminalSettings.fontFamily);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setFontOpenReady(false);
+    void prepareTerminalFontForOpen(terminalSettings.fontFamily).finally(() => {
+      if (!cancelled) {
+        setFontOpenReady(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [terminalSettings.fontFamily]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -531,6 +551,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
   // Initialize terminal
   useEffect(() => {
+    if (!fontOpenReady) return;
     if (!containerRef.current || terminalRef.current) return;
     
     isMountedRef.current = true;
@@ -1004,7 +1025,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       // PTY cleanup is handled ONLY by appStore.closeTab() when the tab is closed.
       console.debug(`[LocalTerminalView] Unmount cleanup for ${sessionId} (PTY kept alive)`);
     };
-  }, [sessionId]); // Only remount on session change — bg image is handled dynamically
+  }, [fontOpenReady, sessionId]); // Only remount on session change — bg image is handled dynamically
 
   useEffect(() => {
     selectionGestureRef.current?.refresh();
