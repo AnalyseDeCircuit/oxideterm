@@ -469,13 +469,18 @@ describe('settingsStore', () => {
 
     useSettingsStore.getState().updateSftp('maxConcurrentTransfers', 5);
     await waitFor(() => {
-      expect(apiMocks.sftpUpdateSettings).toHaveBeenCalledWith(5, 0);
+      expect(apiMocks.sftpUpdateSettings).toHaveBeenCalledWith(5, 0, 4);
     });
 
     useSettingsStore.getState().updateSftp('speedLimitEnabled', true);
     useSettingsStore.getState().updateSftp('speedLimitKBps', 256);
     await waitFor(() => {
-      expect(apiMocks.sftpUpdateSettings.mock.calls).toContainEqual([5, 256]);
+      expect(apiMocks.sftpUpdateSettings.mock.calls).toContainEqual([5, 256, 4]);
+    });
+
+    useSettingsStore.getState().updateSftp('directoryParallelism', 8);
+    await waitFor(() => {
+      expect(apiMocks.sftpUpdateSettings.mock.calls).toContainEqual([5, 256, 8]);
     });
   });
 
@@ -488,14 +493,14 @@ describe('settingsStore', () => {
     useSettingsStore.getState().updateSftp('speedLimitKBps', 256);
 
     await waitFor(() => {
-      expect(apiMocks.sftpUpdateSettings.mock.calls).toContainEqual([5, 256]);
+      expect(apiMocks.sftpUpdateSettings.mock.calls).toContainEqual([5, 256, 4]);
     });
 
     apiMocks.sftpUpdateSettings.mockClear();
     useSettingsStore.getState().resetToDefaults();
 
     await waitFor(() => {
-      expect(apiMocks.sftpUpdateSettings).toHaveBeenCalledWith(3, 0);
+      expect(apiMocks.sftpUpdateSettings).toHaveBeenCalledWith(3, 0, 4);
     });
   });
 

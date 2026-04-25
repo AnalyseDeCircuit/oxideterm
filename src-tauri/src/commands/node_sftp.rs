@@ -265,6 +265,7 @@ async fn resume_directory_download(
                 Some(tx),
                 Some(cancel_flag),
                 Some(transfer_manager.speed_limit_bps_ref()),
+                transfer_manager.directory_parallelism(),
             )
             .await
         }
@@ -353,6 +354,7 @@ async fn resume_directory_upload(
                 Some(tx),
                 Some(cancel_flag),
                 Some(transfer_manager.speed_limit_bps_ref()),
+                transfer_manager.directory_parallelism(),
             )
             .await
         }
@@ -800,6 +802,7 @@ pub async fn node_sftp_download_dir(
             Some(tx),
             Some(cancel_flag),
             Some(transfer_manager.speed_limit_bps_ref()),
+            transfer_manager.directory_parallelism(),
         )
         .await;
     transfer_manager.unregister(&tid);
@@ -872,6 +875,7 @@ pub async fn node_sftp_upload_dir(
             Some(tx),
             Some(cancel_flag),
             Some(transfer_manager.speed_limit_bps_ref()),
+            transfer_manager.directory_parallelism(),
         )
         .await;
     transfer_manager.unregister(&tid);

@@ -163,7 +163,8 @@ function AppContent({ updatesEnabled }: AppContentProps) {
         try {
           await api.sftpUpdateSettings(
             sftp.maxConcurrentTransfers,
-            sftp.speedLimitEnabled ? sftp.speedLimitKBps : 0
+            sftp.speedLimitEnabled ? sftp.speedLimitKBps : 0,
+            sftp.directoryParallelism
           );
         } catch (err) {
           console.error('Failed to sync SFTP settings on startup:', err);

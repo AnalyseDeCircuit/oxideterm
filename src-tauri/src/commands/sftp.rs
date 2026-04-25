@@ -67,11 +67,12 @@ pub async fn sftp_transfer_stats(
     })
 }
 
-/// Update transfer settings (concurrent limit and speed limit)
+/// Update transfer settings (concurrent limit, speed limit, and directory parallelism)
 #[tauri::command]
 pub async fn sftp_update_settings(
     max_concurrent: Option<usize>,
     speed_limit_kbps: Option<usize>,
+    directory_parallelism: Option<usize>,
     transfer_manager: State<'_, Arc<crate::sftp::TransferManager>>,
 ) -> Result<(), SftpError> {
     if let Some(max) = max_concurrent {
@@ -79,6 +80,9 @@ pub async fn sftp_update_settings(
     }
     if let Some(kbps) = speed_limit_kbps {
         transfer_manager.set_speed_limit_kbps(kbps);
+    }
+    if let Some(parallelism) = directory_parallelism {
+        transfer_manager.set_directory_parallelism(parallelism);
     }
     Ok(())
 }

@@ -26,28 +26,54 @@ export const SftpTab = ({ sftp, updateSftp }: SftpTabProps) => {
             <Separator />
 
             <div className="rounded-lg border border-theme-border bg-theme-bg-card p-5">
-                <div className="flex items-center justify-between mb-2">
-                    <div>
-                        <Label className="text-theme-text">{t('settings_view.sftp.concurrent')}</Label>
-                        <p className="text-xs text-theme-text-muted mt-0.5">
-                            {t('settings_view.sftp.concurrent_hint')}
-                        </p>
+                <div className="space-y-5">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-theme-text">{t('settings_view.sftp.concurrent')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">
+                                {t('settings_view.sftp.concurrent_hint')}
+                            </p>
+                        </div>
+                        <Select
+                            value={(sftp?.maxConcurrentTransfers ?? 3).toString()}
+                            onValueChange={(value) => updateSftp('maxConcurrentTransfers', parseInt(value, 10))}
+                        >
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[1, 2, 3, 4, 5, 6, 8, 10].map((count) => (
+                                    <SelectItem key={count} value={count.toString()}>
+                                        {t('settings_view.sftp.transfer_count', { count })}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
-                    <Select
-                        value={(sftp?.maxConcurrentTransfers ?? 3).toString()}
-                        onValueChange={(value) => updateSftp('maxConcurrentTransfers', parseInt(value, 10))}
-                    >
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {[1, 2, 3, 4, 5, 6, 8, 10].map((count) => (
-                                <SelectItem key={count} value={count.toString()}>
-                                    {t('settings_view.sftp.transfer_count', { count })}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    <Separator />
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-theme-text">{t('settings_view.sftp.directory_parallelism')}</Label>
+                            <p className="text-xs text-theme-text-muted mt-0.5">
+                                {t('settings_view.sftp.directory_parallelism_hint')}
+                            </p>
+                        </div>
+                        <Select
+                            value={(sftp?.directoryParallelism ?? 4).toString()}
+                            onValueChange={(value) => updateSftp('directoryParallelism', parseInt(value, 10))}
+                        >
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[1, 2, 3, 4, 5, 6, 8, 10, 12, 16].map((count) => (
+                                    <SelectItem key={count} value={count.toString()}>
+                                        {t('settings_view.sftp.transfer_count', { count })}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
             </div>
 

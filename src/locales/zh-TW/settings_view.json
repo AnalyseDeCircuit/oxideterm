@@ -593,6 +593,8 @@
       "description": "設定檔案傳輸行為和效能。",
       "concurrent": "最大同時傳輸數",
       "concurrent_hint": "同時進行的最大檔案傳輸數（1-10）",
+      "directory_parallelism": "目錄傳輸平行度",
+      "directory_parallelism_hint": "單個遞迴目錄傳輸內部平行處理的檔案數。啟用限速時會自動回退為串行。",
       "bandwidth": "頻寬限制",
       "bandwidth_hint": "限制每個傳輸的上傳/下載速度",
       "speed_limit": "速度限制 (KB/s)",

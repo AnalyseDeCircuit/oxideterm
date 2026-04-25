@@ -961,10 +961,14 @@ export const api = {
     return invoke('sftp_transfer_stats');
   },
 
-  // SFTP Settings - Update transfer settings (concurrent limit and speed limit)
-  sftpUpdateSettings: async (maxConcurrent?: number, speedLimitKbps?: number): Promise<void> => {
+  // SFTP Settings - Update transfer settings (concurrent limit, speed limit, directory parallelism)
+  sftpUpdateSettings: async (
+    maxConcurrent?: number,
+    speedLimitKbps?: number,
+    directoryParallelism?: number,
+  ): Promise<void> => {
     if (USE_MOCK) return;
-    return invoke('sftp_update_settings', { maxConcurrent, speedLimitKbps });
+    return invoke('sftp_update_settings', { maxConcurrent, speedLimitKbps, directoryParallelism });
   },
 
   // ============ Port Forwarding ============

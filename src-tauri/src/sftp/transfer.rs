@@ -132,6 +132,12 @@ const MAX_POSSIBLE_CONCURRENT: usize = 10;
 /// Default concurrent transfers
 const DEFAULT_CONCURRENT_TRANSFERS: usize = 3;
 
+/// Maximum recursive directory file workers per transfer.
+const MAX_DIRECTORY_PARALLELISM: usize = 16;
+
+/// Default recursive directory file workers per transfer.
+const DEFAULT_DIRECTORY_PARALLELISM: usize = 4;
+
 /// Transfer Manager handles concurrent transfers
 pub struct TransferManager {
     /// Semaphore for limiting concurrent transfers (sized for max possible)
@@ -142,6 +148,8 @@ pub struct TransferManager {
     active_count: Arc<AtomicUsize>,
     /// Current configured max concurrent (can be changed at runtime)
     max_concurrent: AtomicUsize,
+    /// File worker count used inside recursive directory transfers.
+    directory_parallelism: AtomicUsize,
     /// Wake blocked acquirers when capacity changes.
     availability_notify: Arc<Notify>,
     /// Speed limit in bytes per second (0 = unlimited, Arc for sharing with transfer loops)
@@ -155,6 +163,7 @@ impl TransferManager {
             controls: RwLock::new(HashMap::new()),
             active_count: Arc::new(AtomicUsize::new(0)),
             max_concurrent: AtomicUsize::new(DEFAULT_CONCURRENT_TRANSFERS),
+            directory_parallelism: AtomicUsize::new(DEFAULT_DIRECTORY_PARALLELISM),
             availability_notify: Arc::new(Notify::new()),
             speed_limit_bps: Arc::new(AtomicUsize::new(0)),
         }
@@ -166,6 +175,18 @@ impl TransferManager {
         self.max_concurrent.store(clamped, Ordering::Release);
         self.availability_notify.notify_waiters();
         info!("Max concurrent transfers set to: {}", clamped);
+    }
+
+    /// Update recursive directory file worker count.
+    pub fn set_directory_parallelism(&self, parallelism: usize) {
+        let clamped = parallelism.clamp(1, MAX_DIRECTORY_PARALLELISM);
+        self.directory_parallelism.store(clamped, Ordering::Release);
+        info!("SFTP directory transfer parallelism set to: {}", clamped);
+    }
+
+    /// Get recursive directory file worker count.
+    pub fn directory_parallelism(&self) -> usize {
+        self.directory_parallelism.load(Ordering::Acquire)
     }
 
     /// Update the speed limit (in KB/s, 0 = unlimited)
@@ -436,6 +457,21 @@ mod tests {
 
         manager.set_speed_limit_kbps(0);
         assert_eq!(manager.get_speed_limit_bps(), 0);
+    }
+
+    #[test]
+    fn test_set_directory_parallelism_is_clamped() {
+        let manager = TransferManager::new();
+        assert_eq!(
+            manager.directory_parallelism(),
+            DEFAULT_DIRECTORY_PARALLELISM
+        );
+
+        manager.set_directory_parallelism(0);
+        assert_eq!(manager.directory_parallelism(), 1);
+
+        manager.set_directory_parallelism(MAX_DIRECTORY_PARALLELISM + 10);
+        assert_eq!(manager.directory_parallelism(), MAX_DIRECTORY_PARALLELISM);
     }
 
     #[test]

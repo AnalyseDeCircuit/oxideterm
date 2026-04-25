@@ -359,6 +359,7 @@ export interface LocalTerminalSettings {
 /** SFTP transfer settings */
 export interface SftpSettings {
   maxConcurrentTransfers: number;  // Max concurrent transfers (1-10)
+  directoryParallelism: number;     // Parallel file workers inside recursive directory transfers (1-16)
   speedLimitEnabled: boolean;      // Enable bandwidth limiting
   speedLimitKBps: number;          // Speed limit in KB/s (0 = unlimited)
   conflictAction: 'ask' | 'overwrite' | 'skip' | 'rename';  // Default conflict resolution
@@ -611,6 +612,7 @@ const defaultLocalTerminalSettings: LocalTerminalSettings = {
 
 const defaultSftpSettings: SftpSettings = {
   maxConcurrentTransfers: 3,
+  directoryParallelism: 4,
   speedLimitEnabled: false,
   speedLimitKBps: 0,
   conflictAction: 'ask',
@@ -893,6 +895,7 @@ function syncSftpToBackend(sftp: SftpSettings): void {
   api.sftpUpdateSettings(
     sftp.maxConcurrentTransfers,
     speedLimit,
+    sftp.directoryParallelism,
   ).catch((err) => {
     console.error('Failed to sync SFTP settings to backend:', err);
   });
@@ -1141,7 +1144,12 @@ export const useSettingsStore = create<SettingsStore>()(
       persistSettings(newSettings);
       set({ settings: newSettings });
 
-      if (key === 'maxConcurrentTransfers' || key === 'speedLimitEnabled' || key === 'speedLimitKBps') {
+      if (
+        key === 'maxConcurrentTransfers' ||
+        key === 'directoryParallelism' ||
+        key === 'speedLimitEnabled' ||
+        key === 'speedLimitKBps'
+      ) {
         syncSftpToBackend(nextSftp);
       }
     },
@@ -1782,7 +1790,13 @@ const AI_KEYS: Array<keyof AiSettings> = [
 ];
 const RECONNECT_KEYS: Array<keyof ReconnectSettings> = ['enabled', 'maxAttempts', 'baseDelayMs', 'maxDelayMs'];
 const CONNECTION_POOL_KEYS: Array<keyof ConnectionPoolSettings> = ['idleTimeoutSecs'];
-const SFTP_KEYS: Array<keyof SftpSettings> = ['maxConcurrentTransfers', 'speedLimitEnabled', 'speedLimitKBps', 'conflictAction'];
+const SFTP_KEYS: Array<keyof SftpSettings> = [
+  'maxConcurrentTransfers',
+  'directoryParallelism',
+  'speedLimitEnabled',
+  'speedLimitKBps',
+  'conflictAction',
+];
 const IDE_KEYS: Array<keyof IdeSettings> = ['autoSave', 'fontSize', 'lineHeight', 'agentMode', 'wordWrap'];
 const LOCAL_TERMINAL_KEYS: Array<keyof LocalTerminalSettings> = [
   'defaultShellId',

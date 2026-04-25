@@ -593,6 +593,8 @@
       "description": "Configure o comportamento e desempenho de transferências de arquivos.",
       "concurrent": "Transferências simultâneas máximas",
       "concurrent_hint": "Número máximo de transferências de arquivos concorrentes (1-10)",
+      "directory_parallelism": "Paralelismo de transferência de pastas",
+      "directory_parallelism_hint": "Workers de arquivo paralelos dentro de uma transferência recursiva de pasta. Volta ao modo serial quando o limite de velocidade está ativo.",
       "bandwidth": "Limite de largura de banda",
       "bandwidth_hint": "Limitar velocidade de upload/download por transferência",
       "speed_limit": "Limite de velocidade (KB/s)",

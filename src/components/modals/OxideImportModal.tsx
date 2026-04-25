@@ -305,6 +305,8 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
         return t('settings_view.connections.idle_timeout.label');
       case 'sftp.maxConcurrentTransfers':
         return t('settings_view.sftp.concurrent');
+      case 'sftp.directoryParallelism':
+        return t('settings_view.sftp.directory_parallelism');
       case 'sftp.speedLimitEnabled':
         return t('settings_view.sftp.bandwidth');
       case 'sftp.speedLimitKBps':

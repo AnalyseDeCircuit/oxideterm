@@ -71,7 +71,7 @@ fn classify_list_entry_file_type(
     }
 }
 
-const DIRECTORY_TRANSFER_PARALLELISM: usize = 4;
+const MAX_DIRECTORY_TRANSFER_PARALLELISM: usize = 16;
 const STREAMING_PREVIEW_CHUNK_SIZE: usize = 64 * 1024;
 
 #[derive(Clone)]
@@ -967,6 +967,7 @@ impl SftpSession {
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
+        directory_parallelism: usize,
     ) -> Result<u64, SftpError> {
         let canonical_path = self.resolve_path(remote_path).await?;
         info!("Downloading directory {} to {}", canonical_path, local_path);
@@ -986,6 +987,7 @@ impl SftpSession {
                 &progress_tx,
                 &cancel_flag,
                 &speed_limit_bps,
+                directory_parallelism,
             )
             .await?;
 
@@ -1067,8 +1069,10 @@ impl SftpSession {
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
+        directory_parallelism: usize,
     ) -> Result<u64, SftpError> {
-        if !Self::directory_parallelism_enabled(speed_limit_bps) {
+        let parallelism = directory_parallelism.clamp(1, MAX_DIRECTORY_TRANSFER_PARALLELISM);
+        if parallelism <= 1 || !Self::directory_parallelism_enabled(speed_limit_bps) {
             for job in &jobs {
                 self.download_dir_file(job, transfer_id, progress_tx, cancel_flag, speed_limit_bps)
                     .await?;
@@ -1088,7 +1092,7 @@ impl SftpSession {
                 .await?;
                 Ok::<u64, SftpError>(1)
             })
-            .buffer_unordered(DIRECTORY_TRANSFER_PARALLELISM)
+            .buffer_unordered(parallelism)
             .try_fold(0u64, |count, delta| async move { Ok(count + delta) })
             .await
     }
@@ -1221,6 +1225,7 @@ impl SftpSession {
         progress_tx: Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         speed_limit_bps: Option<std::sync::Arc<AtomicUsize>>,
+        directory_parallelism: usize,
     ) -> Result<u64, SftpError> {
         let canonical_path = if is_absolute_remote_path(remote_path) {
             remote_path.to_string()
@@ -1256,6 +1261,7 @@ impl SftpSession {
                 &progress_tx,
                 &cancel_flag,
                 &speed_limit_bps,
+                directory_parallelism,
             )
             .await?;
 
@@ -1339,8 +1345,10 @@ impl SftpSession {
         progress_tx: &Option<mpsc::Sender<TransferProgress>>,
         cancel_flag: &Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         speed_limit_bps: &Option<std::sync::Arc<AtomicUsize>>,
+        directory_parallelism: usize,
     ) -> Result<u64, SftpError> {
-        if !Self::directory_parallelism_enabled(speed_limit_bps) {
+        let parallelism = directory_parallelism.clamp(1, MAX_DIRECTORY_TRANSFER_PARALLELISM);
+        if parallelism <= 1 || !Self::directory_parallelism_enabled(speed_limit_bps) {
             for job in &jobs {
                 self.upload_dir_file(job, transfer_id, progress_tx, cancel_flag, speed_limit_bps)
                     .await?;
@@ -1354,7 +1362,7 @@ impl SftpSession {
                     .await?;
                 Ok::<u64, SftpError>(1)
             })
-            .buffer_unordered(DIRECTORY_TRANSFER_PARALLELISM)
+            .buffer_unordered(parallelism)
             .try_fold(0u64, |count, delta| async move { Ok(count + delta) })
             .await
     }
