@@ -38,10 +38,27 @@ import { useEventLogStore } from '../../../store/eventLogStore';
 import { useTransferStore } from '../../../store/transferStore';
 import { useRecordingStore } from '../../../store/recordingStore';
 import { useBroadcastStore } from '../../../store/broadcastStore';
-import { findPaneBySessionId, getTerminalBuffer, writeToTerminal, subscribeTerminalOutput, readScreen } from '../../terminalRegistry';
 import { compressOutput } from './outputCompressor';
 import { sanitizeConnectionInfo } from '../contextSanitizer';
 import { MAX_OUTPUT_BYTES } from '../agentConfig';
+import {
+  createTerminalOutputSubscription,
+  formatScreenSnapshot,
+  readBufferLineCount,
+  readBufferTail,
+  readRenderedBufferLines,
+  readRenderedBufferTail,
+  readRenderedBufferText,
+  readTerminalScreen,
+  renderedDeltaFromLineCount,
+  renderedDeltaFromTextSnapshot,
+  searchRenderedBuffer,
+  terminalRunRemote,
+  terminalSend,
+  waitForTerminalOutput as waitForTerminalOutputV2,
+  type TerminalOutputSubscription,
+  type TerminalWaitResult,
+} from './protocol';
 
 const MAX_COMMAND_TIMEOUT_SECS = 60;
 const MAX_LIST_DEPTH = 8;
@@ -92,11 +109,6 @@ type ResolvedNode = {
   agentAvailable: boolean;
 };
 
-type TerminalOutputSubscription = {
-  getCount: () => number;
-  unsubscribe: () => void;
-};
-
 function makeAbortError(): DOMException {
   return new DOMException('Generation was stopped.', 'AbortError');
 }
@@ -105,23 +117,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw makeAbortError();
   }
-}
-
-function createTerminalOutputSubscription(sessionId: string): TerminalOutputSubscription {
-  let outputCounter = 0;
-  let unsubscribed = false;
-  const rawUnsubscribe = subscribeTerminalOutput(sessionId, () => {
-    outputCounter += 1;
-  });
-
-  return {
-    getCount: () => outputCounter,
-    unsubscribe: () => {
-      if (unsubscribed) return;
-      unsubscribed = true;
-      rawUnsubscribe();
-    },
-  };
 }
 
 async function waitWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
@@ -443,7 +438,7 @@ async function execTerminalCommand(
   const cwd = args.cwd as string | undefined;
   const timeoutSecs = clamp(Number(args.timeout_secs) || 30, 1, MAX_COMMAND_TIMEOUT_SECS);
 
-  const result = await nodeIdeExecCommand(resolved.nodeId, command, cwd, timeoutSecs);
+  const result = await terminalRunRemote({ nodeId: resolved.nodeId, command, cwd, timeoutSecs });
   const combined = result.stderr
     ? `${result.stdout}\n--- stderr ---\n${result.stderr}`
     : result.stdout;
@@ -477,18 +472,6 @@ async function execTerminalCommandToSession(
     return { toolCallId, toolName: 'terminal_exec', success: false, output: '', error: 'Missing required argument: command', durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return {
-      toolCallId,
-      toolName: 'terminal_exec',
-      success: false,
-      output: '',
-      error: `Open terminal session not found: ${sessionId}`,
-      durationMs: Date.now() - startTime,
-    };
-  }
-
   // Pre-command snapshot: take BEFORE writing command to avoid race condition
   // where backend buffer updates before our snapshot read completes.
   const preSnapshotLineCount = await readBufferLineCount(sessionId);
@@ -500,14 +483,14 @@ async function execTerminalCommandToSession(
 
   const outputSubscription = createTerminalOutputSubscription(sessionId);
   try {
-    const sent = writeToTerminal(paneId, `${command}\r`);
-    if (!sent) {
+    const sendResult = terminalSend({ sessionId, input: command, inputKind: 'command', appendEnter: true });
+    if (!sendResult.ok) {
       return {
         toolCallId,
         toolName: 'terminal_exec',
         success: false,
         output: '',
-        error: `Terminal session is not writable: ${sessionId}`,
+        error: sendResult.error,
         durationMs: Date.now() - startTime,
       };
     }
@@ -547,8 +530,10 @@ async function execTerminalCommandToSession(
       };
     }
 
-    const renderedWaitResult = renderedDeltaFromLineCount(sessionId, preRenderedLineCount, waitResult)
-      ?? renderedDeltaFromTextSnapshot(sessionId, preRenderedText, waitResult);
+    const renderedWaitResult = renderedDeltaFromLineCount(sessionId, preRenderedLineCount, waitResult, {
+      completionPromptRe: COMPLETION_PROMPT_RE,
+      truncateOutput,
+    }) ?? renderedDeltaFromTextSnapshot(sessionId, preRenderedText, waitResult, truncateOutput);
 
     return {
       toolCallId,
@@ -1055,12 +1040,7 @@ async function execSearchTerminal(
 // Shared Terminal Output Waiting Logic
 // ═══════════════════════════════════════════════════════════════════════════
 
-type WaitResult = {
-  success: boolean;
-  output: string;
-  error?: string;
-  truncated?: boolean;
-};
+type WaitResult = TerminalWaitResult;
 
 /**
  * Core logic: wait for new terminal output after a command is sent.
@@ -1086,205 +1066,24 @@ async function waitForTerminalOutput(
   existingSubscription?: TerminalOutputSubscription,
   initialRenderedText?: string | null,
 ): Promise<WaitResult> {
-  // Use pre-command snapshot if provided (avoids race condition),
-  // otherwise take a fresh snapshot now.
-  let initialLineCount: number;
-  if (preSnapshotLineCount != null) {
-    initialLineCount = preSnapshotLineCount;
-  } else {
-    const initialSnapshot = await readBufferStats(sessionId, 0);
-    if (initialSnapshot === null) {
-      return { success: false, output: '', error: 'Session not found or buffer unavailable.' };
-    }
-    initialLineCount = initialSnapshot.totalLines;
-  }
-
-  const timeoutMs = timeoutSecs * 1000;
-  const baseStableMs = stableSecs * 1000;
-  const maxStableMs = MAX_ADAPTIVE_STABLE_SECS * 1000;
-  const POLL_INTERVAL_MS = 200;
-
-  console.debug(`[AI:ToolExec] waitForTerminalOutput: initial=${initialLineCount}, timeout=${timeoutSecs}s, stable=${stableSecs}s`);
-
-  const outputSubscription = existingSubscription ?? createTerminalOutputSubscription(sessionId);
-
-  const result = await new Promise<'pattern' | 'prompt' | 'stable' | 'timeout' | 'lost' | 'aborted'>((resolve) => {
-    let stableTimer: ReturnType<typeof setTimeout> | null = null;
-    let promptGraceTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let settled = false;
-    let lastCheckedCounter = 0;  // Tracks which notifications have been processed
-    let lastRenderedDelta = '';
-    let checking = false;        // Prevents overlapping async checks
-    let outputBursts = 0;        // Count of new-output detections for adaptive stability
-
-    const done = (reason: 'pattern' | 'prompt' | 'stable' | 'timeout' | 'lost' | 'aborted') => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutTimer);
-      if (stableTimer) clearTimeout(stableTimer);
-      if (promptGraceTimer) clearTimeout(promptGraceTimer);
-      if (pollTimer) clearInterval(pollTimer);
-      if (abortSignal && abortHandler) abortSignal.removeEventListener('abort', abortHandler);
-      outputSubscription.unsubscribe();
-      console.debug(`[AI:ToolExec] done: reason=${reason}`);
-      resolve(reason);
-    };
-
-    // Timeout guard
-    const timeoutTimer = setTimeout(() => done('timeout'), Math.max(0, timeoutMs - (Date.now() - startTime)));
-
-    const abortHandler = abortSignal ? () => done('aborted') : null;
-    if (abortSignal) {
-      if (abortSignal.aborted) {
-        done('aborted');
-        return;
-      }
-      abortSignal.addEventListener('abort', abortHandler!, { once: true });
-    }
-
-    // Periodic poller — checks counter and performs async buffer reads safely
-    pollTimer = setInterval(async () => {
-      if (settled || checking) return;
-      const outputCounter = outputSubscription.getCount();
-      if (outputCounter === lastCheckedCounter) return; // No new notifications
-
-      checking = true;
-      lastCheckedCounter = outputCounter;
-
-      let currentLineCount: number | null;
-      let currentLines: string[] | null;
-      try {
-        currentLineCount = await readBufferLineCount(sessionId);
-        if (currentLineCount === null) {
-          currentLines = null;
-        } else if (currentLineCount <= initialLineCount) {
-          currentLines = [];
-        } else {
-          currentLines = await readBufferRange(sessionId, initialLineCount, currentLineCount - initialLineCount);
-        }
-      } catch {
-        if (!settled) done('lost');
-        checking = false;
-        return;
-      }
-
-      if (settled) { checking = false; return; }
-
-      if (currentLines === null) {
-        done('lost');
-        checking = false;
-        return;
-      }
-
-      const delta = (currentLineCount ?? initialLineCount) - initialLineCount;
-      const renderedDelta = getRenderedTextDelta(sessionId, initialRenderedText);
-      const hasRenderedDelta = Boolean(renderedDelta && renderedDelta.trim().length > 0 && renderedDelta !== lastRenderedDelta);
-
-      // Check explicit pattern match on new lines
-      if (patternRe && delta > 0) {
-        if (currentLines.some(line => patternRe!.test(line))) {
-          done('pattern');
-          checking = false;
-          return;
-        }
-      }
-
-      if (patternRe && hasRenderedDelta && renderedDelta) {
-        patternRe.lastIndex = 0;
-        if (patternRe.test(renderedDelta)) {
-          done('pattern');
-          checking = false;
-          return;
-        }
-      }
-
-      // Reset stability timer on each new output (adaptive: grows with output bursts)
-      if (delta > 0 || hasRenderedDelta) {
-        if (hasRenderedDelta && renderedDelta) {
-          lastRenderedDelta = renderedDelta;
-        }
-        outputBursts++;
-        if (stableTimer) clearTimeout(stableTimer);
-        // Cancel prompt grace from a PREVIOUS iteration if new output arrived
-        if (promptGraceTimer) {
-          clearTimeout(promptGraceTimer);
-          promptGraceTimer = null;
-        }
-        const adaptiveMs = Math.min(baseStableMs + outputBursts * 200, maxStableMs);
-        stableTimer = setTimeout(() => done('stable'), adaptiveMs);
-
-        // Check shell prompt pattern AFTER stability reset — grace timer survives until next poll
-        if (!promptGraceTimer) {
-          const tail = delta > 0 ? currentLines.slice(-3).join('\n') : renderedDelta ?? '';
-          if (COMPLETION_PROMPT_RE.test(tail) || INTERACTIVE_INPUT_PROMPT_RE.test(tail)) {
-            promptGraceTimer = setTimeout(() => {
-              if (!settled) done('prompt');
-            }, PROMPT_GRACE_MS);
-          }
-        }
-      }
-
-      checking = false;
-    }, POLL_INTERVAL_MS);
+  return waitForTerminalOutputV2({
+    sessionId,
+    timeoutSecs,
+    stableSecs,
+    patternRe,
+    startTime,
+    preSnapshotLineCount,
+    abortSignal,
+    existingSubscription,
+    initialRenderedText,
+    completionPromptRe: COMPLETION_PROMPT_RE,
+    interactiveInputPromptRe: INTERACTIVE_INPUT_PROMPT_RE,
+    truncateOutput,
+    emptyOutputTailLines: EMPTY_OUTPUT_TAIL_LINES,
+    fallbackTailLines: TERMINAL_BUFFER_TAIL_FALLBACK_LINES,
+    promptGraceMs: PROMPT_GRACE_MS,
+    maxAdaptiveStableSecs: MAX_ADAPTIVE_STABLE_SECS,
   });
-
-  if (result === 'aborted') {
-    return { success: false, output: '', error: 'Generation was stopped.' };
-  }
-
-  const finalSnapshot = await readBufferStats(sessionId, TERMINAL_BUFFER_TAIL_FALLBACK_LINES);
-  if (finalSnapshot === null || result === 'lost') {
-    return { success: false, output: '', error: 'Session became unavailable during wait.' };
-  }
-
-  const finalLineCount = finalSnapshot.totalLines;
-
-  // Handle buffer shrink (e.g. terminal clear/reset)
-  if (finalLineCount < initialLineCount) {
-    const { text, truncated } = truncateOutput(finalSnapshot.lines.join('\n'));
-    return { success: true, output: `⚠ Buffer was cleared or reset during command execution. Showing current buffer content:\n${text}`, truncated };
-  }
-
-  let newLines = finalLineCount > initialLineCount
-    ? await readBufferRange(sessionId, initialLineCount, finalLineCount - initialLineCount)
-    : [];
-
-  if (newLines === null) {
-    return { success: false, output: '', error: 'Session became unavailable during wait.' };
-  }
-
-  // Strip trailing prompt line when completion was via prompt detection
-  if (result === 'prompt' && newLines.length > 0) {
-    const lastLine = newLines[newLines.length - 1];
-    if (COMPLETION_PROMPT_RE.test(lastLine)) {
-      newLines = newLines.slice(0, -1);
-    }
-  }
-
-  if (newLines.length === 0) {
-    const renderedDelta = renderedDeltaFromTextSnapshot(sessionId, initialRenderedText, { success: true, output: '' });
-    if (renderedDelta) {
-      return renderedDelta;
-    }
-
-    // Fallback: provide buffer tail so the AI always gets useful context
-    if (result !== 'timeout') {
-      const tail = finalSnapshot.lines.slice(-EMPTY_OUTPUT_TAIL_LINES);
-      if (tail.length > 0) {
-        const { text, truncated } = truncateOutput(tail.join('\n'));
-        return { success: true, output: `No new terminal output detected. Here are the last ${tail.length} lines of the terminal:\n${text}`, truncated };
-      }
-    }
-    const msg = result === 'timeout'
-      ? `No new output after ${timeoutSecs}s. The command may be waiting for input or still running.`
-      : 'No new output detected.';
-    return { success: true, output: msg };
-  }
-
-  console.debug(`[AI:ToolExec] captured ${newLines.length} new lines (reason=${result})`);
-  const { text, truncated } = truncateOutput(newLines.join('\n'));
-  return { success: true, output: text, truncated };
 }
 
 /**
@@ -1335,218 +1134,6 @@ async function execAwaitTerminalOutput(
   };
 }
 
-type BufferSnapshot = {
-  totalLines: number;
-  lines: string[];
-};
-
-function readRenderedBufferLines(sessionId: string): string[] | null {
-  const buffer = readRenderedBufferText(sessionId);
-  return typeof buffer === 'string' ? buffer.split('\n') : null;
-}
-
-function readRenderedBufferText(sessionId: string): string | null {
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return null;
-  }
-
-  const buffer = getTerminalBuffer(paneId);
-  if (typeof buffer !== 'string') {
-    return null;
-  }
-
-  return buffer;
-}
-
-function getRenderedTextDelta(sessionId: string, initialText: string | null | undefined): string | null {
-  if (initialText == null) {
-    return null;
-  }
-
-  const currentText = readRenderedBufferText(sessionId);
-  if (currentText == null || currentText === initialText) {
-    return null;
-  }
-
-  if (currentText.startsWith(initialText)) {
-    return currentText.slice(initialText.length);
-  }
-
-  return currentText.split('\n').slice(-EMPTY_OUTPUT_TAIL_LINES).join('\n');
-}
-
-function readRenderedBufferTail(sessionId: string, maxLines: number): BufferSnapshot | null {
-  const lines = readRenderedBufferLines(sessionId);
-  if (!lines) {
-    return null;
-  }
-  return {
-    totalLines: lines.length,
-    lines: maxLines > 0 ? lines.slice(-maxLines) : [],
-  };
-}
-
-function renderedDeltaFromLineCount(
-  sessionId: string,
-  initialLineCount: number | null | undefined,
-  fallback: WaitResult,
-): WaitResult | null {
-  if (!fallback.success || initialLineCount == null) {
-    return null;
-  }
-
-  const lines = readRenderedBufferLines(sessionId);
-  if (!lines) {
-    return null;
-  }
-
-  if (lines.length < initialLineCount) {
-    const { text, truncated } = truncateOutput(lines.join('\n'));
-    return { success: true, output: `⚠ Buffer was cleared or reset during command execution. Showing current buffer content:\n${text}`, truncated };
-  }
-
-  let newLines = lines.slice(initialLineCount);
-  if (newLines.length === 0) {
-    return null;
-  }
-  const lastLine = newLines[newLines.length - 1];
-  if (COMPLETION_PROMPT_RE.test(lastLine)) {
-    newLines = newLines.slice(0, -1);
-  }
-  if (newLines.length === 0) {
-    return null;
-  }
-
-  const { text, truncated } = truncateOutput(newLines.join('\n'));
-  return { success: true, output: text, truncated };
-}
-
-function renderedDeltaFromTextSnapshot(
-  sessionId: string,
-  initialText: string | null | undefined,
-  fallback: WaitResult,
-): WaitResult | null {
-  if (!fallback.success) {
-    return null;
-  }
-
-  const delta = getRenderedTextDelta(sessionId, initialText);
-  if (!delta || delta.trim().length === 0) {
-    return null;
-  }
-
-  const { text, truncated } = truncateOutput(delta);
-  return { success: true, output: text, truncated };
-}
-
-function searchRenderedBuffer(
-  sessionId: string,
-  query: string,
-  options: { caseSensitive: boolean; regex: boolean; maxResults: number },
-): { lines: string[]; error?: string } | null {
-  const bufferLines = readRenderedBufferLines(sessionId);
-  if (!bufferLines) {
-    return null;
-  }
-
-  let matcher: (line: string) => number;
-  if (options.regex) {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(query, options.caseSensitive ? '' : 'i');
-    } catch {
-      return { lines: [], error: `Invalid regex pattern: ${query}` };
-    }
-    matcher = (line) => {
-      const match = pattern.exec(line);
-      pattern.lastIndex = 0;
-      return match?.index ?? -1;
-    };
-  } else {
-    const needle = options.caseSensitive ? query : query.toLowerCase();
-    matcher = (line) => {
-      const haystack = options.caseSensitive ? line : line.toLowerCase();
-      return haystack.indexOf(needle);
-    };
-  }
-
-  const matches: string[] = [];
-  for (let index = 0; index < bufferLines.length && matches.length < options.maxResults; index += 1) {
-    const line = bufferLines[index];
-    const column = matcher(line);
-    if (column >= 0) {
-      matches.push(`[rendered] L${index + 1}:${column + 1}: ${line}`);
-    }
-  }
-
-  return { lines: matches };
-}
-
-async function readBufferStats(sessionId: string, tailLines: number): Promise<BufferSnapshot | null> {
-  try {
-    const stats = await api.getBufferStats(sessionId);
-    const totalLines = Math.max(0, stats.current_lines);
-    const tailCount = Math.min(totalLines, Math.max(0, tailLines));
-    const lines = tailCount > 0
-      ? (await api.getScrollBuffer(sessionId, Math.max(0, totalLines - tailCount), tailCount)).map(line => line.text)
-      : [];
-    return { totalLines, lines };
-  } catch {
-    // fallback
-  }
-
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return null;
-  }
-
-  const buffer = getTerminalBuffer(paneId);
-  if (typeof buffer !== 'string') {
-    return null;
-  }
-
-  const allLines = buffer.split('\n');
-  return {
-    totalLines: allLines.length,
-    lines: tailLines > 0 ? allLines.slice(-tailLines) : [],
-  };
-}
-
-async function readBufferTail(sessionId: string, maxLines: number): Promise<BufferSnapshot | null> {
-  return readBufferStats(sessionId, maxLines);
-}
-
-async function readBufferLineCount(sessionId: string): Promise<number | null> {
-  const snapshot = await readBufferStats(sessionId, 0);
-  return snapshot?.totalLines ?? null;
-}
-
-async function readBufferRange(sessionId: string, startLine: number, count: number): Promise<string[] | null> {
-  if (count <= 0) {
-    return [];
-  }
-
-  try {
-    const lines = await api.getScrollBuffer(sessionId, startLine, count);
-    return lines.map(line => line.text);
-  } catch {
-    // fallback
-  }
-
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return null;
-  }
-
-  const buffer = getTerminalBuffer(paneId);
-  if (typeof buffer !== 'string') {
-    return null;
-  }
-
-  return buffer.split('\n').slice(startLine, startLine + count);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Meta Tool Executors (error recovery, batch operations)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1585,18 +1172,17 @@ async function execSendControlSequence(
     return { toolCallId, toolName, success: false, output: '', error: `Invalid sequence. Must be one of: ${Object.keys(CONTROL_SEQUENCES).join(', ')}`, durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return { toolCallId, toolName, success: false, output: '', error: `Open terminal session not found: ${sessionId}`, durationMs: Date.now() - startTime };
-  }
-
   const preSnapshotLineCount = await readBufferLineCount(sessionId);
   const outputSubscription = createTerminalOutputSubscription(sessionId);
   let waitResult: WaitResult;
   try {
-    const sent = writeToTerminal(paneId, CONTROL_SEQUENCES[rawSequence]);
-    if (!sent) {
-      return { toolCallId, toolName, success: false, output: '', error: `Terminal session is not writable: ${sessionId}`, durationMs: Date.now() - startTime };
+    const sendResult = terminalSend({
+      sessionId,
+      input: CONTROL_SEQUENCES[rawSequence],
+      inputKind: 'control',
+    });
+    if (!sendResult.ok) {
+      return { toolCallId, toolName, success: false, output: '', error: sendResult.error, durationMs: Date.now() - startTime };
     }
 
     // Wait briefly for terminal response
@@ -1653,11 +1239,6 @@ async function execBatchExec(
     return { toolCallId, toolName, success: false, output: '', error: `Too many commands (max ${MAX_BATCH_COMMANDS}).`, durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return { toolCallId, toolName, success: false, output: '', error: `Open terminal session not found: ${sessionId}`, durationMs: Date.now() - startTime };
-  }
-
   const results: string[] = [];
 
   try {
@@ -1675,9 +1256,9 @@ async function execBatchExec(
 
       const outputSubscription = createTerminalOutputSubscription(sessionId);
       try {
-        const sent = writeToTerminal(paneId, `${cmd}\r`);
-        if (!sent) {
-          results.push(`[${i + 1}] $ ${cmd}\n❌ Terminal is not writable.`);
+        const sendResult = terminalSend({ sessionId, input: cmd, inputKind: 'command', appendEnter: true });
+        if (!sendResult.ok) {
+          results.push(`[${i + 1}] $ ${cmd}\n❌ ${sendResult.error || 'Terminal is not writable.'}`);
           break;
         }
 
@@ -2028,27 +1609,12 @@ function execReadScreen(
     return { toolCallId, toolName, success: false, output: '', error: 'Missing required argument: session_id.', durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return { toolCallId, toolName, success: false, output: '', error: `Open terminal session not found: ${sessionId}`, durationMs: Date.now() - startTime };
-  }
-
-  const snapshot = readScreen(paneId);
+  const snapshot = readTerminalScreen(sessionId);
   if (!snapshot) {
     return { toolCallId, toolName, success: false, output: '', error: 'Screen reader not available for this terminal.', durationMs: Date.now() - startTime };
   }
 
-  // Format output with metadata header + numbered lines
-  const bufferMode = snapshot.isAlternateBuffer ? 'alternate buffer (TUI mode)' : 'normal buffer';
-  const header = `[Screen ${snapshot.cols}×${snapshot.rows} | Cursor: (${snapshot.cursorX},${snapshot.cursorY}) | ${bufferMode}]`;
-  const separator = '─'.repeat(Math.min(snapshot.cols, 80));
-  const lineWidth = String(snapshot.rows).length;
-  const numberedLines = snapshot.lines.map((line: string, i: number) => {
-    const num = String(i + 1).padStart(lineWidth);
-    return `${num}│${line}`;
-  });
-
-  const output = `${header}\n${separator}\n${numberedLines.join('\n')}`;
+  const output = formatScreenSnapshot(snapshot);
   const { text, truncated } = truncateOutput(output);
 
   return {
@@ -2085,11 +1651,6 @@ async function execSendKeys(
     return { toolCallId, toolName, success: false, output: '', error: `Too many keys (max ${MAX_KEYS}).`, durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return { toolCallId, toolName, success: false, output: '', error: `Open terminal session not found: ${sessionId}`, durationMs: Date.now() - startTime };
-  }
-
   // Validate all keys are non-empty strings before sending
   for (let i = 0; i < keys.length; i++) {
     if (typeof keys[i] !== 'string' || keys[i] === '') {
@@ -2113,9 +1674,13 @@ async function execSendKeys(
           return { toolCallId, toolName, success: false, output: sentSummary.join(', '), error: detail, durationMs: Date.now() - startTime };
         }
 
-        const sent = writeToTerminal(paneId, encoded.sequence);
-        if (!sent) {
-          return { toolCallId, toolName, success: false, output: sentSummary.join(', '), error: `Terminal not writable at key ${i + 1}.`, durationMs: Date.now() - startTime };
+        const sendResult = terminalSend({
+          sessionId,
+          input: encoded.sequence,
+          inputKind: 'keys',
+        });
+        if (!sendResult.ok) {
+          return { toolCallId, toolName, success: false, output: sentSummary.join(', '), error: sendResult.error ?? `Terminal not writable at key ${i + 1}.`, durationMs: Date.now() - startTime };
         }
         sentSummary.push(encoded.summary);
 
@@ -2208,13 +1773,8 @@ async function execSendMouse(
     return { toolCallId, toolName, success: false, output: '', error: 'Coordinates must be >= 1 (1-based).', durationMs: Date.now() - startTime };
   }
 
-  const paneId = findPaneBySessionId(sessionId);
-  if (!paneId) {
-    return { toolCallId, toolName, success: false, output: '', error: `Open terminal session not found: ${sessionId}`, durationMs: Date.now() - startTime };
-  }
-
   // Validate coordinates are within terminal bounds
-  const snapshot = readScreen(paneId);
+  const snapshot = readTerminalScreen(sessionId);
   if (snapshot && (x > snapshot.cols || y > snapshot.rows)) {
     return { toolCallId, toolName, success: false, output: '', error: `Coordinates out of bounds. Terminal is ${snapshot.cols}×${snapshot.rows}, got (${x},${y}).`, durationMs: Date.now() - startTime };
   }
@@ -2234,9 +1794,13 @@ async function execSendMouse(
       const press = `\x1b[<${btnCode};${x};${y}M`;
       const release = `\x1b[<${btnCode};${x};${y}m`;
 
-      const sent = writeToTerminal(paneId, press + release);
-      if (!sent) {
-        return { toolCallId, toolName, success: false, output: '', error: `Terminal not writable: ${sessionId}`, durationMs: Date.now() - startTime };
+      const sendResult = terminalSend({
+        sessionId,
+        input: press + release,
+        inputKind: 'mouse',
+      });
+      if (!sendResult.ok) {
+        return { toolCallId, toolName, success: false, output: '', error: sendResult.error, durationMs: Date.now() - startTime };
       }
       summary = `Clicked ${button} button at (${x},${y})`;
     } else {
@@ -2251,9 +1815,13 @@ async function execSendMouse(
         scrollData += `\x1b[<${scrollCode};${x};${y}M`;
       }
 
-      const sent = writeToTerminal(paneId, scrollData);
-      if (!sent) {
-        return { toolCallId, toolName, success: false, output: '', error: `Terminal not writable: ${sessionId}`, durationMs: Date.now() - startTime };
+      const sendResult = terminalSend({
+        sessionId,
+        input: scrollData,
+        inputKind: 'mouse',
+      });
+      if (!sendResult.ok) {
+        return { toolCallId, toolName, success: false, output: '', error: sendResult.error, durationMs: Date.now() - startTime };
       }
       summary = `Scrolled ${direction} ${count} step(s) at (${x},${y})`;
     }

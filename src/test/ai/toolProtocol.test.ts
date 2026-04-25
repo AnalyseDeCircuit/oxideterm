@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createToolResultEnvelope,
   createToolTarget,
+  detectTerminalPrompt,
   fromLegacyToolResult,
   hasTargetCapability,
   inferToolRisk,
@@ -143,5 +144,22 @@ describe('tool protocol risk and target helpers', () => {
     });
     expect(hasTargetCapability(target, 'terminal.observe')).toBe(true);
     expect(hasTargetCapability(target, 'filesystem.read')).toBe(false);
+  });
+});
+
+describe('terminal protocol helpers', () => {
+  it('detects shell and interactive input prompts from terminal text', () => {
+    expect(detectTerminalPrompt('dominical@macbook %')).toEqual({
+      kind: 'shell',
+      text: 'dominical@macbook %',
+    });
+    expect(detectTerminalPrompt('sudo fastfetch\n[sudo] password for dominical:')).toEqual({
+      kind: 'password',
+      text: '[sudo] password for dominical:',
+    });
+    expect(detectTerminalPrompt('Enter passphrase for key /tmp/id_ed25519:')).toEqual({
+      kind: 'passphrase',
+      text: 'Enter passphrase for key /tmp/id_ed25519:',
+    });
   });
 });
