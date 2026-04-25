@@ -110,7 +110,12 @@ export const AiTab = ({
     const { error: toastError } = useToast();
     const { confirm, ConfirmDialog } = useConfirm();
     const [contextWindowsExpanded, setContextWindowsExpanded] = useState(true);
+    const [collapsedContextProviders, setCollapsedContextProviders] = useState<Record<string, boolean>>({});
+    const [toolUseExpanded, setToolUseExpanded] = useState(true);
     const memory = ai.memory ?? { enabled: true, content: '' };
+    const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] };
+    const allToolNames = TOOL_GROUPS.flatMap((group) => [...group.readOnly, ...group.write]);
+    const approvedToolCount = allToolNames.filter((name) => toolUse.autoApproveTools?.[name] === true).length;
 
     return (
         <>
@@ -513,10 +518,35 @@ export const AiTab = ({
                                 <p className="text-xs text-theme-text-muted italic">{t('settings_view.ai.model_context_windows_empty')}</p>
                             ) : (
                                 <div className="space-y-4 max-w-3xl">
-                                    {ai.providers.filter((provider) => provider.models.length > 0).map((provider) => (
+                                    {ai.providers.filter((provider) => provider.models.length > 0).map((provider) => {
+                                        const providerCollapsed = collapsedContextProviders[provider.id] === true;
+                                        const userOverrideCount = provider.models.filter((model) => !!ai.userContextWindows?.[provider.id]?.[model]).length;
+
+                                        return (
                                         <div key={provider.id}>
-                                            <div className="text-[10px] font-bold tracking-wider uppercase text-theme-text-muted mb-1">{provider.name}</div>
-                                            <div className="border border-theme-border/30 rounded-md overflow-hidden">
+                                            <button
+                                                type="button"
+                                                className="mb-1 flex w-full items-center justify-between gap-3 rounded px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
+                                                onClick={() => setCollapsedContextProviders((current) => ({
+                                                    ...current,
+                                                    [provider.id]: !current[provider.id],
+                                                }))}
+                                                aria-expanded={!providerCollapsed}
+                                            >
+                                                <span className="text-[10px] font-bold tracking-wider uppercase">{provider.name}</span>
+                                                <span className="flex items-center gap-2 text-[10px] normal-case tracking-normal">
+                                                    <span>
+                                                        {t('settings_view.ai.ctx_provider_summary', {
+                                                            count: provider.models.length,
+                                                            overrides: userOverrideCount,
+                                                        })}
+                                                    </span>
+                                                    {providerCollapsed
+                                                        ? <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                                                        : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
+                                                </span>
+                                            </button>
+                                            <div className={cn('border border-theme-border/30 rounded-md overflow-hidden', providerCollapsed && 'hidden')}>
                                                 {provider.models.map((model, index) => {
                                                     const info = getModelContextWindowInfo(model, ai.modelContextWindows, provider.id, ai.userContextWindows);
                                                     const hasUserOverride = !!ai.userContextWindows?.[provider.id]?.[model];
@@ -561,7 +591,8 @@ export const AiTab = ({
                                                 })}
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             ))}
                         </div>
@@ -570,10 +601,22 @@ export const AiTab = ({
                     <Separator className="my-6 opacity-50" />
 
                     <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
-                        <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider flex items-center gap-2">
-                            <Wrench className="w-4 h-4" />
-                            {t('settings_view.ai.tool_use')}
-                        </h4>
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                            <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider flex items-center gap-2">
+                                <Wrench className="w-4 h-4" />
+                                {t('settings_view.ai.tool_use')}
+                            </h4>
+                            <button
+                                type="button"
+                                onClick={() => setToolUseExpanded((expanded) => !expanded)}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-theme-border px-2.5 py-1 text-xs text-theme-text-muted hover:bg-theme-bg-hover/50 hover:text-theme-text transition-colors cursor-pointer"
+                                aria-expanded={toolUseExpanded}
+                                aria-controls="ai-tool-use-details"
+                            >
+                                {toolUseExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                                {toolUseExpanded ? t('settings_view.ai.tool_use_collapse') : t('settings_view.ai.tool_use_expand')}
+                            </button>
+                        </div>
 
                         <div className="flex items-center justify-between mb-4">
                             <div>
@@ -582,12 +625,27 @@ export const AiTab = ({
                             </div>
                             <Checkbox
                                 id="tool-use-enabled"
-                                checked={ai.toolUse?.enabled ?? false}
-                                onCheckedChange={(checked) => updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), enabled: !!checked })}
+                                checked={toolUse.enabled}
+                                onCheckedChange={(checked) => updateAi('toolUse', { ...toolUse, enabled: !!checked })}
                             />
                         </div>
 
-                        <div className={ai.toolUse?.enabled ? 'space-y-5 ml-4 pl-4 border-l border-theme-border/30' : 'opacity-40 pointer-events-none space-y-5 ml-4 pl-4 border-l border-theme-border/30'}>
+                        {!toolUseExpanded && (
+                            <div className="ml-4 border-l border-theme-border/30 pl-4">
+                                <p className="text-xs text-theme-text-muted">
+                                    {t('settings_view.ai.tool_use_collapsed_summary', {
+                                        approved: approvedToolCount,
+                                        total: allToolNames.length,
+                                    })}
+                                </p>
+                            </div>
+                        )}
+
+                        {toolUseExpanded && (
+                        <div
+                            id="ai-tool-use-details"
+                            className={toolUse.enabled ? 'space-y-5 ml-4 pl-4 border-l border-theme-border/30' : 'opacity-40 pointer-events-none space-y-5 ml-4 pl-4 border-l border-theme-border/30'}
+                        >
                             <p className="text-xs text-theme-text-muted">{t('settings_view.ai.tool_use_approve_hint')}</p>
 
                             <div className="flex gap-2">
@@ -600,11 +658,11 @@ export const AiTab = ({
                                                 if (!EXPERIMENTAL_TOOLS.has(name)) all[name] = true;
                                             }
                                         }
-                                        const current = ai.toolUse?.autoApproveTools ?? {};
+                                        const current = toolUse.autoApproveTools ?? {};
                                         for (const name of EXPERIMENTAL_TOOLS) {
                                             if (current[name] !== undefined) all[name] = current[name];
                                         }
-                                        updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: all });
+                                        updateAi('toolUse', { ...toolUse, autoApproveTools: all });
                                     }}
                                     className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
                                 >
@@ -619,11 +677,11 @@ export const AiTab = ({
                                                 if (!EXPERIMENTAL_TOOLS.has(name)) none[name] = false;
                                             }
                                         }
-                                        const current = ai.toolUse?.autoApproveTools ?? {};
+                                        const current = toolUse.autoApproveTools ?? {};
                                         for (const name of EXPERIMENTAL_TOOLS) {
                                             if (current[name] !== undefined) none[name] = current[name];
                                         }
-                                        updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: none });
+                                        updateAi('toolUse', { ...toolUse, autoApproveTools: none });
                                     }}
                                     className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
                                 >
@@ -633,10 +691,10 @@ export const AiTab = ({
 
                             {TOOL_GROUPS.map((group) => {
                                 const GroupIcon = TOOL_GROUP_ICONS[group.groupKey] ?? Wrench;
-                                const approveTools = ai.toolUse?.autoApproveTools ?? {};
+                                const approveTools = toolUse.autoApproveTools ?? {};
                                 const toggleTool = (toolName: string) => {
                                     const next = { ...approveTools, [toolName]: !approveTools[toolName] };
-                                    updateAi('toolUse', { ...(ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }), autoApproveTools: next });
+                                    updateAi('toolUse', { ...toolUse, autoApproveTools: next });
                                 };
 
                                 const renderToolButton = (toolName: string) => {
@@ -697,7 +755,7 @@ export const AiTab = ({
                             })}
 
                             {(() => {
-                                const approveTools = ai.toolUse?.autoApproveTools ?? {};
+                                const approveTools = toolUse.autoApproveTools ?? {};
                                 const anyWriteApproved = [...WRITE_TOOLS].some((name) => approveTools[name] === true);
                                 return anyWriteApproved ? (
                                     <div className="p-3 rounded bg-amber-500/10 border border-amber-500/20">
@@ -706,6 +764,7 @@ export const AiTab = ({
                                 ) : null;
                             })()}
                         </div>
+                        )}
                     </div>
                 </div>
             </div>
