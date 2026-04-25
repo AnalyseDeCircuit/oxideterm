@@ -602,7 +602,7 @@
       "concurrent": "Transferencias simultáneas máximas",
       "concurrent_hint": "Número máximo de transferencias de archivos concurrentes (1-10)",
       "directory_parallelism": "Paralelismo de transferencias de carpetas",
-      "directory_parallelism_hint": "Workers de archivo paralelos dentro de una transferencia recursiva de carpeta. Vuelve a modo serial si el límite de velocidad está activado.",
+      "directory_parallelism_hint": "Número de archivos que se transfieren al mismo tiempo al subir o descargar carpetas de forma recursiva. Vuelve a modo serial si el límite de velocidad está activado.",
       "bandwidth": "Límite de ancho de banda",
       "bandwidth_hint": "Limitar velocidad de subida/descarga por transferencia",
       "speed_limit": "Límite de velocidad (KB/s)",

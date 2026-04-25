@@ -602,7 +602,7 @@
       "concurrent": "Max Concurrent Transfers",
       "concurrent_hint": "Maximum simultaneous file transfers (1-10)",
       "directory_parallelism": "Directory Transfer Parallelism",
-      "directory_parallelism_hint": "Parallel file workers inside one recursive folder transfer. Falls back to serial when speed limiting is enabled.",
+      "directory_parallelism_hint": "Number of files transferred at the same time during recursive folder upload or download. Falls back to serial when speed limiting is enabled.",
       "bandwidth": "Bandwidth Limiting",
       "bandwidth_hint": "Limit upload/download speed per transfer",
       "speed_limit": "Speed Limit (KB/s)",

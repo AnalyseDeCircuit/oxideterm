@@ -602,7 +602,7 @@
       "concurrent": "Số lượng truyền đồng thời tối đa",
       "concurrent_hint": "Số lượng file truyền đồng thời tối đa (1-10)",
       "directory_parallelism": "Độ song song khi truyền thư mục",
-      "directory_parallelism_hint": "Số worker file chạy song song trong một lần truyền thư mục đệ quy. Sẽ quay về tuần tự khi bật giới hạn tốc độ.",
+      "directory_parallelism_hint": "Số file được truyền cùng lúc khi upload hoặc download thư mục đệ quy. Sẽ quay về tuần tự khi bật giới hạn tốc độ.",
       "bandwidth": "Giới hạn băng thông",
       "bandwidth_hint": "Giới hạn tốc độ upload/download mỗi lần truyền",
       "speed_limit": "Giới hạn tốc độ (KB/s)",

@@ -602,7 +602,7 @@
       "concurrent": "Maximale gleichzeitige Übertragungen",
       "concurrent_hint": "Maximale gleichzeitige Dateiübertragungen (1-10)",
       "directory_parallelism": "Parallelität für Ordnerübertragungen",
-      "directory_parallelism_hint": "Parallele Datei-Worker innerhalb einer rekursiven Ordnerübertragung. Bei aktivierter Geschwindigkeitsbegrenzung wird seriell übertragen.",
+      "directory_parallelism_hint": "Anzahl der Dateien, die beim rekursiven Hoch- oder Herunterladen von Ordnern gleichzeitig übertragen werden. Bei aktivierter Geschwindigkeitsbegrenzung wird seriell übertragen.",
       "bandwidth": "Bandbreitenlimitierung",
       "bandwidth_hint": "Upload-/Download-Geschwindigkeit pro Übertragung limitieren",
       "speed_limit": "Geschwindigkeitslimit (KB/s)",

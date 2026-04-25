@@ -602,7 +602,7 @@
       "concurrent": "最大同時転送数",
       "concurrent_hint": "同時ファイル転送の最大数（1-10）",
       "directory_parallelism": "ディレクトリ転送の並列度",
-      "directory_parallelism_hint": "1つの再帰的なフォルダ転送内で並列処理するファイルワーカー数です。速度制限が有効な場合はシリアル転送に戻ります。",
+      "directory_parallelism_hint": "フォルダを再帰的にアップロードまたはダウンロードするときに同時転送するファイル数です。速度制限が有効な場合はシリアル転送に戻ります。",
       "bandwidth": "帯域幅制限",
       "bandwidth_hint": "転送ごとのアップロード/ダウンロード速度を制限",
       "speed_limit": "速度制限 (KB/s)",

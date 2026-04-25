@@ -602,7 +602,7 @@
       "concurrent": "최대 동시 전송 수",
       "concurrent_hint": "최대 동시 파일 전송 수 (1-10)",
       "directory_parallelism": "디렉터리 전송 병렬도",
-      "directory_parallelism_hint": "하나의 재귀 폴더 전송 안에서 병렬로 처리할 파일 워커 수입니다. 속도 제한이 켜져 있으면 직렬 전송으로 돌아갑니다.",
+      "directory_parallelism_hint": "폴더를 재귀적으로 업로드하거나 다운로드할 때 동시에 전송할 파일 수입니다. 속도 제한이 켜져 있으면 직렬 전송으로 돌아갑니다.",
       "bandwidth": "대역폭 제한",
       "bandwidth_hint": "전송당 업로드/다운로드 속도 제한",
       "speed_limit": "속도 제한 (KB/s)",

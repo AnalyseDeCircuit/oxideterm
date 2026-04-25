@@ -602,7 +602,7 @@
       "concurrent": "最大并发传输数",
       "concurrent_hint": "同时传输的最大文件数 (1-10)",
       "directory_parallelism": "目录传输并行度",
-      "directory_parallelism_hint": "单个递归目录传输内部并行处理的文件数。开启限速时会自动回退为串行。",
+      "directory_parallelism_hint": "递归上传或下载目录时，同时传输的文件数。开启限速时会自动回退为串行。",
       "bandwidth": "带宽限制",
       "bandwidth_hint": "限制每个传输的上传/下载速度",
       "speed_limit": "速度限制 (KB/s)",

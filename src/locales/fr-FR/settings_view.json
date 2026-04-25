@@ -602,7 +602,7 @@
       "concurrent": "Transferts simultanés max",
       "concurrent_hint": "Nombre maximum de transferts de fichiers simultanés (1-10)",
       "directory_parallelism": "Parallélisme des transferts de dossiers",
-      "directory_parallelism_hint": "Workers de fichiers parallèles dans un transfert récursif de dossier. Repasse en série lorsque la limitation de débit est activée.",
+      "directory_parallelism_hint": "Nombre de fichiers transférés en même temps lors de l'envoi ou du téléchargement récursif d'un dossier. Repasse en série lorsque la limitation de débit est activée.",
       "bandwidth": "Limitation de bande passante",
       "bandwidth_hint": "Limiter la vitesse de téléversement/téléchargement par transfert",
       "speed_limit": "Limite de vitesse (Ko/s)",
