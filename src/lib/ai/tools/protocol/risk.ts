@@ -4,6 +4,15 @@
 import type { ToolCapability, ToolRisk } from './types';
 import { hasDeniedCommands } from '../toolDefinitions';
 
+const SENSITIVE_KEY_RE = /(?:password|passphrase|token|secret|api[_-]?key|private[_-]?key|access[_-]?key|auth|credential)/i;
+const SENSITIVE_VALUE_RE = /(?:password|passphrase|token|secret|api[_-]?key|private key|bearer\s+[A-Za-z0-9._~+/-]+|sk-[A-Za-z0-9_-]{8,})/i;
+const HIGH_RISK_TOOL_RISKS = new Set<ToolRisk>([
+  'destructive',
+  'credential-sensitive',
+  'network-expose',
+  'settings-change',
+]);
+
 const READ_TOOLS = new Set([
   'get_terminal_buffer',
   'search_terminal',
@@ -89,6 +98,28 @@ function capabilityRisk(capability?: ToolCapability): ToolRisk | undefined {
   }
 }
 
+function valueContainsCredential(value: unknown, keyHint = ''): boolean {
+  if (keyHint && keyHint !== 'keys' && SENSITIVE_KEY_RE.test(keyHint)) {
+    return true;
+  }
+
+  if (typeof value === 'string') {
+    return SENSITIVE_VALUE_RE.test(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => valueContainsCredential(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).some(([key, nested]) => (
+      valueContainsCredential(nested, key)
+    ));
+  }
+
+  return false;
+}
+
 export function inferToolRisk(
   toolName: string,
   args: Record<string, unknown> = {},
@@ -96,6 +127,10 @@ export function inferToolRisk(
 ): ToolRisk {
   if (hasDeniedCommands(toolName, args)) {
     return 'destructive';
+  }
+
+  if (valueContainsCredential(args)) {
+    return 'credential-sensitive';
   }
 
   const fromCapability = capabilityRisk(capability);
@@ -129,4 +164,34 @@ export function inferToolRisk(
   }
 
   return 'read';
+}
+
+export function isHighRiskToolRisk(risk: ToolRisk): boolean {
+  return HIGH_RISK_TOOL_RISKS.has(risk);
+}
+
+export function sanitizeToolArguments<T = unknown>(value: T): T {
+  const sanitize = (input: unknown, keyHint = ''): unknown => {
+    if (keyHint && keyHint !== 'keys' && SENSITIVE_KEY_RE.test(keyHint)) {
+      return '[redacted]';
+    }
+
+    if (typeof input === 'string') {
+      return SENSITIVE_VALUE_RE.test(input) ? '[redacted]' : input;
+    }
+
+    if (Array.isArray(input)) {
+      return input.map((item) => sanitize(item));
+    }
+
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>).map(([key, nested]) => [key, sanitize(nested, key)]),
+      );
+    }
+
+    return input;
+  };
+
+  return sanitize(value) as T;
 }

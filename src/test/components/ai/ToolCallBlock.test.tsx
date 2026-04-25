@@ -24,6 +24,7 @@ vi.mock('@/store/aiChatStore', () => ({
 
 vi.mock('@/lib/ai/tools', () => ({
   hasDeniedCommands: vi.fn(() => false),
+  sanitizeToolArguments: (value: unknown) => value,
 }));
 
 import { ToolCallBlock } from '@/components/ai/ToolCallBlock';

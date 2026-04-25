@@ -46,8 +46,11 @@ export type {
 export {
   createToolResultEnvelope,
   createToolTarget,
+  decideToolApproval,
   fromLegacyToolResult,
   hasTargetCapability,
   inferToolRisk,
+  isHighRiskToolRisk,
+  sanitizeToolArguments,
   toLegacyToolResult,
 } from './protocol';

@@ -14,7 +14,7 @@ const contextFreeToolsMock = vi.hoisted(() => new Set(['local_exec']));
 const sessionIdToolsMock = vi.hoisted(() => new Set<string>());
 const getToolsForContextMock = vi.hoisted(() => vi.fn<() => AiToolDefinition[]>(() => []));
 const executeToolMock = vi.hoisted(() => vi.fn());
-const hasDeniedCommandsMock = vi.hoisted(() => vi.fn(() => false));
+const hasDeniedCommandsMock = vi.hoisted(() => vi.fn((_toolName?: string, _args?: Record<string, unknown>) => false));
 const estimateTokensMock = vi.hoisted(() => vi.fn(() => 100));
 const getModelContextWindowMock = vi.hoisted(() => vi.fn(() => 1000));
 const responseReserveMock = vi.hoisted(() => vi.fn(() => 256));
@@ -130,9 +130,24 @@ vi.mock('@/lib/ai/constants', () => ({
 vi.mock('@/lib/ai/tools', () => ({
   CONTEXT_FREE_TOOLS: contextFreeToolsMock,
   SESSION_ID_TOOLS: sessionIdToolsMock,
+  READ_ONLY_TOOLS: new Set(['read_file', 'list_directory', 'grep_search']),
   getToolsForContext: getToolsForContextMock,
   isCommandDenied: vi.fn(() => false),
   hasDeniedCommands: hasDeniedCommandsMock,
+  decideToolApproval: ({ toolName, args, autoApproveTools, readOnlyTools }: {
+    toolName: string;
+    args?: Record<string, unknown>;
+    autoApproveTools?: Record<string, boolean>;
+    readOnlyTools?: Set<string>;
+  }) => {
+    if (hasDeniedCommandsMock(toolName, args ?? {})) {
+      return { risk: 'destructive', autoApprove: false, requiresApproval: true, reason: 'high-risk' };
+    }
+    if (autoApproveTools?.[toolName] === true || readOnlyTools?.has(toolName)) {
+      return { risk: readOnlyTools?.has(toolName) ? 'read' : 'execute-command', autoApprove: true, requiresApproval: false, reason: 'tool-auto-approved' };
+    }
+    return { risk: 'execute-command', autoApprove: false, requiresApproval: true, reason: 'manual' };
+  },
   executeTool: executeToolMock,
 }));
 

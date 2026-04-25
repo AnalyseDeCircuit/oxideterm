@@ -70,9 +70,11 @@ vi.mock('@/lib/ai/constants', () => ({
 vi.mock('@/lib/ai/tools', () => ({
   CONTEXT_FREE_TOOLS: [],
   SESSION_ID_TOOLS: [],
+  READ_ONLY_TOOLS: new Set(),
   getToolsForContext: vi.fn(() => []),
   isCommandDenied: vi.fn(() => false),
   hasDeniedCommands: vi.fn(() => false),
+  decideToolApproval: vi.fn(() => ({ risk: 'read', autoApprove: false, requiresApproval: true, reason: 'manual' })),
   executeTool: vi.fn(),
 }));
 

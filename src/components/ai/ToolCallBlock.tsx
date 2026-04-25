@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Terminal, FileText, FolderOpen, Search, GitB
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import { useAiChatStore } from '../../store/aiChatStore';
-import { hasDeniedCommands } from '../../lib/ai/tools';
+import { hasDeniedCommands, sanitizeToolArguments } from '../../lib/ai/tools';
 import type { AiToolCall, AiToolResult } from '../../types';
 import type { AiToolRound, AiTurnPart, AiTurnToolCall } from '../../lib/ai/turnModel/types';
 
@@ -173,12 +173,20 @@ function StatusIcon({ status }: { status: AiToolCall['status'] }) {
 
 function formatArgs(argsJson: string): string {
   try {
-    const parsed = JSON.parse(argsJson);
+    const parsed = sanitizeToolArguments(JSON.parse(argsJson));
     // Show compact representation for common patterns
     if (parsed.command) return parsed.command;
     if (parsed.path) return parsed.path;
     if (parsed.pattern && parsed.path) return `${parsed.pattern} in ${parsed.path}`;
     return JSON.stringify(parsed, null, 2);
+  } catch {
+    return argsJson;
+  }
+}
+
+function formatArgsForDetails(argsJson: string): string {
+  try {
+    return JSON.stringify(sanitizeToolArguments(JSON.parse(argsJson)), null, 2);
   } catch {
     return argsJson;
   }
@@ -301,10 +309,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
               {t('ai.tool_use.arguments')}
             </div>
             <pre className="text-[10px] text-theme-text-muted/60 font-[family-name:var(--terminal-font-family)] bg-theme-bg/50 rounded-md px-1.5 py-1 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all">
-              {(() => {
-                try { return JSON.stringify(JSON.parse(call.arguments), null, 2); }
-                catch { return call.arguments; }
-              })()}
+              {formatArgsForDetails(call.arguments)}
             </pre>
           </div>
 

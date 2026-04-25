@@ -15,7 +15,16 @@ export {
   fromLegacyToolResult,
   toLegacyToolResult,
 } from './envelope';
-export { inferToolRisk } from './risk';
+export {
+  inferToolRisk,
+  isHighRiskToolRisk,
+  sanitizeToolArguments,
+} from './risk';
+export type {
+  ToolApprovalDecision,
+  ToolApprovalPolicyInput,
+} from './approvalPolicy';
+export { decideToolApproval } from './approvalPolicy';
 export { createToolTarget, hasTargetCapability } from './targets';
 export type {
   TerminalBufferSnapshot,

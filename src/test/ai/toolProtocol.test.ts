@@ -7,10 +7,12 @@ import {
   byteLengthOfText,
   createToolResultEnvelope,
   createToolTarget,
+  decideToolApproval,
   detectTerminalPrompt,
   fromLegacyToolResult,
   hasTargetCapability,
   inferToolRisk,
+  sanitizeToolArguments,
   parseFileWriteRequest,
   toLegacyToolResult,
 } from '@/lib/ai/tools/protocol';
@@ -127,6 +129,65 @@ describe('tool protocol risk and target helpers', () => {
     expect(inferToolRisk('create_port_forward')).toBe('network-expose');
     expect(inferToolRisk('update_setting')).toBe('settings-change');
     expect(inferToolRisk('custom_tool', {}, 'terminal.send')).toBe('interactive-input');
+  });
+
+  it('treats credential-like arguments as high-risk and redacts them for display', () => {
+    expect(inferToolRisk('send_keys', { keys: ['password'] })).toBe('credential-sensitive');
+    expect(inferToolRisk('local_exec', { command: 'echo sk-secret-token' })).toBe('credential-sensitive');
+    expect(sanitizeToolArguments({
+      password: 'hunter2',
+      keys: ['password', 'Enter'],
+      nested: { apiKey: 'sk-test12345678' },
+    })).toEqual({
+      password: '[redacted]',
+      keys: ['[redacted]', 'Enter'],
+      nested: { apiKey: '[redacted]' },
+    });
+  });
+
+  it('blocks high-risk calls from ordinary auto-approval', () => {
+    expect(decideToolApproval({
+      toolName: 'terminal_exec',
+      args: { command: 'ls -la' },
+      autoApproveTools: { terminal_exec: true },
+    })).toMatchObject({
+      risk: 'execute-command',
+      autoApprove: true,
+    });
+
+    expect(decideToolApproval({
+      toolName: 'terminal_exec',
+      args: { command: 'sudo reboot' },
+      autoApproveTools: { terminal_exec: true },
+    })).toMatchObject({
+      risk: 'destructive',
+      autoApprove: false,
+      requiresApproval: true,
+      reason: 'high-risk',
+    });
+
+    expect(decideToolApproval({
+      toolName: 'create_port_forward',
+      args: {},
+      autoApproveTools: { create_port_forward: true },
+      autonomyLevel: 'autonomous',
+    })).toMatchObject({
+      risk: 'network-expose',
+      autoApprove: false,
+      requiresApproval: true,
+    });
+
+    expect(decideToolApproval({
+      toolName: 'read_file',
+      args: { path: '/tmp/a.txt' },
+      autoApproveTools: { read_file: false },
+      readOnlyTools: new Set(['read_file']),
+    })).toMatchObject({
+      risk: 'read',
+      autoApprove: false,
+      requiresApproval: true,
+      reason: 'manual',
+    });
   });
 
   it('creates targets with optional fields only when provided', () => {

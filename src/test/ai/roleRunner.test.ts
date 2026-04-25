@@ -7,7 +7,7 @@ const addApprovalMock = vi.hoisted(() => vi.fn());
 const addToastMock = vi.hoisted(() => vi.fn());
 const executeToolMock = vi.hoisted(() => vi.fn());
 const isCommandDeniedMock = vi.hoisted(() => vi.fn(() => false));
-const hasDeniedCommandsMock = vi.hoisted(() => vi.fn(() => false));
+const hasDeniedCommandsMock = vi.hoisted(() => vi.fn((_toolName?: string, _args?: Record<string, unknown>) => false));
 
 vi.mock('@/store/agentStore', () => ({
   useAgentStore: {
@@ -55,6 +55,25 @@ vi.mock('@/lib/ai/tools', () => ({
   READ_ONLY_TOOLS: new Set(['read_file', 'list_directory', 'grep_search']),
   isCommandDenied: isCommandDeniedMock,
   hasDeniedCommands: hasDeniedCommandsMock,
+  sanitizeToolArguments: (value: unknown) => value,
+  decideToolApproval: ({ toolName, args, autoApproveTools, readOnlyTools, autonomyLevel }: {
+    toolName: string;
+    args?: Record<string, unknown>;
+    autoApproveTools?: Record<string, boolean>;
+    readOnlyTools?: Set<string>;
+    autonomyLevel?: string;
+  }) => {
+    if (hasDeniedCommandsMock(toolName, args ?? {})) {
+      return { risk: 'destructive', autoApprove: false, requiresApproval: true, reason: 'high-risk' };
+    }
+    if (autonomyLevel === 'supervised') {
+      return { risk: 'read', autoApprove: false, requiresApproval: true, reason: 'supervised' };
+    }
+    if (autoApproveTools?.[toolName] === true || readOnlyTools?.has(toolName) || autonomyLevel === 'autonomous') {
+      return { risk: readOnlyTools?.has(toolName) ? 'read' : 'execute-command', autoApprove: true, requiresApproval: false, reason: 'tool-auto-approved' };
+    }
+    return { risk: 'execute-command', autoApprove: false, requiresApproval: true, reason: 'manual' };
+  },
 }));
 
 describe('roleRunner.streamCompletion', () => {

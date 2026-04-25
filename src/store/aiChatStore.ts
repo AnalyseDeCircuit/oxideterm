@@ -32,7 +32,7 @@ import { createAiDiagnosticEvent, persistDiagnosticEvents, type AiDiagnosticTele
 import { normalizePendingSummaries } from '../lib/ai/turnModel/summaryMetadata';
 import { createSyntheticToolDenyPayload } from '../lib/ai/turnModel/toolFeedback';
 import { getToolUseNegativeConstraint } from '../lib/ai/turnModel/toolUsePolicy';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, getToolsForContext, hasDeniedCommands, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, READ_ONLY_TOOLS, decideToolApproval, getToolsForContext, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
 import { PARTICIPANTS, resolveParticipant, mergeParticipantTools } from '../lib/ai/participants';
@@ -2324,27 +2324,22 @@ You have tools to interact with the user's terminal sessions and workspace. **Us
             continue;
           }
 
-          // High-risk commands are still user-controlled, but they must never be auto-approved.
-          const isDenyListed = (() => {
-            try {
-              const parsed = JSON.parse(tc.arguments);
-              return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                ? hasDeniedCommands(tc.name, parsed as Record<string, unknown>)
-                : false;
-            } catch { return false; }
-          })();
+          const parsedApprovalArgs = parseToolArguments(tc.arguments) ?? {};
+          const approvalDecision = decideToolApproval({
+            toolName: tc.name,
+            args: parsedApprovalArgs,
+            autoApproveTools,
+            readOnlyTools: READ_ONLY_TOOLS,
+          });
 
-          if (isDenyListed) {
-            // Deny-list commands always require explicit user approval.
+          if (approvalDecision.requiresApproval) {
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
-            dangerousPendingApprovalIds.add(tc.id);
-          } else if (autoApproveTools[tc.name] === true) {
-            tc.status = 'approved';
+            if (approvalDecision.risk === 'destructive') {
+              dangerousPendingApprovalIds.add(tc.id);
+            }
           } else {
-            // Non-auto-approved tools need user approval
-            tc.status = 'pending_user_approval';
-            pendingApprovalIds.push(tc.id);
+            tc.status = 'approved';
           }
         }
         accumulator.syncToolCalls(toolCallEntries);

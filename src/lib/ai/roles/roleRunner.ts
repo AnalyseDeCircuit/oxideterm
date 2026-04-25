@@ -12,7 +12,7 @@
 import { useAgentStore, registerApprovalResolver, removeApprovalResolver } from '../../../store/agentStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { useToastStore } from '../../../hooks/useToast';
-import { executeTool, READ_ONLY_TOOLS, hasDeniedCommands } from '../tools';
+import { decideToolApproval, executeTool, READ_ONLY_TOOLS, sanitizeToolArguments } from '../tools';
 import { MAX_TOOL_CALLS_PER_ROUND, MAX_OUTPUT_BYTES } from '../agentConfig';
 import i18n from '../../../i18n';
 import type { AiReasoningEffort, AiReasoningProtocol, ChatMessage, AiStreamProvider, AiToolDefinition } from '../providers';
@@ -247,21 +247,14 @@ export function shouldAutoApprove(
   args: Record<string, unknown>,
   autonomyLevel: AgentTask['autonomyLevel'],
 ): boolean {
-  if (hasDeniedCommands(toolName, args)) {
-    return false;
-  }
-
-  switch (autonomyLevel) {
-    case 'supervised':
-      return false;
-    case 'balanced': {
-      const autoApproveTools = useSettingsStore.getState().settings.ai.toolUse?.autoApproveTools;
-      if (autoApproveTools?.[toolName] === true) return true;
-      return READ_ONLY_TOOLS.has(toolName);
-    }
-    case 'autonomous':
-      return true;
-  }
+  const autoApproveTools = useSettingsStore.getState().settings.ai.toolUse?.autoApproveTools;
+  return decideToolApproval({
+    toolName,
+    args,
+    autoApproveTools,
+    readOnlyTools: READ_ONLY_TOOLS,
+    autonomyLevel,
+  }).autoApprove;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -354,22 +347,30 @@ export async function processToolCalls(
       continue;
     }
 
+    const sanitizedArgsText = JSON.stringify(sanitizeToolArguments(parsedArgs));
+
     // Create step
     const toolStep = createStep(round, 'tool_call', `${tc.name}`, {
       name: tc.name,
-      arguments: tc.arguments,
+      arguments: sanitizedArgsText,
     });
     store().appendStep(toolStep);
     await emitDiagnosticEvent(diagnostics, 'tool_call', {
       logicalRound: round,
       toolCallId: tc.id,
       toolName: tc.name,
-      arguments: tc.arguments,
+      arguments: sanitizedArgsText,
     });
 
     // Check approval
-    const isDangerousCommand = hasDeniedCommands(tc.name, parsedArgs);
-    const autoApprove = shouldAutoApprove(tc.name, parsedArgs, autonomyLevel);
+    const approvalDecision = decideToolApproval({
+      toolName: tc.name,
+      args: parsedArgs,
+      autoApproveTools: useSettingsStore.getState().settings.ai.toolUse?.autoApproveTools,
+      readOnlyTools: READ_ONLY_TOOLS,
+      autonomyLevel,
+    });
+    const autoApprove = approvalDecision.autoApprove;
     let dangerousCommandApproved = false;
 
     if (!autoApprove) {
@@ -382,7 +383,7 @@ export async function processToolCalls(
         taskId: task.id,
         stepId: toolStep.id,
         toolName: tc.name,
-        arguments: tc.arguments,
+        arguments: sanitizedArgsText,
         status: 'pending',
         reasoning: undefined,
       };
@@ -449,7 +450,7 @@ export async function processToolCalls(
       }
 
       store().setTaskStatus('executing');
-      dangerousCommandApproved = isDangerousCommand;
+      dangerousCommandApproved = approvalDecision.risk === 'destructive';
     }
 
     // Execute tool
