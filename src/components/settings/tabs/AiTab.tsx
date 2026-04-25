@@ -111,6 +111,8 @@ export const AiTab = ({
     const { confirm, ConfirmDialog } = useConfirm();
     const [contextWindowsExpanded, setContextWindowsExpanded] = useState(true);
     const [collapsedContextProviders, setCollapsedContextProviders] = useState<Record<string, boolean>>({});
+    const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+    const [expandedProviderModels, setExpandedProviderModels] = useState<Record<string, boolean>>({});
     const [toolUseExpanded, setToolUseExpanded] = useState(true);
     const memory = ai.memory ?? { enabled: true, content: '' };
     const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] };
@@ -159,130 +161,220 @@ export const AiTab = ({
                         <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
 
                         <div className="space-y-3 max-w-3xl mb-6">
-                            {ai.providers.map((provider) => (
+                            {ai.providers.map((provider) => {
+                                const isActiveProvider = provider.id === ai.activeProviderId;
+                                const isExpanded = expandedProviders[provider.id] ?? isActiveProvider;
+                                const modelsExpanded = expandedProviderModels[provider.id] === true;
+                                const visibleModels = modelsExpanded ? provider.models : provider.models.slice(0, 8);
+                                const hiddenModelCount = Math.max(0, provider.models.length - visibleModels.length);
+
+                                const refreshModels = async () => {
+                                    if (provider.type !== 'ollama' && provider.type !== 'openai_compatible') {
+                                        try {
+                                            const hasKey = await api.hasAiProviderApiKey(provider.id);
+                                            if (!hasKey) {
+                                                toastError(t('ai.model_selector.no_key_warning'));
+                                                return;
+                                            }
+                                        } catch {
+                                        }
+                                    }
+
+                                    setRefreshingModels(provider.id);
+                                    try {
+                                        await refreshProviderModels(provider.id);
+                                    } catch (error) {
+                                        console.error('[Settings] Failed to refresh models:', error);
+                                        toastError(t('settings_view.ai.refresh_failed', { error: String(error) }));
+                                    } finally {
+                                        setRefreshingModels(null);
+                                    }
+                                };
+
+                                return (
                                 <div
                                     key={provider.id}
                                     className={cn(
-                                        'rounded-lg border p-4 transition-colors',
-                                        provider.id === ai.activeProviderId
-                                            ? 'border-theme-accent/50 bg-theme-accent/5'
-                                            : 'border-theme-border bg-theme-bg',
+                                        'rounded-lg border transition-colors',
+                                        isActiveProvider
+                                            ? 'border-theme-accent/60 bg-theme-accent/5'
+                                            : 'border-theme-border/70 bg-theme-bg/70',
                                     )}
                                 >
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium text-sm text-theme-text">{provider.name}</span>
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-bg-panel text-theme-text-muted uppercase tracking-wider">{provider.type}</span>
-                                            {provider.id === ai.activeProviderId && (
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent font-medium">
-                                                    {t('settings_view.ai.active')}
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
+                                        className="flex w-full items-start justify-between gap-4 p-4 text-left"
+                                        onClick={() => setExpandedProviders((current) => ({
+                                            ...current,
+                                            [provider.id]: !(current[provider.id] ?? isActiveProvider),
+                                        }))}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                setExpandedProviders((current) => ({
+                                                    ...current,
+                                                    [provider.id]: !(current[provider.id] ?? isActiveProvider),
+                                                }));
+                                            }
+                                        }}
+                                        aria-expanded={isExpanded}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-medium text-sm text-theme-text">{provider.name}</span>
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-bg-panel text-theme-text-muted uppercase tracking-wider">{provider.type}</span>
+                                                {isActiveProvider && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent font-medium">
+                                                        {t('settings_view.ai.active')}
+                                                    </span>
+                                                )}
+                                                <span className={cn(
+                                                    'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                                                    provider.enabled
+                                                        ? 'bg-emerald-500/10 text-emerald-400'
+                                                        : 'bg-theme-border/20 text-theme-text-muted',
+                                                )}>
+                                                    {provider.enabled ? t('settings_view.ai.provider_enabled') : t('settings_view.ai.provider_disabled')}
                                                 </span>
-                                            )}
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-theme-text-muted">
+                                                <span className="truncate max-w-[260px]">{t('settings_view.ai.default_model')}: <span className="font-mono text-theme-text-muted/90">{provider.defaultModel || '—'}</span></span>
+                                                <span>{t('settings_view.ai.provider_models_summary', { count: provider.models.length })}</span>
+                                                {provider.type !== 'ollama' && <span>{t('settings_view.ai.api_key')}: {t('settings_view.ai.api_key_stored')}</span>}
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-1">
-                                            {provider.id !== ai.activeProviderId && (
-                                                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setActiveProvider(provider.id)}>
-                                                    {t('settings_view.ai.set_active')}
-                                                </Button>
-                                            )}
-                                            <Checkbox checked={provider.enabled} onCheckedChange={(checked) => updateProvider(provider.id, { enabled: !!checked })} />
-                                            {provider.id.startsWith('custom-') && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-7 w-7 p-0"
-                                                    onClick={async () => {
-                                                        if (await confirm({ title: t('settings_view.ai.remove_provider_confirm', { name: provider.name }), variant: 'danger' })) {
-                                                            api.deleteAiProviderApiKey(provider.id).catch(() => {});
-                                                            removeProvider(provider.id);
+                                        <div className="flex shrink-0 items-center gap-2">
+                                            {!isActiveProvider && (
+                                                <span
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setActiveProvider(provider.id);
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                            setActiveProvider(provider.id);
                                                         }
                                                     }}
+                                                    className="rounded-full border border-theme-border px-2.5 py-1 text-[11px] text-theme-text-muted hover:border-theme-accent/60 hover:text-theme-accent transition-colors"
                                                 >
-                                                    <X className="h-3.5 w-3.5" />
-                                                </Button>
+                                                    {t('settings_view.ai.set_active')}
+                                                </span>
                                             )}
+                                            {isExpanded
+                                                ? <ChevronDown className="h-4 w-4 text-theme-text-muted" />
+                                                : <ChevronRight className="h-4 w-4 text-theme-text-muted" />}
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                                        <div className="grid gap-1">
-                                            <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.base_url')}</Label>
-                                            <Input
-                                                value={provider.baseUrl}
-                                                onChange={(event) => updateProvider(provider.id, { baseUrl: event.target.value })}
-                                                className="bg-theme-bg h-8 text-xs"
-                                                placeholder={provider.type === 'openai_compatible' ? 'http://localhost:1234/v1' : undefined}
-                                            />
-                                        </div>
-                                        <div className="grid gap-1">
-                                            <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.default_model')}</Label>
-                                            <Input
-                                                value={provider.defaultModel}
-                                                onChange={(event) => updateProvider(provider.id, { defaultModel: event.target.value })}
-                                                className="bg-theme-bg h-8 text-xs"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="mt-3">
-                                        <div className="flex items-center justify-between mb-1">
-                                            <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.available_models')} ({provider.models.length})</Label>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-6 px-2 text-[10px] gap-1"
-                                                disabled={refreshingModels === provider.id}
-                                                onClick={async () => {
-                                                    if (provider.type !== 'ollama' && provider.type !== 'openai_compatible') {
-                                                        try {
-                                                            const hasKey = await api.hasAiProviderApiKey(provider.id);
-                                                            if (!hasKey) {
-                                                                toastError(t('ai.model_selector.no_key_warning'));
-                                                                return;
-                                                            }
-                                                        } catch {
-                                                        }
-                                                    }
-
-                                                    setRefreshingModels(provider.id);
-                                                    try {
-                                                        await refreshProviderModels(provider.id);
-                                                    } catch (error) {
-                                                        console.error('[Settings] Failed to refresh models:', error);
-                                                        toastError(t('settings_view.ai.refresh_failed', { error: String(error) }));
-                                                    } finally {
-                                                        setRefreshingModels(null);
-                                                    }
-                                                }}
-                                            >
-                                                <RefreshCw className={cn('w-3 h-3', refreshingModels === provider.id && 'animate-spin')} />
-                                                {t('settings_view.ai.refresh_models')}
-                                            </Button>
-                                        </div>
-                                        {provider.models.length > 0 && (
-                                            <div className="flex flex-wrap gap-1">
-                                                {provider.models.slice(0, 12).map((model) => (
-                                                    <span
-                                                        key={model}
-                                                        className="text-[10px] px-1.5 py-0.5 rounded border border-theme-border/50 bg-theme-bg text-theme-text-muted cursor-pointer hover:text-theme-text hover:border-theme-border transition-colors"
-                                                        onClick={() => updateProvider(provider.id, { defaultModel: model })}
-                                                        title={t('settings_view.ai.click_to_set_default')}
+                                    {isExpanded && (
+                                        <div className="border-t border-theme-border/30 px-4 pb-4 pt-3">
+                                            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                                                <label className="flex items-center gap-2 text-xs text-theme-text-muted cursor-pointer">
+                                                    <Checkbox checked={provider.enabled} onCheckedChange={(checked) => updateProvider(provider.id, { enabled: !!checked })} />
+                                                    {t('settings_view.ai.provider_enabled')}
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 px-2 text-[10px] gap-1"
+                                                        disabled={refreshingModels === provider.id}
+                                                        onClick={refreshModels}
                                                     >
-                                                        {model}
-                                                    </span>
-                                                ))}
-                                                {provider.models.length > 12 && <span className="text-[10px] px-1.5 py-0.5 text-theme-text-muted">+{provider.models.length - 12}</span>}
+                                                        <RefreshCw className={cn('w-3 h-3', refreshingModels === provider.id && 'animate-spin')} />
+                                                        {t('settings_view.ai.refresh_models')}
+                                                    </Button>
+                                                    {provider.id.startsWith('custom-') && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                                                            onClick={async () => {
+                                                                if (await confirm({ title: t('settings_view.ai.remove_provider_confirm', { name: provider.name }), variant: 'danger' })) {
+                                                                    api.deleteAiProviderApiKey(provider.id).catch(() => {});
+                                                                    removeProvider(provider.id);
+                                                                }
+                                                            }}
+                                                        >
+                                                            {t('settings_view.ai.remove')}
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             </div>
-                                        )}
-                                    </div>
 
-                                    {provider.type !== 'ollama' && (
-                                        <div className="mt-3">
-                                            <ProviderKeyInput providerId={provider.id} />
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.base_url')}</Label>
+                                                    <Input
+                                                        value={provider.baseUrl}
+                                                        onChange={(event) => updateProvider(provider.id, { baseUrl: event.target.value })}
+                                                        className="bg-theme-bg h-8 text-xs"
+                                                        placeholder={provider.type === 'openai_compatible' ? 'http://localhost:1234/v1' : undefined}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.default_model')}</Label>
+                                                    <Input
+                                                        value={provider.defaultModel}
+                                                        onChange={(event) => updateProvider(provider.id, { defaultModel: event.target.value })}
+                                                        className="bg-theme-bg h-8 text-xs"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-3">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.available_models')} ({provider.models.length})</Label>
+                                                    {provider.models.length > 8 && (
+                                                        <button
+                                                            type="button"
+                                                            className="text-[10px] text-theme-accent hover:underline"
+                                                            onClick={() => setExpandedProviderModels((current) => ({
+                                                                ...current,
+                                                                [provider.id]: !current[provider.id],
+                                                            }))}
+                                                        >
+                                                            {modelsExpanded
+                                                                ? t('settings_view.ai.show_fewer_models')
+                                                                : t('settings_view.ai.show_all_models', { count: provider.models.length })}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {provider.models.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {visibleModels.map((model) => (
+                                                            <span
+                                                                key={model}
+                                                                className={cn(
+                                                                    'text-[10px] px-1.5 py-0.5 rounded border bg-theme-bg text-theme-text-muted cursor-pointer hover:text-theme-text hover:border-theme-border transition-colors',
+                                                                    provider.defaultModel === model ? 'border-theme-accent/60 text-theme-accent bg-theme-accent/10' : 'border-theme-border/50',
+                                                                )}
+                                                                onClick={() => updateProvider(provider.id, { defaultModel: model })}
+                                                                title={t('settings_view.ai.click_to_set_default')}
+                                                            >
+                                                                {model}
+                                                            </span>
+                                                        ))}
+                                                        {hiddenModelCount > 0 && <span className="text-[10px] px-1.5 py-0.5 text-theme-text-muted">+{hiddenModelCount}</span>}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {provider.type !== 'ollama' && (
+                                                <div className="mt-3">
+                                                    <ProviderKeyInput providerId={provider.id} />
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         <Button
