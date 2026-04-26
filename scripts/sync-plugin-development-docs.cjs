@@ -7,8 +7,12 @@ const args = new Set(process.argv.slice(2));
 const checkOnly = args.has('--check');
 
 const repoRoot = path.resolve(__dirname, '..');
-const sourcePath = path.join(repoRoot, 'docs/reference/PLUGIN_DEVELOPMENT.md');
+const pluginDocsRoot = path.join(repoRoot, 'plugin-development');
+const sourceZhPath = path.join(pluginDocsRoot, 'README.zh-CN.md');
+const sourceEnPath = path.join(pluginDocsRoot, 'README.md');
+const sourceApiPath = path.join(pluginDocsRoot, 'plugin-api.d.ts');
 const rootGuidePath = path.join(repoRoot, 'PLUGIN_DEVELOPMENT.md');
+const rootApiPath = path.join(repoRoot, 'plugin-api.d.ts');
 const webRoot = process.env.OXIDETERM_WEB_REPO || path.join(repoRoot, 'oxideterm-web');
 const webZhPath = path.join(webRoot, 'src/content/docs/zh-hans/docs/plugin-development.mdx');
 const webEnPath = path.join(webRoot, 'src/content/docs/docs/plugin-development.mdx');
@@ -28,15 +32,58 @@ function normalizeNewline(text) {
 function toZhMdx(markdown) {
   const body = normalizeNewline(markdown).replace(/^# OxideTerm Plugin Development Guide\s*\n+/, '');
   const hash = sha256(normalizeNewline(markdown));
-  return `---\ntitle: 插件开发指南\ndescription: OxideTerm 插件开发完全参考 — 适用于 Plugin API v3\n---\n\n{/* AUTO-GENERATED from OxideTerm/docs/reference/PLUGIN_DEVELOPMENT.md. Do not edit manually. */}\n{/* source-sha256: ${hash} */}\n\n${body}`;
+  return `---\ntitle: 插件开发指南\ndescription: OxideTerm 插件开发完全参考 — 适用于 Plugin API v3\n---\n\n{/* AUTO-GENERATED from OxideTerm/plugin-development/README.zh-CN.md. Do not edit manually. */}\n{/* source-sha256: ${hash} */}\n\n${body}`;
 }
 
-function writeOrCheck(file, expected) {
+function toEnMdx(markdown) {
+  const body = normalizeNewline(markdown)
+    .replace(/^<!-- translated-from:[^\n]*-->\n?/m, '')
+    .replace(/^<!-- translated-from-sha256:[^\n]*-->\n?/m, '')
+    .replace(/^# OxideTerm Plugin Development Guide\s*\n+/, '');
+  const hash = sha256(normalizeNewline(markdown));
+  return `---\ntitle: Plugin Development Guide\ndescription: Complete reference for OxideTerm plugin development — Plugin API v3\n---\n\n{/* AUTO-GENERATED from OxideTerm/plugin-development/README.md. Do not edit manually. */}\n{/* source-sha256: ${hash} */}\n\n${body}`;
+}
+
+function generatedRootGuide(markdown) {
+  const source = normalizeNewline(markdown);
+  const hash = sha256(source);
+  return `<!-- AUTO-GENERATED from plugin-development/README.zh-CN.md. Do not edit manually. -->\n<!-- source-sha256: ${hash} -->\n\n${source}`;
+}
+
+function generatedRootApi(apiText) {
+  const source = normalizeNewline(apiText);
+  const hash = sha256(source);
+  return source.replace(
+    /^\/\*\*/m,
+    `/**\n * AUTO-GENERATED from plugin-development/plugin-api.d.ts. Do not edit manually.\n * source-sha256: ${hash}\n *`
+  );
+}
+
+function checkTranslationMarker(file, sourceHash) {
+  const content = read(file);
+  const match = content.match(/translated-from-sha256:\s*([a-f0-9]{64})/);
+  if (match?.[1] === sourceHash) {
+    return;
+  }
+
+  const message =
+    `${path.relative(repoRoot, file)} is not marked as translated from the current ` +
+    `plugin-development/README.zh-CN.md (${sourceHash})`;
+  if (checkOnly) {
+    throw new Error(message);
+  }
+  console.warn(`[sync-plugin-development-docs] ${message}`);
+}
+
+function writeOrCheck(file, expected, options = {}) {
   const normalized = normalizeNewline(expected);
   const exists = fs.existsSync(file);
   const current = exists ? read(file) : '';
 
-  if (current === normalized) {
+  if (
+    current === normalized ||
+    (checkOnly && options.allowCurrentMatchesSource && current === options.allowCurrentMatchesSource)
+  ) {
     return { file, changed: false };
   }
 
@@ -49,35 +96,24 @@ function writeOrCheck(file, expected) {
   return { file, changed: true };
 }
 
-function checkManualTranslation(file, expectedHash) {
-  if (!fs.existsSync(file)) return;
-
-  const content = read(file);
-  const match = content.match(/source-sha256:\s*([a-f0-9]{64})/);
-  if (match?.[1] === expectedHash) {
-    console.log(`ok ${path.relative(repoRoot, file)} manual translation marker`);
-    return;
-  }
-
-  const message =
-    `${path.relative(repoRoot, file)} manual translation is out of sync with ` +
-    'docs/reference/PLUGIN_DEVELOPMENT.md';
-  if (checkOnly) {
-    throw new Error(message);
-  }
-  console.warn(`[sync-plugin-development-docs] ${message}`);
-}
-
 function main() {
-  const source = normalizeNewline(read(sourcePath));
-  const sourceHash = sha256(source);
+  const sourceZh = normalizeNewline(read(sourceZhPath));
+  const sourceEn = normalizeNewline(read(sourceEnPath));
+  const sourceApi = normalizeNewline(read(sourceApiPath));
+  checkTranslationMarker(sourceEnPath, sha256(sourceZh));
   const results = [
-    writeOrCheck(rootGuidePath, source),
+    writeOrCheck(rootGuidePath, generatedRootGuide(sourceZh), {
+      // First run compatibility: accept the historical root copy and normalize it on --sync.
+      allowCurrentMatchesSource: sourceZh,
+    }),
+    writeOrCheck(rootApiPath, generatedRootApi(sourceApi), {
+      allowCurrentMatchesSource: sourceApi,
+    }),
   ];
 
   if (fs.existsSync(webRoot)) {
-    results.push(writeOrCheck(webZhPath, toZhMdx(source)));
-    checkManualTranslation(webEnPath, sourceHash);
+    results.push(writeOrCheck(webZhPath, toZhMdx(sourceZh)));
+    results.push(writeOrCheck(webEnPath, toEnMdx(sourceEn)));
   }
 
   for (const result of results) {

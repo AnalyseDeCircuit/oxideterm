@@ -1,3 +1,6 @@
+<!-- AUTO-GENERATED from plugin-development/README.zh-CN.md. Do not edit manually. -->
+<!-- source-sha256: ecd8cb055f0ba393ed0b457c721f9d5dcad29c9dca947711e2fffca442b705c1 -->
+
 # OxideTerm Plugin Development Guide
 
 > **版本**: 适用于当前 OxideTerm 版本（Plugin API v3）
@@ -4676,7 +4679,7 @@ window.__DEMO_PLUGIN_CTX__?.connections.getAll();
 
 **步骤 1：获取类型定义**
 
-从 OxideTerm 仓库根目录复制 `plugin-api.d.ts` 到你的插件项目中。
+从 OxideTerm 仓库的 `plugin-development/plugin-api.d.ts` 复制到你的插件项目中。
 
 **步骤 2：配置 tsconfig.json**
 
@@ -4820,7 +4823,7 @@ npx esbuild src/index.ts \
 
 ## 20. 类型参考 (TypeScript)
 
-> **推荐**：直接使用仓库根目录的 `plugin-api.d.ts` 文件——它是独立的、零依赖的完整类型定义，复制到你的插件项目即可获得 IntelliSense。详见 [FAQ: 插件可以使用 TypeScript 吗？](#q-插件可以使用-typescript-吗)
+> **推荐**：直接使用 `plugin-development/plugin-api.d.ts` 文件——它是独立的、零依赖的完整类型定义，复制到你的插件项目即可获得 IntelliSense。详见 [FAQ: 插件可以使用 TypeScript 吗？](#q-插件可以使用-typescript-吗)
 
 以下是完整的 TypeScript 类型定义供参考：
 

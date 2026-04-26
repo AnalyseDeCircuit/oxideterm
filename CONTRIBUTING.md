@@ -10,7 +10,7 @@ The best way to contribute is through [GitHub Issues](https://github.com/Analyse
 
 ### Plugins
 
-OxideTerm has a **[plugin system](docs/reference/PLUGIN_DEVELOPMENT.md)** that lets you extend functionality without modifying core code. If you've built something cool, share it with the community!
+OxideTerm has a **[plugin system](plugin-development/README.md)** that lets you extend functionality without modifying core code. If you've built something cool, share it with the community!
 
 ### Pull Requests
 

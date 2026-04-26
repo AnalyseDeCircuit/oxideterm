@@ -198,7 +198,7 @@ Group: Production
 
 ### 插件
 
-- 插件从用户目录加载，通过 **设置 → 插件** 管理；架构与安全边界见 [PLUGIN_SYSTEM.md](./PLUGIN_SYSTEM.md)，开发见 [PLUGIN_DEVELOPMENT.md](./PLUGIN_DEVELOPMENT.md)。
+- 插件从用户目录加载，通过 **设置 → 插件** 管理；架构与安全边界见 [PLUGIN_SYSTEM.md](./PLUGIN_SYSTEM.md)，开发见 [插件开发资料包](../../plugin-development/README.zh-CN.md)。
 
 ### WSL 图形转发
 
@@ -367,7 +367,7 @@ Group: Production
 | [TERMINAL_SEARCH.md](./TERMINAL_SEARCH.md) | 终端搜索双模式 |
 | [LOCAL_TERMINAL.md](./LOCAL_TERMINAL.md) | 本地 PTY 终端 |
 | [SERIALIZATION.md](./SERIALIZATION.md) | `.oxide` 格式与加解密要点 |
-| [PLUGIN_SYSTEM.md](./PLUGIN_SYSTEM.md) / [PLUGIN_DEVELOPMENT.md](./PLUGIN_DEVELOPMENT.md) | 插件运行时与开发 |
+| [PLUGIN_SYSTEM.md](./PLUGIN_SYSTEM.md) / [插件开发资料包](../../plugin-development/README.zh-CN.md) | 插件运行时与开发 |
 | [CUSTOM_THEMES.md](./CUSTOM_THEMES.md) | 自定义主题 |
 | [GRAPHICS_FORWARDING.zh-CN.md](./GRAPHICS_FORWARDING.zh-CN.md) | WSL 图形转发 |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | 开发与构建入门 |

@@ -1,7 +1,4 @@
 /**
- * AUTO-GENERATED from plugin-development/plugin-api.d.ts. Do not edit manually.
- * source-sha256: 995cd8bbd91b000bbec05ac1fb73622ab9aff5de7c864d2a7f408b7a25882f85
- *
  * @oxideterm/plugin-api — Type Definitions for OxideTerm Plugin Development
  *
  * This file provides complete TypeScript type definitions for building
