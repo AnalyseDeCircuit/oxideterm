@@ -38,6 +38,7 @@ const READ_TOOLS = new Set([
   'get_detected_ports',
   'list_port_forwards',
   'get_settings',
+  'open_settings_section',
   'get_pool_stats',
   'get_all_health',
   'get_resource_metrics',
@@ -68,6 +69,7 @@ const NAVIGATION_TOOLS = new Set([
   'open_session_tab',
   'open_local_terminal',
   'connect_saved_session',
+  'connect_saved_connection_by_query',
 ]);
 
 function capabilityRisk(capability?: ToolCapability): ToolRisk | undefined {

@@ -13,6 +13,9 @@ export {
   PLUGIN_TOOL_DEFS,
   MCP_RESOURCE_TOOL_DEFS,
   RAG_TOOL_DEFS,
+  ALL_BUILTIN_TOOL_DEFS,
+  BUILTIN_TOOL_SPECS,
+  TOOL_SPEC_BY_NAME,
   READ_ONLY_TOOLS,
   WRITE_TOOLS,
   EXPERIMENTAL_TOOLS,
@@ -28,10 +31,21 @@ export {
   SESSION_MGR_ONLY_TOOLS,
   PLUGIN_MGR_ONLY_TOOLS,
   TOOL_GROUPS,
+  getAllToolSpecs,
+  getToolSpec,
+  getToolDefinitionByName,
   getToolsForContext,
   isCommandDenied,
   getDeniedCommands,
   hasDeniedCommands,
+} from './toolDefinitions';
+export type {
+  ToolDomain,
+  ToolIntent,
+  ToolLegacyVisibility,
+  ToolSideEffect,
+  ToolSpec,
+  ToolTargetRequirement,
 } from './toolDefinitions';
 export { executeTool, type ToolExecutionContext } from './toolExecutor';
 export type {
@@ -54,3 +68,11 @@ export {
   sanitizeToolArguments,
   toLegacyToolResult,
 } from './protocol';
+export {
+  getToolsForPlan,
+  inferToolIntents,
+} from './toolPlanner';
+export type {
+  ToolIntentInferenceInput,
+  ToolPlanInput,
+} from './toolPlanner';

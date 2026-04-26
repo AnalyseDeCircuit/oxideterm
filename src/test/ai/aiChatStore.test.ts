@@ -72,6 +72,8 @@ vi.mock('@/lib/ai/tools', () => ({
   SESSION_ID_TOOLS: [],
   READ_ONLY_TOOLS: new Set(),
   getToolsForContext: vi.fn(() => []),
+  getToolsForPlan: vi.fn(() => []),
+  inferToolIntents: vi.fn(() => []),
   isCommandDenied: vi.fn(() => false),
   hasDeniedCommands: vi.fn(() => false),
   decideToolApproval: vi.fn(() => ({ risk: 'read', autoApprove: false, requiresApproval: true, reason: 'manual' })),

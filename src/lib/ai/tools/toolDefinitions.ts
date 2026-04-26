@@ -955,6 +955,21 @@ export const SETTINGS_TOOL_DEFS: AiToolDefinition[] = [
       required: ['section', 'key', 'value'],
     },
   },
+  {
+    name: 'open_settings_section',
+    description: 'Open the Settings tab and return a short guide for a settings section. Use this when the user asks to inspect or change settings from outside the Settings tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        section: {
+          type: 'string',
+          enum: ['terminal', 'appearance', 'connectionDefaults', 'sftp', 'ide', 'reconnect', 'general', 'ai', 'localTerminal'],
+          description: 'Settings section to open or inspect.',
+        },
+      },
+      required: ['section'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1041,6 +1056,24 @@ export const SESSION_MGR_TOOL_DEFS: AiToolDefinition[] = [
         },
       },
       required: ['connection_id'],
+    },
+  },
+  {
+    name: 'connect_saved_connection_by_query',
+    description: 'Find a saved SSH connection by natural-language query and connect to it. Prefer this over opening a local terminal and manually running ssh when the user asks to connect to a saved host. If multiple connections match, returns candidates and asks for disambiguation instead of guessing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query for the saved connection name, host, group, or username.',
+        },
+        connection_id: {
+          type: 'string',
+          description: 'Optional explicit saved connection ID from a previous disambiguation result.',
+        },
+      },
+      required: ['query'],
     },
   },
 ];
@@ -1202,6 +1235,99 @@ export const RAG_TOOL_DEFS: AiToolDefinition[] = [
   },
 ];
 
+export const ALL_BUILTIN_TOOL_DEFS: AiToolDefinition[] = [
+  ...BUILTIN_TOOLS,
+  ...SFTP_TOOL_DEFS,
+  ...IDE_TOOL_DEFS,
+  ...LOCAL_TOOL_DEFS,
+  ...SETTINGS_TOOL_DEFS,
+  ...POOL_TOOL_DEFS,
+  ...MONITOR_TOOL_DEFS,
+  ...SESSION_MGR_TOOL_DEFS,
+  ...PLUGIN_TOOL_DEFS,
+  ...MCP_RESOURCE_TOOL_DEFS,
+  ...NAVIGATION_TOOL_DEFS,
+  ...STATUS_TOOL_DEFS,
+  ...INFRA_EXTRA_TOOL_DEFS,
+  ...RAG_TOOL_DEFS,
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool System v3 Registry Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type ToolDomain =
+  | 'terminal'
+  | 'remote_filesystem'
+  | 'sftp'
+  | 'ide'
+  | 'local_terminal'
+  | 'settings'
+  | 'connection'
+  | 'connection_pool'
+  | 'monitoring'
+  | 'navigation'
+  | 'plugin'
+  | 'mcp'
+  | 'rag'
+  | 'status';
+
+export type ToolIntent =
+  | 'command'
+  | 'terminal_interaction'
+  | 'connection'
+  | 'settings'
+  | 'remote_file'
+  | 'local_shell'
+  | 'sftp'
+  | 'ide'
+  | 'monitoring'
+  | 'navigation'
+  | 'plugin'
+  | 'knowledge'
+  | 'status';
+
+export type ToolTargetRequirement =
+  | 'none'
+  | 'active_or_node'
+  | 'session_id'
+  | 'ssh_session'
+  | 'active_sftp'
+  | 'active_ide'
+  | 'local_terminal'
+  | 'app_tab'
+  | 'mcp_server';
+
+export type ToolSideEffect = 'read' | 'write' | 'execute' | 'navigate' | 'network' | 'settings';
+
+export type ToolLegacyVisibility =
+  | 'always'
+  | 'ssh_session'
+  | 'sftp_tab'
+  | 'ide_tab'
+  | 'local_terminal_tab'
+  | 'settings_tab'
+  | 'connection_pool_tab'
+  | 'connection_monitor_tab'
+  | 'session_manager_tab'
+  | 'plugin_manager_tab';
+
+export type ToolSpec = {
+  name: string;
+  definition: AiToolDefinition;
+  domain: ToolDomain;
+  intentTags: ToolIntent[];
+  requiredTarget: ToolTargetRequirement;
+  sideEffect: ToolSideEffect;
+  legacyVisibility: ToolLegacyVisibility;
+  groupKey?: string;
+  readOnly: boolean;
+  write: boolean;
+  contextFree: boolean;
+  sessionIdTool: boolean;
+  experimental: boolean;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Safety Classification
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1237,6 +1363,7 @@ export const READ_ONLY_TOOLS = new Set([
   'local_get_drives',
   // Settings (read-only)
   'get_settings',
+  'open_settings_section',
   // Connection pool (read-only)
   'get_pool_stats',
   // Connection monitor (read-only)
@@ -1297,6 +1424,7 @@ export const WRITE_TOOLS = new Set([
   'open_session_tab',
   // Session manager (write — connect)
   'connect_saved_session',
+  'connect_saved_connection_by_query',
   // SFTP (write)
   'sftp_write_file',
   // TUI interaction (experimental, write)
@@ -1334,6 +1462,7 @@ export const CONTEXT_FREE_TOOLS = new Set([
   // Settings tools
   'get_settings',
   'update_setting',
+  'open_settings_section',
   // Connection pool tools
   'get_pool_stats',
   'set_pool_config',
@@ -1345,6 +1474,7 @@ export const CONTEXT_FREE_TOOLS = new Set([
   'search_saved_connections',
   'get_session_tree',
   'connect_saved_session',
+  'connect_saved_connection_by_query',
   // Plugin manager tools
   'list_plugins',
   // MCP resource tools
@@ -1428,6 +1558,7 @@ export const LOCAL_ONLY_TOOLS = new Set([
 export const SETTINGS_ONLY_TOOLS = new Set([
   'get_settings',
   'update_setting',
+  'open_settings_section',
 ]);
 
 /** Tools only shown when connection_pool tab is active */
@@ -1447,6 +1578,7 @@ export const SESSION_MGR_ONLY_TOOLS = new Set([
   'list_saved_connections',
   'search_saved_connections',
   'get_session_tree',
+  'connect_saved_connection_by_query',
 ]);
 
 /** Tools only shown when plugin_manager tab is active */
@@ -1497,7 +1629,7 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
   },
   {
     groupKey: 'settings',
-    readOnly: ['get_settings'],
+    readOnly: ['get_settings', 'open_settings_section'],
     write: ['update_setting'],
   },
   {
@@ -1513,7 +1645,7 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
   {
     groupKey: 'session_manager',
     readOnly: ['list_saved_connections', 'search_saved_connections', 'get_session_tree'],
-    write: ['connect_saved_session'],
+    write: ['connect_saved_session', 'connect_saved_connection_by_query'],
   },
   {
     groupKey: 'plugin_manager',
@@ -1542,6 +1674,158 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
   },
 ];
 
+const GROUP_KEY_BY_TOOL = new Map<string, string>(
+  TOOL_GROUPS.flatMap((group) =>
+    [...group.readOnly, ...group.write].map((toolName) => [toolName, group.groupKey] as const)
+  )
+);
+
+function inferToolDomain(toolName: string): ToolDomain {
+  if (SFTP_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'sftp';
+  if (IDE_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'ide';
+  if (LOCAL_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'local_terminal';
+  if (SETTINGS_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'settings';
+  if (POOL_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'connection_pool';
+  if (MONITOR_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'monitoring';
+  if (SESSION_MGR_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'connection';
+  if (PLUGIN_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'plugin';
+  if (MCP_RESOURCE_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'mcp';
+  if (NAVIGATION_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'navigation';
+  if (STATUS_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'status';
+  if (INFRA_EXTRA_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'connection';
+  if (RAG_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'rag';
+  if (['read_file', 'write_file', 'list_directory', 'grep_search', 'git_status'].includes(toolName)) return 'remote_filesystem';
+  if (['list_connections', 'list_port_forwards', 'get_detected_ports', 'get_connection_health', 'create_port_forward', 'stop_port_forward'].includes(toolName)) return 'connection';
+  return 'terminal';
+}
+
+function inferIntentTags(toolName: string, domain: ToolDomain): ToolIntent[] {
+  const overrides: Record<string, ToolIntent[]> = {
+    terminal_exec: ['command', 'terminal_interaction'],
+    batch_exec: ['command', 'terminal_interaction'],
+    get_terminal_buffer: ['terminal_interaction', 'status'],
+    search_terminal: ['terminal_interaction'],
+    await_terminal_output: ['terminal_interaction'],
+    send_control_sequence: ['terminal_interaction'],
+    read_screen: ['terminal_interaction'],
+    send_keys: ['terminal_interaction'],
+    send_mouse: ['terminal_interaction'],
+    open_local_terminal: ['local_shell', 'navigation'],
+    local_exec: ['local_shell', 'command'],
+    open_tab: ['navigation'],
+    open_session_tab: ['navigation', 'connection'],
+    list_saved_connections: ['connection'],
+    search_saved_connections: ['connection'],
+    connect_saved_session: ['connection'],
+    get_session_tree: ['connection', 'status'],
+    get_settings: ['settings'],
+    update_setting: ['settings'],
+    search_docs: ['knowledge'],
+  };
+
+  if (overrides[toolName]) return overrides[toolName];
+
+  switch (domain) {
+    case 'remote_filesystem':
+      return ['remote_file'];
+    case 'sftp':
+      return ['sftp', 'remote_file'];
+    case 'ide':
+      return ['ide', 'remote_file'];
+    case 'local_terminal':
+      return ['local_shell'];
+    case 'settings':
+      return ['settings'];
+    case 'connection':
+    case 'connection_pool':
+      return ['connection'];
+    case 'monitoring':
+      return ['monitoring'];
+    case 'navigation':
+      return ['navigation'];
+    case 'plugin':
+      return ['plugin'];
+    case 'mcp':
+    case 'rag':
+      return ['knowledge'];
+    case 'status':
+      return ['status'];
+    default:
+      return ['command'];
+  }
+}
+
+function inferRequiredTarget(toolName: string): ToolTargetRequirement {
+  if (SESSION_ID_TOOLS.has(toolName)) return 'session_id';
+  if (SFTP_ONLY_TOOLS.has(toolName)) return 'active_sftp';
+  if (IDE_ONLY_TOOLS.has(toolName)) return 'active_ide';
+  if (LOCAL_ONLY_TOOLS.has(toolName)) return 'local_terminal';
+  if (SETTINGS_ONLY_TOOLS.has(toolName) || POOL_ONLY_TOOLS.has(toolName) || MONITOR_ONLY_TOOLS.has(toolName) || SESSION_MGR_ONLY_TOOLS.has(toolName) || PLUGIN_MGR_ONLY_TOOLS.has(toolName)) return 'app_tab';
+  if (toolName === 'open_session_tab') return 'ssh_session';
+  if (MCP_RESOURCE_TOOL_DEFS.some((tool) => tool.name === toolName)) return 'mcp_server';
+  if (REMOTE_NODE_ONLY_TOOLS.has(toolName) || SSH_ONLY_TOOLS.has(toolName)) return 'active_or_node';
+  return 'none';
+}
+
+function inferSideEffect(toolName: string): ToolSideEffect {
+  if (toolName === 'open_tab' || toolName === 'open_session_tab' || toolName === 'open_local_terminal') return 'navigate';
+  if (toolName === 'update_setting' || toolName === 'set_pool_config') return 'settings';
+  if (toolName === 'create_port_forward' || toolName === 'stop_port_forward') return 'network';
+  if (['terminal_exec', 'local_exec', 'batch_exec', 'send_control_sequence', 'send_keys', 'send_mouse'].includes(toolName)) return 'execute';
+  if (WRITE_TOOLS.has(toolName)) return 'write';
+  return 'read';
+}
+
+function inferLegacyVisibility(toolName: string): ToolLegacyVisibility {
+  if (SFTP_ONLY_TOOLS.has(toolName)) return 'sftp_tab';
+  if (IDE_ONLY_TOOLS.has(toolName)) return 'ide_tab';
+  if (LOCAL_ONLY_TOOLS.has(toolName)) return 'local_terminal_tab';
+  if (SETTINGS_ONLY_TOOLS.has(toolName)) return 'settings_tab';
+  if (POOL_ONLY_TOOLS.has(toolName)) return 'connection_pool_tab';
+  if (MONITOR_ONLY_TOOLS.has(toolName)) return 'connection_monitor_tab';
+  if (SESSION_MGR_ONLY_TOOLS.has(toolName)) return 'session_manager_tab';
+  if (PLUGIN_MGR_ONLY_TOOLS.has(toolName)) return 'plugin_manager_tab';
+  if (SSH_ONLY_TOOLS.has(toolName)) return 'ssh_session';
+  return 'always';
+}
+
+function createToolSpec(definition: AiToolDefinition): ToolSpec {
+  const domain = inferToolDomain(definition.name);
+  return {
+    name: definition.name,
+    definition,
+    domain,
+    intentTags: inferIntentTags(definition.name, domain),
+    requiredTarget: inferRequiredTarget(definition.name),
+    sideEffect: inferSideEffect(definition.name),
+    legacyVisibility: inferLegacyVisibility(definition.name),
+    groupKey: GROUP_KEY_BY_TOOL.get(definition.name),
+    readOnly: READ_ONLY_TOOLS.has(definition.name),
+    write: WRITE_TOOLS.has(definition.name),
+    contextFree: CONTEXT_FREE_TOOLS.has(definition.name),
+    sessionIdTool: SESSION_ID_TOOLS.has(definition.name),
+    experimental: EXPERIMENTAL_TOOLS.has(definition.name),
+  };
+}
+
+export const BUILTIN_TOOL_SPECS: ToolSpec[] = ALL_BUILTIN_TOOL_DEFS.map(createToolSpec);
+
+export const TOOL_SPEC_BY_NAME = new Map<string, ToolSpec>(
+  BUILTIN_TOOL_SPECS.map((spec) => [spec.name, spec])
+);
+
+export function getAllToolSpecs(): ToolSpec[] {
+  return BUILTIN_TOOL_SPECS;
+}
+
+export function getToolSpec(name: string): ToolSpec | undefined {
+  return TOOL_SPEC_BY_NAME.get(name);
+}
+
+export function getToolDefinitionByName(name: string): AiToolDefinition | undefined {
+  return TOOL_SPEC_BY_NAME.get(name)?.definition;
+}
+
 /**
  * Get relevant tool definitions based on active tab type and session context.
  * Completely hides tools irrelevant to the active tab, saving tokens and focus.
@@ -1555,25 +1839,8 @@ export function getToolsForContext(
   disabledTools?: Set<string>,
   participantOverride?: Set<string>,
 ): AiToolDefinition[] {
-  // Combine all tools into a single pool
-  const allTools = [
-    ...BUILTIN_TOOLS,
-    ...SFTP_TOOL_DEFS,
-    ...IDE_TOOL_DEFS,
-    ...LOCAL_TOOL_DEFS,
-    ...SETTINGS_TOOL_DEFS,
-    ...POOL_TOOL_DEFS,
-    ...MONITOR_TOOL_DEFS,
-    ...SESSION_MGR_TOOL_DEFS,
-    ...PLUGIN_TOOL_DEFS,
-    ...MCP_RESOURCE_TOOL_DEFS,
-    ...NAVIGATION_TOOL_DEFS,
-    ...STATUS_TOOL_DEFS,
-    ...INFRA_EXTRA_TOOL_DEFS,
-    ...RAG_TOOL_DEFS,
-  ];
-  
-  return allTools.filter(t => {
+  return BUILTIN_TOOL_SPECS.filter(spec => {
+    const t = spec.definition;
     // User-disabled tools: never sent to LLM
     if (disabledTools?.has(t.name)) return false;
 
@@ -1600,7 +1867,7 @@ export function getToolsForContext(
     if (PLUGIN_MGR_ONLY_TOOLS.has(t.name)) return activeTabType === 'plugin_manager';
     
     return true;
-  });
+  }).map((spec) => spec.definition);
 }
 
 /**

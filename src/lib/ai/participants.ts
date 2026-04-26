@@ -91,6 +91,7 @@ export const PARTICIPANTS: ParticipantDef[] = [
     includeTools: [
       'list_targets', 'list_capabilities', 'list_sessions', 'list_tabs',
       'list_saved_connections', 'search_saved_connections', 'get_session_tree',
+      'connect_saved_session', 'connect_saved_connection_by_query',
       'get_pool_stats', 'set_pool_config',
       'list_connections', 'get_connection_health',
       'list_port_forwards', 'get_detected_ports', 'create_port_forward', 'stop_port_forward',

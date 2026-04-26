@@ -317,98 +317,7 @@ export async function executeTool(
 
     // Context-free tools — no node required
     if (CONTEXT_FREE_TOOLS.has(toolName)) {
-      switch (toolName) {
-        case 'list_tabs':
-          return execListTabs(startTime, toolCallId);
-        case 'list_sessions':
-          return await execListSessions(args, startTime, toolCallId);
-        case 'list_targets':
-          return execListTargets(args, startTime, toolCallId);
-        case 'list_capabilities':
-          return execListCapabilities(args, startTime, toolCallId);
-        case 'list_connections':
-          return await execListConnections(startTime, toolCallId);
-        case 'get_connection_health':
-          return await execGetConnectionHealth(args, startTime, toolCallId);
-        case 'ide_get_open_files':
-          return execIdeGetOpenFiles(startTime, toolCallId);
-        case 'ide_get_file_content':
-          return await execIdeGetFileContent(args, startTime, toolCallId);
-        case 'ide_get_project_info':
-          return execIdeGetProjectInfo(startTime, toolCallId);
-        case 'ide_replace_string':
-          return await execIdeReplaceString(args, startTime, toolCallId);
-        case 'ide_insert_text':
-          return await execIdeInsertText(args, startTime, toolCallId);
-        case 'ide_open_file':
-          return await execIdeOpenFile(args, startTime, toolCallId);
-        case 'ide_create_file':
-          return await execIdeCreateFile(args, startTime, toolCallId);
-        // Local terminal tools
-        case 'local_list_shells':
-          return await execLocalListShells(startTime, toolCallId);
-        case 'local_get_terminal_info':
-          return await execLocalGetTerminalInfo(startTime, toolCallId);
-        case 'local_exec':
-          return await execLocalExec(args, startTime, toolCallId, options.dangerousCommandApproved === true);
-        case 'local_get_drives':
-          return await execLocalGetDrives(startTime, toolCallId);
-        case 'open_local_terminal':
-          return await execOpenLocalTerminal(args, startTime, toolCallId, context.skipFocus);
-        // Navigation tools
-        case 'open_tab':
-          return execOpenTab(args, startTime, toolCallId, context.skipFocus);
-        case 'open_session_tab':
-          return execOpenSessionTab(args, startTime, toolCallId, context.skipFocus);
-        // Settings tools
-        case 'get_settings':
-          return execGetSettings(args, startTime, toolCallId);
-        case 'update_setting':
-          return execUpdateSetting(args, startTime, toolCallId);
-        // Connection pool tools
-        case 'get_pool_stats':
-          return await execGetPoolStats(startTime, toolCallId);
-        case 'set_pool_config':
-          return await execSetPoolConfig(args, startTime, toolCallId);
-        // Connection monitor tools
-        case 'get_all_health':
-          return await execGetAllHealth(startTime, toolCallId);
-        case 'get_resource_metrics':
-          return await execGetResourceMetrics(args, startTime, toolCallId);
-        // Session manager tools
-        case 'list_saved_connections':
-          return await execListSavedConnections(startTime, toolCallId);
-        case 'search_saved_connections':
-          return await execSearchSavedConnections(args, startTime, toolCallId);
-        case 'get_session_tree':
-          return await execGetSessionTree(startTime, toolCallId);
-        case 'connect_saved_session':
-          return await execConnectSavedSession(args, startTime, toolCallId, context.skipFocus);
-        // Plugin manager tools
-        case 'list_plugins':
-          return execListPlugins(startTime, toolCallId);
-        // Status & observability tools
-        case 'get_event_log':
-          return execGetEventLog(args, startTime, toolCallId);
-        case 'get_transfer_status':
-          return execGetTransferStatus(args, startTime, toolCallId);
-        case 'get_recording_status':
-          return execGetRecordingStatus(startTime, toolCallId);
-        case 'get_broadcast_status':
-          return execGetBroadcastStatus(startTime, toolCallId);
-        case 'get_plugin_details':
-          return execGetPluginDetails(args, startTime, toolCallId);
-        // SSH environment & topology tools
-        case 'get_ssh_environment':
-          return await execGetSshEnvironment(startTime, toolCallId);
-        case 'get_topology':
-          return await execGetTopology(startTime, toolCallId);
-        // RAG document search
-        case 'search_docs':
-          return await execSearchDocs(args, startTime, toolCallId);
-        default:
-          return { toolCallId, toolName, success: false, output: '', error: `Unknown context-free tool: ${toolName}`, durationMs: Date.now() - startTime };
-      }
+      return await executeContextFreeTool(toolName, args, context, options, startTime, toolCallId);
     }
 
     // Session-ID tools — route by session_id parameter
@@ -513,6 +422,102 @@ export async function executeTool(
       error: e instanceof Error ? e.message : String(e),
       durationMs: Date.now() - startTime,
     };
+  }
+}
+
+async function executeContextFreeTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  context: ToolExecutionContext,
+  options: ToolExecutionOptions,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  switch (toolName) {
+    case 'list_tabs':
+      return execListTabs(startTime, toolCallId);
+    case 'list_sessions':
+      return await execListSessions(args, startTime, toolCallId);
+    case 'list_targets':
+      return execListTargets(args, startTime, toolCallId);
+    case 'list_capabilities':
+      return execListCapabilities(args, startTime, toolCallId);
+    case 'list_connections':
+      return await execListConnections(startTime, toolCallId);
+    case 'get_connection_health':
+      return await execGetConnectionHealth(args, startTime, toolCallId);
+    case 'ide_get_open_files':
+      return execIdeGetOpenFiles(startTime, toolCallId);
+    case 'ide_get_file_content':
+      return await execIdeGetFileContent(args, startTime, toolCallId);
+    case 'ide_get_project_info':
+      return execIdeGetProjectInfo(startTime, toolCallId);
+    case 'ide_replace_string':
+      return await execIdeReplaceString(args, startTime, toolCallId);
+    case 'ide_insert_text':
+      return await execIdeInsertText(args, startTime, toolCallId);
+    case 'ide_open_file':
+      return await execIdeOpenFile(args, startTime, toolCallId);
+    case 'ide_create_file':
+      return await execIdeCreateFile(args, startTime, toolCallId);
+    case 'local_list_shells':
+      return await execLocalListShells(startTime, toolCallId);
+    case 'local_get_terminal_info':
+      return await execLocalGetTerminalInfo(startTime, toolCallId);
+    case 'local_exec':
+      return await execLocalExec(args, startTime, toolCallId, options.dangerousCommandApproved === true);
+    case 'local_get_drives':
+      return await execLocalGetDrives(startTime, toolCallId);
+    case 'open_local_terminal':
+      return await execOpenLocalTerminal(args, startTime, toolCallId, context.skipFocus);
+    case 'open_tab':
+      return execOpenTab(args, startTime, toolCallId, context.skipFocus);
+    case 'open_session_tab':
+      return execOpenSessionTab(args, startTime, toolCallId, context.skipFocus);
+    case 'get_settings':
+      return execGetSettings(args, startTime, toolCallId);
+    case 'update_setting':
+      return execUpdateSetting(args, startTime, toolCallId);
+    case 'open_settings_section':
+      return execOpenSettingsSection(args, startTime, toolCallId, context.skipFocus);
+    case 'get_pool_stats':
+      return await execGetPoolStats(startTime, toolCallId);
+    case 'set_pool_config':
+      return await execSetPoolConfig(args, startTime, toolCallId);
+    case 'get_all_health':
+      return await execGetAllHealth(startTime, toolCallId);
+    case 'get_resource_metrics':
+      return await execGetResourceMetrics(args, startTime, toolCallId);
+    case 'list_saved_connections':
+      return await execListSavedConnections(startTime, toolCallId);
+    case 'search_saved_connections':
+      return await execSearchSavedConnections(args, startTime, toolCallId);
+    case 'get_session_tree':
+      return await execGetSessionTree(startTime, toolCallId);
+    case 'connect_saved_session':
+      return await execConnectSavedSession(args, startTime, toolCallId, context.skipFocus);
+    case 'connect_saved_connection_by_query':
+      return await execConnectSavedConnectionByQuery(args, startTime, toolCallId, context.skipFocus);
+    case 'list_plugins':
+      return execListPlugins(startTime, toolCallId);
+    case 'get_event_log':
+      return execGetEventLog(args, startTime, toolCallId);
+    case 'get_transfer_status':
+      return execGetTransferStatus(args, startTime, toolCallId);
+    case 'get_recording_status':
+      return execGetRecordingStatus(startTime, toolCallId);
+    case 'get_broadcast_status':
+      return execGetBroadcastStatus(startTime, toolCallId);
+    case 'get_plugin_details':
+      return execGetPluginDetails(args, startTime, toolCallId);
+    case 'get_ssh_environment':
+      return await execGetSshEnvironment(startTime, toolCallId);
+    case 'get_topology':
+      return await execGetTopology(startTime, toolCallId);
+    case 'search_docs':
+      return await execSearchDocs(args, startTime, toolCallId);
+    default:
+      return { toolCallId, toolName, success: false, output: '', error: `Unknown context-free tool: ${toolName}`, durationMs: Date.now() - startTime };
   }
 }
 
@@ -3012,7 +3017,21 @@ function execOpenTab(args: Record<string, unknown>, startTime: number, toolCallI
     return { toolCallId, toolName: 'open_tab', success: false, output: '', error: `Invalid tab_type. Allowed: ${[...ALLOWED_SINGLETON_TABS].join(', ')}`, durationMs: Date.now() - startTime };
   }
   useAppStore.getState().createTab(tabType as TabType, undefined, skipFocus ? { skipFocus } : undefined);
-  return { toolCallId, toolName: 'open_tab', success: true, output: `Opened ${tabType} tab.`, durationMs: Date.now() - startTime };
+  return envelopeResult(toolCallId, {
+    ok: true,
+    toolName: 'open_tab',
+    summary: `Opened ${tabType} tab.`,
+    output: `Opened ${tabType} tab.`,
+    capability: 'navigation.open',
+    durationMs: Date.now() - startTime,
+    targets: [{ id: `tab:${tabType}`, kind: 'app-tab', label: tabType }],
+    nextActions: tabType === 'settings'
+      ? [
+          { tool: 'get_settings', reason: 'Read the current settings before making a change.', priority: 'recommended' },
+          { tool: 'update_setting', reason: 'Apply the requested setting change after identifying the correct section and key.', priority: 'optional' },
+        ]
+      : undefined,
+  });
 }
 
 const ALLOWED_SESSION_TABS = new Set(['sftp', 'ide', 'forwards']);
@@ -3040,7 +3059,60 @@ function execOpenSessionTab(args: Record<string, unknown>, startTime: number, to
     return { toolCallId, toolName: 'open_session_tab', success: false, output: '', error: `Node ${nodeId} has no active terminal session. Is it connected?`, durationMs: Date.now() - startTime };
   }
   useAppStore.getState().createTab(tabType as TabType, terminalId, { nodeId, ...(skipFocus ? { skipFocus } : {}) });
-  return { toolCallId, toolName: 'open_session_tab', success: true, output: `Opened ${tabType} tab for node ${nodeId}.`, durationMs: Date.now() - startTime };
+  return envelopeResult(toolCallId, {
+    ok: true,
+    toolName: 'open_session_tab',
+    summary: `Opened ${tabType} tab for node ${nodeId}.`,
+    output: `Opened ${tabType} tab for node ${nodeId}.`,
+    capability: 'navigation.open',
+    targetId: nodeId,
+    durationMs: Date.now() - startTime,
+    targets: [{ id: nodeId, kind: 'ssh-node', label: node.host ?? nodeId, metadata: { tabType, terminalId } }],
+  });
+}
+
+const SETTINGS_SECTION_KEYS: Record<string, string[]> = {
+  terminal: ['fontFamily', 'fontSize', 'renderer', 'terminalEncoding', 'scrollback'],
+  appearance: ['theme', 'backgroundImage', 'opacity', 'fontScale'],
+  connectionDefaults: ['terminalEncoding', 'keepaliveInterval', 'connectTimeout'],
+  sftp: ['maxConcurrentTransfers', 'speedLimitKbps', 'directoryParallelism'],
+  ide: ['fontSize', 'tabSize', 'wordWrap'],
+  reconnect: ['enabled', 'maxAttempts', 'initialDelayMs'],
+  general: ['language', 'telemetry', 'startOnBoot'],
+  ai: ['providers', 'modelContextWindows', 'userContextWindows', 'reasoningSettings'],
+  localTerminal: ['defaultShellId', 'defaultCwd', 'loadShellProfile', 'customEnvVars'],
+};
+
+function execOpenSettingsSection(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): AiToolResult {
+  const section = typeof args.section === 'string' ? args.section.trim() : '';
+  if (!section || !SETTINGS_SECTION_KEYS[section]) {
+    return {
+      toolCallId,
+      toolName: 'open_settings_section',
+      success: false,
+      output: '',
+      error: `Invalid settings section. Allowed: ${Object.keys(SETTINGS_SECTION_KEYS).join(', ')}`,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  useAppStore.getState().createTab('settings', undefined, skipFocus ? { skipFocus } : undefined);
+  const keys = SETTINGS_SECTION_KEYS[section];
+  const output = `Opened settings section: ${section}\nCommon keys: ${keys.join(', ')}\nUse get_settings with section="${section}" before update_setting if you need the current value.`;
+  return envelopeResult(toolCallId, {
+    ok: true,
+    toolName: 'open_settings_section',
+    summary: `Opened settings section: ${section}`,
+    output,
+    capability: 'navigation.open',
+    durationMs: Date.now() - startTime,
+    data: { section, commonKeys: keys },
+    targets: [{ id: `settings:${section}`, kind: 'app-tab', label: `Settings: ${section}` }],
+    nextActions: [
+      { tool: 'get_settings', args: { section }, reason: 'Read the current section before modifying a setting.', priority: 'recommended' },
+      { tool: 'update_setting', reason: 'Apply the requested setting change once the section/key/value are clear.', priority: 'optional' },
+    ],
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3159,14 +3231,36 @@ function execGetSettings(args: Record<string, unknown>, startTime: number, toolC
       return { toolCallId, toolName: 'get_settings', success: false, output: '', error: `Unknown settings section: ${section}`, durationMs: Date.now() - startTime };
     }
     const safe = sanitizeSection(section, sectionData);
-    return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safe, null, 2), durationMs: Date.now() - startTime };
+    return envelopeResult(toolCallId, {
+      ok: true,
+      toolName: 'get_settings',
+      summary: `Read settings section: ${section}`,
+      output: JSON.stringify(safe, null, 2),
+      data: { section, settings: safe },
+      capability: 'settings.read',
+      durationMs: Date.now() - startTime,
+      nextActions: [
+        { tool: 'update_setting', reason: `Modify ${section} after confirming the exact key and requested value.`, priority: 'optional' },
+      ],
+    });
   }
 
   // Sanitize the full settings object before exposing it to AI tools.
   const safeSettings = { ...settings as unknown as Record<string, unknown> };
   if (safeSettings.ai) safeSettings.ai = sanitizeAiSettings(safeSettings.ai);
   if (safeSettings.localTerminal) safeSettings.localTerminal = sanitizeLocalTerminalSettings(safeSettings.localTerminal);
-  return { toolCallId, toolName: 'get_settings', success: true, output: JSON.stringify(safeSettings, null, 2), durationMs: Date.now() - startTime };
+  return envelopeResult(toolCallId, {
+    ok: true,
+    toolName: 'get_settings',
+    summary: 'Read application settings',
+    output: JSON.stringify(safeSettings, null, 2),
+    data: { settings: safeSettings },
+    capability: 'settings.read',
+    durationMs: Date.now() - startTime,
+    nextActions: [
+      { tool: 'update_setting', reason: 'Apply the requested setting change after identifying the correct section/key/value.', priority: 'optional' },
+    ],
+  });
 }
 
 function execUpdateSetting(args: Record<string, unknown>, startTime: number, toolCallId: string): AiToolResult {
@@ -3191,7 +3285,18 @@ function execUpdateSetting(args: Record<string, unknown>, startTime: number, too
       return { toolCallId, toolName: 'update_setting', success: false, output: '', error: `No update method for section: ${section}`, durationMs: Date.now() - startTime };
     }
     (store[updateMethod] as (key: string, value: unknown) => void)(key, value);
-    return { toolCallId, toolName: 'update_setting', success: true, output: `Updated ${section}.${key}`, durationMs: Date.now() - startTime };
+    return envelopeResult(toolCallId, {
+      ok: true,
+      toolName: 'update_setting',
+      summary: `Updated ${section}.${key}`,
+      output: `Updated ${section}.${key}`,
+      data: { section, key, value },
+      capability: 'settings.write',
+      durationMs: Date.now() - startTime,
+      nextActions: [
+        { tool: 'get_settings', args: { section }, reason: 'Verify the setting after the update.', priority: 'optional' },
+      ],
+    });
   } catch (e) {
     return { toolCallId, toolName: 'update_setting', success: false, output: '', error: e instanceof Error ? e.message : String(e), durationMs: Date.now() - startTime };
   }
@@ -3285,7 +3390,25 @@ async function execListSavedConnections(startTime: number, toolCallId: string): 
       created_at: c.created_at,
       group: c.group,
     }));
-    return { toolCallId, toolName: 'list_saved_connections', success: true, output: JSON.stringify(safe, null, 2), durationMs: Date.now() - startTime };
+    return envelopeResult(toolCallId, {
+      ok: true,
+      toolName: 'list_saved_connections',
+      summary: `Found ${safe.length} saved connection${safe.length === 1 ? '' : 's'}.`,
+      output: JSON.stringify(safe, null, 2),
+      data: { connections: safe },
+      capability: 'state.list',
+      durationMs: Date.now() - startTime,
+      targets: safe.map((connection) => ({
+        id: connection.id,
+        kind: 'ssh-node',
+        label: `${connection.name || connection.host} (${connection.username}@${connection.host}:${connection.port})`,
+        metadata: connection,
+      })),
+      nextActions: [
+        { tool: 'connect_saved_session', reason: 'Connect using a specific saved connection ID.', priority: 'optional' },
+        { tool: 'search_saved_connections', reason: 'Narrow the list if the requested host is ambiguous.', priority: 'optional' },
+      ],
+    });
   } catch (e) {
     return { toolCallId, toolName: 'list_saved_connections', success: false, output: '', error: e instanceof Error ? e.message : String(e), durationMs: Date.now() - startTime };
   }
@@ -3307,7 +3430,39 @@ async function execSearchSavedConnections(args: Record<string, unknown>, startTi
       name: c.name,
       group: c.group,
     }));
-    return { toolCallId, toolName: 'search_saved_connections', success: true, output: JSON.stringify(safe, null, 2), durationMs: Date.now() - startTime };
+    const nextActions = safe.length === 1
+      ? [{ tool: 'connect_saved_session', args: { connection_id: safe[0].id }, reason: 'Exactly one saved connection matched the query.', priority: 'recommended' as const }]
+      : safe.length > 1
+        ? [{ tool: 'connect_saved_session', reason: 'Choose one candidate and connect with its connection_id.', priority: 'recommended' as const }]
+        : [{ tool: 'list_saved_connections', reason: 'No saved connection matched; inspect all saved connections before trying manual SSH.', priority: 'fallback' as const }];
+    return envelopeResult(toolCallId, {
+      ok: true,
+      toolName: 'search_saved_connections',
+      summary: `Found ${safe.length} saved connection match${safe.length === 1 ? '' : 'es'} for "${query}".`,
+      output: JSON.stringify(safe, null, 2),
+      data: { query, connections: safe },
+      capability: 'state.list',
+      durationMs: Date.now() - startTime,
+      targets: safe.map((connection) => ({
+        id: connection.id,
+        kind: 'ssh-node',
+        label: `${connection.name || connection.host} (${connection.username}@${connection.host}:${connection.port})`,
+        metadata: connection,
+      })),
+      nextActions,
+      ...(safe.length > 1
+        ? {
+            disambiguation: {
+              prompt: 'Multiple saved connections matched. Choose the intended connection before connecting.',
+              options: safe.map((connection) => ({
+                id: connection.id,
+                label: `${connection.name || connection.host} — ${connection.username}@${connection.host}:${connection.port}`,
+                args: { connection_id: connection.id },
+              })),
+            },
+          }
+        : {}),
+    });
   } catch (e) {
     return { toolCallId, toolName: 'search_saved_connections', success: false, output: '', error: e instanceof Error ? e.message : String(e), durationMs: Date.now() - startTime };
   }
@@ -3377,13 +3532,34 @@ async function execConnectSavedSession(args: Record<string, unknown>, startTime:
       info.status = connectedNode.runtime?.status;
     }
 
-    return {
-      toolCallId,
+    return envelopeResult(toolCallId, {
+      ok: true,
       toolName,
-      success: true,
+      summary: 'SSH connection established and terminal opened.',
       output: `SSH connection established and terminal opened.\n${JSON.stringify(info, null, 2)}`,
+      data: info,
+      capability: 'navigation.open',
+      targetId: connectResult.nodeId,
       durationMs: Date.now() - startTime,
-    };
+      targets: [
+        {
+          id: connectResult.nodeId,
+          kind: 'ssh-node',
+          label: typeof info.host === 'string' ? info.host : connectResult.nodeId,
+          metadata: { ...info, sessionId: connectResult.sessionId },
+        },
+        {
+          id: connectResult.sessionId,
+          kind: 'terminal-session',
+          label: `Terminal ${connectResult.sessionId}`,
+          metadata: { nodeId: connectResult.nodeId, sessionId: connectResult.sessionId },
+        },
+      ],
+      nextActions: [
+        { tool: 'terminal_exec', args: { node_id: connectResult.nodeId }, reason: 'Run a non-interactive command on the connected SSH node.', priority: 'optional' },
+        { tool: 'open_session_tab', args: { node_id: connectResult.nodeId, tab_type: 'sftp' }, reason: 'Open SFTP for remote file operations on this connection.', priority: 'optional' },
+      ],
+    });
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
     // Provide actionable error messages
@@ -3394,6 +3570,105 @@ async function execConnectSavedSession(args: Record<string, unknown>, startTime:
       return { toolCallId, toolName, success: false, output: '', error: `Authentication failed for connection ${connectionId}. The user may need to update credentials in the connection settings.`, durationMs: Date.now() - startTime };
     }
     return { toolCallId, toolName, success: false, output: '', error: errorMsg, durationMs: Date.now() - startTime };
+  }
+}
+
+async function execConnectSavedConnectionByQuery(args: Record<string, unknown>, startTime: number, toolCallId: string, skipFocus?: boolean): Promise<AiToolResult> {
+  const toolName = 'connect_saved_connection_by_query';
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const explicitConnectionId = typeof args.connection_id === 'string' ? args.connection_id.trim() : '';
+
+  if (explicitConnectionId) {
+    const result = await execConnectSavedSession({ connection_id: explicitConnectionId }, startTime, toolCallId, skipFocus);
+    return { ...result, toolName };
+  }
+
+  if (!query) {
+    return {
+      toolCallId,
+      toolName,
+      success: false,
+      output: '',
+      error: 'Missing required argument: query',
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  try {
+    const connections = await api.searchConnections(query);
+    const safe = connections.map((c) => ({
+      id: c.id,
+      host: c.host,
+      port: c.port,
+      username: c.username,
+      name: c.name,
+      group: c.group,
+    }));
+
+    if (safe.length === 1) {
+      const result = await execConnectSavedSession({ connection_id: safe[0].id }, startTime, toolCallId, skipFocus);
+      return {
+        ...result,
+        toolName,
+        output: `Matched saved connection "${safe[0].name || safe[0].host}" and connected.\n${result.output}`,
+        envelope: result.envelope
+          ? {
+              ...result.envelope,
+              summary: `Matched saved connection "${safe[0].name || safe[0].host}" and connected.`,
+              meta: { ...result.envelope.meta, toolName },
+            }
+          : result.envelope,
+      };
+    }
+
+    if (safe.length === 0) {
+      return envelopeResult(toolCallId, {
+        ok: false,
+        toolName,
+        summary: `No saved connection matched "${query}".`,
+        output: `No saved connection matched "${query}". Do not fall back to manual ssh unless the user asks for it; inspect saved connections or ask for clarification.`,
+        data: { query, connections: safe },
+        error: {
+          code: 'saved_connection_not_found',
+          message: `No saved connection matched "${query}".`,
+          recoverable: true,
+        },
+        recoverable: true,
+        durationMs: Date.now() - startTime,
+        nextActions: [
+          { tool: 'list_saved_connections', reason: 'Inspect all saved connections before trying a manual SSH command.', priority: 'recommended' },
+        ],
+      });
+    }
+
+    return envelopeResult(toolCallId, {
+      ok: true,
+      toolName,
+      summary: `Multiple saved connections matched "${query}".`,
+      output: JSON.stringify(safe, null, 2),
+      data: { query, connections: safe },
+      capability: 'state.list',
+      durationMs: Date.now() - startTime,
+      targets: safe.map((connection) => ({
+        id: connection.id,
+        kind: 'ssh-node',
+        label: `${connection.name || connection.host} (${connection.username}@${connection.host}:${connection.port})`,
+        metadata: connection,
+      })),
+      disambiguation: {
+        prompt: 'Multiple saved connections matched. Choose one connection_id before connecting.',
+        options: safe.map((connection) => ({
+          id: connection.id,
+          label: `${connection.name || connection.host} — ${connection.username}@${connection.host}:${connection.port}`,
+          args: { query, connection_id: connection.id },
+        })),
+      },
+      nextActions: [
+        { tool: 'connect_saved_connection_by_query', reason: 'Retry with the selected connection_id from the disambiguation options.', priority: 'recommended' },
+      ],
+    });
+  } catch (e) {
+    return { toolCallId, toolName, success: false, output: '', error: e instanceof Error ? e.message : String(e), durationMs: Date.now() - startTime };
   }
 }
 

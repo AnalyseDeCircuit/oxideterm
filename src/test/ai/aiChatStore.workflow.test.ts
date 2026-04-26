@@ -132,6 +132,8 @@ vi.mock('@/lib/ai/tools', () => ({
   SESSION_ID_TOOLS: sessionIdToolsMock,
   READ_ONLY_TOOLS: new Set(['read_file', 'list_directory', 'grep_search']),
   getToolsForContext: getToolsForContextMock,
+  getToolsForPlan: getToolsForContextMock,
+  inferToolIntents: vi.fn(() => []),
   isCommandDenied: vi.fn(() => false),
   hasDeniedCommands: hasDeniedCommandsMock,
   decideToolApproval: ({ toolName, args, autoApproveTools, readOnlyTools }: {

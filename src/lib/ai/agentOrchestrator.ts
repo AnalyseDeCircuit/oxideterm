@@ -25,7 +25,7 @@ import { buildReviewerSystemPrompt, buildReviewPrompt, formatReviewFeedback, par
 import { buildRoundContractPrompt, buildRoundContractSystemPrompt, fallbackRoundContract, formatRoundContractForExecutor, parseRoundContract } from './agentContract';
 import { buildHandoffArtifact, formatHandoffForExecutor } from './agentHandoff';
 import { finalizeReviewResult, shouldTriggerContextReset } from './agentReviewPolicy';
-import { getToolsForContext } from './tools';
+import { getToolsForPlan, inferToolIntents } from './tools';
 import { estimateTokens, getModelContextWindow, responseReserve } from './tokenUtils';
 import { getActiveCwd, getActivePaneMetadata } from '../terminalRegistry';
 import { platform } from '../platform';
@@ -567,13 +567,19 @@ async function executeTask(task: AgentTask, signal: AbortSignal): Promise<{ next
   const disabledToolNames = settings.ai.toolUse?.disabledTools ?? [];
   const disabledSet = new Set(disabledToolNames);
   const { useMcpRegistry } = await import('./mcp');
+  const toolIntents = inferToolIntents(task.goal);
 
   const resolveTools = () => {
     const appState = useAppStore.getState();
     const activeTab = appState.tabs.find((entry) => entry.id === appState.activeTabId);
     const activeTabType = activeTab?.type ?? null;
     const hasAnySSH = appState.sessions.size > 0;
-    let resolved = getToolsForContext(activeTabType, hasAnySSH, disabledSet);
+    let resolved = getToolsForPlan({
+      activeTabType,
+      hasAnySSHSession: hasAnySSH,
+      disabledTools: disabledSet,
+      intents: toolIntents,
+    });
     const mcpTools = useMcpRegistry.getState().getAllMcpToolDefinitions();
     if (mcpTools.length > 0) {
       const filtered = mcpTools.filter((entry) => !disabledSet.has(entry.name));

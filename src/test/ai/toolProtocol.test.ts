@@ -28,6 +28,9 @@ describe('tool protocol v2 adapters', () => {
       summary: 'Command completed',
       output: 'hello',
       data: { stdout: 'hello', exitCode: 0 },
+      nextActions: [
+        { tool: 'get_terminal_buffer', args: { session_id: 'term-1' }, reason: 'Inspect terminal output', priority: 'optional' },
+      ],
       durationMs: 42,
     });
 
@@ -41,6 +44,7 @@ describe('tool protocol v2 adapters', () => {
       durationMs: 42,
       envelope,
     });
+    expect(result.envelope?.nextActions?.[0]?.tool).toBe('get_terminal_buffer');
   });
 
   it('maps envelope errors to legacy error strings', () => {

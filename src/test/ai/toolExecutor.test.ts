@@ -63,6 +63,8 @@ const nodeSftpPreviewMock = vi.hoisted(() => vi.fn());
 const nodeSftpStatMock = vi.hoisted(() => vi.fn());
 const nodeSftpWriteMock = vi.hoisted(() => vi.fn());
 const sshSetPoolConfigMock = vi.hoisted(() => vi.fn());
+const getConnectionsMock = vi.hoisted(() => vi.fn());
+const searchConnectionsMock = vi.hoisted(() => vi.fn());
 const getAllBufferLinesMock = vi.hoisted(() => vi.fn());
 const getBufferStatsMock = vi.hoisted(() => vi.fn());
 const getScrollBufferMock = vi.hoisted(() => vi.fn());
@@ -110,6 +112,8 @@ vi.mock('@/lib/api', () => ({
   api: {
     localExecCommand: localExecCommandMock,
     sshSetPoolConfig: sshSetPoolConfigMock,
+    getConnections: getConnectionsMock,
+    searchConnections: searchConnectionsMock,
     getAllBufferLines: getAllBufferLinesMock,
     getBufferStats: getBufferStatsMock,
     getScrollBuffer: getScrollBufferMock,
@@ -236,6 +240,10 @@ describe('toolExecutor get_settings sanitization', () => {
     nodeSftpWriteMock.mockReset();
     sshSetPoolConfigMock.mockReset();
     sshSetPoolConfigMock.mockResolvedValue(undefined);
+    getConnectionsMock.mockReset();
+    getConnectionsMock.mockResolvedValue([]);
+    searchConnectionsMock.mockReset();
+    searchConnectionsMock.mockResolvedValue([]);
     getAllBufferLinesMock.mockReset();
     getAllBufferLinesMock.mockRejectedValue(new Error('no backend buffer'));
     getBufferStatsMock.mockReset();
@@ -1206,6 +1214,66 @@ describe('toolExecutor regressions', () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain('"session_id": "term-2"');
     expect(result.output).toContain('"node_id": "node-2"');
+    expect(result.envelope?.nextActions?.some((action) => action.tool === 'terminal_exec')).toBe(true);
+  });
+
+  it('connects a unique saved connection match through the workflow tool', async () => {
+    searchConnectionsMock.mockResolvedValue([
+      { id: 'saved-1', host: 'example.com', port: 22, username: 'alice', name: 'Prod', group: 'Servers' },
+    ]);
+    connectToSavedMock.mockResolvedValue({ nodeId: 'node-2', sessionId: 'term-2' });
+    sessionTreeState.getNode.mockReturnValue({
+      id: 'node-2',
+      host: 'example.com',
+      port: 22,
+      username: 'alice',
+      runtime: { status: 'active' },
+    });
+
+    const result = await executeTool(
+      'connect_saved_connection_by_query',
+      { query: 'prod' },
+      { activeNodeId: null, activeAgentAvailable: false },
+    );
+
+    expect(result.success).toBe(true);
+    expect(searchConnectionsMock).toHaveBeenCalledWith('prod');
+    expect(connectToSavedMock).toHaveBeenCalledWith('saved-1', expect.any(Object));
+    expect(result.toolName).toBe('connect_saved_connection_by_query');
+    expect(result.output).toContain('Matched saved connection');
+  });
+
+  it('returns disambiguation when saved connection workflow has multiple matches', async () => {
+    connectToSavedMock.mockClear();
+    searchConnectionsMock.mockResolvedValue([
+      { id: 'saved-1', host: 'one.example.com', port: 22, username: 'alice', name: 'Prod One', group: 'Servers' },
+      { id: 'saved-2', host: 'two.example.com', port: 22, username: 'bob', name: 'Prod Two', group: 'Servers' },
+    ]);
+
+    const result = await executeTool(
+      'connect_saved_connection_by_query',
+      { query: 'prod' },
+      { activeNodeId: null, activeAgentAvailable: false },
+    );
+
+    expect(result.success).toBe(true);
+    expect(connectToSavedMock).not.toHaveBeenCalled();
+    expect(result.envelope?.disambiguation?.options).toHaveLength(2);
+    expect(result.envelope?.nextActions?.[0]?.tool).toBe('connect_saved_connection_by_query');
+  });
+
+  it('opens settings section with next-action guidance', async () => {
+    const result = await executeTool(
+      'open_settings_section',
+      { section: 'sftp' },
+      { activeNodeId: null, activeAgentAvailable: false },
+    );
+
+    expect(result.success).toBe(true);
+    expect(createTabMock).toHaveBeenCalledWith('settings', undefined, undefined);
+    expect(result.output).toContain('directoryParallelism');
+    expect(result.envelope?.nextActions?.map((action) => action.tool)).toContain('get_settings');
+    expect(result.envelope?.nextActions?.map((action) => action.tool)).toContain('update_setting');
   });
 
   it('reports ide_create_file as partial success when post-create content setup fails', async () => {

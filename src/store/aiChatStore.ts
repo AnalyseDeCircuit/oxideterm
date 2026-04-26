@@ -32,7 +32,7 @@ import { createAiDiagnosticEvent, persistDiagnosticEvents, type AiDiagnosticTele
 import { normalizePendingSummaries } from '../lib/ai/turnModel/summaryMetadata';
 import { createSyntheticToolDenyPayload } from '../lib/ai/turnModel/toolFeedback';
 import { getToolUseNegativeConstraint } from '../lib/ai/turnModel/toolUsePolicy';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, READ_ONLY_TOOLS, decideToolApproval, getToolsForContext, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
+import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, READ_ONLY_TOOLS, decideToolApproval, getToolsForPlan, inferToolIntents, executeTool, type ToolExecutionContext } from '../lib/ai/tools';
 import { buildToolOperationStrategyPrompt, buildTuiInteractionGuidelines } from '../lib/ai/toolUsePrompt';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
@@ -875,7 +875,12 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           const nodes = useSessionTreeStore.getState().nodes;
           const hasAnySSH = nodes.some(n => n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId);
           const effectiveDisabled = get().getEffectiveDisabledTools();
-          const tools = getToolsForContext(activeTabType, hasAnySSH, effectiveDisabled);
+          const tools = getToolsForPlan({
+            activeTabType,
+            hasAnySSHSession: hasAnySSH,
+            disabledTools: effectiveDisabled,
+            userMessage: content,
+          });
           const toolLines = tools.map(t => `- \`${t.name}\` — ${t.description.slice(0, 80)}`).join('\n');
           const body = `### /tools\n\n**${tools.length}** tools available:\n\n${toolLines}`;
           const assistantMsg: AiChatMessage = { id: generateId(), role: 'assistant', content: body, timestamp: Date.now() };
@@ -938,6 +943,10 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     // Use cleaned text (without /command, @participant, #reference tokens) for the LLM
     const cleanContent = parsed.cleanText || content;
+    const toolIntents = inferToolIntents({
+      text: cleanContent,
+      activeTabType: sidebarContext?.env.activeTabType ?? null,
+    });
 
     // ════════════════════════════════════════════════════════════════════
     // Resolve Active Provider and API Key
@@ -1151,9 +1160,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     // Resolve tool definitions — extracted as a function so it can be re-evaluated
     // between tool rounds (e.g. after open_local_terminal changes the active tab).
-    let toolDefs: ReturnType<typeof getToolsForContext> | undefined;
+    let toolDefs: ReturnType<typeof getToolsForPlan> | undefined;
     let mcpModule: Awaited<typeof import('../lib/ai/mcp')> | null = null;
-    const resolveToolDefs = (): ReturnType<typeof getToolsForContext> | undefined => {
+    const resolveToolDefs = (): ReturnType<typeof getToolsForPlan> | undefined => {
       if (!toolUseEnabled) return undefined;
       const appState = useAppStore.getState();
       const activeTab = appState.tabs.find(t => t.id === appState.activeTabId);
@@ -1163,7 +1172,13 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
       );
       const effectiveDisabled = get().getEffectiveDisabledTools();
-      let resolved = getToolsForContext(activeTabType, hasAnySSHSession, effectiveDisabled, participantToolOverride);
+      let resolved = getToolsForPlan({
+        activeTabType,
+        hasAnySSHSession,
+        disabledTools: effectiveDisabled,
+        participantOverride: participantToolOverride,
+        intents: toolIntents,
+      });
 
       // Merge MCP tools from connected servers (respecting disabled list)
       if (mcpModule) {

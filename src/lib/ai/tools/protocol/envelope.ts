@@ -29,6 +29,12 @@ export function createToolResultEnvelope<TData = unknown>(input: {
   data?: TData;
   warnings?: string[];
   error?: ToolResultEnvelope['error'];
+  observations?: ToolResultEnvelope['observations'];
+  targets?: ToolResultEnvelope['targets'];
+  nextActions?: ToolResultEnvelope['nextActions'];
+  disambiguation?: ToolResultEnvelope['disambiguation'];
+  recoverable?: boolean;
+  waitingForInput?: boolean;
   capability?: ToolCapability;
   targetId?: string;
   durationMs?: number;
@@ -41,6 +47,12 @@ export function createToolResultEnvelope<TData = unknown>(input: {
     output: input.output ?? input.summary,
     ...(input.warnings && input.warnings.length > 0 ? { warnings: input.warnings } : {}),
     ...(input.error ? { error: input.error } : {}),
+    ...(input.observations && input.observations.length > 0 ? { observations: input.observations } : {}),
+    ...(input.targets && input.targets.length > 0 ? { targets: input.targets } : {}),
+    ...(input.nextActions && input.nextActions.length > 0 ? { nextActions: input.nextActions } : {}),
+    ...(input.disambiguation ? { disambiguation: input.disambiguation } : {}),
+    ...(input.recoverable !== undefined ? { recoverable: input.recoverable } : {}),
+    ...(input.waitingForInput !== undefined ? { waitingForInput: input.waitingForInput } : {}),
     meta: {
       toolName: input.toolName,
       ...(input.capability ? { capability: input.capability } : {}),

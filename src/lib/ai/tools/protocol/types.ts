@@ -63,6 +63,22 @@ export interface ToolResultMeta {
   truncated?: boolean;
 }
 
+export type ToolNextAction = {
+  tool: string;
+  args?: Record<string, unknown>;
+  reason: string;
+  priority: 'recommended' | 'optional' | 'fallback';
+};
+
+export type ToolResultDisambiguation = {
+  prompt: string;
+  options: Array<{
+    id: string;
+    label: string;
+    args?: Record<string, unknown>;
+  }>;
+};
+
 export interface ToolResultEnvelope<TData = unknown> {
   ok: boolean;
   summary: string;
@@ -70,5 +86,11 @@ export interface ToolResultEnvelope<TData = unknown> {
   output: string;
   warnings?: string[];
   error?: ToolResultError;
+  observations?: string[];
+  targets?: Array<{ id: string; kind: string; label: string; metadata?: Record<string, unknown> }>;
+  nextActions?: ToolNextAction[];
+  disambiguation?: ToolResultDisambiguation;
+  recoverable?: boolean;
+  waitingForInput?: boolean;
   meta: ToolResultMeta;
 }
