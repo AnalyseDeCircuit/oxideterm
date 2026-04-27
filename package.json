@@ -137,7 +137,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.23",
-    "jsdom": "^29.0.1",
+    "jsdom": "^29.1.0",
     "postcss": "^8.5.10",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
