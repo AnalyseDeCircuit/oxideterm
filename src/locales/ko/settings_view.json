@@ -564,6 +564,8 @@
       "tool_use_enabled": "도구 사용 활성화",
       "tool_use_enabled_hint": "AI가 Function Calling을 통해 원격 서버에서 명령 실행, 파일 읽기 및 작업을 수행할 수 있도록 허용합니다.",
       "tool_use_approve_hint": "AI가 확인 없이 사용할 수 있는 도구를 선택합니다. 선택하지 않은 도구는 실행 전에 확인을 요청합니다.",
+      "tool_use_max_rounds": "최대 도구 라운드",
+      "tool_use_max_rounds_hint": "OxideSens가 루프를 중지하기 전, 답변 하나에서 허용되는 도구/모델 왕복 횟수입니다. 기본값: 10.",
       "tool_use_group_terminal": "터미널 & 파일",
       "tool_use_group_session": "세션",
       "tool_use_group_infrastructure": "인프라",

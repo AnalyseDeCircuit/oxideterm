@@ -137,12 +137,15 @@ describe('tool disclosure planner v3 phase 2', () => {
   });
 
   it('exposes connection workflow tools outside session manager when intent matches', () => {
-    const tools = new Set(getToolsForPlan({
+    const names = getToolsForPlan({
       activeTabType: 'local_terminal',
       hasAnySSHSession: false,
       userMessage: '连接家里的主机本地',
-    }).map((tool) => tool.name));
+    }).map((tool) => tool.name);
+    const tools = new Set(names);
 
+    expect(names[0]).toBe('resolve_target');
+    expect(tools.has('open_local_terminal')).toBe(false);
     expect(tools.has('search_saved_connections')).toBe(true);
     expect(tools.has('connect_saved_connection_by_query')).toBe(true);
     expect(tools.has('connect_saved_session')).toBe(true);
@@ -182,9 +185,10 @@ describe('tool disclosure planner v3 phase 2', () => {
     });
     const names = scores.map((score) => score.toolName);
 
+    expect(names[0]).toBe('resolve_target');
     expect(names.indexOf('search_saved_connections')).toBeGreaterThanOrEqual(0);
     expect(names.indexOf('connect_saved_connection_by_query')).toBeGreaterThanOrEqual(0);
-    expect(names.indexOf('search_saved_connections')).toBeLessThan(names.indexOf('list_tabs'));
+    expect(names.indexOf('search_saved_connections')).toBeLessThan(names.indexOf('list_targets'));
   });
 });
 

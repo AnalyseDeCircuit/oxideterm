@@ -111,6 +111,8 @@ export type ToolExecutionContext = {
   activeTerminalType?: 'terminal' | 'local_terminal' | null;
   /** If true, tabs created by tools won't steal focus (used by Agent mode) */
   skipFocus?: boolean;
+  /** If true, execution/write/interaction tools must pass target_id, node_id, or session_id explicitly. */
+  requireExplicitTarget?: boolean;
 };
 
 export type ToolExecutionOptions = {
@@ -122,6 +124,12 @@ export type ToolExecutionOptions = {
 type ResolvedNode = {
   nodeId: string;
   agentAvailable: boolean;
+};
+
+type ResolvedTarget = {
+  target: ToolTarget;
+  nodeId?: string;
+  sessionId?: string;
 };
 
 function makeAbortError(): DOMException {
@@ -165,6 +173,62 @@ function envelopeResult<TData>(
   input: Parameters<typeof createToolResultEnvelope<TData>>[0],
 ): AiToolResult {
   return toLegacyToolResult(createToolResultEnvelope(input), toolCallId);
+}
+
+function plainStringArg(args: Record<string, unknown>, key: string): string {
+  return typeof args[key] === 'string' ? args[key].trim() : '';
+}
+
+function resolveTargetById(targetId: string): ResolvedTarget | null {
+  if (!targetId) return null;
+  const target = collectToolTargets().find((candidate) => candidate.id === targetId);
+  if (!target) return null;
+  const terminalSessionIds = Array.isArray(target.metadata?.terminalSessionIds)
+    ? target.metadata.terminalSessionIds.filter((id): id is string => typeof id === 'string')
+    : [];
+  return {
+    target,
+    nodeId: target.nodeId,
+    sessionId: target.sessionId ?? terminalSessionIds[0],
+  };
+}
+
+function targetNotFoundResult(toolCallId: string, toolName: string, targetId: string, startTime: number): AiToolResult {
+  return envelopeResult(toolCallId, {
+    ok: false,
+    toolName,
+    summary: 'Target not found.',
+    output: `Target not found: ${targetId}. Resolve the target again before continuing.`,
+    error: {
+      code: 'target_not_found',
+      message: `Target not found: ${targetId}`,
+      recoverable: true,
+    },
+    recoverable: true,
+    durationMs: Date.now() - startTime,
+    nextActions: [
+      { tool: 'resolve_target', reason: 'Rediscover the target and retry with the returned target_id.', priority: 'recommended' },
+    ],
+  });
+}
+
+function missingExplicitTargetResult(toolCallId: string, toolName: string, startTime: number): AiToolResult {
+  return envelopeResult(toolCallId, {
+    ok: false,
+    toolName,
+    summary: 'This tool requires an explicit target.',
+    output: `${toolName} requires target_id, node_id, or session_id in OxideSens target-first mode. Call resolve_target first, then retry with the returned target_id.`,
+    error: {
+      code: 'target_required',
+      message: 'Missing explicit target_id, node_id, or session_id.',
+      recoverable: true,
+    },
+    recoverable: true,
+    durationMs: Date.now() - startTime,
+    nextActions: [
+      { tool: 'resolve_target', reason: 'Resolve the intended target before performing this action.', priority: 'recommended' },
+    ],
+  });
 }
 
 function recoverableFileError(
@@ -275,7 +339,7 @@ async function resolveNodeForTool(
     return { nodeId: explicitNodeId, agentAvailable };
   }
 
-  if (context.activeNodeId) {
+  if (!context.requireExplicitTarget && context.activeNodeId) {
     return { nodeId: context.activeNodeId, agentAvailable: context.activeAgentAvailable };
   }
 
@@ -286,9 +350,19 @@ function resolveActiveSessionId(
   args: Record<string, unknown>,
   context: ToolExecutionContext,
 ): string {
+  const targetId = plainStringArg(args, 'target_id');
+  if (targetId) {
+    const resolvedTarget = resolveTargetById(targetId);
+    return resolvedTarget?.sessionId ?? '';
+  }
+
   const explicitSessionId = typeof args.session_id === 'string' ? args.session_id.trim() : '';
   if (explicitSessionId.length > 0) {
     return explicitSessionId;
+  }
+
+  if (context.requireExplicitTarget) {
+    return '';
   }
 
   if (context.activeTerminalType !== 'local_terminal') {
@@ -310,7 +384,12 @@ export async function executeTool(
 ): Promise<AiToolResult> {
   const startTime = Date.now();
   const toolCallId = `exec-${Date.now()}`;
-  const explicitNodeId = typeof args.node_id === 'string' ? args.node_id.trim() : '';
+  const explicitTargetId = plainStringArg(args, 'target_id');
+  const explicitTarget = explicitTargetId ? resolveTargetById(explicitTargetId) : null;
+  if (explicitTargetId && !explicitTarget) {
+    return targetNotFoundResult(toolCallId, toolName, explicitTargetId, startTime);
+  }
+  const explicitNodeId = explicitTarget?.nodeId ?? plainStringArg(args, 'node_id');
 
   try {
     throwIfAborted(options.abortSignal);
@@ -328,6 +407,9 @@ export async function executeTool(
     // Session-ID tools — route by session_id parameter
     if (SESSION_ID_TOOLS.has(toolName)) {
       const sessionId = resolveActiveSessionId(args, context);
+      if (!sessionId && context.requireExplicitTarget) {
+        return missingExplicitTargetResult(toolCallId, toolName, startTime);
+      }
       const routedArgs = sessionId ? { ...args, session_id: sessionId } : args;
 
       switch (toolName) {
@@ -352,18 +434,51 @@ export async function executeTool(
       }
     }
 
-    // terminal_exec with session_id: route to interactive terminal path.
-    // Priority: node_id (direct exec) > session_id (terminal send) > active terminal fallback.
+    // terminal_exec with terminal-session target/session_id: route to interactive terminal path.
+    // Priority: target_id > node_id (direct exec) > session_id (terminal send) > legacy active terminal fallback.
+    if (toolName === 'terminal_exec' && explicitTarget?.target.kind === 'terminal-session') {
+      const sessionId = explicitTarget.sessionId;
+      if (sessionId) {
+        return await execTerminalCommandToSession({ ...args, session_id: sessionId }, sessionId, startTime, toolCallId, options.abortSignal);
+      }
+      return missingExplicitTargetResult(toolCallId, toolName, startTime);
+    }
+
     if (toolName === 'terminal_exec' && explicitNodeId.length === 0) {
       const sessionId = resolveActiveSessionId(args, context);
       if (sessionId) {
         return await execTerminalCommandToSession({ ...args, session_id: sessionId }, sessionId, startTime, toolCallId, options.abortSignal);
+      }
+      if (explicitTarget?.target.kind === 'local-shell') {
+        return envelopeResult(toolCallId, {
+          ok: false,
+          toolName,
+          summary: 'Use local_exec for the local shell target.',
+          output: 'target_id=local-shell:default is a local shell target. Use local_exec for local one-shot commands, or open_local_terminal then target a terminal-session for visible shell interaction.',
+          error: {
+            code: 'wrong_tool_for_target',
+            message: 'Use local_exec for local-shell targets.',
+            recoverable: true,
+          },
+          recoverable: true,
+          durationMs: Date.now() - startTime,
+          targets: [{ id: 'local-shell:default', kind: 'local-shell', label: 'Local shell' }],
+          nextActions: [
+            { tool: 'local_exec', args: { command: args.command }, reason: 'Run the command on the local shell target.', priority: 'recommended' },
+          ],
+        });
+      }
+      if (context.requireExplicitTarget) {
+        return missingExplicitTargetResult(toolCallId, toolName, startTime);
       }
     }
 
     // Node-ID tools — resolve target node
     const resolved = await resolveNodeForTool(explicitNodeId || undefined, context);
     if (!resolved) {
+      if (context.requireExplicitTarget) {
+        return missingExplicitTargetResult(toolCallId, toolName, startTime);
+      }
       return {
         toolCallId,
         toolName,
@@ -439,6 +554,8 @@ async function executeContextFreeTool(
   toolCallId: string,
 ): Promise<AiToolResult> {
   switch (toolName) {
+    case 'resolve_target':
+      return await execResolveTarget(args, startTime, toolCallId);
     case 'list_tabs':
       return execListTabs(startTime, toolCallId);
     case 'list_sessions':
@@ -482,6 +599,9 @@ async function executeContextFreeTool(
     case 'get_settings':
       return execGetSettings(args, startTime, toolCallId);
     case 'update_setting':
+      if (context.requireExplicitTarget && !plainStringArg(args, 'target_id')) {
+        return missingExplicitTargetResult(toolCallId, toolName, startTime);
+      }
       return execUpdateSetting(args, startTime, toolCallId);
     case 'open_settings_section':
       return execOpenSettingsSection(args, startTime, toolCallId, context.skipFocus);
@@ -687,7 +807,6 @@ async function detectSavedConnectionSshMisuse(
       nextActions: matches.length === 1
         ? [
             { tool: 'connect_saved_session', args: { connection_id: matches[0].id }, reason: 'Use the matching saved connection instead of manual ssh.', priority: 'recommended' },
-            { tool: 'terminal_exec', args: { command, await_output: true }, reason: 'Only use manual ssh if the user explicitly requested a raw ssh command.', priority: 'fallback' },
           ]
         : [
             { tool: 'connect_saved_connection_by_query', args: { query: parsed.host }, reason: 'Disambiguate and connect using saved connection metadata.', priority: 'recommended' },
@@ -739,15 +858,27 @@ async function execTerminalCommand(
 
   const { text, truncated } = truncateOutput(processed);
 
-  return {
-    toolCallId,
+  const success = result.exitCode === 0 || result.exitCode === null;
+  return envelopeResult(toolCallId, {
+    ok: success,
     toolName: 'terminal_exec',
-    success: result.exitCode === 0 || result.exitCode === null,
+    summary: success ? 'Remote command completed.' : `Remote command exited with ${result.exitCode}.`,
     output: text,
-    error: result.exitCode !== 0 && result.exitCode !== null ? `Exit code: ${result.exitCode}` : undefined,
+    data: { nodeId: resolved.nodeId, exitCode: result.exitCode },
+    capability: 'command.run',
+    targetId: `ssh-node:${resolved.nodeId}`,
     truncated,
     durationMs: Date.now() - startTime,
-  };
+    targets: [{ id: `ssh-node:${resolved.nodeId}`, kind: 'ssh-node', label: resolved.nodeId, metadata: { nodeId: resolved.nodeId } }],
+    ...(success ? {} : {
+      error: {
+        code: 'remote_command_failed',
+        message: `Exit code: ${result.exitCode}`,
+        recoverable: true,
+      },
+      recoverable: true,
+    }),
+  });
 }
 
 async function execTerminalCommandToSession(
@@ -798,13 +929,17 @@ async function execTerminalCommandToSession(
     // Auto-await output (default: true)
     const awaitOutput = args.await_output !== false;
     if (!awaitOutput) {
-      return {
-        toolCallId,
+      return envelopeResult(toolCallId, {
+        ok: true,
         toolName: 'terminal_exec',
-        success: true,
+        summary: 'Command sent to terminal session.',
         output: `Command sent to terminal session ${sessionId}: ${command}`,
+        data: { sessionId, command },
+        capability: 'terminal.send',
+        targetId: `terminal-session:${sessionId}`,
         durationMs: Date.now() - startTime,
-      };
+        targets: [{ id: `terminal-session:${sessionId}`, kind: 'terminal-session', label: `Terminal ${sessionId}`, metadata: { sessionId } }],
+      });
     }
 
     const waitResult = await waitForTerminalOutput(
@@ -835,15 +970,26 @@ async function execTerminalCommandToSession(
       truncateOutput,
     }) ?? renderedDeltaFromTextSnapshot(sessionId, preRenderedText, waitResult, truncateOutput);
 
-    return {
-      toolCallId,
+    return envelopeResult(toolCallId, {
+      ok: renderedWaitResult?.success ?? waitResult.success,
       toolName: 'terminal_exec',
-      success: renderedWaitResult?.success ?? waitResult.success,
+      summary: (renderedWaitResult?.success ?? waitResult.success) ? 'Terminal command output captured.' : 'Terminal command did not produce completed output.',
       output: renderedWaitResult?.output ?? waitResult.output,
-      error: renderedWaitResult?.error ?? waitResult.error,
+      data: { sessionId, command },
+      capability: 'terminal.send',
+      targetId: `terminal-session:${sessionId}`,
+      ...(renderedWaitResult?.error ?? waitResult.error ? {
+        error: {
+          code: 'terminal_command_wait_failed',
+          message: renderedWaitResult?.error ?? waitResult.error ?? 'Terminal command wait failed.',
+          recoverable: true,
+        },
+        recoverable: true,
+      } : {}),
       truncated: renderedWaitResult?.truncated ?? waitResult.truncated,
       durationMs: Date.now() - startTime,
-    };
+      targets: [{ id: `terminal-session:${sessionId}`, kind: 'terminal-session', label: `Terminal ${sessionId}`, metadata: { sessionId } }],
+    });
   } finally {
     outputSubscription.unsubscribe();
   }
@@ -1270,6 +1416,196 @@ function formatTarget(target: ToolTarget, index: number): string {
   ].filter(Boolean).join(' ');
   const idSuffix = ids ? ` ${ids}` : '';
   return `${index + 1}. [${target.kind}] id=${target.id}${idSuffix} "${target.label}" capabilities=${target.capabilities.join(',')}${active}`;
+}
+
+function targetMatchesText(target: ToolTarget, query: string): boolean {
+  if (!query) return true;
+  const haystack = [
+    target.id,
+    target.label,
+    target.nodeId,
+    target.sessionId,
+    target.tabId,
+    JSON.stringify(target.metadata ?? {}),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((token) => haystack.includes(token));
+}
+
+function capabilityScoreForIntent(target: ToolTarget, intent: string): number {
+  const caps = target.capabilities;
+  switch (intent) {
+    case 'command':
+      return caps.includes('command.run') ? 8 : caps.includes('terminal.send') ? 5 : 0;
+    case 'terminal_interaction':
+      return caps.includes('terminal.send') || caps.includes('terminal.observe') ? 8 : 0;
+    case 'connection':
+      return target.kind === 'ssh-node' ? 8 : caps.includes('navigation.open') ? 3 : 0;
+    case 'settings':
+      return caps.includes('settings.write') || caps.includes('settings.read') ? 10 : 0;
+    case 'remote_file':
+    case 'sftp':
+      return caps.includes('filesystem.read') || caps.includes('filesystem.write') ? 8 : 0;
+    case 'ide':
+      return target.kind === 'ide-workspace' ? 8 : caps.includes('filesystem.search') ? 4 : 0;
+    case 'local_shell':
+      return target.kind === 'local-shell' || target.metadata?.terminalType === 'local_terminal' ? 8 : 0;
+    case 'monitoring':
+    case 'status':
+      return caps.includes('state.list') ? 5 : 0;
+    case 'navigation':
+      return caps.includes('navigation.open') ? 5 : 0;
+    default:
+      return 0;
+  }
+}
+
+function serializeResolvedTarget(target: ToolTarget): Record<string, unknown> {
+  return {
+    target_id: target.id,
+    kind: target.kind,
+    label: target.label,
+    ...(target.nodeId ? { node_id: target.nodeId } : {}),
+    ...(target.sessionId ? { session_id: target.sessionId } : {}),
+    ...(target.tabId ? { tab_id: target.tabId } : {}),
+    capabilities: target.capabilities,
+    metadata: target.metadata ?? {},
+  };
+}
+
+async function collectSavedConnectionTargets(query: string): Promise<ToolTarget[]> {
+  if (!query) return [];
+  try {
+    const connections = await api.searchConnections(query);
+    return connections.map((connection) => ({
+      id: `saved-connection:${connection.id}`,
+      kind: 'ssh-node' as const,
+      label: `${connection.name || connection.host} (${connection.username}@${connection.host}:${connection.port})`,
+      capabilities: ['navigation.open', 'state.list'] as ToolTarget['capabilities'],
+      metadata: {
+        savedConnection: true,
+        connectionId: connection.id,
+        host: connection.host,
+        port: connection.port,
+        username: connection.username,
+        name: connection.name,
+        group: connection.group ?? null,
+      },
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function execResolveTarget(
+  args: Record<string, unknown>,
+  startTime: number,
+  toolCallId: string,
+): Promise<AiToolResult> {
+  const toolName = 'resolve_target';
+  const query = plainStringArg(args, 'query');
+  const intent = plainStringArg(args, 'intent');
+  const kind = plainStringArg(args, 'kind') || 'all';
+  const runtimeTargets = collectToolTargets();
+  const savedConnectionTargets = intent === 'connection' || query
+    ? await collectSavedConnectionTargets(query)
+    : [];
+  const allTargets = [...savedConnectionTargets, ...runtimeTargets]
+    .filter((target) => kind === 'all' || target.kind === kind);
+
+  const scored = allTargets
+    .map((target) => {
+      const textMatch = targetMatchesText(target, query);
+      const score = (textMatch ? 12 : query ? 0 : 2)
+        + capabilityScoreForIntent(target, intent)
+        + (target.active ? 1 : 0)
+        + (target.metadata?.savedConnection ? 2 : 0);
+      return { target, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.target.label.localeCompare(b.target.label));
+
+  if (scored.length === 0) {
+    return envelopeResult(toolCallId, {
+      ok: false,
+      toolName,
+      summary: 'No matching target found.',
+      output: `No target matched${query ? ` "${query}"` : ''}${intent ? ` for intent "${intent}"` : ''}.`,
+      error: {
+        code: 'target_not_found',
+        message: 'No matching target found.',
+        recoverable: true,
+      },
+      recoverable: true,
+      durationMs: Date.now() - startTime,
+      nextActions: [
+        { tool: 'list_targets', args: kind === 'all' ? {} : { kind }, reason: 'Inspect available targets.', priority: 'recommended' },
+      ],
+    });
+  }
+
+  const top = scored[0];
+  const second = scored[1];
+  const ambiguous = Boolean(second && top.score - second.score < 3);
+  const candidates = scored.slice(0, 6).map((entry) => serializeResolvedTarget(entry.target));
+
+  if (ambiguous) {
+    return envelopeResult(toolCallId, {
+      ok: false,
+      toolName,
+      summary: 'Multiple targets match. Choose one target before acting.',
+      output: JSON.stringify({ candidates }, null, 2),
+      error: {
+        code: 'target_ambiguous',
+        message: 'Multiple targets match the request.',
+        recoverable: true,
+      },
+      recoverable: true,
+      durationMs: Date.now() - startTime,
+      targets: scored.slice(0, 6).map((entry) => ({
+        id: entry.target.id,
+        kind: entry.target.kind,
+        label: entry.target.label,
+        metadata: entry.target.metadata,
+      })),
+      disambiguation: {
+        prompt: 'Multiple targets match. Use one option before running a write/execute tool.',
+        options: scored.slice(0, 6).map((entry) => ({
+          id: entry.target.id,
+          label: entry.target.label,
+          args: { target_id: entry.target.id },
+        })),
+      },
+    });
+  }
+
+  const resolved = serializeResolvedTarget(top.target);
+  const savedConnectionId = typeof top.target.metadata?.connectionId === 'string'
+    ? top.target.metadata.connectionId
+    : undefined;
+  return envelopeResult(toolCallId, {
+    ok: true,
+    toolName,
+    summary: `Resolved target: ${top.target.label}`,
+    output: JSON.stringify(resolved, null, 2),
+    data: resolved,
+    targetId: top.target.id,
+    durationMs: Date.now() - startTime,
+    targets: [{
+      id: top.target.id,
+      kind: top.target.kind,
+      label: top.target.label,
+      metadata: top.target.metadata,
+    }],
+    nextActions: top.target.metadata?.savedConnection && savedConnectionId
+      ? [
+          { tool: 'connect_saved_session', args: { connection_id: savedConnectionId }, reason: 'Connect using the saved connection target.', priority: 'recommended' },
+        ]
+      : [],
+  });
 }
 
 function execListTargets(
@@ -3135,7 +3471,25 @@ async function execLocalExec(
     if (result.stderr) parts.push(`[stderr]\n${result.stderr}`);
     parts.push(`[exit_code: ${result.exitCode ?? 'unknown'}]`);
 
-    return { toolCallId, toolName: 'local_exec', success: (result.exitCode === 0), output: parts.join('\n'), durationMs: Date.now() - startTime };
+    return envelopeResult(toolCallId, {
+      ok: result.exitCode === 0,
+      toolName: 'local_exec',
+      summary: result.exitCode === 0 ? 'Local command completed.' : `Local command exited with ${result.exitCode ?? 'unknown'}.`,
+      output: parts.join('\n'),
+      data: { exitCode: result.exitCode ?? null },
+      capability: 'command.run',
+      targetId: 'local-shell:default',
+      durationMs: Date.now() - startTime,
+      targets: [{ id: 'local-shell:default', kind: 'local-shell', label: 'Local shell' }],
+      ...(result.exitCode === 0 ? {} : {
+        error: {
+          code: 'local_command_failed',
+          message: `Exit code: ${result.exitCode ?? 'unknown'}`,
+          recoverable: true,
+        },
+        recoverable: true,
+      }),
+    });
   } catch (e) {
     return { toolCallId, toolName: 'local_exec', success: false, output: '', error: e instanceof Error ? e.message : String(e), durationMs: Date.now() - startTime };
   }
@@ -3741,7 +4095,7 @@ async function execConnectSavedSession(args: Record<string, unknown>, startTime:
         },
       ],
       nextActions: [
-        { tool: 'terminal_exec', args: { node_id: connectResult.nodeId }, reason: 'Run a non-interactive command on the connected SSH node.', priority: 'optional' },
+        { tool: 'terminal_exec', args: { target_id: `ssh-node:${connectResult.nodeId}` }, reason: 'Run a non-interactive command on the connected SSH node.', priority: 'optional' },
         { tool: 'open_session_tab', args: { node_id: connectResult.nodeId, tab_type: 'sftp' }, reason: 'Open SFTP for remote file operations on this connection.', priority: 'optional' },
       ],
     });

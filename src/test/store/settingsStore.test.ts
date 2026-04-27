@@ -152,11 +152,31 @@ describe('settingsStore', () => {
     expect(settings.ai.toolUse?.autoApproveTools.list_targets).toBe(true);
     expect(settings.ai.toolUse?.autoApproveTools.list_capabilities).toBe(true);
     expect(settings.ai.toolUse?.autoApproveTools.terminal_exec).toBe(false);
+    expect(settings.ai.toolUse?.maxRounds).toBe(10);
 
     const persisted = JSON.parse(localStorage.getItem('oxide-settings-v2') || '{}');
     expect(persisted.ai.providers.length).toBeGreaterThan(0);
     expect(persisted.ai.toolUse.autoApproveTools.read_file).toBe(true);
     expect(persisted.ai.toolUse.autoApproveTools.list_targets).toBe(true);
+    expect(persisted.ai.toolUse.maxRounds).toBe(10);
+  });
+
+  it('normalizes persisted AI tool round limits on load', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      ai: {
+        ...buildSavedSettings().ai,
+        toolUse: {
+          enabled: true,
+          autoApproveTools: {},
+          disabledTools: [],
+          maxRounds: 999,
+        },
+      },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.ai.toolUse?.maxRounds).toBe(30);
   });
 
   it('clears legacy localStorage keys when loading defaults', async () => {

@@ -6,9 +6,10 @@ describe('toolUsePrompt', () => {
     const prompt = buildToolOperationStrategyPrompt();
 
     expect(prompt).toContain('First identify the task type');
-    expect(prompt).toContain('call `list_targets` first');
-    expect(prompt).toContain('prefer direct execution with `terminal_exec` + `node_id`');
-    expect(prompt).toContain('use `terminal_exec` + `session_id`');
+    expect(prompt).toContain('resolve the target with `resolve_target`');
+    expect(prompt).toContain('Treat the current UI/tab as a hint only');
+    expect(prompt).toContain('`terminal_exec` + `target_id` for an `ssh-node`');
+    expect(prompt).toContain('`target_id` for the `terminal-session`');
     expect(prompt).toContain('Use observe-send-observe');
     expect(prompt).toContain('do not repeat the command and do not guess credentials');
     expect(prompt).toContain('pass `expectedHash`');

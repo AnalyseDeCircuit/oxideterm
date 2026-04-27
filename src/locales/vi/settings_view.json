@@ -564,6 +564,8 @@
       "tool_use_enabled": "Bật sử dụng công cụ",
       "tool_use_enabled_hint": "Cho phép AI thực thi lệnh, đọc tệp và thực hiện hành động trên máy chủ từ xa qua Function Calling.",
       "tool_use_approve_hint": "Chọn công cụ AI có thể sử dụng mà không cần xác nhận. Công cụ chưa chọn sẽ hỏi xác nhận trước khi chạy.",
+      "tool_use_max_rounds": "Số vòng công cụ tối đa",
+      "tool_use_max_rounds_hint": "Số lượt công cụ/mô hình tối đa cho mỗi câu trả lời trước khi OxideSens dừng vòng lặp. Mặc định: 10.",
       "tool_use_group_terminal": "Terminal & Tệp",
       "tool_use_group_session": "Phiên",
       "tool_use_group_infrastructure": "Hạ tầng",

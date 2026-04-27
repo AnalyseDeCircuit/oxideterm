@@ -564,6 +564,8 @@
       "tool_use_enabled": "啟用工具呼叫",
       "tool_use_enabled_hint": "允許 AI 透過 Function Calling 在遠端伺服器上執行命令、讀取檔案和執行操作。",
       "tool_use_approve_hint": "選擇允許 AI 無需確認即可使用的工具。未選取的工具在執行前會請求確認。",
+      "tool_use_max_rounds": "最大工具輪數",
+      "tool_use_max_rounds_hint": "每次回覆中允許的工具/模型往返上限，達到後 OxideSens 會停止循環。預設：10。",
       "tool_use_group_terminal": "終端機與檔案",
       "tool_use_group_session": "工作階段",
       "tool_use_group_infrastructure": "基礎設施",

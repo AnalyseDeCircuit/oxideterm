@@ -69,6 +69,7 @@ const settingsStoreMock = vi.hoisted(() => ({
           enabled: false,
           disabledTools: [],
           autoApproveTools: {},
+          maxRounds: 10,
         },
       },
     },
@@ -273,6 +274,7 @@ describe('aiChatStore workflows', () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
     settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
+    settingsStoreMock.state.settings.ai.toolUse.maxRounds = 10;
     settingsStoreMock.state.settings.ai.memory = { enabled: true, content: '' };
     parseUserInputMock.mockReturnValue({ slashCommand: null, participants: [], references: [], cleanText: '' });
     resolveSlashCommandMock.mockReturnValue(undefined);
@@ -608,6 +610,51 @@ describe('aiChatStore workflows', () => {
     expect(useAiChatStore.getState().error).toBe('The engine is currently overloaded, please try again later');
   });
 
+  it('uses the configured tool-round limit before continuing tool loops', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
+    settingsStoreMock.state.settings.ai.toolUse.maxRounds = 1;
+    setConversation([]);
+    getToolsForContextMock.mockReturnValue([
+      { name: 'local_exec', description: 'Run a local command', parameters: {} },
+    ]);
+    executeToolMock.mockResolvedValue({
+      toolCallId: 'tool-round-1',
+      toolName: 'local_exec',
+      success: true,
+      output: 'ok',
+    });
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-round-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-round-2', name: 'local_exec', arguments: JSON.stringify({ command: 'whoami' }) };
+        yield { type: 'done' };
+      });
+
+    await useAiChatStore.getState().sendMessage('inspect twice');
+
+    const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+    const budgetRound = assistantMessage?.turn?.toolRounds.find((toolRound) => toolRound.toolCalls.some((toolCall) => toolCall.id === 'tool-round-2'));
+    expect(providerStreamMock).toHaveBeenCalledTimes(2);
+    expect(executeToolMock).toHaveBeenCalledTimes(1);
+    expect(budgetRound).toMatchObject({
+      toolCalls: expect.arrayContaining([
+        expect.objectContaining({
+          approvalState: 'rejected',
+          executionState: 'error',
+          id: 'tool-round-2',
+        }),
+      ]),
+    });
+    expect(assistantMessage?.turn?.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'guardrail', code: 'tool-budget-limit' }),
+    ]));
+  });
+
   it('shows and clears a transient post-tool waiting marker before the follow-up summary arrives', async () => {
     let releaseSummary!: () => void;
 
@@ -738,7 +785,8 @@ describe('aiChatStore workflows', () => {
     expect(providerMessages?.[0]?.role).toBe('system');
     expect(providerMessages?.[0]?.content).toContain('## Tool Use Strategy');
     expect(providerMessages?.[0]?.content).toContain('First identify the task type');
-    expect(providerMessages?.[0]?.content).toContain('prefer direct execution with `terminal_exec` + `node_id`');
+    expect(providerMessages?.[0]?.content).toContain('resolve the target with `resolve_target`');
+    expect(providerMessages?.[0]?.content).toContain('`terminal_exec` + `target_id` for an `ssh-node`');
     expect(providerMessages?.[0]?.content).toContain('do not repeat the command and do not guess credentials');
     expect(providerMessages?.[0]?.content).toContain('pass `expectedHash`');
   });

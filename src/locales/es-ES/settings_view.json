@@ -564,6 +564,8 @@
       "tool_use_enabled": "Activar uso de herramientas",
       "tool_use_enabled_hint": "Permitir a la IA ejecutar comandos, leer archivos y realizar acciones en servidores remotos mediante Function Calling.",
       "tool_use_approve_hint": "Seleccione qué herramientas puede usar la IA sin confirmación. Las herramientas no seleccionadas pedirán confirmación antes de ejecutarse.",
+      "tool_use_max_rounds": "Rondas máximas de herramientas",
+      "tool_use_max_rounds_hint": "Máximo de rondas herramienta/modelo por respuesta antes de que OxideSens detenga el bucle. Predeterminado: 10.",
       "tool_use_group_terminal": "Terminal y Archivos",
       "tool_use_group_session": "Sesión",
       "tool_use_group_infrastructure": "Infraestructura",

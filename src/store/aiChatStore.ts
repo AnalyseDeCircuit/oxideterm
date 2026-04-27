@@ -71,7 +71,20 @@ const PSEUDO_TOOL_RETRY_TOOL_NAME = 'tool_use_disabled';
 const JSON_REQUEST_RE = /\b(json|jsonl|json schema|jsonschema|payload|response format|object literal|schema)\b/i;
 const USER_MEMORY_MAX_CHARS = 4000;
 const MAX_REQUIRED_TOOL_RETRIES = 1;
+const DEFAULT_TOOL_ROUNDS_PER_REPLY = 10;
+const MIN_TOOL_ROUNDS_PER_REPLY = 1;
+const MAX_TOOL_ROUNDS_PER_REPLY = 30;
 const ACTION_CLAIM_RE = /\b(?:opened|connected|executed|ran|read|modified|changed|checked|verified|diagnosed|found|failed|succeeded)\b|(?:已经|已|我来|我已|现在).*(?:打开|连接|执行|运行|读取|修改|检查|诊断|确认|发现)|(?:结果是|连接失败|执行完成|修改完成)/i;
+
+function normalizeToolRoundsPerReply(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TOOL_ROUNDS_PER_REPLY;
+  }
+  return Math.min(
+    MAX_TOOL_ROUNDS_PER_REPLY,
+    Math.max(MIN_TOOL_ROUNDS_PER_REPLY, Math.round(value)),
+  );
+}
 
 function resolveToolChoiceForObligation(
   obligation: ToolObligation | null,
@@ -1706,13 +1719,14 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           activeAgentAvailable,
           activeSessionId: currentSidebarContext?.env.sessionId ?? null,
           activeTerminalType: currentSidebarContext?.env.terminalType ?? null,
+          requireExplicitTarget: true,
         };
       };
 
       // activeNodeId can be null — context-free tools (list_sessions, etc.) still work
       let toolContext: ToolExecutionContext | null = await resolveToolContext();
 
-      const MAX_TOOL_ROUNDS = 10;
+      const MAX_TOOL_ROUNDS = normalizeToolRoundsPerReply(aiSettings.toolUse?.maxRounds);
       const MAX_TOOL_CALLS_PER_ROUND = 8;
       let round = 0;
       const appendGuardrail = (
@@ -2284,11 +2298,11 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           const needsNode = completedToolCalls.some(tc => !canRunWithoutActiveNode(tc));
           if (needsNode) {
             const unavailableText = currentToolContext.activeTerminalType === 'local_terminal' && currentToolContext.activeSessionId
-              ? 'The active tab is a local terminal. Remote node tools such as read_file, list_directory, grep_search, and write_file require an SSH node_id. For local machine tasks, use local_exec or terminal_exec against the current local session. To inspect an SSH host, switch to an SSH terminal tab or use list_sessions and pass node_id explicitly.'
-              : 'Some tools require an active terminal session. Please open a terminal tab first, or use list_sessions to discover available sessions and pass node_id or session_id explicitly.';
+              ? 'The active tab is a local terminal, but UI focus is only a hint. Remote and terminal tools require an explicit target_id/node_id/session_id. Use resolve_target first; use local_exec only for local machine tasks.'
+              : 'Some tools require an explicit target_id/node_id/session_id. Use resolve_target first, then retry with the returned target.';
             appendSyntheticRejectedToolCalls(
               completedToolCalls,
-              'The requested tools require an active terminal session or explicit node_id/session_id.',
+              'The requested tools require an explicit target_id/node_id/session_id.',
               {
                 roundNumber: round + 1,
                 guardrailCode: 'tool-context-missing',

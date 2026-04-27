@@ -90,7 +90,7 @@ When the task is complete (or cannot be completed), respond with a summary:
 ${buildCurrentContextSection(activeTabType, terminalType, connectionInfo, localOS, remoteEnvDesc, cwd)}
 
 ## Available Sessions
-${availableSessions || 'No active sessions. You can use context-free tools like list_targets to discover available targets.'}
+${availableSessions || 'No active sessions. Use context-free tools like resolve_target or list_targets to discover available targets.'}
 
 ${buildToolOperationStrategyPrompt({ activeTabType })}`;
 }

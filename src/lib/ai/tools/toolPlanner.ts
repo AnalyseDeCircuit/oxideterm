@@ -7,7 +7,6 @@ import type { ToolIntent } from './toolDefinitions';
 import {
   getAllToolSpecs,
   getToolDefinitionByName,
-  getToolsForContext,
 } from './toolDefinitions';
 
 export type ToolIntentInferenceInput = {
@@ -25,13 +24,12 @@ export type ToolPlanInput = {
 };
 
 const CORE_TOOL_NAMES = [
-  'list_targets',
+  'resolve_target',
   'list_capabilities',
-  'list_tabs',
 ] as const;
 
 const CONNECTION_INTENT_TOOL_NAMES = [
-  'list_targets',
+  'resolve_target',
   'list_capabilities',
   'connect_saved_connection_by_query',
   'list_saved_connections',
@@ -51,16 +49,16 @@ const SETTINGS_INTENT_TOOL_NAMES = [
 
 const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
   command: [
-    'list_targets',
-    'list_sessions',
+    'resolve_target',
+    'list_capabilities',
     'terminal_exec',
     'local_exec',
     'get_terminal_buffer',
     'read_screen',
   ],
   terminal_interaction: [
-    'list_targets',
-    'list_tabs',
+    'resolve_target',
+    'list_capabilities',
     'get_terminal_buffer',
     'read_screen',
     'await_terminal_output',
@@ -71,7 +69,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
   connection: CONNECTION_INTENT_TOOL_NAMES,
   settings: SETTINGS_INTENT_TOOL_NAMES,
   remote_file: [
-    'list_targets',
+    'resolve_target',
     'read_file',
     'list_directory',
     'grep_search',
@@ -82,6 +80,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'ide_open_file',
   ],
   local_shell: [
+    'resolve_target',
     'local_list_shells',
     'local_get_terminal_info',
     'local_get_drives',
@@ -90,6 +89,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'terminal_exec',
   ],
   sftp: [
+    'resolve_target',
     'open_session_tab',
     'sftp_get_cwd',
     'sftp_list_dir',
@@ -98,6 +98,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'sftp_write_file',
   ],
   ide: [
+    'resolve_target',
     'ide_get_project_info',
     'ide_get_open_files',
     'ide_get_file_content',
@@ -114,6 +115,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'get_pool_stats',
   ],
   navigation: [
+    'resolve_target',
     'list_tabs',
     'open_tab',
     'open_session_tab',
@@ -130,6 +132,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'read_mcp_resource',
   ],
   status: [
+    'resolve_target',
     'list_targets',
     'list_tabs',
     'get_event_log',
@@ -292,30 +295,34 @@ export function inferToolIntents(input: ToolIntentInferenceInput | string): Tool
     intents.add('status');
   }
 
-  if (activeTabType === 'settings') {
-    intents.add('settings');
-  }
+  // UI focus is only a hint. Do not let the active tab expand capabilities when
+  // the user's text already identifies a different task domain.
+  if (intents.size === 0) {
+    if (activeTabType === 'settings') {
+      intents.add('settings');
+    }
 
-  if (activeTabType === 'local_terminal') {
-    intents.add('local_shell');
-    intents.add('terminal_interaction');
-  }
+    if (activeTabType === 'local_terminal') {
+      intents.add('local_shell');
+      intents.add('terminal_interaction');
+    }
 
-  if (activeTabType === 'terminal') {
-    intents.add('command');
-    intents.add('terminal_interaction');
-  }
+    if (activeTabType === 'terminal') {
+      intents.add('command');
+      intents.add('terminal_interaction');
+    }
 
-  if (activeTabType === 'sftp') {
-    intents.add('sftp');
-  }
+    if (activeTabType === 'sftp') {
+      intents.add('sftp');
+    }
 
-  if (activeTabType === 'ide') {
-    intents.add('ide');
-  }
+    if (activeTabType === 'ide') {
+      intents.add('ide');
+    }
 
-  if (activeTabType === 'session_manager' || activeTabType === 'connection_pool' || activeTabType === 'connection_monitor') {
-    intents.add('connection');
+    if (activeTabType === 'session_manager' || activeTabType === 'connection_pool' || activeTabType === 'connection_monitor') {
+      intents.add('connection');
+    }
   }
 
   return [...intents];
@@ -350,6 +357,11 @@ export function scoreToolsForRequest(input: ToolPlanInput): ToolScore[] {
 
       if (spec.contextFree) {
         score += 1;
+      }
+
+      if (spec.name === 'resolve_target') {
+        score += 10;
+        reasons.push('target-first');
       }
 
       if (spec.name === 'list_targets' || spec.name === 'list_capabilities') {
@@ -413,16 +425,17 @@ export function getToolsForPlan(input: ToolPlanInput): AiToolDefinition[] {
       ? inferToolIntents({ text: input.userMessage, activeTabType: input.activeTabType })
       : [];
   const intentSet = new Set(inferredIntents);
-  const definitions = getToolsForContext(
-    input.activeTabType,
-    input.hasAnySSHSession,
-    input.disabledTools,
-    input.participantOverride,
-  );
-  const seen = new Set(definitions.map((tool) => tool.name));
+  const definitions: AiToolDefinition[] = [];
+  const seen = new Set<string>();
 
   for (const toolName of CORE_TOOL_NAMES) {
     addToolByName(definitions, seen, toolName, input.disabledTools);
+  }
+
+  if (input.participantOverride) {
+    for (const toolName of input.participantOverride) {
+      addToolByName(definitions, seen, toolName, input.disabledTools);
+    }
   }
 
   if (intentSet.has('connection')) {

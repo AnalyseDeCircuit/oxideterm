@@ -19,16 +19,20 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
   {
     name: 'terminal_exec',
     description:
-      'Execute a shell command on a remote node or send a command into an existing terminal session. Two modes:\n' +
-      '• node_id (preferred for non-interactive commands): Direct remote execution with reliable stdout/stderr capture. Faster and more accurate output.\n' +
-      '• session_id: Send command to an open terminal session. Output is auto-captured from the terminal screen. Use this when you need to interact with an existing shell session or TUI application.\n' +
-      'If both node_id and session_id are provided, node_id takes priority. If output is empty or incomplete, use get_terminal_buffer to read the full terminal content.',
+      'Execute a shell command on a resolved target. Prefer target_id from resolve_target. Two modes:\n' +
+      '• target_id/node_id for non-interactive remote commands: Direct remote execution with reliable stdout/stderr capture.\n' +
+      '• target_id/session_id for visible terminal sessions: Send command to an open shell and capture output from the terminal screen.\n' +
+      'If target_id, node_id, and session_id conflict, target_id wins. If output is empty or incomplete, use get_terminal_buffer with the same target_id/session_id.',
     parameters: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
           description: 'The shell command to execute.',
+        },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target/list_targets. ssh-node:* runs directly on that SSH node; terminal-session:* sends the command to that visible shell.',
         },
         cwd: {
           type: 'string',
@@ -42,11 +46,11 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
         },
         node_id: {
           type: 'string',
-          description: 'Target node ID for direct remote execution (preferred for reliability). If omitted, uses the active remote terminal when available. Use list_sessions to discover nodes.',
+          description: 'Legacy target node ID for direct remote execution. Prefer target_id from resolve_target.',
         },
         session_id: {
           type: 'string',
-          description: 'Target open terminal session ID. Sends command to the session and captures output from terminal screen. Use for interacting with existing shells or TUI apps.',
+          description: 'Legacy open terminal session ID. Prefer target_id from resolve_target when possible.',
         },
         await_output: {
           type: 'boolean',
@@ -67,9 +71,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           type: 'string',
           description: 'Absolute path to the file to read.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active terminal.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -90,9 +98,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           type: 'string',
           description: 'Content to write to the file.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active terminal.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
         expected_hash: {
           type: 'string',
@@ -135,9 +147,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           maximum: 8,
           description: 'Maximum recursion depth. Default: 3. Max: 8.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active terminal.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -168,9 +184,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           maximum: 200,
           description: 'Maximum number of matches to return. Default: 50. Max: 200.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active terminal.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['pattern', 'path'],
@@ -187,9 +207,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           type: 'string',
           description: 'Path to the git repository root.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active terminal.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -222,9 +246,33 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     },
   },
   {
+    name: 'resolve_target',
+    description:
+      'Resolve the user-requested target before executing, editing, navigating, or connecting. Use this first when the target is named naturally (host, connection name, session, tab, settings, local shell). Returns one exact target or disambiguation options; do not guess when multiple targets match.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural-language target query, such as a connection name, hostname, username, tab title, setting area, or "local shell".',
+        },
+        intent: {
+          type: 'string',
+          enum: ['command', 'terminal_interaction', 'connection', 'settings', 'remote_file', 'local_shell', 'sftp', 'ide', 'monitoring', 'navigation', 'plugin', 'knowledge', 'status'],
+          description: 'The intended operation. Helps rank compatible targets and avoid using the active UI as a capability boundary.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['all', 'local-shell', 'ssh-node', 'terminal-session', 'sftp-session', 'ide-workspace', 'app-tab', 'mcp-server', 'rag-index'],
+          description: 'Optional target kind filter. Default: "all".',
+        },
+      },
+    },
+  },
+  {
     name: 'list_targets',
     description:
-      'List all currently actionable targets for AI tools: local shell, SSH nodes, terminal sessions, SFTP/IDE workspaces, and app tabs. Prefer this before choosing node_id, session_id, or tab-specific tools.',
+      'List all currently actionable targets for AI tools: local shell, SSH nodes, terminal sessions, SFTP/IDE workspaces, and app tabs. Prefer resolve_target for normal task routing; use this for debugging or broad inspection.',
     parameters: {
       type: 'object',
       properties: {
@@ -257,9 +305,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'The terminal session ID to read buffer from. Get this from list_sessions.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         max_lines: {
           type: 'number',
@@ -268,7 +320,6 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Maximum number of lines to return. Default: 200. Max: 500.',
         },
       },
-      required: ['session_id'],
     },
   },
   {
@@ -278,9 +329,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'The terminal session ID to search in.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         query: {
           type: 'string',
@@ -301,7 +356,7 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Maximum number of matches. Default: 50. Max: 100.',
         },
       },
-      required: ['session_id', 'query'],
+      required: ['query'],
     },
   },
   {
@@ -311,9 +366,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'The terminal session ID to watch. Get this from list_sessions.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         timeout_secs: {
           type: 'number',
@@ -332,7 +391,6 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Seconds of no new output before considering output stable and returning. Default: 2.',
         },
       },
-      required: ['session_id'],
     },
   },
 
@@ -459,9 +517,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'Target terminal session ID.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         sequence: {
           type: 'string',
@@ -469,7 +531,7 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'The control sequence to send.',
         },
       },
-      required: ['session_id', 'sequence'],
+      required: ['sequence'],
     },
   },
   {
@@ -479,9 +541,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'Target terminal session ID.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         commands: {
           type: 'array',
@@ -489,7 +555,7 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Array of shell commands to execute sequentially. Max 10.',
         },
       },
-      required: ['session_id', 'commands'],
+      required: ['commands'],
     },
   },
   // ── TUI Interaction (Experimental) ──────────────────────────────────────
@@ -500,12 +566,15 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'Target terminal session ID.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
       },
-      required: ['session_id'],
     },
   },
   {
@@ -515,9 +584,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'Target terminal session ID.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         keys: {
           type: 'array',
@@ -529,7 +602,7 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Delay between each key in milliseconds. Default 50. Range: 10-1000.',
         },
       },
-      required: ['session_id', 'keys'],
+      required: ['keys'],
     },
   },
   {
@@ -539,9 +612,13 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be a terminal-session:* target.',
+        },
         session_id: {
           type: 'string',
-          description: 'Target terminal session ID.',
+          description: 'Legacy terminal session ID. Prefer target_id from resolve_target.',
         },
         action: {
           type: 'string',
@@ -571,7 +648,7 @@ export const BUILTIN_TOOLS: AiToolDefinition[] = [
           description: 'Number of scroll steps. Default: 1. Max: 20.',
         },
       },
-      required: ['session_id', 'action', 'x', 'y'],
+      required: ['action', 'x', 'y'],
     },
   },
 ];
@@ -592,9 +669,13 @@ export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
           type: 'string',
           description: 'Absolute path to the directory to list.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* or sftp-session:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -615,9 +696,13 @@ export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
           type: 'number',
           description: 'Maximum file size in bytes to read. Default: 1MB.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* or sftp-session:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -634,9 +719,13 @@ export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
           type: 'string',
           description: 'Absolute path to the file or directory.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* or sftp-session:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
       required: ['path'],
@@ -649,9 +738,13 @@ export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* or sftp-session:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
       },
     },
@@ -675,9 +768,13 @@ export const SFTP_TOOL_DEFS: AiToolDefinition[] = [
           type: 'string',
           description: 'Text encoding. Default: utf-8.',
         },
+        target_id: {
+          type: 'string',
+          description: 'Target ID returned by resolve_target. Must be an ssh-node:* or sftp-session:* target.',
+        },
         node_id: {
           type: 'string',
-          description: 'Target node ID. If omitted, uses the active SFTP tab\'s node.',
+          description: 'Legacy target node ID. Prefer target_id from resolve_target.',
         },
         expected_hash: {
           type: 'string',
@@ -948,6 +1045,7 @@ export const SETTINGS_TOOL_DEFS: AiToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
+        target_id: { type: 'string', description: 'Target ID returned by resolve_target. Use app:settings for settings changes.' },
         section: { type: 'string', description: 'Settings section (e.g. "terminal", "appearance", "ai", "sftp").' },
         key: { type: 'string', description: 'The setting key within the section.' },
         value: { description: 'The new value for the setting.' },
@@ -1339,6 +1437,7 @@ export const READ_ONLY_TOOLS = new Set([
   'list_directory',
   'grep_search',
   'git_status',
+  'resolve_target',
   'list_tabs',
   'list_sessions',
   'list_targets',
@@ -1435,6 +1534,7 @@ export const WRITE_TOOLS = new Set([
 
 /** Tools that do NOT require any node context — work globally or read from local stores */
 export const CONTEXT_FREE_TOOLS = new Set([
+  'resolve_target',
   'list_tabs',
   'list_sessions',
   'list_targets',
@@ -1599,7 +1699,7 @@ export const TOOL_GROUPS: { groupKey: string; readOnly: string[]; write: string[
   },
   {
     groupKey: 'session',
-    readOnly: ['list_tabs', 'list_sessions', 'list_targets', 'list_capabilities', 'get_terminal_buffer', 'search_terminal', 'await_terminal_output'],
+    readOnly: ['resolve_target', 'list_tabs', 'list_sessions', 'list_targets', 'list_capabilities', 'get_terminal_buffer', 'search_terminal', 'await_terminal_output'],
     write: ['send_control_sequence', 'batch_exec'],
   },
   {
@@ -1720,6 +1820,7 @@ function inferIntentTags(toolName: string, domain: ToolDomain): ToolIntent[] {
     get_session_tree: ['connection', 'status'],
     get_settings: ['settings'],
     update_setting: ['settings'],
+    resolve_target: ['connection', 'settings', 'command', 'terminal_interaction'],
     search_docs: ['knowledge'],
   };
 
@@ -1756,6 +1857,7 @@ function inferIntentTags(toolName: string, domain: ToolDomain): ToolIntent[] {
 }
 
 function inferRequiredTarget(toolName: string): ToolTargetRequirement {
+  if (toolName === 'resolve_target') return 'none';
   if (SESSION_ID_TOOLS.has(toolName)) return 'session_id';
   if (SFTP_ONLY_TOOLS.has(toolName)) return 'active_sftp';
   if (IDE_ONLY_TOOLS.has(toolName)) return 'active_ide';

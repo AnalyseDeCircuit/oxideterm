@@ -55,6 +55,9 @@ const IN_BAND_TRANSFER_FILE_COUNT_MIN = 1;
 const IN_BAND_TRANSFER_FILE_COUNT_MAX = 10_000;
 const IN_BAND_TRANSFER_TOTAL_BYTES_MIN = 100 * 1024 * 1024;
 const IN_BAND_TRANSFER_TOTAL_BYTES_MAX = 100 * 1024 * 1024 * 1024;
+export const DEFAULT_AI_TOOL_MAX_ROUNDS = 10;
+export const MIN_AI_TOOL_MAX_ROUNDS = 1;
+export const MAX_AI_TOOL_MAX_ROUNDS = 30;
 
 function clampTerminalScrollback(scrollback: number): number {
   if (!Number.isFinite(scrollback)) {
@@ -80,6 +83,15 @@ function clampFiniteInteger(value: unknown, fallback: number, min: number, max: 
   }
 
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+export function normalizeAiToolMaxRounds(value: unknown): number {
+  return clampFiniteInteger(
+    value,
+    DEFAULT_AI_TOOL_MAX_ROUNDS,
+    MIN_AI_TOOL_MAX_ROUNDS,
+    MAX_AI_TOOL_MAX_ROUNDS,
+  );
 }
 
 function normalizeTerminalEncoding(value: unknown): TerminalEncoding {
@@ -326,6 +338,8 @@ export interface AiSettings {
      * Orthogonal to autoApproveTools (which controls auto-approval).
      */
     disabledTools: string[];
+    /** Maximum model/tool round trips per assistant reply before the loop is stopped. */
+    maxRounds?: number;
   };
   /** Context sources to auto-inject into AI system prompt */
   contextSources?: {
@@ -525,6 +539,7 @@ const defaultAiSettings: AiSettings = {
   },
   toolUse: {
     enabled: false,                  // Default: disabled until user opts in
+    maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS,
     autoApproveTools: {
       // Read-only tools: auto-approve by default
       read_file: true,
@@ -764,6 +779,7 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
               ...saved.ai.toolUse.autoApproveTools,
             },
             disabledTools: saved.ai.toolUse.disabledTools ?? [],
+            maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
           }
         : defaults.ai.toolUse,
     },
@@ -885,7 +901,7 @@ function migrateToolUseSettings(settings: PersistedSettingsV2): PersistedSetting
     ...settings,
     ai: {
       ...settings.ai,
-      toolUse: { enabled: toolUse.enabled, autoApproveTools, disabledTools: [] },
+      toolUse: { enabled: toolUse.enabled, autoApproveTools, disabledTools: [], maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS },
     },
   };
   persistSettings(newSettings);

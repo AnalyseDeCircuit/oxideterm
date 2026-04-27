@@ -564,6 +564,8 @@
       "tool_use_enabled": "Enable Tool Use",
       "tool_use_enabled_hint": "Allow the AI to execute commands, read files, and perform actions on remote servers via function calling.",
       "tool_use_approve_hint": "Select which tools the AI can use without confirmation. Tools not selected here will ask for confirmation before running.",
+      "tool_use_max_rounds": "Max Tool Rounds",
+      "tool_use_max_rounds_hint": "Maximum tool/model round trips per reply before OxideSens stops the loop. Default: 10.",
       "tool_use_group_terminal": "Terminal & Files",
       "tool_use_group_session": "Session",
       "tool_use_group_infrastructure": "Infrastructure",

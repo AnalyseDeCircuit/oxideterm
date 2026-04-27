@@ -118,6 +118,14 @@ export function buildToolTargets(state: TargetDiscoveryState): ToolTarget[] {
       active: activeTab?.type === 'local_terminal',
       capabilities: ['command.run', 'navigation.open', 'state.list'],
     }),
+    createToolTarget({
+      id: 'app:settings',
+      kind: 'app-tab',
+      label: 'Settings',
+      active: activeTab?.type === 'settings',
+      capabilities: ['settings.read', 'settings.write', 'navigation.open', 'state.list'],
+      metadata: { tabType: 'settings', singleton: true },
+    }),
   ];
 
   for (const [sessionId, info] of state.localTerminals) {

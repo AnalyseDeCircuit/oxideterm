@@ -564,6 +564,8 @@
       "tool_use_enabled": "Abilita uso strumenti",
       "tool_use_enabled_hint": "Consenti all'IA di eseguire comandi, leggere file ed eseguire azioni sui server remoti tramite Function Calling.",
       "tool_use_approve_hint": "Seleziona quali strumenti l'IA può usare senza conferma. Gli strumenti non selezionati chiederanno conferma prima dell'esecuzione.",
+      "tool_use_max_rounds": "Round massimi degli strumenti",
+      "tool_use_max_rounds_hint": "Numero massimo di round strumento/modello per risposta prima che OxideSens fermi il ciclo. Predefinito: 10.",
       "tool_use_group_terminal": "Terminale e File",
       "tool_use_group_session": "Sessione",
       "tool_use_group_infrastructure": "Infrastruttura",

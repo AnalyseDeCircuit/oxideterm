@@ -20,7 +20,13 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { AiProvider, AiProviderType } from '@/types';
 import type { AiReasoningEffort } from '@/lib/ai/providers';
-import type { AiSettings } from '@/store/settingsStore';
+import {
+    DEFAULT_AI_TOOL_MAX_ROUNDS,
+    MAX_AI_TOOL_MAX_ROUNDS,
+    MIN_AI_TOOL_MAX_ROUNDS,
+    normalizeAiToolMaxRounds,
+    type AiSettings,
+} from '@/store/settingsStore';
 
 const TOOL_ICON_MAP: Record<string, ElementType> = {
     terminal_exec: TerminalIcon,
@@ -177,7 +183,8 @@ export const AiTab = ({
     const [toolUseExpanded, setToolUseExpanded] = useState(true);
     const [newProviderType, setNewProviderType] = useState<AiProviderType>('openai_compatible');
     const memory = ai.memory ?? { enabled: true, content: '' };
-    const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] };
+    const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [], maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS };
+    const toolUseMaxRounds = normalizeAiToolMaxRounds(toolUse.maxRounds);
     const allToolNames = TOOL_GROUPS.flatMap((group) => [...group.readOnly, ...group.write]);
     const approvedToolCount = allToolNames.filter((name) => toolUse.autoApproveTools?.[name] === true).length;
     const selectedProviderTemplate = PROVIDER_TEMPLATES.find((template) => template.type === newProviderType) ?? PROVIDER_TEMPLATES[0];
@@ -942,6 +949,32 @@ export const AiTab = ({
                             className={toolUse.enabled ? 'space-y-5 ml-4 pl-4 border-l border-theme-border/30' : 'opacity-40 pointer-events-none space-y-5 ml-4 pl-4 border-l border-theme-border/30'}
                         >
                             <p className="text-xs text-theme-text-muted">{t('settings_view.ai.tool_use_approve_hint')}</p>
+
+                            <div className="rounded-lg border border-theme-border/60 bg-theme-bg-panel/30 p-3">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="min-w-0">
+                                        <Label htmlFor="ai-tool-max-rounds" className="text-theme-text">
+                                            {t('settings_view.ai.tool_use_max_rounds')}
+                                        </Label>
+                                        <p className="mt-0.5 text-xs text-theme-text-muted">
+                                            {t('settings_view.ai.tool_use_max_rounds_hint')}
+                                        </p>
+                                    </div>
+                                    <Input
+                                        id="ai-tool-max-rounds"
+                                        type="number"
+                                        min={MIN_AI_TOOL_MAX_ROUNDS}
+                                        max={MAX_AI_TOOL_MAX_ROUNDS}
+                                        step={1}
+                                        value={toolUseMaxRounds}
+                                        onChange={(event) => {
+                                            const next = normalizeAiToolMaxRounds(Number(event.currentTarget.value));
+                                            updateAi('toolUse', { ...toolUse, maxRounds: next });
+                                        }}
+                                        className="h-9 w-24 text-right"
+                                    />
+                                </div>
+                            </div>
 
                             <div className="flex gap-2">
                                 <button
