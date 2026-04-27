@@ -162,8 +162,8 @@ importers:
         specifier: 0.8.0-beta.48
         version: 0.8.0-beta.48(@xterm/xterm@6.0.0)
       '@xterm/addon-clipboard':
-        specifier: 0.1.0
-        version: 0.1.0(@xterm/xterm@6.0.0)
+        specifier: 0.2.0
+        version: 0.2.0
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -1921,10 +1921,8 @@ packages:
     peerDependencies:
       '@xterm/xterm': ^5.0.0
 
-  '@xterm/addon-clipboard@0.1.0':
-    resolution: {integrity: sha512-zdoM7p53T5sv/HbRTyp4hY0kKmEQ3MZvAvEtiXqNIHc/JdpqwByCtsTaQF5DX2n4hYdXRPO4P/eOS0QEhX1nPw==}
-    peerDependencies:
-      '@xterm/xterm': ^5.4.0
+  '@xterm/addon-clipboard@0.2.0':
+    resolution: {integrity: sha512-Dl31BCtBhLaUEECUbEiVcCLvLBbaeGYdT7NofB8OJkGTD3MWgBsaLjXvfGAD4tQNHhm6mbKyYkR7XD8kiZsdNg==}
 
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
@@ -4714,9 +4712,8 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.0.0
 
-  '@xterm/addon-clipboard@0.1.0(@xterm/xterm@6.0.0)':
+  '@xterm/addon-clipboard@0.2.0':
     dependencies:
-      '@xterm/xterm': 6.0.0
       js-base64: 3.7.8
 
   '@xterm/addon-fit@0.11.0': {}
