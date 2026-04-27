@@ -225,8 +225,8 @@ importers:
         specifier: ^0.577.0
         version: 0.577.0(react@19.2.3)
       mammoth:
-        specifier: ^1.11.0
-        version: 1.11.0
+        specifier: ^1.12.0
+        version: 1.12.0
       marked:
         specifier: ^17.0.1
         version: 17.0.1
@@ -1908,10 +1908,9 @@ packages:
   '@vitest/utils@4.1.4':
     resolution: {integrity: sha512-13QMT+eysM5uVGa1rG4kegGYNp6cnQcsTc67ELFbhNLQO+vgsygtYJx2khvdt4gVQqSSpC/KT5FZZxUpP3Oatw==}
 
-  '@xmldom/xmldom@0.8.11':
-    resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
+  '@xmldom/xmldom@0.8.13':
+    resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
-    deprecated: this version has critical issues, please update to the latest version
 
   '@xterm/addon-attach@0.12.0':
     resolution: {integrity: sha512-1lxvXM4JYSm60lbFmE8WMOy2oF2ip3Ye8jWorSAmwy7x8FiC53netEJ5RguL8+FSRj79MUQsNCb2hprY2QA2ig==}
@@ -2551,8 +2550,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  mammoth@1.11.0:
-    resolution: {integrity: sha512-BcEqqY/BOwIcI1iR5tqyVlqc3KIaMRa4egSoK83YAVrBf6+yqdAAbtUcFDCWX8Zef8/fgNZ6rl4VUv+vVX8ddQ==}
+  mammoth@1.12.0:
+    resolution: {integrity: sha512-cwnK1RIcRdDMi2HRx2EXGYlxqIEh0Oo3bLhorgnsVJi2UkbX1+jKxuBNR9PC5+JaX7EkmJxFPmo6mjLpqShI2w==}
     engines: {node: '>=12.0.0'}
     hasBin: true
 
@@ -2873,8 +2872,8 @@ packages:
   ufo@1.6.3:
     resolution: {integrity: sha512-yDJTmhydvl5lJzBmy/hyOAA0d+aqCBuwl818haVdYCRrWV84o7YyeVm4QlVHStqNrrJSTb6jKuFAVqAFsr+K3Q==}
 
-  underscore@1.13.7:
-    resolution: {integrity: sha512-GMXzWtsc57XAtguZgaQViUOzs0KTkk8ojr3/xAxXLITqf/3EMwxC0inyETfDFjH/Krbhuep0HNbbjI9i/q3F3g==}
+  underscore@1.13.8:
+    resolution: {integrity: sha512-DXtD3ZtEQzc7M8m4cXotyHR+FAS18C64asBYY5vqZexfYryNNnDc02W4hKg3rdQuqOYas1jkseX0+nZXjTXnvQ==}
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
@@ -4706,7 +4705,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@xmldom/xmldom@0.8.11': {}
+  '@xmldom/xmldom@0.8.13': {}
 
   '@xterm/addon-attach@0.12.0': {}
 
@@ -5081,7 +5080,7 @@ snapshots:
 
   duck@0.1.12:
     dependencies:
-      underscore: 1.13.7
+      underscore: 1.13.8
 
   electron-to-chromium@1.5.267: {}
 
@@ -5310,7 +5309,7 @@ snapshots:
     dependencies:
       duck: 0.1.12
       option: 0.2.4
-      underscore: 1.13.7
+      underscore: 1.13.8
 
   lru-cache@11.3.5: {}
 
@@ -5328,9 +5327,9 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  mammoth@1.11.0:
+  mammoth@1.12.0:
     dependencies:
-      '@xmldom/xmldom': 0.8.11
+      '@xmldom/xmldom': 0.8.13
       argparse: 1.0.10
       base64-js: 1.5.1
       bluebird: 3.4.7
@@ -5338,7 +5337,7 @@ snapshots:
       jszip: 3.10.1
       lop: 0.4.2
       path-is-absolute: 1.0.1
-      underscore: 1.13.7
+      underscore: 1.13.8
       xmlbuilder: 10.1.1
 
   marked@16.4.2: {}
@@ -5644,7 +5643,7 @@ snapshots:
 
   ufo@1.6.3: {}
 
-  underscore@1.13.7: {}
+  underscore@1.13.8: {}
 
   undici-types@6.21.0: {}
 
