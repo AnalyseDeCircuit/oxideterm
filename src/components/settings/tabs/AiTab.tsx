@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brain, ChevronDown, ChevronRight, RefreshCw, Wrench, X } from 'lucide-react';
 import { McpServersPanel } from '@/components/settings/McpServersPanel';
@@ -123,6 +123,7 @@ export const AiTab = ({
     const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
     const [expandedProviderModels, setExpandedProviderModels] = useState<Record<string, boolean>>({});
     const [toolUseExpanded, setToolUseExpanded] = useState(true);
+    const toolUseSectionRef = useRef<HTMLDivElement | null>(null);
     const [newProviderType, setNewProviderType] = useState<AiProviderType>('openai_compatible');
     const memory = ai.memory ?? { enabled: true, content: '' };
     const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [], maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS };
@@ -135,6 +136,22 @@ export const AiTab = ({
         });
     };
     const selectedProviderTemplate = PROVIDER_TEMPLATES.find((template) => template.type === newProviderType) ?? PROVIDER_TEMPLATES[0];
+
+    useEffect(() => {
+        const handleFocusSettingsSection = (event: Event) => {
+            const detail = (event as CustomEvent<{ tab?: string; section?: string }>).detail;
+            if (detail?.tab !== 'ai' || detail.section !== 'tool-use') {
+                return;
+            }
+            setToolUseExpanded(true);
+            window.requestAnimationFrame(() => {
+                toolUseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        };
+
+        window.addEventListener('oxideterm:focus-settings-section', handleFocusSettingsSection);
+        return () => window.removeEventListener('oxideterm:focus-settings-section', handleFocusSettingsSection);
+    }, []);
 
     return (
         <>
@@ -813,7 +830,7 @@ export const AiTab = ({
 
                     <Separator className="my-6 opacity-50" />
 
-                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
+                    <div ref={toolUseSectionRef} className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider flex items-center gap-2">
                                 <Wrench className="w-4 h-4" />

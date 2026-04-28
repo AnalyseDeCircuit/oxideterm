@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Tools an",
+      "rounds_short": "{{count}}",
       "disabled": "Tools aus",
+      "disabled_short": "Aus",
       "disabled_count": "{{count}} deaktiviert",
       "open_settings": "KI-Tool-Einstellungen öffnen"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Standard-Sicherheitsmodus: gefährliche Befehle benötigen Freigabe",
+      "bypass_title": "Bypass-Modus ist für diesen Chat aktiv",
+      "menu_title": "Sicherheitsmodus",
+      "default_mode": "Default mode",
+      "default_desc": "Gefährliche Befehle benötigen vor der Ausführung eine Freigabe.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Überspringt Freigaben für gefährliche Befehle in diesem Chat nach Bestätigung.",
+      "open_settings": "Tool-Aufruf-Einstellungen öffnen",
+      "confirm_title": "Bypass-Modus aktivieren?",
+      "confirm_description": "Nur für diesen Chat werden gefährliche Befehle ohne einzelne Freigabe ausgeführt. Tool-Aufrufe werden weiter protokolliert. Passwörter, sudo-Abfragen, Passphrasen und Zugangsdaten müssen weiterhin von dir eingegeben werden.",
+      "confirm_enable": "Bypass aktivieren",
+      "confirm_cancel": "Default behalten"
     },
     "slash": {
       "explain": "Erklären",

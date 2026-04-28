@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Outils activés",
+      "rounds_short": "{{count}}",
       "disabled": "Outils désactivés",
+      "disabled_short": "Off",
       "disabled_count": "{{count}} désactivés",
       "open_settings": "Ouvrir les paramètres des outils IA"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Mode de sécurité par défaut : les commandes dangereuses demandent une approbation",
+      "bypass_title": "Le mode Bypass est actif pour cette discussion",
+      "menu_title": "Mode de sécurité",
+      "default_mode": "Default mode",
+      "default_desc": "Les commandes dangereuses demandent une approbation avant exécution.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Ignore les approbations de commandes dangereuses dans cette discussion après confirmation.",
+      "open_settings": "Ouvrir les paramètres d’utilisation des outils",
+      "confirm_title": "Activer le mode Bypass ?",
+      "confirm_description": "Pour cette discussion seulement, les commandes dangereuses s'exécuteront sans approbation individuelle. Les appels d'outils restent enregistrés. Les mots de passe, invites sudo, phrases secrètes et identifiants doivent toujours être saisis par vous.",
+      "confirm_enable": "Activer Bypass",
+      "confirm_cancel": "Garder Default"
     },
     "slash": {
       "explain": "Expliquer",

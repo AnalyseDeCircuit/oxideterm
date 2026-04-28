@@ -627,6 +627,71 @@ describe('aiChatStore workflows', () => {
     expect(useAiChatStore.getState().activeConversationId).toBe('conv-2');
   });
 
+  it('keeps destructive commands pending in default mode even when run_command is auto-approved', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
+    setConversation([]);
+    providerStreamMock.mockImplementationOnce(async function* () {
+      yield { type: 'tool_call_complete', id: 'tool-danger-default', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'sudo reboot' }) };
+      yield { type: 'done' };
+    });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('dangerous command');
+
+    await waitFor(() => {
+      const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+      return assistant?.turn?.toolRounds[0]?.toolCalls[0]?.approvalState === 'pending';
+    });
+
+    useAiChatStore.getState().stopGeneration();
+    await sendPromise;
+    expect(apiMocks.localExecCommand).not.toHaveBeenCalled();
+  });
+
+  it('bypasses only destructive command approval for the current conversation when enabled', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
+    setConversation([]);
+    useAiChatStore.getState().setConversationSafetyMode('conv-1', 'bypass');
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-danger-bypass', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'sudo reboot' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', content: 'done' };
+        yield { type: 'done' };
+      });
+
+    await useAiChatStore.getState().sendMessage('dangerous command');
+
+    expect(apiMocks.localExecCommand).toHaveBeenCalledWith('sudo reboot', undefined, 30, true);
+    const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.turn?.toolRounds[0]?.toolCalls[0]).toMatchObject({
+      id: 'tool-danger-bypass',
+      approvalState: 'approved',
+      executionState: 'completed',
+    });
+    const toolResultPart = assistant?.turn?.parts.find((part) => part.type === 'tool_result' && part.toolCallId === 'tool-danger-bypass');
+    expect(toolResultPart?.type === 'tool_result' ? toolResultPart.envelope?.meta.approvalMode : undefined).toBe('bypass');
+  });
+
+  it('stores bypass mode only for the selected conversation', () => {
+    setConversation([]);
+    useAiChatStore.setState((state) => ({
+      conversations: [
+        ...state.conversations,
+        makeConversation([], 'conv-2'),
+      ],
+    }));
+
+    useAiChatStore.getState().setConversationSafetyMode('conv-1', 'bypass');
+
+    expect(useAiChatStore.getState().getConversationSafetyMode('conv-1')).toBe('bypass');
+    expect(useAiChatStore.getState().getConversationSafetyMode('conv-2')).toBe('default');
+  });
+
   it('keeps the assistant message visible when the provider errors after a tool round', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
     settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };

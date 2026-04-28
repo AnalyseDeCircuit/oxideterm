@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Tools on",
+      "rounds_short": "{{count}}",
       "disabled": "Tools off",
+      "disabled_short": "Off",
       "disabled_count": "{{count}} disabled",
       "open_settings": "Open AI tool settings"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Default safety mode: dangerous commands require approval",
+      "bypass_title": "Bypass mode is active for this chat",
+      "menu_title": "Safety mode",
+      "default_mode": "Default mode",
+      "default_desc": "Dangerous commands require approval before execution.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Skip dangerous-command approvals in this chat after explicit confirmation.",
+      "open_settings": "Open tool-use settings",
+      "confirm_title": "Enable bypass mode?",
+      "confirm_description": "For this chat only, dangerous commands will run without per-command approval. Tool calls are still recorded. Passwords, sudo prompts, passphrases, and credentials must still be handled by you.",
+      "confirm_enable": "Enable bypass",
+      "confirm_cancel": "Keep default"
     },
     "slash": {
       "explain": "Explain",

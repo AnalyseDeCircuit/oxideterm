@@ -66,6 +66,7 @@ import {
   compactingConversations,
   pendingApprovalResolvers,
   updateToolCallStatusInConversations,
+  type AiSafetyMode,
 } from './aiChatStore.runtime';
 import i18n from '../i18n';
 
@@ -195,6 +196,8 @@ interface AiChatStore {
     compactedCount?: number;
     timestamp: number;
   } | null;
+  /** Runtime-only per-conversation safety mode. Missing entries are default mode. */
+  safetyModeByConversationId: Record<string, AiSafetyMode>;
   // Initialization
   init: () => Promise<void>;
   retryInit: () => void;
@@ -222,6 +225,8 @@ interface AiChatStore {
 
   // Tool approval actions
   resolveToolApproval: (toolCallId: string, approved: boolean) => void;
+  setConversationSafetyMode: (conversationId: string, mode: AiSafetyMode) => void;
+  getConversationSafetyMode: (conversationId?: string | null) => AiSafetyMode;
 
   // Internal (persist to backend)
   _addMessage: (conversationId: string, message: AiChatMessage, sidebarContext?: SidebarContext | null) => Promise<void>;
@@ -652,6 +657,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   abortController: null,
   trimInfo: null,
   compactionInfo: null,
+  safetyModeByConversationId: {},
 
   // Initialize store from backend
   init: async () => {
@@ -710,6 +716,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       isInitializing: false,
       initializationError: null,
       error: null,
+      safetyModeByConversationId: {},
     });
     void get().init();
   },
@@ -783,7 +790,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         state.activeConversationId === id
           ? conversations[0]?.id ?? null
           : state.activeConversationId;
-      return { conversations, activeConversationId };
+      const { [id]: _removed, ...safetyModeByConversationId } = state.safetyModeByConversationId;
+      return { conversations, activeConversationId, safetyModeByConversationId };
     });
 
     try {
@@ -840,6 +848,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       conversations: [],
       activeConversationId: null,
       error: null,
+      safetyModeByConversationId: {},
     });
 
     try {
@@ -847,6 +856,27 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     } catch (e) {
       console.warn('[AiChatStore] Failed to clear all conversations:', e);
     }
+  },
+
+  setConversationSafetyMode: (conversationId, mode) => {
+    set((state) => {
+      if (!conversationId) return {};
+      if (mode === 'default') {
+        const { [conversationId]: _removed, ...safetyModeByConversationId } = state.safetyModeByConversationId;
+        return { safetyModeByConversationId };
+      }
+      return {
+        safetyModeByConversationId: {
+          ...state.safetyModeByConversationId,
+          [conversationId]: mode,
+        },
+      };
+    });
+  },
+
+  getConversationSafetyMode: (conversationId) => {
+    if (!conversationId) return 'default';
+    return get().safetyModeByConversationId[conversationId] ?? 'default';
   },
 
   // Send a message
@@ -2242,6 +2272,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         const pendingApprovalIds: string[] = [];
         const dangerousPendingApprovalIds = new Set<string>();
         const explicitlyApprovedDangerousToolIds = new Set<string>();
+        const bypassApprovedDangerousToolIds = new Set<string>();
+        const safetyMode = get().getConversationSafetyMode(convId);
 
         for (const tc of toolCallEntries) {
           if (!availableToolNames.has(tc.name)) {
@@ -2285,11 +2317,19 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
             ? orchestratorRiskForTool(tc.name, parsedApprovalArgs)
             : 'write';
           const approvalDecision = {
-            requiresApproval: risk !== 'read' && autoApproveTools[tc.name] !== true,
+            requiresApproval: risk === 'destructive'
+              ? true
+              : risk !== 'read' && autoApproveTools[tc.name] !== true,
             risk,
           };
 
-          if (approvalDecision.requiresApproval) {
+          const bypassesDangerApproval = safetyMode === 'bypass' && approvalDecision.risk === 'destructive';
+
+          if (bypassesDangerApproval) {
+            tc.status = 'approved';
+            explicitlyApprovedDangerousToolIds.add(tc.id);
+            bypassApprovedDangerousToolIds.add(tc.id);
+          } else if (approvalDecision.requiresApproval) {
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
             if (approvalDecision.risk === 'destructive') {
@@ -2516,6 +2556,15 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
             dangerousCommandApproved: explicitlyApprovedDangerousToolIds.has(tc.id),
             abortSignal: abortController.signal,
           }, tc.id);
+          if (bypassApprovedDangerousToolIds.has(tc.id) && result.envelope) {
+            result.envelope = {
+              ...result.envelope,
+              meta: {
+                ...result.envelope.meta,
+                approvalMode: 'bypass',
+              },
+            };
+          }
           result.toolCallId = tc.id;
           tc.result = result;
           tc.status = result.success ? 'completed' : 'error';

@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "ツール有効",
+      "rounds_short": "{{count}}",
       "disabled": "ツール無効",
+      "disabled_short": "無効",
       "disabled_count": "{{count}} 個無効",
       "open_settings": "AIツール設定を開く"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "既定の安全モード: 危険なコマンドには承認が必要です",
+      "bypass_title": "このチャットで Bypass モードが有効です",
+      "menu_title": "安全モード",
+      "default_mode": "Default mode",
+      "default_desc": "危険なコマンドは実行前に承認が必要です。",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "確認後、このチャットの危険なコマンド承認を省略します。",
+      "open_settings": "ツール使用設定を開く",
+      "confirm_title": "Bypass モードを有効にしますか？",
+      "confirm_description": "このチャットだけで、危険なコマンドが個別承認なしで実行されます。ツール呼び出しは記録されます。パスワード、sudo プロンプト、パスフレーズ、認証情報は引き続きあなたが入力する必要があります。",
+      "confirm_enable": "Bypass を有効化",
+      "confirm_cancel": "Default のまま"
     },
     "slash": {
       "explain": "説明",

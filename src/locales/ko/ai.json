@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "도구 켜짐",
+      "rounds_short": "{{count}}",
       "disabled": "도구 꺼짐",
+      "disabled_short": "끔",
       "disabled_count": "{{count}}개 비활성화",
       "open_settings": "AI 도구 설정 열기"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "기본 안전 모드: 위험한 명령은 승인이 필요합니다",
+      "bypass_title": "이 채팅에서 Bypass 모드가 활성화됨",
+      "menu_title": "안전 모드",
+      "default_mode": "Default mode",
+      "default_desc": "위험한 명령은 실행 전 승인이 필요합니다.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "확인 후 이 채팅에서 위험한 명령 승인을 건너뜁니다.",
+      "open_settings": "도구 사용 설정 열기",
+      "confirm_title": "Bypass 모드를 활성화할까요?",
+      "confirm_description": "이 채팅에서만 위험한 명령이 개별 승인 없이 실행됩니다. 도구 호출은 계속 기록됩니다. 비밀번호, sudo 프롬프트, 패스프레이즈, 자격 증명은 계속 사용자가 직접 처리해야 합니다.",
+      "confirm_enable": "Bypass 활성화",
+      "confirm_cancel": "Default 유지"
     },
     "slash": {
       "explain": "설명",

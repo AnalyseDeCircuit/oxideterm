@@ -249,11 +249,11 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
   }
 
   return (
-    <div className="relative min-w-0" ref={dropdownRef}>
+    <div className="relative min-w-0 flex-1" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-md)] text-[10px] font-medium min-w-0",
+          "flex w-full max-w-full items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-md)] text-[10px] font-medium min-w-0",
           "text-theme-text-muted hover:text-theme-text hover:bg-theme-accent/10",
           open && "bg-theme-accent/10 text-theme-text"
         )}
@@ -268,7 +268,7 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
       </button>
 
       {open && (
-        <div className="absolute left-0 bottom-full mb-0.5 w-64 bg-theme-bg-elevated border border-theme-border rounded-[var(--radius-lg)] shadow-lg z-50 overflow-hidden">
+        <div className="absolute left-0 bottom-full mb-0.5 w-64 bg-theme-bg-elevated border border-theme-border rounded-[var(--radius-lg)] shadow-lg z-[9999] overflow-hidden">
           <div className="px-2 pt-2 pb-1">
             <div className="flex items-center gap-1.5 rounded-[var(--radius-md)] border border-theme-border/50 bg-theme-bg/50 px-2 py-1.5">
               <Search className="w-3 h-3 shrink-0 text-theme-text-muted" />

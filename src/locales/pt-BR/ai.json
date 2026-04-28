@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Ferramentas ativas",
+      "rounds_short": "{{count}}",
       "disabled": "Ferramentas desativadas",
+      "disabled_short": "Off",
       "disabled_count": "{{count}} desativadas",
       "open_settings": "Abrir configurações de ferramentas de IA"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Modo seguro padrão: comandos perigosos exigem aprovação",
+      "bypass_title": "Modo Bypass ativo para este chat",
+      "menu_title": "Modo de segurança",
+      "default_mode": "Default mode",
+      "default_desc": "Comandos perigosos exigem aprovação antes da execução.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Pula aprovações de comandos perigosos neste chat após confirmação.",
+      "open_settings": "Abrir configurações de uso de ferramentas",
+      "confirm_title": "Ativar modo Bypass?",
+      "confirm_description": "Apenas neste chat, comandos perigosos serão executados sem aprovação individual. Chamadas de ferramentas continuarão registradas. Senhas, prompts sudo, passphrases e credenciais ainda devem ser tratados por você.",
+      "confirm_enable": "Ativar Bypass",
+      "confirm_cancel": "Manter Default"
     },
     "slash": {
       "explain": "Explicar",

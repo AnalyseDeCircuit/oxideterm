@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "工具调用开启",
+      "rounds_short": "{{count}}",
       "disabled": "工具调用关闭",
+      "disabled_short": "关闭",
       "disabled_count": "已禁用 {{count}} 个",
       "open_settings": "打开 AI 工具设置"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "默认安全模式：危险命令需要审批",
+      "bypass_title": "当前对话已启用 Bypass 模式",
+      "menu_title": "安全模式",
+      "default_mode": "Default mode",
+      "default_desc": "危险命令执行前需要你逐条审批。",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "确认后，当前对话中的危险命令不再逐条审批。",
+      "open_settings": "打开工具调用设置",
+      "confirm_title": "启用 Bypass 模式？",
+      "confirm_description": "仅当前对话生效。危险命令将不再逐条审批，但工具调用仍会记录。密码、sudo 提示、密钥口令和凭据仍必须由你手动处理。",
+      "confirm_enable": "启用 Bypass",
+      "confirm_cancel": "保持 Default"
     },
     "slash": {
       "explain": "解释",

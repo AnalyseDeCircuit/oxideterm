@@ -52,9 +52,16 @@ export const SettingsView = () => {
 
     useEffect(() => {
         const handleOpenSettingsTab = (event: Event) => {
-            const detail = (event as CustomEvent<{ tab?: string }>).detail;
+            const detail = (event as CustomEvent<{ tab?: string; section?: string }>).detail;
             if (detail?.tab) {
                 setActiveTab(detail.tab);
+            }
+            if (detail?.section) {
+                window.setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('oxideterm:focus-settings-section', {
+                        detail: { tab: detail.tab, section: detail.section },
+                    }));
+                }, 0);
             }
         };
         window.addEventListener('oxideterm:open-settings-tab', handleOpenSettingsTab);

@@ -65,6 +65,7 @@ export interface ToolResultMeta {
   verified?: boolean;
   runtimeEpoch?: string;
   stateVersion?: string;
+  approvalMode?: 'default' | 'bypass';
 }
 
 export type ToolOutputPreview = {

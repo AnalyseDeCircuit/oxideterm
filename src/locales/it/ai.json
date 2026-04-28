@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Strumenti attivi",
+      "rounds_short": "{{count}}",
       "disabled": "Strumenti disattivati",
+      "disabled_short": "Off",
       "disabled_count": "{{count}} disattivati",
       "open_settings": "Apri impostazioni strumenti IA"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Modalità sicura predefinita: i comandi pericolosi richiedono approvazione",
+      "bypass_title": "La modalità Bypass è attiva per questa chat",
+      "menu_title": "Modalità sicurezza",
+      "default_mode": "Default mode",
+      "default_desc": "I comandi pericolosi richiedono approvazione prima dell'esecuzione.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Salta le approvazioni dei comandi pericolosi in questa chat dopo conferma.",
+      "open_settings": "Apri impostazioni uso strumenti",
+      "confirm_title": "Attivare la modalità Bypass?",
+      "confirm_description": "Solo per questa chat, i comandi pericolosi verranno eseguiti senza approvazione singola. Le chiamate agli strumenti saranno comunque registrate. Password, prompt sudo, passphrase e credenziali devono essere gestiti da te.",
+      "confirm_enable": "Attiva Bypass",
+      "confirm_cancel": "Mantieni Default"
     },
     "slash": {
       "explain": "Spiega",

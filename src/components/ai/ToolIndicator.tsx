@@ -26,6 +26,10 @@ export const ToolIndicator = ({ onOpenSettings }: ToolIndicatorProps) => {
   const toolUseEnabled = toolUse?.enabled === true;
   const maxRounds = toolUse?.maxRounds ?? 10;
   const autoApprovedCount = Object.values(toolUse?.autoApproveTools ?? {}).filter(Boolean).length;
+  const roundsLabel = t('ai.tool_status.rounds_short', {
+    count: maxRounds,
+    defaultValue: `${maxRounds}`,
+  });
   const statusLabel = toolUseEnabled
     ? t('ai.tool_status.enabled_with_rounds', {
       count: maxRounds,
@@ -45,7 +49,7 @@ export const ToolIndicator = ({ onOpenSettings }: ToolIndicatorProps) => {
       type="button"
       onClick={onOpenSettings}
       className={cn(
-        'flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+        'flex shrink-0 items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-medium leading-none transition-colors whitespace-nowrap',
         'text-theme-text-muted hover:bg-theme-accent/10 hover:text-theme-text',
         !toolUseEnabled && 'opacity-70',
       )}
@@ -53,7 +57,8 @@ export const ToolIndicator = ({ onOpenSettings }: ToolIndicatorProps) => {
       aria-label={policyTitle}
     >
       <Wrench className={cn('h-2.5 w-2.5 shrink-0', toolUseEnabled ? 'text-theme-accent' : 'text-theme-text-muted')} />
-      <span>{statusLabel}</span>
+      <span className="sr-only">{statusLabel}</span>
+      <span aria-hidden="true">{toolUseEnabled ? roundsLabel : t('ai.tool_status.disabled_short', { defaultValue: t('ai.tool_status.disabled') })}</span>
       <Settings className="h-2.5 w-2.5 shrink-0 opacity-70" />
     </button>
   );

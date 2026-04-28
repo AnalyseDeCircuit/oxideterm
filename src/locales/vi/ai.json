@@ -246,9 +246,27 @@
     },
     "tool_status": {
       "enabled": "Công cụ bật",
+      "rounds_short": "{{count}}",
       "disabled": "Công cụ tắt",
+      "disabled_short": "Tắt",
       "disabled_count": "{{count}} đã tắt",
       "open_settings": "Mở cài đặt công cụ AI"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Chế độ an toàn mặc định: lệnh nguy hiểm cần phê duyệt",
+      "bypass_title": "Chế độ Bypass đang bật cho cuộc trò chuyện này",
+      "menu_title": "Chế độ an toàn",
+      "default_mode": "Default mode",
+      "default_desc": "Lệnh nguy hiểm cần được phê duyệt trước khi chạy.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Bỏ qua phê duyệt lệnh nguy hiểm trong cuộc trò chuyện này sau khi xác nhận.",
+      "open_settings": "Mở cài đặt sử dụng công cụ",
+      "confirm_title": "Bật chế độ Bypass?",
+      "confirm_description": "Chỉ trong cuộc trò chuyện này, lệnh nguy hiểm sẽ chạy mà không cần phê duyệt từng lệnh. Lệnh gọi công cụ vẫn được ghi lại. Mật khẩu, lời nhắc sudo, passphrase và thông tin đăng nhập vẫn phải do bạn xử lý.",
+      "confirm_enable": "Bật Bypass",
+      "confirm_cancel": "Giữ Default"
     },
     "slash": {
       "explain": "Giải thích",
