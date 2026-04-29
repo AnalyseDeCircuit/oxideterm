@@ -91,6 +91,7 @@
       "bindAddr": "바인드 주소",
       "process": "프로세스",
       "action": "작업",
+      "scanning": "수신 포트를 감지하는 중...",
       "noPorts": "아직 감지된 수신 포트가 없습니다",
       "alreadyForwarded": "포워딩됨"
     }

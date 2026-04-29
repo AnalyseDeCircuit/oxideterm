@@ -279,6 +279,36 @@ function gatherSessionsSummary(activeSessionId: string | null): string | null {
 }
 
 /**
+ * Runtime tabs and terminal sessions are intentionally not persisted.
+ * Surface this explicitly to the model so old conversation history cannot
+ * masquerade as current app state after a reload/restart.
+ */
+function gatherRuntimeStateHint(): string {
+  const appState = useAppStore.getState();
+  const sshTerminalCount = useSessionTreeStore.getState().nodes.reduce(
+    (count, node) => count + (node.runtime?.terminalIds?.length ?? 0),
+    0,
+  );
+  const localTerminalCount = useLocalTerminalStore.getState().terminals.size;
+  const terminalCount = sshTerminalCount + localTerminalCount;
+
+  const lines = [
+    '## Runtime State',
+    `- Open tabs: ${appState.tabs.length}`,
+    `- Runtime terminal sessions: ${terminalCount}`,
+    '- Tabs, pane ids, and terminal session ids are memory-only and do not survive an app restart/reload.',
+  ];
+
+  if (appState.tabs.length === 0 && terminalCount === 0) {
+    lines.push('- No tab or terminal session is currently open. Treat any tab_id/session_id from earlier conversation history as stale; use list_targets/connect_target/open_app_surface before acting.');
+  } else {
+    lines.push('- If earlier conversation history mentions a tab_id/session_id that is not visible in current targets, treat it as stale and refresh with list_targets.');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Gather complete sidebar context for AI
  * 
  * @param config - Optional configuration overrides
@@ -597,6 +627,9 @@ function formatSystemPromptSegment(
     parts.push('');
     parts.push(sessionsSummary);
   }
+
+  parts.push('');
+  parts.push(gatherRuntimeStateHint());
   
   // Conditional app state hints — only injected when non-trivial state exists
   const stateHints = gatherConditionalStateHints();
@@ -771,6 +804,19 @@ export function buildContextReminder(ctx: SidebarContext | null): string | null 
   }
 
   if (env.cwd) parts.push(`cwd: ${env.cwd}`);
+
+  const appState = useAppStore.getState();
+  const sshTerminalCount = useSessionTreeStore.getState().nodes.reduce(
+    (count, node) => count + (node.runtime?.terminalIds?.length ?? 0),
+    0,
+  );
+  const localTerminalCount = useLocalTerminalStore.getState().terminals.size;
+  const terminalCount = sshTerminalCount + localTerminalCount;
+  parts.push(`open tabs: ${appState.tabs.length}`);
+  parts.push(`runtime terminal sessions: ${terminalCount}`);
+  if (appState.tabs.length === 0 && terminalCount === 0) {
+    parts.push('old tab_id/session_id values from earlier history are stale after app restart/reload');
+  }
 
   return `[Current context: ${parts.join(' | ')}. When the user's question is about the current environment, use this context rather than earlier conversation history.]`;
 }

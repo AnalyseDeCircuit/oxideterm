@@ -762,7 +762,50 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
-    // Handle IDE tabs (require a connected SFTP session)
+    // Node-scoped workspace tabs do not require a terminal session.
+    // SFTP/IDE/Forwards operate on the SSH node/connection; creating a terminal
+    // here was a legacy compatibility crutch that caused invisible terminals.
+    if ((type === 'sftp' || type === 'ide' || type === 'forwards') && options?.nodeId) {
+      const nodeId = options.nodeId;
+      const existingTab = get().tabs.find(t => {
+        if (t.type !== type) return false;
+        if (t.nodeId === nodeId) return true;
+        return Boolean(sessionId && !t.nodeId && t.sessionId === sessionId);
+      });
+      if (existingTab) {
+        if (!options?.skipFocus) set({ activeTabId: existingTab.id });
+        return;
+      }
+
+      const session = sessionId ? get().sessions.get(sessionId) : undefined;
+      const node = useSessionTreeStore.getState().getNode(nodeId);
+      const nodeLabel = node?.displayName
+        || (node?.username && node?.host ? `${node.username}@${node.host}` : undefined)
+        || session?.name
+        || 'Remote';
+      const titlePrefix = type === 'sftp'
+        ? i18n.t('tabs.sftp_prefix')
+        : type === 'ide'
+          ? i18n.t('tabs.ide')
+          : i18n.t('tabs.forwards_prefix');
+
+      const newTab: Tab = {
+        id: crypto.randomUUID(),
+        type,
+        ...(sessionId ? { sessionId } : {}),
+        nodeId,
+        title: `${titlePrefix}: ${nodeLabel}`,
+        icon: type === 'sftp' ? '📁' : type === 'ide' ? '💻' : '🔀'
+      };
+
+      set((state) => ({
+        tabs: [...state.tabs, newTab],
+        ...(options?.skipFocus ? {} : { activeTabId: newTab.id })
+      }));
+      return;
+    }
+
+    // Legacy IDE tabs that only have a terminal session id.
     if (type === 'ide') {
       if (!sessionId) return;
 

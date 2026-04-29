@@ -20,6 +20,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/tooltip';
 import { useConfirm } from '../../hooks/useConfirm';
 import { usePluginStore } from '../../store/pluginStore';
+import { useSettingsStore } from '../../store/settingsStore';
 
 /** Count leaf panes in a pane tree */
 function countPanes(node: PaneNode): number {
@@ -477,6 +478,7 @@ export const TabBar = () => {
   const tabs = useAppStore(s => s.tabs);
   const activeTabId = useAppStore(s => s.activeTabId);
   const networkOnline = useAppStore(s => s.networkOnline);
+  const showLegacyTerminalActions = useSettingsStore(s => s.settings.terminal.commandBar.showLegacyToolbar || !s.settings.terminal.commandBar.enabled);
   // Stable function refs — never change, won't cause re-renders
   const setActiveTab = useAppStore(s => s.setActiveTab);
   const closeTab = useAppStore(s => s.closeTab);
@@ -905,7 +907,7 @@ export const TabBar = () => {
       {/* Right-fixed area: terminal-specific actions (recording, cast) */}
       {(() => {
         const activeTab = tabs.find(tab => tab.id === activeTabId);
-        if (activeTab && (activeTab.type === 'terminal' || activeTab.type === 'local_terminal')) {
+        if (showLegacyTerminalActions && activeTab && (activeTab.type === 'terminal' || activeTab.type === 'local_terminal')) {
           return <TabBarTerminalActions activeTab={activeTab} />;
         }
         return null;

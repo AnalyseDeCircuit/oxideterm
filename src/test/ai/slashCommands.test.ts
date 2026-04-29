@@ -9,13 +9,16 @@ import {
   groupSlashCommandsByCategory,
 } from '@/lib/ai/slashCommands';
 
+const ACTIVE_SLASH_COMMANDS = ['explain', 'fix', 'help', 'clear', 'compact'];
+const REMOVED_SLASH_COMMANDS = ['tools', 'deploy', 'search', 'connect', 'monitor', 'script', 'optimize'];
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Registry Integrity
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('SLASH_COMMANDS registry', () => {
-  it('has at least 10 commands', () => {
-    expect(SLASH_COMMANDS.length).toBeGreaterThanOrEqual(10);
+  it('only exposes the supported command set', () => {
+    expect(SLASH_COMMANDS.map(c => c.name)).toEqual(ACTIVE_SLASH_COMMANDS);
   });
 
   it('all commands have unique names', () => {
@@ -62,6 +65,12 @@ describe('resolveSlashCommand', () => {
 
   it('returns undefined for unknown command', () => {
     expect(resolveSlashCommand('nonexistent')).toBeUndefined();
+  });
+
+  it('does not resolve removed legacy commands', () => {
+    for (const command of REMOVED_SLASH_COMMANDS) {
+      expect(resolveSlashCommand(command)).toBeUndefined();
+    }
   });
 
   it('is exact match (not prefix)', () => {

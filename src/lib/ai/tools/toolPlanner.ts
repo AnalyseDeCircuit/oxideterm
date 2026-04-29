@@ -7,7 +7,6 @@ import type { ToolIntent } from './toolDefinitions';
 import {
   getAllToolSpecs,
   getToolDefinitionByName,
-  getToolsForContext,
 } from './toolDefinitions';
 
 export type ToolIntentInferenceInput = {
@@ -25,13 +24,12 @@ export type ToolPlanInput = {
 };
 
 const CORE_TOOL_NAMES = [
-  'list_targets',
+  'resolve_target',
   'list_capabilities',
-  'list_tabs',
 ] as const;
 
 const CONNECTION_INTENT_TOOL_NAMES = [
-  'list_targets',
+  'resolve_target',
   'list_capabilities',
   'connect_saved_connection_by_query',
   'list_saved_connections',
@@ -40,6 +38,14 @@ const CONNECTION_INTENT_TOOL_NAMES = [
   'get_session_tree',
   'get_ssh_environment',
   'get_topology',
+] as const;
+
+const CONNECTION_DISCOVERY_TOOL_NAMES = [
+  'list_saved_connections',
+  'search_saved_connections',
+  'get_session_tree',
+  'get_topology',
+  'list_connections',
 ] as const;
 
 const SETTINGS_INTENT_TOOL_NAMES = [
@@ -51,16 +57,16 @@ const SETTINGS_INTENT_TOOL_NAMES = [
 
 const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
   command: [
-    'list_targets',
-    'list_sessions',
+    'resolve_target',
+    'list_capabilities',
     'terminal_exec',
     'local_exec',
     'get_terminal_buffer',
     'read_screen',
   ],
   terminal_interaction: [
-    'list_targets',
-    'list_tabs',
+    'resolve_target',
+    'list_capabilities',
     'get_terminal_buffer',
     'read_screen',
     'await_terminal_output',
@@ -71,7 +77,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
   connection: CONNECTION_INTENT_TOOL_NAMES,
   settings: SETTINGS_INTENT_TOOL_NAMES,
   remote_file: [
-    'list_targets',
+    'resolve_target',
     'read_file',
     'list_directory',
     'grep_search',
@@ -82,6 +88,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'ide_open_file',
   ],
   local_shell: [
+    'resolve_target',
     'local_list_shells',
     'local_get_terminal_info',
     'local_get_drives',
@@ -90,6 +97,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'terminal_exec',
   ],
   sftp: [
+    'resolve_target',
     'open_session_tab',
     'sftp_get_cwd',
     'sftp_list_dir',
@@ -98,6 +106,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'sftp_write_file',
   ],
   ide: [
+    'resolve_target',
     'ide_get_project_info',
     'ide_get_open_files',
     'ide_get_file_content',
@@ -114,6 +123,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'get_pool_stats',
   ],
   navigation: [
+    'resolve_target',
     'list_tabs',
     'open_tab',
     'open_session_tab',
@@ -130,6 +140,7 @@ const INTENT_TOOL_NAMES: Record<ToolIntent, readonly string[]> = {
     'read_mcp_resource',
   ],
   status: [
+    'resolve_target',
     'list_targets',
     'list_tabs',
     'get_event_log',
@@ -152,6 +163,13 @@ const CONNECTION_PATTERNS = [
   /\b(?:open|start|attach|进入|打开|连接|连上|连到|登录|登陆).*(?:主机|服务器|连接|ssh|host|server|session)\b/i,
   /(?:主机|服务器|保存连接|已保存连接|连接配置|会话|跳板机|堡垒机|内网机器|家里|公司).*(?:连接|打开|进入|登录|登陆|ssh)/i,
   /(?:连接|打开|进入|登录|登陆|ssh).*(?:主机|服务器|保存连接|已保存连接|连接配置|会话|跳板机|堡垒机|内网机器|家里|公司)/i,
+];
+
+const CONNECTION_DISCOVERY_PATTERNS = [
+  /\b(?:list|show|what|which|available|saved)\b.*\b(?:hosts?|servers?|connections?|sessions?)\b/i,
+  /\b(?:hosts?|servers?|connections?|sessions?)\b.*\b(?:available|saved|configured)\b/i,
+  /(?:有哪些|有什么|列出|查看|显示|可用|保存的|已保存).*(?:远程主机|主机|服务器|连接|SSH|ssh|会话)/i,
+  /(?:远程主机|主机|服务器|保存连接|已保存连接|连接配置|SSH|ssh|会话).*(?:有哪些|有什么|列表|列出|查看|显示|可用)/i,
 ];
 
 const SETTINGS_PATTERNS = [
@@ -234,13 +252,17 @@ function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+export function isConnectionDiscoveryRequest(text: string): boolean {
+  return matchesAny(text.trim(), CONNECTION_DISCOVERY_PATTERNS);
+}
+
 export function inferToolIntents(input: ToolIntentInferenceInput | string): ToolIntent[] {
   const text = typeof input === 'string' ? input : input.text;
   const activeTabType = typeof input === 'string' ? null : input.activeTabType;
   const normalized = text.trim();
   const intents = new Set<ToolIntent>();
 
-  if (matchesAny(normalized, CONNECTION_PATTERNS)) {
+  if (matchesAny(normalized, CONNECTION_PATTERNS) || isConnectionDiscoveryRequest(normalized)) {
     intents.add('connection');
   }
 
@@ -292,30 +314,34 @@ export function inferToolIntents(input: ToolIntentInferenceInput | string): Tool
     intents.add('status');
   }
 
-  if (activeTabType === 'settings') {
-    intents.add('settings');
-  }
+  // UI focus is only a hint. Do not let the active tab expand capabilities when
+  // the user's text already identifies a different task domain.
+  if (intents.size === 0) {
+    if (activeTabType === 'settings') {
+      intents.add('settings');
+    }
 
-  if (activeTabType === 'local_terminal') {
-    intents.add('local_shell');
-    intents.add('terminal_interaction');
-  }
+    if (activeTabType === 'local_terminal') {
+      intents.add('local_shell');
+      intents.add('terminal_interaction');
+    }
 
-  if (activeTabType === 'terminal') {
-    intents.add('command');
-    intents.add('terminal_interaction');
-  }
+    if (activeTabType === 'terminal') {
+      intents.add('command');
+      intents.add('terminal_interaction');
+    }
 
-  if (activeTabType === 'sftp') {
-    intents.add('sftp');
-  }
+    if (activeTabType === 'sftp') {
+      intents.add('sftp');
+    }
 
-  if (activeTabType === 'ide') {
-    intents.add('ide');
-  }
+    if (activeTabType === 'ide') {
+      intents.add('ide');
+    }
 
-  if (activeTabType === 'session_manager' || activeTabType === 'connection_pool' || activeTabType === 'connection_monitor') {
-    intents.add('connection');
+    if (activeTabType === 'session_manager' || activeTabType === 'connection_pool' || activeTabType === 'connection_monitor') {
+      intents.add('connection');
+    }
   }
 
   return [...intents];
@@ -329,6 +355,8 @@ export type ToolScore = {
 
 export function scoreToolsForRequest(input: ToolPlanInput): ToolScore[] {
   const text = (input.userMessage ?? '').toLowerCase();
+  const rawText = input.userMessage ?? '';
+  const connectionDiscovery = isConnectionDiscoveryRequest(rawText);
   const intents = input.intents
     ? [...input.intents]
     : input.userMessage
@@ -352,6 +380,11 @@ export function scoreToolsForRequest(input: ToolPlanInput): ToolScore[] {
         score += 1;
       }
 
+      if (spec.name === 'resolve_target') {
+        score += connectionDiscovery ? 1 : 10;
+        reasons.push(connectionDiscovery ? 'target-first-not-for-listing' : 'target-first');
+      }
+
       if (spec.name === 'list_targets' || spec.name === 'list_capabilities') {
         score += 3;
         reasons.push('discovery');
@@ -362,9 +395,14 @@ export function scoreToolsForRequest(input: ToolPlanInput): ToolScore[] {
         reasons.push('name-match');
       }
 
-      if (intentSet.has('connection') && ['search_saved_connections', 'connect_saved_connection_by_query', 'connect_saved_session'].includes(spec.name)) {
+      if (intentSet.has('connection') && ['list_saved_connections', 'search_saved_connections', 'connect_saved_connection_by_query', 'connect_saved_session'].includes(spec.name)) {
         score += 8;
         reasons.push('connection-workflow');
+      }
+
+      if (connectionDiscovery && CONNECTION_DISCOVERY_TOOL_NAMES.includes(spec.name as typeof CONNECTION_DISCOVERY_TOOL_NAMES[number])) {
+        score += 18;
+        reasons.push('connection-discovery');
       }
 
       if (intentSet.has('settings') && ['get_settings', 'open_settings_section', 'update_setting'].includes(spec.name)) {
@@ -413,16 +451,17 @@ export function getToolsForPlan(input: ToolPlanInput): AiToolDefinition[] {
       ? inferToolIntents({ text: input.userMessage, activeTabType: input.activeTabType })
       : [];
   const intentSet = new Set(inferredIntents);
-  const definitions = getToolsForContext(
-    input.activeTabType,
-    input.hasAnySSHSession,
-    input.disabledTools,
-    input.participantOverride,
-  );
-  const seen = new Set(definitions.map((tool) => tool.name));
+  const definitions: AiToolDefinition[] = [];
+  const seen = new Set<string>();
 
   for (const toolName of CORE_TOOL_NAMES) {
     addToolByName(definitions, seen, toolName, input.disabledTools);
+  }
+
+  if (input.participantOverride) {
+    for (const toolName of input.participantOverride) {
+      addToolByName(definitions, seen, toolName, input.disabledTools);
+    }
   }
 
   if (intentSet.has('connection')) {

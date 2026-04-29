@@ -38,6 +38,103 @@ function generateId(): string {
   return `mcp-${crypto.randomUUID()}`;
 }
 
+function normalizeTransportLabel(transport: McpTransport): string {
+  switch (transport) {
+    case 'streamable-http':
+    case 'sse':
+      return 'Streamable HTTP';
+    case 'legacy-sse':
+      return 'Legacy SSE';
+    case 'stdio':
+      return 'stdio';
+  }
+}
+
+function cleanRecord(value?: Record<string, string>): Record<string, string> | undefined {
+  if (!value) return undefined;
+  const entries = Object.entries(value)
+    .map(([key, val]) => [key.trim(), val] as const)
+    .filter(([key]) => key.length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function KeyValueEditor({
+  value,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+  addLabel,
+}: {
+  value?: Record<string, string>;
+  onChange: (value: Record<string, string> | undefined) => void;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+  addLabel: string;
+}) {
+  const entries = Object.entries(value ?? {});
+  const commit = (next: Record<string, string>) => onChange(cleanRecord(next));
+
+  return (
+    <div className="space-y-2">
+      {entries.map(([key, val], index) => (
+        <div key={`${key}-${index}`} className="flex gap-2">
+          <Input
+            value={key}
+            onChange={(e) => {
+              const nextKey = e.target.value;
+              const next = { ...(value ?? {}) };
+              delete next[key];
+              if (nextKey.trim()) next[nextKey] = val;
+              commit(next);
+            }}
+            placeholder={keyPlaceholder}
+            className="flex-1"
+          />
+          <Input
+            value={val}
+            onChange={(e) => commit({ ...(value ?? {}), [key]: e.target.value })}
+            placeholder={valuePlaceholder}
+            className="flex-1"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => {
+              const next = { ...(value ?? {}) };
+              delete next[key];
+              commit(next);
+            }}
+            className="h-9 w-9 p-0 shrink-0 text-red-400 hover:text-red-300"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      ))}
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        onClick={() => {
+          const next = { ...(value ?? {}) };
+          let index = entries.length + 1;
+          let key = `KEY_${index}`;
+          while (key in next) {
+            index += 1;
+            key = `KEY_${index}`;
+          }
+          next[key] = '';
+          commit(next);
+        }}
+        className="gap-1.5"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        {addLabel}
+      </Button>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: McpServerStatus }) {
   const { t } = useTranslation();
   const styles: Record<McpServerStatus, string> = {
@@ -86,20 +183,28 @@ export function McpServersPanel() {
   const addServer = useCallback(async () => {
     if (!newServer.name || !isValidName(newServer.name) || isNameTaken(newServer.name)) return;
     const id = generateId();
+    const transport: McpTransport = newServer.transport === 'sse'
+      ? 'streamable-http'
+      : (newServer.transport ?? 'stdio');
+    const env = cleanRecord(newServer.env);
+    const headers = cleanRecord(newServer.headers);
     const config: McpServerConfig = {
       id,
       name: newServer.name,
-      transport: newServer.transport ?? 'stdio',
+      transport,
       url: newServer.url,
       command: newServer.command,
       args: newServer.args?.length ? newServer.args : undefined,
-      env: newServer.env && Object.keys(newServer.env).length > 0 ? newServer.env : undefined,
+      env,
+      authHeaderName: newServer.authHeaderName?.trim() || undefined,
+      authHeaderMode: newServer.authHeaderMode,
+      headers,
       enabled: true,
       // authToken intentionally omitted — stored in OS keychain
       retryOnDisconnect: newServer.retryOnDisconnect,
     };
     // Save auth token to OS keychain FIRST (before config, to avoid config-keychain mismatch)
-    if (newServer.authToken) {
+    if (newServer.authToken && newServer.authHeaderMode !== 'none') {
       try {
         await setMcpAuthToken(id, newServer.authToken);
       } catch (e) {
@@ -174,8 +279,13 @@ export function McpServersPanel() {
                       <span className="font-medium text-sm text-theme-text">{config.name}</span>
                       <StatusBadge status={status} />
                       <span className="text-[10px] uppercase tracking-wider text-theme-text-muted px-1.5 py-0.5 bg-theme-bg-panel rounded">
-                        {config.transport}
+                        {normalizeTransportLabel(config.transport)}
                       </span>
+                      {state?.resolvedTransport === 'legacy-sse' && config.transport !== 'legacy-sse' && (
+                        <span className="text-[10px] uppercase tracking-wider text-amber-300 px-1.5 py-0.5 bg-amber-500/10 rounded">
+                          {t('settings_view.mcp.fallback_legacy_sse')}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {status === 'connected' && (
@@ -219,8 +329,10 @@ export function McpServersPanel() {
                     {config.transport === 'stdio' && config.command && (
                       <code className="bg-theme-bg-panel/60 px-1.5 py-0.5 rounded">{config.command} {config.args?.join(' ')}</code>
                     )}
-                    {config.transport === 'sse' && config.url && (
-                      <code className="bg-theme-bg-panel/60 px-1.5 py-0.5 rounded">{config.url}</code>
+                    {config.transport !== 'stdio' && config.url && (
+                      <code className="bg-theme-bg-panel/60 px-1.5 py-0.5 rounded">
+                        {state?.endpointUrl ?? config.url}
+                      </code>
                     )}
                   </div>
 
@@ -258,7 +370,7 @@ export function McpServersPanel() {
 
       {/* Add Server Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t('settings_view.mcp.add_server_title')}</DialogTitle>
             <DialogDescription>{t('settings_view.mcp.add_server_description')}</DialogDescription>
@@ -283,7 +395,8 @@ export function McpServersPanel() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="stdio">stdio</SelectItem>
-                  <SelectItem value="sse">SSE (HTTP)</SelectItem>
+                  <SelectItem value="streamable-http">Streamable HTTP (auto fallback)</SelectItem>
+                  <SelectItem value="legacy-sse">Legacy SSE</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -306,10 +419,20 @@ export function McpServersPanel() {
                     placeholder="--flag value"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>{t('settings_view.mcp.env_vars')}</Label>
+                  <KeyValueEditor
+                    value={newServer.env}
+                    onChange={(env) => setNewServer(prev => ({ ...prev, env }))}
+                    keyPlaceholder={t('settings_view.mcp.env_key_placeholder')}
+                    valuePlaceholder={t('settings_view.mcp.env_value_placeholder')}
+                    addLabel={t('settings_view.mcp.add_env_var')}
+                  />
+                </div>
               </>
             )}
 
-            {newServer.transport === 'sse' && (
+            {newServer.transport !== 'stdio' && (
               <>
                 <div className="space-y-2">
                   <Label>{t('settings_view.mcp.url')}</Label>
@@ -318,6 +441,30 @@ export function McpServersPanel() {
                     onChange={(e) => setNewServer(prev => ({ ...prev, url: e.target.value }))}
                     placeholder="http://localhost:3000"
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>{t('settings_view.mcp.auth_header_name')}</Label>
+                    <Input
+                      value={newServer.authHeaderName ?? 'Authorization'}
+                      onChange={(e) => setNewServer(prev => ({ ...prev, authHeaderName: e.target.value }))}
+                      placeholder="Authorization"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t('settings_view.mcp.auth_header_mode')}</Label>
+                    <Select
+                      value={newServer.authHeaderMode ?? 'bearer'}
+                      onValueChange={(v) => setNewServer(prev => ({ ...prev, authHeaderMode: v as McpServerConfig['authHeaderMode'] }))}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bearer">{t('settings_view.mcp.auth_header_mode_bearer')}</SelectItem>
+                        <SelectItem value="raw">{t('settings_view.mcp.auth_header_mode_raw')}</SelectItem>
+                        <SelectItem value="none">{t('settings_view.mcp.auth_header_mode_none')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>{t('settings_view.mcp.auth_token')}</Label>
@@ -339,6 +486,19 @@ export function McpServersPanel() {
                       {showAuthToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('settings_view.mcp.extra_headers')}</Label>
+                  <KeyValueEditor
+                    value={newServer.headers}
+                    onChange={(headers) => setNewServer(prev => ({ ...prev, headers }))}
+                    keyPlaceholder={t('settings_view.mcp.header_key_placeholder')}
+                    valuePlaceholder={t('settings_view.mcp.header_value_placeholder')}
+                    addLabel={t('settings_view.mcp.add_header')}
+                  />
+                  <p className="text-[11px] text-theme-text-muted">
+                    {t('settings_view.mcp.extra_headers_hint')}
+                  </p>
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="retry-toggle">{t('settings_view.mcp.retry_on_disconnect')}</Label>

@@ -383,6 +383,68 @@ describe('TrzszController', () => {
     expect(transport.sendRawInput).toHaveBeenCalled();
   });
 
+  it('detects Go trzsz 1.2.0 handshakes with tunnel port metadata', async () => {
+    vi.useFakeTimers();
+
+    const writeServerOutput = vi.fn();
+    const transport = createTransportMock();
+    const cleanupOwner = vi.fn(async () => undefined);
+    const controller = new TrzszController({
+      sessionId: 'session-go-1',
+      connectionId: 'conn-go-1',
+      wsUrl: 'ws://localhost:7777',
+      ownerId: 'trzsz:session-go-1:conn-go-1:owner',
+      isRuntimeCurrent: () => true,
+      transport,
+      writeServerOutput,
+      loadCapabilities: async () => createUnavailableTrzszCapabilities('command-missing'),
+      cleanupOwner,
+      transferSettings,
+    });
+
+    controller.processServerOutput(
+      new TextEncoder().encode('\x1b[s::TRZSZ:TRANSFER:R:1.2.0:1234567890000:0\r\n'),
+    );
+
+    await vi.runAllTimersAsync();
+    await flushMicrotasks();
+
+    const actionFrames = vi.mocked(transport.sendRawInput).mock.calls.filter(
+      ([payload]) => typeof payload === 'string' && payload.startsWith('#ACT:'),
+    );
+    expect(actionFrames).toHaveLength(1);
+  });
+
+  it('detects a trzsz 1.2.0 handshake that ends with a dangling colon', async () => {
+    vi.useFakeTimers();
+
+    const writeServerOutput = vi.fn();
+    const transport = createTransportMock();
+    const cleanupOwner = vi.fn(async () => undefined);
+    const controller = new TrzszController({
+      sessionId: 'session-go-2',
+      connectionId: 'conn-go-2',
+      wsUrl: 'ws://localhost:6666',
+      ownerId: 'trzsz:session-go-2:conn-go-2:owner',
+      isRuntimeCurrent: () => true,
+      transport,
+      writeServerOutput,
+      loadCapabilities: async () => createUnavailableTrzszCapabilities('command-missing'),
+      cleanupOwner,
+      transferSettings,
+    });
+
+    controller.processServerOutput(new TextEncoder().encode('::TRZSZ:TRANSFER:R:1.2.0:\r\n'));
+
+    await vi.runAllTimersAsync();
+    await flushMicrotasks();
+
+    const actionFrames = vi.mocked(transport.sendRawInput).mock.calls.filter(
+      ([payload]) => typeof payload === 'string' && payload.startsWith('#ACT:'),
+    );
+    expect(actionFrames).toHaveLength(1);
+  });
+
   it('deduplicates Windows-style short unique ids across follow-up chunks', async () => {
     vi.useFakeTimers();
 

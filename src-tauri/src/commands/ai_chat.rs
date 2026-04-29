@@ -49,6 +49,8 @@ pub struct SaveMessageRequest {
     pub content: String,
     pub timestamp: i64,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub projection_updated_at: Option<i64>,
     #[serde(default)]
     pub tool_calls: Vec<PersistedToolCall>,
@@ -211,6 +213,7 @@ pub struct MessageResponse {
     pub role: String,
     pub content: String,
     pub timestamp: i64,
+    pub model: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<PersistedToolCall>,
     pub context: Option<String>, // Simplified: just the buffer_tail for display
@@ -349,6 +352,7 @@ pub async fn ai_chat_get_conversation(
                 role: m.role,
                 content: m.content,
                 timestamp: m.timestamp,
+                model: m.model,
                 tool_calls: m.tool_calls,
                 // Return buffer_tail as context for compatibility
                 context: m.context_snapshot.and_then(|c| c.buffer_tail),
@@ -495,6 +499,7 @@ pub async fn ai_chat_save_message(
         role: request.role,
         content: request.content,
         timestamp: request.timestamp,
+        model: request.model,
         projection_updated_at: request.projection_updated_at.unwrap_or(request.timestamp),
         tool_calls: request.tool_calls,
         context_snapshot: request.context_snapshot.map(|c| ContextSnapshot {
@@ -584,6 +589,7 @@ pub async fn ai_chat_save_message_with_transcript(
         role: request.message.role,
         content: request.message.content,
         timestamp: request.message.timestamp,
+        model: request.message.model,
         projection_updated_at: request
             .message
             .projection_updated_at
@@ -675,6 +681,7 @@ pub async fn ai_chat_replace_conversation_messages(
         role: request.message.role,
         content: request.message.content,
         timestamp: request.message.timestamp,
+        model: request.message.model,
         projection_updated_at: request
             .message
             .projection_updated_at
@@ -713,6 +720,7 @@ pub async fn ai_chat_replace_conversation_messages_with_transcript(
         role: request.message.role,
         content: request.message.content,
         timestamp: request.message.timestamp,
+        model: request.message.model,
         projection_updated_at: request
             .message
             .projection_updated_at
@@ -774,6 +782,7 @@ pub async fn ai_chat_replace_conversation_message_list(
             role: message.role,
             content: message.content,
             timestamp: message.timestamp,
+            model: message.model,
             projection_updated_at: message.projection_updated_at.unwrap_or(message.timestamp),
             tool_calls: message.tool_calls,
             context_snapshot: message.context_snapshot.map(|c| ContextSnapshot {
@@ -818,6 +827,7 @@ pub async fn ai_chat_replace_conversation_message_list_with_transcript(
             role: message.role,
             content: message.content,
             timestamp: message.timestamp,
+            model: message.model,
             projection_updated_at: message.projection_updated_at.unwrap_or(message.timestamp),
             tool_calls: message.tool_calls,
             context_snapshot: message.context_snapshot.map(|c| ContextSnapshot {

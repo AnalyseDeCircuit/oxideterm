@@ -21,7 +21,12 @@ vi.mock('react-i18next', () => ({
       if (key === 'ai.tool_use.structured_data') return 'Structured Data';
       if (key === 'ai.tool_use.raw_output') return 'Output';
       if (key === 'ai.tool_use.show_raw_output') return 'Show full output';
+      if (key === 'ai.tool_use.show_more_preview') return 'Show more preview';
+      if (key === 'ai.tool_use.output_truncated_with_full') return 'Output compacted; full stored';
+      if (key === 'ai.tool_use.output_truncated_no_full') return 'Output compacted; full too large';
+      if (key === 'ai.tool_use.output_stats') return `${String(options?.chars ?? 0)} chars, ${String(options?.lines ?? 0)} lines${String(options?.omitted ?? '')}`;
       if (key === 'ai.tool_use.approval_required') return 'Requires approval';
+      if (key === 'ai.tool_use.bypass_badge') return 'Bypass';
       if (key === 'ai.tool_use.condensed') return `condensed ${String(options?.count ?? 0)}`;
       if (key === 'ai.tool_use.condensed_label') return 'Earlier calls';
       if (key.startsWith('ai.tool_use.tool_names.')) {
@@ -129,6 +134,7 @@ describe('ToolCallBlock', () => {
                 ok: true,
                 summary: 'Written 3 bytes to /tmp/demo.txt',
                 output: 'raw output'.repeat(200),
+                rawOutput: 'raw output'.repeat(200),
                 warnings: ['unconditional overwrite'],
                 data: { path: '/tmp/demo.txt', size: 3, contentHash: 'hash-1' },
                 meta: {
@@ -154,6 +160,86 @@ describe('ToolCallBlock', () => {
     expect(screen.getByText('Structured Data')).toBeInTheDocument();
     expect(screen.getByText(/"contentHash":\s*"hash-1"/)).toBeInTheDocument();
     expect(screen.getByText('Show full output')).toBeInTheDocument();
+  });
+
+  it('uses envelope rawOutput when expanding full output', () => {
+    render(
+      <ToolCallBlock
+        toolCalls={[
+          {
+            id: 'tool-long',
+            name: 'terminal_exec',
+            arguments: '{"command":"ls -la"}',
+            status: 'completed',
+            result: {
+              toolCallId: 'tool-long',
+              toolName: 'terminal_exec',
+              success: true,
+              output: 'HEAD\n[output truncated]\nTAIL',
+              truncated: true,
+              envelope: {
+                ok: true,
+                summary: 'Command completed',
+                output: 'HEAD\n[output truncated]\nTAIL',
+                rawOutput: 'HEAD\nfull middle output\nTAIL',
+                outputPreview: {
+                  strategy: 'head_tail',
+                  charCount: 28,
+                  lineCount: 3,
+                  omittedChars: 9,
+                  rawOutputStored: true,
+                },
+                meta: {
+                  toolName: 'terminal_exec',
+                  durationMs: 1,
+                  truncated: true,
+                },
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Execute Command/i }));
+    expect(screen.queryByText(/full middle output/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show full output'));
+    expect(screen.getByText(/full middle output/)).toBeInTheDocument();
+    expect(screen.getByText(/Output compacted; full stored/)).toBeInTheDocument();
+  });
+
+  it('shows a prominent bypass badge for bypass-approved tool results', () => {
+    render(
+      <ToolCallBlock
+        toolCalls={[
+          {
+            id: 'tool-bypass',
+            name: 'terminal_exec',
+            arguments: '{"command":"sudo reboot"}',
+            status: 'completed',
+            result: {
+              toolCallId: 'tool-bypass',
+              toolName: 'terminal_exec',
+              success: true,
+              output: 'ok',
+              durationMs: 1,
+              envelope: {
+                ok: true,
+                summary: 'Command completed',
+                output: 'ok',
+                meta: {
+                  toolName: 'terminal_exec',
+                  approvalMode: 'bypass',
+                  durationMs: 1,
+                },
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Bypass')).toBeInTheDocument();
   });
 
   it('renders part-level tool calls when rounds are not available yet', () => {

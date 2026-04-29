@@ -92,7 +92,6 @@ vi.mock('@/lib/ai/slashCommands', () => ({
 vi.mock('@/lib/ai/participants', () => ({
   PARTICIPANTS: [],
   resolveParticipant: vi.fn(),
-  mergeParticipantTools: vi.fn(() => []),
 }));
 
 vi.mock('@/lib/ai/references', () => ({
@@ -140,7 +139,6 @@ describe('aiChatStore helpers', () => {
     resetAiChatStoreRuntimeState();
     vi.clearAllMocks();
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = ['global.read_file'];
-    useAiChatStore.setState({ sessionDisabledTools: null });
   });
 
   it('generates compact titles from the first user message', () => {
@@ -290,14 +288,6 @@ describe('aiChatStore helpers', () => {
     expect(messages[0].content.startsWith('[condensed] tool-0')).toBe(true);
     expect(messages[1].content).toBe(JSON.stringify({ error: 'boom' }));
     expect(messages[6].content).toContain('line 1');
-  });
-
-  it('prefers session-level disabled tools over global settings', () => {
-    expect(Array.from(useAiChatStore.getState().getEffectiveDisabledTools())).toEqual(['global.read_file']);
-
-    useAiChatStore.getState().setSessionDisabledTools(['session.run_terminal']);
-
-    expect(Array.from(useAiChatStore.getState().getEffectiveDisabledTools())).toEqual(['session.run_terminal']);
   });
 
   it('initializes by loading conversation metadata and the first conversation body', async () => {

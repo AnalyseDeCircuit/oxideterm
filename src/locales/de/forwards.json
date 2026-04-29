@@ -91,6 +91,7 @@
       "bindAddr": "Bind-Adresse",
       "process": "Prozess",
       "action": "Aktion",
+      "scanning": "Listening-Ports werden erkannt...",
       "noPorts": "Noch keine Listening-Ports erkannt",
       "alreadyForwarded": "Weitergeleitet"
     }

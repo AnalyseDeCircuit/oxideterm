@@ -4,9 +4,10 @@
 /**
  * MCP Client — Handles communication with MCP servers
  * 
- * Supports two transports:
- * - SSE (HTTP): Direct HTTP requests from frontend
+ * Supports three transports:
  * - Stdio: JSON-RPC over stdin/stdout, managed by Rust backend
+ * - Streamable HTTP: JSON-RPC over POST, with optional SSE responses
+ * - Legacy SSE: HTTP+SSE endpoint discovery, then JSON-RPC POST
  */
 
 import { api } from '../../api';
@@ -19,11 +20,13 @@ import type {
   JsonRpcRequest,
   JsonRpcResponse,
   McpServerCapabilities,
+  McpServerConfig,
+  McpEffectiveTransport,
 } from './mcpTypes';
 
 class McpHttpStatusError extends Error {
   constructor(public readonly status: number, public readonly statusText: string) {
-    super(`MCP SSE request failed: ${status} ${statusText}`);
+    super(`MCP HTTP request failed: ${status} ${statusText}`);
   }
 }
 
@@ -37,6 +40,9 @@ type HttpRequestResult = {
   sessionId?: string;
   response?: JsonRpcResponse;
 };
+
+const STREAMABLE_HTTP_PROTOCOL_VERSION = '2025-11-25';
+const LEGACY_SSE_PROTOCOL_VERSION = '2024-11-05';
 
 let nextRequestId = 1;
 
@@ -81,32 +87,80 @@ export async function deleteMcpAuthToken(serverId: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SSE Transport
+// HTTP Transports
 // ═══════════════════════════════════════════════════════════════════════════
 
 function validateMcpUrl(urlStr: string): URL {
   const parsed = new URL(urlStr);
   if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('MCP SSE only supports http/https URLs');
+    throw new Error('MCP HTTP only supports http/https URLs');
   }
   return parsed;
 }
 
-function resolveSseMessageUrl(baseUrl: string): string {
-  const base = validateMcpUrl(baseUrl);
-  const pathname = base.pathname.replace(/\/+$/, '');
-  if (!pathname) {
-    return new URL('/message', base).href;
+function normalizeMcpTransport(transport: McpServerConfig['transport']): McpEffectiveTransport {
+  return transport === 'sse' ? 'streamable-http' : transport;
+}
+
+function isHttpTransport(transport: McpServerConfig['transport']): boolean {
+  return normalizeMcpTransport(transport) !== 'stdio';
+}
+
+function isValidHeaderName(name: string): boolean {
+  return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name);
+}
+
+const RESERVED_HTTP_HEADERS = new Set([
+  'accept',
+  'content-type',
+  'mcp-session-id',
+  'mcp-protocol-version',
+]);
+
+function buildMcpHttpHeaders(
+  config: McpServerConfig,
+  authToken: string | undefined,
+  options: {
+    sessionId?: string;
+    protocolVersion: string;
+    contentType?: boolean;
+    accept?: string;
+  },
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const authHeaderName = (config.authHeaderName?.trim() || 'Authorization');
+  const authHeaderMode = config.authHeaderMode ?? 'bearer';
+  const normalizedAuthHeader = authHeaderName.toLowerCase();
+
+  for (const [rawName, rawValue] of Object.entries(config.headers ?? {})) {
+    const name = rawName.trim();
+    if (!name || !isValidHeaderName(name)) {
+      throw new Error(`Invalid MCP HTTP header name: ${rawName}`);
+    }
+    const normalized = name.toLowerCase();
+    if (RESERVED_HTTP_HEADERS.has(normalized) || normalized === normalizedAuthHeader) {
+      continue;
+    }
+    headers[name] = rawValue;
   }
-  if (pathname.endsWith('/message')) {
-    return base.href;
+
+  if (authToken && authHeaderMode !== 'none') {
+    if (!isValidHeaderName(authHeaderName)) {
+      throw new Error(`Invalid MCP auth header name: ${authHeaderName}`);
+    }
+    headers[authHeaderName] = authHeaderMode === 'raw' ? authToken : `Bearer ${authToken}`;
   }
-  if (pathname.endsWith('/sse')) {
-    const next = new URL(base.href);
-    next.pathname = `${pathname.slice(0, -4)}/message`;
-    return next.href;
+
+  headers.Accept = options.accept ?? 'application/json, text/event-stream';
+  if (options.contentType ?? true) {
+    headers['Content-Type'] = 'application/json';
   }
-  return base.href;
+  headers['MCP-Protocol-Version'] = options.protocolVersion;
+  if (options.sessionId) {
+    headers['MCP-Session-Id'] = options.sessionId;
+  }
+
+  return headers;
 }
 
 async function readSseEvents(resp: Response): Promise<McpSseEvent[]> {
@@ -203,12 +257,17 @@ async function parseHttpResponse(
   return JSON.parse(body) as JsonRpcResponse;
 }
 
-async function discoverLegacySseEndpoint(baseUrl: string, authToken?: string): Promise<string> {
+async function discoverLegacySseEndpoint(
+  baseUrl: string,
+  config: McpServerConfig,
+  authToken?: string,
+): Promise<string> {
   const url = validateMcpUrl(baseUrl).href;
-  const headers: Record<string, string> = { Accept: 'text/event-stream' };
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`;
-  }
+  const headers = buildMcpHttpHeaders(config, authToken, {
+    protocolVersion: LEGACY_SSE_PROTOCOL_VERSION,
+    contentType: false,
+    accept: 'text/event-stream',
+  });
 
   const resp = await fetch(url, { method: 'GET', headers });
   if (!resp.ok) {
@@ -224,26 +283,21 @@ async function discoverLegacySseEndpoint(baseUrl: string, authToken?: string): P
   return new URL(endpointEvent.data.trim(), url).href;
 }
 
-async function sseRequest(
-  baseUrl: string,
+async function httpJsonRpcRequest(
+  endpointUrl: string,
   request: JsonRpcRequest | Record<string, unknown>,
+  config: McpServerConfig,
   authToken?: string,
-  options?: { expectJson?: boolean; sessionId?: string },
+  options?: { expectJson?: boolean; sessionId?: string; protocolVersion: string },
 ): Promise<HttpRequestResult> {
-  const url = resolveSseMessageUrl(baseUrl);
+  const url = validateMcpUrl(endpointUrl).href;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-    };
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-    }
-    if (options?.sessionId) {
-      headers['Mcp-Session-Id'] = options.sessionId;
-    }
+    const headers = buildMcpHttpHeaders(config, authToken, {
+      sessionId: options?.sessionId,
+      protocolVersion: options?.protocolVersion ?? STREAMABLE_HTTP_PROTOCOL_VERSION,
+    });
     const resp = await fetch(url, {
       method: 'POST',
       headers,
@@ -255,7 +309,7 @@ async function sseRequest(
     }
     return {
       endpointUrl: url,
-      sessionId: resp.headers.get('Mcp-Session-Id') ?? options?.sessionId,
+      sessionId: resp.headers.get('MCP-Session-Id') ?? resp.headers.get('Mcp-Session-Id') ?? options?.sessionId,
       response: await parseHttpResponse(
         resp,
         'id' in request && typeof request.id === 'number' ? request.id : undefined,
@@ -294,7 +348,9 @@ export async function connectMcpServer(state: McpServerState): Promise<McpServer
   let runtimeId: string | undefined;
 
   try {
-    if (config.transport === 'stdio') {
+    const transport = normalizeMcpTransport(config.transport);
+
+    if (transport === 'stdio') {
       // Spawn process via Rust backend
       runtimeId = await api.mcpSpawnServer(
         config.command ?? '',
@@ -327,29 +383,51 @@ export async function connectMcpServer(state: McpServerState): Promise<McpServer
         resources = resResult?.resources ?? [];
       }
 
-      return { ...state, status: 'connected', runtimeId, capabilities, tools, resources, error: undefined };
+      return { ...state, status: 'connected', runtimeId, resolvedTransport: 'stdio', capabilities, tools, resources, error: undefined };
 
     } else {
-      // SSE transport
+      // HTTP transports
       let endpointUrl = config.url ?? '';
       let sessionId: string | undefined;
+      let resolvedTransport = transport;
       const token = await getMcpAuthToken(config);
+      const protocolVersionFor = () => resolvedTransport === 'legacy-sse'
+        ? LEGACY_SSE_PROTOCOL_VERSION
+        : STREAMABLE_HTTP_PROTOCOL_VERSION;
 
       // Initialize
-      const initReq = makeRequest('initialize', {
-        protocolVersion: '2024-11-05',
+      let initReq = makeRequest('initialize', {
+        protocolVersion: protocolVersionFor(),
         capabilities: {},
         clientInfo: { name: 'OxideTerm', version: '1.0.0' },
       });
       let initTransport: HttpRequestResult;
-      try {
-        initTransport = await sseRequest(endpointUrl, initReq, token);
-      } catch (error) {
-        if (!(error instanceof McpHttpStatusError) || error.status < 400 || error.status >= 500) {
-          throw error;
+
+      if (transport === 'legacy-sse') {
+        endpointUrl = await discoverLegacySseEndpoint(endpointUrl, config, token);
+        initTransport = await httpJsonRpcRequest(endpointUrl, initReq, config, token, {
+          protocolVersion: protocolVersionFor(),
+        });
+      } else {
+        try {
+          initTransport = await httpJsonRpcRequest(endpointUrl, initReq, config, token, {
+            protocolVersion: protocolVersionFor(),
+          });
+        } catch (error) {
+          if (!(error instanceof McpHttpStatusError) || ![400, 404, 405].includes(error.status)) {
+            throw error;
+          }
+          resolvedTransport = 'legacy-sse';
+          endpointUrl = await discoverLegacySseEndpoint(endpointUrl, config, token);
+          initReq = makeRequest('initialize', {
+            protocolVersion: protocolVersionFor(),
+            capabilities: {},
+            clientInfo: { name: 'OxideTerm', version: '1.0.0' },
+          });
+          initTransport = await httpJsonRpcRequest(endpointUrl, initReq, config, token, {
+            protocolVersion: protocolVersionFor(),
+          });
         }
-        endpointUrl = await discoverLegacySseEndpoint(endpointUrl, token);
-        initTransport = await sseRequest(endpointUrl, initReq, token);
       }
       endpointUrl = initTransport.endpointUrl;
       sessionId = initTransport.sessionId;
@@ -358,14 +436,21 @@ export async function connectMcpServer(state: McpServerState): Promise<McpServer
 
       // Notify initialized (notification — no id)
       const notifyMsg = makeNotification('notifications/initialized');
-      const notifyTransport = await sseRequest(endpointUrl, notifyMsg, token, { expectJson: false, sessionId });
+      const notifyTransport = await httpJsonRpcRequest(endpointUrl, notifyMsg, config, token, {
+        expectJson: false,
+        sessionId,
+        protocolVersion: protocolVersionFor(),
+      });
       sessionId = notifyTransport.sessionId ?? sessionId;
 
       // List tools (only if server advertises tools capability)
       let tools: McpToolSchema[] = [];
       if (capabilities?.tools) {
         const listReq = makeRequest('tools/list');
-        const listTransport = await sseRequest(endpointUrl, listReq, token, { sessionId });
+        const listTransport = await httpJsonRpcRequest(endpointUrl, listReq, config, token, {
+          sessionId,
+          protocolVersion: protocolVersionFor(),
+        });
         sessionId = listTransport.sessionId ?? sessionId;
         const listResult = extractResult(listTransport.response as JsonRpcResponse) as { tools?: McpToolSchema[] } | undefined;
         tools = listResult?.tools ?? [];
@@ -375,16 +460,19 @@ export async function connectMcpServer(state: McpServerState): Promise<McpServer
       let resources: McpResource[] = [];
       if (capabilities?.resources) {
         const resReq = makeRequest('resources/list');
-        const resTransport = await sseRequest(endpointUrl, resReq, token, { sessionId });
+        const resTransport = await httpJsonRpcRequest(endpointUrl, resReq, config, token, {
+          sessionId,
+          protocolVersion: protocolVersionFor(),
+        });
         sessionId = resTransport.sessionId ?? sessionId;
         const resResult = extractResult(resTransport.response as JsonRpcResponse) as { resources?: McpResource[] } | undefined;
         resources = resResult?.resources ?? [];
       }
 
-      return { ...state, status: 'connected', endpointUrl, sessionId, capabilities, tools, resources, error: undefined };
+      return { ...state, status: 'connected', endpointUrl, sessionId, resolvedTransport, capabilities, tools, resources, error: undefined };
     }
   } catch (e) {
-    if (config.transport === 'stdio' && runtimeId) {
+    if (normalizeMcpTransport(config.transport) === 'stdio' && runtimeId) {
       await api.mcpCloseServer(runtimeId).catch(() => {});
     }
     const message = e instanceof Error ? e.message : String(e);
@@ -401,7 +489,17 @@ export async function disconnectMcpServer(state: McpServerState): Promise<McpSer
   } catch (e) {
     console.warn(`[MCP] Error disconnecting ${state.config.name}:`, e);
   }
-  return { ...state, status: 'disconnected', runtimeId: undefined, tools: [], resources: [], error: undefined };
+  return {
+    ...state,
+    status: 'disconnected',
+    runtimeId: undefined,
+    endpointUrl: undefined,
+    sessionId: undefined,
+    resolvedTransport: undefined,
+    tools: [],
+    resources: [],
+    error: undefined,
+  };
 }
 
 export async function callMcpTool(
@@ -411,13 +509,19 @@ export async function callMcpTool(
 ): Promise<McpCallToolResult> {
   const params = { name: toolName, arguments: args };
 
-  if (state.config.transport === 'stdio' && state.runtimeId) {
+  const transport = normalizeMcpTransport(state.config.transport);
+  const resolvedTransport = state.resolvedTransport ?? transport;
+
+  if (transport === 'stdio' && state.runtimeId) {
     const result = await stdioRequest(state.runtimeId, 'tools/call', params);
     return result as McpCallToolResult;
-  } else if (state.config.transport === 'sse' && (state.endpointUrl || state.config.url)) {
+  } else if (isHttpTransport(state.config.transport) && (state.endpointUrl || state.config.url)) {
     const token = await getMcpAuthToken(state.config);
     const req = makeRequest('tools/call', params);
-    const resp = await sseRequest(state.endpointUrl ?? state.config.url ?? '', req, token, { sessionId: state.sessionId });
+    const resp = await httpJsonRpcRequest(state.endpointUrl ?? state.config.url ?? '', req, state.config, token, {
+      sessionId: state.sessionId,
+      protocolVersion: resolvedTransport === 'legacy-sse' ? LEGACY_SSE_PROTOCOL_VERSION : STREAMABLE_HTTP_PROTOCOL_VERSION,
+    });
     return extractResult(resp.response as JsonRpcResponse) as McpCallToolResult;
   }
 
@@ -430,15 +534,21 @@ export async function readMcpResource(
 ): Promise<McpResourceContent> {
   const params = { uri };
 
-  if (state.config.transport === 'stdio' && state.runtimeId) {
+  const transport = normalizeMcpTransport(state.config.transport);
+  const resolvedTransport = state.resolvedTransport ?? transport;
+
+  if (transport === 'stdio' && state.runtimeId) {
     const result = await stdioRequest(state.runtimeId, 'resources/read', params);
     const contents = (result as { contents?: McpResourceContent[] })?.contents;
     if (!contents?.length) throw new Error(`Empty resource response for ${uri}`);
     return contents[0];
-  } else if (state.config.transport === 'sse' && (state.endpointUrl || state.config.url)) {
+  } else if (isHttpTransport(state.config.transport) && (state.endpointUrl || state.config.url)) {
     const token = await getMcpAuthToken(state.config);
     const req = makeRequest('resources/read', params);
-    const resp = await sseRequest(state.endpointUrl ?? state.config.url ?? '', req, token, { sessionId: state.sessionId });
+    const resp = await httpJsonRpcRequest(state.endpointUrl ?? state.config.url ?? '', req, state.config, token, {
+      sessionId: state.sessionId,
+      protocolVersion: resolvedTransport === 'legacy-sse' ? LEGACY_SSE_PROTOCOL_VERSION : STREAMABLE_HTTP_PROTOCOL_VERSION,
+    });
     const result = extractResult(resp.response as JsonRpcResponse) as { contents?: McpResourceContent[] } | undefined;
     const contents = result?.contents;
     if (!contents?.length) throw new Error(`Empty resource response for ${uri}`);
@@ -452,13 +562,19 @@ export async function refreshMcpTools(state: McpServerState): Promise<McpToolSch
   if (state.status !== 'connected') return [];
   if (!state.capabilities?.tools) return [];
 
-  if (state.config.transport === 'stdio' && state.runtimeId) {
+  const transport = normalizeMcpTransport(state.config.transport);
+  const resolvedTransport = state.resolvedTransport ?? transport;
+
+  if (transport === 'stdio' && state.runtimeId) {
     const result = await stdioRequest(state.runtimeId, 'tools/list') as { tools?: McpToolSchema[] } | undefined;
     return result?.tools ?? [];
-  } else if (state.config.transport === 'sse' && (state.endpointUrl || state.config.url)) {
+  } else if (isHttpTransport(state.config.transport) && (state.endpointUrl || state.config.url)) {
     const token = await getMcpAuthToken(state.config);
     const req = makeRequest('tools/list');
-    const resp = await sseRequest(state.endpointUrl ?? state.config.url ?? '', req, token, { sessionId: state.sessionId });
+    const resp = await httpJsonRpcRequest(state.endpointUrl ?? state.config.url ?? '', req, state.config, token, {
+      sessionId: state.sessionId,
+      protocolVersion: resolvedTransport === 'legacy-sse' ? LEGACY_SSE_PROTOCOL_VERSION : STREAMABLE_HTTP_PROTOCOL_VERSION,
+    });
     const result = extractResult(resp.response as JsonRpcResponse) as { tools?: McpToolSchema[] } | undefined;
     return result?.tools ?? [];
   }

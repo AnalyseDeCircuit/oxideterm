@@ -14,15 +14,15 @@
 
 
 <p align="center">
-  <strong>터미널, 파일, 포트, 원격 컨텍스트를 위한 AI 네이티브 SSH 워크스페이스.</strong>
+  <strong>OxideTerm은 local-first SSH 워크스페이스이며, 단순한 터미널이 아닙니다.</strong>
   <br>
-  <strong>Electron 제로. OpenSSL 제로. 텔레메트리 제로. 구독 제로. 순수 Rust SSH.</strong>
+  <em>원격 노드(서버 연결)를 한 번 열고 그 주변에서 shell, SFTP, 포트 포워딩, trzsz, 경량 편집, BYOK AI를 사용하세요.</em>
   <br>
-  <em>로컬 셸, SSH, SFTP, 포트 포워딩, 원격 편집, 플러그인, OxideSens AI를 하나의 네이티브 바이너리에 담았습니다.</em>
+  <strong>Electron 제로. OpenSSL 제로. 텔레메트리 제로. 구독 제로. BYOK-first. 순수 Rust SSH.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.5-blue" alt="버전">
+  <img src="https://img.shields.io/badge/version-1.4.0--beta.1-blue" alt="버전">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="플랫폼">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="라이선스">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -47,11 +47,6 @@
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-> [!NOTE]
-> **라이선스 변경:** v1.0.0부터 OxideTerm의 라이선스가 **PolyForm Noncommercial 1.0.0**에서 **GPL-3.0(GNU General Public License v3.0)**으로 변경되었습니다. 이제 OxideTerm은 완전한 오픈소스이며, GPL-3.0 라이선스 조건에 따라 자유롭게 사용, 수정 및 배포할 수 있습니다. 이 전환은 의도적인 선택입니다. 비상업 함정이나 경쟁 금지 조항을 단 "오픈소스 코스프레"가 아니라, 사용자, 포크, 재배포자, 상업 운영자에게 명확한 copyleft 자유를 주기 위해서입니다. 자세한 내용은 [LICENSE](../../LICENSE) 파일을 참조하세요.
-
----
-
 <div align="center">
 
 https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
@@ -66,15 +61,22 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 | 문제점 | OxideTerm의 대답 |
 |---|---|
-| 로컬 셸을 지원하지 않는 SSH 클라이언트 | **하이브리드 엔진**: 로컬 PTY(zsh/bash/fish/pwsh/WSL2)와 원격 SSH를 하나의 창에 통합 |
+| SSH 워크스페이스, 단순한 shell 이상 | **원격 노드 워크스페이스**: 터미널, SFTP, 포트 포워딩, trzsz, 경량 IDE, 모니터링, AI 컨텍스트를 같은 노드 아래에 묶습니다 |
+| 로컬 shell도 필요함 | **통합 로컬 shell**: zsh/bash/fish/pwsh/WSL2를 SSH 세션과 나란히 사용하여 로컬 작업과 원격 작업을 같은 UI에서 처리합니다 |
 | 재연결하면 모든 것을 잃음 | **Grace Period 재연결**: 연결 종료 전 30초간 기존 연결 프로브 — vim/htop/yazi가 그대로 살아남음 |
-| 원격 파일 편집에 VS Code Remote 필요 | **내장 IDE**: CodeMirror 6 over SFTP, 30개 이상 언어, 선택적으로 Linux용 약 1 MB 원격 에이전트 |
+| 무거운 원격 IDE를 설치하고 싶지 않음 | **내장 경량 편집**: CodeMirror 6 over SFTP, 더 빠른 파일 작업이 필요할 때만 선택적 Linux 에이전트(~1 MB)를 사용합니다 |
 | SSH 연결 재사용 불가 | **다중화**: 터미널, SFTP, 포워드, IDE가 참조 카운팅 풀로 하나의 SSH 연결 공유 |
 | SSH 라이브러리가 OpenSSL에 의존 | **russh 0.59**: `ring`으로 컴파일된 순수 Rust SSH — C 의존성 제로 |
-| 100 MB 이상의 Electron 앱 | **Tauri 2.0**: 네이티브 Rust 백엔드, 25~40 MB 바이너리 |
-| AI가 특정 프로바이더에 종속 | **OxideSens**: 40개 이상 도구, MCP 프로토콜, RAG 지식 베이스 — OpenAI/Ollama/DeepSeek/호환 API 지원 |
+| Electron을 원하지 않음 | **Tauri 2.0**: 네이티브 Rust 백엔드, 25~40 MB 바이너리 |
+| 텔레메트리나 앱 구독을 원하지 않음 | **추적 없음, 핵심 SSH 워크플로 앱 구독 없음**: SSH/SFTP/포트 포워딩/로컬 shell은 계정이나 구독이 필요 없습니다. 데이터는 기본적으로 기기에 남고, 클라우드 동기화는 [공식 플러그인](#공식-플러그인)으로 필요할 때만 켭니다 |
+| 플랫폼 계정 없이 AI를 쓰고 싶음 | **BYOK-first OxideSens**: OpenAI/Ollama/DeepSeek/호환 API 키를 직접 사용합니다. OxideTerm은 AI 크레딧이나 클라우드 플랜을 판매하지 않습니다 |
 | 자격 증명이 일반 텍스트 설정에 저장 | **저장 시 암호화**: 비밀번호와 API 키는 OS 키체인에 보관되고, 저장된 연결 메타데이터는 로컬에서 암호화되어 보관됨; `.oxide` 파일은 ChaCha20-Poly1305 + Argon2id 암호화 |
-| 클라우드 종속, 계정 필수 도구 | **로컬 우선**: 계정 없음, 텔레메트리 없음 — 데이터는 기본적으로 내 기기에만. AI 키는 직접 제공. 클라우드 동기화는 [공식 플러그인](#공식-플러그인)으로 선택 가능 |
+
+## 무엇이고 / 무엇이 아닌가
+
+OxideTerm은 **local-first SSH 워크스페이스**입니다. 원격 노드를 한 번 열면 shell, 파일, 포트, 인밴드 전송, 경량 편집, AI 컨텍스트를 한곳에서 다룹니다.
+
+OxideTerm은 클라우드 AI 플랫폼, 호스팅 Agent 서비스, 모든 원격 프로토콜을 위한 도구상자, 또는 터미널 렌더링 벤치마크를 핵심 목표로 삼는 프로젝트가 아닙니다. 많은 최신 터미널은 로컬 shell, AI 패널, 클라우드 Agent 플랫폼을 중심으로 진화하고 있지만, OxideTerm은 local-first SSH 워크스페이스에 집중합니다.
 
 ---
 
@@ -108,7 +110,7 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 | **SFTP** | 이중 패널 브라우저, 드래그 앤 드롭, 스마트 미리보기(이미지/동영상/오디오/코드/PDF/Hex/폰트), 진행률 및 ETA가 포함된 전송 큐, 북마크, 아카이브 추출 |
 | **IDE 모드** | CodeMirror 6, 30개 이상 언어, 파일 트리 + Git 상태, 멀티 탭, 충돌 해결, 통합 터미널. Linux용 선택적 원격 에이전트(9종 추가 아키텍처) |
 | **포트 포워딩** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), 무잠금 메시지 패싱 I/O, 재연결 시 자동 복원, 종료 보고, 유휴 타임아웃 |
-| **AI (OxideSens)** | 인라인 패널(`⌘I`) + 사이드바 채팅, 터미널 버퍼 캡처(단일/전체 창), 멀티 소스 컨텍스트(IDE/SFTP/Git), 40개 이상 자율 도구, MCP 서버 통합, RAG 지식 베이스(BM25 + 벡터 하이브리드 검색), 스트리밍 SSE |
+| **AI (OxideSens)** | 저장된 연결, 라이브 SSH 세션, 터미널 버퍼, SFTP 경로, 설정, 지식 베이스 항목을 워크스페이스 대상으로 보는 target-first 어시스턴트; OxideTerm 계정 없이 원격 출력 진단, 승인된 명령 실행, 파일 검사, 오류 설명을 수행할 수 있습니다 |
 | **플러그인** | 런타임 ESM 로딩, 18개 API 네임스페이스, 24개 UI Kit 컴포넌트, 동결 API + Proxy ACL, 서킷 브레이커, 오류 시 자동 비활성화 |
 | **CLI** | `oxt` 컴패니언: JSON-RPC 2.0 over Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI, 사람 읽기 & JSON 출력 |
 | **보안** | .oxide 암호화 내보내기(ChaCha20-Poly1305 + Argon2id 256 MB), 로컬 설정 저장 시 암호화, OS 키체인, Touch ID(macOS), 휴대용 암호화 키스토어, 호스트 키 TOFU, `zeroize` 메모리 클리어 |
@@ -190,8 +192,8 @@ impl Signer for AgentSigner { /* challenge-response via Agent IPC */ }
 
 - **인라인 패널**(`⌘I`): 빠른 터미널 명령, 출력은 괄호 붙여넣기로 삽입
 - **사이드바 채팅**: 전체 히스토리를 포함한 지속적 대화
-- **컨텍스트 캡처**: Terminal Registry가 활성 창 또는 모든 분할 창에서 버퍼를 동시 수집, IDE 파일, SFTP 경로, Git 상태 자동 삽입
-- **40개 이상 자율 도구**: 파일 작업, 프로세스 관리, 네트워크 진단, TUI 앱 상호작용, 텍스트 처리 — AI가 수동 트리거 없이 호출
+- **Target-first 워크스페이스 컨텍스트**: 저장된 연결, 라이브 SSH 세션, 터미널 버퍼, SFTP 경로, 설정, 지식 베이스 항목을 워크스페이스 대상으로 봅니다
+- **승인된 작업**: OxideTerm 계정 없이 원격 출력 진단, 승인된 명령 실행, 파일 검사, 오류 설명을 수행할 수 있습니다
 - **MCP 지원**: 외부 [Model Context Protocol](https://modelcontextprotocol.io) 서버(stdio & SSE) 연결로 서드파티 도구 통합
 - **RAG 지식 베이스**(v0.20): Markdown/TXT 문서를 범위별 컬렉션(글로벌 또는 연결별)으로 가져오기. Reciprocal Rank Fusion으로 BM25 키워드 인덱스 + 벡터 코사인 유사도의 하이브리드 검색 융합. Markdown 인식 청킹으로 제목 계층 보존. CJK 바이그램 토크나이저로 중국어/일본어/한국어 지원.
 - **프로바이더**: OpenAI, Ollama, DeepSeek, OneAPI, 또는 임의의 `/v1/chat/completions` 엔드포인트
@@ -481,6 +483,8 @@ OxideTerm이 워크플로에 도움이 되었다면 GitHub 스타, 문제 재현
 **GPL-3.0** — 이 소프트웨어는 [GNU 일반 공중 사용 허가서 v3.0](https://www.gnu.org/licenses/gpl-3.0.html) 하에 배포되는 자유 소프트웨어입니다.
 
 GPL-3.0 조건에 따라 이 소프트웨어를 자유롭게 사용, 수정 및 배포할 수 있습니다. 파생 작품도 동일한 라이선스 하에 배포해야 합니다.
+
+OxideTerm은 v1.0.0부터 **PolyForm Noncommercial 1.0.0**에서 **GPL-3.0**으로 전환했습니다. 이는 의도적인 선택입니다. 비상업 함정이나 경쟁 금지 조항을 단 "오픈소스 코스프레"가 아니라, 사용자, 포크, 재배포자, 상업 운영자에게 명확한 copyleft 자유를 주기 위해서입니다.
 
 코드가 공개되어 있다고 해서 자동으로 오픈소스인 것은 아닙니다. 익숙한 오픈소스 라이선스를 내세우면서도 "재배포 금지", "재패키징 금지", "경쟁 제품 금지", "승인되지 않은 배포 플랫폼 금지" 같은 추가 조항을 붙인다면, 이는 사용자가 기대하는 오픈소스의 자유가 아니라 source-available 마케팅에 가깝습니다. OxideTerm은 비경쟁 또는 반재배포 조항을 추가하지 않습니다. GPL-3.0 조건이 전부입니다.
 

@@ -28,6 +28,8 @@ export interface UsePortDetectionResult {
   dismissPort: (port: number) => void;
   /** Whether port detection is active (receiving data) */
   isActive: boolean;
+  /** Whether the first backend scan/poll has completed */
+  hasScanned: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export function usePortDetection(connectionId: string | undefined): UsePortDetec
   const [newPorts, setNewPorts] = useState<DetectedPort[]>([]);
   const [allPorts, setAllPorts] = useState<DetectedPort[]>([]);
   const [isActive, setIsActive] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
   const dismissedRef = useRef<Set<number>>(new Set());
   const prevConnectionIdRef = useRef<string | undefined>(undefined);
 
@@ -93,6 +96,7 @@ export function usePortDetection(connectionId: string | undefined): UsePortDetec
         if (!mounted) return;
         // Always update — including empty array to clear stale data
         setAllPorts(ports);
+        setHasScanned(true);
         if (ports.length > 0) {
           setIsActive(true);
         }
@@ -112,6 +116,7 @@ export function usePortDetection(connectionId: string | undefined): UsePortDetec
           const payload = event.payload;
 
           setIsActive(true);
+          setHasScanned(true);
           setAllPorts(payload.all_ports);
 
           // Filter out dismissed ports and accumulate new ones
@@ -155,8 +160,9 @@ export function usePortDetection(connectionId: string | undefined): UsePortDetec
       setNewPorts([]);
       setAllPorts([]);
       setIsActive(false);
+      setHasScanned(false);
     };
   }, [connectionId]);
 
-  return { newPorts, allPorts, dismissPort, isActive };
+  return { newPorts, allPorts, dismissPort, isActive, hasScanned };
 }

@@ -11,7 +11,14 @@ import { Slider } from '@/components/ui/slider';
 import { getFontFamily } from '@/lib/fontFamily';
 import { platform } from '@/lib/platform';
 import { TerminalHighlightRulesSection } from '@/components/settings/TerminalHighlightRulesSection';
-import type { AdaptiveRendererMode, CursorStyle, FontFamily, RendererType, TerminalEncoding, TerminalSettings } from '@/store/settingsStore';
+import type {
+    AdaptiveRendererMode,
+    CursorStyle,
+    FontFamily,
+    RendererType,
+    TerminalEncoding,
+    TerminalSettings,
+} from '@/store/settingsStore';
 
 type TerminalTabProps = {
     terminal: TerminalSettings;
@@ -31,6 +38,36 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
     ) => {
         updateTerminal('inBandTransfer', {
             ...terminal.inBandTransfer,
+            [key]: value,
+        });
+    };
+
+    const updateAutosuggest = <K extends keyof TerminalSettings['autosuggest']>(
+        key: K,
+        value: TerminalSettings['autosuggest'][K],
+    ) => {
+        updateTerminal('autosuggest', {
+            ...terminal.autosuggest,
+            [key]: value,
+        });
+    };
+
+    const updateCommandBar = <K extends keyof TerminalSettings['commandBar']>(
+        key: K,
+        value: TerminalSettings['commandBar'][K],
+    ) => {
+        updateTerminal('commandBar', {
+            ...terminal.commandBar,
+            [key]: value,
+        });
+    };
+
+    const updateCommandMarks = <K extends keyof TerminalSettings['commandMarks']>(
+        key: K,
+        value: TerminalSettings['commandMarks'][K],
+    ) => {
+        updateTerminal('commandMarks', {
+            ...terminal.commandMarks,
             [key]: value,
         });
     };
@@ -293,6 +330,86 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
                         <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.selection_requires_shift_hint')}</p>
                     </div>
                     <Checkbox id="selection-requires-shift" checked={terminal.selectionRequiresShift} onCheckedChange={(checked) => updateTerminal('selectionRequiresShift', checked as boolean)} />
+                </div>
+                <Separator className="my-5 opacity-50" />
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.autosuggest_local_history')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.autosuggest_local_history_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-autosuggest-local-history"
+                        checked={terminal.autosuggest.localShellHistory}
+                        onCheckedChange={(checked) => updateAutosuggest('localShellHistory', checked as boolean)}
+                    />
+                </div>
+                <Separator className="my-5 opacity-50" />
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-bar"
+                        checked={terminal.commandBar.enabled}
+                        onCheckedChange={(checked) => updateCommandBar('enabled', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar_legacy_toolbar')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_legacy_toolbar_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-bar-legacy-toolbar"
+                        checked={terminal.commandBar.showLegacyToolbar}
+                        onCheckedChange={(checked) => updateCommandBar('showLegacyToolbar', checked as boolean)}
+                    />
+                </div>
+                <Separator className="my-5 opacity-50" />
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_marks')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_marks_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-marks"
+                        checked={terminal.commandMarks.enabled}
+                        onCheckedChange={(checked) => updateCommandMarks('enabled', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_marks_hover_actions')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_marks_hover_actions_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-marks-hover-actions"
+                        checked={terminal.commandMarks.showHoverActions}
+                        onCheckedChange={(checked) => updateCommandMarks('showHoverActions', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_marks_user_input_observed')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_marks_user_input_observed_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-marks-user-input-observed"
+                        checked={terminal.commandMarks.userInputObserved}
+                        onCheckedChange={(checked) => updateCommandMarks('userInputObserved', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_marks_heuristic')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_marks_heuristic_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-marks-heuristic"
+                        checked={terminal.commandMarks.heuristicDetection}
+                        onCheckedChange={(checked) => updateCommandMarks('heuristicDetection', checked as boolean)}
+                    />
                 </div>
             </div>
 

@@ -36,8 +36,32 @@ function convertTools(tools: AiToolDefinition[]): Array<{ type: 'function'; func
  * Transforms tool role messages and assistant tool_calls to the structure
  * expected by Ollama's OpenAI-compatible endpoint.
  */
+function mergeSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const systemContents: string[] = [];
+  const nonSystemMessages: ChatMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      if (msg.content) {
+        systemContents.push(msg.content);
+      }
+      continue;
+    }
+    nonSystemMessages.push(msg);
+  }
+
+  if (systemContents.length === 0) {
+    return messages;
+  }
+
+  return [
+    { role: 'system', content: systemContents.join('\n\n') },
+    ...nonSystemMessages,
+  ];
+}
+
 function convertMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
-  return messages.map((msg) => {
+  return mergeSystemMessages(messages).map((msg) => {
     if (msg.role === 'tool') {
       return {
         role: 'tool',

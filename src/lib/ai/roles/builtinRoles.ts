@@ -10,7 +10,13 @@
  */
 
 import type { AgentRoleDefinition, AgentPipelinePreset } from '../../../types';
-import { buildToolOperationStrategyPrompt } from '../toolUsePrompt';
+
+const AGENT_TOOL_STRATEGY_PROMPT = `## Tool Use Strategy
+- Prefer explicit targets over active-tab assumptions.
+- Use saved-connection/session tools for saved hosts; do not open a local shell and hand-type ssh unless the user asked for raw ssh.
+- For command execution, prefer direct execution on the resolved SSH node when visible terminal state is not required.
+- If a terminal reports password/passphrase/sudo input is required, stop and ask the user to provide it. Do not guess credentials.
+- Read or observe state before writing, and verify after changes.`;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Template variables (resolved at runtime by RoleRunner):
@@ -123,7 +129,7 @@ When the task is complete (or cannot be completed), respond with a summary:
 ## Available Sessions
 {{sessions}}
 
-${buildToolOperationStrategyPrompt()}`,
+${AGENT_TOOL_STRATEGY_PROMPT}`,
   toolAllowlist: '*',
   maxRounds: null, // uses task.maxRounds
   outputSchema: 'text',

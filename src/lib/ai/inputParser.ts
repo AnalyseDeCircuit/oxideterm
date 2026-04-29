@@ -5,9 +5,15 @@
  * Unified Input Parser
  *
  * Extracts /commands, @participants, and #references from user input.
- * All three are optional, composable, and stripped from the clean text
- * that gets sent to the LLM as the user message content.
+ * Known tokens are optional, composable, and stripped from the clean text
+ * that gets sent to the LLM as the user message content. Unknown @/# tokens
+ * are preserved as normal text so user input is not silently swallowed.
  */
+
+import {
+  ACTIVE_PARTICIPANT_NAME_SET,
+  ACTIVE_REFERENCE_TYPE_SET,
+} from './inputTokens';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -52,7 +58,7 @@ const SLASH_RE = /^\/([a-z_]+)\s*/;
 /** @participant anywhere in text, e.g. `@terminal` `@sftp` */
 const PARTICIPANT_RE = /@([a-z_]+)/g;
 
-/** #reference anywhere in text, e.g. `#buffer` `#file:/etc/nginx.conf` `#pane:2` */
+/** #reference anywhere in text, e.g. `#buffer` `#pane:2` */
 const REFERENCE_RE = /#([a-z_]+)(?::(\S+))?/g;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,7 +84,7 @@ export function parseUserInput(raw: string): ParsedInput {
   PARTICIPANT_RE.lastIndex = 0;
   while ((participantMatch = PARTICIPANT_RE.exec(text)) !== null) {
     const name = participantMatch[1];
-    if (!seenParticipants.has(name)) {
+    if (ACTIVE_PARTICIPANT_NAME_SET.has(name) && !seenParticipants.has(name)) {
       seenParticipants.add(name);
       participants.push({ name, raw: participantMatch[0] });
     }
@@ -89,14 +95,17 @@ export function parseUserInput(raw: string): ParsedInput {
   let refMatch: RegExpExecArray | null;
   REFERENCE_RE.lastIndex = 0;
   while ((refMatch = REFERENCE_RE.exec(text)) !== null) {
-    references.push({
-      type: refMatch[1],
-      value: refMatch[2] || undefined,
-      raw: refMatch[0],
-    });
+    const type = refMatch[1];
+    if (ACTIVE_REFERENCE_TYPE_SET.has(type)) {
+      references.push({
+        type,
+        value: refMatch[2] || undefined,
+        raw: refMatch[0],
+      });
+    }
   }
 
-  // 4. Build clean text: strip all @mentions and #references
+  // 4. Build clean text: strip known @mentions and #references only.
   let cleanText = text;
   // Remove @participant tokens
   for (const p of participants) {

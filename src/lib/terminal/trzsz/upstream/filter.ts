@@ -19,7 +19,7 @@ import {
 } from '@/lib/terminal/trzsz/upstream/comm';
 
 const TRZSZ_MAGIC_KEY_PREFIX = '::TRZSZ:TRANSFER:';
-const TRZSZ_MAGIC_KEY_REGEXP = new RegExp(/::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?(?=[^0-9:])/);
+const TRZSZ_MAGIC_KEY_REGEXP = new RegExp(/::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?(?::\d+)?(?=[^0-9]|$)/);
 const TRZSZ_MAGIC_ARRAY = new Float64Array(strToUint8(TRZSZ_MAGIC_KEY_PREFIX).buffer, 0, 2);
 const MAGIC_DETECT_BUFFER_BYTES = 128;
 

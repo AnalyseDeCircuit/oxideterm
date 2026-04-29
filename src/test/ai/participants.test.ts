@@ -6,17 +6,18 @@ import {
   PARTICIPANTS,
   resolveParticipant,
   filterParticipants,
-  mergeParticipantTools,
 } from '@/lib/ai/participants';
-import { ALL_BUILTIN_TOOL_DEFS } from '@/lib/ai/tools';
+
+const ACTIVE_PARTICIPANTS = ['terminal', 'sftp', 'ide', 'local', 'settings', 'knowledge'];
+const REMOVED_PARTICIPANTS = ['connection', 'system'];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Registry Integrity
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('PARTICIPANTS registry', () => {
-  it('has at least 5 participants', () => {
-    expect(PARTICIPANTS.length).toBeGreaterThanOrEqual(5);
+  it('only exposes the supported participant set', () => {
+    expect(PARTICIPANTS.map(p => p.name)).toEqual(ACTIVE_PARTICIPANTS);
   });
 
   it('all participants have unique names', () => {
@@ -30,26 +31,9 @@ describe('PARTICIPANTS registry', () => {
       expect(p.labelKey).toBeTruthy();
       expect(p.descriptionKey).toBeTruthy();
       expect(p.icon).toBeTruthy();
-      expect(Array.isArray(p.includeTools)).toBe(true);
       expect(p.systemPromptModifier).toBeTruthy();
-    }
-  });
-
-  it('all includeTools are non-empty strings', () => {
-    for (const p of PARTICIPANTS) {
-      for (const tool of p.includeTools) {
-        expect(typeof tool).toBe('string');
-        expect(tool.length).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  it('all includeTools point to registered built-in tools', () => {
-    const knownTools = new Set(ALL_BUILTIN_TOOL_DEFS.map((tool) => tool.name));
-    for (const p of PARTICIPANTS) {
-      for (const tool of p.includeTools) {
-        expect(knownTools.has(tool), `${p.name} includes unknown tool ${tool}`).toBe(true);
-      }
+      expect(p.intentHint).toBeTruthy();
+      expect(p.preferredTargetView).toBeTruthy();
     }
   });
 });
@@ -67,6 +51,12 @@ describe('resolveParticipant', () => {
 
   it('returns undefined for unknown participant', () => {
     expect(resolveParticipant('nonexistent')).toBeUndefined();
+  });
+
+  it('does not resolve removed broad participants', () => {
+    for (const name of REMOVED_PARTICIPANTS) {
+      expect(resolveParticipant(name)).toBeUndefined();
+    }
   });
 
   it('resolves every participant in registry', () => {
@@ -103,48 +93,5 @@ describe('filterParticipants', () => {
     const lower = filterParticipants('ter');
     const upper = filterParticipants('TER');
     expect(upper.length).toBe(lower.length);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// mergeParticipantTools
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('mergeParticipantTools', () => {
-  it('returns empty set for empty names', () => {
-    expect(mergeParticipantTools([])).toEqual(new Set());
-  });
-
-  it('returns tools for single participant', () => {
-    const tools = mergeParticipantTools(['terminal']);
-    expect(tools.size).toBeGreaterThan(0);
-    expect(tools.has('terminal_exec')).toBe(true);
-  });
-
-  it('merges tools from multiple participants', () => {
-    const tools = mergeParticipantTools(['terminal', 'sftp']);
-    // Should have tools from both
-    expect(tools.has('terminal_exec')).toBe(true);
-    expect(tools.has('sftp_list_dir')).toBe(true);
-  });
-
-  it('deduplicates tools', () => {
-    const single = mergeParticipantTools(['terminal']);
-    const double = mergeParticipantTools(['terminal', 'terminal']);
-    expect(double.size).toBe(single.size);
-  });
-
-  it('ignores unknown participant names', () => {
-    const tools = mergeParticipantTools(['terminal', 'nonexistent']);
-    const expected = mergeParticipantTools(['terminal']);
-    expect(tools.size).toBe(expected.size);
-  });
-
-  it('handles all participants combined', () => {
-    const allNames = PARTICIPANTS.map(p => p.name);
-    const tools = mergeParticipantTools(allNames);
-    // Should be the union of all tools
-    const expectedCount = new Set(PARTICIPANTS.flatMap(p => p.includeTools)).size;
-    expect(tools.size).toBe(expectedCount);
   });
 });

@@ -8,6 +8,8 @@ export type PendingApprovalEntry = {
   resolve: (approved: boolean) => void;
 };
 
+export type AiSafetyMode = 'default' | 'bypass';
+
 // Module-scoped runtime state that should not survive test resets.
 export const compactingConversations = new Set<string>();
 export const pendingApprovalResolvers = new Map<string, PendingApprovalEntry>();

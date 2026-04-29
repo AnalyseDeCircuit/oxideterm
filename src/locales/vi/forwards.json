@@ -91,6 +91,7 @@
       "bindAddr": "Địa chỉ liên kết",
       "process": "Tiến trình",
       "action": "Thao tác",
+      "scanning": "Đang phát hiện cổng lắng nghe...",
       "noPorts": "Chưa phát hiện cổng lắng nghe nào",
       "alreadyForwarded": "Đã chuyển tiếp"
     }

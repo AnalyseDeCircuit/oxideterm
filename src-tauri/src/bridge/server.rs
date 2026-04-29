@@ -217,6 +217,8 @@ fn utf8_safe_split_point(data: &[u8]) -> usize {
 mod tests {
     use super::*;
     use crate::bridge::protocol::Frame;
+    use crate::session::parse_terminal_output;
+    use crate::ssh::{ExtendedSessionHandle as SshExtendedSessionHandle, SessionCommand};
 
     fn decode_frame(bytes: Bytes) -> Frame {
         let mut buf = BytesMut::from(bytes.as_ref());
@@ -279,6 +281,62 @@ mod tests {
             other => panic!("expected data frame, got {:?}", other),
         }
         assert!(pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn v2_bridge_does_not_append_broadcast_output_to_scroll_buffer() {
+        let scroll_buffer = Arc::new(ScrollBuffer::with_capacity(16));
+        let payload = b"Last login: test\r\n";
+        scroll_buffer
+            .append_batch(parse_terminal_output(payload))
+            .await;
+
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<SessionCommand>(8);
+        let (output_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(8);
+        let handle = SshExtendedSessionHandle {
+            id: "bridge-no-dup".to_string(),
+            cmd_tx,
+            stdout_rx: output_tx.subscribe(),
+        };
+
+        let (_session_id, port, token, _disconnect_rx) =
+            WsBridge::start_extended_with_disconnect(handle, scroll_buffer.clone(), false)
+                .await
+                .expect("bridge should start");
+
+        let url = format!("ws://localhost:{port}");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("websocket client should connect");
+        ws.send(Message::Text(token))
+            .await
+            .expect("auth token should send");
+
+        output_tx
+            .send(payload.to_vec())
+            .expect("broadcast output should send");
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+            .await
+            .expect("data frame should arrive")
+            .expect("websocket should stay open")
+            .expect("message should be valid");
+        let bytes = match msg {
+            Message::Binary(bytes) => Bytes::from(bytes),
+            other => panic!("expected binary data frame, got {:?}", other),
+        };
+        match decode_frame(bytes) {
+            Frame::Data(data) => assert_eq!(data.as_ref(), payload),
+            other => panic!("expected data frame, got {:?}", other),
+        }
+
+        let lines = scroll_buffer.get_all().await;
+        assert_eq!(
+            lines.len(),
+            1,
+            "bridge must not duplicate pump-owned history"
+        );
+        assert!(lines[0].text.contains("Last login"));
     }
 }
 
@@ -1286,8 +1344,6 @@ impl WsBridge {
         let (frame_tx, mut frame_rx) = mpsc::channel::<OutgoingFrame>(FRAME_CHANNEL_CAPACITY);
         let frame_tx_ssh = frame_tx.clone();
         let frame_tx_hb = frame_tx.clone();
-        let buffer_clone = scroll_buffer.clone();
-
         let sid_in = id.clone();
         let sid_out = id.clone();
 
@@ -1333,12 +1389,6 @@ impl WsBridge {
                 let data = &data[..safe_end];
                 if data.is_empty() {
                     continue;
-                }
-
-                // Write to scroll buffer (aligned with V1)
-                let lines = parse_terminal_output(data);
-                if !lines.is_empty() {
-                    buffer_clone.append_batch(lines).await;
                 }
 
                 // Queue depth monitoring (P5)
@@ -1601,8 +1651,6 @@ impl WsBridge {
         let (frame_tx, mut frame_rx) = mpsc::channel::<OutgoingFrame>(FRAME_CHANNEL_CAPACITY);
         let frame_tx_ssh = frame_tx.clone();
         let frame_tx_hb = frame_tx.clone();
-        let buffer_clone = scroll_buffer.clone();
-
         let sid_in = id.clone();
         let sid_out = id.clone();
 
@@ -1649,12 +1697,6 @@ impl WsBridge {
                 let data = &data[..safe_end];
                 if data.is_empty() {
                     continue;
-                }
-
-                // Write to scroll buffer (aligned with V1)
-                let lines = parse_terminal_output(data);
-                if !lines.is_empty() {
-                    buffer_clone.append_batch(lines).await;
                 }
 
                 // Queue depth monitoring (P5)

@@ -13,7 +13,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useAppStore } from '../../store/appStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { triggerGitRefresh } from '../../store/ideStore';
-import { api } from '../../lib/api';
+import { api, nodeTerminalUrl } from '../../lib/api';
 import { runtimeEventHub } from '../../lib/runtimeEventHub';
 import { getTerminalTheme } from '../../lib/themes';
 import { getFontFamily } from '../../lib/fontFamily';
@@ -38,7 +38,16 @@ import {
   touchTerminalEntry,
   notifyTerminalOutput,
   updateTerminalReadiness,
+  registerTerminalCommandMarkCreator,
 } from '../../lib/terminalRegistry';
+import {
+  cleanupTerminalCommandMarks,
+  clearTerminalCommandMarkSelection,
+  closeTerminalCommandMarks,
+  createTerminalCommandMark,
+  getTerminalAbsoluteLineFromClientY,
+  selectTerminalCommandMarkAtLine,
+} from '../../lib/terminal/commandMarks';
 import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -73,9 +82,12 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { useTerminalAutosuggestRecorder } from '../../hooks/useTerminalAutosuggestRecorder';
+import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
-import { useToastStore } from '../../hooks/useToast';
+import { TerminalCommandBar } from './TerminalCommandBar';
+import { useToastStore, type ToastVariant } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
   applyRuntimeDisabledHighlightRules,
@@ -85,7 +97,7 @@ import {
 import { installShiftSelectionGuard, type SelectionGestureController } from '../../lib/terminalSelectionGesture';
 import { useBroadcastStore } from '../../store/broadcastStore';
 import { broadcastToTargets } from '../../lib/terminalRegistry';
-import { HistorySearchMatch, TerminalHistorySearchProgress, type HighlightRule } from '../../types';
+import { HistorySearchMatch, TerminalHistorySearchProgress, type HighlightRule, type UnifiedFlatNode } from '../../types';
 import { notifyTrzszTransferEvent } from '../../lib/terminal/trzsz/notifications';
 import { TrzszController } from '../../lib/terminal/trzsz/controller';
 import { createRemoteTerminalTransport, type RemoteTerminalTransport } from '../../lib/terminal/trzsz/transport';
@@ -157,6 +169,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const commandMarkPointerRef = useRef<{ x: number; y: number; selection: string } | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
@@ -185,6 +198,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const wsRecoveryAttemptsRef = useRef(0);
   const wsRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsConnectAbortRef = useRef<AbortController | null>(null); // Cancel WS connect retries on unmount
+  const lifecycleToastTimestampsRef = useRef<Map<string, number>>(new Map());
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
@@ -491,9 +505,109 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const session = useAppStore((state) => state.sessions.get(sessionId));
   const sessionRef = useRef<SessionInfo | undefined>(session);
   const connectionIdRef = useRef<string | null>(session?.connectionId ?? null);
+  const terminalSessionRehydrateRef = useRef<string | null>(null);
+
+  const resolveNodeForTerminalSession = useCallback((targetSessionId: string): UnifiedFlatNode | undefined => {
+    const treeState = useSessionTreeStore.getState();
+    return treeState.getNodeByTerminalId(targetSessionId)
+      ?? treeState.nodes.find((node) => (
+        node.terminalSessionId === targetSessionId
+        || node.runtime.terminalIds.includes(targetSessionId)
+      ));
+  }, []);
+
+  const rehydrateTerminalSession = useCallback(async () => {
+    if (sessionRef.current?.ws_url) return;
+    if (terminalSessionRehydrateRef.current === sessionId) return;
+    terminalSessionRehydrateRef.current = sessionId;
+
+    let node = resolveNodeForTerminalSession(sessionId);
+    if (!node) {
+      try {
+        await useSessionTreeStore.getState().fetchTree();
+      } catch (error) {
+        console.warn(`[TerminalView ${sessionId}] Failed to refresh session tree before terminal rehydrate:`, error);
+      }
+      node = resolveNodeForTerminalSession(sessionId);
+    }
+
+    if (!node) return;
+
+    try {
+      const endpoint = await nodeTerminalUrl(node.id);
+      if (!isMountedRef.current) return;
+
+      const backendSession = await api.getSession(endpoint.sessionId).catch(() => null);
+      if (!isMountedRef.current) return;
+
+      const wsUrl = backendSession?.ws_url ?? `ws://localhost:${endpoint.wsPort}`;
+      const connectionId = backendSession?.connectionId ?? node.runtime.connectionId ?? node.sshConnectionId ?? undefined;
+      const fallbackSession: SessionInfo = {
+        id: endpoint.sessionId,
+        name: node.displayName || `${node.username}@${node.host}`,
+        host: node.host,
+        port: node.port,
+        username: node.username,
+        state: 'connected',
+        ws_url: wsUrl,
+        ws_token: endpoint.wsToken,
+        color: '#3b82f6',
+        uptime_secs: 0,
+        order: 0,
+        connectionId,
+        auth_type: 'password',
+      };
+
+      useAppStore.setState((state) => {
+        const existing = state.sessions.get(endpoint.sessionId) ?? state.sessions.get(sessionId);
+        const newSessions = new Map(state.sessions);
+        newSessions.set(endpoint.sessionId, {
+          ...fallbackSession,
+          ...(existing ?? {}),
+          ...(backendSession ?? {}),
+          id: endpoint.sessionId,
+          ws_url: wsUrl,
+          ws_token: endpoint.wsToken,
+          connectionId,
+        });
+        return { sessions: newSessions };
+      });
+
+      const treeState = useSessionTreeStore.getState();
+      const currentTerminalIds = treeState.nodeTerminalMap.get(node.id) ?? [];
+      if (!currentTerminalIds.includes(endpoint.sessionId) || treeState.terminalNodeMap.get(endpoint.sessionId) !== node.id) {
+        useSessionTreeStore.setState((state) => {
+          const nextNodeMap = new Map(state.nodeTerminalMap);
+          const ids = nextNodeMap.get(node.id) ?? [];
+          nextNodeMap.set(node.id, ids.includes(endpoint.sessionId) ? ids : [...ids, endpoint.sessionId]);
+
+          const nextTerminalMap = new Map(state.terminalNodeMap);
+          nextTerminalMap.set(endpoint.sessionId, node.id);
+          return {
+            nodeTerminalMap: nextNodeMap,
+            terminalNodeMap: nextTerminalMap,
+          };
+        });
+        useSessionTreeStore.getState().rebuildUnifiedNodes();
+      }
+
+      if (endpoint.sessionId !== sessionId) {
+        useAppStore.getState().updatePaneSessionId(sessionId, endpoint.sessionId);
+      }
+
+      if (import.meta.env.DEV) {
+        console.info(`[TerminalView ${sessionId}] Rehydrated terminal session from node ${node.id}`);
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn(`[TerminalView ${sessionId}] Terminal session rehydrate failed:`, error);
+      }
+    }
+  }, [resolveNodeForTerminalSession, sessionId]);
 
   const cleanupWebSocket = useCallback((ws: WebSocket | null, reason?: string) => {
     if (!ws) return;
+    closeTerminalCommandMarks(effectivePaneId, reason === 'Reconnect' ? 'interrupted_mode' : 'session_lost', 'unknown', true);
     ws.onopen = null;
     ws.onmessage = null;
     ws.onerror = null;
@@ -503,10 +617,30 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     } catch {
       // Ignore close errors
     }
-  }, []);
+  }, [effectivePaneId]);
 
   const writeServerOutputToTerminal = useCallback((payload: Uint8Array) => {
     adaptiveRendererRef.current.scheduleWrite(payload);
+  }, []);
+
+  const notifyTerminalLifecycle = useCallback((
+    key: string,
+    title: string,
+    variant: ToastVariant = 'default',
+    description?: string,
+    cooldownMs = 8_000,
+  ) => {
+    const now = Date.now();
+    const lastShownAt = lifecycleToastTimestampsRef.current.get(key) ?? 0;
+    if (now - lastShownAt < cooldownMs) return;
+    lifecycleToastTimestampsRef.current.set(key, now);
+
+    useToastStore.getState().addToast({
+      title,
+      description,
+      variant,
+      duration: variant === 'error' ? 8000 : variant === 'warning' ? 7000 : 4000,
+    });
   }, []);
 
   const transformTerminalOutput = useCallback((payload: Uint8Array) => {
@@ -570,6 +704,34 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       });
   }, []);
 
+  const autosuggestRecorder = useTerminalAutosuggestRecorder({
+    terminalKind: 'terminal',
+    localShellHistory: terminalSettings.autosuggest?.localShellHistory ?? true,
+  });
+  const autosuggestRecorderRef = useRef(autosuggestRecorder);
+  autosuggestRecorderRef.current = autosuggestRecorder;
+
+  const sendCommandBarInput = useCallback((input: string) => {
+    if (inputLockedRef.current) return;
+    adaptiveRenderer.notifyUserInput();
+    const processed = runInputPipeline(input, sessionId, nodeId);
+    if (processed === null) return;
+    autosuggestRecorderRef.current.observeInput(processed);
+    observeCliAgentTerminalInput({
+      data: processed,
+      targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
+      sessionId,
+      nodeId,
+    });
+    feedInput(processed);
+    const controller = trzszControllerRef.current;
+    if (controller && !controller.isDisposed()) {
+      controller.processTerminalInput(processed);
+    } else if (!controllerRuntimePendingRef.current) {
+      sendEncodedTerminalInput(processed);
+    }
+  }, [adaptiveRenderer, feedInput, nodeId, sendEncodedTerminalInput, sessionId]);
+
   const focusTerminal = useCallback((mode: 'soft' | 'strong' = 'soft') => {
     const term = terminalRef.current;
     if (!term || searchOpen || aiPanelOpen || !isTerminalContainerRenderable(containerRef.current)) {
@@ -589,13 +751,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
     inputLockedRef.current = false;
     setInputLocked(false);
-
-    const term = terminalRef.current;
-    if (term) {
-      term.write(`\r\n\x1b[32m${i18n.t('terminal.ssh.link_restored')}\x1b[0m\r\n`);
-      lastWsUrlRef.current = null;
-    }
-  }, []);
+    lastWsUrlRef.current = null;
+    notifyTerminalLifecycle(
+      'connection-restored',
+      i18n.t('terminal.ssh.reconnected'),
+      'success',
+      undefined,
+      4000,
+    );
+  }, [notifyTerminalLifecycle]);
 
   const disposeTrzszController = useCallback((options?: { notifyConnectionLost?: boolean }) => {
     const controller = trzszControllerRef.current;
@@ -688,6 +852,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     trzszControllerRef.current?.setTerminalColumns(dims.cols);
     transportRef.current?.sendResize(dims.cols, dims.rows);
   }, []);
+
+  const handleCommandBarLayoutChange = useCallback(() => {
+    if (!fitAddonRef.current || !terminalRef.current || !isTerminalContainerRenderable(containerRef.current)) return;
+    fitAddonRef.current.fit();
+    syncRemotePtySize();
+  }, [syncRemotePtySize]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Unified WebSocket message handler
@@ -801,7 +971,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   useEffect(() => {
     sessionRef.current = session;
+    if (session?.ws_url) {
+      terminalSessionRehydrateRef.current = null;
+    }
   }, [session]);
+
+  useEffect(() => {
+    if (session?.ws_url) return;
+    void rehydrateTerminalSession();
+  }, [rehydrateTerminalSession, session?.ws_url]);
 
   useEffect(() => {
     connectionIdRef.current = session?.connectionId ?? null;
@@ -834,11 +1012,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const recoverWebSocket = useCallback((reason: string) => {
     if (wsRecoveryInFlightRef.current) return;
     if (wsRecoveryAttemptsRef.current >= 15) {
-      // All recovery attempts exhausted — notify user
-      const term = terminalRef.current;
-      if (term) {
-        term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_failed')}\x1b[0m`);
-      }
+      // All recovery attempts exhausted. The disconnected overlay renders this
+      // state; do not write OxideTerm lifecycle text into the user's PTY buffer.
       return;
     }
     if (connectionStatusRef.current !== 'connected') return;
@@ -992,10 +1167,42 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       if (connection_id !== currentConnectionId) return;
       
       console.log(`[TerminalView ${sessionId}] Connection status: ${status}`);
+      const previousStatus = connectionStatusRef.current;
       setConnectionStatus(status);
       connectionStatusRef.current = status;
+
+      if (status !== previousStatus) {
+        if (status === 'link_down') {
+          notifyTerminalLifecycle(
+            'connection-lost',
+            i18n.t('terminal.standby.connection_lost'),
+            'warning',
+            i18n.t('terminal.standby.input_locked'),
+          );
+        } else if (status === 'reconnecting') {
+          notifyTerminalLifecycle(
+            'connection-reconnecting',
+            i18n.t('terminal.standby.reconnecting'),
+            'warning',
+            i18n.t('terminal.standby.input_locked'),
+          );
+        } else if (status === 'disconnected') {
+          notifyTerminalLifecycle(
+            'connection-disconnected',
+            i18n.t('terminal.disconnected.message'),
+            'error',
+          );
+        } else if (status === 'connected' && previousStatus !== 'connected') {
+          notifyTerminalLifecycle(
+            'connection-restored',
+            i18n.t('terminal.ssh.reconnected'),
+            'success',
+            undefined,
+            4000,
+          );
+        }
+      }
       
-      const term = terminalRef.current;
       const shouldLock = status === 'link_down' || status === 'reconnecting';
       const shouldHoldRuntimeGate = shouldLock || status === 'disconnected';
 
@@ -1008,17 +1215,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Entering Standby mode
         inputLockedRef.current = true;
         setInputLocked(true);
-        
-        // Write status message (NO clear!)
-        if (term) {
-          if (status === 'link_down') {
-            term.write(`\r\n\x1b[33m${i18n.t('terminal.ssh.connection_lost')}\x1b[0m\r\n`);
-          } else if (status === 'reconnecting') {
-            term.write(`\r\n\x1b[33m${i18n.t('terminal.ssh.attempting_reconnect')}\x1b[0m\r\n`);
-          } else if (status === 'disconnected') {
-            term.write(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_failed')}\x1b[0m\r\n`);
-          }
-        }
+        closeTerminalCommandMarks(effectivePaneId, 'interrupted_mode', 'unknown', true);
       }
 
       if (shouldHoldRuntimeGate) {
@@ -1040,7 +1237,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [sessionId]);
+  }, [notifyTerminalLifecycle, sessionId]);
 
   // Subscribe to terminal settings changes from settingsStore
   useEffect(() => {
@@ -1141,6 +1338,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
     if (!isActive) {
       if (rendererAddonRef.current) {
+        cleanupTerminalCommandMarks(effectivePaneId);
         try {
           rendererAddonRef.current.dispose();
         } catch {
@@ -1312,13 +1510,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       }
     }
     
-    const term = terminalRef.current;
     const wsToken = currentSession?.ws_token;
-    const displayUser = currentSession?.username ?? 'unknown';
-    const displayHost = currentSession?.host ?? 'unknown';
-    
-    term.writeln(`\r\n\x1b[33m${i18n.t('terminal.ssh.reconnecting', { user: displayUser, host: displayHost })}\x1b[0m`);
-    
     try {
       const ws = new WebSocket(wsUrl);
       let opened = false;
@@ -1340,8 +1532,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         if (wsToken) {
           ws.send(wsToken);
         }
-        
-        term.writeln(`\x1b[32m${i18n.t('terminal.ssh.reconnected')}\x1b[0m\r\n`);
+        notifyTerminalLifecycle(
+          'ws-reconnected',
+          i18n.t('terminal.ssh.reconnected'),
+          'success',
+          undefined,
+          4000,
+        );
         
         // Re-send current terminal size
         syncRemotePtySize();
@@ -1358,11 +1555,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       ws.onerror = (error) => {
         if (!isMountedRef.current || wsRef.current !== ws) return;
         console.error('WebSocket reconnection error:', error);
+        notifyTerminalLifecycle(
+          'ws-reconnect-error',
+          i18n.t('terminal.ssh.ws_reconnect_error'),
+          'warning',
+        );
         updateTerminalReadiness(sessionId, {
           terminalType: 'terminal',
           frontendOutputListenerReady: false,
         });
-        term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_reconnect_error')}\x1b[0m`);
         if (!reconnectingRef.current) {
           recoverWebSocket(opened ? 'reconnect-error-opened' : 'reconnect-error');
         }
@@ -1380,7 +1581,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         });
         console.log('WebSocket closed after reconnect:', event.code, event.reason);
         if (event.code !== 1000) {
-          term.writeln(`\r\n\x1b[33m${i18n.t('terminal.ssh.connection_closed_code', { code: event.code })}\x1b[0m`);
+          notifyTerminalLifecycle(
+            `ws-closed-code-${event.code}`,
+            i18n.t('terminal.ssh.connection_closed_code', { code: event.code }),
+            'warning',
+          );
         }
         if (!reconnectingRef.current) {
           recoverWebSocket(opened ? 'reconnect-close-opened' : 'reconnect-close');
@@ -1388,9 +1593,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       };
     } catch (e) {
       console.error('Failed to reconnect WebSocket:', e);
-      term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_establish_failed', { error: e })}\x1b[0m`);
+      notifyTerminalLifecycle(
+        'ws-establish-failed',
+        i18n.t('terminal.ssh.ws_establish_failed', { error: e }),
+        'error',
+      );
     }
-  }, [session?.ws_url, recoverWebSocket, cleanupWebSocket, connectionStatus, syncRemotePtySize, disposeTrzszController, syncTrzszController]);
+  }, [session?.ws_url, recoverWebSocket, cleanupWebSocket, connectionStatus, syncRemotePtySize, disposeTrzszController, syncTrzszController, notifyTerminalLifecycle]);
 
   // Font family resolver — see src/lib/fontFamily.ts
 
@@ -1456,10 +1665,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
     term.parser.registerOscHandler(7, (data: string) => {
       try {
-        const cwd = data.startsWith('file://') ? decodeURIComponent(new URL(data).pathname) : data;
+        const url = data.startsWith('file://') ? new URL(data) : null;
+        const cwd = url ? decodeURIComponent(url.pathname) : data;
+        const host = url?.hostname;
         if (cwd) {
           import('../../lib/terminalRegistry').then(({ updateCwd }) => {
-            updateCwd(effectivePaneId, cwd);
+            updateCwd(effectivePaneId, cwd, host);
           });
         }
       } catch {
@@ -1487,6 +1698,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       if (active !== prevMouseTracking) {
         prevMouseTracking = active;
         setMouseMode(active);
+        if (active) {
+          closeTerminalCommandMarks(effectivePaneId, 'interrupted_mode', 'unknown', true);
+        }
       }
       notifyTerminalOutput(sessionId);
     });
@@ -1725,6 +1939,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       },
       getScreenSnapshot,  // Screen reader for TUI interaction
     );
+    registerTerminalCommandMarkCreator(effectivePaneId, (request) => {
+      const current = terminalRef.current;
+      if (!current || inputLockedRef.current || controllerRuntimePendingRef.current) return;
+      createTerminalCommandMark(current, effectivePaneId, {
+        ...request,
+        nodeId,
+        cwd: request.cwd ?? undefined,
+      });
+    });
     
     // Font loading detection - ensure fonts are loaded before connecting
     const ensureFontsLoaded = async () => {
@@ -1877,7 +2100,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                       return;
                     }
                     
-                    term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.ws_error', { error: 'Connection failed' })}\x1b[0m`);
+                    notifyTerminalLifecycle(
+                      'ws-connection-failed',
+                      i18n.t('terminal.ssh.ws_error', { error: 'Connection failed' }),
+                      'warning',
+                    );
                     recoverWebSocket('initial-error');
                     resolve();
                   }
@@ -1902,7 +2129,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                     return; // Let onerror handle retry
                   }
                   if (!reconnectingRef.current && opened) {
-                    term.writeln(`\r\n\x1b[31m${i18n.t('terminal.ssh.connection_closed')}\x1b[0m`);
+                    notifyTerminalLifecycle(
+                      'ws-connection-closed',
+                      i18n.t('terminal.ssh.connection_closed'),
+                      'warning',
+                    );
                     recoverWebSocket('initial-close-opened');
                   }
                   resolve();
@@ -1930,7 +2161,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             await Promise.race([connectPromise, fontsPromise.then(() => connectPromise)]);
         }, 100); // 100ms delay to let StrictMode unmount/remount complete
     } else {
-         term.writeln(`\x1b[33m${i18n.t('terminal.ssh.no_ws_url')}\x1b[0m`);
+        if (!resolveNodeForTerminalSession(sessionId)) {
+          term.writeln(`\x1b[33m${i18n.t('terminal.ssh.no_ws_url')}\x1b[0m`);
+        }
     }
 
     // IME composition event listeners (for Windows input method compatibility)
@@ -1969,6 +2202,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Plugin input pipeline (fail-open, null = suppress)
         const processed = runInputPipeline(data, sessionId, nodeId);
         if (processed === null) return;
+        const observedInput = autosuggestRecorderRef.current.observeInput(processed);
+        if (observedInput.completedCommand) {
+          createTerminalCommandMark(term, effectivePaneId, {
+            command: observedInput.completedCommand,
+            source: 'user_input_observed',
+            sessionId,
+            nodeId,
+          });
+        }
+        observeCliAgentTerminalInput({
+          data: processed,
+          targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
+          sessionId,
+          nodeId,
+        });
 
         // Feed recording (user input)
         feedInput(processed);
@@ -2137,6 +2385,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Dispose renderer addon first to avoid "onShowLinkUnderline" error
         // This is a known xterm.js canvas addon bug where dispose order matters
         if (rendererAddonRef.current) {
+          cleanupTerminalCommandMarks(effectivePaneId);
           try {
             rendererAddonRef.current.dispose();
           } catch (e) {
@@ -2252,7 +2501,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         term.dispose();
         terminalRef.current = null;
     };
-  }, [fontOpenReady, sessionId, syncRemotePtySize, syncTrzszController, disposeTrzszController, sendEncodedTerminalInput]); // Only remount on session change — bg image is handled dynamically
+  }, [fontOpenReady, sessionId, syncRemotePtySize, syncTrzszController, disposeTrzszController, sendEncodedTerminalInput, resolveNodeForTerminalSession, notifyTerminalLifecycle]); // Only remount on session change — bg image is handled dynamically
 
   useEffect(() => {
     selectionGestureRef.current?.refresh();
@@ -2323,6 +2572,47 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       focusTerminal('strong');
     }
   };
+
+  const cancelCommandMarkDoubleClick = useCallback((event: React.MouseEvent) => {
+    if (event.button !== 0 || event.detail <= 1) return false;
+    commandMarkPointerRef.current = null;
+    clearTerminalCommandMarkSelection(effectivePaneId);
+    terminalRef.current?.clearSelection();
+    event.preventDefault();
+    event.stopPropagation();
+    (event.nativeEvent as MouseEvent & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
+    return true;
+  }, [effectivePaneId]);
+
+  const handleCommandMarkPointerDown = useCallback((event: React.MouseEvent) => {
+    if (cancelCommandMarkDoubleClick(event)) return;
+    if (event.button !== 0 || !containerRef.current?.contains(event.target as Node)) {
+      commandMarkPointerRef.current = null;
+      return;
+    }
+    commandMarkPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      selection: terminalRef.current?.getSelection() ?? '',
+    };
+  }, [cancelCommandMarkDoubleClick]);
+
+  const handleCommandMarkPointerUp = useCallback((event: React.MouseEvent) => {
+    if (cancelCommandMarkDoubleClick(event)) return;
+    const start = commandMarkPointerRef.current;
+    commandMarkPointerRef.current = null;
+    const term = terminalRef.current;
+    const container = containerRef.current;
+    if (!start || !term || !container?.contains(event.target as Node)) return;
+    if (event.button !== 0) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+    const selection = term.getSelection();
+    if (term.buffer.active.type === 'alternate' || (selection && selection !== start.selection)) return;
+    const line = getTerminalAbsoluteLineFromClientY(term, container, event.clientY);
+    if (line === null || !selectTerminalCommandMarkAtLine(term, effectivePaneId, line)) {
+      clearTerminalCommandMarkSelection(effectivePaneId);
+    }
+  }, [cancelCommandMarkDoubleClick, effectivePaneId]);
 
   const currentTheme = getTerminalTheme(terminalSettings.theme);
 
@@ -2813,11 +3103,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   
   return (
     <div 
-      className="terminal-container h-full w-full overflow-hidden relative" 
+      className="terminal-container h-full w-full overflow-hidden relative flex flex-col"
       style={{ 
         backgroundColor: currentTheme.background 
       }}
       onClick={handleContainerClick}
+      onMouseDownCapture={handleCommandMarkPointerDown}
+      onMouseUpCapture={handleCommandMarkPointerUp}
     >
        {/* Background Image Layer — GPU-composited, sits below xterm canvas.
            Uses will-change: transform to promote to its own compositor layer,
@@ -2855,7 +3147,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
        <div 
          ref={containerRef} 
-         className="h-full w-full"
+         className="min-h-0 flex-1 w-full"
          style={{
            contain: 'strict',
            isolation: 'isolate',
@@ -2863,7 +3155,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
            zIndex: 1,
          }}
        />
-
        {/* Input Lock Overlay - shown during reconnection */}
        {inputLocked && (
          <div className={cn(
@@ -2963,6 +3254,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
        {/* FPS / Tier overlay (enabled in Settings → Terminal → Show FPS Overlay) */}
        {terminalSettings.showFpsOverlay && (
          <FpsOverlay getStats={adaptiveRenderer.getStats} />
+       )}
+       {terminalSettings.commandBar.enabled && (
+         <TerminalCommandBar
+           paneId={effectivePaneId}
+           sessionId={sessionId}
+           tabId={effectiveTabId}
+           terminalType="terminal"
+           isActive={isActive}
+           sendInput={sendCommandBarInput}
+           focusTerminal={() => { focusTerminal('strong'); }}
+           onLayoutChange={handleCommandBarLayoutChange}
+         />
        )}
     </div>
   );

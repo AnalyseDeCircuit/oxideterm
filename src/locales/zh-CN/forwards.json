@@ -91,6 +91,7 @@
       "bindAddr": "绑定地址",
       "process": "进程",
       "action": "操作",
+      "scanning": "正在检测监听端口...",
       "noPorts": "暂未检测到监听端口",
       "alreadyForwarded": "已转发"
     }

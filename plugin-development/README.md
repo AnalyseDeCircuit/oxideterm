@@ -1,5 +1,5 @@
 <!-- translated-from: plugin-development/README.zh-CN.md -->
-<!-- translated-from-sha256: ecd8cb055f0ba393ed0b457c721f9d5dcad29c9dca947711e2fffca442b705c1 -->
+<!-- translated-from-sha256: bf204dbf1339c1827ac161f537a72712f182e39d45d259102a05b91cfa98bb08 -->
 
 > Applies to the current OxideTerm version (Plugin API v3)
 
@@ -593,40 +593,85 @@ Supported values: `"onConnect"` | `"onDisconnect"` | `"onReconnect"` | `"onLinkD
 
 ### 4.8 contributes.aiTools
 
-Declares optional Tool Protocol v2 metadata for tools that a plugin provides or plans to expose to OxideSens. This is a declaration layer for UI, approval prompts, and future plugin tool execution. It is **not** a permission boundary and does not grant access to host APIs by itself.
+Declares optional metadata for AI tools that a plugin provides or plans to expose to OxideSens. This field is a **Tool Protocol v2 declaration layer**: legacy plugins can omit it completely; new plugins can use it so the host can display capability, risk, target, approval, and structured-result semantics more clearly.
 
-Legacy plugins can omit this field. New plugins can use it so the host can display capability, risk, target, and result semantics more clearly.
+OxideSens now uses a target-first task orchestrator internally. Built-in chat does not expose every low-level host tool by default, and plugin tools are not automatically shown to the model unless the user explicitly invokes a plugin participant or the host enables the relevant capability path. The manifest API remains compatible; `aiTools` is metadata, not an execution permission.
 
 ```json
 "aiTools": [
   {
-    "name": "webdav_sync",
-    "title": "Sync to WebDAV",
-    "description": "Upload encrypted OxideTerm settings to a configured WebDAV endpoint.",
-    "capabilities": ["network", "write_file"],
-    "risk": "medium",
-    "target": "external_service",
-    "requiresApproval": true
+    "name": "router_backup",
+    "description": "Back up the running configuration from a network device.",
+    "parameters": {
+      "type": "object",
+      "required": ["targetId"],
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "description": "Target terminal session or SSH node ID"
+        }
+      }
+    },
+    "capabilities": ["terminal.send", "terminal.observe", "filesystem.write"],
+    "risk": "write-file",
+    "targetKinds": ["terminal-session", "ssh-node"],
+    "resultSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "bytes": { "type": "number" }
+      }
+    }
   }
 ]
 ```
 
 | Field | Type | Description |
 |------|------|-------------|
-| `name` | `string` | Stable tool identifier |
-| `title` | `string` | Human-readable label shown in tool lists and approval UI |
-| `description` | `string` | Short explanation of what the tool does |
-| `capabilities` | `string[]` | Semantic capability tags such as `read_file`, `write_file`, `network`, or `terminal` |
-| `risk` | `"low" \| "medium" \| "high"` | Display and approval hint for the host UI |
-| `target` | `string?` | Optional target category such as `local`, `remote`, or `external_service` |
-| `requiresApproval` | `boolean?` | Whether the tool should be presented as approval-worthy by default |
+| `name` | `string` | Plugin-local tool name. If exposed to OxideSens later, the host namespaces it to avoid conflicts with built-in tools. |
+| `description` | `string` | Short explanation for both the model and the user. |
+| `parameters` | `object?` | Function-calling JSON Schema. Omitted means an empty object. |
+| `capabilities` | `string[]?` | Semantic capabilities such as `filesystem.read`, `terminal.send`, or `state.list`. |
+| `risk` | `string?` | Explicit risk level. If omitted, the host falls back to legacy inference. |
+| `targetKinds` | `string[]?` | Target kinds the tool can operate on, such as `ssh-node`, `terminal-session`, or `sftp-session`. |
+| `resultSchema` | `object?` | JSON Schema for the envelope `data` field. |
 
-Important rules:
+Available `capabilities`:
 
-- Declaring `aiTools` does not automatically register an executable AI tool.
-- Declaring `aiTools` does not bypass user approval.
-- Real host operations are still limited by `PluginContext` APIs and the `apiCommands` whitelist.
-- If a plugin returns a Tool Protocol v2 result envelope, the tool UI can show `summary`, `data`, `warnings`, and `meta.targetId` instead of treating the result as a legacy string.
+`command.run`, `terminal.send`, `terminal.observe`, `terminal.wait`, `filesystem.read`, `filesystem.write`, `filesystem.search`, `navigation.open`, `state.list`, `network.forward`, `settings.read`, `settings.write`, `plugin.invoke`, `mcp.invoke`
+
+Available `risk` values:
+
+`read`, `write-file`, `execute-command`, `interactive-input`, `destructive`, `network-expose`, `settings-change`, `credential-sensitive`
+
+Available `targetKinds`:
+
+`local-shell`, `ssh-node`, `terminal-session`, `sftp-session`, `ide-workspace`, `app-tab`, `mcp-server`, `rag-index`
+
+Compatibility rules:
+
+- Plugins that omit `aiTools` continue to work as legacy plugins.
+- Declaring `aiTools` does not grant additional permissions and does not bypass user approval.
+- `risk` and `capabilities` only affect display, approval hints, and future plugin-tool registration semantics. Real host operations are still limited by `PluginContext` APIs and the `apiCommands` whitelist.
+- If a plugin returns a legacy string or object, the host displays it as a legacy result. If it returns a Tool Protocol v2 envelope, the tool UI prefers `summary`, `data`, `warnings`, and `meta.targetId`.
+
+Recommended result shape:
+
+```javascript
+return {
+  ok: true,
+  summary: 'Backed up router configuration to backups/router-1.cfg',
+  data: { path: 'backups/router-1.cfg', bytes: 42192 },
+  output: 'Saved 42192 bytes',
+  warnings: [],
+  meta: {
+    toolName: 'router_backup',
+    capability: 'filesystem.write',
+    targetId: 'terminal-session:abc123',
+    durationMs: 840
+  }
+};
+```
 
 ### 4.9 contributes.apiCommands
 

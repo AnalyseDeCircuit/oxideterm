@@ -21,6 +21,10 @@
 //! the above layers already provide sufficient protection.
 
 use keyring::Entry;
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use super::portable_keystore;
@@ -137,6 +141,8 @@ pub enum KeychainError {
 pub struct Keychain {
     service: String,
     portable_passthrough: bool,
+    #[cfg(test)]
+    test_store: Option<Arc<Mutex<HashMap<String, String>>>>,
     /// When true (macOS only), `get()` will prompt Touch ID before returning
     /// the secret. Store/delete/exists use keyring directly without auth.
     #[cfg(target_os = "macos")]
@@ -170,6 +176,8 @@ impl Keychain {
         Self {
             service: SERVICE_NAME.to_string(),
             portable_passthrough: true,
+            #[cfg(test)]
+            test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
         }
@@ -180,6 +188,19 @@ impl Keychain {
         Self {
             service: service.into(),
             portable_passthrough: true,
+            #[cfg(test)]
+            test_store: None,
+            #[cfg(target_os = "macos")]
+            use_biometrics: false,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn in_memory_for_tests(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            portable_passthrough: false,
+            test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             #[cfg(target_os = "macos")]
             use_biometrics: false,
         }
@@ -190,6 +211,8 @@ impl Keychain {
         Self {
             service: service.into(),
             portable_passthrough: false,
+            #[cfg(test)]
+            test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: false,
         }
@@ -207,6 +230,8 @@ impl Keychain {
         Self {
             service: service.into(),
             portable_passthrough: true,
+            #[cfg(test)]
+            test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: true,
         }
@@ -217,6 +242,8 @@ impl Keychain {
         Self {
             service: service.into(),
             portable_passthrough: false,
+            #[cfg(test)]
+            test_store: None,
             #[cfg(target_os = "macos")]
             use_biometrics: true,
         }
@@ -233,6 +260,17 @@ impl Keychain {
     /// avoid per-binary keychain password dialogs.
     /// Otherwise: uses the cross-platform `keyring` crate.
     pub fn store(&self, id: &str, secret: &str) -> Result<(), KeychainError> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_store {
+            store
+                .lock()
+                .map_err(|e| {
+                    KeychainError::Keyring(keyring::Error::PlatformFailure(e.to_string().into()))
+                })?
+                .insert(id.to_string(), secret.to_string());
+            return Ok(());
+        }
+
         if self.uses_portable_backend()? {
             return portable_keystore::store_secret(&self.service, id, secret)
                 .map_err(|e| self.map_portable_error(id, e));
@@ -295,6 +333,18 @@ impl Keychain {
     /// If an older entry exists with restrictive ACL, it is automatically
     /// migrated to the permissive format after a successful read.
     pub fn get(&self, id: &str) -> Result<String, KeychainError> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_store {
+            return store
+                .lock()
+                .map_err(|e| {
+                    KeychainError::Keyring(keyring::Error::PlatformFailure(e.to_string().into()))
+                })?
+                .get(id)
+                .cloned()
+                .ok_or_else(|| KeychainError::NotFound(id.to_string()));
+        }
+
         if self.uses_portable_backend()? {
             return portable_keystore::get_secret(&self.service, id)
                 .map_err(|e| self.map_portable_error(id, e));
@@ -504,6 +554,17 @@ impl Keychain {
     ///
     /// No Touch ID prompt — deletion is always allowed.
     pub fn delete(&self, id: &str) -> Result<(), KeychainError> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_store {
+            store
+                .lock()
+                .map_err(|e| {
+                    KeychainError::Keyring(keyring::Error::PlatformFailure(e.to_string().into()))
+                })?
+                .remove(id);
+            return Ok(());
+        }
+
         if self.uses_portable_backend()? {
             return portable_keystore::delete_secret(&self.service, id)
                 .map_err(|e| self.map_portable_error(id, e));
@@ -534,6 +595,16 @@ impl Keychain {
     ///
     /// No Touch ID prompt — existence check only.
     pub fn exists(&self, id: &str) -> Result<bool, KeychainError> {
+        #[cfg(test)]
+        if let Some(store) = &self.test_store {
+            return store
+                .lock()
+                .map_err(|e| {
+                    KeychainError::Keyring(keyring::Error::PlatformFailure(e.to_string().into()))
+                })
+                .map(|store| store.contains_key(id));
+        }
+
         if self.uses_portable_backend()? {
             return portable_keystore::secret_exists(&self.service, id)
                 .map_err(|e| self.map_portable_error(id, e));

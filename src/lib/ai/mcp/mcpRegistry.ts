@@ -133,7 +133,7 @@ function isCurrentGeneration(configId: string, generation: number): boolean {
 
 function shouldRetry(configId: string): boolean {
   const config = getServerConfigs().find(server => server.id === configId);
-  return Boolean(config?.enabled && config.transport === 'sse' && config.retryOnDisconnect);
+  return Boolean(config?.enabled && config.transport !== 'stdio' && config.retryOnDisconnect);
 }
 
 async function applyRuntimeError(configId: string, generation: number, message: string): Promise<void> {
@@ -286,6 +286,9 @@ export const useMcpRegistry = create<McpRegistryState>((set, get) => ({
         ...current,
         status: 'disconnected',
         runtimeId: undefined,
+        endpointUrl: undefined,
+        sessionId: undefined,
+        resolvedTransport: undefined,
         error: undefined,
         tools: [],
         resources: [],

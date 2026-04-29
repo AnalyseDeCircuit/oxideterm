@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Check, Key, Circle, Settings, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check, Key, Circle, Settings, RefreshCw, Search, X } from 'lucide-react';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useToastStore } from '../../hooks/useToast';
 import { api } from '../../lib/api';
@@ -20,14 +20,17 @@ import type { AiProvider } from '../../types';
 
 type ModelSelectorProps = {
   onOpenSettings?: () => void;
+  dropdownPlacement?: 'up' | 'down';
 };
 
-export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
+export const ModelSelector = ({ onOpenSettings, dropdownPlacement = 'up' }: ModelSelectorProps) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({});
   const [providerOnline, setProviderOnline] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [expandedProviderIds, setExpandedProviderIds] = useState<Set<string>>(() => new Set());
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const aiSettings = useSettingsStore((s) => s.settings.ai);
@@ -158,7 +161,34 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
   const handleSelect = (provider: AiProvider, model: string) => {
     setActiveProvider(provider.id, model);
     setOpen(false);
+    setModelSearchQuery('');
   };
+
+  const toggleProvider = (providerId: string) => {
+    setExpandedProviderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!open || !activeProvider?.id) return;
+    setExpandedProviderIds((prev) => {
+      if (prev.has(activeProvider.id)) return prev;
+      const next = new Set(prev);
+      next.add(activeProvider.id);
+      return next;
+    });
+  }, [activeProvider?.id, open]);
+
+  useEffect(() => {
+    if (!open) setModelSearchQuery('');
+  }, [open]);
 
   const handleRefresh = async (providerId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -193,13 +223,25 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
 
   // Truncate for header space
   const truncatedName = displayName.length > 24 ? displayName.slice(0, 22) + '...' : displayName;
+  const normalizedModelSearchQuery = modelSearchQuery.trim().toLowerCase();
+  const isSearchingModels = normalizedModelSearchQuery.length > 0;
+  const visibleProviderGroups = aiSettings.providers
+    .filter((provider) => provider.enabled)
+    .map((provider) => {
+      const providerMatchesSearch = provider.name.toLowerCase().includes(normalizedModelSearchQuery);
+      const visibleModels = isSearchingModels
+        ? provider.models.filter((model) => providerMatchesSearch || model.toLowerCase().includes(normalizedModelSearchQuery))
+        : provider.models;
+      return { provider, visibleModels };
+    })
+    .filter(({ visibleModels }) => !isSearchingModels || visibleModels.length > 0);
 
   // If no providers, show a setup prompt
   if (aiSettings.providers.length === 0) {
     return (
       <button
         onClick={onOpenSettings}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-400/10"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-md)] text-[10px] font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-400/10"
       >
         <Circle className="w-1.5 h-1.5 fill-current" />
         <span>{t('ai.model_selector.no_provider')}</span>
@@ -208,11 +250,11 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
   }
 
   return (
-    <div className="relative min-w-0" ref={dropdownRef}>
+    <div className="relative min-w-0 flex-1" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium min-w-0",
+          "flex w-full max-w-full items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-md)] text-[10px] font-medium min-w-0",
           "text-theme-text-muted hover:text-theme-text hover:bg-theme-accent/10",
           open && "bg-theme-accent/10 text-theme-text"
         )}
@@ -227,24 +269,73 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
       </button>
 
       {open && (
-        <div className="absolute left-0 bottom-full mb-0.5 w-64 bg-theme-bg-elevated border border-theme-border rounded-md shadow-lg z-50 overflow-hidden">
+        <div className={cn(
+          'absolute left-0 w-64 bg-theme-bg-elevated border border-theme-border rounded-[var(--radius-lg)] shadow-lg z-[9999] overflow-hidden',
+          dropdownPlacement === 'down' ? 'top-full mt-1' : 'bottom-full mb-0.5',
+        )}>
+          <div className="px-2 pt-2 pb-1">
+            <div className="flex items-center gap-1.5 rounded-[var(--radius-md)] border border-theme-border/50 bg-theme-bg/50 px-2 py-1.5">
+              <Search className="w-3 h-3 shrink-0 text-theme-text-muted" />
+              <input
+                value={modelSearchQuery}
+                onChange={(event) => setModelSearchQuery(event.target.value)}
+                placeholder={t('ai.model_selector.search_placeholder')}
+                className="min-w-0 flex-1 bg-transparent text-xs text-theme-text outline-none placeholder:text-theme-text-muted/60"
+              />
+              {modelSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setModelSearchQuery('')}
+                  className="text-theme-text-muted hover:text-theme-text"
+                  title={t('ai.model_selector.clear_search')}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
           <div className="max-h-80 overflow-y-auto py-1">
-            {aiSettings.providers
-              .filter((p) => p.enabled)
-              .map((provider) => {
+            {visibleProviderGroups.length === 0 ? (
+              <div className="px-3 py-3 text-[10px] text-theme-text-muted italic">
+                {t('ai.model_selector.no_search_results')}
+              </div>
+            ) : (
+              visibleProviderGroups.map(({ provider, visibleModels }, index) => {
                 const isLocal = provider.type === 'ollama' || (provider.type === 'openai_compatible' && isLocalUrl(provider.baseUrl));
                 const hasKey = isLocal || !!keyStatus[provider.id];
                 const isOnline = !isLocal || providerOnline[provider.id] !== false;
+                const isExpanded = isSearchingModels || expandedProviderIds.has(provider.id);
+                const isActiveProvider = provider.id === aiSettings.activeProviderId;
+                const activeProviderModel = isActiveProvider && activeModel ? activeModel.split('/').pop() : null;
                 return (
                   <div key={provider.id}>
                     {/* Provider header */}
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-theme-bg/50">
-                      <span className={cn(
-                        "text-[10px] font-bold tracking-wider uppercase",
-                        hasKey ? "text-theme-text-muted" : "text-theme-text-muted/50"
-                      )}>
-                        {provider.name}
-                      </span>
+                    <div className="relative flex items-center justify-between border-y border-theme-border/20 bg-theme-bg-elevated px-3 py-1.5">
+                      {index === 0 && (
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-theme-border/50" />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleProvider(provider.id)}
+                        className="min-w-0 flex flex-1 items-center gap-1.5 text-left"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="w-3 h-3 shrink-0 text-theme-accent/80" />
+                        ) : (
+                          <ChevronRight className="w-3 h-3 shrink-0 text-theme-accent/80" />
+                        )}
+                        <span className={cn(
+                          "min-w-0 truncate text-[10px] font-bold tracking-wider uppercase",
+                          hasKey ? "text-theme-text-heading" : "text-theme-text-muted"
+                        )}>
+                          {provider.name}
+                        </span>
+                        {activeProviderModel && (
+                          <span className="min-w-0 truncate rounded-[var(--radius-sm)] bg-theme-bg-hover/40 px-1.5 py-0.5 text-[9px] normal-case tracking-normal text-theme-text-muted/80">
+                            {activeProviderModel}
+                          </span>
+                        )}
+                      </button>
                       <div className="flex items-center gap-1.5">
                         {hasKey && isOnline && (
                           <button
@@ -278,44 +369,51 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
                     </div>
 
                     {/* No API key: show configure hint instead of models */}
-                    {isLocal && !isOnline ? (
-                      <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
-                        {t('ai.model_selector.offline')}
-                      </div>
-                    ) : !hasKey ? (
-                      <button
-                        onClick={() => { onOpenSettings?.(); setOpen(false); }}
-                        className="w-full px-3 py-2 text-[10px] text-amber-400/80 italic text-left hover:bg-theme-bg-hover"
-                      >
-                        {t('ai.model_selector.no_key_warning')}
-                      </button>
-                    ) : provider.models.length === 0 ? (
-                      <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
-                        {t('ai.model_selector.refresh_models')}
-                      </div>
-                    ) : (
-                      provider.models.map((model) => {
-                        const isActive = provider.id === aiSettings.activeProviderId && model === activeModel;
-                        return (
+                    {!isExpanded ? null : (
+                      <div className="bg-theme-bg-panel/90">
+                        {isLocal && !isOnline ? (
+                          <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
+                            {t('ai.model_selector.offline')}
+                          </div>
+                        ) : !hasKey ? (
                           <button
-                            key={`${provider.id}-${model}`}
-                            onClick={() => handleSelect(provider, model)}
-                            className={cn(
-                              "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left",
-                              "text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover"
-                            )}
+                            onClick={() => { onOpenSettings?.(); setOpen(false); }}
+                            className="w-full px-3 py-2 text-[10px] text-amber-400/80 italic text-left hover:bg-theme-bg-hover/30"
                           >
-                            {isActive && <Check className="w-3 h-3 flex-shrink-0" />}
-                            <span className={cn("truncate", isActive ? "font-medium" : "", !isActive && "ml-5")}>
-                              {model}
-                            </span>
+                            {t('ai.model_selector.no_key_warning')}
                           </button>
-                        );
-                      })
+                        ) : visibleModels.length === 0 ? (
+                          <div className="px-3 py-2 text-[10px] text-theme-text-muted italic">
+                            {t('ai.model_selector.refresh_models')}
+                          </div>
+                        ) : (
+                          visibleModels.map((model) => {
+                            const isActive = provider.id === aiSettings.activeProviderId && model === activeModel;
+                            return (
+                              <button
+                                key={`${provider.id}-${model}`}
+                                onClick={() => handleSelect(provider, model)}
+                                className={cn(
+                                  "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
+                                  isActive
+                                    ? "bg-transparent font-medium text-theme-text/85"
+                                    : "text-theme-text-muted/70 hover:bg-theme-bg-hover/30 hover:text-theme-text-muted"
+                                )}
+                              >
+                                {isActive && <Check className="w-3 h-3 flex-shrink-0 text-theme-accent" />}
+                                <span className={cn("truncate", !isActive && "ml-5")}>
+                                  {model}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
                     )}
                   </div>
                 );
-              })}
+              })
+            )}
           </div>
 
           {/* Footer: settings link */}

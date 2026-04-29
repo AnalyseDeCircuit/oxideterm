@@ -47,6 +47,21 @@ import { ChatMessage } from '@/components/ai/ChatMessage';
 import type { AiChatMessage } from '@/types';
 
 describe('ChatMessage', () => {
+  it('shows the model used for assistant messages without the provider name', () => {
+    const message: AiChatMessage = {
+      id: 'assistant-model',
+      role: 'assistant',
+      content: 'answer',
+      timestamp: 1,
+      model: 'openai/gpt-4o',
+    };
+
+    render(<ChatMessage message={message} />);
+
+    expect(screen.getByText('gpt-4o')).toBeInTheDocument();
+    expect(screen.queryByText('openai/gpt-4o')).not.toBeInTheDocument();
+  });
+
   it('renders assistant messages from turn-first fields before legacy fallbacks', () => {
     const message: AiChatMessage = {
       id: 'assistant-1',

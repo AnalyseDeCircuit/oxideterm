@@ -11,7 +11,13 @@
 
 import type { AutonomyLevel, TabType } from '../../types';
 import { tabTypeLabel } from './tabTypeLabel';
-import { buildToolOperationStrategyPrompt } from './toolUsePrompt';
+
+const AGENT_TOOL_STRATEGY_PROMPT = `## Tool Use Strategy
+- Prefer explicit targets over active-tab assumptions.
+- Use saved-connection/session tools for saved hosts; do not open a local shell and hand-type ssh unless the user asked for raw ssh.
+- For command execution, prefer direct execution on the resolved SSH node when visible terminal state is not required.
+- If a terminal reports password/passphrase/sudo input is required, stop and ask the user to provide it. Do not guess credentials.
+- Read or observe state before writing, and verify after changes.`;
 
 /** Build the agent system prompt with dynamic context */
 export function buildAgentSystemPrompt(options: {
@@ -90,9 +96,9 @@ When the task is complete (or cannot be completed), respond with a summary:
 ${buildCurrentContextSection(activeTabType, terminalType, connectionInfo, localOS, remoteEnvDesc, cwd)}
 
 ## Available Sessions
-${availableSessions || 'No active sessions. You can use context-free tools like list_targets to discover available targets.'}
+${availableSessions || 'No active sessions. Use context-free tools like resolve_target or list_targets to discover available targets.'}
 
-${buildToolOperationStrategyPrompt({ activeTabType })}`;
+${AGENT_TOOL_STRATEGY_PROMPT}`;
 }
 
 function buildCurrentContextSection(

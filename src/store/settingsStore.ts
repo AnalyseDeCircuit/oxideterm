@@ -25,6 +25,12 @@ import { platform } from '../lib/platform';
 import { sanitizeHighlightRules } from '../lib/terminal/highlightPattern';
 import type { HighlightRule } from '../types';
 import type { AiReasoningEffort } from '../lib/ai/providers';
+import {
+  createDefaultExecutionProfile,
+  normalizeExecutionProfiles,
+  type AiExecutionProfilesConfig,
+} from '../lib/ai/profiles';
+import packageJson from '../../package.json';
 
 // ============================================================================
 // Constants
@@ -55,6 +61,17 @@ const IN_BAND_TRANSFER_FILE_COUNT_MIN = 1;
 const IN_BAND_TRANSFER_FILE_COUNT_MAX = 10_000;
 const IN_BAND_TRANSFER_TOTAL_BYTES_MIN = 100 * 1024 * 1024;
 const IN_BAND_TRANSFER_TOTAL_BYTES_MAX = 100 * 1024 * 1024 * 1024;
+export const DEFAULT_AI_TOOL_MAX_ROUNDS = 10;
+export const MIN_AI_TOOL_MAX_ROUNDS = 1;
+export const MAX_AI_TOOL_MAX_ROUNDS = 30;
+
+function isPrereleaseVersion(version: string | undefined): boolean {
+  return /-(?:alpha|beta|rc|pre|preview)(?:[.-]|$)/i.test(version ?? '');
+}
+
+function getDefaultUpdateChannel(): UpdateChannel {
+  return isPrereleaseVersion(packageJson.version) ? 'beta' : 'stable';
+}
 
 function clampTerminalScrollback(scrollback: number): number {
   if (!Number.isFinite(scrollback)) {
@@ -80,6 +97,15 @@ function clampFiniteInteger(value: unknown, fallback: number, min: number, max: 
   }
 
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+export function normalizeAiToolMaxRounds(value: unknown): number {
+  return clampFiniteInteger(
+    value,
+    DEFAULT_AI_TOOL_MAX_ROUNDS,
+    MIN_AI_TOOL_MAX_ROUNDS,
+    MAX_AI_TOOL_MAX_ROUNDS,
+  );
 }
 
 function normalizeTerminalEncoding(value: unknown): TerminalEncoding {
@@ -177,6 +203,23 @@ export interface InBandTransferSettings {
   maxTotalBytes: number;
 }
 
+export interface TerminalAutosuggestSettings {
+  localShellHistory: boolean;
+}
+
+export interface TerminalCommandBarSettings {
+  enabled: boolean;
+  showLegacyToolbar: boolean;
+  gitStatus: boolean;
+}
+
+export interface TerminalCommandMarksSettings {
+  enabled: boolean;
+  userInputObserved: boolean;
+  heuristicDetection: boolean;
+  showHoverActions: boolean;
+}
+
 /** Terminal settings */
 export interface TerminalSettings {
   theme: string;
@@ -197,6 +240,9 @@ export interface TerminalSettings {
   copyOnSelect: boolean; // Copy terminal selection to the system clipboard when it stabilizes
   middleClickPaste: boolean; // Paste clipboard contents on middle-click when mouse tracking is inactive
   selectionRequiresShift: boolean; // Require Shift + drag before starting text selection
+  autosuggest: TerminalAutosuggestSettings; // Command Bar history suggestion sources
+  commandBar: TerminalCommandBarSettings; // Bottom command bar for client-side command editing/actions
+  commandMarks: TerminalCommandMarksSettings; // Lightweight iTerm2-style command marks
   // Background image settings
   backgroundEnabled: boolean;        // Master toggle — false = no bg image anywhere
   backgroundImage: string | null;    // Stored image path (app_data_dir/backgrounds/...)
@@ -326,6 +372,8 @@ export interface AiSettings {
      * Orthogonal to autoApproveTools (which controls auto-approval).
      */
     disabledTools: string[];
+    /** Maximum model/tool round trips per assistant reply before the loop is stopped. */
+    maxRounds?: number;
   };
   /** Context sources to auto-inject into AI system prompt */
   contextSources?: {
@@ -340,6 +388,8 @@ export interface AiSettings {
   embeddingConfig?: import('../types').EmbeddingConfig;
   /** Agent role configuration (planner/reviewer can use different provider/model) */
   agentRoles?: import('../types').AgentRolesConfig;
+  /** OxideSens execution profiles: model, policy, context, and command defaults. */
+  executionProfiles?: AiExecutionProfilesConfig;
 }
 
 /** Local terminal settings */
@@ -429,7 +479,7 @@ const isWindows = platform.isWindows;
 
 const defaultGeneralSettings: GeneralSettings = {
   language: 'zh-CN',  // Default to Chinese
-  updateChannel: 'stable',
+  updateChannel: getDefaultUpdateChannel(),
 };
 
 const defaultTerminalSettings: TerminalSettings = {
@@ -451,6 +501,20 @@ const defaultTerminalSettings: TerminalSettings = {
   copyOnSelect: false,
   middleClickPaste: false,
   selectionRequiresShift: false,
+  autosuggest: {
+    localShellHistory: true,
+  },
+  commandBar: {
+    enabled: true,
+    showLegacyToolbar: false,
+    gitStatus: true,
+  },
+  commandMarks: {
+    enabled: true,
+    userInputObserved: false,
+    heuristicDetection: false,
+    showHoverActions: true,
+  },
   // Background image defaults
   backgroundEnabled: true,
   backgroundImage: null,
@@ -525,80 +589,47 @@ const defaultAiSettings: AiSettings = {
   },
   toolUse: {
     enabled: false,                  // Default: disabled until user opts in
+    maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS,
     autoApproveTools: {
-      // Read-only tools: auto-approve by default
-      read_file: true,
-      list_directory: true,
-      grep_search: true,
-      git_status: true,
-      list_tabs: true,
-      list_sessions: true,
+      // Task-level read/discovery tools: auto-approve by default
       list_targets: true,
-      list_capabilities: true,
-      get_terminal_buffer: true,
-      search_terminal: true,
-      await_terminal_output: true,
-      list_connections: true,
-      list_port_forwards: true,
-      get_detected_ports: true,
-      get_connection_health: true,
-      sftp_list_dir: true,
-      sftp_read_file: true,
-      sftp_stat: true,
-      sftp_get_cwd: true,
-      ide_get_open_files: true,
-      ide_get_file_content: true,
-      ide_get_project_info: true,
-      // Local terminal (read-only)
-      local_list_shells: true,
-      local_get_terminal_info: true,
-      local_get_drives: true,
-      // Settings (read-only)
-      get_settings: true,
-      // Connection pool (read-only)
-      get_pool_stats: true,
-      // Connection monitor (read-only)
-      get_all_health: true,
-      get_resource_metrics: true,
-      // Session manager (all read-only)
-      list_saved_connections: true,
-      search_saved_connections: true,
-      get_session_tree: true,
-      // Plugin manager (read-only)
-      list_plugins: true,
-      // Write tools: require approval by default
-      terminal_exec: false,
-      write_file: false,
-      create_port_forward: false,
-      stop_port_forward: false,
-      // IDE (write)
-      ide_replace_string: false,
-      ide_insert_text: false,
-      ide_open_file: false,
-      ide_create_file: false,
-      // SFTP (write)
-      sftp_write_file: false,
-      // Local terminal (write)
-      local_exec: false,
-      // Settings (write)
-      update_setting: false,
-      // Connection pool (write)
-      set_pool_config: false,
-      // Meta tools
-      send_control_sequence: false,
-      batch_exec: false,
-      // Session manager (write)
-      connect_saved_session: false,
-      // TUI interaction (experimental — disabled by default)
-      read_screen: false,
-      send_keys: false,
-      send_mouse: false,
+      select_target: true,
+      observe_terminal: true,
+      read_resource: true,
+      get_state: true,
+      recall_preferences: true,
+      // Task-level action tools: require approval by default
+      connect_target: false,
+      run_command: false,
+      send_terminal_input: false,
+      write_resource: false,
+      'write_resource:settings': false,
+      'write_resource:file': false,
+      transfer_resource: false,
+      open_app_surface: false,
+      remember_preference: false,
     },
     disabledTools: [],
   },
   contextSources: {
     ide: true,
     sftp: true,
+  },
+  executionProfiles: {
+    defaultProfileId: 'default',
+    profiles: [
+      createDefaultExecutionProfile({
+        providerId: null,
+        model: null,
+        reasoningEffort: 'auto',
+        toolUse: {
+          enabled: false,
+          maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS,
+          autoApproveTools: {},
+          disabledTools: [],
+        },
+      }),
+    ],
   },
 };
 
@@ -731,6 +762,27 @@ function normalizeHistorySettings(settings: PersistedSettingsV2): PersistedSetti
   };
 }
 
+function mergeAutoApproveTools(
+  defaults: Record<string, boolean> | undefined,
+  saved: Record<string, boolean> | undefined,
+): Record<string, boolean> {
+  const merged = {
+    ...(defaults ?? {}),
+    ...(saved ?? {}),
+  };
+
+  if (saved?.write_resource === true) {
+    if (!Object.prototype.hasOwnProperty.call(saved, 'write_resource:settings')) {
+      merged['write_resource:settings'] = true;
+    }
+    if (!Object.prototype.hasOwnProperty.call(saved, 'write_resource:file')) {
+      merged['write_resource:file'] = true;
+    }
+  }
+
+  return merged;
+}
+
 // ============================================================================
 // Persistence Helpers
 // ============================================================================
@@ -740,8 +792,27 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
   const defaults = createDefaultSettings();
   return normalizeHistorySettings({
     version: 2,
-    general: { ...defaults.general, ...saved.general },
-    terminal: { ...defaults.terminal, ...saved.terminal },
+    general: {
+      ...defaults.general,
+      ...saved.general,
+      updateChannel: saved.general?.updateChannel ?? defaults.general.updateChannel,
+    },
+    terminal: {
+      ...defaults.terminal,
+      ...saved.terminal,
+      autosuggest: {
+        ...defaults.terminal.autosuggest,
+        ...saved.terminal?.autosuggest,
+      },
+      commandBar: {
+        ...defaults.terminal.commandBar,
+        ...saved.terminal?.commandBar,
+      },
+      inBandTransfer: {
+        ...defaults.terminal.inBandTransfer,
+        ...saved.terminal?.inBandTransfer,
+      },
+    },
     buffer: { ...defaults.buffer, ...saved.buffer },
     appearance: { ...defaults.appearance, ...saved.appearance },
     connectionDefaults: { ...defaults.connectionDefaults, ...saved.connectionDefaults },
@@ -759,13 +830,26 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
         ? {
             ...defaults.ai.toolUse,
             ...saved.ai.toolUse,
-            autoApproveTools: {
-              ...defaults.ai.toolUse?.autoApproveTools,
-              ...saved.ai.toolUse.autoApproveTools,
-            },
+            autoApproveTools: mergeAutoApproveTools(defaults.ai.toolUse?.autoApproveTools, saved.ai.toolUse.autoApproveTools),
             disabledTools: saved.ai.toolUse.disabledTools ?? [],
+            maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
           }
         : defaults.ai.toolUse,
+      executionProfiles: normalizeExecutionProfiles({
+        config: saved.ai?.executionProfiles,
+        providerId: saved.ai?.activeProviderId ?? defaults.ai.activeProviderId,
+        model: saved.ai?.activeModel ?? defaults.ai.activeModel,
+        reasoningEffort: saved.ai?.reasoningEffort ?? defaults.ai.reasoningEffort,
+        toolUse: saved.ai?.toolUse
+          ? {
+              ...defaults.ai.toolUse,
+              ...saved.ai.toolUse,
+              autoApproveTools: mergeAutoApproveTools(defaults.ai.toolUse?.autoApproveTools, saved.ai.toolUse.autoApproveTools),
+              disabledTools: saved.ai.toolUse.disabledTools ?? [],
+              maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
+            }
+          : defaults.ai.toolUse,
+      }),
     },
     localTerminal: saved.localTerminal
       ? { ...defaults.localTerminal!, ...saved.localTerminal }
@@ -885,7 +969,7 @@ function migrateToolUseSettings(settings: PersistedSettingsV2): PersistedSetting
     ...settings,
     ai: {
       ...settings.ai,
-      toolUse: { enabled: toolUse.enabled, autoApproveTools, disabledTools: [] },
+      toolUse: { enabled: toolUse.enabled, autoApproveTools, disabledTools: [], maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS },
     },
   };
   persistSettings(newSettings);
@@ -1757,6 +1841,8 @@ const TERMINAL_BEHAVIOR_KEYS: Array<keyof TerminalSettings> = [
   'copyOnSelect',
   'middleClickPaste',
   'selectionRequiresShift',
+  'autosuggest',
+  'commandBar',
   'highlightRules',
   'inBandTransfer',
 ];

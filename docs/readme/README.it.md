@@ -14,15 +14,15 @@
 
 
 <p align="center">
-  <strong>Un workspace SSH AI-native per terminali, file, porte e contesto remoto.</strong>
+  <strong>OxideTerm è un workspace SSH local-first, non solo un terminale.</strong>
   <br>
-  <strong>Zero Electron. Zero OpenSSL. Zero telemetria. Zero abbonamento. SSH puro in Rust.</strong>
+  <em>Apri una volta un nodo remoto (connessione server), poi lavora attorno a esso: shell, SFTP, port forwarding, trzsz, editing leggero e AI BYOK.</em>
   <br>
-  <em>Un singolo binario nativo per shell locali, SSH, SFTP, port forwarding, editing remoto, plugin e OxideSens AI.</em>
+  <strong>Zero Electron. Zero OpenSSL. Zero telemetria. Zero abbonamento. BYOK-first. SSH puro in Rust.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.5-blue" alt="Versione">
+  <img src="https://img.shields.io/badge/version-1.4.0--beta.1-blue" alt="Versione">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Piattaforma">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licenza">
   <img src="https://img.shields.io/badge/rust-1.85+-orange" alt="Rust">
@@ -47,11 +47,6 @@
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-> [!NOTE]
-> **Cambio di licenza:** A partire dalla v1.0.0, OxideTerm ha cambiato la sua licenza da **PolyForm Noncommercial 1.0.0** a **GPL-3.0 (GNU General Public License v3.0)**. OxideTerm è ora completamente open source — puoi usarlo, modificarlo e distribuirlo liberamente secondo i termini della licenza GPL-3.0. Abbiamo scelto questo cambio deliberatamente: niente cosplay "open source" con trappole non commerciali o clausole anti-concorrenza, ma libertà copyleft chiara per utenti, fork, redistributori e operatori commerciali. Vedi il file [LICENSE](../../LICENSE) per i dettagli.
-
----
-
 <div align="center">
 
 https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
@@ -66,15 +61,22 @@ https://github.com/user-attachments/assets/4ba033aa-94b5-4ed4-980c-5c3f9f21db7e
 
 | Problema | La risposta di OxideTerm |
 |---|---|
-| I client SSH non supportano shell locali | **Motore ibrido**: PTY locale (zsh/bash/fish/pwsh/WSL2) + SSH remoto in un'unica finestra |
+| Workspace SSH, non solo shell | **Workspace per nodi remoti**: terminali, SFTP, port forwarding, trzsz, IDE leggero, monitoraggio e contesto AI restano sotto lo stesso nodo |
+| Vuoi anche una shell locale | **Shell locale integrata**: zsh/bash/fish/pwsh/WSL2 affiancati alle sessioni SSH, così attività locali e remote convivono nella stessa UI |
 | Riconnessione = perdere tutto | **Riconnessione con periodo di grazia**: sonda la vecchia connessione per 30 s prima di chiuderla — i tuoi vim/htop/yazi sopravvivono |
-| L'editing remoto richiede VS Code Remote | **IDE integrato**: CodeMirror 6 su SFTP con 30+ linguaggi, agente remoto opzionale (~1 MB) su Linux |
+| Non vuoi installare un IDE remoto pesante | **Editing leggero integrato**: CodeMirror 6 su SFTP, più un agente Linux opzionale (~1 MB) quando servono operazioni file più veloci |
 | Nessun riutilizzo delle connessioni SSH | **Multiplexing**: terminale, SFTP, inoltri, IDE condividono una singola connessione SSH tramite pool con conteggio dei riferimenti |
 | Le librerie SSH dipendono da OpenSSL | **russh 0.59**: SSH puro in Rust compilato con `ring` — zero dipendenze C |
-| App Electron da 100+ MB | **Tauri 2.0**: backend Rust nativo, binario da 25–40 MB |
-| IA vincolata a un provider | **OxideSens**: 40+ strumenti, protocollo MCP, knowledge base RAG — funziona con OpenAI/Ollama/DeepSeek/qualsiasi API compatibile |
+| Non vuoi Electron | **Tauri 2.0**: backend Rust nativo, binario da 25–40 MB |
+| Non vuoi telemetria o abbonamento app | **Zero tracking, zero abbonamento per i workflow SSH core**: SSH/SFTP/port forwarding/shell locale non richiedono account o abbonamenti; i dati restano sul tuo dispositivo per impostazione predefinita; la sincronizzazione cloud è opzionale tramite [plugin ufficiale](#plugin-ufficiali) |
+| Vuoi AI senza account della piattaforma | **BYOK-first OxideSens**: usa la tua chiave OpenAI/Ollama/DeepSeek/compatibile; OxideTerm non vende crediti AI o piani cloud |
 | Credenziali in file di configurazione in chiaro | **Cifratura a riposo**: password e chiavi API restano nel portachiavi del sistema operativo, i metadati delle connessioni salvate vengono sigillati localmente e i file `.oxide` sono cifrati con ChaCha20-Poly1305 + Argon2id |
-| Strumenti dipendenti dal cloud che richiedono un account | **Local-first**: zero account, zero telemetria — i tuoi dati restano sul tuo dispositivo per impostazione predefinita. Porta la tua chiave AI. Sincronizzazione cloud opzionale tramite [plugin ufficiale](#plugin-ufficiali) |
+
+## Che cos'è / Che cosa non è
+
+OxideTerm è un **workspace SSH local-first**: apri una volta un nodo remoto e lavori nello stesso posto con shell, file, porte, trasferimenti integrati, editing leggero e contesto AI.
+
+OxideTerm **non è** una piattaforma AI cloud, un servizio agent ospitato, una cassetta degli attrezzi per ogni protocollo remoto, né un progetto che mette al centro i benchmark di rendering del terminale. Molti terminali moderni stanno evolvendo attorno a shell locali, pannelli AI o piattaforme agent cloud; OxideTerm si concentra sul workspace SSH local-first.
 
 ---
 
@@ -108,7 +110,7 @@ Scarica l'ultima versione da [GitHub Releases](https://github.com/AnalyseDeCircu
 | **SFTP** | Browser a doppio pannello, drag-and-drop, anteprima intelligente (immagini/video/audio/codice/PDF/hex/font), coda di trasferimento con progresso ed ETA, segnalibri, estrazione archivi |
 | **Modalità IDE** | CodeMirror 6 con 30+ linguaggi, albero file + stato Git, multi-tab, risoluzione conflitti, terminale integrato. Agente remoto opzionale per Linux (9 architetture aggiuntive) |
 | **Port forwarding** | Locale (-L), remoto (-R), SOCKS5 dinamico (-D), I/O message-passing senza lock, ripristino automatico alla riconnessione, report di terminazione, timeout di inattività |
-| **IA (OxideSens)** | Pannello inline (`⌘I`) + chat laterale, cattura buffer terminale (pannello singolo/tutti), contesto multi-sorgente (IDE/SFTP/Git), 40+ strumenti autonomi, integrazione server MCP, knowledge base RAG (ricerca ibrida BM25 + vettori), streaming SSE |
+| **IA (OxideSens)** | Assistente orientato ai target per connessioni salvate, sessioni SSH live, buffer del terminale, percorsi SFTP, impostazioni e voci della knowledge base; può diagnosticare output remoto, eseguire comandi approvati, ispezionare file e spiegare guasti senza un account OxideTerm |
 | **Plugin** | Caricamento ESM runtime, 18 namespace API, 24 componenti UI Kit, API congelata + ACL Proxy, circuit breaker, disattivazione automatica in caso di errori |
 | **CLI** | Companion `oxt`: JSON-RPC 2.0 tramite Unix Socket / Named Pipe, status/health/list/forward/config/connect/focus/attach/SFTP/import/AI, output leggibile + JSON |
 | **Sicurezza** | Export .oxide crittografato (ChaCha20-Poly1305 + Argon2id 256 MB), configurazione locale cifrata a riposo, portachiavi OS, Touch ID (macOS), keystore crittografato portatile, TOFU chiave host, pulizia memoria `zeroize` |
@@ -190,8 +192,8 @@ Assistente IA incentrato sulla privacy con due modalità di interazione:
 
 - **Pannello inline** (`⌘I`): comandi terminale rapidi, output iniettato tramite bracketed paste
 - **Chat laterale**: conversazioni persistenti con cronologia completa
-- **Cattura del contesto**: il Terminal Registry raccoglie il buffer dal pannello attivo o da tutti i pannelli divisi simultaneamente; iniezione automatica di file IDE, percorsi SFTP e stato Git
-- **40+ strumenti autonomi**: operazioni sui file, gestione processi, diagnostica di rete, interazione con app TUI, elaborazione testi — l'IA invoca questi strumenti senza attivazione manuale
+- **Contesto workspace orientato ai target**: vede connessioni salvate, sessioni SSH live, buffer del terminale, percorsi SFTP, impostazioni e voci della knowledge base come target del workspace
+- **Azioni approvate**: può diagnosticare output remoto, eseguire comandi approvati, ispezionare file e spiegare guasti senza richiedere un account OxideTerm
 - **Supporto MCP**: connessione a server [Model Context Protocol](https://modelcontextprotocol.io) esterni (stdio e SSE) per integrazione di strumenti di terze parti
 - **Knowledge base RAG** (v0.20): importa documenti Markdown/TXT in collezioni con scope (globale o per connessione). La ricerca ibrida fonde indice di keyword BM25 + similarità coseno vettoriale tramite Reciprocal Rank Fusion. Chunking consapevole del Markdown che preserva la gerarchia dei titoli. Tokenizer a bigrammi CJK per cinese/giapponese/coreano.
 - **Provider**: OpenAI, Ollama, DeepSeek, OneAPI, o qualsiasi endpoint `/v1/chat/completions`
@@ -481,6 +483,8 @@ Se OxideTerm aiuta il tuo workflow, una stella su GitHub, una riproduzione di is
 **GPL-3.0** — questo software è software libero rilasciato sotto la [Licenza Pubblica Generale GNU v3.0](https://www.gnu.org/licenses/gpl-3.0.html).
 
 È possibile utilizzare, modificare e distribuire liberamente questo software secondo i termini della GPL-3.0. Qualsiasi opera derivata deve essere distribuita sotto la stessa licenza.
+
+OxideTerm è passato da **PolyForm Noncommercial 1.0.0** a **GPL-3.0** a partire dalla v1.0.0. Il cambio è stato intenzionale: niente cosplay "open source" con trappole non commerciali o clausole anti-concorrenza, ma libertà copyleft chiara per utenti, fork, redistributori e operatori commerciali.
 
 Codice pubblico non significa automaticamente open source. Se un progetto mostra una licenza open source nota ma aggiunge clausole come "niente redistribuzione", "niente repackaging", "niente prodotti concorrenti" o "niente piattaforme di distribuzione non autorizzate", è più marketing source-available che la libertà che gli utenti si aspettano dall'open source. OxideTerm non aggiunge clausole di non concorrenza o anti-redistribuzione: i termini GPL-3.0 sono tutti i termini.
 

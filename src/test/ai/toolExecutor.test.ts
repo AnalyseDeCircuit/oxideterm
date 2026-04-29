@@ -25,6 +25,12 @@ const settingsState = vi.hoisted(() => ({
           transport: 'stdio',
           command: 'npx',
           args: ['-y', '@modelcontextprotocol/server-filesystem', '--api-key=secret-inline', '--token', 'secret-following'],
+          authHeaderName: 'X-API-Key',
+          authHeaderMode: 'raw',
+          headers: {
+            'X-Workspace': 'prod',
+            'X-Trace-Token': 'secret-header',
+          } as Record<string, string>,
           env: {
             API_TOKEN: 'super-secret',
             DEBUG: '1',
@@ -75,6 +81,7 @@ const writeToTerminalMock = vi.hoisted(() => vi.fn());
 const subscribeTerminalOutputMock = vi.hoisted(() => vi.fn());
 const waitForTerminalReadyMock = vi.hoisted(() => vi.fn());
 const readScreenMock = vi.hoisted(() => vi.fn());
+const beginTerminalCommandMarkMock = vi.hoisted(() => vi.fn());
 const createTabMock = vi.hoisted(() => vi.fn());
 
 const sessionTreeState = vi.hoisted(() => ({
@@ -205,6 +212,7 @@ vi.mock('@/store/broadcastStore', () => ({
 }));
 
 vi.mock('@/lib/terminalRegistry', () => ({
+  beginTerminalCommandMark: beginTerminalCommandMarkMock,
   findPaneBySessionId: findPaneBySessionIdMock,
   getTerminalBuffer: getTerminalBufferMock,
   writeToTerminal: writeToTerminalMock,
@@ -329,10 +337,16 @@ describe('toolExecutor get_settings sanitization', () => {
         name: 'ops',
         transport: 'stdio',
         command: 'npx',
+        authHeaderName: 'X-API-Key',
+        authHeaderMode: 'raw',
         args: ['-y', '@modelcontextprotocol/server-filesystem', '--api-key=[redacted]', '--token', '[redacted]'],
         env: {
           API_TOKEN: '[redacted]',
           DEBUG: '[redacted]',
+        },
+        headers: {
+          'X-Workspace': '[redacted]',
+          'X-Trace-Token': '[redacted]',
         },
         enabled: true,
         retryOnDisconnect: false,
@@ -591,6 +605,118 @@ describe('toolExecutor get_settings sanitization', () => {
       expect.objectContaining({ targetId: 'ssh-node:node-1', capability: 'command.run' }),
       expect.objectContaining({ targetId: 'ssh-node:node-1', capability: 'filesystem.read' }),
     ]));
+  });
+
+  it('resolves saved connection targets before opening a manual shell', async () => {
+    searchConnectionsMock.mockResolvedValue([
+      { id: 'saved-1', host: '192.168.31.192', port: 22, username: 'lipsc', name: '家里的主机本地', group: 'Home' },
+    ]);
+
+    const result = await executeTool(
+      'resolve_target',
+      { query: '家里的主机本地', intent: 'connection' },
+      { activeNodeId: null, activeAgentAvailable: false, activeSessionId: 'local-1', activeTerminalType: 'local_terminal', requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('saved-connection:saved-1');
+    expect(result.envelope?.targets?.[0]).toMatchObject({
+      id: 'saved-connection:saved-1',
+      kind: 'saved-connection',
+    });
+    expect(result.envelope?.nextActions?.[0]).toMatchObject({
+      tool: 'connect_saved_session',
+      args: { connection_id: 'saved-1' },
+    });
+  });
+
+  it('rejects broad connection discovery through resolve_target with list guidance', async () => {
+    const result = await executeTool(
+      'resolve_target',
+      { query: '看看现在有哪些远程主机可供链接', intent: 'connection' },
+      { activeNodeId: null, activeAgentAvailable: false, activeSessionId: 'local-1', activeTerminalType: 'local_terminal', requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.envelope?.error?.code).toBe('target_query_too_broad');
+    expect(result.envelope?.nextActions?.[0]?.tool).toBe('list_saved_connections');
+    expect(searchConnectionsMock).not.toHaveBeenCalled();
+  });
+
+  it('lists capabilities for a resolved saved-connection target', async () => {
+    const result = await executeTool(
+      'list_capabilities',
+      { target_id: 'saved-connection:saved-1' },
+      { activeNodeId: null, activeAgentAvailable: false, requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('navigation.open on saved-connection:saved-1');
+    expect(result.output).toContain('state.list on saved-connection:saved-1');
+  });
+
+  it('rejects terminal_exec on saved-connection targets with connect guidance', async () => {
+    const result = await executeTool(
+      'terminal_exec',
+      { target_id: 'saved-connection:saved-1', command: 'docker ps' },
+      { activeNodeId: null, activeAgentAvailable: false, requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.envelope?.error?.code).toBe('saved_connection_not_connected');
+    expect(result.envelope?.nextActions?.[0]).toMatchObject({
+      tool: 'connect_saved_session',
+      args: { connection_id: 'saved-1' },
+    });
+  });
+
+  it('requires an explicit target for terminal_exec in target-first mode', async () => {
+    const result = await executeTool(
+      'terminal_exec',
+      { command: 'pwd' },
+      { activeNodeId: 'node-1', activeAgentAvailable: true, requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.envelope?.error?.code).toBe('target_required');
+    expect(result.envelope?.nextActions?.[0]?.tool).toBe('resolve_target');
+  });
+
+  it('maps terminal_exec target_id to direct SSH node execution', async () => {
+    sessionTreeState.nodes = [
+      { id: 'node-1', host: 'example.com', username: 'root', port: 22, runtime: { status: 'connected', terminalIds: [] } },
+    ];
+    nodeIdeExecCommandMock.mockResolvedValue({ stdout: '/home/root\n', stderr: '', exitCode: 0 });
+
+    const result = await executeTool(
+      'terminal_exec',
+      { target_id: 'ssh-node:node-1', command: 'pwd' },
+      { activeNodeId: null, activeAgentAvailable: false, requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('/home/root');
+    expect(nodeIdeExecCommandMock).toHaveBeenCalledWith('node-1', 'pwd', undefined, 30);
+    expect(result.envelope?.meta.targetId).toBe('ssh-node:node-1');
+  });
+
+  it('maps terminal_exec target_id to visible terminal session execution', async () => {
+    sessionTreeState.nodes = [
+      { id: 'node-1', host: 'example.com', username: 'root', port: 22, runtime: { status: 'connected', terminalIds: ['term-1'] } },
+    ];
+    findPaneBySessionIdMock.mockReturnValue('pane-1');
+    getBufferStatsMock.mockResolvedValue({ current_lines: 0, total_lines: 0, max_lines: 100000, memory_usage_mb: 0 });
+    writeToTerminalMock.mockReturnValue(true);
+
+    const result = await executeTool(
+      'terminal_exec',
+      { target_id: 'terminal-session:term-1', command: 'pwd', await_output: false },
+      { activeNodeId: null, activeAgentAvailable: false, requireExplicitTarget: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(writeToTerminalMock).toHaveBeenCalledWith('pane-1', 'pwd\r');
+    expect(result.envelope?.meta.targetId).toBe('terminal-session:term-1');
   });
 
   it('returns file read metadata in the structured envelope', async () => {

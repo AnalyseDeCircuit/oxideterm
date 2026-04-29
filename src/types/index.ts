@@ -1551,6 +1551,8 @@ export interface AiChatMessage {
   content: string;
   /** Unix timestamp (ms) */
   timestamp: number;
+  /** Model that produced this assistant message */
+  model?: string;
   /** Terminal context attached to this message */
   context?: string;
   /** Whether the message is being streamed */
@@ -1611,6 +1613,8 @@ export interface AiConversation {
   turns?: import('../lib/ai/turnModel/types').AiConversationTurn[];
   /** Session-level metadata for turn-first chat flows */
   sessionMetadata?: import('../lib/ai/turnModel/types').AiConversationSessionMetadata;
+  /** Selected OxideSens execution profile. Missing = current default profile. */
+  profileId?: string;
   /** Creation timestamp */
   createdAt: number;
   /** Last update timestamp */
@@ -1665,7 +1669,7 @@ export interface AiProvider {
  * Separate from chat provider so users can pick a dedicated embedding model.
  */
 export type EmbeddingConfig = {
-  /** Provider ID to use for embeddings (null = use active chat provider) */
+  /** Provider ID to use for embeddings (null = auto-select an embedding-capable provider) */
   providerId: string | null;
   /** Embedding model name (e.g. "text-embedding-3-small") */
   model: string;
@@ -1713,7 +1717,7 @@ export type AiToolResult = {
   toolName: string;
   /** Whether execution succeeded */
   success: boolean;
-  /** Output content (truncated to max 8KB) */
+  /** Output content prepared for model/UI preview. Full output may live in envelope.rawOutput. */
   output: string;
   /** Error message if failed */
   error?: string;

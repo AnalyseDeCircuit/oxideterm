@@ -426,78 +426,33 @@ export const Sidebar = () => {
     const node = getNode(nodeId);
     if (!node) return;
 
-    const terminalIds = node.runtime?.terminalIds || [];
     const connectionId = node.runtime?.connectionId || node.sshConnectionId;
-
-    // 如果已有终端会话，用第一个打开 SFTP 标签页
-    if (terminalIds.length > 0) {
-      const sessionId = terminalIds[0];
-      createTab('sftp', sessionId, { nodeId });
-      return;
-    }
-
-    // 如果节点已连接但没有终端会话，先创建终端会话再打开 SFTP 标签页
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
-      try {
-        const terminalId = await createTerminalForNode(nodeId, 0, 0);
-        createTab('sftp', terminalId, { nodeId });
-      } catch (err) {
-        console.error('Failed to create session for SFTP:', err);
-      }
+      createTab('sftp', undefined, { nodeId });
     }
-  }, [getNode, createTab, createTerminalForNode]);
+  }, [getNode, createTab]);
 
   // 打开 IDE 模式标签页
   const handleTreeOpenIde = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
     if (!node) return;
 
-    const terminalIds = node.runtime?.terminalIds || [];
     const connectionId = node.runtime?.connectionId || node.sshConnectionId;
-
-    // 如果已有终端会话，用第一个打开 IDE 标签页
-    if (terminalIds.length > 0) {
-      const sessionId = terminalIds[0];
-      createTab('ide', sessionId, { nodeId });
-      return;
-    }
-
-    // 如果节点已连接但没有终端会话，先创建终端会话再打开 IDE 标签页
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
-      try {
-        const terminalId = await createTerminalForNode(nodeId, 0, 0);
-        createTab('ide', terminalId, { nodeId });
-      } catch (err) {
-        console.error('Failed to create session for IDE:', err);
-      }
+      createTab('ide', undefined, { nodeId });
     }
-  }, [getNode, createTab, createTerminalForNode]);
+  }, [getNode, createTab]);
 
   // 打开端口转发标签页
   const handleTreeOpenForwards = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);
     if (!node) return;
 
-    const terminalIds = node.runtime?.terminalIds || [];
     const connectionId = node.runtime?.connectionId || node.sshConnectionId;
-
-    // 如果节点有终端，用第一个
-    if (terminalIds.length > 0) {
-      const sessionId = terminalIds[0];
-      createTab('forwards', sessionId, { nodeId });
-      return;
-    }
-
-    // 如果节点已连接但没有终端会话，先创建终端会话再打开转发标签页
     if (connectionId && (node.runtime.status === 'connected' || node.runtime.status === 'active')) {
-      try {
-        const terminalId = await createTerminalForNode(nodeId, 0, 0);
-        createTab('forwards', terminalId, { nodeId });
-      } catch (err) {
-        console.error('Failed to create session for forwards:', err);
-      }
+      createTab('forwards', undefined, { nodeId });
     }
-  }, [getNode, createTab, createTerminalForNode]);
+  }, [getNode, createTab]);
 
   const handleTreeRemove = useCallback(async (nodeId: string) => {
     const node = getNode(nodeId);

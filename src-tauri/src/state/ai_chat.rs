@@ -169,6 +169,10 @@ pub struct PersistedMessage {
     /// Summary reference metadata for reload/rebuild (optional during migration)
     #[serde(default)]
     pub summary_ref: Option<Value>,
+    /// Model that produced this assistant message. Keep this as the final
+    /// field so old MessagePack records remain position-compatible.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Conversation metadata (lightweight, for list display)
@@ -1645,6 +1649,7 @@ pub struct AiChatStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Serialize;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -1686,7 +1691,48 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         }
+    }
+
+    #[derive(Serialize)]
+    struct LegacyPersistedMessage {
+        id: String,
+        conversation_id: String,
+        role: String,
+        content: String,
+        timestamp: i64,
+        projection_updated_at: i64,
+        tool_calls: Vec<PersistedToolCall>,
+        context_snapshot: Option<ContextSnapshot>,
+        turn: Option<Value>,
+        transcript_ref: Option<Value>,
+        summary_ref: Option<Value>,
+    }
+
+    #[test]
+    fn test_persisted_message_deserializes_legacy_records_without_model() {
+        let legacy = LegacyPersistedMessage {
+            id: "legacy-1".to_string(),
+            conversation_id: "conv-legacy".to_string(),
+            role: "assistant".to_string(),
+            content: "old answer".to_string(),
+            timestamp: 1000,
+            projection_updated_at: 1100,
+            tool_calls: vec![],
+            context_snapshot: None,
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+        };
+
+        let bytes = rmp_serde::to_vec(&legacy).unwrap();
+        let decoded: PersistedMessage = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.id, "legacy-1");
+        assert_eq!(decoded.content, "old answer");
+        assert_eq!(decoded.projection_updated_at, 1100);
+        assert!(decoded.model.is_none());
     }
 
     #[test]
@@ -1755,6 +1801,7 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         };
         store.save_message(message).unwrap();
 
@@ -1819,6 +1866,7 @@ mod tests {
                 turn: None,
                 transcript_ref: None,
                 summary_ref: None,
+                model: None,
             };
             store.save_message(msg).unwrap();
         }
@@ -1878,6 +1926,7 @@ mod tests {
                     turn: None,
                     transcript_ref: None,
                     summary_ref: None,
+                    model: None,
                 };
                 store.save_message(msg).unwrap();
             }
@@ -1989,6 +2038,7 @@ mod tests {
                 turn: None,
                 transcript_ref: None,
                 summary_ref: None,
+                model: None,
             };
             store.save_message(msg).unwrap();
         }
@@ -2029,6 +2079,7 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         };
         store.save_message(msg).unwrap();
 
@@ -2145,6 +2196,7 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         };
 
         store.save_message(message).unwrap();
@@ -2192,6 +2244,7 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         });
         set_test_force_compression_failure(false);
 
@@ -2257,6 +2310,7 @@ mod tests {
             turn: None,
             transcript_ref: None,
             summary_ref: None,
+            model: None,
         };
 
         store
@@ -2390,6 +2444,7 @@ mod tests {
                 "conversationId": "conv-summary-atomic",
                 "endEntryId": "entry-summary"
             })),
+            model: None,
             summary_ref: Some(serde_json::json!({
                 "kind": "conversation",
                 "transcriptRef": {
@@ -2474,6 +2529,7 @@ mod tests {
                             "endEntryId": "entry-anchor"
                         }
                     })),
+                    model: None,
                 }],
                 vec![PersistedTranscriptEntry {
                     id: "entry-anchor".to_string(),
@@ -2517,6 +2573,7 @@ mod tests {
                     turn: None,
                     transcript_ref: None,
                     summary_ref: None,
+                    model: None,
                 },
                 vec![],
             )
@@ -2536,6 +2593,7 @@ mod tests {
                     turn: None,
                     transcript_ref: None,
                     summary_ref: None,
+                    model: None,
                 },
                 vec![PersistedTranscriptEntry {
                     id: "entry-1".to_string(),
@@ -2587,6 +2645,7 @@ mod tests {
                 turn: None,
                 transcript_ref: None,
                 summary_ref: None,
+                model: None,
             })
             .unwrap();
 
@@ -2603,6 +2662,7 @@ mod tests {
                 turn: None,
                 transcript_ref: None,
                 summary_ref: None,
+                model: None,
             })
             .unwrap();
 
@@ -2634,6 +2694,7 @@ mod tests {
                     turn: None,
                     transcript_ref: None,
                     summary_ref: None,
+                    model: None,
                 },
                 vec![],
             )
@@ -2653,6 +2714,7 @@ mod tests {
                     turn: None,
                     transcript_ref: None,
                     summary_ref: None,
+                    model: None,
                 },
                 vec![PersistedTranscriptEntry {
                     id: "entry-newer".to_string(),

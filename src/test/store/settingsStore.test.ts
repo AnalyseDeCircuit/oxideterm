@@ -148,15 +148,100 @@ describe('settingsStore', () => {
     });
     expect(settings.ai.activeProviderId).toBe(settings.ai.providers[0].id);
     expect(settings.ai.activeModel).toBe('custom-model');
-    expect(settings.ai.toolUse?.autoApproveTools.read_file).toBe(true);
     expect(settings.ai.toolUse?.autoApproveTools.list_targets).toBe(true);
-    expect(settings.ai.toolUse?.autoApproveTools.list_capabilities).toBe(true);
-    expect(settings.ai.toolUse?.autoApproveTools.terminal_exec).toBe(false);
+    expect(settings.ai.toolUse?.autoApproveTools.select_target).toBe(true);
+    expect(settings.ai.toolUse?.autoApproveTools.read_resource).toBe(true);
+    expect(settings.ai.toolUse?.autoApproveTools.run_command).toBe(false);
+    expect(settings.ai.toolUse?.maxRounds).toBe(10);
 
     const persisted = JSON.parse(localStorage.getItem('oxide-settings-v2') || '{}');
     expect(persisted.ai.providers.length).toBeGreaterThan(0);
-    expect(persisted.ai.toolUse.autoApproveTools.read_file).toBe(true);
     expect(persisted.ai.toolUse.autoApproveTools.list_targets).toBe(true);
+    expect(persisted.ai.toolUse.autoApproveTools.run_command).toBe(false);
+    expect(persisted.ai.toolUse.maxRounds).toBe(10);
+  });
+
+  it('normalizes persisted AI tool round limits on load', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      ai: {
+        ...buildSavedSettings().ai,
+        toolUse: {
+          enabled: true,
+          autoApproveTools: {},
+          disabledTools: [],
+          maxRounds: 999,
+        },
+      },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.ai.toolUse?.maxRounds).toBe(30);
+  });
+
+  it('merges terminal autosuggest defaults for existing settings', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.autosuggest).toEqual({
+      localShellHistory: true,
+    });
+  });
+
+  it('merges terminal command bar defaults for existing settings', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.commandBar).toEqual({
+      enabled: true,
+      showLegacyToolbar: false,
+      gitStatus: true,
+    });
+  });
+
+  it('merges terminal command mark defaults for existing settings', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.commandMarks).toEqual({
+      enabled: true,
+      userInputObserved: false,
+      heuristicDetection: false,
+      showHoverActions: true,
+    });
+  });
+
+  it('maps legacy write_resource approval to settings and file only', async () => {
+    const base = buildSavedSettings();
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      ai: {
+        ...base.ai,
+        toolUse: {
+          enabled: true,
+          autoApproveTools: { write_resource: true },
+          disabledTools: [],
+          maxRounds: 10,
+        },
+      },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+    const autoApproveTools = useSettingsStore.getState().settings.ai.toolUse?.autoApproveTools;
+
+    expect(autoApproveTools?.write_resource).toBe(true);
+    expect(autoApproveTools?.['write_resource:settings']).toBe(true);
+    expect(autoApproveTools?.['write_resource:file']).toBe(true);
+    expect(autoApproveTools?.transfer_resource).toBe(false);
+    expect(autoApproveTools?.remember_preference).toBe(false);
   });
 
   it('clears legacy localStorage keys when loading defaults', async () => {
@@ -168,6 +253,22 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.version).toBe(2);
     expect(localStorage.getItem('oxide-settings')).toBeNull();
     expect(localStorage.getItem('oxide-ui-state')).toBeNull();
+  });
+
+  it('defaults prerelease builds to the beta update channel', async () => {
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.general.updateChannel).toBe('beta');
+  });
+
+  it('preserves an explicitly selected stable update channel', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      general: { language: 'en', updateChannel: 'stable' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.general.updateChannel).toBe('stable');
   });
 
   it('uses derived backend hot-buffer defaults', async () => {

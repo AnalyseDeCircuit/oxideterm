@@ -78,6 +78,7 @@ function arePropsEqual(prev: ChatMessageProps, next: ChatMessageProps): boolean 
   return (
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
+    prev.message.model === next.message.model &&
     prev.message.isStreaming === next.message.isStreaming &&
     prev.message.turn === next.message.turn &&
     prev.message.thinkingContent === next.message.thinkingContent &&
@@ -103,6 +104,9 @@ export const ChatMessage = memo(function ChatMessage({
 }: ChatMessageProps) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
+  const messageModelLabel = !isUser && message.model
+    ? message.model.split('/').filter(Boolean).pop() ?? message.model
+    : null;
   const contentRef = useRef<HTMLDivElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -307,6 +311,14 @@ export const ChatMessage = memo(function ChatMessage({
         {message.context && !isUser && (
           <span className="text-[10px] text-theme-text-muted/40 font-medium">
             ({t('ai.message.used_context')})
+          </span>
+        )}
+        {messageModelLabel && (
+          <span
+            className="max-w-[180px] truncate rounded-[var(--radius-sm)] border border-theme-border/40 bg-theme-bg-panel/55 px-1.5 py-0.5 text-[10px] font-medium text-theme-text-muted/45"
+            title={message.model}
+          >
+            {messageModelLabel}
           </span>
         )}
         <span className={`text-[10px] text-theme-text-muted/25 font-mono shrink-0 ${isUser ? 'mr-auto' : 'ml-auto'}`}>

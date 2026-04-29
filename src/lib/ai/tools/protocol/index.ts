@@ -6,6 +6,7 @@ export type {
   ToolResultEnvelope,
   ToolResultError,
   ToolResultMeta,
+  ToolOutputPreview,
   ToolRisk,
   ToolTarget,
   ToolTargetKind,

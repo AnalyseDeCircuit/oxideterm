@@ -66,6 +66,12 @@ describe('parseUserInput', () => {
     expect(result.participants).toHaveLength(1);
   });
 
+  it('preserves unknown @tokens as normal text', () => {
+    const result = parseUserInput('@foo explain this @terminal');
+    expect(result.participants).toEqual([{ name: 'terminal', raw: '@terminal' }]);
+    expect(result.cleanText).toBe('@foo explain this');
+  });
+
   // ── References ──
 
   it('extracts #reference without value', () => {
@@ -74,9 +80,9 @@ describe('parseUserInput', () => {
   });
 
   it('extracts #reference with colon value', () => {
-    const result = parseUserInput('read #file:/etc/nginx.conf');
+    const result = parseUserInput('read #pane:2');
     expect(result.references).toEqual([
-      { type: 'file', value: '/etc/nginx.conf', raw: '#file:/etc/nginx.conf' },
+      { type: 'pane', value: '2', raw: '#pane:2' },
     ]);
   });
 
@@ -85,6 +91,12 @@ describe('parseUserInput', () => {
     expect(result.references).toHaveLength(2);
     expect(result.references[0].type).toBe('buffer');
     expect(result.references[1]).toEqual({ type: 'pane', value: '2', raw: '#pane:2' });
+  });
+
+  it('preserves unknown #tokens as normal text', () => {
+    const result = parseUserInput('#file:/etc/nginx.conf #bar explain #buffer');
+    expect(result.references).toEqual([{ type: 'buffer', value: undefined, raw: '#buffer' }]);
+    expect(result.cleanText).toBe('#file:/etc/nginx.conf #bar explain');
   });
 
   // ── Combined ──

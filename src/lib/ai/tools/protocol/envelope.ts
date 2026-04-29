@@ -30,6 +30,8 @@ export function createToolResultEnvelope<TData = unknown>(input: {
   toolName: string;
   summary: string;
   output?: string;
+  rawOutput?: string;
+  outputPreview?: ToolResultEnvelope['outputPreview'];
   data?: TData;
   warnings?: string[];
   error?: ToolResultEnvelope['error'];
@@ -43,12 +45,20 @@ export function createToolResultEnvelope<TData = unknown>(input: {
   targetId?: string;
   durationMs?: number;
   truncated?: boolean;
+  verified?: boolean;
+  runtimeEpoch?: string;
+  stateVersion?: string;
+  commandRecordId?: string;
+  policyDecision?: ToolResultEnvelope['meta']['policyDecision'];
+  profileId?: string;
 }): ToolResultEnvelope<TData> {
   return {
     ok: input.ok,
     summary: input.summary,
     ...(input.data !== undefined ? { data: input.data } : {}),
     output: input.output ?? input.summary,
+    ...(input.rawOutput !== undefined ? { rawOutput: input.rawOutput } : {}),
+    ...(input.outputPreview ? { outputPreview: input.outputPreview } : {}),
     ...(input.warnings && input.warnings.length > 0 ? { warnings: input.warnings } : {}),
     ...(input.error ? { error: input.error } : {}),
     ...(input.observations && input.observations.length > 0 ? { observations: input.observations } : {}),
@@ -63,6 +73,12 @@ export function createToolResultEnvelope<TData = unknown>(input: {
       ...(input.targetId ? { targetId: input.targetId } : {}),
       durationMs: input.durationMs ?? DEFAULT_DURATION_MS,
       ...(input.truncated !== undefined ? { truncated: input.truncated } : {}),
+      ...(input.verified !== undefined ? { verified: input.verified } : {}),
+      ...(input.runtimeEpoch ? { runtimeEpoch: input.runtimeEpoch } : {}),
+      ...(input.stateVersion ? { stateVersion: input.stateVersion } : {}),
+      ...(input.commandRecordId ? { commandRecordId: input.commandRecordId } : {}),
+      ...(input.policyDecision ? { policyDecision: input.policyDecision } : {}),
+      ...(input.profileId ? { profileId: input.profileId } : {}),
     },
   };
 }
@@ -141,6 +157,7 @@ export function formatToolResultForModel(result: AiToolResult): string {
     ...(envelope.targets && envelope.targets.length > 0 ? { targets: envelope.targets } : {}),
     ...(envelope.nextActions && envelope.nextActions.length > 0 ? { nextActions: envelope.nextActions } : {}),
     ...(envelope.disambiguation ? { disambiguation: envelope.disambiguation } : {}),
+    ...(envelope.outputPreview ? { outputPreview: envelope.outputPreview } : {}),
     meta: {
       ...envelope.meta,
       truncated: envelope.meta.truncated === true

@@ -114,6 +114,9 @@
       "offline": "Hors ligne",
       "manage_providers": "Gérer les fournisseurs",
       "no_provider": "Aucun fournisseur configuré",
+      "search_placeholder": "Rechercher des modèles...",
+      "clear_search": "Effacer la recherche",
+      "no_search_results": "Aucun modèle correspondant",
       "refresh_models": "Actualiser",
       "api_key_not_found": "Clé API introuvable. Veuillez la configurer dans Paramètres > IA.",
       "failed_to_get_api_key": "Échec de la récupération de la clé API."
@@ -133,6 +136,10 @@
       "copy_session_id": "Copier session_id",
       "recoverable_error": "Erreur récupérable",
       "output_truncated": "La sortie a été tronquée",
+      "output_truncated_with_full": "La sortie a été compactée pour le modèle. La sortie complète est enregistrée dans cette conversation.",
+      "output_truncated_no_full": "La sortie a été compactée ; la sortie complète était trop volumineuse pour être enregistrée.",
+      "output_stats": "{{chars}} caractères, {{lines}} lignes{{omitted}}",
+      "show_more_preview": "Afficher plus d’aperçu",
       "condensed": "{{count}} appel(s) antérieur(s) condensé(s) pour le contexte IA",
       "condensed_label": "Appels antérieurs (condensés)",
       "deny_list_warning": "Commande sensible à la sécurité",
@@ -217,7 +224,17 @@
         "network-expose": "Exposition réseau",
         "settings-change": "Modification paramètres",
         "credential-sensitive": "Identifiants sensibles"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "L'utilisation d'outils est désactivée pour ce chat et le modèle a émis une fausse transcription d'outil. OxideSens a demandé une nouvelle tentative en langage naturel.",
@@ -237,31 +254,41 @@
       "disable_group": "Désactiver le groupe",
       "active_summary": "{{active}}/{{total}} outils actifs"
     },
+    "tool_status": {
+      "enabled": "Outils activés",
+      "rounds_short": "{{count}}",
+      "disabled": "Outils désactivés",
+      "disabled_short": "Off",
+      "disabled_count": "{{count}} désactivés",
+      "open_settings": "Ouvrir les paramètres des outils IA"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Mode de sécurité par défaut : les commandes dangereuses demandent une approbation",
+      "bypass_title": "Le mode Bypass est actif pour cette discussion",
+      "menu_title": "Mode de sécurité",
+      "default_mode": "Default mode",
+      "default_desc": "Les commandes dangereuses demandent une approbation avant exécution.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Ignore les approbations de commandes dangereuses dans cette discussion après confirmation.",
+      "open_settings": "Ouvrir les paramètres d’utilisation des outils",
+      "confirm_title": "Activer le mode Bypass ?",
+      "confirm_description": "Pour cette discussion seulement, les commandes dangereuses s'exécuteront sans approbation individuelle. Les appels d'outils restent enregistrés. Les mots de passe, invites sudo, phrases secrètes et identifiants doivent toujours être saisis par vous.",
+      "confirm_enable": "Activer Bypass",
+      "confirm_cancel": "Garder Default"
+    },
     "slash": {
       "explain": "Expliquer",
       "explain_desc": "Expliquer une commande, sortie ou concept",
-      "optimize": "Optimiser",
-      "optimize_desc": "Suggérer des optimisations pour une commande ou un script",
       "fix": "Réparer",
       "fix_desc": "Diagnostiquer et réparer les erreurs",
-      "script": "Script",
-      "script_desc": "Générer un script shell pour une tâche",
-      "deploy": "Déployer",
-      "deploy_desc": "Aider au déploiement et aux tâches CI/CD",
-      "monitor": "Surveiller",
-      "monitor_desc": "Vérifier les ressources système et la santé",
-      "connect": "Connecter",
-      "connect_desc": "Aider à gérer les connexions SSH",
-      "search": "Rechercher",
-      "search_desc": "Rechercher dans les fichiers, journaux ou sorties terminal",
       "help": "Aide",
       "help_desc": "Afficher les commandes et fonctionnalités disponibles",
       "clear": "Effacer",
       "clear_desc": "Démarrer une nouvelle conversation",
       "compact": "Compacter",
-      "compact_desc": "Compresser l'historique de conversation",
-      "tools": "Outils",
-      "tools_desc": "Afficher les outils disponibles et leur statut"
+      "compact_desc": "Compresser l'historique de conversation"
     },
     "participant": {
       "terminal": "Terminal",
@@ -270,30 +297,24 @@
       "sftp_desc": "Navigateur de fichiers et transferts",
       "ide": "IDE",
       "ide_desc": "Édition de code et outils de projet",
-      "connection": "Connexion",
-      "connection_desc": "Connexions SSH et infrastructure",
-      "system": "Système",
-      "system_desc": "Surveillance système et santé",
       "local": "Local",
-      "local_desc": "Terminal local et shell"
+      "local_desc": "Terminal local et shell",
+      "settings": "Paramètres",
+      "settings_desc": "Paramètres et préférences de l'application",
+      "knowledge": "Connaissances",
+      "knowledge_desc": "Base de connaissances et recherche documentaire"
     },
     "reference": {
       "buffer": "Tampon",
       "buffer_desc": "Contenu du tampon terminal actif",
       "selection": "Sélection",
       "selection_desc": "Sélection actuelle du terminal",
-      "file": "Fichier",
-      "file_desc": "Lire un fichier distant par chemin",
       "error": "Erreur",
       "error_desc": "Dernière erreur de la sortie terminal",
       "pane": "Panneau",
       "pane_desc": "Contenu d'un panneau spécifique",
       "cwd": "Rép. courant",
-      "cwd_desc": "Répertoire de travail actuel",
-      "env": "Env.",
-      "env_desc": "Variables d'environnement",
-      "history": "Historique",
-      "history_desc": "Historique récent des commandes"
+      "cwd_desc": "Répertoire de travail actuel"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens n'est pas activé. Veuillez l'activer dans Paramètres → AI pour commencer."

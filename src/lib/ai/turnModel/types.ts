@@ -105,6 +105,7 @@ export interface AiConversationSessionMetadata {
   origin?: string;
   providerId?: string;
   providerModel?: string;
+  profileId?: string;
   activeParticipant?: string;
   affectedSessionIds?: string[];
   affectedNodeIds?: string[];

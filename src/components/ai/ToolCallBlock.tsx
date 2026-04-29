@@ -300,15 +300,37 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
   const summary = envelope?.summary || formatArgs(call.arguments);
   const capability = envelope?.meta.capability;
   const targetId = envelope?.meta.targetId;
+  const bypassApproval = envelope?.meta.approvalMode === 'bypass';
+  const policyDecision = envelope?.meta.policyDecision;
   const warnings = envelope?.warnings ?? [];
   const structuredData = envelope?.data;
   const hasOutput = call.result && (call.result.output || call.result.error);
   const isPendingApproval = call.status === 'pending_user_approval';
-  const rawOutput = call.result?.output ?? '';
-  const isLongOutput = rawOutput.length > LONG_OUTPUT_PREVIEW_CHARS;
-  const displayedOutput = isLongOutput && !showRawOutput
-    ? `${rawOutput.slice(0, LONG_OUTPUT_PREVIEW_CHARS)}\n…`
-    : rawOutput;
+  const previewOutput = call.result?.output ?? '';
+  const fullOutput = envelope?.rawOutput;
+  const outputPreview = envelope?.outputPreview;
+  const canShowFullOutput = typeof fullOutput === 'string' && fullOutput.length > 0;
+  const outputWasCompressed = Boolean(call.result?.truncated || outputPreview?.strategy !== undefined && outputPreview.strategy !== 'full');
+  const isLongOutput = previewOutput.length > LONG_OUTPUT_PREVIEW_CHARS;
+  const shouldShowOutputToggle = canShowFullOutput || isLongOutput || outputWasCompressed;
+  const displayedOutput = (() => {
+    if (showRawOutput && canShowFullOutput) return fullOutput;
+    if (isLongOutput && !showRawOutput) return `${previewOutput.slice(0, LONG_OUTPUT_PREVIEW_CHARS)}\n…`;
+    return previewOutput;
+  })();
+  const outputStatsLabel = outputPreview
+    ? t('ai.tool_use.output_stats', {
+        defaultValue: '{{chars}} chars, {{lines}} lines{{omitted}}',
+        chars: outputPreview.charCount,
+        lines: outputPreview.lineCount,
+        omitted: outputPreview.omittedChars ? `, ${outputPreview.omittedChars} omitted` : '',
+      })
+    : undefined;
+  const outputToggleLabel = showRawOutput
+    ? t('ai.tool_use.hide_raw_output')
+    : canShowFullOutput
+      ? t('ai.tool_use.show_raw_output')
+      : t('ai.tool_use.show_more_preview', { defaultValue: 'Show more preview' });
   const sessionId = (() => {
     const args = parseArgs(call.arguments);
     return typeof args.session_id === 'string' ? args.session_id : undefined;
@@ -352,6 +374,12 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
         <Badge className={cn('shrink-0', RISK_CLASS[risk])}>
           {formatRiskLabel(risk, t)}
         </Badge>
+        {bypassApproval && (
+          <Badge className="shrink-0 gap-1 border-amber-400/70 bg-amber-400/20 text-amber-200 shadow-[0_0_12px_rgba(251,191,36,0.25)]">
+            <ShieldAlert className="h-2.5 w-2.5" />
+            {t('ai.tool_use.bypass_badge', { defaultValue: 'Bypass' })}
+          </Badge>
+        )}
         {capability && (
           <Badge className="shrink-0 border-theme-border/30 text-theme-text-muted/60 bg-theme-bg/30">
             {capability}
@@ -420,6 +448,20 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
                   <span className="text-[10px] text-theme-text-muted/65 font-mono">{targetId}</span>
                 </div>
               )}
+              {policyDecision && (
+                <div>
+                  <span className="text-[9px] text-theme-text-muted/40 uppercase tracking-wider mr-1">{t('ai.tool_use.policy', { defaultValue: 'Policy' })}</span>
+                  <span className="text-[10px] text-theme-text-muted/65">
+                    {policyDecision.decision} · {policyDecision.reasonCode} · {policyDecision.matchedPolicyKey}
+                  </span>
+                </div>
+              )}
+              {envelope?.meta.commandRecordId && (
+                <div>
+                  <span className="text-[9px] text-theme-text-muted/40 uppercase tracking-wider mr-1">{t('ai.tool_use.command_record', { defaultValue: 'Command record' })}</span>
+                  <span className="text-[10px] text-theme-text-muted/65 font-mono">{envelope.meta.commandRecordId}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -476,18 +518,21 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
                   {displayedOutput}
                 </pre>
               )}
-              {isLongOutput && (
+              {shouldShowOutputToggle && (
                 <button
                   type="button"
                   onClick={() => setShowRawOutput((value) => !value)}
                   className="text-[9px] text-theme-accent hover:text-theme-accent/80 mt-0.5"
                 >
-                  {showRawOutput ? t('ai.tool_use.hide_raw_output') : t('ai.tool_use.show_raw_output')}
+                  {outputToggleLabel}
                 </button>
               )}
               {call.result!.truncated && (
                 <div className="text-[9px] text-yellow-500/60 mt-0.5">
-                  {t('ai.tool_use.output_truncated')}
+                  {canShowFullOutput
+                    ? t('ai.tool_use.output_truncated_with_full', { defaultValue: 'Output was compacted for the model. Full output is stored for this chat.' })
+                    : t('ai.tool_use.output_truncated_no_full', { defaultValue: 'Output was compacted; full output was too large to store.' })}
+                  {outputStatsLabel ? ` (${outputStatsLabel})` : ''}
                 </div>
               )}
             </div>

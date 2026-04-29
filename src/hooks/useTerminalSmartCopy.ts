@@ -15,6 +15,7 @@ type TerminalSmartCopyOptions = {
   isCopyOnSelectEnabled?: () => boolean;
   isMiddleClickPasteEnabled?: () => boolean;
   onPasteShortcut?: () => void;
+  onKeyEvent?: (event: KeyboardEvent) => boolean;
   container?: HTMLElement | null;
 };
 
@@ -154,6 +155,10 @@ export function attachTerminalSmartCopy(
   term.attachCustomKeyEventHandler((event) => {
     if (!options.isActive()) {
       return true;
+    }
+
+    if (options.onKeyEvent && !options.onKeyEvent(event)) {
+      return false;
     }
 
     if (options.isEnabled() && isSmartCopyShortcut(event)) {

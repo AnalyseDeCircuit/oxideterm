@@ -19,6 +19,7 @@ export type ToolCapability =
 
 export type ToolTargetKind =
   | 'local-shell'
+  | 'saved-connection'
   | 'ssh-node'
   | 'terminal-session'
   | 'sftp-session'
@@ -61,7 +62,29 @@ export interface ToolResultMeta {
   targetId?: string;
   durationMs: number;
   truncated?: boolean;
+  verified?: boolean;
+  runtimeEpoch?: string;
+  stateVersion?: string;
+  approvalMode?: 'default' | 'bypass';
+  commandRecordId?: string;
+  policyDecision?: {
+    decision: 'allow' | 'require_approval' | 'deny';
+    risk: string;
+    reasonCode: string;
+    matchedPolicyKey: string;
+    approvalMode: 'default' | 'bypass';
+    profileId?: string;
+  };
+  profileId?: string;
 }
+
+export type ToolOutputPreview = {
+  strategy: 'full' | 'head_tail' | 'tail';
+  charCount: number;
+  lineCount: number;
+  omittedChars?: number;
+  rawOutputStored?: boolean;
+};
 
 export type ToolNextAction = {
   tool: string;
@@ -83,7 +106,11 @@ export interface ToolResultEnvelope<TData = unknown> {
   ok: boolean;
   summary: string;
   data?: TData;
+  /** Compact model-safe output preview. */
   output: string;
+  /** UI-only full output when it is small enough to persist. Never send this to the model. */
+  rawOutput?: string;
+  outputPreview?: ToolOutputPreview;
   warnings?: string[];
   error?: ToolResultError;
   observations?: string[];

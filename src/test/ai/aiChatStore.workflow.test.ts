@@ -9,6 +9,8 @@ const parseUserInputMock = vi.hoisted(() => vi.fn(() => ({
   cleanText: '',
 })));
 const resolveSlashCommandMock = vi.hoisted(() => vi.fn());
+const slashCommandsMock = vi.hoisted(() => [] as Array<{ name: string; descriptionKey: string; clientOnly?: boolean }>);
+const resolveParticipantMock = vi.hoisted(() => vi.fn());
 const getProviderMock = vi.hoisted(() => vi.fn());
 const contextFreeToolsMock = vi.hoisted(() => new Set(['local_exec']));
 const sessionIdToolsMock = vi.hoisted(() => new Set<string>());
@@ -33,6 +35,8 @@ const resolveAllReferencesMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => 
 const appStoreState = vi.hoisted(() => ({ tabs: [] as Array<{ id: string; type?: string }>, activeTabId: null as string | null, sessions: new Map() }));
 const apiMocks = vi.hoisted(() => ({
   getAiProviderApiKey: vi.fn().mockResolvedValue('key-1'),
+  getConnections: vi.fn().mockResolvedValue([]),
+  localExecCommand: vi.fn().mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, timedOut: false }),
   ragSearch: vi.fn().mockResolvedValue([]),
   nodeAgentStatus: vi.fn().mockResolvedValue({ type: 'ready' }),
   nodeGetState: vi.fn().mockResolvedValue({ state: { readiness: 'ready' } }),
@@ -69,6 +73,7 @@ const settingsStoreMock = vi.hoisted(() => ({
           enabled: false,
           disabledTools: [],
           autoApproveTools: {},
+          maxRounds: 10,
         },
       },
     },
@@ -83,7 +88,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
-  api: { getAiProviderApiKey: apiMocks.getAiProviderApiKey },
+  api: {
+    getAiProviderApiKey: apiMocks.getAiProviderApiKey,
+    getConnections: apiMocks.getConnections,
+    localExecCommand: apiMocks.localExecCommand,
+  },
   ragSearch: apiMocks.ragSearch,
   nodeAgentStatus: apiMocks.nodeAgentStatus,
   nodeGetState: apiMocks.nodeGetState,
@@ -173,13 +182,12 @@ vi.mock('@/lib/ai/inputParser', () => ({
 
 vi.mock('@/lib/ai/slashCommands', () => ({
   resolveSlashCommand: resolveSlashCommandMock,
-  SLASH_COMMANDS: [],
+  SLASH_COMMANDS: slashCommandsMock,
 }));
 
 vi.mock('@/lib/ai/participants', () => ({
   PARTICIPANTS: [],
-  resolveParticipant: vi.fn(),
-  mergeParticipantTools: vi.fn(() => new Set()),
+  resolveParticipant: resolveParticipantMock,
 }));
 
 vi.mock('@/lib/ai/references', () => ({
@@ -273,9 +281,12 @@ describe('aiChatStore workflows', () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
     settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
+    settingsStoreMock.state.settings.ai.toolUse.maxRounds = 10;
     settingsStoreMock.state.settings.ai.memory = { enabled: true, content: '' };
     parseUserInputMock.mockReturnValue({ slashCommand: null, participants: [], references: [], cleanText: '' });
     resolveSlashCommandMock.mockReturnValue(undefined);
+    slashCommandsMock.splice(0, slashCommandsMock.length);
+    resolveParticipantMock.mockReturnValue(undefined);
     getProviderMock.mockReturnValue({ streamCompletion: providerStreamMock });
     estimateTokensMock.mockImplementation(() => 100);
     trimHistoryMock.mockImplementation((messages) => ({ messages, trimmedCount: 0 }));
@@ -296,6 +307,10 @@ describe('aiChatStore workflows', () => {
       candidateTools: [],
     });
     executeToolMock.mockReset();
+    apiMocks.getConnections.mockReset();
+    apiMocks.getConnections.mockResolvedValue([]);
+    apiMocks.localExecCommand.mockReset();
+    apiMocks.localExecCommand.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, timedOut: false });
     hasDeniedCommandsMock.mockReset();
     hasDeniedCommandsMock.mockReturnValue(false);
     streamText('summary text');
@@ -310,7 +325,6 @@ describe('aiChatStore workflows', () => {
       abortController: null,
       trimInfo: null,
       compactionInfo: null,
-      sessionDisabledTools: null,
     });
   });
 
@@ -330,6 +344,63 @@ describe('aiChatStore workflows', () => {
 
     expect(createConversation).toHaveBeenCalledTimes(1);
     expect(providerStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('/help lists only the active slash commands', async () => {
+    setConversation([]);
+    parseUserInputMock.mockReturnValue({
+      slashCommand: { name: 'help', raw: '/help' },
+      participants: [],
+      references: [],
+      cleanText: '',
+    });
+    resolveSlashCommandMock.mockReturnValue({ name: 'help', clientOnly: true });
+    slashCommandsMock.push(
+      { name: 'explain', descriptionKey: 'ai.slash.explain_desc' },
+      { name: 'fix', descriptionKey: 'ai.slash.fix_desc' },
+      { name: 'help', descriptionKey: 'ai.slash.help_desc', clientOnly: true },
+      { name: 'clear', descriptionKey: 'ai.slash.clear_desc', clientOnly: true },
+      { name: 'compact', descriptionKey: 'ai.slash.compact_desc', clientOnly: true },
+    );
+
+    await useAiChatStore.getState().sendMessage('/help');
+
+    const assistantMessage = useAiChatStore.getState().conversations[0]?.messages.find(m => m.role === 'assistant');
+    expect(assistantMessage?.content).toContain('### /help');
+    for (const command of ['explain', 'fix', 'help', 'clear', 'compact']) {
+      expect(assistantMessage?.content).toContain(`/${command}`);
+    }
+    for (const removed of ['tools', 'deploy', 'monitor', 'connect', 'search', 'script', 'optimize']) {
+      expect(assistantMessage?.content).not.toContain(`/${removed}`);
+    }
+    expect(providerStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('adds participant intent and target-view hints to the system prompt', async () => {
+    setConversation([]);
+    parseUserInputMock.mockReturnValue({
+      slashCommand: null,
+      participants: [{ name: 'knowledge', raw: '@knowledge' }],
+      references: [],
+      cleanText: '查询插件开发文档',
+    });
+    resolveParticipantMock.mockReturnValue({
+      name: 'knowledge',
+      systemPromptModifier: 'Use the knowledge base.',
+      intentHint: 'knowledge',
+      preferredTargetView: 'files',
+    });
+    streamText('assistant reply');
+
+    await useAiChatStore.getState().sendMessage('@knowledge 查询插件开发文档');
+
+    const [, providerMessages] = providerStreamMock.mock.calls[0];
+    expect(providerMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('@knowledge: Use the knowledge base. (intent=knowledge, preferred_target_view=files)'),
+      }),
+    ]));
   });
 
   it('keeps the newer run state when an older aborted run finishes later', async () => {
@@ -513,20 +584,9 @@ describe('aiChatStore workflows', () => {
   it('updates approval state on the originating conversation even after switching activeConversationId', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
     setConversation([]);
-    getToolsForContextMock.mockReturnValue([
-      { name: 'local_exec', description: 'Run a local command', parameters: {} },
-    ]);
-    hasDeniedCommandsMock.mockReturnValue(true);
-    executeToolMock.mockResolvedValue({
-      toolCallId: 'tool-1',
-      toolName: 'local_exec',
-      success: true,
-      output: 'ok',
-    });
-
     providerStreamMock
       .mockImplementationOnce(async function* () {
-        yield { type: 'tool_call_complete', id: 'tool-1', name: 'local_exec', arguments: JSON.stringify({ command: 'sudo reboot' }) };
+        yield { type: 'tool_call_complete', id: 'tool-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'sudo reboot' }) };
         yield { type: 'done' };
       })
       .mockImplementationOnce(async function* () {
@@ -567,25 +627,148 @@ describe('aiChatStore workflows', () => {
     expect(useAiChatStore.getState().activeConversationId).toBe('conv-2');
   });
 
+  it('keeps destructive commands pending in default mode even when run_command is auto-approved', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
+    setConversation([]);
+    providerStreamMock.mockImplementationOnce(async function* () {
+      yield { type: 'tool_call_complete', id: 'tool-danger-default', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'sudo reboot' }) };
+      yield { type: 'done' };
+    });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('dangerous command');
+
+    await waitFor(() => {
+      const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+      return assistant?.turn?.toolRounds[0]?.toolCalls[0]?.approvalState === 'pending';
+    });
+
+    useAiChatStore.getState().stopGeneration();
+    await sendPromise;
+    expect(apiMocks.localExecCommand).not.toHaveBeenCalled();
+  });
+
+  it('bypasses only destructive command approval for the current conversation when enabled', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
+    setConversation([]);
+    useAiChatStore.getState().setConversationSafetyMode('conv-1', 'bypass');
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-danger-bypass', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'sudo reboot' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', content: 'done' };
+        yield { type: 'done' };
+      });
+
+    await useAiChatStore.getState().sendMessage('dangerous command');
+
+    expect(apiMocks.localExecCommand).toHaveBeenCalledWith('sudo reboot', undefined, 30, true);
+    const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.turn?.toolRounds[0]?.toolCalls[0]).toMatchObject({
+      id: 'tool-danger-bypass',
+      approvalState: 'approved',
+      executionState: 'completed',
+    });
+    const toolResultPart = assistant?.turn?.parts.find((part) => part.type === 'tool_result' && part.toolCallId === 'tool-danger-bypass');
+    expect(toolResultPart?.type === 'tool_result' ? toolResultPart.envelope?.meta.approvalMode : undefined).toBe('bypass');
+  });
+
+  it('auto-approves settings writes independently from file writes', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { 'write_resource:settings': true };
+    setConversation([]);
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield {
+          type: 'tool_call_complete',
+          id: 'tool-settings-write',
+          name: 'write_resource',
+          arguments: JSON.stringify({
+            target_id: 'settings:app',
+            resource: 'settings',
+            section: 'ai',
+            key: 'thinkingDefaultExpanded',
+            value: true,
+            dry_run: true,
+          }),
+        };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', content: 'done' };
+        yield { type: 'done' };
+      });
+
+    await useAiChatStore.getState().sendMessage('dry run settings write');
+
+    const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.turn?.toolRounds[0]?.toolCalls[0]).toMatchObject({
+      id: 'tool-settings-write',
+      approvalState: 'approved',
+      executionState: 'completed',
+    });
+  });
+
+  it('does not use settings-write approval for file writes', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { 'write_resource:settings': true };
+    setConversation([]);
+
+    providerStreamMock.mockImplementationOnce(async function* () {
+      yield {
+        type: 'tool_call_complete',
+        id: 'tool-file-write',
+        name: 'write_resource',
+        arguments: JSON.stringify({
+          target_id: 'ssh-node:node-1',
+          resource: 'file',
+          path: '/tmp/demo.txt',
+          content: 'demo',
+        }),
+      };
+      yield { type: 'done' };
+    });
+
+    const sendPromise = useAiChatStore.getState().sendMessage('write a file');
+
+    await waitFor(() => {
+      const assistant = useAiChatStore.getState().conversations[0]?.messages.find((message) => message.role === 'assistant');
+      return assistant?.turn?.toolRounds[0]?.toolCalls[0]?.approvalState === 'pending';
+    });
+
+    useAiChatStore.getState().stopGeneration();
+    await sendPromise;
+  });
+
+  it('stores bypass mode only for the selected conversation', () => {
+    setConversation([]);
+    useAiChatStore.setState((state) => ({
+      conversations: [
+        ...state.conversations,
+        makeConversation([], 'conv-2'),
+      ],
+    }));
+
+    useAiChatStore.getState().setConversationSafetyMode('conv-1', 'bypass');
+
+    expect(useAiChatStore.getState().getConversationSafetyMode('conv-1')).toBe('bypass');
+    expect(useAiChatStore.getState().getConversationSafetyMode('conv-2')).toBe('default');
+  });
+
   it('keeps the assistant message visible when the provider errors after a tool round', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
-    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
     setConversation([]);
-    getToolsForContextMock.mockReturnValue([
-      { name: 'local_exec', description: 'Run a local command', parameters: {} },
-    ]);
-    hasDeniedCommandsMock.mockReturnValue(false);
-    executeToolMock.mockResolvedValue({
-      toolCallId: 'tool-keep-1',
-      toolName: 'local_exec',
-      success: true,
-      output: 'ok',
-    });
 
     providerStreamMock
       .mockImplementationOnce(async function* () {
         yield { type: 'thinking', content: 'Let me inspect that first.' };
-        yield { type: 'tool_call_complete', id: 'tool-keep-1', name: 'local_exec', arguments: JSON.stringify({ command: 'uname -a' }) };
+        yield { type: 'tool_call_complete', id: 'tool-keep-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'uname -a' }) };
         yield { type: 'done' };
       })
       .mockImplementationOnce(async function* () {
@@ -608,25 +791,52 @@ describe('aiChatStore workflows', () => {
     expect(useAiChatStore.getState().error).toBe('The engine is currently overloaded, please try again later');
   });
 
+  it('uses the configured tool-round limit before continuing tool loops', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
+    settingsStoreMock.state.settings.ai.toolUse.maxRounds = 1;
+    setConversation([]);
+
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-round-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'pwd' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-round-2', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'whoami' }) };
+        yield { type: 'done' };
+      });
+
+    await useAiChatStore.getState().sendMessage('inspect twice');
+
+    const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+    const budgetRound = assistantMessage?.turn?.toolRounds.find((toolRound) => toolRound.toolCalls.some((toolCall) => toolCall.id === 'tool-round-2'));
+    expect(providerStreamMock).toHaveBeenCalledTimes(2);
+    expect(apiMocks.localExecCommand).toHaveBeenCalledTimes(1);
+    expect(budgetRound).toMatchObject({
+      toolCalls: expect.arrayContaining([
+        expect.objectContaining({
+          approvalState: 'rejected',
+          executionState: 'error',
+          id: 'tool-round-2',
+        }),
+      ]),
+    });
+    expect(assistantMessage?.turn?.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'guardrail', code: 'tool-budget-limit' }),
+    ]));
+  });
+
   it('shows and clears a transient post-tool waiting marker before the follow-up summary arrives', async () => {
     let releaseSummary!: () => void;
 
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
-    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
     setConversation([]);
-    getToolsForContextMock.mockReturnValue([
-      { name: 'local_exec', description: 'Run a local command', parameters: {} },
-    ]);
-    executeToolMock.mockResolvedValue({
-      toolCallId: 'tool-wait-1',
-      toolName: 'local_exec',
-      success: true,
-      output: 'pwd',
-    });
 
     providerStreamMock
       .mockImplementationOnce(async function* () {
-        yield { type: 'tool_call_complete', id: 'tool-wait-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+        yield { type: 'tool_call_complete', id: 'tool-wait-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'pwd' }) };
         yield { type: 'done' };
       })
       .mockImplementationOnce(async function* () {
@@ -659,21 +869,12 @@ describe('aiChatStore workflows', () => {
 
   it('keeps inline post-tool thinking after the tool round instead of collapsing it to the top', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
-    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
     setConversation([]);
-    getToolsForContextMock.mockReturnValue([
-      { name: 'local_exec', description: 'Run a local command', parameters: {} },
-    ]);
-    executeToolMock.mockResolvedValue({
-      toolCallId: 'tool-inline-think-1',
-      toolName: 'local_exec',
-      success: true,
-      output: 'pwd',
-    });
 
     providerStreamMock
       .mockImplementationOnce(async function* () {
-        yield { type: 'tool_call_complete', id: 'tool-inline-think-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+        yield { type: 'tool_call_complete', id: 'tool-inline-think-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'pwd' }) };
         yield { type: 'done' };
       })
       .mockImplementationOnce(async function* () {
@@ -736,11 +937,12 @@ describe('aiChatStore workflows', () => {
 
     const providerMessages = providerStreamMock.mock.calls[0]?.[1];
     expect(providerMessages?.[0]?.role).toBe('system');
-    expect(providerMessages?.[0]?.content).toContain('## Tool Use Strategy');
-    expect(providerMessages?.[0]?.content).toContain('First identify the task type');
-    expect(providerMessages?.[0]?.content).toContain('prefer direct execution with `terminal_exec` + `node_id`');
-    expect(providerMessages?.[0]?.content).toContain('do not repeat the command and do not guess credentials');
-    expect(providerMessages?.[0]?.content).toContain('pass `expectedHash`');
+    expect(providerMessages?.[0]?.content).toContain('## OxideSens Tool System');
+    expect(providerMessages?.[0]?.content).toContain('call `select_target` first');
+    expect(providerMessages?.[0]?.content).toContain('`connect_target` first, then `run_command`');
+    expect(providerMessages?.[0]?.content).toContain('Never open a local terminal and type `ssh user@host`');
+    expect(providerMessages?.[0]?.content).toContain('Do not guess passwords, passphrases, sudo prompts, or repeat the command');
+    expect(providerMessages?.[0]?.content).toContain('Every action that runs, writes, transfers, or sends input must use an explicit target_id');
   });
 
   it('marks required tool requests with toolChoice and retries once when no tool call is made', async () => {
@@ -782,6 +984,43 @@ describe('aiChatStore workflows', () => {
     ]));
   });
 
+  it('does not retry required discovery after list_targets already returned a result', async () => {
+    settingsStoreMock.state.settings.ai.toolUse.enabled = true;
+    apiMocks.getConnections.mockResolvedValue([
+      {
+        id: 'conn-1',
+        name: '家里的主机',
+        host: '100.118.61.75',
+        port: 22,
+        username: 'lipsc',
+        group: 'Imported',
+      },
+    ]);
+    providerStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'tool_call_complete', id: 'tool-list-1', name: 'list_targets', arguments: JSON.stringify({ kind: 'all' }) };
+        yield { type: 'done' };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', content: '当前有 1 个远程主机：家里的主机。' };
+        yield { type: 'done' };
+      });
+    setConversation([]);
+
+    await useAiChatStore.getState().sendMessage('现在有哪些远程主机可供连接');
+
+    expect(providerStreamMock).toHaveBeenCalledTimes(2);
+    const assistantMessage = useAiChatStore.getState().conversations[0].messages.find((message) => message.role === 'assistant');
+    expect(assistantMessage?.content).toBe('当前有 1 个远程主机：家里的主机。');
+    expect(assistantMessage?.turn?.parts).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'guardrail', code: 'tool-required-no-call' }),
+    ]));
+    expect(assistantMessage?.turn?.toolRounds[0]?.toolCalls[0]).toMatchObject({
+      name: 'list_targets',
+      executionState: 'completed',
+    });
+  });
+
   it('drops pre-required-tool thinking content before retrying', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
     const settingsTool = { name: 'open_settings_section', description: 'Open settings', parameters: { type: 'object', properties: {} } };
@@ -815,47 +1054,26 @@ describe('aiChatStore workflows', () => {
 
   it('feeds compact structured tool envelopes back to the model', async () => {
     settingsStoreMock.state.settings.ai.toolUse.enabled = true;
-    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { local_exec: true };
-    const localExecTool = { name: 'local_exec', description: 'Run local command', parameters: { type: 'object', properties: {} } };
-    getToolsForContextMock.mockReturnValue([localExecTool]);
-    classifyToolObligationMock.mockReturnValue({
-      mode: 'required',
-      reason: 'action-request-needs-tool-result',
-      intents: ['local_shell', 'command'],
-      candidateTools: ['local_exec'],
-    });
+    settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = { run_command: true };
+    apiMocks.localExecCommand.mockResolvedValue({ stdout: '/tmp/project', stderr: '', exitCode: 0, timedOut: false });
     providerStreamMock
       .mockImplementationOnce(async function* () {
-        yield { type: 'tool_call_complete', id: 'tool-env-1', name: 'local_exec', arguments: JSON.stringify({ command: 'pwd' }) };
+        yield { type: 'tool_call_complete', id: 'tool-env-1', name: 'run_command', arguments: JSON.stringify({ target_id: 'local-shell:default', command: 'pwd' }) };
         yield { type: 'done' };
       })
       .mockImplementationOnce(async function* () {
         yield { type: 'content', content: 'done' };
         yield { type: 'done' };
       });
-    executeToolMock.mockResolvedValue({
-      toolCallId: 'tool-env-1',
-      toolName: 'local_exec',
-      success: true,
-      output: '/tmp/project',
-      envelope: {
-        ok: true,
-        summary: 'Command completed',
-        output: '/tmp/project',
-        nextActions: [{ tool: 'get_terminal_buffer', reason: 'Observe output', priority: 'optional' }],
-        meta: { toolName: 'local_exec', durationMs: 2 },
-      },
-      durationMs: 2,
-    });
     setConversation([]);
 
     await useAiChatStore.getState().sendMessage('在本地执行 pwd');
 
     const secondRequestMessages = providerStreamMock.mock.calls[1]?.[1] ?? [];
-    const toolMessage = secondRequestMessages.find((message: { role: string; tool_name?: string }) => message.role === 'tool' && message.tool_name === 'local_exec');
+    const toolMessage = secondRequestMessages.find((message: { role: string; tool_name?: string }) => message.role === 'tool' && message.tool_name === 'run_command');
     expect(toolMessage?.content).toContain('"ok":true');
-    expect(toolMessage?.content).toContain('"nextActions"');
-    expect(toolMessage?.content).toContain('Command completed');
+    expect(toolMessage?.content).toContain('Local command completed');
+    expect(toolMessage?.content).toContain('/tmp/project');
   });
 
   it('stores turn snapshots and session metadata for sidebar sends', async () => {

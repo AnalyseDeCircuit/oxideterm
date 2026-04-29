@@ -5,14 +5,16 @@
  * MCP (Model Context Protocol) Type Definitions
  * 
  * Based on the MCP specification for tool discovery and execution.
- * Supports SSE (HTTP) and stdio transports.
+ * Supports stdio, Streamable HTTP, and legacy HTTP+SSE transports.
  */
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Server Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type McpTransport = 'sse' | 'stdio';
+export type McpTransport = 'stdio' | 'streamable-http' | 'legacy-sse' | 'sse';
+export type McpEffectiveTransport = Exclude<McpTransport, 'sse'>;
+export type McpAuthHeaderMode = 'bearer' | 'raw' | 'none';
 
 export type McpServerConfig = {
   /** Unique identifier for this server */
@@ -21,7 +23,7 @@ export type McpServerConfig = {
   name: string;
   /** Transport type */
   transport: McpTransport;
-  /** SSE: HTTP endpoint URL */
+  /** HTTP endpoint URL */
   url?: string;
   /** Stdio: command to execute */
   command?: string;
@@ -29,6 +31,12 @@ export type McpServerConfig = {
   args?: string[];
   /** Stdio: environment variables */
   env?: Record<string, string>;
+  /** HTTP: Header name used for the keychain auth token. Defaults to Authorization. */
+  authHeaderName?: string;
+  /** HTTP: How to format the keychain auth token. Defaults to bearer. */
+  authHeaderMode?: McpAuthHeaderMode;
+  /** HTTP: Additional non-secret headers. Secret header values should use authToken/keychain. */
+  headers?: Record<string, string>;
   /** Whether this server is enabled */
   enabled: boolean;
   /**
@@ -37,7 +45,7 @@ export type McpServerConfig = {
    * This field is only used for migration — new tokens are never written here.
    */
   authToken?: string;
-  /** Automatically retry connection on disconnect (SSE only) */
+  /** Automatically retry connection on disconnect (HTTP only) */
   retryOnDisconnect?: boolean;
 };
 
@@ -127,6 +135,8 @@ export type McpServerState = {
   runtimeId?: string;
   /** For HTTP/SSE transports: resolved message endpoint URL */
   endpointUrl?: string;
+  /** Effective runtime transport after compatibility normalization or fallback. */
+  resolvedTransport?: McpEffectiveTransport;
   /** For streamable HTTP transports: sticky MCP session identifier */
   sessionId?: string;
 };

@@ -114,6 +114,9 @@
       "offline": "Offline",
       "manage_providers": "Anbieter verwalten",
       "no_provider": "Kein Anbieter konfiguriert",
+      "search_placeholder": "Modelle suchen...",
+      "clear_search": "Suche löschen",
+      "no_search_results": "Keine passenden Modelle",
       "refresh_models": "Aktualisieren",
       "api_key_not_found": "API-Schlüssel nicht gefunden. Bitte konfigurieren Sie ihn in Einstellungen > KI.",
       "failed_to_get_api_key": "API-Schlüssel konnte nicht abgerufen werden."
@@ -133,6 +136,10 @@
       "copy_session_id": "session_id kopieren",
       "recoverable_error": "Behebbarer Fehler",
       "output_truncated": "Ausgabe wurde abgeschnitten",
+      "output_truncated_with_full": "Die Ausgabe wurde für das Modell komprimiert. Die vollständige Ausgabe ist in diesem Chat gespeichert.",
+      "output_truncated_no_full": "Die Ausgabe wurde komprimiert; die vollständige Ausgabe war zu groß zum Speichern.",
+      "output_stats": "{{chars}} Zeichen, {{lines}} Zeilen{{omitted}}",
+      "show_more_preview": "Mehr Vorschau anzeigen",
       "condensed": "{{count}} frühere(r) Aufruf(e) für den KI-Kontext komprimiert",
       "condensed_label": "Frühere Aufrufe (komprimiert)",
       "deny_list_warning": "Sicherheitsrelevanter Befehl",
@@ -217,7 +224,17 @@
         "network-expose": "Netzwerkfreigabe",
         "settings-change": "Einstellung ändern",
         "credential-sensitive": "Zugangsdaten"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "Die Tool-Nutzung ist für diesen Chat deaktiviert, und das Modell hat ein Pseudo-Tool-Protokoll ausgegeben. OxideSens hat eine Wiederholung in Klartext angefordert.",
@@ -237,31 +254,41 @@
       "disable_group": "Gruppe deaktivieren",
       "active_summary": "{{active}}/{{total}} Werkzeuge aktiv"
     },
+    "tool_status": {
+      "enabled": "Tools an",
+      "rounds_short": "{{count}}",
+      "disabled": "Tools aus",
+      "disabled_short": "Aus",
+      "disabled_count": "{{count}} deaktiviert",
+      "open_settings": "KI-Tool-Einstellungen öffnen"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Standard-Sicherheitsmodus: gefährliche Befehle benötigen Freigabe",
+      "bypass_title": "Bypass-Modus ist für diesen Chat aktiv",
+      "menu_title": "Sicherheitsmodus",
+      "default_mode": "Default mode",
+      "default_desc": "Gefährliche Befehle benötigen vor der Ausführung eine Freigabe.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Überspringt Freigaben für gefährliche Befehle in diesem Chat nach Bestätigung.",
+      "open_settings": "Tool-Aufruf-Einstellungen öffnen",
+      "confirm_title": "Bypass-Modus aktivieren?",
+      "confirm_description": "Nur für diesen Chat werden gefährliche Befehle ohne einzelne Freigabe ausgeführt. Tool-Aufrufe werden weiter protokolliert. Passwörter, sudo-Abfragen, Passphrasen und Zugangsdaten müssen weiterhin von dir eingegeben werden.",
+      "confirm_enable": "Bypass aktivieren",
+      "confirm_cancel": "Default behalten"
+    },
     "slash": {
       "explain": "Erklären",
       "explain_desc": "Befehl, Ausgabe oder Konzept erklären",
-      "optimize": "Optimieren",
-      "optimize_desc": "Optimierungen für Befehl oder Skript vorschlagen",
       "fix": "Reparieren",
       "fix_desc": "Fehler oder Probleme diagnostizieren und beheben",
-      "script": "Skript",
-      "script_desc": "Shell-Skript für eine Aufgabe generieren",
-      "deploy": "Bereitstellen",
-      "deploy_desc": "Bei Bereitstellung und CI/CD-Aufgaben helfen",
-      "monitor": "Überwachen",
-      "monitor_desc": "Systemressourcen und Zustand prüfen",
-      "connect": "Verbinden",
-      "connect_desc": "SSH-Verbindungen verwalten",
-      "search": "Suchen",
-      "search_desc": "Dateien, Protokolle oder Terminalausgabe durchsuchen",
       "help": "Hilfe",
       "help_desc": "Verfügbare Befehle und Funktionen anzeigen",
       "clear": "Löschen",
       "clear_desc": "Neue Unterhaltung starten",
       "compact": "Komprimieren",
-      "compact_desc": "Gesprächsverlauf komprimieren",
-      "tools": "Werkzeuge",
-      "tools_desc": "Verfügbare Werkzeuge und Status anzeigen"
+      "compact_desc": "Gesprächsverlauf komprimieren"
     },
     "participant": {
       "terminal": "Terminal",
@@ -270,30 +297,24 @@
       "sftp_desc": "Dateibrowser und Übertragungen",
       "ide": "IDE",
       "ide_desc": "Code-Bearbeitung und Projektwerkzeuge",
-      "connection": "Verbindung",
-      "connection_desc": "SSH-Verbindungen und Infrastruktur",
-      "system": "System",
-      "system_desc": "Systemüberwachung und Zustand",
       "local": "Lokal",
-      "local_desc": "Lokales Terminal und Shell"
+      "local_desc": "Lokales Terminal und Shell",
+      "settings": "Einstellungen",
+      "settings_desc": "App-Einstellungen und Präferenzen",
+      "knowledge": "Wissen",
+      "knowledge_desc": "Wissensdatenbank und Dokumentationssuche"
     },
     "reference": {
       "buffer": "Puffer",
       "buffer_desc": "Inhalt des aktiven Terminalpuffers",
       "selection": "Auswahl",
       "selection_desc": "Aktuelle Terminalauswahl",
-      "file": "Datei",
-      "file_desc": "Remote-Datei über Pfad lesen",
       "error": "Fehler",
       "error_desc": "Letzter Fehler der Terminalausgabe",
       "pane": "Bereich",
       "pane_desc": "Inhalt eines bestimmten Bereichs",
       "cwd": "Arbeitsverz.",
-      "cwd_desc": "Aktuelles Arbeitsverzeichnis",
-      "env": "Umgebung",
-      "env_desc": "Umgebungsvariablen",
-      "history": "Verlauf",
-      "history_desc": "Letzter Befehlsverlauf"
+      "cwd_desc": "Aktuelles Arbeitsverzeichnis"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens ist nicht aktiviert. Bitte aktivieren Sie es unter Einstellungen → AI."

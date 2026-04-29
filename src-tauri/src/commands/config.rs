@@ -2099,7 +2099,7 @@ mod tests {
 
     #[test]
     fn build_saved_auth_stores_certificate_passphrase() {
-        let keychain = Keychain::with_service("com.oxideterm.test");
+        let keychain = Keychain::in_memory_for_tests("com.oxideterm.test");
         let auth = build_saved_auth(
             "certificate",
             None,
@@ -2126,7 +2126,7 @@ mod tests {
 
     #[test]
     fn build_saved_auth_for_update_stores_new_key_passphrase() {
-        let keychain = Keychain::with_service("com.oxideterm.test");
+        let keychain = Keychain::in_memory_for_tests("com.oxideterm.test");
         let existing = SavedAuth::Key {
             key_path: "/tmp/id_ed25519".to_string(),
             has_passphrase: false,

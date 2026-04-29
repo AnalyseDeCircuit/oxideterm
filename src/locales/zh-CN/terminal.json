@@ -200,6 +200,24 @@
       "title": "终端输出可能不是 UTF-8 编码",
       "description": "OxideTerm 检测到当前 UTF-8 输出疑似乱码。可以尝试 {{encodings}}；不会自动切换，除非你手动选择。",
       "use_encoding": "使用 {{encoding}}"
+    },
+    "command_bar": {
+      "command": "命令",
+      "command_mode": "命令模式",
+      "command_placeholder": "输入命令...",
+      "run_command": "执行命令",
+      "local_shell": "本地 Shell",
+      "remote_shell": "远程 Shell",
+      "all_targets": "全部",
+      "recording": "录制中",
+      "source_runtime": "历史",
+      "source_local_history": "本地",
+      "source_ai_ledger": "AI"
+    },
+    "command_selection": {
+      "actions": "命令选区操作",
+      "copy": "复制",
+      "copy_title": "复制命令输出"
     }
   }
 }

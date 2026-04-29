@@ -46,6 +46,7 @@ const settingsStoreMock = vi.hoisted(() => {
 const sessionTreeStoreMock = vi.hoisted(() => {
   const state = {
     getNodeByTerminalId: vi.fn(),
+    getNode: vi.fn(),
     purgeTerminalMapping: vi.fn(),
   };
 
@@ -225,6 +226,30 @@ describe('appStore', () => {
     resetAppStore();
     resetIdeStore();
     vi.mocked(topologyResolver.getNodeId).mockReturnValue(undefined);
+    sessionTreeStoreMock.state.getNode.mockReturnValue({
+      id: 'node-1',
+      displayName: 'Prod',
+      username: 'deploy',
+      host: 'prod.example.com',
+    });
+  });
+
+  it.each([
+    ['sftp', 'tabs.sftp_prefix', '📁'],
+    ['ide', 'tabs.ide', '💻'],
+    ['forwards', 'tabs.forwards_prefix', '🔀'],
+  ] as const)('creates %s tabs from nodeId without creating a terminal session', (type, titlePrefix, icon) => {
+    useAppStore.getState().createTab(type, undefined, { nodeId: 'node-1' });
+
+    const [tab] = useAppStore.getState().tabs;
+    expect(tab).toMatchObject({
+      type,
+      nodeId: 'node-1',
+      title: `${titlePrefix}: Prod`,
+      icon,
+    });
+    expect(tab.sessionId).toBeUndefined();
+    expect(useAppStore.getState().activeTabId).toBe(tab.id);
   });
 
   it('refreshConnections replaces the current connection map from backend data', async () => {

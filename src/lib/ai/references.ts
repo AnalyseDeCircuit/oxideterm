@@ -5,9 +5,9 @@
  * # References Registry
  *
  * References let users attach specific context to their query
- * (e.g. `#buffer`, `#file:/etc/nginx.conf`, `#error`).
+ * (e.g. `#buffer`, `#pane:2`, `#error`).
  *
- * Each reference has an async `resolve()` that fetches the context content.
+ * Each reference has an async `resolve()` that fetches real context content.
  * Multiple references can be combined: `#buffer #error fix this`.
  */
 
@@ -19,6 +19,7 @@ import {
   getActiveTerminalSelection,
 } from '@/lib/terminalRegistry';
 import { useAppStore } from '@/store/appStore';
+import { ACTIVE_REFERENCE_TYPES } from './inputTokens';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -33,7 +34,7 @@ export type ReferenceDef = {
   descriptionKey: string;
   /** Lucide icon name */
   icon: string;
-  /** Whether this reference accepts a value (e.g. #file:path, #pane:2) */
+  /** Whether this reference accepts a value (e.g. #pane:2) */
   acceptsValue?: boolean;
   /** Placeholder for the value portion */
   valuePlaceholder?: string;
@@ -67,12 +68,6 @@ async function resolveBuffer(): Promise<string | null> {
 
 async function resolveSelection(): Promise<string | null> {
   return getActiveTerminalSelection();
-}
-
-async function resolveFile(path?: string): Promise<string | null> {
-  if (!path) return null;
-  // File reading requires SFTP or agent — inject as a hint for the LLM to use read_file tool
-  return `[Use the read_file tool to read the contents of "${path}"]`;
 }
 
 async function resolveError(): Promise<string | null> {
@@ -139,17 +134,6 @@ async function resolveCwd(): Promise<string | null> {
   return null;
 }
 
-async function resolveEnv(): Promise<string | null> {
-  // Environment variables require running `env` — not possible without command execution.
-  // Return instruction to the LLM to use terminal_exec tool instead.
-  return '[Use the terminal_exec tool with command "env | sort | head -30" to get environment variables]';
-}
-
-async function resolveHistory(): Promise<string | null> {
-  // Shell history requires running `history` or `fc -l` — not possible without command execution.
-  return '[Use the terminal_exec tool with command "history 50" to get command history]';
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Registry
 // ═══════════════════════════════════════════════════════════════════════════
@@ -168,15 +152,6 @@ export const REFERENCES: ReferenceDef[] = [
     descriptionKey: 'ai.reference.selection_desc',
     icon: 'TextSelect',
     resolve: resolveSelection,
-  },
-  {
-    type: 'file',
-    labelKey: 'ai.reference.file',
-    descriptionKey: 'ai.reference.file_desc',
-    icon: 'File',
-    acceptsValue: true,
-    valuePlaceholder: '/path/to/file',
-    resolve: resolveFile,
   },
   {
     type: 'error',
@@ -201,21 +176,15 @@ export const REFERENCES: ReferenceDef[] = [
     icon: 'FolderOpen',
     resolve: resolveCwd,
   },
-  {
-    type: 'env',
-    labelKey: 'ai.reference.env',
-    descriptionKey: 'ai.reference.env_desc',
-    icon: 'Settings',
-    resolve: resolveEnv,
-  },
-  {
-    type: 'history',
-    labelKey: 'ai.reference.history',
-    descriptionKey: 'ai.reference.history_desc',
-    icon: 'Clock',
-    resolve: resolveHistory,
-  },
 ];
+
+if (import.meta.env.DEV) {
+  const registryTypes = REFERENCES.map(r => r.type).join(',');
+  const activeTypes = ACTIVE_REFERENCE_TYPES.join(',');
+  if (registryTypes !== activeTypes) {
+    console.warn(`[References] Registry/input token mismatch: ${registryTypes} !== ${activeTypes}`);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Lookup Helpers

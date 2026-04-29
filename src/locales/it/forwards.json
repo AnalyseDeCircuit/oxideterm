@@ -91,6 +91,7 @@
       "bindAddr": "Indirizzo di binding",
       "process": "Processo",
       "action": "Azione",
+      "scanning": "Rilevamento delle porte in ascolto...",
       "noPorts": "Nessuna porta in ascolto rilevata",
       "alreadyForwarded": "Inoltrata"
     }

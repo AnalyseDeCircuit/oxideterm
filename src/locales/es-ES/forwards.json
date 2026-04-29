@@ -91,6 +91,7 @@
       "bindAddr": "Dirección de enlace",
       "process": "Proceso",
       "action": "Acción",
+      "scanning": "Detectando puertos en escucha...",
       "noPorts": "Aún no se han detectado puertos en escucha",
       "alreadyForwarded": "Reenviado"
     }

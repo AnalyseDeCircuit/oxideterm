@@ -45,7 +45,16 @@ import {
   touchTerminalEntry,
   notifyTerminalOutput,
   updateTerminalReadiness,
+  registerTerminalCommandMarkCreator,
 } from '../../lib/terminalRegistry';
+import {
+  cleanupTerminalCommandMarks,
+  clearTerminalCommandMarkSelection,
+  closeTerminalCommandMarks,
+  createTerminalCommandMark,
+  getTerminalAbsoluteLineFromClientY,
+  selectTerminalCommandMarkAtLine,
+} from '../../lib/terminal/commandMarks';
 import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { api } from '../../lib/api';
 import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
@@ -59,8 +68,11 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { useTerminalAutosuggestRecorder } from '../../hooks/useTerminalAutosuggestRecorder';
+import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
+import { TerminalCommandBar } from './TerminalCommandBar';
 import { useToastStore } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -104,6 +116,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const commandMarkPointerRef = useRef<{ x: number; y: number; selection: string } | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -118,6 +131,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const rendererSuspendedRef = useRef(false);
   const rendererTransitionTokenRef = useRef(0);
   const pasteShortcutSuppressionRef = useRef(createTerminalPasteShortcutSuppressionState());
+  const isComposingRef = useRef(false);
   // xterm.js event listener disposables - must be explicitly disposed to prevent memory leaks
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const onBinaryDisposableRef = useRef<{ dispose: () => void } | null>(null);
@@ -250,6 +264,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       });
   }, [sessionId, writeTerminal]);
 
+  const autosuggestRecorder = useTerminalAutosuggestRecorder({
+    terminalKind: 'local_terminal',
+    localShellHistory: terminalSettings.autosuggest?.localShellHistory ?? true,
+  });
+  const autosuggestRecorderRef = useRef(autosuggestRecorder);
+  autosuggestRecorderRef.current = autosuggestRecorder;
+
   const maybeSuggestTerminalEncoding = useCallback((payload: Uint8Array) => {
     if (terminalEncodingRef.current !== 'utf-8' || encodingHintToastShownRef.current) {
       return;
@@ -283,6 +304,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
     resizeTerminal(sessionId, dims.cols, dims.rows);
   }, [resizeTerminal, sessionId]);
+
+  const handleCommandBarLayoutChange = useCallback(() => {
+    if (!fitAddonRef.current || !terminalRef.current || !isTerminalContainerRenderable(containerRef.current)) return;
+    fitAddonRef.current.fit();
+    syncLocalPtySize();
+  }, [syncLocalPtySize]);
 
   const getEffectiveHighlightRules = useCallback((rules: HighlightRule[]) => {
     const rulesSignature = getHighlightRulesSignature(rules);
@@ -371,6 +398,19 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     terminalType: 'local',
     label: terminalInfo?.shell?.path || sessionId,
   });
+
+  const sendCommandBarInput = useCallback((input: string) => {
+    if (!isRunningRef.current) return;
+    adaptiveRendererRef.current.notifyUserInput();
+    autosuggestRecorderRef.current.observeInput(input);
+    observeCliAgentTerminalInput({
+      data: input,
+      targetId: 'local-shell:default',
+      sessionId,
+    });
+    feedInput(input);
+    writeEncodedTerminalInput(input);
+  }, [feedInput, sessionId, writeEncodedTerminalInput]);
 
   // ── Listen for TabBar recording events ──────────────────────────────────
   useEffect(() => {
@@ -494,6 +534,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
     if (!isActive) {
       if (rendererAddonRef.current) {
+        cleanupTerminalCommandMarks(effectivePaneId);
         try {
           rendererAddonRef.current.dispose();
         } catch {
@@ -671,10 +712,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
     term.parser.registerOscHandler(7, (data: string) => {
       try {
-        const cwd = data.startsWith('file://') ? decodeURIComponent(new URL(data).pathname) : data;
+        const url = data.startsWith('file://') ? new URL(data) : null;
+        const cwd = url ? decodeURIComponent(url.pathname) : data;
+        const host = url?.hostname;
         if (cwd) {
           import('../../lib/terminalRegistry').then(({ updateCwd }) => {
-            updateCwd(effectivePaneId, cwd);
+            updateCwd(effectivePaneId, cwd, host);
           });
         }
       } catch {
@@ -702,6 +745,9 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (active !== prevMouseTracking) {
         prevMouseTracking = active;
         setMouseMode(active);
+        if (active) {
+          closeTerminalCommandMarks(effectivePaneId, 'interrupted_mode', 'unknown', true);
+        }
       }
       notifyTerminalOutput(sessionId);
     });
@@ -777,6 +823,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     };
 
     term.open(containerRef.current);
+    const handleCompositionStart = () => {
+      isComposingRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      isComposingRef.current = false;
+    };
+    containerRef.current.addEventListener('compositionstart', handleCompositionStart);
+    containerRef.current.addEventListener('compositionend', handleCompositionEnd);
     smartCopyDisposableRef.current = attachTerminalSmartCopy(term, {
       isActive: () => isActiveRef.current,
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
@@ -907,6 +961,14 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       },
       getScreenSnapshot,  // Screen reader for TUI interaction
     );
+    registerTerminalCommandMarkCreator(effectivePaneId, (request) => {
+      const current = terminalRef.current;
+      if (!current || !isRunningRef.current) return;
+      createTerminalCommandMark(current, effectivePaneId, {
+        ...request,
+        cwd: request.cwd ?? undefined,
+      });
+    });
 
     // Initial fit
     setTimeout(() => {
@@ -923,6 +985,19 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (!isRunningRef.current) return;
       // Notify adaptive renderer of user activity (exits idle tier)
       adaptiveRendererRef.current.notifyUserInput();
+      const observedInput = autosuggestRecorderRef.current.observeInput(data);
+      if (observedInput.completedCommand) {
+        createTerminalCommandMark(term, effectivePaneId, {
+          command: observedInput.completedCommand,
+          source: 'user_input_observed',
+          sessionId,
+        });
+      }
+      observeCliAgentTerminalInput({
+        data,
+        targetId: 'local-shell:default',
+        sessionId,
+      });
       // Feed recording (user input)
       feedInput(data);
       writeEncodedTerminalInput(data);
@@ -971,10 +1046,13 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (termElement) {
         termElement.removeEventListener('focusin', handleTerminalFocus);
       }
+      containerRef.current?.removeEventListener('compositionstart', handleCompositionStart);
+      containerRef.current?.removeEventListener('compositionend', handleCompositionEnd);
       
       // Dispose renderer addon first to avoid "onShowLinkUnderline" error
       // This is a known xterm.js canvas addon bug where dispose order matters
       if (rendererAddonRef.current) {
+        cleanupTerminalCommandMarks(effectivePaneId);
         try {
           rendererAddonRef.current.dispose();
         } catch (e) {
@@ -1169,6 +1247,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       setIsRunning(false);
       isRunningRef.current = false;
       updateTerminalState(sessionId, false);
+      closeTerminalCommandMarks(effectivePaneId, 'session_lost', 'unknown', true);
       
       terminalRef.current.writeln('');
       if (exitCode !== null) {
@@ -1266,7 +1345,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       }
       resizeObserver.disconnect();
     };
-  }, [sessionId, resizeTerminal]);
+  }, [feedResize, fontOpenReady, resizeTerminal, sessionId]);
 
   // Search close handler
   const handleSearchClose = useCallback(() => {
@@ -1575,6 +1654,47 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     }
   }, [searchOpen, aiPanelOpen, effectivePaneId, focusTerminal, onFocus]);
 
+  const cancelCommandMarkDoubleClick = useCallback((event: React.MouseEvent) => {
+    if (event.button !== 0 || event.detail <= 1) return false;
+    commandMarkPointerRef.current = null;
+    clearTerminalCommandMarkSelection(effectivePaneId);
+    terminalRef.current?.clearSelection();
+    event.preventDefault();
+    event.stopPropagation();
+    (event.nativeEvent as MouseEvent & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
+    return true;
+  }, [effectivePaneId]);
+
+  const handleCommandMarkPointerDown = useCallback((event: React.MouseEvent) => {
+    if (cancelCommandMarkDoubleClick(event)) return;
+    if (event.button !== 0 || !containerRef.current?.contains(event.target as Node)) {
+      commandMarkPointerRef.current = null;
+      return;
+    }
+    commandMarkPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      selection: terminalRef.current?.getSelection() ?? '',
+    };
+  }, [cancelCommandMarkDoubleClick]);
+
+  const handleCommandMarkPointerUp = useCallback((event: React.MouseEvent) => {
+    if (cancelCommandMarkDoubleClick(event)) return;
+    const start = commandMarkPointerRef.current;
+    commandMarkPointerRef.current = null;
+    const term = terminalRef.current;
+    const container = containerRef.current;
+    if (!start || !term || !container?.contains(event.target as Node)) return;
+    if (event.button !== 0) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+    const selection = term.getSelection();
+    if (term.buffer.active.type === 'alternate' || (selection && selection !== start.selection)) return;
+    const line = getTerminalAbsoluteLineFromClientY(term, container, event.clientY);
+    if (line === null || !selectTerminalCommandMarkAtLine(term, effectivePaneId, line)) {
+      clearTerminalCommandMarkSelection(effectivePaneId);
+    }
+  }, [cancelCommandMarkDoubleClick, effectivePaneId]);
+
   // ── Background Image ──────────────────────────────────────────────────────────
   const currentTheme = getTerminalTheme(terminalSettings.theme);
   const bgImageUrl = React.useMemo(
@@ -1596,6 +1716,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       className="relative flex-1 w-full h-full flex flex-col overflow-hidden"
       style={{ backgroundColor: currentTheme.background }}
       onClick={handleContainerClick}
+      onMouseDownCapture={handleCommandMarkPointerDown}
+      onMouseUpCapture={handleCommandMarkPointerUp}
     >
       {/* Background Image Layer */}
       {bgImageUrl && (
@@ -1677,7 +1799,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           isolation: 'isolate',
         }}
       />
-      
       {/* Recording status overlay (shown only during active recording) */}
       {isSessionRecording && (
         <RecordingControls
@@ -1704,6 +1825,18 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         <div className="absolute bottom-4 right-4 bg-theme-bg-hover/80 text-theme-text-muted text-xs px-2 py-1 rounded">
           {t('terminal.local.session_ended')}
         </div>
+      )}
+      {terminalSettings.commandBar.enabled && (
+        <TerminalCommandBar
+          paneId={effectivePaneId}
+          sessionId={sessionId}
+          tabId={effectiveTabId}
+          terminalType="local_terminal"
+          isActive={isActive}
+          sendInput={sendCommandBarInput}
+          focusTerminal={() => { focusTerminal('strong'); }}
+          onLayoutChange={handleCommandBarLayoutChange}
+        />
       )}
     </div>
   );

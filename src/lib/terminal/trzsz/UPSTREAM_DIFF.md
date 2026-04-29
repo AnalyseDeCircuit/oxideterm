@@ -22,7 +22,7 @@ All files below are local vendored copies. The `reason` column only describes Ox
 - `buffer.ts`: local browser/Tauri compatibility fixes for binary buffer handling used by the vendored transfer core.
 - `comm.ts`: keeps the vendored version marker and extends file-writer lifecycle types with `commitFile`, `finishFile`, and `abortFile` so OxideTerm can map temp-file downloads onto Tauri IPC safely.
 - `escape.ts`: vendored helper retained with no OxideTerm behavior change beyond import-path normalization.
-- `filter.ts`: replaces stock browser and Node file-system entry points with injected Tauri dialogs/readers/writers, adds controller-safe disposal, split-frame handshake buffering, and duplicate-handshake suppression for Windows short unique IDs.
+- `filter.ts`: replaces stock browser and Node file-system entry points with injected Tauri dialogs/readers/writers, adds controller-safe disposal, split-frame handshake buffering, duplicate-handshake suppression for Windows short unique IDs, and Go trzsz 1.2.0 `uniqueId:port` handshake compatibility.
 - `options.ts`: narrows upstream options into the explicit OxideTerm injection surface used by `TrzszController`.
 - `progress.ts`: vendored helper retained with no OxideTerm behavior change beyond import-path normalization.
 - `transfer.ts`: aligns upstream receive/write flow with OxideTerm temp-file semantics, rollback cleanup, explicit directory commit, timeout cleanup, zero-length read protection, and local no-overwrite policy.

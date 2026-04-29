@@ -27,6 +27,7 @@ export interface FullConversationDto {
     role: 'user' | 'assistant' | 'system' | 'tool';
     content: string;
     timestamp: number;
+    model?: string | null;
     toolCalls?: AiToolCall[];
     context: string | null;
     turn?: AiAssistantTurn | null;
@@ -436,6 +437,7 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
     updatedAt: dto.updatedAt,
     sessionId: dto.sessionId ?? undefined,
     origin: dto.origin || 'sidebar',
+    profileId: dto.sessionMetadata?.profileId,
     sessionMetadata: dto.sessionMetadata ?? {
       conversationId: dto.id,
       origin: dto.origin || 'sidebar',
@@ -447,6 +449,7 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
           role: m.role as 'assistant',
           content: m.content,
           timestamp: m.timestamp,
+          model: m.model ?? undefined,
           context: m.context || undefined,
           turn: m.turn ?? undefined,
           transcriptRef: m.transcriptRef ?? undefined,
@@ -463,6 +466,7 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
             role: m.role as 'system',
             content: anchor.content,
             timestamp: m.timestamp,
+            model: m.model ?? undefined,
             context: m.context || undefined,
             metadata: anchor.metadata,
             transcriptRef: m.transcriptRef ?? undefined,
@@ -477,6 +481,7 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
         content: m.content,
         toolCalls: m.toolCalls,
         timestamp: m.timestamp,
+        model: m.model ?? undefined,
         context: m.context || undefined,
         turn: m.turn ?? undefined,
         transcriptRef: m.transcriptRef ?? undefined,

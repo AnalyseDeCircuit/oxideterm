@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { BookOpen, Code2, HardDrive, HelpCircle, Key, Keyboard, Monitor, Shield, Sparkles, Square, Terminal as TerminalIcon, WifiOff } from 'lucide-react';
 import { DocumentManager } from '@/components/settings/DocumentManager';
+import { EmbeddingConfigSection } from '@/components/settings/EmbeddingConfigSection';
 import { KeybindingEditorSection } from '@/components/settings/KeybindingEditorSection';
 import { useToast } from '@/hooks/useToast';
 import { useConfirm } from '@/hooks/useConfirm';
@@ -47,6 +48,25 @@ export const SettingsView = () => {
     const { general, terminal, appearance, connectionDefaults, ai, sftp, ide, reconnect } = settings;
     const [showAiConfirm, setShowAiConfirm] = useState(false);
     const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
+    const [embeddingConfigExpanded, setEmbeddingConfigExpanded] = useState(false);
+
+    useEffect(() => {
+        const handleOpenSettingsTab = (event: Event) => {
+            const detail = (event as CustomEvent<{ tab?: string; section?: string }>).detail;
+            if (detail?.tab) {
+                setActiveTab(detail.tab);
+            }
+            if (detail?.section) {
+                window.setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('oxideterm:focus-settings-section', {
+                        detail: { tab: detail.tab, section: detail.section },
+                    }));
+                }, 0);
+            }
+        };
+        window.addEventListener('oxideterm:open-settings-tab', handleOpenSettingsTab);
+        return () => window.removeEventListener('oxideterm:open-settings-tab', handleOpenSettingsTab);
+    }, []);
 
     useEffect(() => {
         if (activeTab !== 'help') {
@@ -244,7 +264,17 @@ export const SettingsView = () => {
                     )}
 
                     {activeTab === 'knowledge' && (
-                        <DocumentManager />
+                        <DocumentManager
+                            embeddingConfigSection={(
+                                <EmbeddingConfigSection
+                                    ai={ai}
+                                    updateAi={updateAi}
+                                    expanded={embeddingConfigExpanded}
+                                    onExpandedChange={setEmbeddingConfigExpanded}
+                                />
+                            )}
+                            onEmbeddingConfigRequired={() => setEmbeddingConfigExpanded(true)}
+                        />
                     )}
 
                     {activeTab === 'local' && (

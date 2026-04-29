@@ -91,6 +91,7 @@
       "bindAddr": "Endereço de ligação",
       "process": "Processo",
       "action": "Ação",
+      "scanning": "Detectando portas em escuta...",
       "noPorts": "Nenhuma porta em escuta detectada ainda",
       "alreadyForwarded": "Encaminhada"
     }

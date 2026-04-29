@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import {
+  beginTerminalCommandMark,
   findPaneBySessionId,
   writeToTerminal,
 } from '../../../terminalRegistry';
@@ -32,6 +33,13 @@ export function terminalSend(request: TerminalSendRequest): TerminalSendResult {
   const sent = writeToTerminal(paneId, payload);
   if (!sent) {
     return { ok: false, paneId, error: `Terminal session is not writable: ${request.sessionId}` };
+  }
+  if (request.inputKind === 'command') {
+    beginTerminalCommandMark(paneId, {
+      command: request.input,
+      source: 'ai',
+      sessionId: request.sessionId,
+    });
   }
 
   return {

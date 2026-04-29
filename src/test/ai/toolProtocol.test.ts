@@ -180,6 +180,34 @@ describe('tool protocol v2 adapters', () => {
     });
   });
 
+  it('keeps UI-only raw output out of model payloads', () => {
+    const rawOutput = 'full-output\n'.repeat(9000);
+    const result = toLegacyToolResult(createToolResultEnvelope({
+      ok: true,
+      toolName: 'run_command',
+      summary: 'Command completed',
+      output: 'preview only',
+      rawOutput,
+      outputPreview: {
+        strategy: 'head_tail',
+        charCount: rawOutput.length,
+        lineCount: 9001,
+        omittedChars: rawOutput.length - 'preview only'.length,
+        rawOutputStored: true,
+      },
+    }), 'call-raw-output');
+
+    const payload = JSON.parse(formatToolResultForModel(result));
+
+    expect(payload.output).toBe('preview only');
+    expect(payload.rawOutput).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain(rawOutput.slice(0, 100));
+    expect(payload.outputPreview).toMatchObject({
+      strategy: 'head_tail',
+      rawOutputStored: true,
+    });
+  });
+
   it('caps failed tool summary and error fields before sending them to the model', () => {
     const longError = 'stderr '.repeat(1200);
     const result = {

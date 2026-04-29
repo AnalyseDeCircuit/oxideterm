@@ -105,11 +105,11 @@ jobs:
       - name: cargo test (cli)
         run: cd cli && cargo test
 
-  # ── Security & license audit ────────────────────────────────────────
+  # ── License & duplicate dependency audit ────────────────────────────
   # cargo deny reads the dependency graph only — no compilation, no Linux
   # graphics libs needed.  Runs in parallel with the rust job.
   cargo-deny:
-    name: Security & License audit (cargo deny)
+    name: License & dependency audit (cargo deny)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -118,13 +118,15 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: src-tauri/Cargo.toml
-          # advisories = known CVEs, licenses = license policy, bans = duplicate crates
+          # Advisory checks are intentionally not a CI gate: Tauri/WebKitGTK
+          # transitive advisories churn faster than we can action upstream fixes.
+          # Keep licenses and duplicate-crate bans as hard gates.
           command: check
-          command-arguments: advisories licenses bans
+          command-arguments: licenses bans
 
       - name: cargo deny (cli)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: cli/Cargo.toml
           command: check
-          command-arguments: --config src-tauri/deny.toml advisories licenses bans
+          command-arguments: --config src-tauri/deny.toml licenses bans

@@ -114,6 +114,9 @@
       "offline": "Ngoại tuyến",
       "manage_providers": "Quản lý nhà cung cấp",
       "no_provider": "Chưa cấu hình nhà cung cấp",
+      "search_placeholder": "Tìm kiếm mô hình...",
+      "clear_search": "Xóa tìm kiếm",
+      "no_search_results": "Không có mô hình phù hợp",
       "refresh_models": "Làm mới",
       "api_key_not_found": "Không tìm thấy khóa API. Vui lòng cấu hình trong Cài đặt > AI.",
       "failed_to_get_api_key": "Không thể lấy khóa API."
@@ -133,6 +136,10 @@
       "copy_session_id": "Sao chép session_id",
       "recoverable_error": "Lỗi có thể khôi phục",
       "output_truncated": "Kết quả đã bị cắt ngắn",
+      "output_truncated_with_full": "Kết quả đã được nén cho mô hình. Kết quả đầy đủ được lưu trong cuộc trò chuyện này.",
+      "output_truncated_no_full": "Kết quả đã được nén; kết quả đầy đủ quá lớn nên không được lưu.",
+      "output_stats": "{{chars}} ký tự, {{lines}} dòng{{omitted}}",
+      "show_more_preview": "Hiện thêm bản xem trước",
       "condensed": "{{count}} lệnh gọi trước đã được nén để tiết kiệm ngữ cảnh AI",
       "condensed_label": "Lệnh gọi trước (đã nén)",
       "deny_list_warning": "Lệnh nhạy cảm bảo mật",
@@ -217,7 +224,17 @@
         "network-expose": "Lộ mạng",
         "settings-change": "Đổi cài đặt",
         "credential-sensitive": "Nhạy cảm thông tin đăng nhập"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "Việc dùng công cụ bị tắt cho cuộc trò chuyện này và mô hình đã tạo ra một bản ghi công cụ giả. OxideSens đã yêu cầu thử lại bằng ngôn ngữ tự nhiên.",
@@ -237,31 +254,41 @@
       "disable_group": "Tắt nhóm",
       "active_summary": "{{active}}/{{total}} công cụ đang hoạt động"
     },
+    "tool_status": {
+      "enabled": "Công cụ bật",
+      "rounds_short": "{{count}}",
+      "disabled": "Công cụ tắt",
+      "disabled_short": "Tắt",
+      "disabled_count": "{{count}} đã tắt",
+      "open_settings": "Mở cài đặt công cụ AI"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Chế độ an toàn mặc định: lệnh nguy hiểm cần phê duyệt",
+      "bypass_title": "Chế độ Bypass đang bật cho cuộc trò chuyện này",
+      "menu_title": "Chế độ an toàn",
+      "default_mode": "Default mode",
+      "default_desc": "Lệnh nguy hiểm cần được phê duyệt trước khi chạy.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Bỏ qua phê duyệt lệnh nguy hiểm trong cuộc trò chuyện này sau khi xác nhận.",
+      "open_settings": "Mở cài đặt sử dụng công cụ",
+      "confirm_title": "Bật chế độ Bypass?",
+      "confirm_description": "Chỉ trong cuộc trò chuyện này, lệnh nguy hiểm sẽ chạy mà không cần phê duyệt từng lệnh. Lệnh gọi công cụ vẫn được ghi lại. Mật khẩu, lời nhắc sudo, passphrase và thông tin đăng nhập vẫn phải do bạn xử lý.",
+      "confirm_enable": "Bật Bypass",
+      "confirm_cancel": "Giữ Default"
+    },
     "slash": {
       "explain": "Giải thích",
       "explain_desc": "Giải thích lệnh, đầu ra hoặc khái niệm",
-      "optimize": "Tối ưu",
-      "optimize_desc": "Đề xuất tối ưu cho lệnh hoặc script",
       "fix": "Sửa lỗi",
       "fix_desc": "Chẩn đoán và sửa lỗi hoặc vấn đề",
-      "script": "Script",
-      "script_desc": "Tạo script shell cho một tác vụ",
-      "deploy": "Triển khai",
-      "deploy_desc": "Hỗ trợ triển khai và tác vụ CI/CD",
-      "monitor": "Giám sát",
-      "monitor_desc": "Kiểm tra tài nguyên hệ thống và tình trạng",
-      "connect": "Kết nối",
-      "connect_desc": "Hỗ trợ quản lý kết nối SSH",
-      "search": "Tìm kiếm",
-      "search_desc": "Tìm kiếm tệp, nhật ký hoặc đầu ra terminal",
       "help": "Trợ giúp",
       "help_desc": "Hiển thị các lệnh và tính năng có sẵn",
       "clear": "Xóa",
       "clear_desc": "Bắt đầu cuộc trò chuyện mới",
       "compact": "Nén",
-      "compact_desc": "Nén lịch sử cuộc trò chuyện",
-      "tools": "Công cụ",
-      "tools_desc": "Hiển thị các công cụ có sẵn và trạng thái"
+      "compact_desc": "Nén lịch sử cuộc trò chuyện"
     },
     "participant": {
       "terminal": "Terminal",
@@ -270,30 +297,24 @@
       "sftp_desc": "Trình duyệt tệp và truyền tải",
       "ide": "IDE",
       "ide_desc": "Chỉnh sửa mã và công cụ dự án",
-      "connection": "Kết nối",
-      "connection_desc": "Kết nối SSH và cơ sở hạ tầng",
-      "system": "Hệ thống",
-      "system_desc": "Giám sát hệ thống và tình trạng",
       "local": "Cục bộ",
-      "local_desc": "Terminal cục bộ và shell"
+      "local_desc": "Terminal cục bộ và shell",
+      "settings": "Cài đặt",
+      "settings_desc": "Cài đặt và tùy chọn ứng dụng",
+      "knowledge": "Kiến thức",
+      "knowledge_desc": "Kho kiến thức và tìm kiếm tài liệu"
     },
     "reference": {
       "buffer": "Bộ đệm",
       "buffer_desc": "Nội dung bộ đệm terminal đang hoạt động",
       "selection": "Vùng chọn",
       "selection_desc": "Văn bản đang chọn trong terminal",
-      "file": "Tệp",
-      "file_desc": "Đọc tệp từ xa theo đường dẫn",
       "error": "Lỗi",
       "error_desc": "Lỗi cuối cùng từ đầu ra terminal",
       "pane": "Ngăn",
       "pane_desc": "Nội dung của một ngăn cụ thể",
       "cwd": "Thư mục",
-      "cwd_desc": "Thư mục làm việc hiện tại",
-      "env": "Biến môi trường",
-      "env_desc": "Biến môi trường",
-      "history": "Lịch sử",
-      "history_desc": "Lịch sử lệnh gần đây"
+      "cwd_desc": "Thư mục làm việc hiện tại"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens chưa được bật. Vui lòng bật trong Cài đặt → AI để bắt đầu."

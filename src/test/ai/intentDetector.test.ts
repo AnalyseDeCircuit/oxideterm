@@ -38,28 +38,15 @@ describe('detectIntent — slash commands', () => {
     expect(detect('/fix this error').type).toBe('troubleshoot');
   });
 
-  it('/script → create', () => {
-    expect(detect('/script backup tool').type).toBe('create');
-  });
-
-  it('/deploy → execute', () => {
-    expect(detect('/deploy the app').type).toBe('execute');
-  });
-
-  it('/monitor → explore', () => {
-    expect(detect('/monitor system health').type).toBe('explore');
-  });
-
-  it('/search → explore', () => {
-    expect(detect('/search logs for errors').type).toBe('explore');
-  });
-
-  it('/optimize → create', () => {
-    expect(detect('/optimize this query').type).toBe('create');
-  });
-
-  it('/connect → execute', () => {
-    expect(detect('/connect to production').type).toBe('execute');
+  it('removed legacy slash commands no longer force an intent', () => {
+    for (const name of ['script', 'deploy', 'monitor', 'search', 'optimize', 'connect', 'tools']) {
+      const intent = detectIntent(makeParsed({
+        slashCommand: { name, raw: `/${name}` },
+        cleanText: 'plain neutral text',
+      }));
+      expect(intent.type).toBe('general');
+      expect(intent.confidence).toBe(0.5);
+    }
   });
 
   it('unknown slash command falls through to pattern matching', () => {

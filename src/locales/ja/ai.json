@@ -114,6 +114,9 @@
       "offline": "オフライン",
       "manage_providers": "プロバイダーを管理",
       "no_provider": "プロバイダー未設定",
+      "search_placeholder": "モデルを検索...",
+      "clear_search": "検索をクリア",
+      "no_search_results": "一致するモデルがありません",
       "refresh_models": "更新",
       "api_key_not_found": "API キーが見つかりません。設定 > AI で設定してください。",
       "failed_to_get_api_key": "API キーの取得に失敗しました。"
@@ -133,6 +136,10 @@
       "copy_session_id": "session_id をコピー",
       "recoverable_error": "回復可能なエラー",
       "output_truncated": "出力は切り詰められました",
+      "output_truncated_with_full": "出力はモデル向けに圧縮されました。完全な出力はこのチャットに保存されています。",
+      "output_truncated_no_full": "出力は圧縮されました。完全な出力は大きすぎるため保存されていません。",
+      "output_stats": "{{chars}} 文字、{{lines}} 行{{omitted}}",
+      "show_more_preview": "さらにプレビューを表示",
       "condensed": "{{count}} 件の初期呼び出しが AI コンテキスト節約のため圧縮されました",
       "condensed_label": "初期呼び出し（圧縮済み）",
       "deny_list_warning": "セキュリティ上注意が必要なコマンド",
@@ -217,7 +224,17 @@
         "network-expose": "ネットワーク公開",
         "settings-change": "設定変更",
         "credential-sensitive": "認証情報"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "このチャットではツール利用が無効で、モデルが疑似ツールの記録を出力しました。OxideSens は自然文での再試行を要求しました。",
@@ -237,31 +254,41 @@
       "disable_group": "グループを無効化",
       "active_summary": "{{active}}/{{total}} ツール有効"
     },
+    "tool_status": {
+      "enabled": "ツール有効",
+      "rounds_short": "{{count}}",
+      "disabled": "ツール無効",
+      "disabled_short": "無効",
+      "disabled_count": "{{count}} 個無効",
+      "open_settings": "AIツール設定を開く"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "既定の安全モード: 危険なコマンドには承認が必要です",
+      "bypass_title": "このチャットで Bypass モードが有効です",
+      "menu_title": "安全モード",
+      "default_mode": "Default mode",
+      "default_desc": "危険なコマンドは実行前に承認が必要です。",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "確認後、このチャットの危険なコマンド承認を省略します。",
+      "open_settings": "ツール使用設定を開く",
+      "confirm_title": "Bypass モードを有効にしますか？",
+      "confirm_description": "このチャットだけで、危険なコマンドが個別承認なしで実行されます。ツール呼び出しは記録されます。パスワード、sudo プロンプト、パスフレーズ、認証情報は引き続きあなたが入力する必要があります。",
+      "confirm_enable": "Bypass を有効化",
+      "confirm_cancel": "Default のまま"
+    },
     "slash": {
       "explain": "説明",
       "explain_desc": "コマンド、出力、概念を説明",
-      "optimize": "最適化",
-      "optimize_desc": "コマンドやスクリプトの最適化を提案",
       "fix": "修正",
       "fix_desc": "エラーや問題を診断して修正",
-      "script": "スクリプト",
-      "script_desc": "タスク用のシェルスクリプトを生成",
-      "deploy": "デプロイ",
-      "deploy_desc": "デプロイとCI/CDタスクを支援",
-      "monitor": "モニター",
-      "monitor_desc": "システムリソースとヘルスを確認",
-      "connect": "接続",
-      "connect_desc": "SSH接続の管理を支援",
-      "search": "検索",
-      "search_desc": "ファイル、ログ、ターミナル出力を検索",
       "help": "ヘルプ",
       "help_desc": "利用可能なコマンドと機能を表示",
       "clear": "クリア",
       "clear_desc": "新しい会話を開始",
       "compact": "圧縮",
-      "compact_desc": "会話履歴を圧縮",
-      "tools": "ツール",
-      "tools_desc": "利用可能なツールとステータスを表示"
+      "compact_desc": "会話履歴を圧縮"
     },
     "participant": {
       "terminal": "ターミナル",
@@ -270,30 +297,24 @@
       "sftp_desc": "ファイルブラウザと転送",
       "ide": "IDE",
       "ide_desc": "コード編集とプロジェクトツール",
-      "connection": "接続",
-      "connection_desc": "SSH接続とインフラストラクチャ",
-      "system": "システム",
-      "system_desc": "システム監視とヘルス",
       "local": "ローカル",
-      "local_desc": "ローカルターミナルとシェル"
+      "local_desc": "ローカルターミナルとシェル",
+      "settings": "設定",
+      "settings_desc": "アプリ設定と環境設定",
+      "knowledge": "ナレッジ",
+      "knowledge_desc": "ナレッジベースとドキュメント検索"
     },
     "reference": {
       "buffer": "バッファ",
       "buffer_desc": "アクティブなターミナルバッファの内容",
       "selection": "選択",
       "selection_desc": "現在のターミナルの選択テキスト",
-      "file": "ファイル",
-      "file_desc": "パスでリモートファイルを読み取り",
       "error": "エラー",
       "error_desc": "ターミナル出力の最後のエラー",
       "pane": "ペイン",
       "pane_desc": "特定のペインの内容",
       "cwd": "作業ディレクトリ",
-      "cwd_desc": "現在の作業ディレクトリ",
-      "env": "環境変数",
-      "env_desc": "環境変数",
-      "history": "履歴",
-      "history_desc": "最近のコマンド履歴"
+      "cwd_desc": "現在の作業ディレクトリ"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens が有効になっていません。設定 → AI から有効にしてください。"

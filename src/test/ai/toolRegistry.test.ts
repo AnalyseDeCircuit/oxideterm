@@ -121,6 +121,7 @@ describe('tool disclosure planner v3 phase 2', () => {
   it('infers connection intent from saved-host requests', () => {
     expect(inferToolIntents('连接家里的主机本地')).toContain('connection');
     expect(inferToolIntents('open my saved SSH connection')).toContain('connection');
+    expect(inferToolIntents('看看现在有哪些远程主机可供链接')).toContain('connection');
   });
 
   it('infers settings intent from configuration requests', () => {
@@ -137,12 +138,15 @@ describe('tool disclosure planner v3 phase 2', () => {
   });
 
   it('exposes connection workflow tools outside session manager when intent matches', () => {
-    const tools = new Set(getToolsForPlan({
+    const names = getToolsForPlan({
       activeTabType: 'local_terminal',
       hasAnySSHSession: false,
       userMessage: '连接家里的主机本地',
-    }).map((tool) => tool.name));
+    }).map((tool) => tool.name);
+    const tools = new Set(names);
 
+    expect(names[0]).toBe('resolve_target');
+    expect(tools.has('open_local_terminal')).toBe(false);
     expect(tools.has('search_saved_connections')).toBe(true);
     expect(tools.has('connect_saved_connection_by_query')).toBe(true);
     expect(tools.has('connect_saved_session')).toBe(true);
@@ -182,9 +186,22 @@ describe('tool disclosure planner v3 phase 2', () => {
     });
     const names = scores.map((score) => score.toolName);
 
+    expect(names[0]).toBe('resolve_target');
     expect(names.indexOf('search_saved_connections')).toBeGreaterThanOrEqual(0);
     expect(names.indexOf('connect_saved_connection_by_query')).toBeGreaterThanOrEqual(0);
-    expect(names.indexOf('search_saved_connections')).toBeLessThan(names.indexOf('list_tabs'));
+    expect(names.indexOf('search_saved_connections')).toBeLessThan(names.indexOf('list_targets'));
+  });
+
+  it('routes broad remote-host discovery to saved connection listing', () => {
+    const names = getToolsForPlan({
+      activeTabType: 'local_terminal',
+      hasAnySSHSession: false,
+      userMessage: '看看现在有哪些远程主机可供链接',
+    }).map((tool) => tool.name);
+
+    expect(names[0]).toBe('list_saved_connections');
+    expect(names.indexOf('list_saved_connections')).toBeLessThan(names.indexOf('resolve_target'));
+    expect(names.indexOf('search_saved_connections')).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -210,6 +227,18 @@ describe('tool obligation classifier v4', () => {
     expect(obligation.mode).toBe('required');
     expect(obligation.intents).toContain('connection');
     expect(obligation.candidateTools).toContain('connect_saved_connection_by_query');
+  });
+
+  it('requires list tools for broad remote host discovery', () => {
+    const obligation = classifyToolObligation({
+      text: '看看现在有哪些远程主机可供链接',
+      activeTabType: 'local_terminal',
+      availableToolNames: ['resolve_target', 'list_saved_connections', 'search_saved_connections'],
+    });
+
+    expect(obligation.mode).toBe('required');
+    expect(obligation.intents).toContain('connection');
+    expect(obligation.candidateTools[0]).toBe('list_saved_connections');
   });
 
   it('does not force tools for conceptual architecture discussion', () => {

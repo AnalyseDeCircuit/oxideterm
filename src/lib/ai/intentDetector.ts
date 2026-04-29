@@ -124,13 +124,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
 
 const SLASH_TO_INTENT: Record<string, IntentType> = {
   explain: 'explain',
-  optimize: 'create',
   fix: 'troubleshoot',
-  script: 'create',
-  deploy: 'execute',
-  monitor: 'explore',
-  connect: 'execute',
-  search: 'explore',
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

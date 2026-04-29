@@ -5,12 +5,11 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { api } from '../lib/api';
 import { ragSearch } from '../lib/api';
-import { nodeAgentStatus, nodeGetState } from '../lib/api';
-import { useSettingsStore, type AiMemorySettings } from './settingsStore';
-import { useSessionTreeStore } from './sessionTreeStore';
+import { useSettingsStore, type AiMemorySettings, type AiSettings } from './settingsStore';
 import { useAppStore } from './appStore';
 import { gatherSidebarContext, buildContextReminder, type SidebarContext } from '../lib/sidebarContextProvider';
 import { getProvider, getProviderReasoningProtocol } from '../lib/ai/providerRegistry';
+import { resolveEmbeddingProvider } from '../lib/ai/embeddingConfig';
 import { resolveAiReasoningEffort } from '../lib/ai/reasoningSettings';
 import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
 import type { AiToolChoice, ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
@@ -32,11 +31,23 @@ import { createAiDiagnosticEvent, persistDiagnosticEvents, type AiDiagnosticTele
 import { normalizePendingSummaries } from '../lib/ai/turnModel/summaryMetadata';
 import { createSyntheticToolDenyPayload } from '../lib/ai/turnModel/toolFeedback';
 import { getToolUseNegativeConstraint } from '../lib/ai/turnModel/toolUsePolicy';
-import { CONTEXT_FREE_TOOLS, SESSION_ID_TOOLS, READ_ONLY_TOOLS, classifyToolObligation, decideToolApproval, formatToolResultForModel, getToolsForPlan, inferToolIntents, executeTool, type ToolExecutionContext, type ToolObligation } from '../lib/ai/tools';
-import { buildToolObligationPrompt, buildToolOperationStrategyPrompt, buildTuiInteractionGuidelines } from '../lib/ai/toolUsePrompt';
+import { formatToolResultForModel } from '../lib/ai/tools';
+import {
+  buildOrchestratorObligationPrompt,
+  buildOrchestratorSystemPrompt,
+  classifyOrchestratorObligation,
+  executeOrchestratorTool,
+  formatContextChipsForPrompt,
+  buildRuntimeContextChips,
+  getOrchestratorToolDefs,
+  resolveAiPolicyDecision,
+  type OrchestratorObligation,
+  type OrchestratorToolContext,
+} from '../lib/ai/orchestrator';
+import { resolveExecutionProfile } from '../lib/ai/profiles';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
-import { PARTICIPANTS, resolveParticipant, mergeParticipantTools } from '../lib/ai/participants';
+import { PARTICIPANTS, resolveParticipant } from '../lib/ai/participants';
 import { REFERENCES, resolveReferenceType, resolveAllReferences } from '../lib/ai/references';
 import { parseSuggestions } from '../lib/ai/suggestionParser';
 import { detectIntent } from '../lib/ai/intentDetector';
@@ -57,6 +68,7 @@ import {
   compactingConversations,
   pendingApprovalResolvers,
   updateToolCallStatusInConversations,
+  type AiSafetyMode,
 } from './aiChatStore.runtime';
 import i18n from '../i18n';
 
@@ -71,10 +83,23 @@ const PSEUDO_TOOL_RETRY_TOOL_NAME = 'tool_use_disabled';
 const JSON_REQUEST_RE = /\b(json|jsonl|json schema|jsonschema|payload|response format|object literal|schema)\b/i;
 const USER_MEMORY_MAX_CHARS = 4000;
 const MAX_REQUIRED_TOOL_RETRIES = 1;
+const DEFAULT_TOOL_ROUNDS_PER_REPLY = 10;
+const MIN_TOOL_ROUNDS_PER_REPLY = 1;
+const MAX_TOOL_ROUNDS_PER_REPLY = 30;
 const ACTION_CLAIM_RE = /\b(?:opened|connected|executed|ran|read|modified|changed|checked|verified|diagnosed|found|failed|succeeded)\b|(?:已经|已|我来|我已|现在).*(?:打开|连接|执行|运行|读取|修改|检查|诊断|确认|发现)|(?:结果是|连接失败|执行完成|修改完成)/i;
 
+function normalizeToolRoundsPerReply(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TOOL_ROUNDS_PER_REPLY;
+  }
+  return Math.min(
+    MAX_TOOL_ROUNDS_PER_REPLY,
+    Math.max(MIN_TOOL_ROUNDS_PER_REPLY, Math.round(value)),
+  );
+}
+
 function resolveToolChoiceForObligation(
-  obligation: ToolObligation | null,
+  obligation: OrchestratorObligation | null,
   tools: Array<{ name: string }> | undefined,
 ): AiToolChoice | undefined {
   if (!obligation || obligation.mode !== 'required' || obligation.candidateTools.length === 0 || !tools || tools.length === 0) {
@@ -84,7 +109,7 @@ function resolveToolChoiceForObligation(
   return 'required';
 }
 
-function buildRequiredToolRetryPrompt(obligation: ToolObligation): string {
+function buildRequiredToolRetryPrompt(obligation: OrchestratorObligation): string {
   const candidates = obligation.candidateTools.length > 0
     ? obligation.candidateTools.slice(0, 8).map((tool) => `\`${tool}\``).join(', ')
     : 'the relevant available tool';
@@ -97,7 +122,7 @@ function buildRequiredToolRetryPrompt(obligation: ToolObligation): string {
   ].join('\n');
 }
 
-function shouldRetryRequiredToolRound(obligation: ToolObligation | null, assistantText: string): boolean {
+function shouldRetryRequiredToolRound(obligation: OrchestratorObligation | null, assistantText: string): boolean {
   if (!obligation || obligation.mode !== 'required' || obligation.candidateTools.length === 0) {
     return false;
   }
@@ -173,13 +198,8 @@ interface AiChatStore {
     compactedCount?: number;
     timestamp: number;
   } | null;
-  /**
-   * Session-level disabled tools override.
-   * null = use global settingsStore.disabledTools
-   * string[] = complete replacement for this session only
-   */
-  sessionDisabledTools: string[] | null;
-
+  /** Runtime-only per-conversation safety mode. Missing entries are default mode. */
+  safetyModeByConversationId: Record<string, AiSafetyMode>;
   // Initialization
   init: () => Promise<void>;
   retryInit: () => void;
@@ -205,12 +225,11 @@ interface AiChatStore {
   switchBranch: (messageId: string, branchIndex: number) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
 
-  // Tool override actions
-  setSessionDisabledTools: (tools: string[] | null) => void;
-  getEffectiveDisabledTools: () => Set<string>;
-
   // Tool approval actions
   resolveToolApproval: (toolCallId: string, approved: boolean) => void;
+  setConversationSafetyMode: (conversationId: string, mode: AiSafetyMode) => void;
+  getConversationSafetyMode: (conversationId?: string | null) => AiSafetyMode;
+  setConversationProfile: (conversationId: string, profileId: string | null) => Promise<void>;
 
   // Internal (persist to backend)
   _addMessage: (conversationId: string, message: AiChatMessage, sidebarContext?: SidebarContext | null) => Promise<void>;
@@ -262,6 +281,7 @@ function metaToConversation(meta: ConversationMetaDto): AiConversation {
     messages: [], // Will be loaded on demand
     messageCount: meta.messageCount,
     origin: meta.origin || 'sidebar',
+    profileId: meta.sessionMetadata?.profileId,
     sessionMetadata: meta.sessionMetadata ?? {
       conversationId: meta.id,
       origin: meta.origin || 'sidebar',
@@ -337,6 +357,39 @@ ${truncateUserMemoryForPrompt(content)}
 </user_memory>`;
 }
 
+function applyExecutionProfileToAiSettings(
+  settings: AiSettings,
+  profileId?: string | null,
+): { settings: AiSettings; profileId?: string; profile?: NonNullable<AiSettings['executionProfiles']>['profiles'][number] } {
+  const profile = resolveExecutionProfile(settings.executionProfiles, profileId);
+  if (!profile) return { settings };
+
+  const profileToolUse = profile.toolUse;
+  const mergedToolUse = profileToolUse
+    ? {
+        ...(settings.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }),
+        ...profileToolUse,
+        autoApproveTools: {
+          ...(settings.toolUse?.autoApproveTools ?? {}),
+          ...(profileToolUse.autoApproveTools ?? {}),
+        },
+        disabledTools: profileToolUse.disabledTools ?? settings.toolUse?.disabledTools ?? [],
+      }
+    : settings.toolUse;
+
+  return {
+    profileId: profile.id,
+    profile,
+    settings: {
+      ...settings,
+      activeProviderId: profile.providerId ?? settings.activeProviderId,
+      activeModel: profile.model ?? settings.activeModel,
+      reasoningEffort: profile.reasoningEffort ?? settings.reasoningEffort,
+      toolUse: mergedToolUse,
+    },
+  };
+}
+
 function buildPersistedMessageRequest(
   conversationId: string,
   message: AiChatMessage,
@@ -354,6 +407,7 @@ function buildPersistedMessageRequest(
       ? encodeAnchorContent(normalizedMessage.content, normalizedMessage.metadata)
       : normalizedMessage.content,
     timestamp: normalizedMessage.timestamp,
+    model: normalizedMessage.model,
     projectionUpdatedAt: nextProjectionPersistAt(),
     toolCalls: normalizedMessage.toolCalls || [],
     contextSnapshot,
@@ -473,13 +527,19 @@ function shouldRetainAssistantMessage(message: AiChatMessage | undefined): boole
   return Boolean(message.turn && (message.turn.parts.length > 0 || message.turn.toolRounds.length > 0));
 }
 
-function buildConversationPersistenceRequest(conversation: Pick<AiConversation, 'id' | 'title' | 'origin' | 'sessionId' | 'sessionMetadata'>) {
+function buildConversationPersistenceRequest(conversation: Pick<AiConversation, 'id' | 'title' | 'origin' | 'sessionId' | 'sessionMetadata' | 'profileId'>) {
+  const sessionMetadata = conversation.sessionMetadata || conversation.profileId
+    ? {
+        ...(conversation.sessionMetadata ?? { conversationId: conversation.id, origin: conversation.origin ?? 'sidebar' }),
+        ...(conversation.profileId ? { profileId: conversation.profileId } : {}),
+      }
+    : null;
   return {
     id: conversation.id,
     title: conversation.title,
     sessionId: conversation.sessionId ?? null,
     origin: conversation.origin ?? 'sidebar',
-    sessionMetadata: conversation.sessionMetadata ?? null,
+    sessionMetadata,
   };
 }
 
@@ -641,7 +701,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   abortController: null,
   trimInfo: null,
   compactionInfo: null,
-  sessionDisabledTools: null,
+  safetyModeByConversationId: {},
 
   // Initialize store from backend
   init: async () => {
@@ -700,6 +760,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       isInitializing: false,
       initializationError: null,
       error: null,
+      safetyModeByConversationId: {},
     });
     void get().init();
   },
@@ -734,6 +795,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   createConversation: async (title) => {
     const id = generateId();
     const now = Date.now();
+    const profileId = useSettingsStore.getState().settings.ai.executionProfiles?.defaultProfileId;
     const conversation: AiConversation = {
       id,
       title: title || 'New Chat',
@@ -741,9 +803,11 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       createdAt: now,
       updatedAt: now,
       origin: 'sidebar',
+      profileId,
       sessionMetadata: {
         conversationId: id,
         origin: 'sidebar',
+        profileId,
       },
     };
 
@@ -773,7 +837,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         state.activeConversationId === id
           ? conversations[0]?.id ?? null
           : state.activeConversationId;
-      return { conversations, activeConversationId };
+      const { [id]: _removed, ...safetyModeByConversationId } = state.safetyModeByConversationId;
+      return { conversations, activeConversationId, safetyModeByConversationId };
     });
 
     try {
@@ -830,12 +895,66 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       conversations: [],
       activeConversationId: null,
       error: null,
+      safetyModeByConversationId: {},
     });
 
     try {
       await invoke('ai_chat_clear_all');
     } catch (e) {
       console.warn('[AiChatStore] Failed to clear all conversations:', e);
+    }
+  },
+
+  setConversationSafetyMode: (conversationId, mode) => {
+    set((state) => {
+      if (!conversationId) return {};
+      if (mode === 'default') {
+        const { [conversationId]: _removed, ...safetyModeByConversationId } = state.safetyModeByConversationId;
+        return { safetyModeByConversationId };
+      }
+      return {
+        safetyModeByConversationId: {
+          ...state.safetyModeByConversationId,
+          [conversationId]: mode,
+        },
+      };
+    });
+  },
+
+  getConversationSafetyMode: (conversationId) => {
+    if (!conversationId) return 'default';
+    return get().safetyModeByConversationId[conversationId] ?? 'default';
+  },
+
+  setConversationProfile: async (conversationId, profileId) => {
+    let nextConversation: AiConversation | undefined;
+    set((state) => {
+      const conversations = state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        const nextSessionMetadata = {
+          ...(conversation.sessionMetadata ?? { conversationId: conversation.id, origin: conversation.origin ?? 'sidebar' }),
+          ...(profileId ? { profileId } : {}),
+        };
+        if (!profileId) {
+          delete nextSessionMetadata.profileId;
+        }
+        nextConversation = {
+          ...conversation,
+          profileId: profileId ?? undefined,
+          sessionMetadata: nextSessionMetadata,
+          updatedAt: Date.now(),
+        };
+        return nextConversation;
+      });
+      return { conversations };
+    });
+
+    if (nextConversation) {
+      try {
+        await persistConversationMetadata(nextConversation);
+      } catch (error) {
+        console.warn('[AiChatStore] Failed to persist conversation profile:', error);
+      }
     }
   },
 
@@ -857,7 +976,14 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     if (!conversation) return;
 
     // Get AI settings
-    const aiSettings = useSettingsStore.getState().settings.ai;
+    const baseAiSettings = useSettingsStore.getState().settings.ai;
+    const appliedProfile = applyExecutionProfileToAiSettings(
+      baseAiSettings,
+      conversation.profileId ?? conversation.sessionMetadata?.profileId,
+    );
+    const aiSettings = appliedProfile.settings;
+    const activeProfileId = appliedProfile.profileId;
+    const activeProfile = appliedProfile.profile;
     if (!aiSettings.enabled) {
       set({ error: 'OxideSens is not enabled. Please enable it in Settings.' });
       return;
@@ -897,36 +1023,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           const cmdLines = SLASH_COMMANDS.map(c => `- \`/${c.name}\` — ${t(c.descriptionKey)}`).join('\n');
           const partLines = PARTICIPANTS.map(p => `- \`@${p.name}\` — ${t(p.descriptionKey)}`).join('\n');
           const refLines = REFERENCES.map(r => `- \`#${r.type}\` — ${t(r.descriptionKey)}`).join('\n');
-          const body = `### ${t('ai.slash.help')}\n\n**/${t('ai.slash.help')}** — Slash Commands\n${cmdLines}\n\n**@** — Participants\n${partLines}\n\n**#** — References\n${refLines}`;
-          const assistantMsg: AiChatMessage = { id: generateId(), role: 'assistant', content: body, timestamp: Date.now() };
-          await _addMessage(convId, assistantMsg);
-          return;
-        }
-        if (slashDef.name === 'tools') {
-          const convId = activeConversationId || (await createConversation());
-          const userMsg: AiChatMessage = { id: generateId(), role: 'user', content, timestamp: Date.now() };
-          await _addMessage(convId, userMsg);
-
-          const aiSettings = useSettingsStore.getState().settings.ai;
-          const toolUseEnabled = aiSettings.toolUse?.enabled === true;
-          if (!toolUseEnabled) {
-            const assistantMsg: AiChatMessage = { id: generateId(), role: 'assistant', content: '⚠️ Tool Use is disabled. Enable it in Settings → AI → Tool Use.', timestamp: Date.now() };
-            await _addMessage(convId, assistantMsg);
-            return;
-          }
-          const sidebarCtx = await gatherSidebarContext();
-          const activeTabType = sidebarCtx?.env.activeTabType ?? null;
-          const nodes = useSessionTreeStore.getState().nodes;
-          const hasAnySSH = nodes.some(n => n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId);
-          const effectiveDisabled = get().getEffectiveDisabledTools();
-          const tools = getToolsForPlan({
-            activeTabType,
-            hasAnySSHSession: hasAnySSH,
-            disabledTools: effectiveDisabled,
-            userMessage: content,
-          });
-          const toolLines = tools.map(t => `- \`${t.name}\` — ${t.description.slice(0, 80)}`).join('\n');
-          const body = `### /tools\n\n**${tools.length}** tools available:\n\n${toolLines}`;
+          const body = `### /help\n\n**Slash Commands**\n${cmdLines}\n\n**@ Participants**\n${partLines}\n\n**# References**\n${refLines}`;
           const assistantMsg: AiChatMessage = { id: generateId(), role: 'assistant', content: body, timestamp: Date.now() };
           await _addMessage(convId, assistantMsg);
           return;
@@ -952,19 +1049,22 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       }
     }
 
-    // Resolve participants and build tool override set
-    let participantToolOverride: Set<string> | undefined;
+    // Resolve participants into domain hints. These do not expose legacy tool
+    // subsets; they only bias the orchestrator toward the intended target view.
     const participantSystemHints: string[] = [];
     if (parsed.participants.length > 0) {
-      const names = parsed.participants.map(p => p.name);
-      const merged = mergeParticipantTools(names);
-      if (merged.size > 0) {
-        participantToolOverride = merged;
-      }
       for (const p of parsed.participants) {
         const def = resolveParticipant(p.name);
         if (def) {
-          participantSystemHints.push(def.systemPromptModifier);
+          const routingHint = [
+            def.intentHint ? `intent=${def.intentHint}` : '',
+            def.preferredTargetView ? `preferred_target_view=${def.preferredTargetView}` : '',
+          ].filter(Boolean).join(', ');
+          participantSystemHints.push(
+            routingHint
+              ? `@${def.name}: ${def.systemPromptModifier} (${routingHint})`
+              : `@${def.name}: ${def.systemPromptModifier}`,
+          );
         }
       }
     }
@@ -987,10 +1087,6 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     // Use cleaned text (without /command, @participant, #reference tokens) for the LLM
     const cleanContent = parsed.cleanText || content;
-    const toolIntents = inferToolIntents({
-      text: cleanContent,
-      activeTabType: sidebarContext?.env.activeTabType ?? null,
-    });
 
     // ════════════════════════════════════════════════════════════════════
     // Resolve Active Provider and API Key
@@ -1088,7 +1184,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     const providerLabel = activeProvider?.name || providerType;
     systemPrompt += `\nYou are currently the model "${providerModel}", provided by ${providerLabel}.`;
 
-    const userMemoryPrompt = buildUserMemoryPrompt(aiSettings.memory);
+    const userMemoryPrompt = activeProfile?.context?.includeMemory === false
+      ? null
+      : buildUserMemoryPrompt(aiSettings.memory);
     if (userMemoryPrompt) {
       systemPrompt += `\n\n${userMemoryPrompt}`;
     }
@@ -1098,30 +1196,36 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     }
 
     // RAG auto-injection: search user docs and inject relevant snippets
-    if (cleanContent.length >= 4) {
+    if (activeProfile?.context?.includeRag !== false && cleanContent.length >= 4) {
       try {
         const makeTimeout = () => new Promise<never>((_, reject) => setTimeout(() => reject(new Error('RAG timeout')), 3000));
 
         // Optionally embed query for hybrid search
         let queryVector: number[] | undefined;
-        const embCfg = aiSettings.embeddingConfig;
-        const embProviderId = embCfg?.providerId || aiSettings.activeProviderId;
-        const embProviderConfig = aiSettings.providers.find(p => p.id === embProviderId);
-        const embModel = embCfg?.model || embProviderConfig?.defaultModel;
-        if (embProviderConfig && embModel) {
-          const embProvider = getProvider(embProviderConfig.type);
-          if (embProvider?.embedTexts) {
-            try {
-              let embApiKey = '';
-              try { embApiKey = (await api.getAiProviderApiKey(embProviderConfig.id)) ?? ''; } catch { /* Ollama */ }
-              const vectors = await Promise.race([
-                embProvider.embedTexts({ baseUrl: embProviderConfig.baseUrl, apiKey: embApiKey, model: embModel }, [cleanContent.slice(0, 500)]),
-                makeTimeout(),
-              ]);
-              if (vectors.length > 0) queryVector = vectors[0];
-            } catch {
-              // Embedding failed — fall back to BM25 only
-            }
+        const resolvedEmbedding = resolveEmbeddingProvider(aiSettings);
+        if (
+          resolvedEmbedding.reason === 'ready'
+          && resolvedEmbedding.providerConfig
+          && resolvedEmbedding.provider?.embedTexts
+          && resolvedEmbedding.model
+        ) {
+          try {
+            let embApiKey = '';
+            try { embApiKey = (await api.getAiProviderApiKey(resolvedEmbedding.providerConfig.id)) ?? ''; } catch { /* Ollama */ }
+            const vectors = await Promise.race([
+              resolvedEmbedding.provider.embedTexts(
+                {
+                  baseUrl: resolvedEmbedding.providerConfig.baseUrl,
+                  apiKey: embApiKey,
+                  model: resolvedEmbedding.model,
+                },
+                [cleanContent.slice(0, 500)],
+              ),
+              makeTimeout(),
+            ]);
+            if (vectors.length > 0) queryVector = vectors[0];
+          } catch {
+            // Embedding failed — fall back to BM25 only
           }
         }
 
@@ -1154,6 +1258,13 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       systemPrompt += `\n\n## Active Participants\n${participantSystemHints.join('\n')}`;
     }
 
+    if (activeProfile?.context?.includeRuntimeChips !== false) {
+      const chipPrompt = formatContextChipsForPrompt(buildRuntimeContextChips());
+      if (chipPrompt) {
+        systemPrompt += `\n\n${chipPrompt}`;
+      }
+    }
+
     // Intent-based hint (only when confidence is high enough)
     if (intent.confidence >= 0.8 && intent.systemHint) {
       systemPrompt += `\n\n## Detected Intent\n${intent.systemHint}`;
@@ -1181,9 +1292,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     }
 
     if (toolUseEnabled) {
-      systemPrompt += `\n\n${buildToolOperationStrategyPrompt({
-        activeTabType: sidebarContext?.env.activeTabType,
-      })}`;
+      systemPrompt += `\n\n${buildOrchestratorSystemPrompt()}`;
     }
 
     apiMessages.push({
@@ -1204,58 +1313,19 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
     // Resolve tool definitions — extracted as a function so it can be re-evaluated
     // between tool rounds (e.g. after open_local_terminal changes the active tab).
-    let toolDefs: ReturnType<typeof getToolsForPlan> | undefined;
-    let toolObligation: ToolObligation | null = null;
-    let mcpModule: Awaited<typeof import('../lib/ai/mcp')> | null = null;
-    const resolveToolDefs = (): ReturnType<typeof getToolsForPlan> | undefined => {
+    let toolDefs: ReturnType<typeof getOrchestratorToolDefs> | undefined;
+    let toolObligation: OrchestratorObligation | null = null;
+    const resolveToolDefs = (): ReturnType<typeof getOrchestratorToolDefs> | undefined => {
       if (!toolUseEnabled) return undefined;
-      const appState = useAppStore.getState();
-      const activeTab = appState.tabs.find(t => t.id === appState.activeTabId);
-      const activeTabType = activeTab?.type ?? null;
-      const nodes = useSessionTreeStore.getState().nodes;
-      const hasAnySSHSession = nodes.some(n =>
-        n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId
-      );
-      const effectiveDisabled = get().getEffectiveDisabledTools();
-      let resolved = getToolsForPlan({
-        activeTabType,
-        hasAnySSHSession,
-        disabledTools: effectiveDisabled,
-        participantOverride: participantToolOverride,
-        intents: toolIntents,
-      });
-
-      // Merge MCP tools from connected servers (respecting disabled list)
-      if (mcpModule) {
-        const mcpTools = mcpModule.useMcpRegistry.getState().getAllMcpToolDefinitions();
-        if (mcpTools.length > 0) {
-          const filteredMcpTools = mcpTools.filter(t => !effectiveDisabled.has(t.name));
-          if (filteredMcpTools.length > 0) {
-            resolved = [...resolved, ...filteredMcpTools];
-          }
-        }
-      }
-      return resolved;
+      return getOrchestratorToolDefs();
     };
 
     if (toolUseEnabled) {
-      mcpModule = await import('../lib/ai/mcp');
       toolDefs = resolveToolDefs();
-      toolObligation = classifyToolObligation({
-        text: cleanContent,
-        activeTabType: sidebarContext?.env.activeTabType ?? null,
-        intents: toolIntents,
-        availableToolNames: toolDefs?.map((tool) => tool.name) ?? [],
-        disabledTools: get().getEffectiveDisabledTools(),
-      });
-      const obligationPrompt = buildToolObligationPrompt(toolObligation);
+      toolObligation = classifyOrchestratorObligation(cleanContent);
+      const obligationPrompt = buildOrchestratorObligationPrompt(toolObligation);
       if (obligationPrompt) {
         apiMessages[0].content += `\n\n${obligationPrompt}`;
-      }
-
-      // Lazy TUI interaction guidance — only when experimental tools are in the active set
-      if (toolDefs?.some(t => t.name === 'read_screen' || t.name === 'send_keys' || t.name === 'send_mouse')) {
-        apiMessages[0].content += `\n\n${buildTuiInteractionGuidelines()}`;
       }
     }
 
@@ -1328,6 +1398,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
+      model: providerModel,
       isStreaming: true,
     };
     const conversationTurnId = generateId();
@@ -1650,10 +1721,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       const provider = getProvider(providerType);
       let roundReasoningContent = '';
 
-      // Tool use configuration
-      const autoApproveTools = aiSettings.toolUse?.autoApproveTools ?? {};
-
-      const resolveToolContext = async (): Promise<ToolExecutionContext | null> => {
+      const resolveToolContext = async (): Promise<OrchestratorToolContext | null> => {
         if (!toolUseEnabled) return null;
 
         let currentSidebarContext: SidebarContext | null = sidebarContext;
@@ -1667,52 +1735,16 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           currentSidebarContext = sidebarContext;
         }
 
-        let activeNodeId: string | null = null;
-        let activeAgentAvailable = false;
-
-        // Try terminal session first (for terminal/local_terminal tabs)
-        if (currentSidebarContext?.env.sessionId) {
-          const node = useSessionTreeStore.getState().getNodeByTerminalId(currentSidebarContext.env.sessionId);
-          if (node) {
-            try {
-              const nodeSnapshot = await nodeGetState(node.id);
-              if (nodeSnapshot.state.readiness === 'ready') {
-                activeNodeId = node.id;
-                const agentStatus = await nodeAgentStatus(node.id);
-                activeAgentAvailable = agentStatus.type === 'ready';
-              }
-            } catch {
-              // Node not ready — activeNodeId stays null, context-free tools still work
-            }
-          }
-        }
-
-        // Fallback: use activeNodeId from tab (for SFTP/IDE tabs that have nodeId but no terminal)
-        if (!activeNodeId && currentSidebarContext?.env.activeNodeId) {
-          try {
-            const nodeSnapshot = await nodeGetState(currentSidebarContext.env.activeNodeId);
-            if (nodeSnapshot.state.readiness === 'ready') {
-              activeNodeId = currentSidebarContext.env.activeNodeId;
-              const agentStatus = await nodeAgentStatus(activeNodeId);
-              activeAgentAvailable = agentStatus.type === 'ready';
-            }
-          } catch {
-            // Node not ready
-          }
-        }
-
         return {
-          activeNodeId,
-          activeAgentAvailable,
           activeSessionId: currentSidebarContext?.env.sessionId ?? null,
           activeTerminalType: currentSidebarContext?.env.terminalType ?? null,
+          profileId: activeProfileId,
         };
       };
 
-      // activeNodeId can be null — context-free tools (list_sessions, etc.) still work
-      let toolContext: ToolExecutionContext | null = await resolveToolContext();
+      let toolContext: OrchestratorToolContext | null = await resolveToolContext();
 
-      const MAX_TOOL_ROUNDS = 10;
+      const MAX_TOOL_ROUNDS = normalizeToolRoundsPerReply(aiSettings.toolUse?.maxRounds);
       const MAX_TOOL_CALLS_PER_ROUND = 8;
       let round = 0;
       const appendGuardrail = (
@@ -1874,30 +1906,8 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         }
       };
 
-      const canRunWithoutActiveNode = (toolCall: { name: string; arguments: string }): boolean => {
-        // MCP tools are external — they don't require an active terminal node
-        if (toolCall.name.startsWith('mcp::')) {
-          return true;
-        }
-        if (CONTEXT_FREE_TOOLS.has(toolCall.name) || SESSION_ID_TOOLS.has(toolCall.name)) {
-          return true;
-        }
-
-        const parsedArgs = parseToolArguments(toolCall.arguments);
-        const nodeId = typeof parsedArgs?.node_id === 'string' ? parsedArgs.node_id.trim() : '';
-        if (nodeId.length > 0) {
-          return true;
-        }
-
-        if (toolCall.name !== 'terminal_exec') {
-          return false;
-        }
-
-        const sessionId = typeof parsedArgs?.session_id === 'string' ? parsedArgs.session_id.trim() : '';
-        return sessionId.length > 0 || (toolContext?.activeTerminalType === 'local_terminal' && !!toolContext.activeSessionId);
-      };
-
       let requiredToolRetryCount = 0;
+      let hasRequiredToolResultThisTurn = false;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const completedToolCalls: Array<{ id: string; name: string; arguments: string }> = [];
@@ -1905,7 +1915,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         let bufferedAssistantText = '';
         let bufferedThinkingText = '';
         let isBufferingForHardDeny = !toolUseEnabled;
-        const isBufferingForRequiredTool = toolObligation?.mode === 'required' && requiredToolRetryCount < MAX_REQUIRED_TOOL_RETRIES;
+        const isBufferingForRequiredTool = toolObligation?.mode === 'required'
+          && requiredToolRetryCount < MAX_REQUIRED_TOOL_RETRIES
+          && !hasRequiredToolResultThisTurn;
         let hardDenyDetection: GuardrailDetectionResult | null = null;
         const toolChoice = resolveToolChoiceForObligation(toolObligation, toolDefs);
 
@@ -2217,6 +2229,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
         if (
           completedToolCalls.length === 0
+          && !hasRequiredToolResultThisTurn
           && requiredToolRetryCount < MAX_REQUIRED_TOOL_RETRIES
           && shouldRetryRequiredToolRound(toolObligation, heldRequiredToolText || roundResponseText)
         ) {
@@ -2278,27 +2291,6 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         }
 
         const currentToolContext = toolContext;
-
-        // Check if all requested tools are context-free when no node is active
-        if (currentToolContext.activeNodeId === null) {
-          const needsNode = completedToolCalls.some(tc => !canRunWithoutActiveNode(tc));
-          if (needsNode) {
-            const unavailableText = currentToolContext.activeTerminalType === 'local_terminal' && currentToolContext.activeSessionId
-              ? 'The active tab is a local terminal. Remote node tools such as read_file, list_directory, grep_search, and write_file require an SSH node_id. For local machine tasks, use local_exec or terminal_exec against the current local session. To inspect an SSH host, switch to an SSH terminal tab or use list_sessions and pass node_id explicitly.'
-              : 'Some tools require an active terminal session. Please open a terminal tab first, or use list_sessions to discover available sessions and pass node_id or session_id explicitly.';
-            appendSyntheticRejectedToolCalls(
-              completedToolCalls,
-              'The requested tools require an active terminal session or explicit node_id/session_id.',
-              {
-                roundNumber: round + 1,
-                guardrailCode: 'tool-context-missing',
-                guardrailMessage: unavailableText,
-              },
-            );
-            updateAssistantSnapshot(true, false);
-            break;
-          }
-        }
 
         // Guard against infinite loops
         round++;
@@ -2374,6 +2366,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         const pendingApprovalIds: string[] = [];
         const dangerousPendingApprovalIds = new Set<string>();
         const explicitlyApprovedDangerousToolIds = new Set<string>();
+        const bypassApprovedDangerousToolIds = new Set<string>();
+        const safetyMode = get().getConversationSafetyMode(convId);
+        const policyDecisionsByToolId = new Map<string, ReturnType<typeof resolveAiPolicyDecision>>();
 
         for (const tc of toolCallEntries) {
           if (!availableToolNames.has(tc.name)) {
@@ -2413,14 +2408,33 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           }
 
           const parsedApprovalArgs = parseToolArguments(tc.arguments) ?? {};
-          const approvalDecision = decideToolApproval({
+          const approvalDecision = resolveAiPolicyDecision({
             toolName: tc.name,
             args: parsedApprovalArgs,
-            autoApproveTools,
-            readOnlyTools: READ_ONLY_TOOLS,
+            aiSettings,
+            safetyMode,
+            profileId: activeProfileId,
           });
+          policyDecisionsByToolId.set(tc.id, approvalDecision);
 
-          if (approvalDecision.requiresApproval) {
+          const bypassesDangerApproval = approvalDecision.approvalMode === 'bypass'
+            && approvalDecision.risk === 'destructive'
+            && approvalDecision.decision === 'allow';
+
+          if (bypassesDangerApproval) {
+            tc.status = 'approved';
+            explicitlyApprovedDangerousToolIds.add(tc.id);
+            bypassApprovedDangerousToolIds.add(tc.id);
+          } else if (approvalDecision.decision === 'deny') {
+            tc.status = 'rejected';
+            tc.result = {
+              toolCallId: tc.id,
+              toolName: tc.name,
+              success: false,
+              output: '',
+              error: approvalDecision.reasonCode,
+            };
+          } else if (approvalDecision.decision === 'require_approval') {
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
             if (approvalDecision.risk === 'destructive') {
@@ -2642,10 +2656,23 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           }
           parsedArgs = maybeParsedArgs;
 
-          const result = await executeTool(tc.name, parsedArgs, currentToolContext, {
+          const result = await executeOrchestratorTool(tc.name, parsedArgs, {
+            ...currentToolContext,
             dangerousCommandApproved: explicitlyApprovedDangerousToolIds.has(tc.id),
+            approvalMode: bypassApprovedDangerousToolIds.has(tc.id) ? 'bypass' : 'default',
+            policyDecision: policyDecisionsByToolId.get(tc.id),
+            profileId: activeProfileId,
             abortSignal: abortController.signal,
-          });
+          }, tc.id);
+          if (bypassApprovedDangerousToolIds.has(tc.id) && result.envelope) {
+            result.envelope = {
+              ...result.envelope,
+              meta: {
+                ...result.envelope.meta,
+                approvalMode: 'bypass',
+              },
+            };
+          }
           result.toolCallId = tc.id;
           tc.result = result;
           tc.status = result.success ? 'completed' : 'error';
@@ -2702,6 +2729,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         for (const trm of toolResultMessages) {
           apiMessages.push(trm);
         }
+        if (toolResultMessages.length > 0) {
+          hasRequiredToolResultThisTurn = true;
+        }
 
         // ── Conversation Condensation ──
         // After 2+ tool rounds, compress the earliest tool result messages into
@@ -2716,13 +2746,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         // (e.g. open_local_terminal, open_tab, open_session_tab may change activeTabType)
         if (toolUseEnabled) {
           toolDefs = resolveToolDefs();
-          toolObligation = classifyToolObligation({
-            text: cleanContent,
-            activeTabType: sidebarContext?.env.activeTabType ?? null,
-            intents: toolIntents,
-            availableToolNames: toolDefs?.map((tool) => tool.name) ?? [],
-            disabledTools: get().getEffectiveDisabledTools(),
-          });
+          toolObligation = classifyOrchestratorObligation(cleanContent);
           toolContext = await resolveToolContext();
         }
 
@@ -3377,20 +3401,6 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       }));
       set({ error: i18n.t('ai.message.delete_failed') });
     }
-  },
-
-  // Tool override actions
-  setSessionDisabledTools: (tools) => {
-    set({ sessionDisabledTools: tools });
-  },
-
-  getEffectiveDisabledTools: () => {
-    const { sessionDisabledTools } = get();
-    if (sessionDisabledTools !== null) {
-      return new Set(sessionDisabledTools);
-    }
-    const global = useSettingsStore.getState().settings.ai.toolUse?.disabledTools ?? [];
-    return new Set(global);
   },
 
   resolveToolApproval: (toolCallId, approved) => {

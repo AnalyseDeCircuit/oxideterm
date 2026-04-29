@@ -91,6 +91,7 @@
       "bindAddr": "Adresse de liaison",
       "process": "Processus",
       "action": "Action",
+      "scanning": "Détection des ports d'écoute...",
       "noPorts": "Aucun port d'écoute détecté",
       "alreadyForwarded": "Transféré"
     }

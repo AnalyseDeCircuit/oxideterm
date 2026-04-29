@@ -114,6 +114,9 @@
       "offline": "Sin conexión",
       "manage_providers": "Gestionar proveedores",
       "no_provider": "Ningún proveedor configurado",
+      "search_placeholder": "Buscar modelos...",
+      "clear_search": "Borrar búsqueda",
+      "no_search_results": "No hay modelos coincidentes",
       "refresh_models": "Actualizar",
       "api_key_not_found": "Clave API no encontrada. Configúraela en Configuración > IA.",
       "failed_to_get_api_key": "Error al obtener la clave API."
@@ -133,6 +136,10 @@
       "copy_session_id": "Copiar session_id",
       "recoverable_error": "Error recuperable",
       "output_truncated": "La salida fue truncada",
+      "output_truncated_with_full": "La salida se compactó para el modelo. La salida completa se guardó en este chat.",
+      "output_truncated_no_full": "La salida se compactó; la salida completa era demasiado grande para guardarla.",
+      "output_stats": "{{chars}} caracteres, {{lines}} líneas{{omitted}}",
+      "show_more_preview": "Mostrar más vista previa",
       "condensed": "{{count}} llamada(s) anterior(es) condensada(s) para el contexto IA",
       "condensed_label": "Llamadas anteriores (condensadas)",
       "deny_list_warning": "Comando sensible a la seguridad",
@@ -217,7 +224,17 @@
         "network-expose": "Exposición de red",
         "settings-change": "Cambio de ajustes",
         "credential-sensitive": "Credenciales sensibles"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "El uso de herramientas está desactivado para este chat y el modelo emitió una transcripción de herramienta simulada. OxideSens solicitó un nuevo intento en lenguaje natural.",
@@ -237,31 +254,41 @@
       "disable_group": "Desactivar grupo",
       "active_summary": "{{active}}/{{total}} herramientas activas"
     },
+    "tool_status": {
+      "enabled": "Herramientas activas",
+      "rounds_short": "{{count}}",
+      "disabled": "Herramientas desactivadas",
+      "disabled_short": "Off",
+      "disabled_count": "{{count}} desactivadas",
+      "open_settings": "Abrir ajustes de herramientas de IA"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Modo seguro predeterminado: los comandos peligrosos requieren aprobación",
+      "bypass_title": "El modo Bypass está activo para este chat",
+      "menu_title": "Modo de seguridad",
+      "default_mode": "Default mode",
+      "default_desc": "Los comandos peligrosos requieren aprobación antes de ejecutarse.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Omite aprobaciones de comandos peligrosos en este chat tras confirmarlo.",
+      "open_settings": "Abrir ajustes de uso de herramientas",
+      "confirm_title": "¿Activar modo Bypass?",
+      "confirm_description": "Solo en este chat, los comandos peligrosos se ejecutarán sin aprobación individual. Las llamadas de herramientas seguirán registradas. Contraseñas, sudo, frases de clave y credenciales deben seguir siendo gestionadas por ti.",
+      "confirm_enable": "Activar Bypass",
+      "confirm_cancel": "Mantener Default"
+    },
     "slash": {
       "explain": "Explicar",
       "explain_desc": "Explicar un comando, salida o concepto",
-      "optimize": "Optimizar",
-      "optimize_desc": "Sugerir optimizaciones para un comando o script",
       "fix": "Reparar",
       "fix_desc": "Diagnosticar y reparar errores o problemas",
-      "script": "Script",
-      "script_desc": "Generar un script de shell para una tarea",
-      "deploy": "Desplegar",
-      "deploy_desc": "Ayudar con despliegue y tareas CI/CD",
-      "monitor": "Monitor",
-      "monitor_desc": "Verificar recursos del sistema y salud",
-      "connect": "Conectar",
-      "connect_desc": "Ayudar a gestionar conexiones SSH",
-      "search": "Buscar",
-      "search_desc": "Buscar en archivos, registros o salida de terminal",
       "help": "Ayuda",
       "help_desc": "Mostrar comandos y funciones disponibles",
       "clear": "Limpiar",
       "clear_desc": "Iniciar una nueva conversación",
       "compact": "Compactar",
-      "compact_desc": "Comprimir historial de conversación",
-      "tools": "Herramientas",
-      "tools_desc": "Mostrar herramientas disponibles y su estado"
+      "compact_desc": "Comprimir historial de conversación"
     },
     "participant": {
       "terminal": "Terminal",
@@ -270,30 +297,24 @@
       "sftp_desc": "Navegador de archivos y transferencias",
       "ide": "IDE",
       "ide_desc": "Edición de código y herramientas de proyecto",
-      "connection": "Conexión",
-      "connection_desc": "Conexiones SSH e infraestructura",
-      "system": "Sistema",
-      "system_desc": "Monitoreo del sistema y salud",
       "local": "Local",
-      "local_desc": "Terminal local y shell"
+      "local_desc": "Terminal local y shell",
+      "settings": "Ajustes",
+      "settings_desc": "Ajustes y preferencias de la app",
+      "knowledge": "Conocimiento",
+      "knowledge_desc": "Base de conocimiento y búsqueda documental"
     },
     "reference": {
       "buffer": "Buffer",
       "buffer_desc": "Contenido del buffer de terminal activo",
       "selection": "Selección",
       "selection_desc": "Selección actual del terminal",
-      "file": "Archivo",
-      "file_desc": "Leer un archivo remoto por ruta",
       "error": "Error",
       "error_desc": "Último error de la salida del terminal",
       "pane": "Panel",
       "pane_desc": "Contenido de un panel específico",
       "cwd": "Dir. actual",
-      "cwd_desc": "Directorio de trabajo actual",
-      "env": "Entorno",
-      "env_desc": "Variables de entorno",
-      "history": "Historial",
-      "history_desc": "Historial de comandos reciente"
+      "cwd_desc": "Directorio de trabajo actual"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens no está habilitado. Actívelo en Configuración → AI para comenzar."

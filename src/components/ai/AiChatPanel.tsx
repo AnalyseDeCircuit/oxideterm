@@ -7,12 +7,13 @@ import { Plus, Trash2, MessageSquare, MoreVertical, Settings, Terminal, HelpCirc
 import { useAiChatStore } from '../../store/aiChatStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAppStore } from '../../store/appStore';
-import { useSessionTreeStore } from '../../store/sessionTreeStore';
 import { useConfirm } from '../../hooks/useConfirm';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ModelSelector } from './ModelSelector';
 import { ToolIndicator } from './ToolIndicator';
+import { AiSafetyModeIndicator } from './AiSafetyModeIndicator';
+import { ProfileIndicator } from './ProfileIndicator';
 import { estimateTokens, getModelContextWindow } from '../../lib/ai/tokenUtils';
 import { CONTEXT_WARNING_THRESHOLD, CONTEXT_DANGER_THRESHOLD } from '../../lib/ai/constants';
 import type { SidebarContext } from '../../lib/sidebarContextProvider';
@@ -50,13 +51,6 @@ export function AiChatPanel() {
 
   const aiEnabled = useSettingsStore((state) => state.settings.ai.enabled);
   const createTab = useAppStore((state) => state.createTab);
-  const activeTabType = useAppStore((s) => {
-    const tab = s.tabs.find((t) => t.id === s.activeTabId);
-    return tab?.type ?? null;
-  });
-  const hasAnySSHSession = useSessionTreeStore((s) =>
-    s.nodes.some((n) => n.runtime?.status === 'connected' || n.runtime?.status === 'active' || n.runtime?.connectionId),
-  );
   const { confirm, ConfirmDialog } = useConfirm();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -252,10 +246,23 @@ export function AiChatPanel() {
     setShowMenu(false);
   }, [clearAllConversations, t, confirm]);
 
-  const handleOpenSettings = useCallback(() => {
+  const openSettingsTab = useCallback((tab?: string, section?: string) => {
     createTab('settings');
     setShowMenu(false);
+    if (tab) {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('oxideterm:open-settings-tab', { detail: { tab, section } }));
+      }, 0);
+    }
   }, [createTab]);
+
+  const handleOpenSettings = useCallback(() => {
+    openSettingsTab();
+  }, [openSettingsTab]);
+
+  const handleOpenToolSettings = useCallback(() => {
+    openSettingsTab('ai', 'tool-use');
+  }, [openSettingsTab]);
 
   // Handle regenerate last response
   const handleRegenerate = useCallback(async () => {
@@ -610,9 +617,11 @@ export function AiChatPanel() {
       )}
 
       {/* Model Selector + Tool Indicator - bottom position like VS Code */}
-      <div className="flex-shrink-0 px-3 py-1.5 border-t border-theme-border/20 bg-theme-bg flex items-center gap-2">
+      <div className="flex-shrink-0 px-3 py-1.5 border-t border-theme-border/20 bg-theme-bg flex items-center gap-1.5 min-w-0">
         <ModelSelector onOpenSettings={handleOpenSettings} />
-        <ToolIndicator activeTabType={activeTabType} hasAnySSHSession={hasAnySSHSession} />
+        <ProfileIndicator />
+        <AiSafetyModeIndicator onOpenToolSettings={handleOpenToolSettings} />
+        <ToolIndicator onOpenSettings={handleOpenToolSettings} />
       </div>
 
       {/* Input */}

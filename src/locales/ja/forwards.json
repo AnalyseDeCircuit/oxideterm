@@ -91,6 +91,7 @@
       "bindAddr": "バインドアドレス",
       "process": "プロセス",
       "action": "操作",
+      "scanning": "リスニングポートを検出中...",
       "noPorts": "リスニングポートはまだ検出されていません",
       "alreadyForwarded": "転送済み"
     }

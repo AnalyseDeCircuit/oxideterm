@@ -200,6 +200,24 @@
       "title": "Terminal output may use another encoding",
       "description": "OxideTerm detected garbled text while using UTF-8. You can try {{encodings}}; nothing will change unless you choose one.",
       "use_encoding": "Use {{encoding}}"
+    },
+    "command_bar": {
+      "command": "Commande",
+      "command_mode": "Mode commande",
+      "command_placeholder": "Exécuter une commande",
+      "run_command": "Exécuter",
+      "local_shell": "Shell local",
+      "remote_shell": "Shell distant",
+      "all_targets": "tous",
+      "recording": "REC",
+      "source_runtime": "historique",
+      "source_local_history": "local",
+      "source_ai_ledger": "IA"
+    },
+    "command_selection": {
+      "actions": "Command selection actions",
+      "copy": "Copy",
+      "copy_title": "Copy command output"
     }
   }
 }

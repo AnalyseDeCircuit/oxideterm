@@ -29,6 +29,7 @@ describe('mcpClient', () => {
         transport: 'stdio' as const,
         command: 'npx',
         args: ['-y', '@example/server'],
+        env: { API_TOKEN: 'secret' },
         enabled: true,
       },
       status: 'connecting' as const,
@@ -56,6 +57,7 @@ describe('mcpClient', () => {
     expect(result.tools).toEqual([]);
     expect(result.resources).toEqual([{ uri: 'file:///a', name: 'A' }]);
     expect(result.capabilities).toEqual({ resources: {} });
+    expect(apiMock.mcpSpawnServer).toHaveBeenCalledWith('npx', ['-y', '@example/server'], { API_TOKEN: 'secret' });
     expect(apiMock.mcpSendRequest.mock.calls.map((call) => call[1])).toEqual([
       'initialize',
       'notifications/initialized',
@@ -118,18 +120,28 @@ describe('mcpClient', () => {
     expect(apiMock.mcpCloseServer).toHaveBeenCalledWith('runtime-broken');
   });
 
-  it('preserves SSE subpaths and tolerates 204 initialized notifications', async () => {
+  it('connects legacy SSE servers through endpoint discovery', async () => {
     const { connectMcpServer } = await import('@/lib/ai/mcp/mcpClient');
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (fetchMock.mock.calls.length === 1) {
+        expect(url).toBe('http://localhost:3000/mcp/sse');
+        expect(init?.method).toBe('GET');
+        return new Response('event: endpoint\ndata: /mcp/message\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }
+      if (fetchMock.mock.calls.length === 2) {
         expect(url).toBe('http://localhost:3000/mcp/message');
+        expect(init?.method).toBe('POST');
         return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
       expect(url).toBe('http://localhost:3000/mcp/message');
+      expect(init?.method).toBe('POST');
       return new Response(null, { status: 204 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -138,7 +150,7 @@ describe('mcpClient', () => {
       config: {
         id: 'srv-4',
         name: 'sse-server',
-        transport: 'sse',
+        transport: 'legacy-sse',
         url: 'http://localhost:3000/mcp/sse',
         enabled: true,
       },
@@ -148,10 +160,12 @@ describe('mcpClient', () => {
     });
 
     expect(result.status).toBe('connected');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.resolvedTransport).toBe('legacy-sse');
+    expect(result.endpointUrl).toBe('http://localhost:3000/mcp/message');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('fails SSE connection when initialize response is missing result', async () => {
+  it('fails HTTP connection when initialize response is missing result', async () => {
     const { connectMcpServer } = await import('@/lib/ai/mcp/mcpClient');
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1 }), {
       status: 200,
@@ -162,9 +176,9 @@ describe('mcpClient', () => {
     const result = await connectMcpServer({
       config: {
         id: 'srv-5',
-        name: 'bad-sse',
-        transport: 'sse',
-        url: 'http://localhost:3000/sse',
+        name: 'bad-http',
+        transport: 'streamable-http',
+        url: 'http://localhost:3000/mcp',
         enabled: true,
       },
       status: 'connecting',
@@ -179,6 +193,7 @@ describe('mcpClient', () => {
   it('supports streamable HTTP responses returned as text/event-stream', async () => {
     const { connectMcpServer } = await import('@/lib/ai/mcp/mcpClient');
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(_input)).toBe('http://localhost:3000/mcp');
       const body = String(init?.body ?? '');
       const parsed = JSON.parse(body) as { id?: number; method?: string };
       if (body.includes('"method":"initialize"')) {
@@ -195,7 +210,7 @@ describe('mcpClient', () => {
       config: {
         id: 'srv-6',
         name: 'streamable-http',
-        transport: 'sse',
+        transport: 'streamable-http',
         url: 'http://localhost:3000/mcp',
         enabled: true,
       },
@@ -207,6 +222,42 @@ describe('mcpClient', () => {
     expect(result.status).toBe('connected');
     expect(result.sessionId).toBe('session-1');
     expect(result.endpointUrl).toBe('http://localhost:3000/mcp');
+    expect(result.resolvedTransport).toBe('streamable-http');
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      Accept: 'application/json, text/event-stream',
+      'MCP-Protocol-Version': '2025-11-25',
+    });
+  });
+
+  it('treats legacy sse config values as streamable HTTP compatibility mode', async () => {
+    const { connectMcpServer } = await import('@/lib/ai/mcp/mcpClient');
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(_input)).toBe('http://localhost:3000/mcp');
+      if (String(init?.body).includes('"method":"initialize"')) {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await connectMcpServer({
+      config: {
+        id: 'srv-legacy-name',
+        name: 'legacy-name',
+        transport: 'sse',
+        url: 'http://localhost:3000/mcp',
+        enabled: true,
+      },
+      status: 'connecting',
+      tools: [],
+      resources: [],
+    });
+
+    expect(result.status).toBe('connected');
+    expect(result.resolvedTransport).toBe('streamable-http');
   });
 
   it('falls back to legacy HTTP+SSE endpoint discovery after a 4xx initialize POST', async () => {
@@ -236,7 +287,7 @@ describe('mcpClient', () => {
       config: {
         id: 'srv-7',
         name: 'legacy-sse',
-        transport: 'sse',
+        transport: 'streamable-http',
         url: 'http://localhost:3000/sse',
         enabled: true,
       },
@@ -247,6 +298,48 @@ describe('mcpClient', () => {
 
     expect(result.status).toBe('connected');
     expect(result.endpointUrl).toBe('http://localhost:3000/legacy/message');
+    expect(result.resolvedTransport).toBe('legacy-sse');
     expect(fetchMock.mock.calls.some((call) => String(call[0]) === 'http://localhost:3000/sse' && call[1]?.method === 'GET')).toBe(true);
+  });
+
+  it('sends custom raw auth and extra headers for streamable HTTP', async () => {
+    apiMock.getAiProviderApiKey.mockResolvedValue('token-123');
+    const { connectMcpServer } = await import('@/lib/ai/mcp/mcpClient');
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string>;
+      expect(headers['X-API-Key']).toBe('token-123');
+      expect(headers['X-Workspace']).toBe('prod');
+      expect(headers.Authorization).toBeUndefined();
+      if (String(init?.body).includes('"method":"initialize"')) {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await connectMcpServer({
+      config: {
+        id: 'srv-8',
+        name: 'custom-auth',
+        transport: 'streamable-http',
+        url: 'http://localhost:3000/mcp',
+        authHeaderName: 'X-API-Key',
+        authHeaderMode: 'raw',
+        headers: {
+          'X-Workspace': 'prod',
+          Accept: 'text/plain',
+          'MCP-Session-Id': 'bad',
+        },
+        enabled: true,
+      },
+      status: 'connecting',
+      tools: [],
+      resources: [],
+    });
+
+    expect(result.status).toBe('connected');
   });
 });

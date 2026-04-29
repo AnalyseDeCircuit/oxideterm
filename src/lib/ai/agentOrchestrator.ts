@@ -228,6 +228,7 @@ async function resolveActiveToolContext(): Promise<ToolExecutionContext> {
     activeNodeId: null,
     activeAgentAvailable: false,
     skipFocus: true,
+    requireExplicitTarget: true,
   };
 
   try {
@@ -247,6 +248,7 @@ async function resolveActiveToolContext(): Promise<ToolExecutionContext> {
       activeNodeId: null,
       activeAgentAvailable: false,
       skipFocus: true,
+      requireExplicitTarget: true,
     };
 
     const snapshot = await nodeGetState(focusedNodeId);

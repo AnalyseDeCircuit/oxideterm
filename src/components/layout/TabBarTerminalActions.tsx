@@ -68,7 +68,7 @@ type BroadcastDropdownProps = {
   t: (key: string, opts?: Record<string, unknown>) => string;
 };
 
-const BroadcastDropdown: React.FC<BroadcastDropdownProps> = ({
+export const BroadcastDropdown: React.FC<BroadcastDropdownProps> = ({
   entries,
   targets,
   enabled,

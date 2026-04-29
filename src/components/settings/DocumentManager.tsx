@@ -9,7 +9,7 @@
  * and rebuild BM25 indexes.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readTextFile, stat } from '@tauri-apps/plugin-fs';
@@ -17,7 +17,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useRagStore } from '../../store/ragStore';
 import { RAG_SYNC_VERSION_CONFLICT_ERROR } from '../../store/ragStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { getProvider } from '../../lib/ai/providerRegistry';
+import { requiresEmbeddingApiKey, resolveEmbeddingProvider } from '../../lib/ai/embeddingConfig';
 import { useToast } from '../../hooks/useToast';
 import { api } from '../../lib/api';
 import { Button } from '../ui/button';
@@ -79,7 +79,12 @@ function scopeLabel(scope: RagCollection['scope'], t: (key: string) => string): 
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function DocumentManager() {
+type DocumentManagerProps = {
+  embeddingConfigSection?: ReactNode;
+  onEmbeddingConfigRequired?: () => void;
+};
+
+export function DocumentManager({ embeddingConfigSection, onEmbeddingConfigRequired }: DocumentManagerProps = {}) {
   const { t } = useTranslation();
   const { error: toastError, success: toastSuccess } = useToast();
   const {
@@ -223,14 +228,19 @@ export function DocumentManager() {
     if (!selectedCollectionId) return;
 
     const aiSettings = useSettingsStore.getState().settings.ai;
-    if (!aiSettings?.enabled || !aiSettings.providers?.length) return;
+    if (!aiSettings?.enabled || !aiSettings.providers?.length) {
+      onEmbeddingConfigRequired?.();
+      toastError(t('settings_view.knowledge.error_no_embedding_support'));
+      return;
+    }
 
-    // Resolve embedding provider: embeddingConfig > active chat provider
-    const embCfg = aiSettings.embeddingConfig;
-    const embProviderId = embCfg?.providerId || aiSettings.activeProviderId;
-    const providerConfig = aiSettings.providers.find(p => p.id === embProviderId) ?? aiSettings.providers[0];
-    const provider = getProvider(providerConfig.type);
-    if (!provider?.embedTexts) {
+    const resolvedEmbedding = resolveEmbeddingProvider(aiSettings);
+    const providerConfig = resolvedEmbedding.providerConfig;
+    const provider = resolvedEmbedding.provider;
+    const embeddingModel = resolvedEmbedding.model;
+
+    if (!providerConfig || !provider?.embedTexts || resolvedEmbedding.reason === 'unsupported_provider' || resolvedEmbedding.reason === 'no_provider') {
+      onEmbeddingConfigRequired?.();
       toastError(t('settings_view.knowledge.error_no_embedding_support'));
       return;
     }
@@ -243,8 +253,14 @@ export function DocumentManager() {
       // Ollama doesn't require API key
     }
 
-    const embeddingModel = embCfg?.model || providerConfig.defaultModel;
-    if (!embeddingModel) {
+    if (requiresEmbeddingApiKey(providerConfig) && !apiKey) {
+      onEmbeddingConfigRequired?.();
+      toastError(t('settings_view.knowledge.error_no_embedding_api_key'));
+      return;
+    }
+
+    if (!embeddingModel || resolvedEmbedding.reason === 'missing_model') {
+      onEmbeddingConfigRequired?.();
       toastError(t('settings_view.knowledge.error_no_embedding_model'));
       return;
     }
@@ -298,7 +314,7 @@ export function DocumentManager() {
       // Refresh stats
       if (selectedCollectionId) await selectCollection(selectedCollectionId);
     }
-  }, [selectedCollectionId, getPendingEmbeddings, storeEmbeddings, selectCollection, toastError, t]);
+  }, [selectedCollectionId, getPendingEmbeddings, storeEmbeddings, selectCollection, onEmbeddingConfigRequired, toastError, t]);
 
   // ─── Reindex ─────────────────────────────────────────────────────────
   const handleReindex = useCallback(async () => {
@@ -521,6 +537,12 @@ export function DocumentManager() {
               </Button>
             </div>
           </div>
+
+          {embeddingConfigSection && (
+            <div className="mb-4">
+              {embeddingConfigSection}
+            </div>
+          )}
 
           {/* Stats */}
           {stats && (

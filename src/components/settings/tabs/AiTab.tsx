@@ -1,9 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { useState, type ElementType } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Activity, Brain, ChevronDown, ChevronRight, CirclePlus, CircleStop, Code2, FileCode, FileText, FlaskConical, FolderInput, FolderOpen, FolderSearch, GitBranch, HardDrive, Info, Keyboard, ListTree, Monitor, MousePointer2, Network, Pen, Puzzle, Radio, RefreshCw, Search, Settings, Terminal as TerminalIcon, Wrench, X } from 'lucide-react';
+import { Brain, ChevronDown, ChevronRight, Copy, Plus, RefreshCw, Trash2, Wrench, X } from 'lucide-react';
 import { McpServersPanel } from '@/components/settings/McpServersPanel';
 import { ProviderKeyInput } from '@/components/settings/ProviderKeyInput';
 import { Button } from '@/components/ui/button';
@@ -14,70 +14,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { useConfirm } from '@/hooks/useConfirm';
 import { useToast } from '@/hooks/useToast';
-import { TOOL_GROUPS, WRITE_TOOLS, EXPERIMENTAL_TOOLS } from '@/lib/ai/tools';
 import { getModelContextWindowInfo } from '@/lib/ai/tokenUtils';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { AiProvider, AiProviderType } from '@/types';
 import type { AiReasoningEffort } from '@/lib/ai/providers';
-import type { AiSettings } from '@/store/settingsStore';
-
-const TOOL_ICON_MAP: Record<string, ElementType> = {
-    terminal_exec: TerminalIcon,
-    read_file: FileText,
-    write_file: Pen,
-    list_directory: FolderOpen,
-    grep_search: Search,
-    git_status: GitBranch,
-    list_sessions: Network,
-    get_terminal_buffer: TerminalIcon,
-    search_terminal: Search,
-    list_connections: Network,
-    list_port_forwards: Radio,
-    get_detected_ports: Radio,
-    get_connection_health: Activity,
-    create_port_forward: CirclePlus,
-    stop_port_forward: CircleStop,
-    sftp_list_dir: FolderSearch,
-    sftp_read_file: HardDrive,
-    sftp_stat: Info,
-    sftp_get_cwd: HardDrive,
-    ide_get_open_files: FileCode,
-    ide_get_file_content: FileCode,
-    ide_get_project_info: Code2,
-    local_list_shells: TerminalIcon,
-    local_get_terminal_info: ListTree,
-    local_exec: TerminalIcon,
-    local_get_drives: HardDrive,
-    get_settings: Settings,
-    update_setting: Settings,
-    get_pool_stats: Activity,
-    set_pool_config: Settings,
-    get_all_health: Activity,
-    get_resource_metrics: Activity,
-    list_saved_connections: Network,
-    search_saved_connections: Search,
-    get_session_tree: ListTree,
-    list_plugins: Puzzle,
-    read_screen: Monitor,
-    send_keys: Keyboard,
-    send_mouse: MousePointer2,
-};
-
-const TOOL_GROUP_ICONS: Record<string, ElementType> = {
-    terminal: TerminalIcon,
-    session: Network,
-    infrastructure: Radio,
-    sftp: FolderInput,
-    ide: Code2,
-    local_terminal: TerminalIcon,
-    settings: Settings,
-    connection_pool: Activity,
-    connection_monitor: Activity,
-    session_manager: Network,
-    plugin_manager: Puzzle,
-    tui_interaction: Monitor,
-};
+import {
+    DEFAULT_AI_TOOL_MAX_ROUNDS,
+    MAX_AI_TOOL_MAX_ROUNDS,
+    MIN_AI_TOOL_MAX_ROUNDS,
+    normalizeAiToolMaxRounds,
+    type AiSettings,
+} from '@/store/settingsStore';
+import { createDefaultExecutionProfile, type AiExecutionProfile, type AiExecutionProfilesConfig } from '@/lib/ai/profiles';
 
 type AiTabProps = {
     ai: AiSettings;
@@ -100,6 +49,20 @@ type ProviderTemplate = {
     nameKey: string;
     baseUrl: string;
     defaultModel: string;
+};
+
+type ToolPolicyItem = {
+    label: string;
+    checked: boolean;
+    locked?: boolean;
+    onChange?: (checked: boolean) => void;
+};
+
+type ToolPolicyGroup = {
+    title: string;
+    description: string;
+    className?: string;
+    items: ToolPolicyItem[];
 };
 
 const PROVIDER_TEMPLATES: ProviderTemplate[] = [
@@ -172,15 +135,104 @@ export const AiTab = ({
     const [collapsedContextProviders, setCollapsedContextProviders] = useState<Record<string, boolean>>({});
     const [modelReasoningExpanded, setModelReasoningExpanded] = useState(false);
     const [collapsedReasoningProviders, setCollapsedReasoningProviders] = useState<Record<string, boolean>>({});
+    const [providerSettingsExpanded, setProviderSettingsExpanded] = useState(true);
     const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
     const [expandedProviderModels, setExpandedProviderModels] = useState<Record<string, boolean>>({});
     const [toolUseExpanded, setToolUseExpanded] = useState(true);
+    const toolUseSectionRef = useRef<HTMLDivElement | null>(null);
     const [newProviderType, setNewProviderType] = useState<AiProviderType>('openai_compatible');
     const memory = ai.memory ?? { enabled: true, content: '' };
-    const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] };
-    const allToolNames = TOOL_GROUPS.flatMap((group) => [...group.readOnly, ...group.write]);
-    const approvedToolCount = allToolNames.filter((name) => toolUse.autoApproveTools?.[name] === true).length;
+    const toolUse = ai.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [], maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS };
+    const toolUseMaxRounds = normalizeAiToolMaxRounds(toolUse.maxRounds);
+    const approveTools = toolUse.autoApproveTools ?? {};
+    const setToolApproval = (toolName: string, approved: boolean) => {
+        updateAi('toolUse', {
+            ...toolUse,
+            autoApproveTools: { ...approveTools, [toolName]: approved },
+        });
+    };
     const selectedProviderTemplate = PROVIDER_TEMPLATES.find((template) => template.type === newProviderType) ?? PROVIDER_TEMPLATES[0];
+    const profilesConfig: AiExecutionProfilesConfig = ai.executionProfiles ?? {
+        defaultProfileId: 'default',
+        profiles: [
+            createDefaultExecutionProfile({
+                providerId: ai.activeProviderId,
+                model: ai.activeModel,
+                reasoningEffort: ai.reasoningEffort,
+                toolUse,
+            }),
+        ],
+    };
+    const updateProfiles = (profiles: AiExecutionProfile[], defaultProfileId = profilesConfig.defaultProfileId) => {
+        updateAi('executionProfiles', {
+            defaultProfileId: profiles.some((profile) => profile.id === defaultProfileId)
+                ? defaultProfileId
+                : profiles[0]?.id ?? 'default',
+            profiles,
+        });
+    };
+    const patchProfile = (profileId: string, patch: Partial<AiExecutionProfile>) => {
+        updateProfiles(profilesConfig.profiles.map((profile) => (
+            profile.id === profileId ? { ...profile, ...patch, updatedAt: Date.now() } : profile
+        )));
+    };
+    const addProfile = () => {
+        const now = Date.now();
+        const profile: AiExecutionProfile = {
+            id: crypto.randomUUID(),
+            name: `Profile ${profilesConfig.profiles.length + 1}`,
+            providerId: ai.activeProviderId,
+            model: ai.activeModel,
+            reasoningEffort: ai.reasoningEffort,
+            toolUse: { ...toolUse, autoApproveTools: { ...approveTools } },
+            context: { includeRuntimeChips: true, includeMemory: true, includeRag: true },
+            commandPolicy: { allow: [], deny: [] },
+            createdAt: now,
+            updatedAt: now,
+        };
+        updateProfiles([...profilesConfig.profiles, profile], profile.id);
+    };
+    const duplicateProfile = (profile: AiExecutionProfile) => {
+        const now = Date.now();
+        const copy: AiExecutionProfile = {
+            ...profile,
+            id: crypto.randomUUID(),
+            name: `${profile.name} Copy`,
+            createdAt: now,
+            updatedAt: now,
+            toolUse: profile.toolUse ? {
+                ...profile.toolUse,
+                autoApproveTools: { ...(profile.toolUse.autoApproveTools ?? {}) },
+                disabledTools: [...(profile.toolUse.disabledTools ?? [])],
+            } : undefined,
+            context: profile.context ? { ...profile.context } : undefined,
+            commandPolicy: profile.commandPolicy ? {
+                allow: [...(profile.commandPolicy.allow ?? [])],
+                deny: [...(profile.commandPolicy.deny ?? [])],
+            } : undefined,
+        };
+        updateProfiles([...profilesConfig.profiles, copy], copy.id);
+    };
+    const deleteProfile = (profileId: string) => {
+        if (profilesConfig.profiles.length <= 1) return;
+        updateProfiles(profilesConfig.profiles.filter((profile) => profile.id !== profileId));
+    };
+
+    useEffect(() => {
+        const handleFocusSettingsSection = (event: Event) => {
+            const detail = (event as CustomEvent<{ tab?: string; section?: string }>).detail;
+            if (detail?.tab !== 'ai' || detail.section !== 'tool-use') {
+                return;
+            }
+            setToolUseExpanded(true);
+            window.requestAnimationFrame(() => {
+                toolUseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        };
+
+        window.addEventListener('oxideterm:focus-settings-section', handleFocusSettingsSection);
+        return () => window.removeEventListener('oxideterm:focus-settings-section', handleFocusSettingsSection);
+    }, []);
 
     return (
         <>
@@ -218,12 +270,121 @@ export const AiTab = ({
                         </p>
                     </div>
 
-                    <Separator className="my-6 opacity-50" />
+	                    <Separator className="my-6 opacity-50" />
 
-                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
-                        <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
+	                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
+                            <div className="mb-6 max-w-3xl rounded-lg border border-theme-border/70 bg-theme-bg/60 p-4">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                    <div>
+                                        <h4 className="text-sm font-medium uppercase tracking-wider text-theme-text">
+                                            {t('settings_view.ai.execution_profiles', { defaultValue: 'Execution Profiles' })}
+                                        </h4>
+                                        <p className="mt-1 text-xs text-theme-text-muted">
+                                            {t('settings_view.ai.execution_profiles_hint', { defaultValue: 'Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.' })}
+                                        </p>
+                                    </div>
+                                    <Button type="button" variant="outline" size="sm" onClick={addProfile} className="gap-1.5">
+                                        <Plus className="h-3.5 w-3.5" />
+                                        {t('settings_view.ai.profile_add', { defaultValue: 'New profile' })}
+                                    </Button>
+                                </div>
+                                <div className="space-y-2">
+                                    {profilesConfig.profiles.map((profile) => (
+                                        <div key={profile.id} className="rounded-md border border-theme-border/45 bg-theme-bg-card/45 p-3">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Input
+                                                    value={profile.name}
+                                                    onChange={(event) => patchProfile(profile.id, { name: event.currentTarget.value })}
+                                                    className="h-8 min-w-[180px] flex-1"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant={profilesConfig.defaultProfileId === profile.id ? 'default' : 'outline'}
+                                                    size="sm"
+                                                    onClick={() => updateProfiles(profilesConfig.profiles, profile.id)}
+                                                >
+                                                    {profilesConfig.defaultProfileId === profile.id
+                                                        ? t('settings_view.ai.profile_default', { defaultValue: 'Default' })
+                                                        : t('settings_view.ai.profile_set_default', { defaultValue: 'Set default' })}
+                                                </Button>
+                                                <Button type="button" variant="ghost" size="icon" onClick={() => duplicateProfile(profile)}>
+                                                    <Copy className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    disabled={profilesConfig.profiles.length <= 1}
+                                                    onClick={() => deleteProfile(profile.id)}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                                                </Button>
+                                            </div>
+                                            <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                                <Select
+                                                    value={profile.providerId ?? 'inherit'}
+                                                    onValueChange={(value) => patchProfile(profile.id, {
+                                                        providerId: value === 'inherit' ? null : value,
+                                                        model: value === 'inherit'
+                                                            ? null
+                                                            : ai.providers.find((provider) => provider.id === value)?.defaultModel ?? null,
+                                                    })}
+                                                >
+                                                    <SelectTrigger className="h-8">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="inherit">{t('settings_view.ai.profile_inherit_provider', { defaultValue: 'Use active provider' })}</SelectItem>
+                                                        {ai.providers.map((provider) => (
+                                                            <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Input
+                                                    value={profile.model ?? ''}
+                                                    placeholder={t('settings_view.ai.profile_inherit_model', { defaultValue: 'Use provider default' })}
+                                                    onChange={(event) => patchProfile(profile.id, { model: event.currentTarget.value || null })}
+                                                    className="h-8"
+                                                />
+                                                <Select
+                                                    value={profile.reasoningEffort}
+                                                    onValueChange={(value) => patchProfile(profile.id, { reasoningEffort: value as AiReasoningEffort })}
+                                                >
+                                                    <SelectTrigger className="h-8">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {(['auto', 'off', 'low', 'medium', 'high', 'max'] as AiReasoningEffort[]).map((effort) => (
+                                                            <SelectItem key={effort} value={effort}>
+                                                                {t(`settings_view.ai.reasoning_${effort}`, { defaultValue: effort })}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
 
-                        <div className="space-y-3 max-w-3xl mb-6">
+	                        <button
+	                            type="button"
+                            className="mb-4 flex w-full max-w-3xl items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
+                            onClick={() => setProviderSettingsExpanded((current) => !current)}
+                            aria-expanded={providerSettingsExpanded}
+                        >
+                            <div>
+                                <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider">{t('settings_view.ai.provider_settings')}</h4>
+                                <p className="mt-1 text-xs text-theme-text-muted">
+                                    {t('settings_view.ai.provider_settings_summary', { count: ai.providers.length })}
+                                </p>
+                            </div>
+                            {providerSettingsExpanded
+                                ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0" />
+                                : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0" />}
+                        </button>
+
+                        {providerSettingsExpanded && <div className="space-y-3 max-w-3xl mb-6">
                             {ai.providers.map((provider) => {
                                 const isActiveProvider = provider.id === ai.activeProviderId;
                                 const isExpanded = expandedProviders[provider.id] ?? isActiveProvider;
@@ -372,6 +533,21 @@ export const AiTab = ({
 
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                                                 <div className="grid gap-1">
+                                                    <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.provider_name')}</Label>
+                                                    <Input
+                                                        value={provider.name}
+                                                        onChange={(event) => updateProvider(provider.id, { name: event.target.value })}
+                                                        onBlur={(event) => {
+                                                            const trimmedName = event.target.value.trim();
+                                                            if (trimmedName && trimmedName !== provider.name) {
+                                                                updateProvider(provider.id, { name: trimmedName });
+                                                            }
+                                                        }}
+                                                        className="bg-theme-bg h-8 text-xs"
+                                                        placeholder={t('settings_view.ai.provider_name')}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1">
                                                     <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.base_url')}</Label>
                                                     <Input
                                                         value={provider.baseUrl}
@@ -461,9 +637,9 @@ export const AiTab = ({
                                 </div>
                                 );
                             })}
-                        </div>
+                        </div>}
 
-                        <div className="mb-6 flex flex-wrap items-end gap-3">
+                        {providerSettingsExpanded && <div className="mb-6 flex flex-wrap items-end gap-3">
                             <div className="grid gap-1">
                                 <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.provider_template')}</Label>
                                 <Select value={newProviderType} onValueChange={(value) => setNewProviderType(value as AiProviderType)}>
@@ -498,43 +674,7 @@ export const AiTab = ({
                             >
                                 + {t('settings_view.ai.add_provider')}
                             </Button>
-                        </div>
-
-                        <Separator className="my-6 opacity-50" />
-                        <h4 className="text-sm font-medium text-theme-text mb-4 uppercase tracking-wider">{t('settings_view.ai.embedding_title')}</h4>
-                        <p className="text-xs text-theme-text-muted mb-4">{t('settings_view.ai.embedding_description')}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl mb-6">
-                            <div className="grid gap-1">
-                                <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.embedding_provider')}</Label>
-                                <Select
-                                    value={ai.embeddingConfig?.providerId ?? '__default__'}
-                                    onValueChange={(value) => updateAi('embeddingConfig', { ...ai.embeddingConfig, providerId: value === '__default__' ? null : value, model: ai.embeddingConfig?.model ?? '' })}
-                                >
-                                    <SelectTrigger className="bg-theme-bg h-8 text-xs">
-                                        <SelectValue placeholder={t('settings_view.ai.embedding_provider_placeholder')} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="__default__">{t('settings_view.ai.embedding_provider_default')}</SelectItem>
-                                        {ai.providers.filter((provider) => provider.enabled && provider.type !== 'anthropic').map((provider) => (
-                                            <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid gap-1">
-                                <Label className="text-xs text-theme-text-muted">{t('settings_view.ai.embedding_model')}</Label>
-                                <Input
-                                    value={ai.embeddingConfig?.model ?? ''}
-                                    onChange={(event) => updateAi('embeddingConfig', { ...ai.embeddingConfig, providerId: ai.embeddingConfig?.providerId ?? null, model: event.target.value })}
-                                    className="bg-theme-bg h-8 text-xs"
-                                    placeholder={(() => {
-                                        const embeddingProvider = ai.providers.find((provider) => provider.id === ai.embeddingConfig?.providerId);
-                                        if (embeddingProvider?.type === 'ollama') return 'nomic-embed-text';
-                                        return 'text-embedding-3-small';
-                                    })()}
-                                />
-                            </div>
-                        </div>
+                        </div>}
 
                         <Separator className="my-6 opacity-50" />
 
@@ -701,7 +841,7 @@ export const AiTab = ({
                             ) : (
                                 <div className="space-y-4">
                                     {ai.providers.filter((provider) => provider.models.length > 0).map((provider) => {
-                                        const providerCollapsed = collapsedReasoningProviders[provider.id] === true;
+                                        const providerCollapsed = collapsedReasoningProviders[provider.id] ?? true;
                                         const overrideCount = provider.models.filter((model) => !!ai.reasoningModelOverrides?.[provider.id]?.[model]).length;
 
                                         return (
@@ -711,7 +851,7 @@ export const AiTab = ({
                                                     className="mb-1 flex w-full items-center justify-between gap-3 rounded px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
                                                     onClick={() => setCollapsedReasoningProviders((current) => ({
                                                         ...current,
-                                                        [provider.id]: !current[provider.id],
+                                                        [provider.id]: !(current[provider.id] ?? true),
                                                     }))}
                                                     aria-expanded={!providerCollapsed}
                                                 >
@@ -814,7 +954,7 @@ export const AiTab = ({
                             ) : (
                                 <div className="space-y-4 max-w-3xl">
                                     {ai.providers.filter((provider) => provider.models.length > 0).map((provider) => {
-                                        const providerCollapsed = collapsedContextProviders[provider.id] === true;
+                                        const providerCollapsed = collapsedContextProviders[provider.id] ?? true;
                                         const userOverrideCount = provider.models.filter((model) => !!ai.userContextWindows?.[provider.id]?.[model]).length;
 
                                         return (
@@ -824,7 +964,7 @@ export const AiTab = ({
                                                 className="mb-1 flex w-full items-center justify-between gap-3 rounded px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
                                                 onClick={() => setCollapsedContextProviders((current) => ({
                                                     ...current,
-                                                    [provider.id]: !current[provider.id],
+                                                    [provider.id]: !(current[provider.id] ?? true),
                                                 }))}
                                                 aria-expanded={!providerCollapsed}
                                             >
@@ -895,7 +1035,7 @@ export const AiTab = ({
 
                     <Separator className="my-6 opacity-50" />
 
-                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
+                    <div ref={toolUseSectionRef} className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h4 className="text-sm font-medium text-theme-text uppercase tracking-wider flex items-center gap-2">
                                 <Wrench className="w-4 h-4" />
@@ -928,10 +1068,7 @@ export const AiTab = ({
                         {!toolUseExpanded && (
                             <div className="ml-4 border-l border-theme-border/30 pl-4">
                                 <p className="text-xs text-theme-text-muted">
-                                    {t('settings_view.ai.tool_use_collapsed_summary', {
-                                        approved: approvedToolCount,
-                                        total: allToolNames.length,
-                                    })}
+                                    {t('settings_view.ai.tool_use_policy_summary')}
                                 </p>
                             </div>
                         )}
@@ -941,123 +1078,144 @@ export const AiTab = ({
                             id="ai-tool-use-details"
                             className={toolUse.enabled ? 'space-y-5 ml-4 pl-4 border-l border-theme-border/30' : 'opacity-40 pointer-events-none space-y-5 ml-4 pl-4 border-l border-theme-border/30'}
                         >
-                            <p className="text-xs text-theme-text-muted">{t('settings_view.ai.tool_use_approve_hint')}</p>
+                            <p className="text-xs text-theme-text-muted">
+                                {t('settings_view.ai.tool_use_approve_hint')}
+                            </p>
 
-                            <div className="flex gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const all: Record<string, boolean> = {};
-                                        for (const group of TOOL_GROUPS) {
-                                            for (const name of [...group.readOnly, ...group.write]) {
-                                                if (!EXPERIMENTAL_TOOLS.has(name)) all[name] = true;
-                                            }
-                                        }
-                                        const current = toolUse.autoApproveTools ?? {};
-                                        for (const name of EXPERIMENTAL_TOOLS) {
-                                            if (current[name] !== undefined) all[name] = current[name];
-                                        }
-                                        updateAi('toolUse', { ...toolUse, autoApproveTools: all });
-                                    }}
-                                    className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
-                                >
-                                    {t('settings_view.ai.tool_use_approve_all')}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const none: Record<string, boolean> = {};
-                                        for (const group of TOOL_GROUPS) {
-                                            for (const name of [...group.readOnly, ...group.write]) {
-                                                if (!EXPERIMENTAL_TOOLS.has(name)) none[name] = false;
-                                            }
-                                        }
-                                        const current = toolUse.autoApproveTools ?? {};
-                                        for (const name of EXPERIMENTAL_TOOLS) {
-                                            if (current[name] !== undefined) none[name] = current[name];
-                                        }
-                                        updateAi('toolUse', { ...toolUse, autoApproveTools: none });
-                                    }}
-                                    className="text-xs px-3 py-1 rounded border border-theme-border text-theme-text-muted hover:bg-theme-bg-hover/50 transition-colors cursor-pointer"
-                                >
-                                    {t('settings_view.ai.tool_use_approve_none')}
-                                </button>
+                            <div className="rounded-lg border border-theme-border/60 bg-theme-bg-panel/30 p-3">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="min-w-0">
+                                        <Label htmlFor="ai-tool-max-rounds" className="text-theme-text">
+                                            {t('settings_view.ai.tool_use_max_rounds')}
+                                        </Label>
+                                        <p className="mt-0.5 text-xs text-theme-text-muted">
+                                            {t('settings_view.ai.tool_use_max_rounds_hint')}
+                                        </p>
+                                    </div>
+                                    <Input
+                                        id="ai-tool-max-rounds"
+                                        type="number"
+                                        min={MIN_AI_TOOL_MAX_ROUNDS}
+                                        max={MAX_AI_TOOL_MAX_ROUNDS}
+                                        step={1}
+                                        value={toolUseMaxRounds}
+                                        onChange={(event) => {
+                                            const next = normalizeAiToolMaxRounds(Number(event.currentTarget.value));
+                                            updateAi('toolUse', { ...toolUse, maxRounds: next });
+                                        }}
+                                        className="h-9 w-24 text-right"
+                                    />
+                                </div>
                             </div>
 
-                            {TOOL_GROUPS.map((group) => {
-                                const GroupIcon = TOOL_GROUP_ICONS[group.groupKey] ?? Wrench;
-                                const approveTools = toolUse.autoApproveTools ?? {};
-                                const toggleTool = (toolName: string) => {
-                                    const next = { ...approveTools, [toolName]: !approveTools[toolName] };
-                                    updateAi('toolUse', { ...toolUse, autoApproveTools: next });
-                                };
-
-                                const renderToolButton = (toolName: string) => {
-                                    const Icon = TOOL_ICON_MAP[toolName] ?? Wrench;
-                                    const checked = approveTools[toolName] === true;
-                                    const isWrite = WRITE_TOOLS.has(toolName);
-                                    const isExperimental = EXPERIMENTAL_TOOLS.has(toolName);
-                                    return (
-                                        <button
-                                            key={toolName}
-                                            type="button"
-                                            aria-pressed={checked}
-                                            onClick={() => toggleTool(toolName)}
-                                            className={cn(
-                                                'flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors cursor-pointer select-none',
-                                                checked
-                                                    ? isExperimental
-                                                        ? 'border-purple-500/60 bg-purple-500/10 text-purple-400'
-                                                        : isWrite
-                                                            ? 'border-amber-500/60 bg-amber-500/10 text-amber-400'
-                                                            : 'border-theme-accent/60 bg-theme-accent/10 text-theme-accent'
-                                                    : 'border-theme-border bg-theme-bg-panel/30 text-theme-text-muted hover:border-theme-border hover:bg-theme-bg-hover/50',
-                                            )}
-                                        >
-                                            <Icon className="size-3.5 shrink-0" />
-                                            <span className="truncate">{t(`ai.tool_use.tool_names.${toolName}`, { defaultValue: toolName })}</span>
-                                            {isExperimental && <FlaskConical className="size-3 shrink-0 text-purple-400/70" />}
-                                        </button>
-                                    );
-                                };
-
-                                const isExperimentalGroup = [...group.readOnly, ...group.write].some((name) => EXPERIMENTAL_TOOLS.has(name));
-                                return (
-                                    <div key={group.groupKey}>
-                                        <div className="flex items-center gap-1.5 mb-2">
-                                            <GroupIcon className="size-3.5 text-theme-text-muted" />
-                                            <span className="text-xs font-medium text-theme-text uppercase tracking-wider">{t(`settings_view.ai.tool_use_group_${group.groupKey}`)}</span>
-                                            {isExperimentalGroup && (
-                                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-medium uppercase tracking-wider">
-                                                    {t('settings_view.ai.experimental')}
-                                                </span>
-                                            )}
+                            <div className="grid gap-3 md:grid-cols-2">
+                                {([
+                                    {
+                                        title: t('settings_view.ai.tool_policy_read_title'),
+                                        description: t('settings_view.ai.tool_policy_read_desc'),
+                                        items: [
+                                            {
+                                                label: t('settings_view.ai.tool_policy_read_auto'),
+                                                checked: true,
+                                                locked: true,
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: t('settings_view.ai.tool_policy_execute_title'),
+                                        description: t('settings_view.ai.tool_policy_execute_desc'),
+                                        items: [
+                                            {
+                                                label: t('settings_view.ai.tool_policy_execute_run_command'),
+                                                checked: approveTools.run_command === true,
+                                                onChange: (checked: boolean) => setToolApproval('run_command', checked),
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: t('settings_view.ai.tool_policy_interactive_title'),
+                                        description: t('settings_view.ai.tool_policy_interactive_desc'),
+                                        items: [
+                                            {
+                                                label: t('settings_view.ai.tool_policy_interactive_send_input'),
+                                                checked: approveTools.send_terminal_input === true,
+                                                onChange: (checked: boolean) => setToolApproval('send_terminal_input', checked),
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: t('settings_view.ai.tool_policy_navigation_title'),
+                                        description: t('settings_view.ai.tool_policy_navigation_desc'),
+                                        items: [
+                                            {
+                                                label: t('settings_view.ai.tool_policy_connect_target'),
+                                                checked: approveTools.connect_target === true,
+                                                onChange: (checked: boolean) => setToolApproval('connect_target', checked),
+                                            },
+                                            {
+                                                label: t('settings_view.ai.tool_policy_open_surface'),
+                                                checked: approveTools.open_app_surface === true,
+                                                onChange: (checked: boolean) => setToolApproval('open_app_surface', checked),
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        title: t('settings_view.ai.tool_policy_write_title'),
+                                        description: t('settings_view.ai.tool_policy_write_desc'),
+                                        className: 'md:col-span-2',
+                                        items: [
+                                            {
+                                                label: t('settings_view.ai.tool_policy_write_settings'),
+                                                checked: approveTools['write_resource:settings'] === true,
+                                                onChange: (checked: boolean) => setToolApproval('write_resource:settings', checked),
+                                            },
+                                            {
+                                                label: t('settings_view.ai.tool_policy_write_file'),
+                                                checked: approveTools['write_resource:file'] === true,
+                                                onChange: (checked: boolean) => setToolApproval('write_resource:file', checked),
+                                            },
+                                            {
+                                                label: t('settings_view.ai.tool_policy_transfer_resource'),
+                                                checked: approveTools.transfer_resource === true,
+                                                onChange: (checked: boolean) => setToolApproval('transfer_resource', checked),
+                                            },
+                                            {
+                                                label: t('settings_view.ai.tool_policy_remember_preference'),
+                                                checked: approveTools.remember_preference === true,
+                                                onChange: (checked: boolean) => setToolApproval('remember_preference', checked),
+                                            },
+                                        ],
+                                    },
+                                ] as ToolPolicyGroup[]).map((policy) => (
+                                    <div key={policy.title} className={cn('rounded-lg border border-theme-border/60 bg-theme-bg-panel/30 p-3', policy.className)}>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-theme-text">{policy.title}</p>
+                                            <p className="mt-1 text-xs leading-relaxed text-theme-text-muted">{policy.description}</p>
                                         </div>
-                                        {group.readOnly.length > 0 && (
-                                            <div className="mb-2">
-                                                <span className="text-[10px] text-theme-text-muted/60 uppercase tracking-widest">{t('settings_view.ai.tool_use_subgroup_read_only')}</span>
-                                                <div className="grid grid-cols-3 gap-1.5 mt-1">{group.readOnly.map(renderToolButton)}</div>
-                                            </div>
-                                        )}
-                                        {group.write.length > 0 && (
-                                            <div>
-                                                <span className="text-[10px] text-amber-400/70 uppercase tracking-widest">{t('settings_view.ai.tool_use_subgroup_write')}</span>
-                                                <div className="grid grid-cols-3 gap-1.5 mt-1">{group.write.map(renderToolButton)}</div>
-                                            </div>
-                                        )}
+                                        <div className="mt-3 grid gap-2">
+                                            {policy.items.map((item) => (
+                                                <label
+                                                    key={item.label}
+                                                    className="flex items-center justify-between gap-3 rounded-md border border-theme-border/30 bg-theme-bg/25 px-2.5 py-2 text-xs text-theme-text-muted"
+                                                >
+                                                    <span>{item.label}</span>
+                                                    <Checkbox
+                                                        checked={item.checked}
+                                                        disabled={item.locked}
+                                                        onCheckedChange={(checked) => item.onChange?.(!!checked)}
+                                                    />
+                                                </label>
+                                            ))}
+                                        </div>
                                     </div>
-                                );
-                            })}
+                                ))}
+                            </div>
 
-                            {(() => {
-                                const approveTools = toolUse.autoApproveTools ?? {};
-                                const anyWriteApproved = [...WRITE_TOOLS].some((name) => approveTools[name] === true);
-                                return anyWriteApproved ? (
-                                    <div className="p-3 rounded bg-amber-500/10 border border-amber-500/20">
-                                        <p className="text-xs text-amber-400 leading-relaxed"><span className="font-semibold">⚠</span> {t('settings_view.ai.tool_use_write_warning')}</p>
-                                    </div>
-                                ) : null;
-                            })()}
+                            <div className="p-3 rounded bg-amber-500/10 border border-amber-500/20">
+                                <p className="text-xs text-amber-400 leading-relaxed">
+                                    {t('settings_view.ai.tool_policy_warning')}
+                                </p>
+                            </div>
                         </div>
                         )}
                     </div>

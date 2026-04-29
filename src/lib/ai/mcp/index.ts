@@ -5,6 +5,8 @@ export { useMcpRegistry } from './mcpRegistry';
 export { connectMcpServer, disconnectMcpServer, callMcpTool, readMcpResource, refreshMcpTools, setMcpAuthToken, deleteMcpAuthToken } from './mcpClient';
 export type {
   McpTransport,
+  McpEffectiveTransport,
+  McpAuthHeaderMode,
   McpServerConfig,
   McpServerState,
   McpServerStatus,

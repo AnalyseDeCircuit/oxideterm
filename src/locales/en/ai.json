@@ -114,6 +114,9 @@
       "offline": "Offline",
       "manage_providers": "Manage Providers",
       "no_provider": "No provider configured",
+      "search_placeholder": "Search models...",
+      "clear_search": "Clear search",
+      "no_search_results": "No matching models",
       "refresh_models": "Refresh",
       "api_key_not_found": "API key not found. Please configure it in Settings > AI.",
       "failed_to_get_api_key": "Failed to get API key."
@@ -133,6 +136,10 @@
       "copy_session_id": "Copy session_id",
       "recoverable_error": "Recoverable error",
       "output_truncated": "Output was truncated",
+      "output_truncated_with_full": "Output was compacted for the model. Full output is stored for this chat.",
+      "output_truncated_no_full": "Output was compacted; full output was too large to store.",
+      "output_stats": "{{chars}} chars, {{lines}} lines{{omitted}}",
+      "show_more_preview": "Show more preview",
       "condensed": "{{count}} earlier call(s) — condensed for AI context",
       "condensed_label": "Earlier calls (condensed for AI)",
       "deny_list_warning": "Security-sensitive command",
@@ -217,7 +224,17 @@
         "network-expose": "Network Exposure",
         "settings-change": "Settings Change",
         "credential-sensitive": "Credential Sensitive"
-      }
+      },
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "Tool use is disabled for this chat, and the model emitted a pseudo-tool transcript. OxideSens requested a plain-language retry.",
@@ -237,31 +254,41 @@
       "disable_group": "Disable group",
       "active_summary": "{{active}}/{{total}} tools active"
     },
+    "tool_status": {
+      "enabled": "Tools on",
+      "rounds_short": "{{count}}",
+      "disabled": "Tools off",
+      "disabled_short": "Off",
+      "disabled_count": "{{count}} disabled",
+      "open_settings": "Open AI tool settings"
+    },
+    "safety_mode": {
+      "default_label": "Default",
+      "bypass_label": "Bypass",
+      "default_title": "Default safety mode: dangerous commands require approval",
+      "bypass_title": "Bypass mode is active for this chat",
+      "menu_title": "Safety mode",
+      "default_mode": "Default mode",
+      "default_desc": "Dangerous commands require approval before execution.",
+      "bypass_mode": "Bypass mode",
+      "bypass_desc": "Skip dangerous-command approvals in this chat after explicit confirmation.",
+      "open_settings": "Open tool-use settings",
+      "confirm_title": "Enable bypass mode?",
+      "confirm_description": "For this chat only, dangerous commands will run without per-command approval. Tool calls are still recorded. Passwords, sudo prompts, passphrases, and credentials must still be handled by you.",
+      "confirm_enable": "Enable bypass",
+      "confirm_cancel": "Keep default"
+    },
     "slash": {
       "explain": "Explain",
       "explain_desc": "Explain a command, output, or concept",
-      "optimize": "Optimize",
-      "optimize_desc": "Suggest optimizations for a command or script",
       "fix": "Fix",
       "fix_desc": "Diagnose and fix errors or problems",
-      "script": "Script",
-      "script_desc": "Generate a shell script for a task",
-      "deploy": "Deploy",
-      "deploy_desc": "Help with deployment and CI/CD tasks",
-      "monitor": "Monitor",
-      "monitor_desc": "Check system resources and health",
-      "connect": "Connect",
-      "connect_desc": "Help manage SSH connections",
-      "search": "Search",
-      "search_desc": "Search files, logs, or terminal output",
       "help": "Help",
       "help_desc": "Show available commands and features",
       "clear": "Clear",
       "clear_desc": "Start a new conversation",
       "compact": "Compact",
-      "compact_desc": "Compress conversation history",
-      "tools": "Tools",
-      "tools_desc": "Show available tools and their status"
+      "compact_desc": "Compress conversation history"
     },
     "participant": {
       "terminal": "Terminal",
@@ -270,30 +297,24 @@
       "sftp_desc": "File browser and transfers",
       "ide": "IDE",
       "ide_desc": "Code editing and project tools",
-      "connection": "Connection",
-      "connection_desc": "SSH connections and infrastructure",
-      "system": "System",
-      "system_desc": "System monitoring and health",
       "local": "Local",
-      "local_desc": "Local terminal and shell"
+      "local_desc": "Local terminal and shell",
+      "settings": "Settings",
+      "settings_desc": "App settings and preferences",
+      "knowledge": "Knowledge",
+      "knowledge_desc": "Knowledge base and documentation search"
     },
     "reference": {
       "buffer": "Buffer",
       "buffer_desc": "Active terminal buffer content",
       "selection": "Selection",
       "selection_desc": "Current terminal selection",
-      "file": "File",
-      "file_desc": "Read a remote file by path",
       "error": "Error",
       "error_desc": "Last error from terminal output",
       "pane": "Pane",
       "pane_desc": "Content from a specific pane",
       "cwd": "CWD",
-      "cwd_desc": "Current working directory",
-      "env": "Env",
-      "env_desc": "Environment variables",
-      "history": "History",
-      "history_desc": "Recent command history"
+      "cwd_desc": "Current working directory"
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens is not enabled. Please enable it in Settings → AI to get started."

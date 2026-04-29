@@ -59,7 +59,7 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
 
   // Smart port detection: resolve nodeId → connectionId for profiler events
   const connectionId = topologyResolver.getConnectionId(nodeId);
-  const { newPorts, allPorts, dismissPort } = usePortDetection(connectionId);
+  const { newPorts, allPorts, dismissPort, hasScanned } = usePortDetection(connectionId);
 
   const [forwards, setForwards] = useState<ForwardRule[]>([]);
   const [forwardStats, setForwardStats] = useState<Record<string, ForwardStats>>({});
@@ -743,7 +743,9 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                 {allPorts.filter(p => p.port !== 22).length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-4 py-6 text-center text-theme-text-muted text-xs">
-                      {t('forwards.detection.noPorts')}
+                      {hasScanned
+                        ? t('forwards.detection.noPorts')
+                        : t('forwards.detection.scanning')}
                     </td>
                   </tr>
                 ) : (

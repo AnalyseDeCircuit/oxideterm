@@ -91,6 +91,7 @@
       "bindAddr": "綁定地址",
       "process": "程序",
       "action": "操作",
+      "scanning": "正在偵測監聽連接埠...",
       "noPorts": "尚未偵測到監聽連接埠",
       "alreadyForwarded": "已轉發"
     }
