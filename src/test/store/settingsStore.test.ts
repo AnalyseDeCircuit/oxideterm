@@ -202,7 +202,6 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.terminal.commandBar).toEqual({
       enabled: true,
       showLegacyToolbar: false,
-      askMode: true,
       gitStatus: true,
     });
   });

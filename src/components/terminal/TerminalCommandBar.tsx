@@ -5,16 +5,13 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from '
 import { open } from '@tauri-apps/plugin-dialog';
 import { readTextFile } from '@tauri-apps/plugin-fs';
 import {
-  Bot,
   ChevronRight,
   FilePlay,
   GitBranch,
   Radio,
-  Send,
   SplitSquareHorizontal,
   SplitSquareVertical,
   Square,
-  TerminalSquare,
   Trash2,
   Circle,
 } from 'lucide-react';
@@ -58,9 +55,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
 
-  const placeholder = state.mode === 'ask'
-    ? t('terminal.command_bar.ask_placeholder')
-    : t('terminal.command_bar.command_placeholder');
+  const placeholder = t('terminal.command_bar.command_placeholder');
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (composingRef.current || isComposingKeyEvent(event)) {
@@ -98,15 +93,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
     if (event.key === 'Enter') {
       event.preventDefault();
       setSuggestionsOpen(false);
-      if ((event.metaKey || event.ctrlKey) && state.mode === 'command') {
-        state.submitAsk();
-        return;
-      }
-      if (state.mode === 'ask') {
-        state.submitAsk();
-      } else {
-        state.submitCommand();
-      }
+      state.submitCommand();
     }
   }, [focusTerminal, highlightedSuggestion, state, suggestionsOpen]);
 
@@ -131,7 +118,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
 
   return (
     <div ref={rootRef} className="relative z-20 flex-shrink-0 border-t border-theme-border/70 bg-theme-bg/95 px-3 py-1 shadow-[0_-6px_18px_rgba(0,0,0,0.16)]">
-      {state.focused && suggestionsOpen && state.suggestions.length > 0 && state.mode === 'command' && (
+      {state.focused && suggestionsOpen && state.suggestions.length > 0 && (
         <TerminalCommandSuggestions
           suggestions={state.suggestions}
           highlightedIndex={highlightedSuggestion}
@@ -153,20 +140,6 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
           gitBranch={state.chips.gitBranch}
         />
         <div className="flex flex-shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => state.setMode(state.mode === 'command' ? 'ask' : 'command')}
-            className={cn(
-              'inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors',
-              state.mode === 'ask'
-                ? 'text-theme-accent bg-theme-accent/10'
-                : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-hover',
-            )}
-            title={state.mode === 'ask' ? t('terminal.command_bar.ask_mode') : t('terminal.command_bar.command_mode')}
-          >
-            {state.mode === 'ask' ? <Bot className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">{state.mode === 'ask' ? t('terminal.command_bar.ask') : t('terminal.command_bar.command')}</span>
-          </button>
           <TerminalCommandBarActions
             paneId={paneId}
             sessionId={sessionId}
@@ -189,9 +162,9 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
       >
         <span className={cn(
           'flex h-6 w-5 flex-shrink-0 items-center justify-center',
-          state.mode === 'ask' ? 'text-theme-accent' : 'text-theme-text-muted',
+          'text-theme-text-muted',
         )}>
-          {state.mode === 'ask' ? <Bot className="h-3.5 w-3.5" /> : <ChevronRight className="h-4 w-4" />}
+          <ChevronRight className="h-4 w-4" />
         </span>
         <input
           ref={inputRef}
@@ -222,11 +195,11 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         <button
           type="button"
           onMouseDown={(event) => event.preventDefault()}
-          onClick={state.mode === 'ask' ? state.submitAsk : state.submitCommand}
+          onClick={state.submitCommand}
           className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-theme-accent hover:bg-theme-accent/10"
-          title={state.mode === 'ask' ? t('terminal.command_bar.send_to_ai') : t('terminal.command_bar.run_command')}
+          title={t('terminal.command_bar.run_command')}
         >
-          {state.mode === 'ask' ? <Send className="h-3.5 w-3.5" /> : <ChevronRight className="h-4 w-4" />}
+          <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </div>

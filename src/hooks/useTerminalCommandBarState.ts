@@ -3,7 +3,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAiChatStore } from '@/store/aiChatStore';
 import { useAppStore } from '@/store/appStore';
 import { useBroadcastStore } from '@/store/broadcastStore';
 import { useRecordingStore } from '@/store/recordingStore';
@@ -13,7 +12,6 @@ import {
   getCwd,
   getCwdHost,
   getTerminalBuffer,
-  getTerminalSelection,
   broadcastToTargets,
   subscribeTerminalOutput,
 } from '@/lib/terminalRegistry';
@@ -22,7 +20,6 @@ import {
 } from '@/lib/terminal/autosuggest';
 import type { TerminalAutosuggestCandidate } from '@/lib/terminal/autosuggest';
 
-export type TerminalCommandBarMode = 'command' | 'ask';
 export type TerminalCommandBarTerminalType = 'terminal' | 'local_terminal';
 
 type UseTerminalCommandBarStateOptions = {
@@ -37,13 +34,11 @@ type UseTerminalCommandBarStateOptions = {
 export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOptions) {
   const { paneId, sessionId, tabId, terminalType, isActive, sendInput } = options;
   const { t } = useTranslation();
-  const [mode, setMode] = useState<TerminalCommandBarMode>('command');
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [terminalActivityTick, setTerminalActivityTick] = useState(0);
   const commandBarSettings = useSettingsStore((s) => s.settings.terminal.commandBar);
-  const aiEnabled = useSettingsStore((s) => s.settings.ai.enabled);
   const broadcastEnabled = useBroadcastStore((s) => s.enabled);
   const broadcastTargets = useBroadcastStore((s) => s.targets);
   const isRecording = useRecordingStore((s) => s.isRecording(sessionId));
@@ -84,9 +79,9 @@ export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOp
   }, [sessionId]);
 
   const suggestions = useMemo<TerminalAutosuggestCandidate[]>(() => {
-    if (!commandBarSettings.enabled || mode !== 'command' || !value.trim()) return [];
+    if (!commandBarSettings.enabled) return [];
     return getTerminalAutosuggestCandidates(value, 6);
-  }, [commandBarSettings.enabled, mode, value]);
+  }, [commandBarSettings.enabled, value]);
 
   useEffect(() => {
     if (!commandBarSettings.gitStatus || terminalType !== 'local_terminal' || !cwd) {
@@ -126,23 +121,6 @@ export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOp
     return true;
   }, [isActive, paneId, sendInput, value]);
 
-  const submitAsk = useCallback(() => {
-    const prompt = value.trim();
-    if (!prompt || !commandBarSettings.askMode || !aiEnabled) return false;
-    const selection = getTerminalSelection(paneId) ?? '';
-    const buffer = getTerminalBuffer(paneId, tabId) ?? '';
-    const contextParts = [
-      `Target: ${targetLabel}`,
-      cwd ? `CWD: ${cwd}` : null,
-      selection ? `Selection:\n${selection}` : null,
-      buffer ? `Visible terminal buffer:\n${buffer.slice(-6000)}` : null,
-    ].filter(Boolean);
-    useSettingsStore.getState().setAiSidebarCollapsed(false);
-    void useAiChatStore.getState().sendMessage(prompt, contextParts.join('\n\n') || undefined);
-    setValue('');
-    return true;
-  }, [aiEnabled, commandBarSettings.askMode, cwd, paneId, tabId, targetLabel, value]);
-
   const acceptSuggestion = useCallback((candidate?: TerminalAutosuggestCandidate) => {
     const next = candidate?.command ?? suggestions[0]?.command;
     if (!next) return false;
@@ -151,8 +129,6 @@ export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOp
   }, [suggestions]);
 
   return {
-    mode,
-    setMode,
     value,
     setValue,
     focused,
@@ -160,7 +136,6 @@ export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOp
     suggestions,
     acceptSuggestion,
     submitCommand,
-    submitAsk,
     cwd,
     targetLabel,
     chips: {

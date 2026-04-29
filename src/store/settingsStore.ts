@@ -211,7 +211,6 @@ export interface TerminalAutosuggestSettings {
 export interface TerminalCommandBarSettings {
   enabled: boolean;
   showLegacyToolbar: boolean;
-  askMode: boolean;
   gitStatus: boolean;
 }
 
@@ -502,7 +501,6 @@ const defaultTerminalSettings: TerminalSettings = {
   commandBar: {
     enabled: true,
     showLegacyToolbar: false,
-    askMode: true,
     gitStatus: true,
   },
   // Background image defaults

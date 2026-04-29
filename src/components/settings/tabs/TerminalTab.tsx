@@ -358,17 +358,6 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
                 </div>
                 <div className="flex items-center justify-between mt-4">
                     <div>
-                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar_ask_mode')}</Label>
-                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_ask_mode_hint')}</p>
-                    </div>
-                    <Checkbox
-                        id="terminal-command-bar-ask"
-                        checked={terminal.commandBar.askMode}
-                        onCheckedChange={(checked) => updateCommandBar('askMode', checked as boolean)}
-                    />
-                </div>
-                <div className="flex items-center justify-between mt-4">
-                    <div>
                         <Label className="text-theme-text">{t('settings_view.terminal.command_bar_legacy_toolbar')}</Label>
                         <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_legacy_toolbar_hint')}</p>
                     </div>

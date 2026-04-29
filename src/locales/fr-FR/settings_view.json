@@ -312,8 +312,6 @@
       "autosuggest_local_history_hint": "Utilise l’historique zsh/bash/fish uniquement pour les terminaux locaux. Les terminaux distants utilisent seulement les commandes observées par OxideTerm.",
       "command_bar": "Barre de commande",
       "command_bar_hint": "Affiche une barre en bas du terminal pour les suggestions OxideTerm, le mode question, la diffusion, l’enregistrement, la lecture cast et les divisions.",
-      "command_bar_ask_mode": "Mode question",
-      "command_bar_ask_mode_hint": "Permet d’envoyer une question à OxideSens avec le contexte du terminal au lieu d’écrire dans le shell.",
       "command_bar_legacy_toolbar": "Afficher l’ancienne barre supérieure",
       "command_bar_legacy_toolbar_hint": "Garde les anciens boutons d’action dans la barre d’onglets quand la barre de commande est activée."
     },

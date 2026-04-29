@@ -312,8 +312,6 @@
       "autosuggest_local_history_hint": "仅为本地终端读取 zsh/bash/fish 历史。远程终端只使用 OxideTerm 实际观察到的命令。",
       "command_bar": "底部命令栏",
       "command_bar_hint": "在终端底部显示 OxideTerm 命令栏，用于命令建议、AI 询问、广播、录制、播放和分栏操作。",
-      "command_bar_ask_mode": "询问模式",
-      "command_bar_ask_mode_hint": "允许命令栏把当前终端上下文发送给 OxideSens，而不是写入 shell。",
       "command_bar_legacy_toolbar": "显示旧顶部工具栏",
       "command_bar_legacy_toolbar_hint": "启用底部命令栏时，仍保留旧的标签栏终端操作按钮。"
     },

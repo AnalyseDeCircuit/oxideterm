@@ -203,13 +203,9 @@
     },
     "command_bar": {
       "command": "命令",
-      "ask": "詢問",
       "command_mode": "命令模式",
-      "ask_mode": "詢問模式",
       "command_placeholder": "輸入命令...",
-      "ask_placeholder": "詢問 OxideSens 目前終端...",
       "run_command": "執行命令",
-      "send_to_ai": "傳送給 OxideSens",
       "local_shell": "本機 Shell",
       "remote_shell": "遠端 Shell",
       "all_targets": "全部",

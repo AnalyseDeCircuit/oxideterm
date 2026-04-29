@@ -203,13 +203,9 @@
     },
     "command_bar": {
       "command": "Command",
-      "ask": "Ask",
       "command_mode": "Command mode",
-      "ask_mode": "Ask mode",
       "command_placeholder": "Run commands",
-      "ask_placeholder": "Ask OxideSens about this terminal...",
       "run_command": "Run command",
-      "send_to_ai": "Ask OxideSens",
       "local_shell": "Local shell",
       "remote_shell": "Remote shell",
       "all_targets": "all",

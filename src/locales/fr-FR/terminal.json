@@ -203,13 +203,9 @@
     },
     "command_bar": {
       "command": "Commande",
-      "ask": "Demander",
       "command_mode": "Mode commande",
-      "ask_mode": "Mode question",
       "command_placeholder": "Exécuter une commande",
-      "ask_placeholder": "Demander à OxideSens pour ce terminal...",
       "run_command": "Exécuter",
-      "send_to_ai": "Demander à OxideSens",
       "local_shell": "Shell local",
       "remote_shell": "Shell distant",
       "all_targets": "tous",

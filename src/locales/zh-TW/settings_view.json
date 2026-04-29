@@ -312,8 +312,6 @@
       "autosuggest_local_history_hint": "僅為本機終端讀取 zsh/bash/fish 歷史。遠端終端只使用 OxideTerm 實際觀察到的命令。",
       "command_bar": "底部命令列",
       "command_bar_hint": "在終端底部顯示 OxideTerm 命令列，用於命令建議、AI 詢問、廣播、錄製、播放和分割操作。",
-      "command_bar_ask_mode": "詢問模式",
-      "command_bar_ask_mode_hint": "允許命令列把目前終端上下文傳送給 OxideSens，而不是寫入 shell。",
       "command_bar_legacy_toolbar": "顯示舊頂部工具列",
       "command_bar_legacy_toolbar_hint": "啟用底部命令列時，仍保留舊的標籤列終端操作按鈕。"
     },

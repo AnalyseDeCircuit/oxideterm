@@ -312,8 +312,6 @@
       "autosuggest_local_history_hint": "Usa el historial zsh/bash/fish solo para terminales locales. Los terminales remotos solo usan comandos observados por OxideTerm.",
       "command_bar": "Command Bar",
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
-      "command_bar_ask_mode": "Ask Mode",
-      "command_bar_ask_mode_hint": "Allow the command bar to send prompts to OxideSens with terminal context instead of writing to the shell.",
       "command_bar_legacy_toolbar": "Show Legacy Top Toolbar",
       "command_bar_legacy_toolbar_hint": "Keep the old tab-bar terminal action buttons visible while the bottom command bar is enabled."
     },
