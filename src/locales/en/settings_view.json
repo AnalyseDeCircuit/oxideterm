@@ -305,7 +305,11 @@
           "unsupported-regex-syntax": "This regex uses syntax that RE2 does not support.",
           "empty-match": "Regex cannot match empty text."
         }
-      }
+      },
+      "autosuggest": "Command Suggestions",
+      "autosuggest_hint": "Show non-intrusive ghost text from recent command history. Tab and Ctrl+R keep going to the shell by default.",
+      "autosuggest_local_history": "Read Local Shell History",
+      "autosuggest_local_history_hint": "Use local zsh/bash/fish history for local terminals only. Remote terminals only use commands observed by OxideTerm."
     },
     "appearance": {
       "title": "Appearance",

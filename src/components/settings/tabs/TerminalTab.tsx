@@ -11,7 +11,14 @@ import { Slider } from '@/components/ui/slider';
 import { getFontFamily } from '@/lib/fontFamily';
 import { platform } from '@/lib/platform';
 import { TerminalHighlightRulesSection } from '@/components/settings/TerminalHighlightRulesSection';
-import type { AdaptiveRendererMode, CursorStyle, FontFamily, RendererType, TerminalEncoding, TerminalSettings } from '@/store/settingsStore';
+import type {
+    AdaptiveRendererMode,
+    CursorStyle,
+    FontFamily,
+    RendererType,
+    TerminalEncoding,
+    TerminalSettings,
+} from '@/store/settingsStore';
 
 type TerminalTabProps = {
     terminal: TerminalSettings;
@@ -31,6 +38,16 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
     ) => {
         updateTerminal('inBandTransfer', {
             ...terminal.inBandTransfer,
+            [key]: value,
+        });
+    };
+
+    const updateAutosuggest = <K extends keyof TerminalSettings['autosuggest']>(
+        key: K,
+        value: TerminalSettings['autosuggest'][K],
+    ) => {
+        updateTerminal('autosuggest', {
+            ...terminal.autosuggest,
             [key]: value,
         });
     };
@@ -293,6 +310,29 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
                         <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.selection_requires_shift_hint')}</p>
                     </div>
                     <Checkbox id="selection-requires-shift" checked={terminal.selectionRequiresShift} onCheckedChange={(checked) => updateTerminal('selectionRequiresShift', checked as boolean)} />
+                </div>
+                <Separator className="my-5 opacity-50" />
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.autosuggest')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.autosuggest_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-autosuggest"
+                        checked={terminal.autosuggest.enabled}
+                        onCheckedChange={(checked) => updateAutosuggest('enabled', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.autosuggest_local_history')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.autosuggest_local_history_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-autosuggest-local-history"
+                        checked={terminal.autosuggest.localShellHistory}
+                        onCheckedChange={(checked) => updateAutosuggest('localShellHistory', checked as boolean)}
+                    />
                 </div>
             </div>
 

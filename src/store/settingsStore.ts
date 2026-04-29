@@ -203,6 +203,11 @@ export interface InBandTransferSettings {
   maxTotalBytes: number;
 }
 
+export interface TerminalAutosuggestSettings {
+  enabled: boolean;
+  localShellHistory: boolean;
+}
+
 /** Terminal settings */
 export interface TerminalSettings {
   theme: string;
@@ -223,6 +228,7 @@ export interface TerminalSettings {
   copyOnSelect: boolean; // Copy terminal selection to the system clipboard when it stabilizes
   middleClickPaste: boolean; // Paste clipboard contents on middle-click when mouse tracking is inactive
   selectionRequiresShift: boolean; // Require Shift + drag before starting text selection
+  autosuggest: TerminalAutosuggestSettings; // Client-side ghost command suggestions
   // Background image settings
   backgroundEnabled: boolean;        // Master toggle — false = no bg image anywhere
   backgroundImage: string | null;    // Stored image path (app_data_dir/backgrounds/...)
@@ -481,6 +487,10 @@ const defaultTerminalSettings: TerminalSettings = {
   copyOnSelect: false,
   middleClickPaste: false,
   selectionRequiresShift: false,
+  autosuggest: {
+    enabled: true,
+    localShellHistory: true,
+  },
   // Background image defaults
   backgroundEnabled: true,
   backgroundImage: null,
@@ -763,7 +773,18 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
       ...saved.general,
       updateChannel: saved.general?.updateChannel ?? defaults.general.updateChannel,
     },
-    terminal: { ...defaults.terminal, ...saved.terminal },
+    terminal: {
+      ...defaults.terminal,
+      ...saved.terminal,
+      autosuggest: {
+        ...defaults.terminal.autosuggest,
+        ...saved.terminal?.autosuggest,
+      },
+      inBandTransfer: {
+        ...defaults.terminal.inBandTransfer,
+        ...saved.terminal?.inBandTransfer,
+      },
+    },
     buffer: { ...defaults.buffer, ...saved.buffer },
     appearance: { ...defaults.appearance, ...saved.appearance },
     connectionDefaults: { ...defaults.connectionDefaults, ...saved.connectionDefaults },
@@ -1792,6 +1813,7 @@ const TERMINAL_BEHAVIOR_KEYS: Array<keyof TerminalSettings> = [
   'copyOnSelect',
   'middleClickPaste',
   'selectionRequiresShift',
+  'autosuggest',
   'highlightRules',
   'inBandTransfer',
 ];

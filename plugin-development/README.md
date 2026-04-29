@@ -1,5 +1,5 @@
 <!-- translated-from: plugin-development/README.zh-CN.md -->
-<!-- translated-from-sha256: ecd8cb055f0ba393ed0b457c721f9d5dcad29c9dca947711e2fffca442b705c1 -->
+<!-- translated-from-sha256: bf204dbf1339c1827ac161f537a72712f182e39d45d259102a05b91cfa98bb08 -->
 
 > Applies to the current OxideTerm version (Plugin API v3)
 

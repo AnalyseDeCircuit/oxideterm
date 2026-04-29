@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "命令建議",
+      "autosuggest_hint": "根據最近命令歷史顯示非侵入式 ghost text。預設不接管 Tab 和 Ctrl+R，仍交給 shell。",
+      "autosuggest_local_history": "讀取本機 Shell 歷史",
+      "autosuggest_local_history_hint": "僅為本機終端讀取 zsh/bash/fish 歷史。遠端終端只使用 OxideTerm 實際觀察到的命令。"
     },
     "appearance": {
       "title": "外觀",

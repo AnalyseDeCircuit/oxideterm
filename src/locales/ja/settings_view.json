@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "コマンド候補",
+      "autosuggest_hint": "最近のコマンド履歴から非侵入的な ghost text を表示します。Tab と Ctrl+R は既定で shell に渡します。",
+      "autosuggest_local_history": "ローカル Shell 履歴を読む",
+      "autosuggest_local_history_hint": "ローカル端末だけで zsh/bash/fish 履歴を使います。リモート端末は OxideTerm が観測したコマンドだけを使います。"
     },
     "appearance": {
       "title": "外観",

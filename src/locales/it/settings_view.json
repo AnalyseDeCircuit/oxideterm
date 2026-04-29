@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "Suggerimenti comandi",
+      "autosuggest_hint": "Mostra ghost text non invasivo dalla cronologia recente. Tab e Ctrl+R restano inviati alla shell per impostazione predefinita.",
+      "autosuggest_local_history": "Leggi cronologia shell locale",
+      "autosuggest_local_history_hint": "Usa la cronologia zsh/bash/fish solo per terminali locali. I terminali remoti usano solo comandi osservati da OxideTerm."
     },
     "appearance": {
       "title": "Aspetto",

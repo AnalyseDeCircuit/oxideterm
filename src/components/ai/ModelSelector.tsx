@@ -20,9 +20,10 @@ import type { AiProvider } from '../../types';
 
 type ModelSelectorProps = {
   onOpenSettings?: () => void;
+  dropdownPlacement?: 'up' | 'down';
 };
 
-export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
+export const ModelSelector = ({ onOpenSettings, dropdownPlacement = 'up' }: ModelSelectorProps) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({});
@@ -268,7 +269,10 @@ export const ModelSelector = ({ onOpenSettings }: ModelSelectorProps) => {
       </button>
 
       {open && (
-        <div className="absolute left-0 bottom-full mb-0.5 w-64 bg-theme-bg-elevated border border-theme-border rounded-[var(--radius-lg)] shadow-lg z-[9999] overflow-hidden">
+        <div className={cn(
+          'absolute left-0 w-64 bg-theme-bg-elevated border border-theme-border rounded-[var(--radius-lg)] shadow-lg z-[9999] overflow-hidden',
+          dropdownPlacement === 'down' ? 'top-full mt-1' : 'bottom-full mb-0.5',
+        )}>
           <div className="px-2 pt-2 pb-1">
             <div className="flex items-center gap-1.5 rounded-[var(--radius-md)] border border-theme-border/50 bg-theme-bg/50 px-2 py-1.5">
               <Search className="w-3 h-3 shrink-0 text-theme-text-muted" />

@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "Gợi ý lệnh",
+      "autosuggest_hint": "Hiển thị ghost text không can thiệp từ lịch sử lệnh gần đây. Tab và Ctrl+R mặc định vẫn chuyển cho shell.",
+      "autosuggest_local_history": "Đọc lịch sử Shell cục bộ",
+      "autosuggest_local_history_hint": "Chỉ dùng lịch sử zsh/bash/fish cho terminal cục bộ. Terminal từ xa chỉ dùng lệnh OxideTerm đã quan sát."
     },
     "appearance": {
       "title": "Giao diện",

@@ -305,7 +305,11 @@
           "unsupported-regex-syntax": "此正则使用了 RE2 不支持的语法。",
           "empty-match": "正则不能匹配空文本。"
         }
-      }
+      },
+      "autosuggest": "命令建议",
+      "autosuggest_hint": "根据最近命令历史显示非侵入式 ghost text。默认不接管 Tab 和 Ctrl+R，仍交给 shell。",
+      "autosuggest_local_history": "读取本地 Shell 历史",
+      "autosuggest_local_history_hint": "仅为本地终端读取 zsh/bash/fish 历史。远程终端只使用 OxideTerm 实际观察到的命令。"
     },
     "appearance": {
       "title": "外观",

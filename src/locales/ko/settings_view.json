@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "명령 제안",
+      "autosuggest_hint": "최근 명령 기록에서 비침투적인 ghost text를 표시합니다. Tab과 Ctrl+R은 기본적으로 shell에 그대로 전달됩니다.",
+      "autosuggest_local_history": "로컬 Shell 기록 읽기",
+      "autosuggest_local_history_hint": "로컬 터미널에만 zsh/bash/fish 기록을 사용합니다. 원격 터미널은 OxideTerm이 관찰한 명령만 사용합니다."
     },
     "appearance": {
       "title": "외관",

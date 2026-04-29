@@ -73,9 +73,11 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { useTerminalAutosuggest } from '../../hooks/useTerminalAutosuggest';
 import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
+import { TerminalGhostSuggestion } from './TerminalAutosuggestOverlay';
 import { useToastStore, type ToastVariant } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -690,6 +692,25 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         console.error('[TerminalView] Failed to encode terminal input:', error);
       });
   }, []);
+
+  const autosuggest = useTerminalAutosuggest({
+    terminalRef,
+    containerRef,
+    settings: terminalSettings.autosuggest,
+    isActive,
+    terminalKind: 'terminal',
+    disabled: () => (
+      inputLockedRef.current
+      || isComposingRef.current
+      || !!pendingPaste
+      || connectionStatusRef.current !== 'connected'
+      || controllerRuntimePendingRef.current
+      || (!!trzszControllerRef.current && !trzszControllerRef.current.isDisposed())
+    ),
+    sendInput: sendEncodedTerminalInput,
+  });
+  const autosuggestRef = useRef(autosuggest);
+  autosuggestRef.current = autosuggest;
 
   const focusTerminal = useCallback((mode: 'soft' | 'strong' = 'soft') => {
     const term = terminalRef.current;
@@ -1752,6 +1773,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
       isCopyOnSelectEnabled: () => useSettingsStore.getState().settings.terminal.copyOnSelect,
       isMiddleClickPasteEnabled: () => useSettingsStore.getState().settings.terminal.middleClickPaste,
+      onKeyEvent: (event) => autosuggestRef.current.handleKeyEvent(event),
       onPasteShortcut: handlePasteShortcut,
       container: containerRef.current,
     });
@@ -2139,6 +2161,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Plugin input pipeline (fail-open, null = suppress)
         const processed = runInputPipeline(data, sessionId, nodeId);
         if (processed === null) return;
+        autosuggestRef.current.observeInput(processed);
         observeCliAgentTerminalInput({
           data: processed,
           targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
@@ -3038,6 +3061,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
            position: 'relative',
            zIndex: 1,
          }}
+       />
+
+       <TerminalGhostSuggestion
+         text={autosuggest.ghostText}
+         position={autosuggest.ghostPosition}
        />
 
        {/* Input Lock Overlay - shown during reconnection */}

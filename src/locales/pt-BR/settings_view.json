@@ -305,7 +305,11 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale."
+      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "autosuggest": "Sugestões de comandos",
+      "autosuggest_hint": "Mostra ghost text não intrusivo a partir do histórico recente. Tab e Ctrl+R continuam indo para o shell por padrão.",
+      "autosuggest_local_history": "Ler histórico do shell local",
+      "autosuggest_local_history_hint": "Usa histórico zsh/bash/fish apenas em terminais locais. Terminais remotos usam somente comandos observados pelo OxideTerm."
     },
     "appearance": {
       "title": "Aparência",

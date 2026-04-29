@@ -59,9 +59,11 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { useTerminalAutosuggest } from '../../hooks/useTerminalAutosuggest';
 import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
+import { TerminalGhostSuggestion } from './TerminalAutosuggestOverlay';
 import { useToastStore } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -119,6 +121,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
   const rendererSuspendedRef = useRef(false);
   const rendererTransitionTokenRef = useRef(0);
   const pasteShortcutSuppressionRef = useRef(createTerminalPasteShortcutSuppressionState());
+  const isComposingRef = useRef(false);
   // xterm.js event listener disposables - must be explicitly disposed to prevent memory leaks
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const onBinaryDisposableRef = useRef<{ dispose: () => void } | null>(null);
@@ -250,6 +253,18 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         console.error('[LocalTerminalView] Failed to encode terminal input:', error);
       });
   }, [sessionId, writeTerminal]);
+
+  const autosuggest = useTerminalAutosuggest({
+    terminalRef,
+    containerRef,
+    settings: terminalSettings.autosuggest,
+    isActive,
+    terminalKind: 'local_terminal',
+    disabled: () => !isRunningRef.current || !!pendingPaste || isComposingRef.current,
+    sendInput: writeEncodedTerminalInput,
+  });
+  const autosuggestRef = useRef(autosuggest);
+  autosuggestRef.current = autosuggest;
 
   const maybeSuggestTerminalEncoding = useCallback((payload: Uint8Array) => {
     if (terminalEncodingRef.current !== 'utf-8' || encodingHintToastShownRef.current) {
@@ -778,11 +793,21 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     };
 
     term.open(containerRef.current);
+    const handleCompositionStart = () => {
+      isComposingRef.current = true;
+      autosuggestRef.current.clearSuggestion();
+    };
+    const handleCompositionEnd = () => {
+      isComposingRef.current = false;
+    };
+    containerRef.current.addEventListener('compositionstart', handleCompositionStart);
+    containerRef.current.addEventListener('compositionend', handleCompositionEnd);
     smartCopyDisposableRef.current = attachTerminalSmartCopy(term, {
       isActive: () => isActiveRef.current,
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
       isCopyOnSelectEnabled: () => useSettingsStore.getState().settings.terminal.copyOnSelect,
       isMiddleClickPasteEnabled: () => useSettingsStore.getState().settings.terminal.middleClickPaste,
+      onKeyEvent: (event) => autosuggestRef.current.handleKeyEvent(event),
       onPasteShortcut: handlePasteShortcut,
       container: containerRef.current,
     });
@@ -924,6 +949,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (!isRunningRef.current) return;
       // Notify adaptive renderer of user activity (exits idle tier)
       adaptiveRendererRef.current.notifyUserInput();
+      autosuggestRef.current.observeInput(data);
       observeCliAgentTerminalInput({
         data,
         targetId: 'local-shell:default',
@@ -977,6 +1003,8 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (termElement) {
         termElement.removeEventListener('focusin', handleTerminalFocus);
       }
+      containerRef.current?.removeEventListener('compositionstart', handleCompositionStart);
+      containerRef.current?.removeEventListener('compositionend', handleCompositionEnd);
       
       // Dispose renderer addon first to avoid "onShowLinkUnderline" error
       // This is a known xterm.js canvas addon bug where dispose order matters
@@ -1272,7 +1300,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       }
       resizeObserver.disconnect();
     };
-  }, [sessionId, resizeTerminal]);
+  }, [feedResize, fontOpenReady, resizeTerminal, sessionId]);
 
   // Search close handler
   const handleSearchClose = useCallback(() => {
@@ -1683,7 +1711,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           isolation: 'isolate',
         }}
       />
-      
+
+      <TerminalGhostSuggestion
+        text={autosuggest.ghostText}
+        position={autosuggest.ghostPosition}
+      />
+
       {/* Recording status overlay (shown only during active recording) */}
       {isSessionRecording && (
         <RecordingControls

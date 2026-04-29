@@ -179,6 +179,19 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.ai.toolUse?.maxRounds).toBe(30);
   });
 
+  it('merges terminal autosuggest defaults for existing settings', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.autosuggest).toEqual({
+      enabled: true,
+      localShellHistory: true,
+    });
+  });
+
   it('maps legacy write_resource approval to settings and file only', async () => {
     const base = buildSavedSettings();
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
