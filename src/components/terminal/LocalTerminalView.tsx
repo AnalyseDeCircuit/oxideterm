@@ -1826,7 +1826,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           {t('terminal.local.session_ended')}
         </div>
       )}
-      {terminalSettings.commandBar.enabled && (
+      {(terminalSettings.commandBar?.enabled ?? false) && (
         <TerminalCommandBar
           paneId={effectivePaneId}
           sessionId={sessionId}

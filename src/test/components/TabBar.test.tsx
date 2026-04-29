@@ -80,6 +80,10 @@ vi.mock('@/lib/plugin/pluginHostUi', () => ({
   selectVisiblePluginContextMenuItems: () => [],
 }));
 
+vi.mock('@/lib/plugin/pluginI18nManager', () => ({
+  resolvePluginTabTitle: () => null,
+}));
+
 vi.mock('@/components/connections/ReconnectTimeline', () => ({
   ReconnectTimeline: () => null,
 }));
@@ -115,6 +119,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => undefined,
+  },
 }));
 
 import { TabBar } from '@/components/layout/TabBar';

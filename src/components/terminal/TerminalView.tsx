@@ -3255,7 +3255,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
        {terminalSettings.showFpsOverlay && (
          <FpsOverlay getStats={adaptiveRenderer.getStats} />
        )}
-       {terminalSettings.commandBar.enabled && (
+       {(terminalSettings.commandBar?.enabled ?? false) && (
          <TerminalCommandBar
            paneId={effectivePaneId}
            sessionId={sessionId}
