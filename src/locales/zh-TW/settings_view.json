@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "修改設定",
       "tool_policy_write_file": "寫入遠端/本機檔案",
       "tool_policy_transfer_resource": "啟動 SFTP 傳輸",
-      "tool_policy_remember_preference": "儲存長期 AI 記憶偏好"
+      "tool_policy_remember_preference": "儲存長期 AI 記憶偏好",
+      "execution_profiles": "執行設定檔",
+      "execution_profiles_hint": "組合模型、推理深度、工具策略、上下文卡片與記憶/知識庫偏好。",
+      "profile_add": "新增設定檔",
+      "profile_default": "預設",
+      "profile_set_default": "設為預設",
+      "profile_inherit_provider": "使用目前提供商",
+      "profile_inherit_model": "使用提供商預設模型"
     },
     "sftp": {
       "title": "SFTP 傳輸",

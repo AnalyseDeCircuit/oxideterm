@@ -301,6 +301,7 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
   const capability = envelope?.meta.capability;
   const targetId = envelope?.meta.targetId;
   const bypassApproval = envelope?.meta.approvalMode === 'bypass';
+  const policyDecision = envelope?.meta.policyDecision;
   const warnings = envelope?.warnings ?? [];
   const structuredData = envelope?.data;
   const hasOutput = call.result && (call.result.output || call.result.error);
@@ -445,6 +446,20 @@ const ToolCallItem = memo(function ToolCallItem({ call }: { call: AiToolCall }) 
                 <div>
                   <span className="text-[9px] text-theme-text-muted/40 uppercase tracking-wider mr-1">{t('ai.tool_use.target')}</span>
                   <span className="text-[10px] text-theme-text-muted/65 font-mono">{targetId}</span>
+                </div>
+              )}
+              {policyDecision && (
+                <div>
+                  <span className="text-[9px] text-theme-text-muted/40 uppercase tracking-wider mr-1">{t('ai.tool_use.policy', { defaultValue: 'Policy' })}</span>
+                  <span className="text-[10px] text-theme-text-muted/65">
+                    {policyDecision.decision} · {policyDecision.reasonCode} · {policyDecision.matchedPolicyKey}
+                  </span>
+                </div>
+              )}
+              {envelope?.meta.commandRecordId && (
+                <div>
+                  <span className="text-[9px] text-theme-text-muted/40 uppercase tracking-wider mr-1">{t('ai.tool_use.command_record', { defaultValue: 'Command record' })}</span>
+                  <span className="text-[10px] text-theme-text-muted/65 font-mono">{envelope.meta.commandRecordId}</span>
                 </div>
               )}
             </div>

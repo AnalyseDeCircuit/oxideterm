@@ -225,7 +225,16 @@
         "settings-change": "修改設定",
         "credential-sensitive": "憑證敏感"
       },
-      "bypass_badge": "Bypass"
+      "bypass_badge": "Bypass",
+      "policy": "策略",
+      "command_record": "命令記錄",
+      "policy_reason_tool_disabled": "工具已被策略停用",
+      "policy_reason_read_only": "唯讀操作自動允許",
+      "policy_reason_credential": "憑證敏感操作必須由使用者處理",
+      "policy_reason_bypass": "Bypass 模式已允許危險命令",
+      "policy_reason_destructive": "危險命令需要審批",
+      "policy_reason_auto_approved": "工具策略已允許",
+      "policy_reason_requires_approval": "工具策略要求審批"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "此聊天已停用工具使用，但模型輸出了偽工具記錄。OxideSens 已要求改用自然語言重試。",

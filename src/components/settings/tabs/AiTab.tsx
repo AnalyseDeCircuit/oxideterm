@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Brain, ChevronDown, ChevronRight, RefreshCw, Wrench, X } from 'lucide-react';
+import { Brain, ChevronDown, ChevronRight, Copy, Plus, RefreshCw, Trash2, Wrench, X } from 'lucide-react';
 import { McpServersPanel } from '@/components/settings/McpServersPanel';
 import { ProviderKeyInput } from '@/components/settings/ProviderKeyInput';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import {
     normalizeAiToolMaxRounds,
     type AiSettings,
 } from '@/store/settingsStore';
+import { createDefaultExecutionProfile, type AiExecutionProfile, type AiExecutionProfilesConfig } from '@/lib/ai/profiles';
 
 type AiTabProps = {
     ai: AiSettings;
@@ -151,6 +152,71 @@ export const AiTab = ({
         });
     };
     const selectedProviderTemplate = PROVIDER_TEMPLATES.find((template) => template.type === newProviderType) ?? PROVIDER_TEMPLATES[0];
+    const profilesConfig: AiExecutionProfilesConfig = ai.executionProfiles ?? {
+        defaultProfileId: 'default',
+        profiles: [
+            createDefaultExecutionProfile({
+                providerId: ai.activeProviderId,
+                model: ai.activeModel,
+                reasoningEffort: ai.reasoningEffort,
+                toolUse,
+            }),
+        ],
+    };
+    const updateProfiles = (profiles: AiExecutionProfile[], defaultProfileId = profilesConfig.defaultProfileId) => {
+        updateAi('executionProfiles', {
+            defaultProfileId: profiles.some((profile) => profile.id === defaultProfileId)
+                ? defaultProfileId
+                : profiles[0]?.id ?? 'default',
+            profiles,
+        });
+    };
+    const patchProfile = (profileId: string, patch: Partial<AiExecutionProfile>) => {
+        updateProfiles(profilesConfig.profiles.map((profile) => (
+            profile.id === profileId ? { ...profile, ...patch, updatedAt: Date.now() } : profile
+        )));
+    };
+    const addProfile = () => {
+        const now = Date.now();
+        const profile: AiExecutionProfile = {
+            id: crypto.randomUUID(),
+            name: `Profile ${profilesConfig.profiles.length + 1}`,
+            providerId: ai.activeProviderId,
+            model: ai.activeModel,
+            reasoningEffort: ai.reasoningEffort,
+            toolUse: { ...toolUse, autoApproveTools: { ...approveTools } },
+            context: { includeRuntimeChips: true, includeMemory: true, includeRag: true },
+            commandPolicy: { allow: [], deny: [] },
+            createdAt: now,
+            updatedAt: now,
+        };
+        updateProfiles([...profilesConfig.profiles, profile], profile.id);
+    };
+    const duplicateProfile = (profile: AiExecutionProfile) => {
+        const now = Date.now();
+        const copy: AiExecutionProfile = {
+            ...profile,
+            id: crypto.randomUUID(),
+            name: `${profile.name} Copy`,
+            createdAt: now,
+            updatedAt: now,
+            toolUse: profile.toolUse ? {
+                ...profile.toolUse,
+                autoApproveTools: { ...(profile.toolUse.autoApproveTools ?? {}) },
+                disabledTools: [...(profile.toolUse.disabledTools ?? [])],
+            } : undefined,
+            context: profile.context ? { ...profile.context } : undefined,
+            commandPolicy: profile.commandPolicy ? {
+                allow: [...(profile.commandPolicy.allow ?? [])],
+                deny: [...(profile.commandPolicy.deny ?? [])],
+            } : undefined,
+        };
+        updateProfiles([...profilesConfig.profiles, copy], copy.id);
+    };
+    const deleteProfile = (profileId: string) => {
+        if (profilesConfig.profiles.length <= 1) return;
+        updateProfiles(profilesConfig.profiles.filter((profile) => profile.id !== profileId));
+    };
 
     useEffect(() => {
         const handleFocusSettingsSection = (event: Event) => {
@@ -204,11 +270,105 @@ export const AiTab = ({
                         </p>
                     </div>
 
-                    <Separator className="my-6 opacity-50" />
+	                    <Separator className="my-6 opacity-50" />
 
-                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
-                        <button
-                            type="button"
+	                    <div className={ai.enabled ? '' : 'opacity-50 pointer-events-none'}>
+                            <div className="mb-6 max-w-3xl rounded-lg border border-theme-border/70 bg-theme-bg/60 p-4">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                    <div>
+                                        <h4 className="text-sm font-medium uppercase tracking-wider text-theme-text">
+                                            {t('settings_view.ai.execution_profiles', { defaultValue: 'Execution Profiles' })}
+                                        </h4>
+                                        <p className="mt-1 text-xs text-theme-text-muted">
+                                            {t('settings_view.ai.execution_profiles_hint', { defaultValue: 'Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.' })}
+                                        </p>
+                                    </div>
+                                    <Button type="button" variant="outline" size="sm" onClick={addProfile} className="gap-1.5">
+                                        <Plus className="h-3.5 w-3.5" />
+                                        {t('settings_view.ai.profile_add', { defaultValue: 'New profile' })}
+                                    </Button>
+                                </div>
+                                <div className="space-y-2">
+                                    {profilesConfig.profiles.map((profile) => (
+                                        <div key={profile.id} className="rounded-md border border-theme-border/45 bg-theme-bg-card/45 p-3">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Input
+                                                    value={profile.name}
+                                                    onChange={(event) => patchProfile(profile.id, { name: event.currentTarget.value })}
+                                                    className="h-8 min-w-[180px] flex-1"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant={profilesConfig.defaultProfileId === profile.id ? 'default' : 'outline'}
+                                                    size="sm"
+                                                    onClick={() => updateProfiles(profilesConfig.profiles, profile.id)}
+                                                >
+                                                    {profilesConfig.defaultProfileId === profile.id
+                                                        ? t('settings_view.ai.profile_default', { defaultValue: 'Default' })
+                                                        : t('settings_view.ai.profile_set_default', { defaultValue: 'Set default' })}
+                                                </Button>
+                                                <Button type="button" variant="ghost" size="icon" onClick={() => duplicateProfile(profile)}>
+                                                    <Copy className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    disabled={profilesConfig.profiles.length <= 1}
+                                                    onClick={() => deleteProfile(profile.id)}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                                                </Button>
+                                            </div>
+                                            <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                                <Select
+                                                    value={profile.providerId ?? 'inherit'}
+                                                    onValueChange={(value) => patchProfile(profile.id, {
+                                                        providerId: value === 'inherit' ? null : value,
+                                                        model: value === 'inherit'
+                                                            ? null
+                                                            : ai.providers.find((provider) => provider.id === value)?.defaultModel ?? null,
+                                                    })}
+                                                >
+                                                    <SelectTrigger className="h-8">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="inherit">{t('settings_view.ai.profile_inherit_provider', { defaultValue: 'Use active provider' })}</SelectItem>
+                                                        {ai.providers.map((provider) => (
+                                                            <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Input
+                                                    value={profile.model ?? ''}
+                                                    placeholder={t('settings_view.ai.profile_inherit_model', { defaultValue: 'Use provider default' })}
+                                                    onChange={(event) => patchProfile(profile.id, { model: event.currentTarget.value || null })}
+                                                    className="h-8"
+                                                />
+                                                <Select
+                                                    value={profile.reasoningEffort}
+                                                    onValueChange={(value) => patchProfile(profile.id, { reasoningEffort: value as AiReasoningEffort })}
+                                                >
+                                                    <SelectTrigger className="h-8">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {(['auto', 'off', 'low', 'medium', 'high', 'max'] as AiReasoningEffort[]).map((effort) => (
+                                                            <SelectItem key={effort} value={effort}>
+                                                                {t(`settings_view.ai.reasoning_${effort}`, { defaultValue: effort })}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+	                        <button
+	                            type="button"
                             className="mb-4 flex w-full max-w-3xl items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-theme-text-muted hover:bg-theme-bg-hover/40 hover:text-theme-text transition-colors"
                             onClick={() => setProviderSettingsExpanded((current) => !current)}
                             aria-expanded={providerSettingsExpanded}

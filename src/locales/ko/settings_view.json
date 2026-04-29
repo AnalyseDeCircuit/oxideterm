@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "설정 수정",
       "tool_policy_write_file": "원격/로컬 파일 쓰기",
       "tool_policy_transfer_resource": "SFTP 전송 시작",
-      "tool_policy_remember_preference": "장기 AI 메모리 선호 저장"
+      "tool_policy_remember_preference": "장기 AI 메모리 선호 저장",
+      "execution_profiles": "Execution Profiles",
+      "execution_profiles_hint": "Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.",
+      "profile_add": "New profile",
+      "profile_default": "Default",
+      "profile_set_default": "Set default",
+      "profile_inherit_provider": "Use active provider",
+      "profile_inherit_model": "Use provider default"
     },
     "sftp": {
       "title": "SFTP 전송",

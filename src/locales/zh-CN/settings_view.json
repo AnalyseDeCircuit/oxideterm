@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "修改设置",
       "tool_policy_write_file": "写入远程/本地文件",
       "tool_policy_transfer_resource": "启动 SFTP 传输",
-      "tool_policy_remember_preference": "保存长期 AI 记忆偏好"
+      "tool_policy_remember_preference": "保存长期 AI 记忆偏好",
+      "execution_profiles": "执行配置档",
+      "execution_profiles_hint": "组合模型、推理深度、工具策略、上下文卡片和记忆/知识库偏好。",
+      "profile_add": "新建配置档",
+      "profile_default": "默认",
+      "profile_set_default": "设为默认",
+      "profile_inherit_provider": "使用当前提供商",
+      "profile_inherit_model": "使用提供商默认模型"
     },
     "sftp": {
       "title": "SFTP 传输",

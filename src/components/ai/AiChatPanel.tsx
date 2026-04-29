@@ -13,6 +13,7 @@ import { ChatInput } from './ChatInput';
 import { ModelSelector } from './ModelSelector';
 import { ToolIndicator } from './ToolIndicator';
 import { AiSafetyModeIndicator } from './AiSafetyModeIndicator';
+import { ProfileIndicator } from './ProfileIndicator';
 import { estimateTokens, getModelContextWindow } from '../../lib/ai/tokenUtils';
 import { CONTEXT_WARNING_THRESHOLD, CONTEXT_DANGER_THRESHOLD } from '../../lib/ai/constants';
 import type { SidebarContext } from '../../lib/sidebarContextProvider';
@@ -618,6 +619,7 @@ export function AiChatPanel() {
       {/* Model Selector + Tool Indicator - bottom position like VS Code */}
       <div className="flex-shrink-0 px-3 py-1.5 border-t border-theme-border/20 bg-theme-bg flex items-center gap-1.5 min-w-0">
         <ModelSelector onOpenSettings={handleOpenSettings} />
+        <ProfileIndicator />
         <AiSafetyModeIndicator onOpenToolSettings={handleOpenToolSettings} />
         <ToolIndicator onOpenSettings={handleOpenToolSettings} />
       </div>

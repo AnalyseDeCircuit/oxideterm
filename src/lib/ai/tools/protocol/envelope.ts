@@ -48,6 +48,9 @@ export function createToolResultEnvelope<TData = unknown>(input: {
   verified?: boolean;
   runtimeEpoch?: string;
   stateVersion?: string;
+  commandRecordId?: string;
+  policyDecision?: ToolResultEnvelope['meta']['policyDecision'];
+  profileId?: string;
 }): ToolResultEnvelope<TData> {
   return {
     ok: input.ok,
@@ -73,6 +76,9 @@ export function createToolResultEnvelope<TData = unknown>(input: {
       ...(input.verified !== undefined ? { verified: input.verified } : {}),
       ...(input.runtimeEpoch ? { runtimeEpoch: input.runtimeEpoch } : {}),
       ...(input.stateVersion ? { stateVersion: input.stateVersion } : {}),
+      ...(input.commandRecordId ? { commandRecordId: input.commandRecordId } : {}),
+      ...(input.policyDecision ? { policyDecision: input.policyDecision } : {}),
+      ...(input.profileId ? { profileId: input.profileId } : {}),
     },
   };
 }

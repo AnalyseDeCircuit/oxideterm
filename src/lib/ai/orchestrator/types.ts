@@ -91,6 +91,9 @@ export type OrchestratorToolContext = {
   activeSessionId?: string | null;
   activeTerminalType?: 'terminal' | 'local_terminal' | null;
   dangerousCommandApproved?: boolean;
+  approvalMode?: 'default' | 'bypass';
+  policyDecision?: import('./policy').AiPolicyDecision;
+  profileId?: string;
   abortSignal?: AbortSignal;
   skipFocus?: boolean;
 };

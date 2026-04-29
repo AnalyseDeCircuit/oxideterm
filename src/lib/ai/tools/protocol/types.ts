@@ -66,6 +66,16 @@ export interface ToolResultMeta {
   runtimeEpoch?: string;
   stateVersion?: string;
   approvalMode?: 'default' | 'bypass';
+  commandRecordId?: string;
+  policyDecision?: {
+    decision: 'allow' | 'require_approval' | 'deny';
+    risk: string;
+    reasonCode: string;
+    matchedPolicyKey: string;
+    approvalMode: 'default' | 'bypass';
+    profileId?: string;
+  };
+  profileId?: string;
 }
 
 export type ToolOutputPreview = {

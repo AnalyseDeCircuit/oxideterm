@@ -437,6 +437,7 @@ export function dtoToConversation(dto: FullConversationDto): AiConversation {
     updatedAt: dto.updatedAt,
     sessionId: dto.sessionId ?? undefined,
     origin: dto.origin || 'sidebar',
+    profileId: dto.sessionMetadata?.profileId,
     sessionMetadata: dto.sessionMetadata ?? {
       conversationId: dto.id,
       origin: dto.origin || 'sidebar',

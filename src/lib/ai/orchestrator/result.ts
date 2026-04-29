@@ -92,6 +92,11 @@ export function actionResultToToolResult(
   toolName: string,
   result: AiActionResult,
   durationMs: number,
+  meta?: {
+    commandRecordId?: string;
+    policyDecision?: ToolResultEnvelope['meta']['policyDecision'];
+    profileId?: string;
+  },
 ): AiToolResult {
   const rawOutput = result.output ?? result.summary;
   const preparedOutput = prepareToolOutput(rawOutput);
@@ -132,6 +137,9 @@ export function actionResultToToolResult(
     verified,
     runtimeEpoch,
     stateVersion: result.stateVersion,
+    commandRecordId: meta?.commandRecordId,
+    policyDecision: meta?.policyDecision,
+    profileId: meta?.profileId,
   });
 
   return {

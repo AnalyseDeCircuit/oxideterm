@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "設定を変更",
       "tool_policy_write_file": "リモート/ローカルファイルを書き込み",
       "tool_policy_transfer_resource": "SFTP 転送を開始",
-      "tool_policy_remember_preference": "長期 AI メモリ設定を保存"
+      "tool_policy_remember_preference": "長期 AI メモリ設定を保存",
+      "execution_profiles": "Execution Profiles",
+      "execution_profiles_hint": "Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.",
+      "profile_add": "New profile",
+      "profile_default": "Default",
+      "profile_set_default": "Set default",
+      "profile_inherit_provider": "Use active provider",
+      "profile_inherit_model": "Use provider default"
     },
     "sftp": {
       "title": "SFTP転送",

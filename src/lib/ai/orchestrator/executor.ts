@@ -17,6 +17,8 @@ import type { AiActionResult, AiResourceKind, AiTarget, AiTargetView, Orchestrat
 import { actionResultToToolResult, failAction } from './result';
 import { isOrchestratorToolName, ORCHESTRATOR_TOOL_DEFS } from './definitions';
 import { useSettingsStore } from '../../../store/settingsStore';
+import { commandRecordFromToolResult } from './ledger';
+import { recordCliAgentCommand } from './cliAgents';
 
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
@@ -254,7 +256,43 @@ export async function executeOrchestratorTool(
   }
 
   const result = await executeAction(toolName, args, context);
-  return actionResultToToolResult(toolCallId, toolName, result, performance.now() - startedAt);
+  const previewProbe = actionResultToToolResult(toolCallId, toolName, result, performance.now() - startedAt);
+  const exitCode = result.data && typeof result.data === 'object' && 'exitCode' in result.data
+    ? (result.data as { exitCode?: number | null }).exitCode
+    : undefined;
+  const record = commandRecordFromToolResult({
+    toolName,
+    args,
+    target: result.target,
+    ok: result.ok,
+    waitingForInput: result.waitingForInput,
+    risk: result.risk,
+    approvalMode: context.approvalMode,
+    outputPreview: previewProbe.envelope?.outputPreview,
+    rawOutputStored: Boolean(previewProbe.envelope?.rawOutput),
+    exitCode,
+  });
+  if (record) {
+    recordCliAgentCommand({
+      command: record.command,
+      targetId: record.targetId,
+      sessionId: record.sessionId,
+      nodeId: record.nodeId,
+      status: record.status === 'waiting_for_input' ? 'waiting_for_input' : record.status === 'error' ? 'failed' : 'running',
+    });
+  }
+  return actionResultToToolResult(toolCallId, toolName, result, performance.now() - startedAt, {
+    commandRecordId: record?.commandId,
+    policyDecision: context.policyDecision ? {
+      decision: context.policyDecision.decision,
+      risk: context.policyDecision.risk,
+      reasonCode: context.policyDecision.reasonCode,
+      matchedPolicyKey: context.policyDecision.matchedPolicyKey,
+      approvalMode: context.policyDecision.approvalMode,
+      profileId: context.policyDecision.profileId,
+    } : undefined,
+    profileId: context.profileId,
+  });
 }
 
 export function getOrchestratorToolDefs() {

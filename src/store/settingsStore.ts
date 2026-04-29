@@ -25,6 +25,11 @@ import { platform } from '../lib/platform';
 import { sanitizeHighlightRules } from '../lib/terminal/highlightPattern';
 import type { HighlightRule } from '../types';
 import type { AiReasoningEffort } from '../lib/ai/providers';
+import {
+  createDefaultExecutionProfile,
+  normalizeExecutionProfiles,
+  type AiExecutionProfilesConfig,
+} from '../lib/ai/profiles';
 import packageJson from '../../package.json';
 
 // ============================================================================
@@ -363,6 +368,8 @@ export interface AiSettings {
   embeddingConfig?: import('../types').EmbeddingConfig;
   /** Agent role configuration (planner/reviewer can use different provider/model) */
   agentRoles?: import('../types').AgentRolesConfig;
+  /** OxideSens execution profiles: model, policy, context, and command defaults. */
+  executionProfiles?: AiExecutionProfilesConfig;
 }
 
 /** Local terminal settings */
@@ -574,6 +581,22 @@ const defaultAiSettings: AiSettings = {
     ide: true,
     sftp: true,
   },
+  executionProfiles: {
+    defaultProfileId: 'default',
+    profiles: [
+      createDefaultExecutionProfile({
+        providerId: null,
+        model: null,
+        reasoningEffort: 'auto',
+        toolUse: {
+          enabled: false,
+          maxRounds: DEFAULT_AI_TOOL_MAX_ROUNDS,
+          autoApproveTools: {},
+          disabledTools: [],
+        },
+      }),
+    ],
+  },
 };
 
 const defaultLocalTerminalSettings: LocalTerminalSettings = {
@@ -763,6 +786,21 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
             maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
           }
         : defaults.ai.toolUse,
+      executionProfiles: normalizeExecutionProfiles({
+        config: saved.ai?.executionProfiles,
+        providerId: saved.ai?.activeProviderId ?? defaults.ai.activeProviderId,
+        model: saved.ai?.activeModel ?? defaults.ai.activeModel,
+        reasoningEffort: saved.ai?.reasoningEffort ?? defaults.ai.reasoningEffort,
+        toolUse: saved.ai?.toolUse
+          ? {
+              ...defaults.ai.toolUse,
+              ...saved.ai.toolUse,
+              autoApproveTools: mergeAutoApproveTools(defaults.ai.toolUse?.autoApproveTools, saved.ai.toolUse.autoApproveTools),
+              disabledTools: saved.ai.toolUse.disabledTools ?? [],
+              maxRounds: normalizeAiToolMaxRounds(saved.ai.toolUse.maxRounds),
+            }
+          : defaults.ai.toolUse,
+      }),
     },
     localTerminal: saved.localTerminal
       ? { ...defaults.localTerminal!, ...saved.localTerminal }

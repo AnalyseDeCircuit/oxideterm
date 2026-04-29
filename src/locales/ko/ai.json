@@ -225,7 +225,16 @@
         "settings-change": "설정 변경",
         "credential-sensitive": "자격 증명 민감"
       },
-      "bypass_badge": "Bypass"
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "이 채팅에서는 도구 사용이 비활성화되어 있는데, 모델이 가짜 도구 기록을 출력했습니다. OxideSens가 자연어로 다시 시도해 달라고 요청했습니다.",

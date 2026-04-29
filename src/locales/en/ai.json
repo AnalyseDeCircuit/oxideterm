@@ -225,7 +225,16 @@
         "settings-change": "Settings Change",
         "credential-sensitive": "Credential Sensitive"
       },
-      "bypass_badge": "Bypass"
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "Tool use is disabled for this chat, and the model emitted a pseudo-tool transcript. OxideSens requested a plain-language retry.",

@@ -59,6 +59,7 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
 import { useToastStore } from '../../hooks/useToast';
@@ -923,6 +924,11 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (!isRunningRef.current) return;
       // Notify adaptive renderer of user activity (exits idle tier)
       adaptiveRendererRef.current.notifyUserInput();
+      observeCliAgentTerminalInput({
+        data,
+        targetId: 'local-shell:default',
+        sessionId,
+      });
       // Feed recording (user input)
       feedInput(data);
       writeEncodedTerminalInput(data);

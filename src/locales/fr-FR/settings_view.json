@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "Modifier les paramètres",
       "tool_policy_write_file": "Écrire des fichiers distants/locaux",
       "tool_policy_transfer_resource": "Démarrer des transferts SFTP",
-      "tool_policy_remember_preference": "Enregistrer des préférences mémoire IA durables"
+      "tool_policy_remember_preference": "Enregistrer des préférences mémoire IA durables",
+      "execution_profiles": "Execution Profiles",
+      "execution_profiles_hint": "Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.",
+      "profile_add": "New profile",
+      "profile_default": "Default",
+      "profile_set_default": "Set default",
+      "profile_inherit_provider": "Use active provider",
+      "profile_inherit_model": "Use provider default"
     },
     "sftp": {
       "title": "Transfert SFTP",

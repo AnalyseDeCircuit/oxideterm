@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { api } from '../lib/api';
 import { ragSearch } from '../lib/api';
-import { useSettingsStore, type AiMemorySettings } from './settingsStore';
+import { useSettingsStore, type AiMemorySettings, type AiSettings } from './settingsStore';
 import { useAppStore } from './appStore';
 import { gatherSidebarContext, buildContextReminder, type SidebarContext } from '../lib/sidebarContextProvider';
 import { getProvider, getProviderReasoningProtocol } from '../lib/ai/providerRegistry';
@@ -37,13 +37,14 @@ import {
   buildOrchestratorSystemPrompt,
   classifyOrchestratorObligation,
   executeOrchestratorTool,
+  formatContextChipsForPrompt,
+  buildRuntimeContextChips,
   getOrchestratorToolDefs,
-  isOrchestratorToolName,
-  orchestratorApprovalKeyForTool,
-  orchestratorRiskForTool,
+  resolveAiPolicyDecision,
   type OrchestratorObligation,
   type OrchestratorToolContext,
 } from '../lib/ai/orchestrator';
+import { resolveExecutionProfile } from '../lib/ai/profiles';
 import { parseUserInput } from '../lib/ai/inputParser';
 import { resolveSlashCommand, SLASH_COMMANDS } from '../lib/ai/slashCommands';
 import { PARTICIPANTS, resolveParticipant } from '../lib/ai/participants';
@@ -228,6 +229,7 @@ interface AiChatStore {
   resolveToolApproval: (toolCallId: string, approved: boolean) => void;
   setConversationSafetyMode: (conversationId: string, mode: AiSafetyMode) => void;
   getConversationSafetyMode: (conversationId?: string | null) => AiSafetyMode;
+  setConversationProfile: (conversationId: string, profileId: string | null) => Promise<void>;
 
   // Internal (persist to backend)
   _addMessage: (conversationId: string, message: AiChatMessage, sidebarContext?: SidebarContext | null) => Promise<void>;
@@ -279,6 +281,7 @@ function metaToConversation(meta: ConversationMetaDto): AiConversation {
     messages: [], // Will be loaded on demand
     messageCount: meta.messageCount,
     origin: meta.origin || 'sidebar',
+    profileId: meta.sessionMetadata?.profileId,
     sessionMetadata: meta.sessionMetadata ?? {
       conversationId: meta.id,
       origin: meta.origin || 'sidebar',
@@ -352,6 +355,39 @@ The following are long-lived user preferences explicitly saved by the user. Trea
 <user_memory>
 ${truncateUserMemoryForPrompt(content)}
 </user_memory>`;
+}
+
+function applyExecutionProfileToAiSettings(
+  settings: AiSettings,
+  profileId?: string | null,
+): { settings: AiSettings; profileId?: string; profile?: NonNullable<AiSettings['executionProfiles']>['profiles'][number] } {
+  const profile = resolveExecutionProfile(settings.executionProfiles, profileId);
+  if (!profile) return { settings };
+
+  const profileToolUse = profile.toolUse;
+  const mergedToolUse = profileToolUse
+    ? {
+        ...(settings.toolUse ?? { enabled: false, autoApproveTools: {}, disabledTools: [] }),
+        ...profileToolUse,
+        autoApproveTools: {
+          ...(settings.toolUse?.autoApproveTools ?? {}),
+          ...(profileToolUse.autoApproveTools ?? {}),
+        },
+        disabledTools: profileToolUse.disabledTools ?? settings.toolUse?.disabledTools ?? [],
+      }
+    : settings.toolUse;
+
+  return {
+    profileId: profile.id,
+    profile,
+    settings: {
+      ...settings,
+      activeProviderId: profile.providerId ?? settings.activeProviderId,
+      activeModel: profile.model ?? settings.activeModel,
+      reasoningEffort: profile.reasoningEffort ?? settings.reasoningEffort,
+      toolUse: mergedToolUse,
+    },
+  };
 }
 
 function buildPersistedMessageRequest(
@@ -491,13 +527,19 @@ function shouldRetainAssistantMessage(message: AiChatMessage | undefined): boole
   return Boolean(message.turn && (message.turn.parts.length > 0 || message.turn.toolRounds.length > 0));
 }
 
-function buildConversationPersistenceRequest(conversation: Pick<AiConversation, 'id' | 'title' | 'origin' | 'sessionId' | 'sessionMetadata'>) {
+function buildConversationPersistenceRequest(conversation: Pick<AiConversation, 'id' | 'title' | 'origin' | 'sessionId' | 'sessionMetadata' | 'profileId'>) {
+  const sessionMetadata = conversation.sessionMetadata || conversation.profileId
+    ? {
+        ...(conversation.sessionMetadata ?? { conversationId: conversation.id, origin: conversation.origin ?? 'sidebar' }),
+        ...(conversation.profileId ? { profileId: conversation.profileId } : {}),
+      }
+    : null;
   return {
     id: conversation.id,
     title: conversation.title,
     sessionId: conversation.sessionId ?? null,
     origin: conversation.origin ?? 'sidebar',
-    sessionMetadata: conversation.sessionMetadata ?? null,
+    sessionMetadata,
   };
 }
 
@@ -753,6 +795,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
   createConversation: async (title) => {
     const id = generateId();
     const now = Date.now();
+    const profileId = useSettingsStore.getState().settings.ai.executionProfiles?.defaultProfileId;
     const conversation: AiConversation = {
       id,
       title: title || 'New Chat',
@@ -760,9 +803,11 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       createdAt: now,
       updatedAt: now,
       origin: 'sidebar',
+      profileId,
       sessionMetadata: {
         conversationId: id,
         origin: 'sidebar',
+        profileId,
       },
     };
 
@@ -881,6 +926,38 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     return get().safetyModeByConversationId[conversationId] ?? 'default';
   },
 
+  setConversationProfile: async (conversationId, profileId) => {
+    let nextConversation: AiConversation | undefined;
+    set((state) => {
+      const conversations = state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        const nextSessionMetadata = {
+          ...(conversation.sessionMetadata ?? { conversationId: conversation.id, origin: conversation.origin ?? 'sidebar' }),
+          ...(profileId ? { profileId } : {}),
+        };
+        if (!profileId) {
+          delete nextSessionMetadata.profileId;
+        }
+        nextConversation = {
+          ...conversation,
+          profileId: profileId ?? undefined,
+          sessionMetadata: nextSessionMetadata,
+          updatedAt: Date.now(),
+        };
+        return nextConversation;
+      });
+      return { conversations };
+    });
+
+    if (nextConversation) {
+      try {
+        await persistConversationMetadata(nextConversation);
+      } catch (error) {
+        console.warn('[AiChatStore] Failed to persist conversation profile:', error);
+      }
+    }
+  },
+
   // Send a message
   sendMessage: async (content, context, options) => {
     // Guard against concurrent calls — only one tool loop at a time
@@ -899,7 +976,14 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     if (!conversation) return;
 
     // Get AI settings
-    const aiSettings = useSettingsStore.getState().settings.ai;
+    const baseAiSettings = useSettingsStore.getState().settings.ai;
+    const appliedProfile = applyExecutionProfileToAiSettings(
+      baseAiSettings,
+      conversation.profileId ?? conversation.sessionMetadata?.profileId,
+    );
+    const aiSettings = appliedProfile.settings;
+    const activeProfileId = appliedProfile.profileId;
+    const activeProfile = appliedProfile.profile;
     if (!aiSettings.enabled) {
       set({ error: 'OxideSens is not enabled. Please enable it in Settings.' });
       return;
@@ -1100,7 +1184,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     const providerLabel = activeProvider?.name || providerType;
     systemPrompt += `\nYou are currently the model "${providerModel}", provided by ${providerLabel}.`;
 
-    const userMemoryPrompt = buildUserMemoryPrompt(aiSettings.memory);
+    const userMemoryPrompt = activeProfile?.context?.includeMemory === false
+      ? null
+      : buildUserMemoryPrompt(aiSettings.memory);
     if (userMemoryPrompt) {
       systemPrompt += `\n\n${userMemoryPrompt}`;
     }
@@ -1110,7 +1196,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     }
 
     // RAG auto-injection: search user docs and inject relevant snippets
-    if (cleanContent.length >= 4) {
+    if (activeProfile?.context?.includeRag !== false && cleanContent.length >= 4) {
       try {
         const makeTimeout = () => new Promise<never>((_, reject) => setTimeout(() => reject(new Error('RAG timeout')), 3000));
 
@@ -1170,6 +1256,13 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
     // Participant system prompt modifiers
     if (participantSystemHints.length > 0) {
       systemPrompt += `\n\n## Active Participants\n${participantSystemHints.join('\n')}`;
+    }
+
+    if (activeProfile?.context?.includeRuntimeChips !== false) {
+      const chipPrompt = formatContextChipsForPrompt(buildRuntimeContextChips());
+      if (chipPrompt) {
+        systemPrompt += `\n\n${chipPrompt}`;
+      }
     }
 
     // Intent-based hint (only when confidence is high enough)
@@ -1628,9 +1721,6 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
       const provider = getProvider(providerType);
       let roundReasoningContent = '';
 
-      // Tool use configuration
-      const autoApproveTools = aiSettings.toolUse?.autoApproveTools ?? {};
-
       const resolveToolContext = async (): Promise<OrchestratorToolContext | null> => {
         if (!toolUseEnabled) return null;
 
@@ -1648,6 +1738,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         return {
           activeSessionId: currentSidebarContext?.env.sessionId ?? null,
           activeTerminalType: currentSidebarContext?.env.terminalType ?? null,
+          profileId: activeProfileId,
         };
       };
 
@@ -2277,6 +2368,7 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
         const explicitlyApprovedDangerousToolIds = new Set<string>();
         const bypassApprovedDangerousToolIds = new Set<string>();
         const safetyMode = get().getConversationSafetyMode(convId);
+        const policyDecisionsByToolId = new Map<string, ReturnType<typeof resolveAiPolicyDecision>>();
 
         for (const tc of toolCallEntries) {
           if (!availableToolNames.has(tc.name)) {
@@ -2316,26 +2408,33 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           }
 
           const parsedApprovalArgs = parseToolArguments(tc.arguments) ?? {};
-          const risk = isOrchestratorToolName(tc.name)
-            ? orchestratorRiskForTool(tc.name, parsedApprovalArgs)
-            : 'write';
-          const approvalKey = isOrchestratorToolName(tc.name)
-            ? orchestratorApprovalKeyForTool(tc.name, parsedApprovalArgs)
-            : tc.name;
-          const approvalDecision = {
-            requiresApproval: risk === 'destructive'
-              ? true
-              : risk !== 'read' && autoApproveTools[approvalKey] !== true,
-            risk,
-          };
+          const approvalDecision = resolveAiPolicyDecision({
+            toolName: tc.name,
+            args: parsedApprovalArgs,
+            aiSettings,
+            safetyMode,
+            profileId: activeProfileId,
+          });
+          policyDecisionsByToolId.set(tc.id, approvalDecision);
 
-          const bypassesDangerApproval = safetyMode === 'bypass' && approvalDecision.risk === 'destructive';
+          const bypassesDangerApproval = approvalDecision.approvalMode === 'bypass'
+            && approvalDecision.risk === 'destructive'
+            && approvalDecision.decision === 'allow';
 
           if (bypassesDangerApproval) {
             tc.status = 'approved';
             explicitlyApprovedDangerousToolIds.add(tc.id);
             bypassApprovedDangerousToolIds.add(tc.id);
-          } else if (approvalDecision.requiresApproval) {
+          } else if (approvalDecision.decision === 'deny') {
+            tc.status = 'rejected';
+            tc.result = {
+              toolCallId: tc.id,
+              toolName: tc.name,
+              success: false,
+              output: '',
+              error: approvalDecision.reasonCode,
+            };
+          } else if (approvalDecision.decision === 'require_approval') {
             tc.status = 'pending_user_approval';
             pendingApprovalIds.push(tc.id);
             if (approvalDecision.risk === 'destructive') {
@@ -2560,6 +2659,9 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           const result = await executeOrchestratorTool(tc.name, parsedArgs, {
             ...currentToolContext,
             dangerousCommandApproved: explicitlyApprovedDangerousToolIds.has(tc.id),
+            approvalMode: bypassApprovedDangerousToolIds.has(tc.id) ? 'bypass' : 'default',
+            policyDecision: policyDecisionsByToolId.get(tc.id),
+            profileId: activeProfileId,
             abortSignal: abortController.signal,
           }, tc.id);
           if (bypassApprovedDangerousToolIds.has(tc.id) && result.envelope) {

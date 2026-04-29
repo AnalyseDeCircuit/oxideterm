@@ -622,7 +622,14 @@
       "tool_policy_write_settings": "Sửa cài đặt",
       "tool_policy_write_file": "Ghi tệp từ xa/cục bộ",
       "tool_policy_transfer_resource": "Bắt đầu truyền SFTP",
-      "tool_policy_remember_preference": "Lưu tùy chọn bộ nhớ AI dài hạn"
+      "tool_policy_remember_preference": "Lưu tùy chọn bộ nhớ AI dài hạn",
+      "execution_profiles": "Execution Profiles",
+      "execution_profiles_hint": "Bundle model, reasoning, tool policy, context chips, and memory/RAG preferences.",
+      "profile_add": "New profile",
+      "profile_default": "Default",
+      "profile_set_default": "Set default",
+      "profile_inherit_provider": "Use active provider",
+      "profile_inherit_model": "Use provider default"
     },
     "sftp": {
       "title": "Truyền file SFTP",

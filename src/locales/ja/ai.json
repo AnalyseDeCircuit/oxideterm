@@ -225,7 +225,16 @@
         "settings-change": "設定変更",
         "credential-sensitive": "認証情報"
       },
-      "bypass_badge": "Bypass"
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "このチャットではツール利用が無効で、モデルが疑似ツールの記録を出力しました。OxideSens は自然文での再試行を要求しました。",

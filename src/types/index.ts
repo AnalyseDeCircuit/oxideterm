@@ -1613,6 +1613,8 @@ export interface AiConversation {
   turns?: import('../lib/ai/turnModel/types').AiConversationTurn[];
   /** Session-level metadata for turn-first chat flows */
   sessionMetadata?: import('../lib/ai/turnModel/types').AiConversationSessionMetadata;
+  /** Selected OxideSens execution profile. Missing = current default profile. */
+  profileId?: string;
   /** Creation timestamp */
   createdAt: number;
   /** Last update timestamp */

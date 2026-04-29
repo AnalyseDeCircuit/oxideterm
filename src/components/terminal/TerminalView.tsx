@@ -73,6 +73,7 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
+import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
 import { useToastStore, type ToastVariant } from '../../hooks/useToast';
@@ -2138,6 +2139,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Plugin input pipeline (fail-open, null = suppress)
         const processed = runInputPipeline(data, sessionId, nodeId);
         if (processed === null) return;
+        observeCliAgentTerminalInput({
+          data: processed,
+          targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
+          sessionId,
+          nodeId,
+        });
 
         // Feed recording (user input)
         feedInput(processed);

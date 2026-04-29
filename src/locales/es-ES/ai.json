@@ -225,7 +225,16 @@
         "settings-change": "Cambio de ajustes",
         "credential-sensitive": "Credenciales sensibles"
       },
-      "bypass_badge": "Bypass"
+      "bypass_badge": "Bypass",
+      "policy": "Policy",
+      "command_record": "Command record",
+      "policy_reason_tool_disabled": "Tool disabled by policy",
+      "policy_reason_read_only": "Read-only action auto allowed",
+      "policy_reason_credential": "Credential-sensitive action requires the user",
+      "policy_reason_bypass": "Bypass mode approved a dangerous command",
+      "policy_reason_destructive": "Dangerous command requires approval",
+      "policy_reason_auto_approved": "Allowed by tool policy",
+      "policy_reason_requires_approval": "Approval required by tool policy"
     },
     "guardrail": {
       "tool_disabled_hard_deny_retry": "El uso de herramientas está desactivado para este chat y el modelo emitió una transcripción de herramienta simulada. OxideSens solicitó un nuevo intento en lenguaje natural.",
