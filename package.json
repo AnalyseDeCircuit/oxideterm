@@ -112,7 +112,7 @@
     "pdfjs-dist": "4.10.38",
     "prismjs": "^1.30.0",
     "react": "^19.2.5",
-    "react-dom": "^19.1.0",
+    "react-dom": "^19.2.5",
     "react-i18next": "^16.6.5",
     "react-resizable-panels": "^4.10.0",
     "tailwind-merge": "^3.5.0",

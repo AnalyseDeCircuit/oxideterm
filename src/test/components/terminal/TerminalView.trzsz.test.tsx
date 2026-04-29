@@ -59,6 +59,7 @@ const terminalRegistryMocks = vi.hoisted(() => ({
   setActivePaneId: vi.fn(),
   touchTerminalEntry: vi.fn(),
   notifyTerminalOutput: vi.fn(),
+  updateTerminalReadiness: vi.fn(),
   broadcastToTargets: vi.fn(),
 }));
 
@@ -391,6 +392,7 @@ vi.mock('@/lib/terminalRegistry', () => ({
   setActivePaneId: terminalRegistryMocks.setActivePaneId,
   touchTerminalEntry: terminalRegistryMocks.touchTerminalEntry,
   notifyTerminalOutput: terminalRegistryMocks.notifyTerminalOutput,
+  updateTerminalReadiness: terminalRegistryMocks.updateTerminalReadiness,
   broadcastToTargets: terminalRegistryMocks.broadcastToTargets,
 }));
 
