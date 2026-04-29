@@ -309,7 +309,13 @@
       "autosuggest": "명령 제안",
       "autosuggest_hint": "최근 명령 기록에서 비침투적인 ghost text를 표시합니다. Tab과 Ctrl+R은 기본적으로 shell에 그대로 전달됩니다.",
       "autosuggest_local_history": "로컬 Shell 기록 읽기",
-      "autosuggest_local_history_hint": "로컬 터미널에만 zsh/bash/fish 기록을 사용합니다. 원격 터미널은 OxideTerm이 관찰한 명령만 사용합니다."
+      "autosuggest_local_history_hint": "로컬 터미널에만 zsh/bash/fish 기록을 사용합니다. 원격 터미널은 OxideTerm이 관찰한 명령만 사용합니다.",
+      "command_bar": "Command Bar",
+      "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ask_mode": "Ask Mode",
+      "command_bar_ask_mode_hint": "Allow the command bar to send prompts to OxideSens with terminal context instead of writing to the shell.",
+      "command_bar_legacy_toolbar": "Show Legacy Top Toolbar",
+      "command_bar_legacy_toolbar_hint": "Keep the old tab-bar terminal action buttons visible while the bottom command bar is enabled."
     },
     "appearance": {
       "title": "외관",

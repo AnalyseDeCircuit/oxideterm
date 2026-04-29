@@ -309,7 +309,13 @@
       "autosuggest": "Gợi ý lệnh",
       "autosuggest_hint": "Hiển thị ghost text không can thiệp từ lịch sử lệnh gần đây. Tab và Ctrl+R mặc định vẫn chuyển cho shell.",
       "autosuggest_local_history": "Đọc lịch sử Shell cục bộ",
-      "autosuggest_local_history_hint": "Chỉ dùng lịch sử zsh/bash/fish cho terminal cục bộ. Terminal từ xa chỉ dùng lệnh OxideTerm đã quan sát."
+      "autosuggest_local_history_hint": "Chỉ dùng lịch sử zsh/bash/fish cho terminal cục bộ. Terminal từ xa chỉ dùng lệnh OxideTerm đã quan sát.",
+      "command_bar": "Command Bar",
+      "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ask_mode": "Ask Mode",
+      "command_bar_ask_mode_hint": "Allow the command bar to send prompts to OxideSens with terminal context instead of writing to the shell.",
+      "command_bar_legacy_toolbar": "Show Legacy Top Toolbar",
+      "command_bar_legacy_toolbar_hint": "Keep the old tab-bar terminal action buttons visible while the bottom command bar is enabled."
     },
     "appearance": {
       "title": "Giao diện",

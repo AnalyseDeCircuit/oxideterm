@@ -200,6 +200,23 @@
       "title": "Terminal output may use another encoding",
       "description": "OxideTerm detected garbled text while using UTF-8. You can try {{encodings}}; nothing will change unless you choose one.",
       "use_encoding": "Use {{encoding}}"
+    },
+    "command_bar": {
+      "command": "Command",
+      "ask": "Ask",
+      "command_mode": "Command mode",
+      "ask_mode": "Ask mode",
+      "command_placeholder": "Run commands",
+      "ask_placeholder": "Ask OxideSens about this terminal...",
+      "run_command": "Run command",
+      "send_to_ai": "Ask OxideSens",
+      "local_shell": "Local shell",
+      "remote_shell": "Remote shell",
+      "all_targets": "all",
+      "recording": "REC",
+      "source_runtime": "history",
+      "source_local_history": "local",
+      "source_ai_ledger": "AI"
     }
   }
 }

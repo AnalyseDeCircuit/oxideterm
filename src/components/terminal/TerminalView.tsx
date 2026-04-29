@@ -73,11 +73,11 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
-import { useTerminalAutosuggest } from '../../hooks/useTerminalAutosuggest';
+import { useTerminalAutosuggestRecorder } from '../../hooks/useTerminalAutosuggestRecorder';
 import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
-import { TerminalGhostSuggestion } from './TerminalAutosuggestOverlay';
+import { TerminalCommandBar } from './TerminalCommandBar';
 import { useToastStore, type ToastVariant } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -693,24 +693,33 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       });
   }, []);
 
-  const autosuggest = useTerminalAutosuggest({
-    terminalRef,
-    containerRef,
-    settings: terminalSettings.autosuggest,
-    isActive,
+  const autosuggestRecorder = useTerminalAutosuggestRecorder({
     terminalKind: 'terminal',
-    disabled: () => (
-      inputLockedRef.current
-      || isComposingRef.current
-      || !!pendingPaste
-      || connectionStatusRef.current !== 'connected'
-      || controllerRuntimePendingRef.current
-      || (!!trzszControllerRef.current && !trzszControllerRef.current.isDisposed())
-    ),
-    sendInput: sendEncodedTerminalInput,
+    localShellHistory: terminalSettings.autosuggest.localShellHistory,
   });
-  const autosuggestRef = useRef(autosuggest);
-  autosuggestRef.current = autosuggest;
+  const autosuggestRecorderRef = useRef(autosuggestRecorder);
+  autosuggestRecorderRef.current = autosuggestRecorder;
+
+  const sendCommandBarInput = useCallback((input: string) => {
+    if (inputLockedRef.current) return;
+    adaptiveRenderer.notifyUserInput();
+    const processed = runInputPipeline(input, sessionId, nodeId);
+    if (processed === null) return;
+    autosuggestRecorderRef.current.observeInput(processed);
+    observeCliAgentTerminalInput({
+      data: processed,
+      targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
+      sessionId,
+      nodeId,
+    });
+    feedInput(processed);
+    const controller = trzszControllerRef.current;
+    if (controller && !controller.isDisposed()) {
+      controller.processTerminalInput(processed);
+    } else if (!controllerRuntimePendingRef.current) {
+      sendEncodedTerminalInput(processed);
+    }
+  }, [adaptiveRenderer, feedInput, nodeId, sendEncodedTerminalInput, sessionId]);
 
   const focusTerminal = useCallback((mode: 'soft' | 'strong' = 'soft') => {
     const term = terminalRef.current;
@@ -832,6 +841,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     trzszControllerRef.current?.setTerminalColumns(dims.cols);
     transportRef.current?.sendResize(dims.cols, dims.rows);
   }, []);
+
+  const handleCommandBarLayoutChange = useCallback(() => {
+    if (!fitAddonRef.current || !terminalRef.current || !isTerminalContainerRenderable(containerRef.current)) return;
+    fitAddonRef.current.fit();
+    syncRemotePtySize();
+  }, [syncRemotePtySize]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Unified WebSocket message handler
@@ -1637,10 +1652,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
     term.parser.registerOscHandler(7, (data: string) => {
       try {
-        const cwd = data.startsWith('file://') ? decodeURIComponent(new URL(data).pathname) : data;
+        const url = data.startsWith('file://') ? new URL(data) : null;
+        const cwd = url ? decodeURIComponent(url.pathname) : data;
+        const host = url?.hostname;
         if (cwd) {
           import('../../lib/terminalRegistry').then(({ updateCwd }) => {
-            updateCwd(effectivePaneId, cwd);
+            updateCwd(effectivePaneId, cwd, host);
           });
         }
       } catch {
@@ -1773,7 +1790,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
       isCopyOnSelectEnabled: () => useSettingsStore.getState().settings.terminal.copyOnSelect,
       isMiddleClickPasteEnabled: () => useSettingsStore.getState().settings.terminal.middleClickPaste,
-      onKeyEvent: (event) => autosuggestRef.current.handleKeyEvent(event),
       onPasteShortcut: handlePasteShortcut,
       container: containerRef.current,
     });
@@ -2161,7 +2177,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         // Plugin input pipeline (fail-open, null = suppress)
         const processed = runInputPipeline(data, sessionId, nodeId);
         if (processed === null) return;
-        autosuggestRef.current.observeInput(processed);
+        autosuggestRecorderRef.current.observeInput(processed);
         observeCliAgentTerminalInput({
           data: processed,
           targetId: nodeId ? `ssh-node:${nodeId}` : undefined,
@@ -3012,7 +3028,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   
   return (
     <div 
-      className="terminal-container h-full w-full overflow-hidden relative" 
+      className="terminal-container h-full w-full overflow-hidden relative flex flex-col"
       style={{ 
         backgroundColor: currentTheme.background 
       }}
@@ -3054,7 +3070,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
        <div 
          ref={containerRef} 
-         className="h-full w-full"
+         className="min-h-0 flex-1 w-full"
          style={{
            contain: 'strict',
            isolation: 'isolate',
@@ -3062,12 +3078,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
            zIndex: 1,
          }}
        />
-
-       <TerminalGhostSuggestion
-         text={autosuggest.ghostText}
-         position={autosuggest.ghostPosition}
-       />
-
        {/* Input Lock Overlay - shown during reconnection */}
        {inputLocked && (
          <div className={cn(
@@ -3167,6 +3177,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
        {/* FPS / Tier overlay (enabled in Settings → Terminal → Show FPS Overlay) */}
        {terminalSettings.showFpsOverlay && (
          <FpsOverlay getStats={adaptiveRenderer.getStats} />
+       )}
+       {terminalSettings.commandBar.enabled && (
+         <TerminalCommandBar
+           paneId={effectivePaneId}
+           sessionId={sessionId}
+           tabId={effectiveTabId}
+           terminalType="terminal"
+           isActive={isActive}
+           sendInput={sendCommandBarInput}
+           focusTerminal={() => { focusTerminal('strong'); }}
+           onLayoutChange={handleCommandBarLayoutChange}
+         />
        )}
     </div>
   );

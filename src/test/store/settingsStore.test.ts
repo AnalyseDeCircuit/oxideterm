@@ -192,6 +192,21 @@ describe('settingsStore', () => {
     });
   });
 
+  it('merges terminal command bar defaults for existing settings', async () => {
+    localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
+      terminal: { theme: 'default', renderer: 'auto' },
+    })));
+
+    const useSettingsStore = await loadSettingsStore();
+
+    expect(useSettingsStore.getState().settings.terminal.commandBar).toEqual({
+      enabled: true,
+      showLegacyToolbar: false,
+      askMode: true,
+      gitStatus: true,
+    });
+  });
+
   it('maps legacy write_resource approval to settings and file only', async () => {
     const base = buildSavedSettings();
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({

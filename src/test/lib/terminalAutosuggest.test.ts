@@ -56,6 +56,17 @@ describe('terminal autosuggest', () => {
     ]);
   });
 
+  it('returns recent history when the query is empty', () => {
+    recordTerminalAutosuggestCommand('git status');
+    recordTerminalAutosuggestCommand('ls -la');
+
+    const matches = getTerminalAutosuggestCandidates('', 10);
+    expect(matches.map((match) => match.command)).toEqual([
+      'ls -la',
+      'git status',
+    ]);
+  });
+
   it('filters likely secret commands from suggestions', () => {
     recordTerminalAutosuggestCommand('curl -H "Authorization: Bearer abc" https://example.com');
     recordTerminalAutosuggestCommand('export OPENAI_API_KEY=sk-test');

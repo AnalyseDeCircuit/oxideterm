@@ -200,6 +200,23 @@
       "title": "终端输出可能不是 UTF-8 编码",
       "description": "OxideTerm 检测到当前 UTF-8 输出疑似乱码。可以尝试 {{encodings}}；不会自动切换，除非你手动选择。",
       "use_encoding": "使用 {{encoding}}"
+    },
+    "command_bar": {
+      "command": "命令",
+      "ask": "询问",
+      "command_mode": "命令模式",
+      "ask_mode": "询问模式",
+      "command_placeholder": "输入命令...",
+      "ask_placeholder": "询问 OxideSens 当前终端...",
+      "run_command": "执行命令",
+      "send_to_ai": "发送给 OxideSens",
+      "local_shell": "本地 Shell",
+      "remote_shell": "远程 Shell",
+      "all_targets": "全部",
+      "recording": "录制中",
+      "source_runtime": "历史",
+      "source_local_history": "本地",
+      "source_ai_ledger": "AI"
     }
   }
 }

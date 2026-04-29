@@ -59,11 +59,11 @@ import {
 import { attachTerminalSmartCopy } from '../../hooks/useTerminalSmartCopy';
 import { useTerminalRecording } from '../../hooks/useTerminalRecording';
 import { useAdaptiveRenderer } from '../../hooks/useAdaptiveRenderer';
-import { useTerminalAutosuggest } from '../../hooks/useTerminalAutosuggest';
+import { useTerminalAutosuggestRecorder } from '../../hooks/useTerminalAutosuggestRecorder';
 import { observeCliAgentTerminalInput } from '../../lib/ai/orchestrator/cliAgents';
 import { RecordingControls } from './RecordingControls';
 import { FpsOverlay } from './FpsOverlay';
-import { TerminalGhostSuggestion } from './TerminalAutosuggestOverlay';
+import { TerminalCommandBar } from './TerminalCommandBar';
 import { useToastStore } from '../../hooks/useToast';
 import { HighlightEngine } from '../../lib/terminal/highlightEngine';
 import {
@@ -254,17 +254,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       });
   }, [sessionId, writeTerminal]);
 
-  const autosuggest = useTerminalAutosuggest({
-    terminalRef,
-    containerRef,
-    settings: terminalSettings.autosuggest,
-    isActive,
+  const autosuggestRecorder = useTerminalAutosuggestRecorder({
     terminalKind: 'local_terminal',
-    disabled: () => !isRunningRef.current || !!pendingPaste || isComposingRef.current,
-    sendInput: writeEncodedTerminalInput,
+    localShellHistory: terminalSettings.autosuggest.localShellHistory,
   });
-  const autosuggestRef = useRef(autosuggest);
-  autosuggestRef.current = autosuggest;
+  const autosuggestRecorderRef = useRef(autosuggestRecorder);
+  autosuggestRecorderRef.current = autosuggestRecorder;
 
   const maybeSuggestTerminalEncoding = useCallback((payload: Uint8Array) => {
     if (terminalEncodingRef.current !== 'utf-8' || encodingHintToastShownRef.current) {
@@ -299,6 +294,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
 
     resizeTerminal(sessionId, dims.cols, dims.rows);
   }, [resizeTerminal, sessionId]);
+
+  const handleCommandBarLayoutChange = useCallback(() => {
+    if (!fitAddonRef.current || !terminalRef.current || !isTerminalContainerRenderable(containerRef.current)) return;
+    fitAddonRef.current.fit();
+    syncLocalPtySize();
+  }, [syncLocalPtySize]);
 
   const getEffectiveHighlightRules = useCallback((rules: HighlightRule[]) => {
     const rulesSignature = getHighlightRulesSignature(rules);
@@ -387,6 +388,19 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     terminalType: 'local',
     label: terminalInfo?.shell?.path || sessionId,
   });
+
+  const sendCommandBarInput = useCallback((input: string) => {
+    if (!isRunningRef.current) return;
+    adaptiveRendererRef.current.notifyUserInput();
+    autosuggestRecorderRef.current.observeInput(input);
+    observeCliAgentTerminalInput({
+      data: input,
+      targetId: 'local-shell:default',
+      sessionId,
+    });
+    feedInput(input);
+    writeEncodedTerminalInput(input);
+  }, [feedInput, sessionId, writeEncodedTerminalInput]);
 
   // ── Listen for TabBar recording events ──────────────────────────────────
   useEffect(() => {
@@ -687,10 +701,12 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
     term.parser.registerOscHandler(7, (data: string) => {
       try {
-        const cwd = data.startsWith('file://') ? decodeURIComponent(new URL(data).pathname) : data;
+        const url = data.startsWith('file://') ? new URL(data) : null;
+        const cwd = url ? decodeURIComponent(url.pathname) : data;
+        const host = url?.hostname;
         if (cwd) {
           import('../../lib/terminalRegistry').then(({ updateCwd }) => {
-            updateCwd(effectivePaneId, cwd);
+            updateCwd(effectivePaneId, cwd, host);
           });
         }
       } catch {
@@ -795,7 +811,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     term.open(containerRef.current);
     const handleCompositionStart = () => {
       isComposingRef.current = true;
-      autosuggestRef.current.clearSuggestion();
     };
     const handleCompositionEnd = () => {
       isComposingRef.current = false;
@@ -807,7 +822,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       isEnabled: () => useSettingsStore.getState().settings.terminal.smartCopy,
       isCopyOnSelectEnabled: () => useSettingsStore.getState().settings.terminal.copyOnSelect,
       isMiddleClickPasteEnabled: () => useSettingsStore.getState().settings.terminal.middleClickPaste,
-      onKeyEvent: (event) => autosuggestRef.current.handleKeyEvent(event),
       onPasteShortcut: handlePasteShortcut,
       container: containerRef.current,
     });
@@ -949,7 +963,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       if (!isRunningRef.current) return;
       // Notify adaptive renderer of user activity (exits idle tier)
       adaptiveRendererRef.current.notifyUserInput();
-      autosuggestRef.current.observeInput(data);
+      autosuggestRecorderRef.current.observeInput(data);
       observeCliAgentTerminalInput({
         data,
         targetId: 'local-shell:default',
@@ -1711,12 +1725,6 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
           isolation: 'isolate',
         }}
       />
-
-      <TerminalGhostSuggestion
-        text={autosuggest.ghostText}
-        position={autosuggest.ghostPosition}
-      />
-
       {/* Recording status overlay (shown only during active recording) */}
       {isSessionRecording && (
         <RecordingControls
@@ -1743,6 +1751,18 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
         <div className="absolute bottom-4 right-4 bg-theme-bg-hover/80 text-theme-text-muted text-xs px-2 py-1 rounded">
           {t('terminal.local.session_ended')}
         </div>
+      )}
+      {terminalSettings.commandBar.enabled && (
+        <TerminalCommandBar
+          paneId={effectivePaneId}
+          sessionId={sessionId}
+          tabId={effectiveTabId}
+          terminalType="local_terminal"
+          isActive={isActive}
+          sendInput={sendCommandBarInput}
+          focusTerminal={() => { focusTerminal('strong'); }}
+          onLayoutChange={handleCommandBarLayoutChange}
+        />
       )}
     </div>
   );

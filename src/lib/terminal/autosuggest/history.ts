@@ -10,10 +10,12 @@ type HistoryEntry = {
   source: TerminalAutosuggestCandidate['source'];
   lastUsedAt: number;
   uses: number;
+  sequence: number;
 };
 
 const MAX_HISTORY = 1000;
 const entries = new Map<string, HistoryEntry>();
+let sequenceCounter = 0;
 
 function normalizeCommand(command: string): string {
   return command.replace(/\s+/g, ' ').trim();
@@ -31,13 +33,14 @@ function putCommand(
   const existing = entries.get(normalized);
   if (existing) {
     existing.lastUsedAt = Math.max(existing.lastUsedAt, lastUsedAt);
+    existing.sequence = ++sequenceCounter;
     if (countUse) {
       existing.uses += 1;
     }
     return;
   }
 
-  entries.set(normalized, { command: normalized, source, lastUsedAt, uses: 1 });
+  entries.set(normalized, { command: normalized, source, lastUsedAt, uses: 1, sequence: ++sequenceCounter });
   if (entries.size > MAX_HISTORY) {
     const oldest = [...entries.values()].sort((a, b) => a.lastUsedAt - b.lastUsedAt)[0];
     if (oldest) entries.delete(oldest.command);
@@ -86,16 +89,16 @@ function fuzzyScore(command: string, query: string): number {
 
 export function getTerminalAutosuggestCandidates(query: string, limit = 8): TerminalAutosuggestCandidate[] {
   const trimmed = query.trimStart();
-  if (!trimmed) return [];
 
   seedFromAiLedger();
   const now = Date.now();
   const candidates: TerminalAutosuggestCandidate[] = [];
   for (const entry of entries.values()) {
     const fuzzy = fuzzyScore(entry.command, trimmed);
-    if (fuzzy <= 0 || entry.command === trimmed) continue;
+    if (trimmed && (fuzzy <= 0 || entry.command === trimmed)) continue;
     const recency = Math.max(0, 200 - Math.floor((now - entry.lastUsedAt) / 60_000));
-    candidates.push({ command: entry.command, source: entry.source, lastUsedAt: entry.lastUsedAt, score: fuzzy + recency + entry.uses * 5 });
+    const score = (trimmed ? fuzzy + recency + entry.uses * 5 : recency + entry.uses * 5) + entry.sequence / 1_000_000;
+    candidates.push({ command: entry.command, source: entry.source, lastUsedAt: entry.lastUsedAt, score });
   }
 
   return candidates
@@ -114,4 +117,5 @@ export function getTerminalAutosuggestion(input: string): string | null {
 
 export function clearTerminalAutosuggestHistory(): void {
   entries.clear();
+  sequenceCounter = 0;
 }

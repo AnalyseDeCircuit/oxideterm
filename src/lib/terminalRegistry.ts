@@ -32,6 +32,8 @@ interface TerminalEntry {
   terminalType: 'terminal' | 'local_terminal';      // SSH or Local
   /** Current working directory captured from OSC 7 shell integration */
   cwd?: string;
+  /** Host part captured from OSC 7 file://host/path, if provided by the shell */
+  cwdHost?: string;
 }
 
 // Registry now uses paneId as key (supports split panes)
@@ -450,10 +452,11 @@ export function touchTerminalEntry(paneId: string): void {
  * @param paneId - The pane ID
  * @param cwd - The current working directory path
  */
-export function updateCwd(paneId: string, cwd: string): void {
+export function updateCwd(paneId: string, cwd: string, host?: string): void {
   const entry = registry.get(paneId);
   if (entry) {
     entry.cwd = cwd;
+    entry.cwdHost = host;
   }
 }
 
@@ -464,6 +467,14 @@ export function updateCwd(paneId: string, cwd: string): void {
  */
 export function getCwd(paneId: string): string | null {
   return registry.get(paneId)?.cwd ?? null;
+}
+
+/**
+ * Get the OSC 7 host for a pane, when the shell provides one.
+ * This is useful for local terminals that have SSHed into a remote host.
+ */
+export function getCwdHost(paneId: string): string | null {
+  return registry.get(paneId)?.cwdHost ?? null;
 }
 
 /**

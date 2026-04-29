@@ -208,6 +208,13 @@ export interface TerminalAutosuggestSettings {
   localShellHistory: boolean;
 }
 
+export interface TerminalCommandBarSettings {
+  enabled: boolean;
+  showLegacyToolbar: boolean;
+  askMode: boolean;
+  gitStatus: boolean;
+}
+
 /** Terminal settings */
 export interface TerminalSettings {
   theme: string;
@@ -229,6 +236,7 @@ export interface TerminalSettings {
   middleClickPaste: boolean; // Paste clipboard contents on middle-click when mouse tracking is inactive
   selectionRequiresShift: boolean; // Require Shift + drag before starting text selection
   autosuggest: TerminalAutosuggestSettings; // Client-side ghost command suggestions
+  commandBar: TerminalCommandBarSettings; // Bottom command bar for client-side command editing/actions
   // Background image settings
   backgroundEnabled: boolean;        // Master toggle — false = no bg image anywhere
   backgroundImage: string | null;    // Stored image path (app_data_dir/backgrounds/...)
@@ -490,6 +498,12 @@ const defaultTerminalSettings: TerminalSettings = {
   autosuggest: {
     enabled: true,
     localShellHistory: true,
+  },
+  commandBar: {
+    enabled: true,
+    showLegacyToolbar: false,
+    askMode: true,
+    gitStatus: true,
   },
   // Background image defaults
   backgroundEnabled: true,
@@ -779,6 +793,10 @@ function mergeWithDefaults(saved: OxidePartialSettingsSnapshot | Partial<Persist
       autosuggest: {
         ...defaults.terminal.autosuggest,
         ...saved.terminal?.autosuggest,
+      },
+      commandBar: {
+        ...defaults.terminal.commandBar,
+        ...saved.terminal?.commandBar,
       },
       inBandTransfer: {
         ...defaults.terminal.inBandTransfer,
@@ -1814,6 +1832,7 @@ const TERMINAL_BEHAVIOR_KEYS: Array<keyof TerminalSettings> = [
   'middleClickPaste',
   'selectionRequiresShift',
   'autosuggest',
+  'commandBar',
   'highlightRules',
   'inBandTransfer',
 ];

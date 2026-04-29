@@ -52,6 +52,16 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
         });
     };
 
+    const updateCommandBar = <K extends keyof TerminalSettings['commandBar']>(
+        key: K,
+        value: TerminalSettings['commandBar'][K],
+    ) => {
+        updateTerminal('commandBar', {
+            ...terminal.commandBar,
+            [key]: value,
+        });
+    };
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div>
@@ -332,6 +342,40 @@ export const TerminalTab = ({ terminal, updateTerminal }: TerminalTabProps) => {
                         id="terminal-autosuggest-local-history"
                         checked={terminal.autosuggest.localShellHistory}
                         onCheckedChange={(checked) => updateAutosuggest('localShellHistory', checked as boolean)}
+                    />
+                </div>
+                <Separator className="my-5 opacity-50" />
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-bar"
+                        checked={terminal.commandBar.enabled}
+                        onCheckedChange={(checked) => updateCommandBar('enabled', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar_ask_mode')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_ask_mode_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-bar-ask"
+                        checked={terminal.commandBar.askMode}
+                        onCheckedChange={(checked) => updateCommandBar('askMode', checked as boolean)}
+                    />
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                    <div>
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar_legacy_toolbar')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_legacy_toolbar_hint')}</p>
+                    </div>
+                    <Checkbox
+                        id="terminal-command-bar-legacy-toolbar"
+                        checked={terminal.commandBar.showLegacyToolbar}
+                        onCheckedChange={(checked) => updateCommandBar('showLegacyToolbar', checked as boolean)}
                     />
                 </div>
             </div>
