@@ -34,7 +34,9 @@ pub mod types;
 pub use auth::{KeyAuth, load_private_key};
 pub use auto_reconnect::AutoReconnectService;
 pub use command_facts::{
-    CloseCommandFactPatch, CommandFact, CommandFactClosedBy, CommandFactConfidence,
+    CloseCommandFactPatch, CommandFact, CommandFactAuthorityMode, CommandFactClosedBy,
+    CommandFactConfidence, CommandFactLedgerCandidate, CommandFactLedgerDiagnostic,
+    CommandFactLedgerDiagnosticReason, CommandFactLedgerDiagnosticsSnapshot,
     CommandFactOutputResponse, CommandFactSource, CommandFactStatus, CommandFactStore,
     CreateCommandFactRequest, CreateCommandFactResponse,
 };

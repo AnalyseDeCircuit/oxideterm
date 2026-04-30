@@ -600,6 +600,7 @@ pub fn run() {
         commands::close_command_fact,
         commands::get_command_facts,
         commands::get_command_fact_output,
+        commands::get_command_fact_ledger_diagnostics,
         // Search commands
         commands::start_terminal_history_search,
         commands::get_terminal_history_search_results,
@@ -988,6 +989,7 @@ pub fn run() {
         commands::close_command_fact,
         commands::get_command_facts,
         commands::get_command_fact_output,
+        commands::get_command_fact_ledger_diagnostics,
         // Search commands
         commands::start_terminal_history_search,
         commands::get_terminal_history_search_results,

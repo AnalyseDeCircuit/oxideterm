@@ -7,6 +7,7 @@ import { cleanupTerminalCommandMarks, createTerminalCommandMark, listTerminalCom
 import {
   cleanupShellIntegration,
   createShellIntegrationController,
+  getShellIntegrationTrace,
   getShellIntegrationStatus,
   parseOsc133,
   parseOsc633,
@@ -282,6 +283,69 @@ describe('terminal shell integration', () => {
       },
     ]);
     expect(addAiCommandRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the full prompt block start when empty commands follow a multiline p10k prompt', () => {
+    const term = createMockTerminal({
+      10: '   ~ ······················ lipsc@host  01:57:29 ',
+      11: '❯ ls',
+      30: '   ~ ······················ INT ✘  lipsc@host  01:57:32 ',
+      31: '❯ ',
+    });
+    const controller = createShellIntegrationController({ term, paneId: 'pane-1', sessionId: 'session-1' });
+
+    term.setPosition(10);
+    controller.handleOsc133('A');
+    term.setPosition(11);
+    controller.handleOsc133('B');
+    term.setPosition(12);
+    controller.handleOsc133('C');
+
+    term.setPosition(31);
+    controller.handleOsc133('B');
+    term.setPosition(32);
+    controller.handleOsc133('C');
+    controller.handleOsc133('D;130');
+
+    expect(listTerminalCommandMarks('pane-1')).toMatchObject([
+      {
+        command: 'ls',
+        startLine: 10,
+        endLine: 29,
+        closedBy: 'next_command',
+        isClosed: true,
+      },
+      {
+        command: null,
+        startLine: 30,
+        commandLine: 31,
+        endLine: 31,
+        closedBy: 'shell_integration',
+        isClosed: true,
+        exitCode: 130,
+      },
+    ]);
+    expect(addAiCommandRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a capped shell integration trace for diagnostics', () => {
+    const term = createMockTerminal();
+    const controller = createShellIntegrationController({ term, paneId: 'pane-1', sessionId: 'session-1' });
+
+    for (let index = 0; index < 205; index += 1) {
+      term.setPosition(index);
+      controller.handleOsc633('A');
+    }
+
+    const trace = getShellIntegrationTrace('pane-1');
+    expect(trace).toHaveLength(200);
+    expect(trace[0]?.line).toBe(5);
+    expect(trace.at(-1)).toMatchObject({
+      kind: 'prompt_start',
+      source: 'osc633',
+      line: 204,
+      promptBlockStartLine: 204,
+    });
   });
 
   it('records integration source and last seen time for diagnostics', () => {

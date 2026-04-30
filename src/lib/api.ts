@@ -41,6 +41,7 @@ import {
   TerminalLine,
   BufferStats,
   CommandFact,
+  CommandFactLedgerDiagnosticsSnapshot,
   CommandFactOutputResponse,
   CloseCommandFactPatch,
   CreateCommandFactRequest,
@@ -1579,6 +1580,13 @@ export const api = {
       maxLines: limits.maxLines,
       maxChars: limits.maxChars,
     });
+  },
+
+  getCommandFactLedgerDiagnostics: async (
+    sessionId: string,
+  ): Promise<CommandFactLedgerDiagnosticsSnapshot> => {
+    if (USE_MOCK) return { authorityMode: 'shadow', candidates: [], diagnostics: [] };
+    return invoke('get_command_fact_ledger_diagnostics', { sessionId });
   },
 
   // --- Search APIs ---

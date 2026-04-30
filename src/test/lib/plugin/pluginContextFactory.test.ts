@@ -650,6 +650,7 @@ describe('pluginContextFactory', () => {
       selectedForwardIds: null,
       appSettingsJson: expect.any(String),
       pluginSettings: null,
+      quickCommandsJson: expect.any(String),
     });
   });
 

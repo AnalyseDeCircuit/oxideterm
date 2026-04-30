@@ -422,6 +422,7 @@ function shadowCloseCommandFact(
     exitCode: close.exitCode ?? undefined,
     status: close.stale ? 'stale' : 'closed',
     staleReason: close.stale ? close.closedBy : undefined,
+    runtimeEpoch: mark.runtimeEpoch,
   }).catch((error) => {
     console.debug('[TerminalCommandFacts] shadow close failed:', error);
   });
@@ -946,6 +947,12 @@ function factToPresentationMark(fact: CommandFact, paneId: string): TerminalComm
   };
 }
 
+function commandFactRangeDiffersFromFrontendMark(fact: CommandFact, mark: TerminalCommandMark): boolean {
+  return fact.startGlobalLine !== mark.startLine
+    || fact.commandGlobalLine !== mark.commandLine
+    || (typeof fact.endGlobalLine === 'number' && mark.endLine !== fact.endGlobalLine);
+}
+
 export async function selectTerminalCommandMarkAtLineFromFacts(
   term: Terminal,
   paneId: string,
@@ -953,6 +960,9 @@ export async function selectTerminalCommandMarkAtLineFromFacts(
   absoluteLine: number,
 ): Promise<boolean> {
   try {
+    // Phase2/3a reads Rust command facts first, but the switch is not fully
+    // authoritative yet. Keep frontend marks as the presentation fallback until
+    // the Rust-side terminal domain is mature enough for the Rust-native path.
     const facts = await api.getCommandFacts(sessionId, absoluteLine, absoluteLine);
     const fact = [...facts].reverse().find((candidate) => {
       if (candidate.status === 'open' || typeof candidate.endGlobalLine !== 'number') return false;
@@ -962,6 +972,27 @@ export async function selectTerminalCommandMarkAtLineFromFacts(
       const existing = (marksByPane.get(paneId) ?? []).find((mark) => {
         return mark.factId === fact.factId || mark.commandId === fact.clientMarkId;
       });
+      if (existing && commandFactRangeDiffersFromFrontendMark(fact, existing)) {
+        console.debug('[TerminalCommandFacts] fact selection range mismatch; falling back to frontend mark:', {
+          paneId,
+          sessionId,
+          factId: fact.factId,
+          commandId: existing.commandId,
+          frontend: {
+            startLine: existing.startLine,
+            commandLine: existing.commandLine,
+            endLine: existing.endLine,
+          },
+          rust: {
+            startGlobalLine: fact.startGlobalLine,
+            commandGlobalLine: fact.commandGlobalLine,
+            endGlobalLine: fact.endGlobalLine,
+            bufferGeneration: fact.bufferGeneration,
+            runtimeEpoch: fact.runtimeEpoch,
+          },
+        });
+        return selectTerminalCommandMarkAtLine(term, paneId, absoluteLine);
+      }
       const presentationMark = existing ?? factToPresentationMark(fact, paneId);
       if (presentationMark && selectTerminalCommandMarkRecord(term, paneId, presentationMark)) {
         return true;

@@ -8,8 +8,9 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::session::{
-    CloseCommandFactPatch, CommandFact, CommandFactOutputResponse, CreateCommandFactRequest,
-    CreateCommandFactResponse, ScrollBuffer, SessionRegistry,
+    CloseCommandFactPatch, CommandFact, CommandFactLedgerDiagnosticsSnapshot,
+    CommandFactOutputResponse, CreateCommandFactRequest, CreateCommandFactResponse, ScrollBuffer,
+    SessionRegistry,
 };
 
 const DEFAULT_OUTPUT_MAX_LINES: usize = 400;
@@ -43,11 +44,14 @@ pub async fn close_command_fact(
     patch: CloseCommandFactPatch,
     registry: State<'_, Arc<SessionRegistry>>,
 ) -> Result<CommandFact, String> {
-    let store = registry
-        .with_session(&session_id, |entry| entry.command_facts.clone())
+    let (store, scroll_buffer) = registry
+        .with_session(&session_id, |entry| {
+            (entry.command_facts.clone(), entry.scroll_buffer.clone())
+        })
         .ok_or_else(|| format!("Session {} not found", session_id))?;
+    let identity = scroll_buffer.identity().await;
     store
-        .close_fact(&fact_id, patch)
+        .close_fact(&fact_id, patch, Some(identity.buffer_generation), None)
         .await
         .ok_or_else(|| format!("Command fact {} not found", fact_id))
 }
@@ -83,6 +87,17 @@ pub async fn get_command_fact_output(
         .await
         .ok_or_else(|| format!("Command fact {} not found", fact_id))?;
     read_fact_output(scroll_buffer, fact, max_lines, max_chars).await
+}
+
+#[tauri::command]
+pub async fn get_command_fact_ledger_diagnostics(
+    session_id: String,
+    registry: State<'_, Arc<SessionRegistry>>,
+) -> Result<CommandFactLedgerDiagnosticsSnapshot, String> {
+    let store = registry
+        .with_session(&session_id, |entry| entry.command_facts.clone())
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    Ok(store.ledger_diagnostics_snapshot().await)
 }
 
 async fn read_fact_output(

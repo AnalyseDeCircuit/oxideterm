@@ -6,6 +6,7 @@ import {
   closeTerminalCommandMarkById,
   createShellIntegratedCommandMark,
   getTerminalPromptBlockStartLine,
+  type TerminalCommandMarkClosedBy,
 } from './commandMarks';
 
 export type ShellIntegrationSource = 'osc133' | 'osc633';
@@ -24,6 +25,23 @@ export type ShellIntegrationStatus = {
   integrationSource?: ShellIntegrationSource;
   lastSeenAt?: number;
 };
+
+export interface ShellIntegrationTraceEntry {
+  id: number;
+  at: number;
+  source: ShellIntegrationSource;
+  kind: ShellIntegrationEvent['kind'];
+  line: number;
+  col: number;
+  raw?: string;
+  sequence?: string;
+  promptBlockStartLine?: number;
+  activeCommandId?: string;
+  createdMarkId?: string;
+  closedMarkId?: string;
+  closeLine?: number;
+  closedBy?: TerminalCommandMarkClosedBy;
+}
 
 type TerminalPosition = {
   line: number;
@@ -54,9 +72,12 @@ type ControllerState = {
 };
 
 const MAX_COMMAND_TEXT_LENGTH = 4096;
+const MAX_SHELL_INTEGRATION_TRACE_PER_PANE = 200;
 
 const stateByPane = new Map<string, ControllerState>();
+const traceByPane = new Map<string, ShellIntegrationTraceEntry[]>();
 const statusListeners = new Set<() => void>();
+let nextTraceId = 1;
 
 function getAbsoluteCursorPosition(term: Terminal): TerminalPosition {
   return {
@@ -195,14 +216,47 @@ function updateStatus(paneId: string, source: ShellIntegrationSource, lifecycle:
   return current;
 }
 
-function closeActiveMarkBefore(paneId: string, state: ControllerState, nextBlockStartLine: number, closedBy: 'next_command' | 'unknown'): void {
-  if (!state.activeCommandId) return;
+function pushShellIntegrationTrace(paneId: string, entry: Omit<ShellIntegrationTraceEntry, 'id' | 'at'>): ShellIntegrationTraceEntry {
+  const trace: ShellIntegrationTraceEntry = {
+    ...entry,
+    id: nextTraceId++,
+    at: Date.now(),
+  };
+  const traces = traceByPane.get(paneId) ?? [];
+  traces.push(trace);
+  if (traces.length > MAX_SHELL_INTEGRATION_TRACE_PER_PANE) {
+    traces.splice(0, traces.length - MAX_SHELL_INTEGRATION_TRACE_PER_PANE);
+  }
+  traceByPane.set(paneId, traces);
+  return trace;
+}
+
+type ShellIntegrationCloseTrace = {
+  closedMarkId: string;
+  closeLine: number;
+  closedBy: TerminalCommandMarkClosedBy;
+};
+
+function closeActiveMarkBefore(
+  paneId: string,
+  state: ControllerState,
+  nextBlockStartLine: number,
+  closedBy: Extract<TerminalCommandMarkClosedBy, 'next_command' | 'unknown'>,
+): ShellIntegrationCloseTrace | null {
+  if (!state.activeCommandId) return null;
   const fallbackStart = state.activeStartLine ?? state.promptStart?.line ?? nextBlockStartLine;
+  const closedMarkId = state.activeCommandId;
+  const closeLine = Math.max(fallbackStart, nextBlockStartLine - 1);
   closeTerminalCommandMarkById(paneId, state.activeCommandId, closedBy, 'high', {
-    endLine: Math.max(fallbackStart, nextBlockStartLine - 1),
+    endLine: closeLine,
   });
   state.activeCommandId = undefined;
   state.activeStartLine = undefined;
+  return { closedMarkId, closeLine, closedBy };
+}
+
+export function getShellIntegrationTrace(paneId: string): ShellIntegrationTraceEntry[] {
+  return [...(traceByPane.get(paneId) ?? [])];
 }
 
 export function getShellIntegrationStatus(paneId: string): ShellIntegrationStatus {
@@ -230,6 +284,7 @@ export function subscribeShellIntegrationStatus(listener: () => void): () => voi
 }
 
 export function cleanupShellIntegration(paneId: string): void {
+  traceByPane.delete(paneId);
   if (stateByPane.delete(paneId)) {
     notifyStatusListeners();
   }
@@ -245,11 +300,26 @@ export function createShellIntegrationController(options: ControllerOptions): {
   const handleEvent = (event: ShellIntegrationEvent): void => {
     const previousLifecycle = stateByPane.get(paneId)?.lifecycle ?? 'idle';
     const state = updateStatus(paneId, event.source, event.kind === 'command_end' ? 'closed' : event.kind === 'output_start' ? 'output' : event.kind === 'command_start' ? 'command' : 'prompt');
+    const trace: Omit<ShellIntegrationTraceEntry, 'id' | 'at'> = {
+      source: event.source,
+      kind: event.kind,
+      line: event.line,
+      col: event.col,
+      raw: event.raw,
+      sequence: event.sequence,
+      activeCommandId: state.activeCommandId,
+    };
 
     switch (event.kind) {
       case 'prompt_start': {
         const promptBlockStartLine = getTerminalPromptBlockStartLine(term, event.line);
-        closeActiveMarkBefore(paneId, state, promptBlockStartLine, 'next_command');
+        trace.promptBlockStartLine = promptBlockStartLine;
+        const closed = closeActiveMarkBefore(paneId, state, promptBlockStartLine, 'next_command');
+        if (closed) {
+          trace.closedMarkId = closed.closedMarkId;
+          trace.closeLine = closed.closeLine;
+          trace.closedBy = closed.closedBy;
+        }
         state.promptStart = { line: promptBlockStartLine, col: event.col, at: Date.now() };
         state.commandStart = undefined;
         state.pendingCommandText = null;
@@ -260,8 +330,14 @@ export function createShellIntegrationController(options: ControllerOptions): {
       }
       case 'command_start': {
         const promptBlockStartLine = getTerminalPromptBlockStartLine(term, event.line);
+        trace.promptBlockStartLine = promptBlockStartLine;
         if (state.activeCommandId) {
-          closeActiveMarkBefore(paneId, state, promptBlockStartLine, 'next_command');
+          const closed = closeActiveMarkBefore(paneId, state, promptBlockStartLine, 'next_command');
+          if (closed) {
+            trace.closedMarkId = closed.closedMarkId;
+            trace.closeLine = closed.closeLine;
+            trace.closedBy = closed.closedBy;
+          }
         }
         if (previousLifecycle !== 'prompt') {
           state.promptStart = { line: promptBlockStartLine, col: event.col, at: Date.now() };
@@ -300,6 +376,7 @@ export function createShellIntegrationController(options: ControllerOptions): {
         if (mark) {
           state.activeCommandId = mark.commandId;
           state.activeStartLine = startLine;
+          trace.createdMarkId = mark.commandId;
         }
         state.promptStart = undefined;
         state.lifecycle = 'output';
@@ -311,11 +388,17 @@ export function createShellIntegrationController(options: ControllerOptions): {
           break;
         }
         const endBoundaryLine = getTerminalPromptBlockStartLine(term, event.line);
+        trace.promptBlockStartLine = endBoundaryLine;
         const fallbackStart = state.activeStartLine ?? state.promptStart?.line ?? endBoundaryLine;
+        const closeLine = Math.max(fallbackStart, endBoundaryLine - 1);
+        const closedMarkId = state.activeCommandId;
         closeTerminalCommandMarkById(paneId, state.activeCommandId, 'shell_integration', 'high', {
-          endLine: Math.max(fallbackStart, endBoundaryLine - 1),
+          endLine: closeLine,
           exitCode: event.exitCode,
         });
+        trace.closedMarkId = closedMarkId;
+        trace.closeLine = closeLine;
+        trace.closedBy = 'shell_integration';
         state.activeCommandId = undefined;
         state.activeStartLine = undefined;
         state.lifecycle = 'closed';
@@ -324,6 +407,7 @@ export function createShellIntegrationController(options: ControllerOptions): {
       default:
         break;
     }
+    pushShellIntegrationTrace(paneId, trace);
   };
 
   return {

@@ -1050,6 +1050,16 @@ export type CommandFactClosedBy =
 
 export type CommandFactConfidence = 'high' | 'medium' | 'low';
 export type CommandFactStatus = 'open' | 'closed' | 'stale';
+export type CommandFactAuthorityMode = 'shadow' | 'candidate' | 'authoritative_ledger';
+export type CommandFactLedgerDiagnosticReason =
+  | 'null_command'
+  | 'stale'
+  | 'interrupted'
+  | 'not_closed'
+  | 'generation_mismatch'
+  | 'runtime_epoch_mismatch'
+  | 'low_confidence'
+  | 'command_sanitize_failed';
 
 export interface CommandFact {
   factId: string;
@@ -1102,6 +1112,7 @@ export interface CloseCommandFactPatch {
   exitCode?: number | null;
   status?: CommandFactStatus;
   staleReason?: string;
+  runtimeEpoch?: string;
 }
 
 export interface CommandFactOutputResponse {
@@ -1109,6 +1120,42 @@ export interface CommandFactOutputResponse {
   truncated: boolean;
   lineCount: number;
   stale: boolean;
+}
+
+export interface CommandFactLedgerCandidate {
+  candidateId: string;
+  factId: string;
+  sessionId: string;
+  nodeId?: string | null;
+  source: CommandFactSource;
+  submittedBy?: CommandFactSource | null;
+  command: string;
+  cwd?: string | null;
+  startGlobalLine: number;
+  commandGlobalLine: number;
+  outputStartGlobalLine?: number | null;
+  endGlobalLine: number;
+  bufferGeneration: number;
+  runtimeEpoch: string;
+  closedBy?: CommandFactClosedBy | null;
+  exitCode?: number | null;
+  createdAt: number;
+  closedAt: number;
+  preview?: string | null;
+}
+
+export interface CommandFactLedgerDiagnostic {
+  factId: string;
+  sessionId: string;
+  reason: CommandFactLedgerDiagnosticReason;
+  message: string;
+  createdAt: number;
+}
+
+export interface CommandFactLedgerDiagnosticsSnapshot {
+  authorityMode: CommandFactAuthorityMode;
+  candidates: CommandFactLedgerCandidate[];
+  diagnostics: CommandFactLedgerDiagnostic[];
 }
 
 // Search Types
