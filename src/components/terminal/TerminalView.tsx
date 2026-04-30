@@ -469,10 +469,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       if (last && last.cols === next.cols && last.rows === next.rows) {
         return;
       }
+      const sent = transportRef.current?.sendResize(next.cols, next.rows) ?? false;
+      if (!sent) {
+        // SSH terminals can be created with a deferred 0x0 PTY. Initial xterm
+        // fits often happen before the WebSocket is open; do not mark those
+        // dimensions as synced, or the first real WS-open resize gets deduped
+        // and the remote shell stays at the wrong size until a manual window
+        // resize happens.
+        return;
+      }
       lastRemoteResizeRef.current = next;
       feedResize(next.cols, next.rows);
       trzszControllerRef.current?.setTerminalColumns(next.cols);
-      transportRef.current?.sendResize(next.cols, next.rows);
     }, 100);
   }, [feedResize]);
 
@@ -1596,7 +1604,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           4000,
         );
         
-        // Re-send current terminal size
+        // Re-send dimensions for the newly opened socket even when the
+        // frontend size matches the last terminal instance. A reconnect may
+        // allocate a fresh PTY that has not seen any resize frame yet.
+        lastRemoteResizeRef.current = null;
         syncRemotePtySize();
         syncTrzszController();
         updateTerminalReadiness(sessionId, {
@@ -2095,7 +2106,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                   }
 
                   term.writeln(i18n.t('terminal.ssh.connected') + "\r\n");
-                  // Initial resize using the current visible or last stable size.
+                  // New SSH terminals are created with a deferred 0x0 PTY and
+                  // wait for this first real resize frame before starting the
+                  // remote shell at the correct size.
+                  lastRemoteResizeRef.current = null;
                   syncRemotePtySize();
                   syncTrzszController();
                   updateTerminalReadiness(sessionId, {
@@ -2368,6 +2382,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         }
         if (fitAddonRef.current && terminalRef.current && isMountedRef.current) {
           fitAddonRef.current.fit();
+          syncRemotePtySize();
         }
         resizeDebounceTimer = null;
       }, 50); // 50ms debounce
@@ -2390,6 +2405,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const initialFitTimer = setTimeout(() => {
         if (isMountedRef.current && fitAddonRef.current && isTerminalContainerRenderable(containerRef.current)) {
           fitAddonRef.current.fit();
+          syncRemotePtySize();
         }
     }, 100);
 

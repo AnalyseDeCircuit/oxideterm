@@ -1338,6 +1338,11 @@ export interface ConnectTreeNodeRequest {
   rows?: number;
   trustHostKey?: boolean;
   expectedHostKeyFingerprint?: string;
+  attemptId?: string;
+  traceLabel?: string;
+  traceStepIndex?: number;
+  traceTotalSteps?: number;
+  traceMode?: 'connect' | 'reconnect';
 }
 
 /**

@@ -184,6 +184,82 @@ function concatUint8Arrays(left: Uint8Array, right: Uint8Array): Uint8Array {
   return combined;
 }
 
+function isInverseSgr(params: string): boolean {
+  const parts = params.length === 0 ? ['0'] : params.split(';');
+  return parts.includes('7');
+}
+
+function sgrResetEnd(data: Uint8Array, offset: number): number {
+  if (data[offset] !== 0x1b || data[offset + 1] !== 0x5b) return -1;
+  let i = offset + 2;
+  while (i < data.length && data[i] !== 0x6d) {
+    const byte = data[i];
+    if (!((byte >= 0x30 && byte <= 0x3f) || byte === 0x20)) return -1;
+    i += 1;
+  }
+  if (i >= data.length) return -1;
+  const params = new TextDecoder().decode(data.subarray(offset + 2, i)).replace(/\s/g, '');
+  const parts = params.length === 0 ? ['0'] : params.split(';');
+  return parts.includes('0') || parts.includes('27') ? i + 1 : -1;
+}
+
+export function stripZshPromptEolMarks(data: Uint8Array): Uint8Array {
+  if (data.length < 8) return data;
+
+  let changed = false;
+  const chunks: Uint8Array[] = [];
+  let last = 0;
+
+  for (let start = 0; start < data.length - 7; start += 1) {
+    if (data[start] !== 0x1b || data[start + 1] !== 0x5b) continue;
+
+    let sgrEnd = start + 2;
+    while (sgrEnd < data.length && data[sgrEnd] !== 0x6d) {
+      const byte = data[sgrEnd];
+      if (!((byte >= 0x30 && byte <= 0x3f) || byte === 0x20)) break;
+      sgrEnd += 1;
+    }
+    if (sgrEnd >= data.length || data[sgrEnd] !== 0x6d) continue;
+
+    const markerIndex = sgrEnd + 1;
+    const marker = data[markerIndex];
+    if (marker !== 0x25 && marker !== 0x23) continue; // zsh uses % for users, # for root.
+
+    const params = new TextDecoder().decode(data.subarray(start + 2, sgrEnd)).replace(/\s/g, '');
+    if (!isInverseSgr(params)) continue;
+
+    const resetEnd = sgrResetEnd(data, markerIndex + 1);
+    if (resetEnd < 0) continue;
+
+    // zsh's default PROMPT_EOL_MARK is a reverse-video "%/#" inserted when
+    // the previous output did not end with a newline. It is a shell warning,
+    // not command output. Strip only this exact SGR marker shape so ordinary
+    // percent signs and progress output remain untouched.
+    if (start > last) chunks.push(data.subarray(last, start));
+    chunks.push(data.subarray(markerIndex + 1, resetEnd));
+    last = resetEnd;
+    start = resetEnd - 1;
+    changed = true;
+  }
+
+  if (!changed) return data;
+  if (last < data.length) chunks.push(data.subarray(last));
+  return concatManyUint8Arrays(chunks);
+}
+
+function concatManyUint8Arrays(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 0) return new Uint8Array();
+  if (chunks.length === 1) return chunks[0];
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return combined;
+}
+
 export function buildWriteBatches(
   chunks: Uint8Array[],
   maxBatchBytes: number = MAX_WRITE_BATCH_BYTES,
@@ -534,13 +610,13 @@ export function useAdaptiveRenderer(opts: UseAdaptiveRendererOptions): AdaptiveR
     (data: Uint8Array) => {
       if (!terminalRef.current || !mountedRef.current) return;
 
-      let nextData = data;
+      let nextData = stripZshPromptEolMarks(data);
 
       const currentMode = modeRef.current;
 
       // Mode: 'off' — direct write, no batching
       if (currentMode === 'off') {
-        terminalRef.current.write(data);
+        terminalRef.current.write(nextData);
         return;
       }
 

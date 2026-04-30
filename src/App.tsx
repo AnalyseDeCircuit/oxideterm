@@ -39,6 +39,7 @@ import { useCommandPaletteStore } from './store/commandPaletteStore';
 import { useBroadcastStore } from './store/broadcastStore';
 import { useActivityStore } from './store/activityStore';
 import { initNotificationListener, teardownNotificationListener } from './store/notificationCenterStore';
+import { initializeConnectionTraceToastManager } from './lib/connectionTraceToastManager';
 import type { PortableStatusResponse } from './types';
 
 type AppProps = {
@@ -56,6 +57,10 @@ function AppContent({ updatesEnabled }: AppContentProps) {
   useConnectionEvents();
   useCliEvents();
   useEventLogCapture();
+
+  useEffect(() => {
+    return initializeConnectionTraceToastManager();
+  }, []);
   
   // Recording player modal state
   const playerModal = useRecordingStore((s) => s.playerModal);

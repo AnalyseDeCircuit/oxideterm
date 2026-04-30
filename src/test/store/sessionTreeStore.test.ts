@@ -537,7 +537,13 @@ describe('sessionTreeStore', () => {
 
     expect(resetNodeState).toHaveBeenCalledTimes(1);
     expect(resetNodeState).toHaveBeenCalledWith('leaf');
-    expect(connectNodeInternal).toHaveBeenCalledWith('leaf');
+    expect(connectNodeInternal).toHaveBeenCalledWith('leaf', expect.objectContaining({
+      attemptId: expect.any(String),
+      mode: 'connect',
+      stepIndex: 1,
+      totalSteps: 1,
+      label: 'Example',
+    }));
     expect(apiMocks.updateTreeNodeState).toHaveBeenCalledWith('leaf', 'failed', 'boom');
     expect(fetchTree).toHaveBeenCalled();
     expect(useSessionTreeStore.getState().isConnectingChain).toBe(false);

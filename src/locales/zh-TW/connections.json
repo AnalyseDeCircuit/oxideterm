@@ -105,6 +105,25 @@
         "services": "個服務已恢復"
       }
     },
-    "failedFetchStats": "取得統計資訊失敗"
+    "failedFetchStats": "取得統計資訊失敗",
+    "trace": {
+      "connecting": "正在連線 {{label}}",
+      "reconnecting": "正在重新連線 {{label}}",
+      "connecting_chain": "正在連線 {{current}}/{{total}}: {{label}}",
+      "reconnecting_chain": "正在重新連線 {{current}}/{{total}}: {{label}}",
+      "connected": "已連線 · {{elapsed}}",
+      "target_unknown": "目標",
+      "stage": {
+        "queued": "已排入佇列",
+        "preparing": "準備連線",
+        "opening_transport": "開啟傳輸通道",
+        "ssh_handshake": "SSH 握手",
+        "host_key": "檢查主機金鑰",
+        "authentication": "正在驗證",
+        "pty": "配置 PTY",
+        "shell_ready": "啟動 Shell",
+        "ready": "就緒"
+      }
+    }
   }
 }

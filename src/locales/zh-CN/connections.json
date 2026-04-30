@@ -105,6 +105,25 @@
         "services": "个服务已恢复"
       }
     },
-    "failedFetchStats": "获取统计信息失败"
+    "failedFetchStats": "获取统计信息失败",
+    "trace": {
+      "connecting": "正在连接 {{label}}",
+      "reconnecting": "正在重连 {{label}}",
+      "connecting_chain": "正在连接 {{current}}/{{total}}: {{label}}",
+      "reconnecting_chain": "正在重连 {{current}}/{{total}}: {{label}}",
+      "connected": "已连接 · {{elapsed}}",
+      "target_unknown": "目标",
+      "stage": {
+        "queued": "已排队",
+        "preparing": "准备连接",
+        "opening_transport": "打开传输通道",
+        "ssh_handshake": "SSH 握手",
+        "host_key": "检查主机密钥",
+        "authentication": "正在认证",
+        "pty": "分配 PTY",
+        "shell_ready": "启动 Shell",
+        "ready": "就绪"
+      }
+    }
   }
 }

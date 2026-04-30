@@ -25,10 +25,21 @@ export const Toaster = () => {
             if (!open) removeToast(toast.id);
           }}
         >
-          <div className="grid gap-1">
+          <div className="grid min-w-0 flex-1 gap-1">
             <ToastTitle>{toast.title}</ToastTitle>
             {toast.description && (
               <ToastDescription>{toast.description}</ToastDescription>
+            )}
+            {toast.statusText && (
+              <ToastDescription>{toast.statusText}</ToastDescription>
+            )}
+            {typeof toast.progress === 'number' && (
+              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-theme-border/50">
+                <div
+                  className="h-full rounded-full bg-theme-accent transition-[width] duration-200"
+                  style={{ width: `${Math.max(0, Math.min(100, toast.progress))}%` }}
+                />
+              </div>
             )}
           </div>
           {toast.actions && toast.actions.length > 0 && (

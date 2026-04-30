@@ -4,6 +4,7 @@ import {
   buildWriteBatches,
   findCursorControlBoundary,
   getAdaptiveFlushPlan,
+  stripZshPromptEolMarks,
   useAdaptiveRenderer,
 } from '@/hooks/useAdaptiveRenderer';
 import { adaptiveRendererIssue26Fixtures } from '@/test/fixtures/adaptiveRendererIssue26Fixtures';
@@ -58,6 +59,21 @@ describe('findCursorControlBoundary', () => {
 });
 
 describe('useAdaptiveRenderer', () => {
+  it('strips zsh reverse-video prompt eol markers before writing to xterm', () => {
+    const { writes, scheduleWrite, flushRaf } = createRendererHarness();
+
+    scheduleWrite(textEncoder('out\x1b[7m%\x1b[27m\r\nprompt'));
+    flushRaf();
+
+    expect(writes).toEqual(['out\x1b[27m\r\nprompt']);
+  });
+
+  it('keeps ordinary percent output intact', () => {
+    const input = textEncoder('42%\r\n\x1b[31m100%\x1b[0m');
+
+    expect(new TextDecoder().decode(stripZshPromptEolMarks(input))).toBe('42%\r\n\x1b[31m100%\x1b[0m');
+  });
+
   it('flushes printable output before a later destructive cursor-control tail', () => {
     const { writes, scheduleWrite, flushRaf, hasPendingRaf } = createRendererHarness();
 

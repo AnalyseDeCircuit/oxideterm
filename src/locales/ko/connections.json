@@ -105,6 +105,25 @@
         "services": "개 서비스 복원"
       }
     },
-    "failedFetchStats": "통계를 가져오지 못했습니다"
+    "failedFetchStats": "통계를 가져오지 못했습니다",
+    "trace": {
+      "connecting": "Connecting {{label}}",
+      "reconnecting": "Reconnecting {{label}}",
+      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
+      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
+      "connected": "Connected · {{elapsed}}",
+      "target_unknown": "target",
+      "stage": {
+        "queued": "Queued",
+        "preparing": "Preparing connection",
+        "opening_transport": "Opening transport",
+        "ssh_handshake": "SSH handshake",
+        "host_key": "Checking host key",
+        "authentication": "Authenticating",
+        "pty": "Allocating PTY",
+        "shell_ready": "Starting shell",
+        "ready": "Ready"
+      }
+    }
   }
 }

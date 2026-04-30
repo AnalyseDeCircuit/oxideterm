@@ -6,9 +6,10 @@
 //! Tauri commands for managing the dynamic jump host session tree.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 use crate::session::AuthMethod;
@@ -803,6 +804,16 @@ pub struct ConnectTreeNodeRequest {
     pub trust_host_key: Option<bool>,
     #[serde(default)]
     pub expected_host_key_fingerprint: Option<String>,
+    #[serde(default)]
+    pub attempt_id: Option<String>,
+    #[serde(default)]
+    pub trace_label: Option<String>,
+    #[serde(default)]
+    pub trace_step_index: Option<u32>,
+    #[serde(default)]
+    pub trace_total_steps: Option<u32>,
+    #[serde(default)]
+    pub trace_mode: Option<String>,
 }
 
 fn default_cols() -> u32 {
@@ -819,6 +830,75 @@ pub struct ConnectTreeNodeResponse {
     pub node_id: String,
     pub ssh_connection_id: String,
     pub parent_connection_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionTracePayload {
+    attempt_id: String,
+    node_id: String,
+    stage: &'static str,
+    status: &'static str,
+    progress: u8,
+    elapsed_ms: u64,
+    detail: Option<String>,
+    label: Option<String>,
+    step_index: Option<u32>,
+    total_steps: Option<u32>,
+    mode: Option<String>,
+}
+
+struct ConnectionTraceContext {
+    attempt_id: Option<String>,
+    node_id: String,
+    label: Option<String>,
+    step_index: Option<u32>,
+    total_steps: Option<u32>,
+    mode: Option<String>,
+    started_at: Instant,
+}
+
+impl ConnectionTraceContext {
+    fn from_request(request: &ConnectTreeNodeRequest) -> Self {
+        Self {
+            attempt_id: request.attempt_id.clone(),
+            node_id: request.node_id.clone(),
+            label: request.trace_label.clone(),
+            step_index: request.trace_step_index,
+            total_steps: request.trace_total_steps,
+            mode: request.trace_mode.clone(),
+            started_at: Instant::now(),
+        }
+    }
+
+    fn emit(
+        &self,
+        app: &AppHandle,
+        stage: &'static str,
+        status: &'static str,
+        progress: u8,
+        detail: Option<String>,
+    ) {
+        let Some(attempt_id) = self.attempt_id.as_ref() else {
+            return;
+        };
+        let payload = ConnectionTracePayload {
+            attempt_id: attempt_id.clone(),
+            node_id: self.node_id.clone(),
+            stage,
+            status,
+            progress,
+            elapsed_ms: self.started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            detail,
+            label: self.label.clone(),
+            step_index: self.step_index,
+            total_steps: self.total_steps,
+            mode: self.mode.clone(),
+        };
+        if let Err(error) = app.emit("connection:trace", payload) {
+            tracing::debug!("Failed to emit connection trace event: {}", error);
+        }
+    }
 }
 
 #[tauri::command]
@@ -869,27 +949,54 @@ pub async fn preflight_tree_node(
 /// - 对于子节点（depth>0），通过父节点的隧道建立连接
 #[tauri::command]
 pub async fn connect_tree_node(
+    app: AppHandle,
     state: State<'_, Arc<SessionTreeState>>,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
     request: ConnectTreeNodeRequest,
 ) -> Result<ConnectTreeNodeResponse, String> {
     let node_id = request.node_id.clone();
+    let trace = ConnectionTraceContext::from_request(&request);
+    trace.emit(&app, "queued", "running", 5, None);
 
     // 1. 获取节点信息并构建 SessionConfig
     let (session_config, parent_node_id) = {
+        trace.emit(&app, "preparing", "running", 15, None);
         let tree = state.tree.read().await;
         let node = tree
             .get_node(&node_id)
-            .ok_or_else(|| format!("Node not found: {}", node_id))?;
+            .ok_or_else(|| {
+                trace.emit(
+                    &app,
+                    "preparing",
+                    "failed",
+                    15,
+                    Some(format!("Node not found: {}", node_id)),
+                );
+                format!("Node not found: {}", node_id)
+            })?;
 
         // 确保节点状态允许连接
         match &node.state {
             NodeState::Pending | NodeState::Disconnected => {}
             NodeState::Failed { .. } => {}
             NodeState::Connecting => {
+                trace.emit(
+                    &app,
+                    "preparing",
+                    "failed",
+                    15,
+                    Some(format!("Node {} is already connecting", node_id)),
+                );
                 return Err(format!("Node {} is already connecting", node_id));
             }
             NodeState::Connected => {
+                trace.emit(
+                    &app,
+                    "preparing",
+                    "failed",
+                    15,
+                    Some(format!("Node {} is already connected", node_id)),
+                );
                 return Err(format!("Node {} is already connected", node_id));
             }
         }
@@ -918,6 +1025,7 @@ pub async fn connect_tree_node(
         tree.update_state(&node_id, NodeState::Connecting)
             .map_err(|e| e.to_string())?;
     }
+    trace.emit(&app, "opening_transport", "running", 28, None);
 
     // 3. 根据是否有父节点决定连接方式
     let connect_result = if let Some(ref parent_id) = parent_node_id {
@@ -926,12 +1034,30 @@ pub async fn connect_tree_node(
             let tree = state.tree.read().await;
             let parent_node = tree
                 .get_node(parent_id)
-                .ok_or_else(|| format!("Parent node not found: {}", parent_id))?;
+                .ok_or_else(|| {
+                    trace.emit(
+                        &app,
+                        "opening_transport",
+                        "failed",
+                        28,
+                        Some(format!("Parent node not found: {}", parent_id)),
+                    );
+                    format!("Parent node not found: {}", parent_id)
+                })?;
 
             parent_node
                 .ssh_connection_id
                 .clone()
-                .ok_or_else(|| format!("Parent node {} has no SSH connection", parent_id))?
+                .ok_or_else(|| {
+                    trace.emit(
+                        &app,
+                        "opening_transport",
+                        "failed",
+                        28,
+                        Some(format!("Parent node {} has no SSH connection", parent_id)),
+                    );
+                    format!("Parent node {} has no SSH connection", parent_id)
+                })?
         };
 
         // 通过父连接建立隧道连接
@@ -942,6 +1068,16 @@ pub async fn connect_tree_node(
             parent_ssh_id
         );
 
+        trace.emit(&app, "host_key", "running", 38, None);
+        trace.emit(
+            &app,
+            "ssh_handshake",
+            "running",
+            48,
+            Some(format!("via {}", parent_id)),
+        );
+        trace.emit(&app, "authentication", "running", 62, None);
+
         connection_registry
             .establish_tunneled_connection(&parent_ssh_id, session_config)
             .await
@@ -950,6 +1086,10 @@ pub async fn connect_tree_node(
     } else {
         // 无父节点 - 直接连接
         tracing::info!("Connecting root node {} directly", node_id);
+
+        trace.emit(&app, "host_key", "running", 38, None);
+        trace.emit(&app, "ssh_handshake", "running", 48, None);
+        trace.emit(&app, "authentication", "running", 62, None);
 
         connection_registry
             .connect(session_config)
@@ -961,6 +1101,9 @@ pub async fn connect_tree_node(
     // 4. 根据连接结果更新节点状态
     match connect_result {
         Ok((ssh_connection_id, parent_connection_id)) => {
+            trace.emit(&app, "pty", "running", 86, None);
+            trace.emit(&app, "shell_ready", "running", 96, None);
+
             let mut tree = state.tree.write().await;
 
             // 更新状态为已连接
@@ -978,6 +1121,8 @@ pub async fn connect_tree_node(
                 parent_connection_id
             );
 
+            trace.emit(&app, "ready", "ready", 100, None);
+
             Ok(ConnectTreeNodeResponse {
                 node_id,
                 ssh_connection_id,
@@ -992,6 +1137,7 @@ pub async fn connect_tree_node(
                 .map_err(|err| err.to_string())?;
 
             tracing::error!("Failed to connect node {}: {}", node_id, e);
+            trace.emit(&app, "authentication", "failed", 100, Some(e.clone()));
             Err(e)
         }
     }
