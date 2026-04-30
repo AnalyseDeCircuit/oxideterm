@@ -14,6 +14,11 @@ import {
   exportOxideAppSettingsSnapshot,
   type OxideAppSettingsSectionId,
 } from '../store/settingsStore';
+import {
+  applyImportedQuickCommandsSnapshot,
+  exportQuickCommandsSnapshot,
+  type QuickCommandImportStrategy,
+} from '../store/quickCommandsStore';
 
 type ExportOxideRequest = {
   connectionIds: string[];
@@ -22,6 +27,7 @@ type ExportOxideRequest = {
   embedKeys?: boolean | null;
   includePortableSecrets?: boolean;
   includeAppSettings?: boolean;
+  includeQuickCommands?: boolean;
   selectedAppSettingsSections?: OxideAppSettingsSectionId[];
   includeLocalTerminalEnvVars?: boolean;
   includePluginSettings?: boolean;
@@ -53,6 +59,7 @@ type PreviewImportOptions = {
 type ImportOxideOptions = PreviewImportOptions & {
   selectedNames?: string[];
   importAppSettings?: boolean;
+  importQuickCommands?: boolean;
   selectedAppSettingsSections?: string[];
   importPluginSettings?: boolean;
   selectedPluginIds?: string[];
@@ -62,6 +69,7 @@ type ImportOxideOptions = PreviewImportOptions & {
 
 type ImportFromOxideEnvelope = Omit<ImportResult, 'importedAppSettings' | 'importedPluginSettings'> & {
   appSettingsJson?: string | null;
+  quickCommandsJson?: string | null;
   pluginSettings?: PluginSettingSnapshotEntry[] | null;
 };
 
@@ -70,6 +78,7 @@ function buildClientStatePayload(options?: {
   includeLocalTerminalEnvVars?: boolean;
 }): {
   appSettingsJson: string | null;
+  quickCommandsJson: string | null;
   pluginSettings: PluginSettingSnapshotEntry[];
 } {
   return {
@@ -77,6 +86,7 @@ function buildClientStatePayload(options?: {
       selectedSections: options?.selectedAppSettingsSections,
       includeLocalTerminalEnvVars: options?.includeLocalTerminalEnvVars,
     }),
+    quickCommandsJson: exportQuickCommandsSnapshot(),
     pluginSettings: collectPluginSettingsSnapshot(),
   };
 }
@@ -97,13 +107,14 @@ export async function exportOxideWithClientState(
 ): Promise<Uint8Array> {
   const includeAppSettings = (request.includeAppSettings ?? true)
     && (request.selectedAppSettingsSections ? request.selectedAppSettingsSections.length > 0 : true);
+  const includeQuickCommands = request.includeQuickCommands ?? true;
   const includePluginSettings = request.includePluginSettings ?? true;
-  const clientState = (includeAppSettings || includePluginSettings)
+  const clientState = (includeAppSettings || includeQuickCommands || includePluginSettings)
     ? buildClientStatePayload({
         selectedAppSettingsSections: request.selectedAppSettingsSections,
         includeLocalTerminalEnvVars: request.includeLocalTerminalEnvVars,
       })
-    : { appSettingsJson: null, pluginSettings: [] };
+    : { appSettingsJson: null, quickCommandsJson: null, pluginSettings: [] };
   const filteredPluginSettings = includePluginSettings && clientState.pluginSettings.length > 0
     ? (request.selectedPluginIds?.length
       ? clientState.pluginSettings.filter((entry) => {
@@ -120,6 +131,7 @@ export async function exportOxideWithClientState(
     includePortableSecrets: request.includePortableSecrets ?? null,
     selectedForwardIds: request.selectedForwardIds ?? null,
     appSettingsJson: includeAppSettings ? clientState.appSettingsJson : null,
+    quickCommandsJson: includeQuickCommands ? clientState.quickCommandsJson : null,
     pluginSettings: filteredPluginSettings.length > 0
       ? filteredPluginSettings
       : null,
@@ -184,6 +196,7 @@ export async function importOxideWithClientState(
     ? []
     : options?.selectedAppSettingsSections;
   const shouldImportApp = options?.importAppSettings !== false;
+  const shouldImportQuickCommands = options?.importQuickCommands !== false;
   const shouldImportPlugin = options?.importPluginSettings !== false;
   const invokeArgs = {
     fileData: Array.from(fileData),
@@ -215,6 +228,13 @@ export async function importOxideWithClientState(
     });
   }
 
+  const quickCommandsResult = shouldImportQuickCommands && envelope.quickCommandsJson
+    ? applyImportedQuickCommandsSnapshot(
+      envelope.quickCommandsJson,
+      (options?.conflictStrategy ?? 'rename') as QuickCommandImportStrategy,
+    )
+    : { imported: 0, skipped: 0, errors: [] };
+
   const filteredPluginSettings = shouldImportPlugin && envelope.pluginSettings?.length
     ? (options?.selectedPluginIds
       ? (options.selectedPluginIds.length > 0
@@ -230,11 +250,20 @@ export async function importOxideWithClientState(
     ? applyImportedPluginSettingsSnapshot(filteredPluginSettings)
     : 0;
 
-  const { appSettingsJson: _appSettingsJson, pluginSettings: _pluginSettings, ...result } = envelope;
+  const {
+    appSettingsJson: _appSettingsJson,
+    quickCommandsJson: _quickCommandsJson,
+    pluginSettings: _pluginSettings,
+    ...result
+  } = envelope;
   return {
     ...result,
     importedAppSettings,
     skippedAppSettings: !shouldImportApp && Boolean(envelope.appSettingsJson),
+    importedQuickCommands: quickCommandsResult.imported,
+    skippedQuickCommands: (!shouldImportQuickCommands && Boolean(envelope.quickCommandsJson))
+      || quickCommandsResult.errors.length > 0,
+    quickCommandsErrors: quickCommandsResult.errors,
     importedPluginSettings,
     skippedPluginSettings: !shouldImportPlugin && Boolean(envelope.pluginSettings?.length),
   };

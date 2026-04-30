@@ -24,6 +24,8 @@ const translationMap: Record<string, string> = {
   'modals.export.app_settings_no_sections': 'No application settings sections selected',
   'modals.export.include_plugin_settings': 'Include Plugin Preferences',
   'modals.export.include_plugin_settings_description': 'Include plugin settings',
+  'modals.export.include_quick_commands': 'Include Quick Commands',
+  'modals.export.include_quick_commands_description': 'Quick commands warning',
   'modals.export.include_portable_secrets': 'Include Portable Secrets',
   'modals.export.include_portable_secrets_description': 'Include portable secrets',
   'modals.export.no_plugin_settings': 'No plugin preferences to export',
@@ -77,6 +79,10 @@ const collectPluginSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const saveMock = vi.hoisted(() => vi.fn());
 const writeFileMock = vi.hoisted(() => vi.fn());
 const invokeMock = vi.hoisted(() => vi.fn());
+const quickCommandsStoreState = vi.hoisted(() => ({
+  commands: [{ id: 'qc-1', name: 'pwd', command: 'pwd', category: 'system', createdAt: 0, updatedAt: 0 }],
+  hydrate: vi.fn().mockResolvedValue(undefined),
+}));
 
 const appStoreState = vi.hoisted(() => ({
   savedConnections: [] as Array<Record<string, unknown>>,
@@ -111,6 +117,10 @@ vi.mock('@/store/settingsStore', () => ({
     'connections',
     'fileAndEditor',
   ],
+}));
+
+vi.mock('@/store/quickCommandsStore', () => ({
+  useQuickCommandsStore: (selector: (state: unknown) => unknown) => selector(quickCommandsStoreState),
 }));
 
 vi.mock('@/lib/oxideClientState', () => ({

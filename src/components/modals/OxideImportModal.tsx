@@ -90,6 +90,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
   const [result, setResult] = useState<ImportResult | null>(null);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [selectedAppSettingsSections, setSelectedAppSettingsSections] = useState<Set<string>>(new Set());
+  const [importQuickCommands, setImportQuickCommands] = useState(true);
   const [importPluginSettings, setImportPluginSettings] = useState(true);
   const [selectedPluginIds, setSelectedPluginIds] = useState<Set<string>>(new Set());
   const [importForwards, setImportForwards] = useState(true);
@@ -134,6 +135,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
   const hasAnySelectedContent = Boolean(
     selectedNames.size > 0
     || (preview?.hasAppSettings && importAppSettings)
+    || (preview?.hasQuickCommands && importQuickCommands)
     || ((preview?.pluginSettingsCount ?? 0) > 0 && importPluginSettings)
     || ((preview?.totalForwards ?? 0) > 0 && importForwards)
     || ((preview?.portableSecretCount ?? 0) > 0 && importPortableSecrets),
@@ -182,6 +184,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
     setResult(null);
     setSelectedNames(new Set());
     setSelectedAppSettingsSections(new Set());
+    setImportQuickCommands(true);
     setImportPluginSettings(true);
     setSelectedPluginIds(new Set());
     setImportForwards(true);
@@ -369,6 +372,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
     setPreview(null);
     setSelectedNames(new Set());
     setSelectedAppSettingsSections(new Set());
+    setImportQuickCommands(true);
     setImportPluginSettings(true);
     setSelectedPluginIds(new Set());
     setImportForwards(true);
@@ -421,6 +425,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
       setSelectedNames(getSelectableNames(previewResult));
       setSelectedAppSettingsSections(getSelectableAppSettingsSectionIds(previewResult));
       setSelectedPluginIds(getSelectablePluginIds(previewResult));
+      setImportQuickCommands(previewResult.hasQuickCommands);
       setImportPortableSecrets(mode === 'portableMigration');
       setExpandedAppSettingsSections(new Set());
     } catch (err) {
@@ -456,6 +461,7 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
         selectedNames: Array.from(selectedNames),
         conflictStrategy,
         importAppSettings,
+        importQuickCommands,
         selectedAppSettingsSections: Array.from(selectedAppSettingsSections),
         importPluginSettings,
         selectedPluginIds: importPluginSettings
@@ -639,6 +645,19 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
                 )}
                 {preview?.hasAppSettings && !importAppSettings && (
                   <p className="text-sm mt-1">{t('modals.import.skipped_app_settings')}</p>
+                )}
+                {result.importedQuickCommands > 0 && (
+                  <p className="text-sm mt-1">{t('modals.import.imported_quick_commands', { count: result.importedQuickCommands })}</p>
+                )}
+                {result.skippedQuickCommands && (
+                  <p className="text-sm mt-1">{t('modals.import.skipped_quick_commands')}</p>
+                )}
+                {result.quickCommandsErrors.length > 0 && (
+                  <ul className="text-xs mt-1 space-y-1 opacity-90">
+                    {result.quickCommandsErrors.map((item, index) => (
+                      <li key={index}>• {item}</li>
+                    ))}
+                  </ul>
                 )}
                 {result.importedPluginSettings > 0 && (
                   <p className="text-sm mt-1">{t('modals.import.imported_plugin_settings', { count: result.importedPluginSettings })}</p>
@@ -957,6 +976,31 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
                   </div>
                 )}
 
+                {preview.hasQuickCommands && (
+                  <div className="rounded-md border border-theme-border bg-theme-bg-elevated/60 p-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setImportQuickCommands((prev) => !prev)}
+                      className="flex w-full items-start gap-2 text-left"
+                    >
+                      {importQuickCommands
+                        ? <CheckSquare className="mt-0.5 h-4 w-4 flex-shrink-0 text-theme-accent" />
+                        : <Square className="mt-0.5 h-4 w-4 flex-shrink-0 text-theme-text-muted" />}
+                      <div>
+                        <p className="text-sm font-semibold text-theme-text">
+                          {t('modals.import.section_quick_commands', { count: preview.quickCommandsCount })}
+                        </p>
+                        <p className="text-xs text-theme-text-muted">
+                          {t('modals.import.toggle_quick_commands', { categories: preview.quickCommandCategoriesCount })}
+                        </p>
+                        {!importQuickCommands && (
+                          <p className="mt-1 text-xs text-yellow-400">{t('modals.import.skipped_quick_commands')}</p>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                )}
+
                 {preview.pluginSettingsCount > 0 && (
                   hasStructuredPluginPreview ? (
                     <div className="rounded-md border border-theme-border bg-theme-bg-elevated/60 p-3 space-y-3">
@@ -1133,6 +1177,12 @@ export function OxideImportModal({ isOpen, onClose, mode = 'default' }: OxideImp
                     <p><span className="text-theme-text-muted">{t('modals.import.contains')}</span> {t('modals.import.connections_count', { count: metadata.num_connections })}</p>
                     {metadata.has_app_settings && (
                       <p><span className="text-theme-text-muted">{t('modals.import.contains_app_settings')}</span> {t('modals.import.contains_app_settings_partial')}</p>
+                    )}
+                    {metadata.has_quick_commands && (
+                      <p>
+                        <span className="text-theme-text-muted">{t('modals.import.contains_quick_commands')}</span>{' '}
+                        {t('modals.import.quick_commands_count', { count: metadata.quick_commands_count ?? 0 })}
+                      </p>
                     )}
                     {typeof metadata.plugin_settings_count === 'number' && metadata.plugin_settings_count > 0 && (
                       <p><span className="text-theme-text-muted">{t('modals.import.contains_plugin_settings')}</span> {t('modals.import.plugin_settings_count', { count: metadata.plugin_settings_count })}</p>

@@ -174,7 +174,9 @@
       "password_strength_fair": "Razoável",
       "password_strength_strong": "Forte",
       "error_export_failed": "Falha na exportação",
-      "success": "Exportação bem-sucedida: {{count}} conexões salvas em {{path}}"
+      "success": "Exportação bem-sucedida: {{count}} conexões salvas em {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Importar configuração de arquivo .oxide",
@@ -215,13 +217,13 @@
       "cancel": "Cancelar",
       "preview": "Pré-visualização",
       "previewing": "Carregando...",
-        "stage_parsing": "Analisando arquivo...",
-        "stage_decrypting": "Descriptografando...",
-        "stage_analyzing": "Analisando pré-visualização da importação...",
-        "stage_preparing": "Preparando importação...",
-        "stage_applying": "Aplicando alterações...",
-        "stage_saving": "Salvando dados importados...",
-        "stage_done": "Concluído!",
+      "stage_parsing": "Analisando arquivo...",
+      "stage_decrypting": "Descriptografando...",
+      "stage_analyzing": "Analisando pré-visualização da importação...",
+      "stage_preparing": "Preparando importação...",
+      "stage_applying": "Aplicando alterações...",
+      "stage_saving": "Salvando dados importados...",
+      "stage_done": "Concluído!",
       "preview_title": "Pré-visualização da importação",
       "preview_total": "{{count}} conexões serão importadas",
       "preview_unchanged": "✓ {{count}} conexões serão importadas sem alterações:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "As senhas de servidor salvas nunca são incluídas em arquivos .oxide. Conexões com autenticação por senha podem exigir que você digite a senha novamente mais tarde.",
       "error_password": "Senha incorreta, não é possível descriptografar o arquivo",
       "error_tampered": "Falha na verificação do arquivo, os dados podem ter sido adulterados",
-      "error_enter_password": "Por favor, digite a senha de descriptografia"
+      "error_enter_password": "Por favor, digite a senha de descriptografia",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Reconectar à sessão",

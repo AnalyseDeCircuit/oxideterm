@@ -312,6 +312,8 @@
       "command_bar_hint": "在终端底部显示 OxideTerm 命令栏，用于命令建议、AI 询问、广播、录制、播放和分栏操作。",
       "command_bar_legacy_toolbar": "显示旧顶部工具栏",
       "command_bar_legacy_toolbar_hint": "启用底部命令栏时，仍保留旧的标签栏终端操作按钮。",
+      "command_bar_focus_handoff": "TUI 命令后聚焦终端",
+      "command_bar_focus_handoff_hint": "从命令栏运行这些命令后，将焦点交给终端，因为它们通常会接管键盘输入。可用空格、逗号或换行分隔命令。",
       "command_marks": "命令标记",
       "command_marks_hint": "为命令栏、AI 和广播发送的可靠命令添加 iTerm2 风格轻量标记。不会改写终端缓冲区。",
       "command_marks_hover_actions": "悬停操作",

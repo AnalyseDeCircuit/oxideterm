@@ -284,7 +284,17 @@
       "confirm_title": "执行快捷命令？",
       "confirm_description": "执行：{{command}}",
       "confirm_risky_description": "此命令可能具有破坏性或涉及敏感操作。执行：{{command}}",
-      "toast_executed": "快捷命令已发送"
+      "toast_executed": "快捷命令已发送",
+      "add_group": "新增组",
+      "edit_group": "编辑组",
+      "delete_group": "删除组",
+      "save_group": "保存组",
+      "group_name_placeholder": "组名称",
+      "icon_terminal": "终端",
+      "icon_server": "服务器",
+      "icon_folder": "文件夹",
+      "icon_docker": "Docker",
+      "icon_zap": "自定义"
     }
   }
 }

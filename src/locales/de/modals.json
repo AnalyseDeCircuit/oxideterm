@@ -174,7 +174,9 @@
       "password_strength_fair": "Mittel",
       "password_strength_strong": "Stark",
       "error_export_failed": "Export fehlgeschlagen",
-      "success": "Export erfolgreich: {{count}} Verbindungen gespeichert unter {{path}}"
+      "success": "Export erfolgreich: {{count}} Verbindungen gespeichert unter {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Konfiguration aus .oxide-Datei importieren",
@@ -215,13 +217,13 @@
       "cancel": "Abbrechen",
       "preview": "Vorschau",
       "previewing": "Wird geladen...",
-        "stage_parsing": "Datei wird eingelesen...",
-        "stage_decrypting": "Wird entschlüsselt...",
-        "stage_analyzing": "Import-Vorschau wird analysiert...",
-        "stage_preparing": "Import wird vorbereitet...",
-        "stage_applying": "Änderungen werden angewendet...",
-        "stage_saving": "Importierte Daten werden gespeichert...",
-        "stage_done": "Fertig!",
+      "stage_parsing": "Datei wird eingelesen...",
+      "stage_decrypting": "Wird entschlüsselt...",
+      "stage_analyzing": "Import-Vorschau wird analysiert...",
+      "stage_preparing": "Import wird vorbereitet...",
+      "stage_applying": "Änderungen werden angewendet...",
+      "stage_saving": "Importierte Daten werden gespeichert...",
+      "stage_done": "Fertig!",
       "preview_title": "Import-Vorschau",
       "preview_total": "{{count}} Verbindungen werden importiert",
       "preview_unchanged": "✓ {{count}} Verbindungen werden unverändert importiert:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Gespeicherte Server-Passwörter sind niemals in .oxide-Dateien enthalten. Bei passwortbasierten Verbindungen müssen Sie das Passwort später möglicherweise erneut eingeben.",
       "error_password": "Falsches Passwort, Datei kann nicht entschlüsselt werden",
       "error_tampered": "Dateiüberprüfung fehlgeschlagen, Daten könnten manipuliert worden sein",
-      "error_enter_password": "Bitte Entschlüsselungspasswort eingeben"
+      "error_enter_password": "Bitte Entschlüsselungspasswort eingeben",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Sitzung erneut verbinden",

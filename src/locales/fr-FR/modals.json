@@ -174,7 +174,9 @@
       "password_strength_fair": "Moyen",
       "password_strength_strong": "Fort",
       "error_export_failed": "Échec de l'exportation",
-      "success": "Exportation réussie : {{count}} connexion(s) enregistrée(s) dans {{path}}"
+      "success": "Exportation réussie : {{count}} connexion(s) enregistrée(s) dans {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Importer la configuration depuis un fichier .oxide",
@@ -215,13 +217,13 @@
       "cancel": "Annuler",
       "preview": "Aperçu",
       "previewing": "Chargement...",
-        "stage_parsing": "Analyse du fichier...",
-        "stage_decrypting": "Déchiffrement...",
-        "stage_analyzing": "Analyse de l'aperçu d'importation...",
-        "stage_preparing": "Préparation de l'importation...",
-        "stage_applying": "Application des modifications...",
-        "stage_saving": "Enregistrement des données importées...",
-        "stage_done": "Terminé !",
+      "stage_parsing": "Analyse du fichier...",
+      "stage_decrypting": "Déchiffrement...",
+      "stage_analyzing": "Analyse de l'aperçu d'importation...",
+      "stage_preparing": "Préparation de l'importation...",
+      "stage_applying": "Application des modifications...",
+      "stage_saving": "Enregistrement des données importées...",
+      "stage_done": "Terminé !",
       "preview_title": "Aperçu de l'importation",
       "preview_total": "{{count}} connexion(s) seront importée(s)",
       "preview_unchanged": "✓ {{count}} connexion(s) seront importée(s) telles quelles :",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Les mots de passe serveur enregistrés ne sont jamais inclus dans les fichiers .oxide. Les connexions avec authentification par mot de passe peuvent vous demander de ressaisir le mot de passe plus tard.",
       "error_password": "Mot de passe incorrect, impossible de déchiffrer le fichier",
       "error_tampered": "La vérification du fichier a échoué, les données peuvent avoir été altérées",
-      "error_enter_password": "Veuillez entrer le mot de passe de déchiffrement"
+      "error_enter_password": "Veuillez entrer le mot de passe de déchiffrement",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Reconnecter la session",

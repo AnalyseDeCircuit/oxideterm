@@ -312,6 +312,8 @@
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
       "command_bar_legacy_toolbar": "Show Legacy Top Toolbar",
       "command_bar_legacy_toolbar_hint": "Keep the old tab-bar terminal action buttons visible while the bottom command bar is enabled.",
+      "command_bar_focus_handoff": "TUI 명령 후 터미널 포커스",
+      "command_bar_focus_handoff_hint": "명령 막대에서 이 명령을 실행한 뒤에는 보통 키보드 입력을 가져가므로 터미널에 포커스를 둡니다. 공백, 쉼표, 줄바꿈으로 구분하세요.",
       "command_marks": "명령 표시",
       "command_marks_hint": "Command Bar, AI, broadcast에서 보낸 신뢰 가능한 명령에 iTerm2 스타일의 가벼운 표시를 추가합니다. 터미널 버퍼는 변경하지 않습니다.",
       "command_marks_hover_actions": "호버 작업",

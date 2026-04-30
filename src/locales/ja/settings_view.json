@@ -312,6 +312,8 @@
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
       "command_bar_legacy_toolbar": "Show Legacy Top Toolbar",
       "command_bar_legacy_toolbar_hint": "Keep the old tab-bar terminal action buttons visible while the bottom command bar is enabled.",
+      "command_bar_focus_handoff": "TUI コマンド後に端末へフォーカス",
+      "command_bar_focus_handoff_hint": "これらのコマンドをコマンドバーから実行した後、通常キーボード入力を引き継ぐため端末へフォーカスします。コマンドは空白、カンマ、改行で区切れます。",
       "command_marks": "コマンドマーク",
       "command_marks_hint": "Command Bar、AI、broadcast から送られた信頼できるコマンドに iTerm2 風の軽量マークを付けます。端末バッファは変更しません。",
       "command_marks_hover_actions": "ホバー操作",

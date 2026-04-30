@@ -6,6 +6,8 @@ const applyImportedSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const exportOxideAppSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const collectPluginSettingsSnapshotMock = vi.hoisted(() => vi.fn());
 const applyImportedPluginSettingsSnapshotMock = vi.hoisted(() => vi.fn());
+const exportQuickCommandsSnapshotMock = vi.hoisted(() => vi.fn());
+const applyImportedQuickCommandsSnapshotMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
@@ -39,6 +41,11 @@ vi.mock('@/lib/plugin/pluginSettingsManager', () => ({
   },
 }));
 
+vi.mock('@/store/quickCommandsStore', () => ({
+  exportQuickCommandsSnapshot: exportQuickCommandsSnapshotMock,
+  applyImportedQuickCommandsSnapshot: applyImportedQuickCommandsSnapshotMock,
+}));
+
 import { exportOxideWithClientState, importOxideWithClientState } from '@/lib/oxideClientState';
 
 describe('oxideClientState', () => {
@@ -46,6 +53,7 @@ describe('oxideClientState', () => {
     vi.clearAllMocks();
     channelInstances.length = 0;
     exportOxideAppSettingsSnapshotMock.mockReturnValue('{"format":"oxide-settings-sections-v1"}');
+    exportQuickCommandsSnapshotMock.mockReturnValue('{"version":1,"categories":[],"commands":[],"updatedAt":1}');
     collectPluginSettingsSnapshotMock.mockReturnValue([
       { storageKey: 'oxide-plugin-plugin-a-setting-theme', serializedValue: '"night"' },
       { storageKey: 'oxide-plugin-plugin-b-setting-layout', serializedValue: '"compact"' },
@@ -53,6 +61,7 @@ describe('oxideClientState', () => {
     ]);
     applyImportedSettingsSnapshotMock.mockResolvedValue(true);
     applyImportedPluginSettingsSnapshotMock.mockImplementation((entries: Array<{ storageKey: string }>) => entries.length);
+    applyImportedQuickCommandsSnapshotMock.mockReturnValue({ imported: 0, skipped: 0, errors: [] });
   });
 
   it('filters exported plugin settings and forwards by caller selection', async () => {
@@ -66,6 +75,7 @@ describe('oxideClientState', () => {
       includePluginSettings: true,
       selectedPluginIds: ['plugin-b'],
       selectedForwardIds: ['forward-1'],
+      includeQuickCommands: true,
     });
 
     expect(Array.from(result)).toEqual([1, 2, 3]);
@@ -77,6 +87,7 @@ describe('oxideClientState', () => {
       includePortableSecrets: true,
       selectedForwardIds: ['forward-1'],
       appSettingsJson: '{"format":"oxide-settings-sections-v1"}',
+      quickCommandsJson: '{"version":1,"categories":[],"commands":[],"updatedAt":1}',
       pluginSettings: [{
         storageKey: 'oxide-plugin-plugin-b-setting-layout',
         serializedValue: '"compact"',
@@ -123,6 +134,7 @@ describe('oxideClientState', () => {
       importedPortableSecrets: 0,
       skippedPortableSecrets: 0,
       appSettingsJson: '{"theme":"imported"}',
+      quickCommandsJson: '{"version":1,"categories":[],"commands":[],"updatedAt":1}',
       pluginSettings: [{
         storageKey: 'oxide-plugin-plugin-a-setting-theme',
         serializedValue: '"light"',
@@ -131,6 +143,7 @@ describe('oxideClientState', () => {
 
     const result = await importOxideWithClientState(new Uint8Array([9, 8, 7]), '123456', {
       importAppSettings: false,
+      importQuickCommands: false,
       importPluginSettings: false,
       importForwards: false,
     });
@@ -149,7 +162,40 @@ describe('oxideClientState', () => {
     expect(result.skippedAppSettings).toBe(true);
     expect(result.importedPluginSettings).toBe(0);
     expect(result.skippedPluginSettings).toBe(true);
+    expect(result.importedQuickCommands).toBe(0);
+    expect(result.skippedQuickCommands).toBe(true);
     expect(result.skippedForwards).toBe(2);
+  });
+
+  it('applies imported Quick Commands with the selected conflict strategy', async () => {
+    invokeMock.mockResolvedValueOnce({
+      imported: 0,
+      skipped: 0,
+      merged: 0,
+      replaced: 0,
+      renamed: 0,
+      errors: [],
+      renames: [],
+      importedForwards: 0,
+      skippedForwards: 0,
+      importedPortableSecrets: 0,
+      skippedPortableSecrets: 0,
+      appSettingsJson: null,
+      quickCommandsJson: '{"version":1,"categories":[],"commands":[],"updatedAt":1}',
+      pluginSettings: [],
+    });
+    applyImportedQuickCommandsSnapshotMock.mockReturnValueOnce({ imported: 2, skipped: 0, errors: [] });
+
+    const result = await importOxideWithClientState(new Uint8Array([1]), '123456', {
+      conflictStrategy: 'replace',
+    });
+
+    expect(applyImportedQuickCommandsSnapshotMock).toHaveBeenCalledWith(
+      '{"version":1,"categories":[],"commands":[],"updatedAt":1}',
+      'replace',
+    );
+    expect(result.importedQuickCommands).toBe(2);
+    expect(result.skippedQuickCommands).toBe(false);
   });
 
   it('filters imported plugin settings to selected plugin ids only', async () => {
@@ -166,6 +212,7 @@ describe('oxideClientState', () => {
       importedPortableSecrets: 0,
       skippedPortableSecrets: 0,
       appSettingsJson: null,
+      quickCommandsJson: null,
       pluginSettings: [
         {
           storageKey: 'oxide-plugin-plugin-a-setting-theme',

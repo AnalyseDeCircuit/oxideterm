@@ -152,6 +152,13 @@ fn export_forward(forward: &crate::state::PersistedForward) -> EncryptedForward 
     }
 }
 
+fn count_quick_commands(snapshot_json: &str) -> Option<(usize, usize)> {
+    let value: serde_json::Value = serde_json::from_str(snapshot_json).ok()?;
+    let commands = value.get("commands")?.as_array()?.len();
+    let categories = value.get("categories")?.as_array()?.len();
+    Some((commands, categories))
+}
+
 /// Pre-flight check before export - detects issues early
 #[tauri::command]
 pub async fn preflight_export(
@@ -289,6 +296,7 @@ pub async fn export_to_oxide(
     include_portable_secrets: Option<bool>,
     selected_forward_ids: Option<Vec<String>>,
     app_settings_json: Option<String>,
+    quick_commands_json: Option<String>,
     plugin_settings: Option<Vec<EncryptedPluginSetting>>,
     config_state: State<'_, Arc<ConfigState>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
@@ -302,6 +310,7 @@ pub async fn export_to_oxide(
         include_portable_secrets,
         selected_forward_ids,
         app_settings_json,
+        quick_commands_json,
         plugin_settings,
         config_state,
         forwarding_registry,
@@ -320,6 +329,7 @@ pub async fn export_to_oxide_with_progress(
     include_portable_secrets: Option<bool>,
     selected_forward_ids: Option<Vec<String>>,
     app_settings_json: Option<String>,
+    quick_commands_json: Option<String>,
     plugin_settings: Option<Vec<EncryptedPluginSetting>>,
     on_progress: Channel<OxideExportProgressEvent>,
     config_state: State<'_, Arc<ConfigState>>,
@@ -334,6 +344,7 @@ pub async fn export_to_oxide_with_progress(
         include_portable_secrets,
         selected_forward_ids,
         app_settings_json,
+        quick_commands_json,
         plugin_settings,
         config_state,
         forwarding_registry,
@@ -351,6 +362,7 @@ async fn export_to_oxide_inner(
     include_portable_secrets: Option<bool>,
     selected_forward_ids: Option<Vec<String>>,
     app_settings_json: Option<String>,
+    quick_commands_json: Option<String>,
     plugin_settings: Option<Vec<EncryptedPluginSetting>>,
     config_state: State<'_, Arc<ConfigState>>,
     forwarding_registry: State<'_, Arc<ForwardingRegistry>>,
@@ -556,8 +568,13 @@ async fn export_to_oxide_inner(
     report_progress("collecting_portable_secrets", &mut current_step);
 
     // 3. Compute checksum and build payload
+    let quick_command_counts = quick_commands_json
+        .as_deref()
+        .and_then(count_quick_commands);
+
     let mut payload = EncryptedPayload {
         version: if app_settings_json.is_some()
+            || quick_commands_json.is_some()
             || plugin_settings
                 .as_ref()
                 .is_some_and(|entries| !entries.is_empty())
@@ -569,6 +586,7 @@ async fn export_to_oxide_inner(
         },
         connections: connections.clone(),
         app_settings_json,
+        quick_commands_json,
         plugin_settings: plugin_settings.unwrap_or_default(),
         portable_secrets,
         checksum: String::new(),
@@ -585,6 +603,9 @@ async fn export_to_oxide_inner(
         num_connections: connections.len(),
         connection_names: connections.iter().map(|c| c.name.clone()).collect(),
         has_app_settings: payload.app_settings_json.as_ref().map(|_| true),
+        has_quick_commands: payload.quick_commands_json.as_ref().map(|_| true),
+        quick_commands_count: quick_command_counts.map(|counts| counts.0),
+        quick_command_categories_count: quick_command_counts.map(|counts| counts.1),
         plugin_settings_count: (!payload.plugin_settings.is_empty())
             .then_some(payload.plugin_settings.len()),
         portable_secret_count: (!payload.portable_secrets.is_empty())

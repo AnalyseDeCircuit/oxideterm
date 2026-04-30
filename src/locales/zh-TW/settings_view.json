@@ -312,6 +312,8 @@
       "command_bar_hint": "在終端底部顯示 OxideTerm 命令列，用於命令建議、AI 詢問、廣播、錄製、播放和分割操作。",
       "command_bar_legacy_toolbar": "顯示舊頂部工具列",
       "command_bar_legacy_toolbar_hint": "啟用底部命令列時，仍保留舊的標籤列終端操作按鈕。",
+      "command_bar_focus_handoff": "TUI 指令後聚焦終端",
+      "command_bar_focus_handoff_hint": "從命令列執行這些指令後，將焦點交給終端，因為它們通常會接管鍵盤輸入。可用空格、逗號或換行分隔指令。",
       "command_marks": "命令標記",
       "command_marks_hint": "為命令列、AI 和廣播送出的可靠命令加入 iTerm2 風格輕量標記。不會改寫終端緩衝區。",
       "command_marks_hover_actions": "懸停操作",

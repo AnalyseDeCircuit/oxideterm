@@ -174,7 +174,9 @@
       "password_strength_fair": "Aceptable",
       "password_strength_strong": "Fuerte",
       "error_export_failed": "Exportación fallida",
-      "success": "Exportación exitosa: {{count}} conexiones guardadas en {{path}}"
+      "success": "Exportación exitosa: {{count}} conexiones guardadas en {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Importar configuración desde archivo .oxide",
@@ -215,13 +217,13 @@
       "cancel": "Cancelar",
       "preview": "Vista previa",
       "previewing": "Cargando...",
-        "stage_parsing": "Analizando archivo...",
-        "stage_decrypting": "Descifrando...",
-        "stage_analyzing": "Analizando vista previa de importación...",
-        "stage_preparing": "Preparando importación...",
-        "stage_applying": "Aplicando cambios...",
-        "stage_saving": "Guardando datos importados...",
-        "stage_done": "¡Listo!",
+      "stage_parsing": "Analizando archivo...",
+      "stage_decrypting": "Descifrando...",
+      "stage_analyzing": "Analizando vista previa de importación...",
+      "stage_preparing": "Preparando importación...",
+      "stage_applying": "Aplicando cambios...",
+      "stage_saving": "Guardando datos importados...",
+      "stage_done": "¡Listo!",
       "preview_title": "Vista previa de importación",
       "preview_total": "Se importarán {{count}} conexiones",
       "preview_unchanged": "✓ {{count}} conexiones se importarán sin cambios:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Las contraseñas guardadas de los servidores nunca se incluyen en los archivos .oxide. Es posible que las conexiones con autenticación por contraseña requieran volver a introducir la contraseña más adelante.",
       "error_password": "Contraseña incorrecta, no se puede descifrar el archivo",
       "error_tampered": "Error de verificación del archivo, los datos pueden haber sido manipulados",
-      "error_enter_password": "Por favor introduce la contraseña de descifrado"
+      "error_enter_password": "Por favor introduce la contraseña de descifrado",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Reconectar a sesión",

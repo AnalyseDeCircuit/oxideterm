@@ -174,7 +174,9 @@
       "password_strength_fair": "보통",
       "password_strength_strong": "강함",
       "error_export_failed": "내보내기 실패",
-      "success": "내보내기 성공: {{count}}개 연결이 {{path}}에 저장됨"
+      "success": "내보내기 성공: {{count}}개 연결이 {{path}}에 저장됨",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": ".oxide 파일에서 구성 가져오기",
@@ -215,13 +217,13 @@
       "cancel": "취소",
       "preview": "미리보기",
       "previewing": "로딩 중...",
-        "stage_parsing": "파일 분석 중...",
-        "stage_decrypting": "복호화 중...",
-        "stage_analyzing": "가져오기 미리보기 분석 중...",
-        "stage_preparing": "가져오기 준비 중...",
-        "stage_applying": "변경 사항 적용 중...",
-        "stage_saving": "가져온 데이터 저장 중...",
-        "stage_done": "완료!",
+      "stage_parsing": "파일 분석 중...",
+      "stage_decrypting": "복호화 중...",
+      "stage_analyzing": "가져오기 미리보기 분석 중...",
+      "stage_preparing": "가져오기 준비 중...",
+      "stage_applying": "변경 사항 적용 중...",
+      "stage_saving": "가져온 데이터 저장 중...",
+      "stage_done": "완료!",
       "preview_title": "가져오기 미리보기",
       "preview_total": "{{count}}개 연결이 가져와집니다",
       "preview_unchanged": "✓ {{count}}개 연결이 그대로 가져와집니다:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "저장된 서버 비밀번호는 .oxide 파일에 절대 포함되지 않습니다. 비밀번호 인증 연결은 나중에 비밀번호를 다시 입력해야 할 수 있습니다.",
       "error_password": "비밀번호가 잘못되어 파일을 복호화할 수 없습니다",
       "error_tampered": "파일 검증 실패, 데이터가 변조되었을 수 있습니다",
-      "error_enter_password": "복호화 비밀번호를 입력하세요"
+      "error_enter_password": "복호화 비밀번호를 입력하세요",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "세션 재연결",

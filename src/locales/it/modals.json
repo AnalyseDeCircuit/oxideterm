@@ -174,7 +174,9 @@
       "password_strength_fair": "Discreta",
       "password_strength_strong": "Forte",
       "error_export_failed": "Esportazione fallita",
-      "success": "Esportazione riuscita: {{count}} connessioni salvate in {{path}}"
+      "success": "Esportazione riuscita: {{count}} connessioni salvate in {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Importa Configurazione da file .oxide",
@@ -215,13 +217,13 @@
       "cancel": "Annulla",
       "preview": "Anteprima",
       "previewing": "Caricamento...",
-        "stage_parsing": "Analisi del file...",
-        "stage_decrypting": "Decrittografia...",
-        "stage_analyzing": "Analisi dell'anteprima di importazione...",
-        "stage_preparing": "Preparazione importazione...",
-        "stage_applying": "Applicazione modifiche...",
-        "stage_saving": "Salvataggio dati importati...",
-        "stage_done": "Fatto!",
+      "stage_parsing": "Analisi del file...",
+      "stage_decrypting": "Decrittografia...",
+      "stage_analyzing": "Analisi dell'anteprima di importazione...",
+      "stage_preparing": "Preparazione importazione...",
+      "stage_applying": "Applicazione modifiche...",
+      "stage_saving": "Salvataggio dati importati...",
+      "stage_done": "Fatto!",
       "preview_title": "Anteprima Importazione",
       "preview_total": "{{count}} connessioni verranno importate",
       "preview_unchanged": "✓ {{count}} connessioni verranno importate così come sono:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Le password dei server salvate non sono mai incluse nei file .oxide. Le connessioni con autenticazione tramite password potrebbero richiedere di reinserire la password in seguito.",
       "error_password": "Password errata, impossibile decrittare il file",
       "error_tampered": "Verifica file fallita, i dati potrebbero essere stati manomessi",
-      "error_enter_password": "Inserisci la password di decrittazione"
+      "error_enter_password": "Inserisci la password di decrittazione",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Riconnetti Sessione",

@@ -559,6 +559,9 @@ export interface OxideMetadata {
   num_connections: number;
   connection_names: string[];
   has_app_settings?: boolean;
+  has_quick_commands?: boolean;
+  quick_commands_count?: number;
+  quick_command_categories_count?: number;
   plugin_settings_count?: number;
   portable_secret_count?: number;
 }
@@ -576,6 +579,9 @@ export interface ImportResult {
   skippedAppSettings: boolean;
   importedPluginSettings: number;
   skippedPluginSettings: boolean;
+  importedQuickCommands: number;
+  skippedQuickCommands: boolean;
+  quickCommandsErrors: string[];
   importedForwards: number;
   skippedForwards: number;
   importedPortableSecrets: number;
@@ -601,6 +607,12 @@ export interface ImportPreview {
   totalForwards: number;
   /** Whether the payload includes a global settings snapshot */
   hasAppSettings: boolean;
+  /** Whether the payload includes a Quick Commands snapshot */
+  hasQuickCommands: boolean;
+  /** Number of Quick Command entries bundled in the payload */
+  quickCommandsCount: number;
+  /** Number of Quick Command categories bundled in the payload */
+  quickCommandCategoriesCount: number;
   /** Whether the imported app settings payload uses the new sectioned format */
   appSettingsFormat?: 'legacy' | 'sectioned';
   /** Top-level keys present in the imported app settings snapshot */

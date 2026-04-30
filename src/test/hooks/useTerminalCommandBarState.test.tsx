@@ -111,6 +111,28 @@ describe('useTerminalCommandBarState', () => {
     expect(result.current.value).toBe('');
   });
 
+  it('normalizes multi-line commands to terminal enter sequences on submit', () => {
+    const sendInput = vi.fn();
+    const { result } = renderHook(() => useTerminalCommandBarState({
+      paneId: 'pane-1',
+      sessionId: 'session-1',
+      tabId: 'tab-1',
+      terminalType: 'local_terminal',
+      isActive: true,
+      sendInput,
+    }));
+
+    act(() => {
+      result.current.setValue("cat <<'EOF'\nhello\nEOF");
+    });
+
+    act(() => {
+      expect(result.current.submitCommand()).toBe(true);
+    });
+
+    expect(sendInput).toHaveBeenCalledWith("cat <<'EOF'\rhello\rEOF\r");
+  });
+
   it('clamps stale completion replacement ranges when accepting suggestions', () => {
     const { result } = renderHook(() => useTerminalCommandBarState({
       paneId: 'pane-1',

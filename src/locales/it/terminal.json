@@ -284,7 +284,17 @@
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",
-      "toast_executed": "Quick command sent"
+      "toast_executed": "Quick command sent",
+      "add_group": "Add group",
+      "edit_group": "Edit group",
+      "delete_group": "Delete group",
+      "save_group": "Save group",
+      "group_name_placeholder": "Group name",
+      "icon_terminal": "Terminal",
+      "icon_server": "Server",
+      "icon_folder": "Folder",
+      "icon_docker": "Docker",
+      "icon_zap": "Custom"
     }
   }
 }

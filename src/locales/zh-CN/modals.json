@@ -174,7 +174,9 @@
       "password_strength_fair": "中等",
       "password_strength_strong": "强",
       "error_export_failed": "导出失败",
-      "success": "导出成功: {{count}} 个连接已保存到 {{path}}"
+      "success": "导出成功: {{count}} 个连接已保存到 {{path}}",
+      "include_quick_commands": "包含快捷命令（{{count}}）",
+      "include_quick_commands_description": "快捷命令可能包含主机名、路径或命令中的敏感信息。"
     },
     "import": {
       "title": "从 .oxide 文件导入配置",
@@ -215,13 +217,13 @@
       "cancel": "取消",
       "preview": "预览",
       "previewing": "加载中...",
-        "stage_parsing": "正在解析文件...",
-        "stage_decrypting": "正在解密...",
-        "stage_analyzing": "正在分析导入预览...",
-        "stage_preparing": "正在准备导入...",
-        "stage_applying": "正在应用更改...",
-        "stage_saving": "正在保存导入的数据...",
-        "stage_done": "完成!",
+      "stage_parsing": "正在解析文件...",
+      "stage_decrypting": "正在解密...",
+      "stage_analyzing": "正在分析导入预览...",
+      "stage_preparing": "正在准备导入...",
+      "stage_applying": "正在应用更改...",
+      "stage_saving": "正在保存导入的数据...",
+      "stage_done": "完成!",
       "preview_title": "导入预览",
       "preview_total": "将导入 {{count}} 个连接",
       "preview_unchanged": "✓ {{count}} 个连接将原样导入:",
@@ -276,7 +278,13 @@
       "passwords_not_included": ".oxide 文件从不包含已保存的服务器密码。使用密码认证的连接导入后，后续可能需要你重新输入密码。",
       "error_password": "密码错误，无法解密文件",
       "error_tampered": "文件验证失败，数据可能已被篡改",
-      "error_enter_password": "请输入解密密码"
+      "error_enter_password": "请输入解密密码",
+      "contains_quick_commands": "快捷命令:",
+      "quick_commands_count": "{{count}} 条命令",
+      "section_quick_commands": "快捷命令（{{count}} 条命令）",
+      "toggle_quick_commands": "导入 {{categories}} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
+      "imported_quick_commands": "已导入 {{count}} 项快捷命令。",
+      "skipped_quick_commands": "已跳过快捷命令"
     },
     "reconnect": {
       "title": "重新连接会话",

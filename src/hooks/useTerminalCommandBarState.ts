@@ -186,7 +186,7 @@ export function useTerminalCommandBarState(options: UseTerminalCommandBarStateOp
   const submitCommand = useCallback((commandOverride?: string) => {
     const command = (commandOverride ?? value).trim();
     if (!command || !isActive) return false;
-    const payload = `${command}\r`;
+    const payload = `${command.replace(/\r?\n/g, '\r')}\r`;
     beginTerminalCommandMark(paneId, {
       command,
       source: 'command_bar',

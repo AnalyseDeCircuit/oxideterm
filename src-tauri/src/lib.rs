@@ -692,6 +692,8 @@ pub fn run() {
         commands::oxide_import::preview_oxide_import_with_progress,
         commands::oxide_import::import_from_oxide,
         commands::oxide_import::import_from_oxide_with_progress,
+        commands::quick_commands::load_quick_commands,
+        commands::quick_commands::save_quick_commands,
         // Port forwarding commands
         commands::create_port_forward,
         commands::stop_port_forward,
@@ -1074,6 +1076,8 @@ pub fn run() {
         commands::oxide_import::preview_oxide_import_with_progress,
         commands::oxide_import::import_from_oxide,
         commands::oxide_import::import_from_oxide_with_progress,
+        commands::quick_commands::load_quick_commands,
+        commands::quick_commands::save_quick_commands,
         // Port forwarding commands
         commands::create_port_forward,
         commands::stop_port_forward,

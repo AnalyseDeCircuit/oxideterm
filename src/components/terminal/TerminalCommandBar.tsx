@@ -32,12 +32,22 @@ import { getAllEntries } from '@/lib/terminalRegistry';
 import { useTerminalCommandBarState, type TerminalCommandBarTerminalType } from '@/hooks/useTerminalCommandBarState';
 import type { CommandBarCompletion } from '@/lib/terminal/completion';
 import { classifyCommandRisk } from '@/lib/terminal/completion/risk';
+import { shouldHandOffFocusToTerminal } from '@/lib/terminal/focusHandoff';
 import { useConfirm } from '@/hooks/useConfirm';
 import { useToastStore } from '@/hooks/useToast';
 import { useAppStore } from '@/store/appStore';
 import { useBroadcastStore } from '@/store/broadcastStore';
 import { useLocalTerminalStore } from '@/store/localTerminalStore';
-import { useQuickCommandsStore, matchQuickCommandHostPattern, type QuickCommand, type QuickCommandDraft, type QuickCommandIcon } from '@/store/quickCommandsStore';
+import {
+  DEFAULT_QUICK_COMMAND_CATEGORIES,
+  useQuickCommandsStore,
+  matchQuickCommandHostPattern,
+  type QuickCommand,
+  type QuickCommandCategory,
+  type QuickCommandCategoryDraft,
+  type QuickCommandDraft,
+  type QuickCommandIcon,
+} from '@/store/quickCommandsStore';
 import { useRecordingStore } from '@/store/recordingStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { MAX_PANES_PER_TAB, type SplitDirection } from '@/types';
@@ -72,12 +82,28 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [quickCommandsOpen, setQuickCommandsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const quickCommandSettings = useSettingsStore((s) => s.settings.terminal.commandBar);
+  const hydrateQuickCommands = useQuickCommandsStore((s) => s.hydrate);
   const { confirm, ConfirmDialog } = useConfirm();
 
   const placeholder = t('terminal.command_bar.command_placeholder');
+
+  const submitCommand = useCallback((commandOverride?: string) => {
+    const command = commandOverride ?? state.value;
+    const didSubmit = state.submitCommand(commandOverride);
+    if (didSubmit && shouldHandOffFocusToTerminal(command, quickCommandSettings.focusHandoffCommands)) {
+      focusTerminal();
+    }
+    return didSubmit;
+  }, [focusTerminal, quickCommandSettings.focusHandoffCommands, state]);
+
+  useEffect(() => {
+    if (quickCommandSettings.quickCommandsEnabled) {
+      void hydrateQuickCommands();
+    }
+  }, [hydrateQuickCommands, quickCommandSettings.quickCommandsEnabled]);
 
   const runCommand = useCallback(async (command: string) => {
     const risk = classifyCommandRisk(command);
@@ -92,7 +118,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
       });
       if (!confirmed) return;
     }
-    const didSubmit = state.submitCommand(command);
+    const didSubmit = submitCommand(command);
     if (didSubmit && quickCommandSettings.quickCommandsShowToast) {
       useToastStore.getState().addToast({
         title: t('terminal.quick_commands.toast_executed'),
@@ -101,10 +127,12 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
       });
     }
     setQuickCommandsOpen(false);
-    inputRef.current?.focus();
-  }, [confirm, quickCommandSettings.quickCommandsConfirmBeforeRun, quickCommandSettings.quickCommandsShowToast, state, t]);
+    if (!didSubmit || !shouldHandOffFocusToTerminal(command, quickCommandSettings.focusHandoffCommands)) {
+      inputRef.current?.focus();
+    }
+  }, [confirm, quickCommandSettings.focusHandoffCommands, quickCommandSettings.quickCommandsConfirmBeforeRun, quickCommandSettings.quickCommandsShowToast, submitCommand, t]);
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composingRef.current || isComposingKeyEvent(event)) {
       return;
     }
@@ -172,6 +200,13 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
       });
       return;
     }
+    if (event.key === 'Enter' && (event.shiftKey || event.altKey)) {
+      // Command Bar keeps plain Enter as "run", so explicit modified Enter is
+      // the manual newline path for multi-line shell snippets and heredocs.
+      setSuggestionsOpen(false);
+      setHighlightedSuggestion(-1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       setSuggestionsOpen(false);
@@ -186,9 +221,9 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         return;
       }
       setHighlightedSuggestion(-1);
-      state.submitCommand(selectedSuggestion?.insertText);
+      submitCommand(selectedSuggestion?.insertText);
     }
-  }, [focusTerminal, highlightedSuggestion, quickCommandsOpen, state, suggestionsOpen]);
+  }, [focusTerminal, highlightedSuggestion, quickCommandsOpen, state, submitCommand, suggestionsOpen]);
 
   useLayoutEffect(() => {
     if (!rootRef.current || !onLayoutChange) return;
@@ -222,6 +257,25 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
     setHighlightedSuggestion(-1);
     setSuggestionsOpen(false);
   }, [state.suggestions.length, suggestionsOpen]);
+
+  useEffect(() => {
+    if (!quickCommandsOpen && !suggestionsOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const root = rootRef.current;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (root?.contains(target)) return;
+      if (isRadixPortalInteraction(event)) return;
+
+      setQuickCommandsOpen(false);
+      setSuggestionsOpen(false);
+      setHighlightedSuggestion(-1);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [quickCommandsOpen, suggestionsOpen]);
 
   return (
     <div ref={rootRef} className="relative z-20 flex-shrink-0 border-t border-theme-border/70 bg-theme-bg/95 px-3 py-1 shadow-[0_-6px_18px_rgba(0,0,0,0.16)]">
@@ -290,7 +344,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         )}>
           <ChevronRight className="h-4 w-4" />
         </span>
-        <input
+        <textarea
           ref={inputRef}
           value={state.value}
           onChange={(event) => {
@@ -332,11 +386,12 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="min-w-0 max-w-[960px] flex-1 bg-transparent py-0.5 text-sm leading-6 text-theme-text outline-none placeholder:text-theme-text-muted"
+          rows={Math.min(6, Math.max(1, state.value.split(/\r?\n/).length))}
+          className="max-h-36 min-h-6 min-w-0 max-w-[960px] flex-1 resize-none bg-transparent py-0.5 text-sm leading-6 text-theme-text outline-none placeholder:text-theme-text-muted"
           spellCheck={false}
         />
-        {state.focused && state.ghostText && (
-          <span className="pointer-events-none max-w-[24rem] flex-shrink truncate font-mono text-sm leading-6 text-theme-text-muted/35">
+        {state.focused && state.ghostText && !state.value.includes('\n') && (
+          <span className={cn('pointer-events-none max-w-[24rem] flex-shrink truncate text-sm leading-6 text-theme-text-muted/35', terminalFontClass)}>
             {state.ghostText}
           </span>
         )}
@@ -362,7 +417,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         <button
           type="button"
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => state.submitCommand()}
+          onClick={() => submitCommand()}
           className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-theme-accent hover:bg-theme-accent/10"
           title={t('terminal.command_bar.run_command')}
         >
@@ -438,10 +493,14 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
   const commands = useQuickCommandsStore((s) => s.commands);
   const upsertCommand = useQuickCommandsStore((s) => s.upsertCommand);
   const deleteCommand = useQuickCommandsStore((s) => s.deleteCommand);
+  const upsertCategory = useQuickCommandsStore((s) => s.upsertCategory);
+  const deleteCategory = useQuickCommandsStore((s) => s.deleteCategory);
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState(categories[0]?.id ?? 'system');
   const [editingCommand, setEditingCommand] = useState<QuickCommand | null>(null);
+  const [editingCategory, setEditingCategory] = useState<QuickCommandCategory | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
 
   const targetFields = useMemo(() => [targetLabel, cwdHost], [cwdHost, targetLabel]);
   const filteredCommands = useMemo(() => {
@@ -474,37 +533,88 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
     setEditingCommand(null);
   }, [upsertCommand]);
 
+  const handleSaveCategory = useCallback((draft: QuickCommandCategoryDraft) => {
+    const saved = upsertCategory(draft);
+    setActiveCategory(saved.id);
+    setCategoryEditorOpen(false);
+    setEditingCategory(null);
+  }, [upsertCategory]);
+
+  const handleDeleteCategory = useCallback((categoryId: string) => {
+    if (deleteCategory(categoryId) && activeCategory === categoryId) {
+      setActiveCategory(categories.find((category) => category.id !== categoryId)?.id ?? 'custom');
+    }
+  }, [activeCategory, categories, deleteCategory]);
+
   return (
-    <div className="absolute bottom-full right-3 z-30 mb-2 flex max-h-[min(520px,70vh)] w-[min(860px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30">
+    <div className={cn('absolute bottom-full right-3 z-30 mb-2 flex max-h-[min(520px,70vh)] w-[min(860px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30', terminalFontClass)}>
       <div className="w-40 flex-shrink-0 border-r border-theme-border/60 bg-theme-bg/45 p-2">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-medium uppercase tracking-wide text-theme-text-muted">
             {t('terminal.quick_commands.title')}
           </span>
-          <button type="button" onClick={onClose} className="rounded p-1 text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text" title={t('terminal.quick_commands.close')}>
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setEditingCategory(null);
+                setCategoryEditorOpen(true);
+                setEditorOpen(false);
+              }}
+              className="rounded p-1 text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text"
+              title={t('terminal.quick_commands.add_group')}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" onClick={onClose} className="rounded p-1 text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text" title={t('terminal.quick_commands.close')}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         <div className="space-y-1">
           {categories.map((category) => {
             const Icon = quickCommandIcon(category.icon);
             const count = commands.filter((command) => command.category === category.id).length;
+            const isDefaultCategory = DEFAULT_QUICK_COMMAND_CATEGORIES.some((defaultCategory) => defaultCategory.id === category.id);
+            const canDeleteCategory = !isDefaultCategory && count === 0;
             return (
-              <button
+              <div
                 key={category.id}
-                type="button"
-                onClick={() => setActiveCategory(category.id)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                  'group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-xs transition-colors',
                   activeCategory === category.id
                     ? 'bg-theme-accent/12 text-theme-accent'
                     : 'text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text',
                 )}
               >
-                <Icon className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{category.name}</span>
-                <span className="rounded bg-theme-bg-panel px-1.5 py-0.5 text-[10px] text-theme-text-muted">{count}</span>
-              </button>
+                <button type="button" onClick={() => setActiveCategory(category.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                  <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                  <span className="rounded bg-theme-bg-panel px-1.5 py-0.5 text-[10px] text-theme-text-muted">{count}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCategory(category);
+                    setCategoryEditorOpen(true);
+                    setEditorOpen(false);
+                  }}
+                  className="rounded p-0.5 text-theme-text-muted opacity-100 hover:bg-theme-bg-hover hover:text-theme-accent sm:opacity-0 sm:group-hover:opacity-100"
+                  title={t('terminal.quick_commands.edit_group')}
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+                {canDeleteCategory && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCategory(category.id)}
+                    className="rounded p-0.5 text-theme-text-muted opacity-100 hover:bg-theme-bg-hover hover:text-red-300 sm:opacity-0 sm:group-hover:opacity-100"
+                    title={t('terminal.quick_commands.delete_group')}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -525,6 +635,16 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
             {t('terminal.quick_commands.add')}
           </button>
         </div>
+        {categoryEditorOpen && (
+          <QuickCommandCategoryEditor
+            category={editingCategory}
+            onSave={handleSaveCategory}
+            onCancel={() => {
+              setCategoryEditorOpen(false);
+              setEditingCategory(null);
+            }}
+          />
+        )}
         {editorOpen && (
           <QuickCommandEditor
             command={editingCommand}
@@ -593,7 +713,7 @@ const QuickCommandRow: React.FC<QuickCommandRowProps> = ({ command, onInsert, on
             </span>
           )}
         </div>
-        <div className="truncate font-mono text-xs text-theme-accent/85">{command.command}</div>
+        <div className={cn('truncate text-xs text-theme-accent/85', terminalFontClass)}>{command.command}</div>
         {command.description && <div className="truncate text-xs text-theme-text-muted/70">{command.description}</div>}
       </button>
       <div className="flex flex-shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
@@ -619,6 +739,70 @@ type QuickCommandEditorProps = {
   onCancel: () => void;
 };
 
+type QuickCommandCategoryEditorProps = {
+  category: QuickCommandCategory | null;
+  onSave: (draft: QuickCommandCategoryDraft) => void;
+  onCancel: () => void;
+};
+
+const QUICK_COMMAND_ICON_OPTIONS: QuickCommandIcon[] = ['terminal', 'server', 'folder', 'docker', 'zap'];
+
+const QuickCommandCategoryEditor: React.FC<QuickCommandCategoryEditorProps> = ({ category, onSave, onCancel }) => {
+  const { t } = useTranslation();
+  const [name, setName] = useState(category?.name ?? '');
+  const [icon, setIcon] = useState<QuickCommandIcon>(category?.icon ?? 'zap');
+  const canSave = name.trim().length > 0;
+
+  useEffect(() => {
+    setName(category?.name ?? '');
+    setIcon(category?.icon ?? 'zap');
+  }, [category]);
+
+  return (
+    <div className="border-b border-theme-border/60 bg-theme-bg/35 p-2">
+      <div className="grid gap-2 md:grid-cols-[1fr_220px]">
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.group_name_placeholder')} className={quickCommandInputClass} />
+        <Select value={icon} onValueChange={(value) => setIcon(value as QuickCommandIcon)}>
+          <SelectTrigger className="h-8 border-theme-border/50 bg-theme-bg/70 px-2 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {QUICK_COMMAND_ICON_OPTIONS.map((candidate) => {
+              const Icon = quickCommandIcon(candidate);
+              return (
+                <SelectItem key={candidate} value={candidate}>
+                  <span className="inline-flex items-center gap-2">
+                    <Icon className="h-3.5 w-3.5" />
+                    {t(`terminal.quick_commands.icon_${candidate}`)}
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="mt-2 flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text">
+          <X className="h-3.5 w-3.5" />
+          {t('terminal.quick_commands.cancel')}
+        </button>
+        <button
+          type="button"
+          disabled={!canSave}
+          onClick={() => onSave({ id: category?.id, name, icon })}
+          className={cn(
+            'inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs',
+            canSave ? 'bg-theme-accent/15 text-theme-accent hover:bg-theme-accent/25' : 'cursor-not-allowed text-theme-text-muted/40',
+          )}
+        >
+          <Save className="h-3.5 w-3.5" />
+          {t('terminal.quick_commands.save_group')}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, category, categories, onSave, onCancel }) => {
   const { t } = useTranslation();
   const [name, setName] = useState(command?.name ?? '');
@@ -640,7 +824,7 @@ const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, catego
     <div className="border-b border-theme-border/60 bg-theme-bg/35 p-2">
       <div className="grid gap-2 md:grid-cols-[1fr_1.2fr]">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.name_placeholder')} className={quickCommandInputClass} />
-        <input value={commandText} onChange={(event) => setCommandText(event.target.value)} placeholder={t('terminal.quick_commands.command_placeholder')} className={cn(quickCommandInputClass, 'font-mono')} />
+        <input value={commandText} onChange={(event) => setCommandText(event.target.value)} placeholder={t('terminal.quick_commands.command_placeholder')} className={quickCommandInputClass} />
         <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('terminal.quick_commands.description_placeholder')} className={quickCommandInputClass} />
         <div className="grid grid-cols-2 gap-2">
           <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -687,7 +871,8 @@ const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, catego
   );
 };
 
-const quickCommandInputClass = 'h-8 rounded-md border border-theme-border/50 bg-theme-bg/70 px-2 text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60';
+const terminalFontClass = 'font-[family-name:var(--terminal-font-family)]';
+const quickCommandInputClass = 'h-8 rounded-md border border-theme-border/50 bg-theme-bg/70 px-2 text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60 font-[family-name:var(--terminal-font-family)]';
 
 function quickCommandIcon(icon: QuickCommandIcon): React.ComponentType<{ className?: string }> {
   switch (icon) {
@@ -830,9 +1015,20 @@ function actionButtonClass(enabled: boolean): string {
   );
 }
 
-function isComposingKeyEvent(event: React.KeyboardEvent<HTMLInputElement>): boolean {
+function isComposingKeyEvent(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): boolean {
   const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean };
   return nativeEvent.isComposing === true || nativeEvent.keyCode === 229;
+}
+
+function isRadixPortalInteraction(event: PointerEvent): boolean {
+  return event.composedPath().some((element) => (
+    element instanceof HTMLElement
+    && (
+      element.hasAttribute('data-radix-popper-content-wrapper')
+      || element.getAttribute('role') === 'listbox'
+      || element.getAttribute('role') === 'option'
+    )
+  ));
 }
 
 type SuggestionsProps = {
@@ -853,7 +1049,7 @@ const TerminalCommandSuggestions: React.FC<SuggestionsProps> = ({ suggestions, h
   }, [suggestions]);
 
   return (
-    <div className="absolute bottom-full left-3 mb-2 w-[min(720px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30">
+    <div className={cn('absolute bottom-full left-3 mb-2 w-[min(720px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30', terminalFontClass)}>
       {groupedSuggestions.map(([group, entries]) => (
         <div key={group}>
           <div className="border-b border-theme-border/50 bg-theme-bg/60 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-theme-text-muted">
@@ -870,7 +1066,7 @@ const TerminalCommandSuggestions: React.FC<SuggestionsProps> = ({ suggestions, h
                 index === highlightedIndex ? 'bg-theme-bg-hover text-theme-text' : 'text-theme-text-muted hover:bg-theme-bg-hover/60 hover:text-theme-text',
               )}
             >
-              <span className="min-w-0 flex-1 truncate font-mono">{candidate.label}</span>
+              <span className={cn('min-w-0 flex-1 truncate', terminalFontClass)}>{candidate.label}</span>
               {candidate.description && (
                 <span className="hidden min-w-0 flex-1 truncate text-xs text-theme-text-muted/70 sm:inline">
                   {candidate.description}

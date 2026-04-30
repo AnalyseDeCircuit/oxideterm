@@ -174,7 +174,9 @@
       "password_strength_fair": "Trung bình",
       "password_strength_strong": "Mạnh",
       "error_export_failed": "Xuất thất bại",
-      "success": "Xuất thành công: {{count}} kết nối đã lưu vào {{path}}"
+      "success": "Xuất thành công: {{count}} kết nối đã lưu vào {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Nhập cấu hình từ file .oxide",
@@ -215,13 +217,13 @@
       "cancel": "Hủy",
       "preview": "Xem trước",
       "previewing": "Đang tải...",
-        "stage_parsing": "Đang phân tích tệp...",
-        "stage_decrypting": "Đang giải mã...",
-        "stage_analyzing": "Đang phân tích bản xem trước nhập...",
-        "stage_preparing": "Đang chuẩn bị nhập...",
-        "stage_applying": "Đang áp dụng thay đổi...",
-        "stage_saving": "Đang lưu dữ liệu đã nhập...",
-        "stage_done": "Hoàn tất!",
+      "stage_parsing": "Đang phân tích tệp...",
+      "stage_decrypting": "Đang giải mã...",
+      "stage_analyzing": "Đang phân tích bản xem trước nhập...",
+      "stage_preparing": "Đang chuẩn bị nhập...",
+      "stage_applying": "Đang áp dụng thay đổi...",
+      "stage_saving": "Đang lưu dữ liệu đã nhập...",
+      "stage_done": "Hoàn tất!",
       "preview_title": "Xem trước nhập",
       "preview_total": "{{count}} kết nối sẽ được nhập",
       "preview_unchanged": "✓ {{count}} kết nối sẽ được nhập nguyên vẹn:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Mật khẩu máy chủ đã lưu không bao giờ được bao gồm trong file .oxide. Các kết nối dùng xác thực bằng mật khẩu có thể yêu cầu bạn nhập lại mật khẩu sau đó.",
       "error_password": "Mật khẩu không đúng, không thể giải mã file",
       "error_tampered": "Xác minh file thất bại, dữ liệu có thể đã bị thay đổi",
-      "error_enter_password": "Vui lòng nhập mật khẩu giải mã"
+      "error_enter_password": "Vui lòng nhập mật khẩu giải mã",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Kết nối lại phiên",

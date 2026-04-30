@@ -22,6 +22,7 @@ import { getFontFamilyCSS } from '../components/fileManager/fontUtils';
 import i18n from '../i18n';
 import { DEFAULT_PROVIDERS } from '../lib/ai/providers';
 import { platform } from '../lib/platform';
+import { DEFAULT_TERMINAL_FOCUS_HANDOFF_COMMANDS } from '../lib/terminal/focusHandoff';
 import { sanitizeHighlightRules } from '../lib/terminal/highlightPattern';
 import type { HighlightRule } from '../types';
 import type { AiReasoningEffort } from '../lib/ai/providers';
@@ -223,6 +224,7 @@ export interface TerminalCommandBarSettings {
   quickCommandsEnabled: boolean;
   quickCommandsConfirmBeforeRun: boolean;
   quickCommandsShowToast: boolean;
+  focusHandoffCommands: string[];
 }
 
 export interface TerminalCommandMarksSettings {
@@ -526,6 +528,7 @@ const defaultTerminalSettings: TerminalSettings = {
     quickCommandsEnabled: true,
     quickCommandsConfirmBeforeRun: false,
     quickCommandsShowToast: true,
+    focusHandoffCommands: [...DEFAULT_TERMINAL_FOCUS_HANDOFF_COMMANDS],
   },
   commandMarks: {
     enabled: true,

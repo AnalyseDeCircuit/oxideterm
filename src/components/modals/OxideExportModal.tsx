@@ -21,6 +21,7 @@ import {
   getDefaultOxideAppSettingsExportSections,
   type OxideAppSettingsSectionId,
 } from '../../store/settingsStore';
+import { useQuickCommandsStore } from '../../store/quickCommandsStore';
 import type { ExportPreflightResult, PersistedForwardInfo } from '../../types';
 
 type OxideExportModalProps = {
@@ -69,6 +70,8 @@ function getFallbackProgressPercent(stage: ExportStage): number {
 export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExportModalProps) {
   const { t } = useTranslation();
   const { savedConnections, loadSavedConnections } = useAppStore();
+  const quickCommandCount = useQuickCommandsStore((state) => state.commands.length);
+  const hydrateQuickCommands = useQuickCommandsStore((state) => state.hydrate);
   const defaultAppSettingsSections = useMemo(
     () => getDefaultOxideAppSettingsExportSections(),
     [],
@@ -79,6 +82,7 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
   );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [includeAppSettings, setIncludeAppSettings] = useState(true);
+  const [includeQuickCommands, setIncludeQuickCommands] = useState(true);
   const [selectedAppSettingsSections, setSelectedAppSettingsSections] = useState<Set<OxideAppSettingsSectionId>>(
     () => new Set(defaultAppSettingsSections),
   );
@@ -120,6 +124,7 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
   const hasAnyContent = Boolean(
     selectedIds.length > 0
     || hasSelectedAppSettings
+    || includeQuickCommands
     || hasSelectedPluginSettings
     || includePortableSecrets
     || selectedForwardIds.size > 0,
@@ -199,6 +204,7 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
 
     setSelectedIds([]);
     setIncludeAppSettings(true);
+    setIncludeQuickCommands(true);
     setSelectedAppSettingsSections(new Set(
       mode === 'portableMigration'
         ? Array.from(new Set([...defaultAppSettingsSections, 'ai']))
@@ -217,7 +223,8 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
     setExportProgress(null);
 
     void loadExportSources();
-  }, [defaultAppSettingsSections, isOpen, loadExportSources, mode]);
+    void hydrateQuickCommands();
+  }, [defaultAppSettingsSections, hydrateQuickCommands, isOpen, loadExportSources, mode]);
 
   useEffect(() => {
     if (!isOpen || mode !== 'portableMigration') {
@@ -421,6 +428,7 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
         embedKeys: embedKeys || null,
         includePortableSecrets,
         includeAppSettings,
+        includeQuickCommands,
         selectedAppSettingsSections: Array.from(selectedAppSettingsSections),
         includeLocalTerminalEnvVars,
         includePluginSettings: hasSelectedPluginSettings,
@@ -639,6 +647,23 @@ export function OxideExportModal({ isOpen, onClose, mode = 'default' }: OxideExp
                 )}
               </div>
             )}
+
+            <div className="flex items-start space-x-2">
+              <Checkbox
+                id="includeQuickCommands"
+                checked={includeQuickCommands}
+                onCheckedChange={(checked) => setIncludeQuickCommands(checked === true)}
+                className="mt-0.5 border-theme-text-muted data-[state=checked]:bg-theme-accent data-[state=checked]:border-theme-accent"
+              />
+              <div className="flex flex-col">
+                <Label htmlFor="includeQuickCommands" className="cursor-pointer text-theme-text">
+                  {t('modals.export.include_quick_commands', { count: quickCommandCount })}
+                </Label>
+                <p className="text-xs text-theme-text-muted mt-0.5">
+                  {t('modals.export.include_quick_commands_description')}
+                </p>
+              </div>
+            </div>
 
             <div className="flex items-start space-x-2">
               <Checkbox

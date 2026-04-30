@@ -312,6 +312,8 @@
       "command_bar_hint": "Affiche une barre en bas du terminal pour les suggestions OxideTerm, le mode question, la diffusion, l’enregistrement, la lecture cast et les divisions.",
       "command_bar_legacy_toolbar": "Afficher l’ancienne barre supérieure",
       "command_bar_legacy_toolbar_hint": "Garde les anciens boutons d’action dans la barre d’onglets quand la barre de commande est activée.",
+      "command_bar_focus_handoff": "Focaliser le terminal pour les commandes TUI",
+      "command_bar_focus_handoff_hint": "Après ces commandes depuis la barre de commande, le terminal reprend le focus car elles capturent souvent le clavier. Séparez les commandes par espaces, virgules ou retours ligne.",
       "command_marks": "Repères de commandes",
       "command_marks_hint": "Ajoute des repères légers façon iTerm2 aux commandes fiables envoyées par la barre de commande, l’IA et la diffusion. Le buffer du terminal reste intact.",
       "command_marks_hover_actions": "Actions au survol",

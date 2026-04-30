@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { useTranslation } from 'react-i18next';
+import { useEffect, useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { getFontFamily } from '@/lib/fontFamily';
+import { parseFocusHandoffCommandList } from '@/lib/terminal/focusHandoff';
 import { platform } from '@/lib/platform';
 import { TerminalHighlightRulesSection } from '@/components/settings/TerminalHighlightRulesSection';
 import type {
@@ -33,6 +35,7 @@ type TerminalTabProps = {
 
 export const TerminalTab = ({ terminal, buffer, experimental, updateTerminal, updateBuffer, updateExperimental }: TerminalTabProps) => {
     const { t } = useTranslation();
+    const [focusHandoffDraft, setFocusHandoffDraft] = useState(() => terminal.commandBar.focusHandoffCommands.join('\n'));
     const parseIntegerInput = (value: string, fallback: number) => {
         const parsed = parseInt(value, 10);
         return Number.isFinite(parsed) ? parsed : fallback;
@@ -67,6 +70,16 @@ export const TerminalTab = ({ terminal, buffer, experimental, updateTerminal, up
             [key]: value,
         });
     };
+
+    useEffect(() => {
+        const draftCommands = parseFocusHandoffCommandList(focusHandoffDraft);
+        const savedCommands = terminal.commandBar.focusHandoffCommands;
+        const isSameList = draftCommands.length === savedCommands.length
+            && draftCommands.every((command, index) => command === savedCommands[index]);
+        if (!isSameList) {
+            setFocusHandoffDraft(savedCommands.join('\n'));
+        }
+    }, [focusHandoffDraft, terminal.commandBar.focusHandoffCommands]);
 
     const updateCommandMarks = <K extends keyof TerminalSettings['commandMarks']>(
         key: K,
@@ -381,6 +394,24 @@ export const TerminalTab = ({ terminal, buffer, experimental, updateTerminal, up
                         id="terminal-command-bar-legacy-toolbar"
                         checked={terminal.commandBar.showLegacyToolbar}
                         onCheckedChange={(checked) => updateCommandBar('showLegacyToolbar', checked as boolean)}
+                    />
+                </div>
+                <div className="mt-4">
+                    <div className="mb-2">
+                        <Label className="text-theme-text">{t('settings_view.terminal.command_bar_focus_handoff')}</Label>
+                        <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.command_bar_focus_handoff_hint')}</p>
+                    </div>
+                    <textarea
+                        value={focusHandoffDraft}
+                        onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setFocusHandoffDraft(nextValue);
+                            updateCommandBar('focusHandoffCommands', parseFocusHandoffCommandList(nextValue));
+                        }}
+                        rows={4}
+                        spellCheck={false}
+                        className="w-full resize-y rounded-md border border-theme-border bg-theme-bg px-3 py-2 font-mono text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60"
+                        placeholder={'vim\nnvim\nlazygit'}
                     />
                 </div>
                 <div className="flex items-center justify-between mt-4">

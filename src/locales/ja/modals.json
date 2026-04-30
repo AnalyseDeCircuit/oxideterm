@@ -174,7 +174,9 @@
       "password_strength_fair": "普通",
       "password_strength_strong": "強い",
       "error_export_failed": "エクスポートに失敗しました",
-      "success": "エクスポート成功: {{count}}件の接続が{{path}}に保存されました"
+      "success": "エクスポート成功: {{count}}件の接続が{{path}}に保存されました",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": ".oxideファイルから構成をインポート",
@@ -215,13 +217,13 @@
       "cancel": "キャンセル",
       "preview": "プレビュー",
       "previewing": "読み込み中...",
-        "stage_parsing": "ファイルを解析中...",
-        "stage_decrypting": "復号中...",
-        "stage_analyzing": "インポートプレビューを解析中...",
-        "stage_preparing": "インポートを準備中...",
-        "stage_applying": "変更を適用中...",
-        "stage_saving": "インポートしたデータを保存中...",
-        "stage_done": "完了!",
+      "stage_parsing": "ファイルを解析中...",
+      "stage_decrypting": "復号中...",
+      "stage_analyzing": "インポートプレビューを解析中...",
+      "stage_preparing": "インポートを準備中...",
+      "stage_applying": "変更を適用中...",
+      "stage_saving": "インポートしたデータを保存中...",
+      "stage_done": "完了!",
       "preview_title": "インポートプレビュー",
       "preview_total": "{{count}}件の接続がインポートされます",
       "preview_unchanged": "✓ {{count}}件の接続がそのままインポートされます:",
@@ -276,7 +278,13 @@
       "passwords_not_included": "保存済みのサーバーパスワードが .oxide ファイルに含まれることはありません。パスワード認証の接続では、後で再入力が必要になる場合があります。",
       "error_password": "パスワードが正しくありません。ファイルを復号化できません",
       "error_tampered": "ファイルの検証に失敗しました。データが改ざんされている可能性があります",
-      "error_enter_password": "復号化パスワードを入力してください"
+      "error_enter_password": "復号化パスワードを入力してください",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "セッションに再接続",

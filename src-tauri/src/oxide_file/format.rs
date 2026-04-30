@@ -129,6 +129,12 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_app_settings: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_quick_commands: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_commands_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_command_categories_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_settings_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_secret_count: Option<usize>,
@@ -141,6 +147,8 @@ pub struct EncryptedPayload {
     pub connections: Vec<EncryptedConnection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_settings_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_commands_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

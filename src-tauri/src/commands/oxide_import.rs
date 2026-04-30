@@ -66,6 +66,8 @@ pub struct ImportResultEnvelope {
     pub skipped_portable_secrets: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_commands_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
 }
@@ -92,6 +94,12 @@ pub struct ImportPreview {
     pub total_forwards: usize,
     /// Whether the payload includes a global app settings snapshot.
     pub has_app_settings: bool,
+    /// Whether the payload includes a Quick Commands snapshot.
+    pub has_quick_commands: bool,
+    /// Number of Quick Command entries bundled in the payload.
+    pub quick_commands_count: usize,
+    /// Number of Quick Command categories bundled in the payload.
+    pub quick_command_categories_count: usize,
     /// App settings preview format: legacy or sectioned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_format: Option<String>,
@@ -269,6 +277,24 @@ fn format_forward_preview_description(forward: &EncryptedForward) -> String {
         Some("") | None => summary,
         Some(description) => format!("{} ({})", description, summary),
     }
+}
+
+fn count_quick_commands(snapshot_json: Option<&str>) -> (bool, usize, usize) {
+    let Some(snapshot_json) = snapshot_json else {
+        return (false, 0, 0);
+    };
+    let Ok(value) = serde_json::from_str::<Value>(snapshot_json) else {
+        return (true, 0, 0);
+    };
+    let commands = value
+        .get("commands")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let categories = value
+        .get("categories")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    (true, commands, categories)
 }
 
 const OXIDE_APP_SETTINGS_ENVELOPE_FORMAT: &str = "oxide-settings-sections-v1";
@@ -1104,6 +1130,8 @@ async fn preview_oxide_import_inner(
     );
     let (app_settings_format, app_settings_keys, app_settings_preview, app_settings_sections) =
         build_app_settings_preview(payload.app_settings_json.as_deref());
+    let (has_quick_commands, quick_commands_count, quick_command_categories_count) =
+        count_quick_commands(payload.quick_commands_json.as_deref());
 
     for setting in &payload.plugin_settings {
         if let Some(plugin_id) = parse_plugin_id_from_setting_storage_key(&setting.storage_key) {
@@ -1239,6 +1267,9 @@ async fn preview_oxide_import_inner(
         has_embedded_keys,
         total_forwards: payload.connections.iter().map(|c| c.forwards.len()).sum(),
         has_app_settings: payload.app_settings_json.is_some(),
+        has_quick_commands,
+        quick_commands_count,
+        quick_command_categories_count,
         app_settings_format,
         app_settings_keys,
         app_settings_preview,
@@ -1351,6 +1382,7 @@ async fn import_from_oxide_inner(
     let crate::oxide_file::EncryptedPayload {
         connections: payload_connections,
         app_settings_json,
+        quick_commands_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -1963,6 +1995,7 @@ async fn import_from_oxide_inner(
             total_portable_secret_count
         },
         app_settings_json,
+        quick_commands_json,
         plugin_settings,
     })
 }

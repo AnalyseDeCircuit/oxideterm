@@ -174,7 +174,9 @@
       "password_strength_fair": "Fair",
       "password_strength_strong": "Strong",
       "error_export_failed": "Export failed",
-      "success": "Export successful: {{count}} connections saved to {{path}}"
+      "success": "Export successful: {{count}} connections saved to {{path}}",
+      "include_quick_commands": "Include Quick Commands ({{count}})",
+      "include_quick_commands_description": "Quick Commands may contain hostnames, paths, or secrets embedded in commands."
     },
     "import": {
       "title": "Import Configuration from .oxide File",
@@ -276,7 +278,13 @@
       "passwords_not_included": "Saved server passwords are never included in .oxide files. Password-auth connections may require you to re-enter the password later.",
       "error_password": "Incorrect password, unable to decrypt file",
       "error_tampered": "File verification failed, data may have been tampered with",
-      "error_enter_password": "Please enter decryption password"
+      "error_enter_password": "Please enter decryption password",
+      "contains_quick_commands": "Quick Commands:",
+      "quick_commands_count": "{{count}} command(s)",
+      "section_quick_commands": "Quick Commands ({{count}} commands)",
+      "toggle_quick_commands": "Import {{categories}} Quick Command group(s). Existing conflicts follow the selected conflict strategy; Replace only replaces conflicting items.",
+      "imported_quick_commands": "Imported {{count}} Quick Command item(s).",
+      "skipped_quick_commands": "Quick Commands skipped"
     },
     "reconnect": {
       "title": "Reconnect Session",

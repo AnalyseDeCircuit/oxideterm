@@ -206,6 +206,28 @@ describe('settingsStore', () => {
       quickCommandsEnabled: true,
       quickCommandsConfirmBeforeRun: false,
       quickCommandsShowToast: true,
+      focusHandoffCommands: [
+        'btop',
+        'emacs',
+        'fzf',
+        'htop',
+        'lazydocker',
+        'lazygit',
+        'less',
+        'man',
+        'micro',
+        'nano',
+        'nvim',
+        'ranger',
+        'screen',
+        'ssh',
+        'tig',
+        'tmux',
+        'top',
+        'vi',
+        'vim',
+        'yazi',
+      ],
     });
   });
 
