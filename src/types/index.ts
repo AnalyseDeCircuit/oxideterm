@@ -1250,6 +1250,52 @@ export interface TerminalHistorySearchResultsResponse {
   error?: string;
 }
 
+export interface TerminalSearchModelMatch extends HistorySearchMatch {
+  match_index: number;
+}
+
+export interface TerminalSearchModelSnapshot {
+  search_id: string;
+  session_id: string;
+  query: string;
+  options: SearchOptions;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  loading: boolean;
+  done: boolean;
+  error?: string;
+  matches: TerminalSearchModelMatch[];
+  active_match_index?: number;
+  active_match?: TerminalSearchModelMatch;
+  max_matches: number;
+  total_matches: number;
+  total_buffered_matches: number;
+  duration_ms: number;
+  searched_layers: HistorySearchSource[];
+  searched_chunks: number;
+  total_chunks?: number;
+  truncated: boolean;
+  partial_failure: boolean;
+  archive_status: ArchiveHealthSnapshot;
+  hot_match_count: number;
+  cold_match_count: number;
+  excerpt?: ArchivedHistoryExcerpt;
+  excerpt_error?: string;
+}
+
+export interface TerminalSearchModelUpdatedEvent {
+  search_id: string;
+  session_id: string;
+  revision: number;
+}
+
+export interface StartTerminalSearchModelResponse {
+  search_id: string;
+}
+
+export type TerminalSearchStepDirection = 'next' | 'previous';
+
 export interface ArchivedExcerptLine {
   line_number: number;
   text: string;

@@ -23,6 +23,7 @@ export interface DeepSearchState {
   loading: boolean;
   searchId?: string;
   matches: HistorySearchMatch[];
+  activeMatchIndex?: number;
   totalMatches: number;
   durationMs: number;
   searchedChunks?: number;
@@ -45,13 +46,11 @@ interface SearchBarProps {
   // Deep history search (optional - not available for local terminals)
   onDeepSearch?: (query: string, options: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean }) => void;
   onJumpToMatch?: (match: HistorySearchMatch) => void;
+  onDeepFindNext?: () => void;
+  onDeepFindPrevious?: () => void;
   deepSearchState?: DeepSearchState;
   // Whether to show deep search mode tab (default: true if onDeepSearch is provided)
   showDeepSearch?: boolean;
-}
-
-function historyMatchKey(match: HistorySearchMatch): string {
-  return `${match.source}:${match.chunk_id ?? 'hot'}:${match.line_number}:${match.column_start}:${match.column_end}`;
 }
 
 export const SearchBar: React.FC<SearchBarProps> = ({ 
@@ -64,6 +63,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   resultCount,
   onDeepSearch,
   onJumpToMatch,
+  onDeepFindNext,
+  onDeepFindPrevious,
   deepSearchState,
   showDeepSearch,
 }) => {
@@ -80,7 +81,6 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const resultsListRef = useRef<HTMLDivElement>(null);
-  const [activeDeepMatchKey, setActiveDeepMatchKey] = useState<string | null>(null);
   // Track IME composition state (for CJK input methods)
   const isComposingRef = useRef(false);
   // Ignore the next Enter after IME composition end (prevents double-trigger)
@@ -213,16 +213,12 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   // Handle deep search button click
   const handleDeepSearchClick = () => {
     if (query.trim() && onDeepSearch) {
-      setActiveDeepMatchKey(null);
       onDeepSearch(query, { caseSensitive, regex: useRegex, wholeWord });
     }
   };
 
   const deepMatches = deepSearchState?.matches ?? [];
-  const activeDeepMatchIndex = useMemo(() => {
-    if (!activeDeepMatchKey) return -1;
-    return deepMatches.findIndex((match) => historyMatchKey(match) === activeDeepMatchKey);
-  }, [activeDeepMatchKey, deepMatches]);
+  const activeDeepMatchIndex = deepSearchState?.activeMatchIndex ?? -1;
   const searchMapBins = useMemo(() => buildHistorySearchMapBins({
     matches: deepMatches,
     activeMatchIndex: activeDeepMatchIndex,
@@ -232,7 +228,6 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   }), [activeDeepMatchIndex, deepMatches, deepSearchState?.partialFailure, deepSearchState?.truncated]);
 
   const jumpToDeepMatch = useCallback((match: HistorySearchMatch) => {
-    setActiveDeepMatchKey(historyMatchKey(match));
     onJumpToMatch?.(match);
   }, [onJumpToMatch]);
   
@@ -333,7 +328,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           </div>
         )}
 
-        {/* Navigation Buttons - only show in active mode */}
+        {/* Navigation Buttons */}
         {searchMode === 'active' && (
           <>
             <Tooltip>
@@ -358,6 +353,38 @@ export const SearchBar: React.FC<SearchBarProps> = ({
                   className="h-7 w-7 p-0"
                   onClick={onFindNext}
                   disabled={resultCount === 0}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.search.next_match')}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+        {searchMode === 'deep' && canDeepSearch && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onDeepFindPrevious}
+                  disabled={!deepSearchState || deepSearchState.matches.length === 0}
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.search.previous_match')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onDeepFindNext}
+                  disabled={!deepSearchState || deepSearchState.matches.length === 0}
                 >
                   <ChevronDown className="h-4 w-4" />
                 </Button>
@@ -507,7 +534,9 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           {deepSearchState.matches.map((match, idx) => (
             <button
               key={`${match.source}-${match.chunk_id || 'hot'}-${match.line_number}-${match.column_start}-${idx}`}
-              className="w-full text-left px-3 py-2 hover:bg-theme-bg-hover border-b border-theme-border transition-colors"
+              className={`w-full text-left px-3 py-2 hover:bg-theme-bg-hover border-b border-theme-border transition-colors ${
+                idx === activeDeepMatchIndex ? 'bg-theme-bg-hover' : ''
+              }`}
               onClick={() => jumpToDeepMatch(match)}
             >
               <div className="flex items-center justify-between text-xs text-theme-text-muted mb-1">

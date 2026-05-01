@@ -11,6 +11,11 @@ const apiMocks = vi.hoisted(() => ({
   startTerminalHistorySearch: vi.fn(),
   getTerminalHistorySearchResults: vi.fn(),
   cancelTerminalHistorySearch: vi.fn(),
+  startTerminalSearchModel: vi.fn(),
+  getTerminalSearchModelSnapshot: vi.fn(),
+  selectTerminalSearchMatch: vi.fn(),
+  stepTerminalSearchMatch: vi.fn(),
+  closeTerminalSearchModel: vi.fn(),
   getArchivedHistoryExcerpt: vi.fn(),
   getCommandFacts: vi.fn(),
 }));
@@ -140,6 +145,45 @@ describe('ScrollbackViewer', () => {
       done: true,
     });
     apiMocks.cancelTerminalHistorySearch.mockResolvedValue(undefined);
+    apiMocks.startTerminalSearchModel.mockResolvedValue({ search_id: 'search-1' });
+    apiMocks.getTerminalSearchModelSnapshot.mockResolvedValue({
+      search_id: 'search-1',
+      session_id: 'session-1',
+      query: '',
+      options: { query: '', case_sensitive: false, regex: false, whole_word: false, max_matches: 1000 },
+      revision: 1,
+      created_at: 1,
+      updated_at: 1,
+      loading: false,
+      done: true,
+      matches: [],
+      max_matches: 1000,
+      total_matches: 0,
+      total_buffered_matches: 0,
+      duration_ms: 0,
+      searched_layers: [],
+      searched_chunks: 0,
+      truncated: false,
+      partial_failure: false,
+      archive_status: {
+        available: false,
+        degraded: false,
+        closing: false,
+        queued_commands: 0,
+        max_queue_depth: 0,
+        dropped_appends: 0,
+        dropped_lines: 0,
+        sealed_chunks: 0,
+      },
+      hot_match_count: 0,
+      cold_match_count: 0,
+    });
+    apiMocks.selectTerminalSearchMatch.mockImplementation(async (_searchId: string, matchIndex: number) => {
+      const snapshot = await apiMocks.getTerminalSearchModelSnapshot();
+      return { ...snapshot, active_match_index: matchIndex, active_match: snapshot.matches[matchIndex] };
+    });
+    apiMocks.stepTerminalSearchMatch.mockImplementation(async () => apiMocks.getTerminalSearchModelSnapshot());
+    apiMocks.closeTerminalSearchModel.mockResolvedValue(undefined);
     apiMocks.getArchivedHistoryExcerpt.mockResolvedValue({
       chunk_id: 'chunk-1',
       start_line_number: 40,
@@ -241,12 +285,18 @@ describe('ScrollbackViewer', () => {
   });
 
   it('shows archive matches as excerpts instead of scrolling the live list', async () => {
-    apiMocks.getTerminalHistorySearchResults.mockResolvedValueOnce({
+    apiMocks.getTerminalSearchModelSnapshot.mockResolvedValueOnce({
       search_id: 'search-1',
       session_id: 'session-1',
-      cursor: 0,
-      next_cursor: 1,
+      query: 'archived',
+      options: { query: 'archived', case_sensitive: false, regex: false, whole_word: false, max_matches: 1000 },
+      revision: 1,
+      created_at: 1,
+      updated_at: 1,
+      loading: false,
+      done: true,
       matches: [{
+        match_index: 0,
         source: 'cold',
         line_number: 41,
         column_start: 0,
@@ -255,8 +305,20 @@ describe('ScrollbackViewer', () => {
         line_content: 'archived hit',
         chunk_id: 'chunk-1',
       }],
-      total_buffered_matches: 1,
+      active_match_index: 0,
+      active_match: {
+        match_index: 0,
+        source: 'cold',
+        line_number: 41,
+        column_start: 0,
+        column_end: 8,
+        matched_text: 'archived',
+        line_content: 'archived hit',
+        chunk_id: 'chunk-1',
+      },
+      max_matches: 1000,
       total_matches: 1,
+      total_buffered_matches: 1,
       duration_ms: 1,
       searched_layers: ['cold'],
       searched_chunks: 1,
@@ -272,7 +334,14 @@ describe('ScrollbackViewer', () => {
         dropped_lines: 0,
         sealed_chunks: 1,
       },
-      done: true,
+      hot_match_count: 0,
+      cold_match_count: 1,
+      excerpt: {
+        chunk_id: 'chunk-1',
+        start_line_number: 40,
+        end_line_number: 42,
+        lines: [{ line_number: 41, text: 'archived hit', is_match: true }],
+      },
     });
 
     render(
@@ -290,8 +359,9 @@ describe('ScrollbackViewer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => {
-      expect(apiMocks.getArchivedHistoryExcerpt).toHaveBeenCalledWith('session-1', 'chunk-1', 41, 6);
+      expect(apiMocks.getTerminalSearchModelSnapshot).toHaveBeenCalledWith('search-1');
     });
+    expect(apiMocks.getArchivedHistoryExcerpt).not.toHaveBeenCalled();
     expect(await screen.findByText('Archive excerpt')).toBeInTheDocument();
     expect((await screen.findAllByText('archived hit')).length).toBeGreaterThan(0);
   });

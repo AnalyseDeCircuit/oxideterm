@@ -51,6 +51,9 @@ import {
   ConnectPresetChainRequest,
   StartTerminalHistorySearchResponse,
   TerminalHistorySearchResultsResponse,
+  StartTerminalSearchModelResponse,
+  TerminalSearchModelSnapshot,
+  TerminalSearchStepDirection,
   ArchivedHistoryExcerpt,
   HistorySearchMatch,
   SessionStats,
@@ -1636,6 +1639,75 @@ export const api = {
   cancelTerminalHistorySearch: async (searchId: string): Promise<void> => {
     if (USE_MOCK) return;
     return invoke('cancel_terminal_history_search', { searchId });
+  },
+
+  startTerminalSearchModel: async (
+    sessionId: string,
+    options: SearchOptions,
+  ): Promise<StartTerminalSearchModelResponse> => {
+    if (USE_MOCK) return { search_id: 'mock-search-model-id' };
+    return invoke('start_terminal_search_model', { sessionId, options });
+  },
+
+  getTerminalSearchModelSnapshot: async (
+    searchId: string,
+  ): Promise<TerminalSearchModelSnapshot> => {
+    if (USE_MOCK) {
+      return {
+        search_id: searchId,
+        session_id: 'mock-session',
+        query: '',
+        options: { query: '', case_sensitive: false, regex: false, whole_word: false, max_matches: 100 },
+        revision: 0,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        loading: false,
+        done: true,
+        matches: [],
+        max_matches: 100,
+        total_matches: 0,
+        total_buffered_matches: 0,
+        duration_ms: 0,
+        searched_layers: [],
+        searched_chunks: 0,
+        truncated: false,
+        partial_failure: false,
+        archive_status: {
+          available: false,
+          degraded: false,
+          closing: false,
+          queued_commands: 0,
+          max_queue_depth: 0,
+          dropped_appends: 0,
+          dropped_lines: 0,
+          sealed_chunks: 0,
+        },
+        hot_match_count: 0,
+        cold_match_count: 0,
+      };
+    }
+    return invoke('get_terminal_search_model_snapshot', { searchId });
+  },
+
+  selectTerminalSearchMatch: async (
+    searchId: string,
+    matchIndex: number,
+  ): Promise<TerminalSearchModelSnapshot> => {
+    if (USE_MOCK) return api.getTerminalSearchModelSnapshot(searchId);
+    return invoke('select_terminal_search_match', { searchId, matchIndex });
+  },
+
+  stepTerminalSearchMatch: async (
+    searchId: string,
+    direction: TerminalSearchStepDirection,
+  ): Promise<TerminalSearchModelSnapshot> => {
+    if (USE_MOCK) return api.getTerminalSearchModelSnapshot(searchId);
+    return invoke('step_terminal_search_match', { searchId, direction });
+  },
+
+  closeTerminalSearchModel: async (searchId: string): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('close_terminal_search_model', { searchId });
   },
 
   getArchivedHistoryExcerpt: async (

@@ -102,7 +102,13 @@ import {
 import { installShiftSelectionGuard, type SelectionGestureController } from '../../lib/terminalSelectionGesture';
 import { useBroadcastStore } from '../../store/broadcastStore';
 import { broadcastToTargets } from '../../lib/terminalRegistry';
-import { HistorySearchMatch, TerminalHistorySearchProgress, type HighlightRule, type UnifiedFlatNode } from '../../types';
+import {
+  HistorySearchMatch,
+  TerminalSearchModelSnapshot,
+  TerminalSearchModelUpdatedEvent,
+  type HighlightRule,
+  type UnifiedFlatNode,
+} from '../../types';
 import { notifyTrzszTransferEvent } from '../../lib/terminal/trzsz/notifications';
 import { TrzszController } from '../../lib/terminal/trzsz/controller';
 import { createRemoteTerminalTransport, type RemoteTerminalTransport } from '../../lib/terminal/trzsz/transport';
@@ -124,7 +130,25 @@ function normalizeWebSocketUrl(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
-function historyMatchKey(match: HistorySearchMatch): string {
+function deepSearchStateFromSnapshot(snapshot: TerminalSearchModelSnapshot): DeepSearchState {
+  return {
+    loading: snapshot.loading,
+    searchId: snapshot.search_id,
+    matches: snapshot.matches,
+    activeMatchIndex: snapshot.active_match_index,
+    totalMatches: snapshot.total_matches,
+    durationMs: snapshot.duration_ms,
+    searchedChunks: snapshot.searched_chunks,
+    totalChunks: snapshot.total_chunks,
+    truncated: snapshot.truncated,
+    partialFailure: snapshot.partial_failure,
+    error: snapshot.error ?? snapshot.excerpt_error,
+    archiveStatus: snapshot.archive_status,
+    excerpt: snapshot.excerpt,
+  };
+}
+
+function historySearchMatchKey(match: HistorySearchMatch): string {
   return [
     match.source,
     match.chunk_id ?? 'hot',
@@ -132,26 +156,6 @@ function historyMatchKey(match: HistorySearchMatch): string {
     match.column_start,
     match.column_end,
   ].join(':');
-}
-
-function mergeHistorySearchMatches(
-  current: HistorySearchMatch[],
-  incoming: HistorySearchMatch[],
-): HistorySearchMatch[] {
-  if (incoming.length === 0) {
-    return current;
-  }
-
-  const seen = new Set(current.map(historyMatchKey));
-  const merged = [...current];
-  for (const match of incoming) {
-    const key = historyMatchKey(match);
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(match);
-    }
-  }
-  return merged;
 }
 
 interface TerminalViewProps {
@@ -252,6 +256,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const currentSearchQueryRef = useRef<string>('');
   const currentSearchOptionsRef = useRef<ISearchOptions | undefined>(undefined);
   const activeHistorySearchIdRef = useRef<string | null>(null);
+  const activeHistorySearchRevisionRef = useRef<number>(-1);
   
   // Deep history search state
   const [deepSearchState, setDeepSearchState] = useState<DeepSearchState>({
@@ -260,38 +265,46 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     totalMatches: 0,
     durationMs: 0,
   });
+  const [scrollbackSearchId, setScrollbackSearchId] = useState<string | null>(null);
+
+  const applySearchModelSnapshot = useCallback((snapshot: TerminalSearchModelSnapshot) => {
+    if (snapshot.session_id !== sessionId) return;
+    if (snapshot.search_id !== activeHistorySearchIdRef.current) return;
+    if (snapshot.revision < activeHistorySearchRevisionRef.current) return;
+    activeHistorySearchRevisionRef.current = snapshot.revision;
+    setDeepSearchState(deepSearchStateFromSnapshot(snapshot));
+  }, [sessionId]);
+
+  const refreshSearchModelSnapshot = useCallback(async (searchId: string, minRevision = -1) => {
+    try {
+      const snapshot = await api.getTerminalSearchModelSnapshot(searchId);
+      if (snapshot.revision < minRevision) return;
+      applySearchModelSnapshot(snapshot);
+    } catch (caught) {
+      if (activeHistorySearchIdRef.current !== searchId) return;
+      setDeepSearchState((prev) => ({
+        ...prev,
+        loading: false,
+        error: caught instanceof Error ? caught.message : String(caught),
+      }));
+    }
+  }, [applySearchModelSnapshot]);
 
   useEffect(() => {
     let mounted = true;
     let unlistenFn: (() => void) | null = null;
 
-    listen<TerminalHistorySearchProgress>('terminal-history-search-progress', (event) => {
+    listen<TerminalSearchModelUpdatedEvent>('terminal-search-model-updated', (event) => {
       if (!mounted || !isMountedRef.current) return;
 
-      const progress = event.payload;
-      if (progress.session_id !== sessionId) return;
-      if (!activeHistorySearchIdRef.current || progress.search_id !== activeHistorySearchIdRef.current) {
+      const update = event.payload;
+      if (update.session_id !== sessionId) return;
+      if (!activeHistorySearchIdRef.current || update.search_id !== activeHistorySearchIdRef.current) {
         return;
       }
+      if (update.revision <= activeHistorySearchRevisionRef.current) return;
 
-      setDeepSearchState((prev) => ({
-        ...prev,
-        searchId: progress.search_id,
-        loading: !progress.done,
-        matches: mergeHistorySearchMatches(prev.matches, progress.matches),
-        totalMatches: progress.total_matches,
-        durationMs: progress.duration_ms,
-        searchedChunks: progress.searched_chunks,
-        totalChunks: progress.total_chunks,
-        truncated: progress.truncated,
-        partialFailure: progress.partial_failure,
-        archiveStatus: progress.archive_status,
-        error: progress.error,
-      }));
-
-      if (progress.done) {
-        activeHistorySearchIdRef.current = null;
-      }
+      void refreshSearchModelSnapshot(update.search_id, update.revision);
     }).then((fn) => {
       if (mounted) {
         unlistenFn = fn;
@@ -306,10 +319,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       const activeSearchId = activeHistorySearchIdRef.current;
       if (activeSearchId) {
         activeHistorySearchIdRef.current = null;
-        void api.cancelTerminalHistorySearch(activeSearchId);
+        activeHistorySearchRevisionRef.current = -1;
+        void api.closeTerminalSearchModel(activeSearchId);
       }
     };
-  }, [sessionId]);
+  }, [refreshSearchModelSnapshot, sessionId]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -2776,7 +2790,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const activeSearchId = activeHistorySearchIdRef.current;
     if (activeSearchId) {
       activeHistorySearchIdRef.current = null;
-      void api.cancelTerminalHistorySearch(activeSearchId);
+      activeHistorySearchRevisionRef.current = -1;
+      void api.closeTerminalSearchModel(activeSearchId);
     }
     setSearchOpen(false);
     searchAddonRef.current?.clearDecorations();
@@ -2784,6 +2799,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     searchAddonRef.current = null;
     setSearchResults({ resultIndex: -1, resultCount: 0 });
     setDeepSearchState({ loading: false, matches: [], totalMatches: 0, durationMs: 0 });
+    setScrollbackSearchId(null);
     currentSearchQueryRef.current = '';
     requestAnimationFrame(() => {
       focusTerminal('strong');
@@ -2797,7 +2813,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const previousSearchId = activeHistorySearchIdRef.current;
     if (previousSearchId) {
       activeHistorySearchIdRef.current = null;
-      void api.cancelTerminalHistorySearch(previousSearchId);
+      activeHistorySearchRevisionRef.current = -1;
+      void api.closeTerminalSearchModel(previousSearchId);
     }
     
     setDeepSearchState({
@@ -2815,7 +2832,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     });
     
     try {
-      const result = await api.startTerminalHistorySearch(sessionId, {
+      const result = await api.startTerminalSearchModel(sessionId, {
         query,
         case_sensitive: options.caseSensitive || false,
         regex: options.regex || false,
@@ -2824,7 +2841,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       });
 
       activeHistorySearchIdRef.current = result.search_id;
-      setDeepSearchState((prev) => ({ ...prev, searchId: result.search_id }));
+      activeHistorySearchRevisionRef.current = -1;
+      setScrollbackSearchId(result.search_id);
+      await refreshSearchModelSnapshot(result.search_id);
     } catch (err) {
       setDeepSearchState({
         loading: false,
@@ -2838,14 +2857,49 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         error: err instanceof Error ? err.message : 'Search failed',
       });
     }
-  }, [sessionId]);
+  }, [refreshSearchModelSnapshot, sessionId]);
   
   // === Jump to search match from deep history ===
-  const handleJumpToMatch = useCallback((match: HistorySearchMatch) => {
-    setDeepSearchState((prev) => ({ ...prev, excerpt: undefined }));
-    setScrollbackInitialMatch(match);
+  const handleJumpToMatch = useCallback(async (match: HistorySearchMatch) => {
+    const activeSearchId = activeHistorySearchIdRef.current;
+    let selectedMatch = match;
+    const explicitIndex = (match as HistorySearchMatch & { match_index?: number }).match_index;
+    const matchIndex = typeof explicitIndex === 'number'
+      ? explicitIndex
+      : deepSearchState.matches.findIndex((candidate) => historySearchMatchKey(candidate) === historySearchMatchKey(match));
+    if (activeSearchId && matchIndex >= 0) {
+      try {
+        const snapshot = await api.selectTerminalSearchMatch(activeSearchId, matchIndex);
+        applySearchModelSnapshot(snapshot);
+        selectedMatch = snapshot.active_match ?? match;
+      } catch {
+        // Falling back to the clicked match keeps the UI usable if the model expired.
+      }
+    }
+    setScrollbackSearchId(activeSearchId);
+    setScrollbackInitialMatch(selectedMatch);
     setScrollbackOpen(true);
-  }, []);
+  }, [applySearchModelSnapshot, deepSearchState.matches]);
+
+  const handleDeepStep = useCallback(async (direction: 'next' | 'previous') => {
+    const activeSearchId = activeHistorySearchIdRef.current;
+    if (!activeSearchId) return;
+    try {
+      const snapshot = await api.stepTerminalSearchMatch(activeSearchId, direction);
+      applySearchModelSnapshot(snapshot);
+      if (snapshot.active_match) {
+        setScrollbackSearchId(activeSearchId);
+        setScrollbackInitialMatch(snapshot.active_match);
+        setScrollbackOpen(true);
+      }
+    } catch (caught) {
+      setDeepSearchState((prev) => ({
+        ...prev,
+        loading: false,
+        error: caught instanceof Error ? caught.message : String(caught),
+      }));
+    }
+  }, [applySearchModelSnapshot]);
   
   // === AI Panel Helper Functions ===
   
@@ -3148,6 +3202,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
            onClick={(event) => {
              event.stopPropagation();
              setScrollbackInitialMatch(null);
+             setScrollbackSearchId(null);
              setScrollbackOpen(true);
            }}
            className="absolute right-2 top-2 z-20 rounded border border-theme-border/70 bg-theme-bg-panel/85 p-1.5 text-theme-text-muted opacity-0 shadow-lg transition-all hover:text-theme-accent focus:opacity-100 group-hover:opacity-100"
@@ -3162,6 +3217,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          sessionId={sessionId}
          nodeId={nodeId ?? effectivePaneId}
          isOpen={scrollbackOpen}
+         searchId={scrollbackSearchId}
          initialMatch={scrollbackInitialMatch}
          onClose={() => setScrollbackOpen(false)}
        />
@@ -3229,6 +3285,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
          resultCount={searchResults.resultCount}
          onDeepSearch={handleDeepSearch}
          onJumpToMatch={handleJumpToMatch}
+         onDeepFindNext={() => void handleDeepStep('next')}
+         onDeepFindPrevious={() => void handleDeepStep('previous')}
          deepSearchState={deepSearchState}
        />
        

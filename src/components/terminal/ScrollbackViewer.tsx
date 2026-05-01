@@ -33,6 +33,7 @@ import type {
   CommandFact,
   HistorySearchMatch,
   SearchOptions,
+  TerminalSearchModelSnapshot,
   TerminalLine,
 } from '../../types';
 
@@ -49,6 +50,7 @@ interface ScrollbackViewerProps {
   sessionId: string;
   nodeId: string;
   isOpen: boolean;
+  searchId?: string | null;
   initialMatch?: HistorySearchMatch | null;
   onClose: () => void;
 }
@@ -131,19 +133,6 @@ function historyMatchKey(match: HistorySearchMatch): string {
     match.column_start,
     match.column_end,
   ].join(':');
-}
-
-function mergeMatches(current: HistorySearchMatch[], incoming: HistorySearchMatch[]): HistorySearchMatch[] {
-  const seen = new Set(current.map(historyMatchKey));
-  const merged = [...current];
-  for (const match of incoming) {
-    const key = historyMatchKey(match);
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(match);
-    }
-  }
-  return merged;
 }
 
 function isHotMatchInWindow(match: HistorySearchMatch, stats: BufferStats | null): boolean {
@@ -260,6 +249,7 @@ export const ScrollbackViewer: React.FC<ScrollbackViewerProps> = ({
   sessionId,
   nodeId,
   isOpen,
+  searchId = null,
   initialMatch = null,
   onClose,
 }) => {
@@ -493,9 +483,30 @@ export const ScrollbackViewer: React.FC<ScrollbackViewerProps> = ({
     const activeSearchId = searchIdRef.current;
     if (activeSearchId) {
       searchIdRef.current = null;
-      void api.cancelTerminalHistorySearch(activeSearchId);
+      void api.closeTerminalSearchModel(activeSearchId);
     }
   }, []);
+
+  const applySearchModelSnapshot = useCallback((snapshot: TerminalSearchModelSnapshot) => {
+    if (snapshot.session_id !== sessionId) return;
+
+    matchesRef.current = snapshot.matches;
+    setMatches(snapshot.matches);
+    setActiveMatchIndex(snapshot.active_match_index ?? (snapshot.matches.length > 0 ? 0 : -1));
+    setSearchQuery(snapshot.query);
+    setSearchError(snapshot.error ?? snapshot.excerpt_error ?? null);
+    setSearchLoading(snapshot.loading);
+    setExcerpt(snapshot.excerpt ?? null);
+
+    const activeMatch = snapshot.active_match
+      ?? (typeof snapshot.active_match_index === 'number' ? snapshot.matches[snapshot.active_match_index] : null);
+    if (!activeMatch || activeMatch.source !== 'hot') return;
+    const currentStats = statsRef.current;
+    if (!currentStats || !isHotMatchInWindow(activeMatch, currentStats)) return;
+    const rowIndex = activeMatch.line_number - getBaseGlobalLine(currentStats);
+    void loadPageForGlobalLine(activeMatch.line_number);
+    requestAnimationFrame(() => rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: 'center' }));
+  }, [loadPageForGlobalLine, sessionId]);
 
   const loadExcerptForMatch = useCallback(async (match: HistorySearchMatch) => {
     if (match.source !== 'cold' || !match.chunk_id) {
@@ -571,6 +582,25 @@ export const ScrollbackViewer: React.FC<ScrollbackViewerProps> = ({
     requestAnimationFrame(() => rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: 'center' }));
   }, [cancelActiveSearch, initialMatch, isOpen, loadExcerptForMatch, loadPageForGlobalLine, stats]);
 
+  useEffect(() => {
+    if (!isOpen || !searchId) return;
+    let cancelled = false;
+
+    api.getTerminalSearchModelSnapshot(searchId)
+      .then((snapshot) => {
+        if (cancelled) return;
+        applySearchModelSnapshot(snapshot);
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setSearchError(caught instanceof Error ? caught.message : String(caught));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applySearchModelSnapshot, isOpen, searchId]);
+
   const runSearch = useCallback(async () => {
     const query = searchQuery.trim();
     cancelActiveSearch();
@@ -587,27 +617,28 @@ export const ScrollbackViewer: React.FC<ScrollbackViewerProps> = ({
 
     setSearchLoading(true);
     try {
-      const { search_id } = await api.startTerminalHistorySearch(sessionId, options);
+      const { search_id } = await api.startTerminalSearchModel(sessionId, options);
       searchIdRef.current = search_id;
-      let cursor = 0;
-      let collectedMatches: HistorySearchMatch[] = [];
+      let latestSnapshot: TerminalSearchModelSnapshot | null = null;
 
       while (searchIdRef.current === search_id) {
-        const page = await api.getTerminalHistorySearchResults(search_id, cursor);
+        const snapshot = await api.getTerminalSearchModelSnapshot(search_id);
         if (searchIdRef.current !== search_id) return;
-
-        if (page.matches.length > 0) {
-          collectedMatches = mergeMatches(collectedMatches, page.matches);
-          matchesRef.current = collectedMatches;
-          setMatches(collectedMatches);
-        }
-        if (page.error) setSearchError(page.error);
-        cursor = page.next_cursor;
-        if (page.done) break;
+        latestSnapshot = snapshot;
+        applySearchModelSnapshot(snapshot);
+        if (snapshot.done) break;
         await new Promise((resolve) => setTimeout(resolve, SEARCH_POLL_MS));
       }
 
-      if (collectedMatches.length > 0) activateMatch(0);
+      const finalSnapshot = latestSnapshot ?? await api.getTerminalSearchModelSnapshot(search_id);
+      if (searchIdRef.current === search_id) {
+        if (finalSnapshot.matches.length > 0 && typeof finalSnapshot.active_match_index !== 'number') {
+          const selected = await api.selectTerminalSearchMatch(search_id, 0);
+          applySearchModelSnapshot(selected);
+        } else {
+          applySearchModelSnapshot(finalSnapshot);
+        }
+      }
     } catch (caught) {
       setSearchError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -615,10 +646,10 @@ export const ScrollbackViewer: React.FC<ScrollbackViewerProps> = ({
       const activeSearchId = searchIdRef.current;
       if (activeSearchId) {
         searchIdRef.current = null;
-        void api.cancelTerminalHistorySearch(activeSearchId);
+        void api.closeTerminalSearchModel(activeSearchId);
       }
     }
-  }, [activateMatch, cancelActiveSearch, caseSensitive, clearSearchState, regex, searchQuery, sessionId, wholeWord]);
+  }, [applySearchModelSnapshot, cancelActiveSearch, caseSensitive, clearSearchState, regex, searchQuery, sessionId, wholeWord]);
 
   const handleClear = useCallback(async () => {
     const confirmed = await confirm({
