@@ -339,7 +339,10 @@
       "page_commandBar": "Command Bar",
       "page_history": "History & Marks",
       "page_transfer": "Transfer",
-      "page_highlight": "Highlight"
+      "page_highlight": "Highlight",
+      "native_alacritty_font": "Native Alacritty font",
+      "native_alacritty_font_hint": "System font family used only by the native Alacritty engine. Use an installed macOS font name such as Menlo, JetBrains Mono, or Maple Mono NF CN.",
+      "native_alacritty_font_placeholder": "Menlo"
     },
     "appearance": {
       "title": "Appearance",

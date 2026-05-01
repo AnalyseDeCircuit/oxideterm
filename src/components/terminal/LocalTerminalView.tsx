@@ -1923,6 +1923,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = (props) => {
         sessionId={props.sessionId}
         paneId={effectivePaneId}
         terminalType="local_terminal"
+        isActive={props.isActive ?? true}
       />
     );
   }

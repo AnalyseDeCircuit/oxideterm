@@ -20,7 +20,9 @@
       "surface": "Surface",
       "attaching": "attaching",
       "grid": "Grid",
-      "parsed": "Parsed"
+      "parsed": "Parsed",
+      "follow_tail": "follow tail",
+      "pinned": "pinned"
     },
     "search": {
       "visible_buffer": "Visible Buffer",

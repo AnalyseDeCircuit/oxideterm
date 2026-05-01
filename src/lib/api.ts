@@ -137,6 +137,9 @@ export type NativeTerminalBounds = {
 
 export type NativeTerminalFont = {
   family: string;
+  familyCss?: string;
+  primaryFamily?: string;
+  fallbackFamilies?: string[];
   size: number;
   lineHeight: number;
 };
@@ -167,6 +170,10 @@ export type NativeTerminalAttachResponse = {
 
 export type NativeTerminalSnapshot = {
   surfaceId: string;
+  paneId: string;
+  nodeId?: string | null;
+  visible: boolean;
+  bounds: NativeTerminalBounds;
   status: NativeTerminalSurfaceStatus;
   columns: number;
   rows: number;
@@ -175,15 +182,21 @@ export type NativeTerminalSnapshot = {
   outputBytes: number;
   droppedOutputFrames: number;
   lines: string[];
-  styledRows: Array<Array<{
-    text: string;
-    fg?: string | null;
-    bg?: string | null;
-    bold: boolean;
-    italic: boolean;
-    underline: boolean;
-    inverse: boolean;
-  }>>;
+  styledRows: Array<{
+    visibleRow: number;
+    cells: Array<{
+      text: string;
+      visibleRow: number;
+      startCol: number;
+      widthCols: number;
+      fg?: string | null;
+      bg?: string | null;
+      bold: boolean;
+      italic: boolean;
+      underline: boolean;
+      inverse: boolean;
+    }>;
+  }>;
   cursorRow: number;
   cursorCol: number;
   bracketedPaste: boolean;
@@ -196,6 +209,15 @@ export type NativeTerminalSnapshot = {
   pinnedToBottom: boolean;
   canScrollUp: boolean;
   canScrollDown: boolean;
+  fontMetrics?: {
+    resolvedFamily: string;
+    cellWidthPx: number;
+    cellHeightPx: number;
+    baselineYPx: number;
+    ascentPx: number;
+    descentPx: number;
+    leadingPx: number;
+  } | null;
 };
 
 export type TestConnectionProxyHop =
@@ -633,10 +655,21 @@ export const api = {
     });
   },
 
+  nativeTerminalUpdateVisibility: async (surfaceId: string, visible: boolean): Promise<void> => {
+    if (USE_MOCK) return;
+    return invoke('native_terminal_update_visibility', {
+      request: { surfaceId, visible },
+    });
+  },
+
   nativeTerminalGetSnapshot: async (surfaceId: string): Promise<NativeTerminalSnapshot> => {
     if (USE_MOCK) {
       return {
         surfaceId,
+        paneId: 'mock-pane',
+        nodeId: null,
+        visible: false,
+        bounds: { x: 0, y: 0, width: 0, height: 0, dpr: 1 },
         status: 'unsupported',
         columns: 80,
         rows: 24,
@@ -658,6 +691,7 @@ export const api = {
         pinnedToBottom: true,
         canScrollUp: false,
         canScrollDown: false,
+        fontMetrics: null,
       };
     }
     return invoke('native_terminal_get_snapshot', { surfaceId });

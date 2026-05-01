@@ -3298,6 +3298,7 @@ export const TerminalView: React.FC<TerminalViewProps> = (props) => {
         paneId={effectivePaneId}
         terminalType="terminal"
         nodeId={nodeId}
+        isActive={props.isActive ?? true}
       />
     );
   }

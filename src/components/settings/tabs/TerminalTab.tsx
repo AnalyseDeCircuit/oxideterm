@@ -262,6 +262,25 @@ export const TerminalTab = ({ terminal, buffer, experimental, updateTerminal, up
                         </Select>
                     </div>
 
+                    {(terminal.engine ?? 'xterm') === 'native_alacritty' && (
+                        <>
+                            <Separator className="opacity-50" />
+
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <Label className="text-theme-text">{t('settings_view.terminal.native_alacritty_font')}</Label>
+                                    <p className="text-xs text-theme-text-muted mt-0.5">{t('settings_view.terminal.native_alacritty_font_hint')}</p>
+                                </div>
+                                <Input
+                                    value={terminal.nativeAlacrittyFontFamily}
+                                    onChange={(event) => updateTerminal('nativeAlacrittyFontFamily', event.target.value)}
+                                    placeholder={t('settings_view.terminal.native_alacritty_font_placeholder')}
+                                    className="w-[260px] font-mono text-sm"
+                                />
+                            </div>
+                        </>
+                    )}
+
                     <Separator className="opacity-50" />
 
                     <div className="flex items-center justify-between">

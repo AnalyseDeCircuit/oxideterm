@@ -20,7 +20,9 @@
       "surface": "Surface",
       "attaching": "正在接入",
       "grid": "Grid",
-      "parsed": "已解析"
+      "parsed": "已解析",
+      "follow_tail": "跟隨尾端",
+      "pinned": "固定視口"
     },
     "search": {
       "visible_buffer": "可見緩衝區",

@@ -339,7 +339,10 @@
       "page_commandBar": "命令栏",
       "page_history": "历史与标记",
       "page_transfer": "传输",
-      "page_highlight": "高亮"
+      "page_highlight": "高亮",
+      "native_alacritty_font": "Native Alacritty 字体",
+      "native_alacritty_font_hint": "仅 Native Alacritty 引擎使用的系统字体。填写已安装的 macOS 字体名，如 Menlo、JetBrains Mono 或 Maple Mono NF CN。",
+      "native_alacritty_font_placeholder": "Menlo"
     },
     "appearance": {
       "title": "外观",

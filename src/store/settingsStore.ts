@@ -247,6 +247,7 @@ export interface TerminalSettings {
   engine: TerminalEngine;
   fontFamily: FontFamily;
   customFontFamily: string; // 自定义轨道: user-defined font stack (e.g. "'Sarasa Fixed SC', monospace")
+  nativeAlacrittyFontFamily: string; // Native Alacritty only: explicit system font family/PostScript name
   fontSize: number;        // 8-32
   lineHeight: number;      // 0.8-3.0
   cursorStyle: CursorStyle;
@@ -511,6 +512,7 @@ const defaultTerminalSettings: TerminalSettings = {
   engine: 'xterm',
   fontFamily: 'jetbrains',
   customFontFamily: '',  // 自定义轨道为空时不生效
+  nativeAlacrittyFontFamily: 'Menlo',
   fontSize: 14,
   lineHeight: 1.2,
   cursorStyle: 'block',
@@ -739,6 +741,14 @@ function normalizeTerminalSettings(settings: TerminalSettings): TerminalSettings
   return {
     ...settings,
     engine: normalizeTerminalEngine(settings.engine),
+    nativeAlacrittyFontFamily:
+      // Keep the editable setting permissive. An empty string is a valid
+      // intermediate UI state while the user deletes/retypes the system font
+      // name; NativeAlacrittyTerminalSurface applies the runtime Menlo fallback
+      // only when attaching/updating the native renderer.
+      typeof settings.nativeAlacrittyFontFamily === 'string'
+        ? settings.nativeAlacrittyFontFamily.slice(0, 128)
+        : defaultTerminalSettings.nativeAlacrittyFontFamily,
     scrollback: clampTerminalScrollback(settings.scrollback),
     terminalEncoding: normalizeTerminalEncoding(settings.terminalEncoding),
     highlightRules: sanitizeHighlightRules(settings.highlightRules),

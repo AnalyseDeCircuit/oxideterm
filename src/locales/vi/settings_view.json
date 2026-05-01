@@ -339,7 +339,10 @@
       "page_commandBar": "Thanh lệnh",
       "page_history": "Lịch sử và đánh dấu",
       "page_transfer": "Truyền",
-      "page_highlight": "Tô sáng"
+      "page_highlight": "Tô sáng",
+      "native_alacritty_font": "Native Alacritty font",
+      "native_alacritty_font_hint": "System font family used only by the native Alacritty engine. Use an installed macOS font name such as Menlo, JetBrains Mono, or Maple Mono NF CN.",
+      "native_alacritty_font_placeholder": "Menlo"
     },
     "appearance": {
       "title": "Giao diện",
