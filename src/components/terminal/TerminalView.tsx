@@ -52,6 +52,7 @@ import {
   createShellIntegrationController,
   isShellIntegrationDetected,
 } from '../../lib/terminal/shellIntegration';
+import { installPreserveScrollbackEd3Handler } from '../../lib/terminal/preserveScrollback';
 import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { runInputPipeline, runOutputPipeline } from '../../lib/plugin/pluginTerminalHooks';
 import { useSessionTreeStore } from '../../store/sessionTreeStore';
@@ -1741,6 +1742,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     term.unicode.activeVersion = '11';
     
     webLinksAddonRef.current = webLinksAddon;
+    const preserveScrollbackDisposable = installPreserveScrollbackEd3Handler(term);
 
     // OSC 7 shell integration: capture current working directory
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
@@ -2462,6 +2464,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       }
       osc133Disposable.dispose();
       osc633Disposable.dispose();
+      preserveScrollbackDisposable.dispose();
       shellIntegrationController.dispose();
 
       if (wsConnectTimeout) {

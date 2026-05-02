@@ -32,7 +32,8 @@ import { useAppStore } from '../../../store/appStore';
 import { useLocalTerminalStore } from '../../../store/localTerminalStore';
 import { useIdeStore } from '../../../store/ideStore';
 import { useSettingsStore } from '../../../store/settingsStore';
-import { resolveEmbeddingProvider } from '../embeddingConfig';
+import { requiresEmbeddingApiKey, resolveEmbeddingProvider } from '../embeddingConfig';
+import { resolveChatEmbeddingApiKey } from '../providerKeyScope';
 import { usePluginStore } from '../../../store/pluginStore';
 import { useEventLogStore } from '../../../store/eventLogStore';
 import { useTransferStore } from '../../../store/transferStore';
@@ -4842,8 +4843,32 @@ async function execSearchDocs(args: Record<string, unknown>, startTime: number, 
       && resolvedEmbedding.provider?.embedTexts
       && resolvedEmbedding.model
     ) {
+      // search_docs may run during an AI turn. Auto-selected embeddings should
+      // not unlock a secondary provider behind the user's back, but an explicit
+      // embedding provider is a user choice and may load exactly that one key.
+      const embeddingRequiresApiKey = requiresEmbeddingApiKey(resolvedEmbedding.providerConfig);
+      const activeEmbeddingProvider = resolvedEmbedding.providerConfig.id === aiSettings.activeProviderId;
+      const activeEmbeddingApiKey = embeddingRequiresApiKey && activeEmbeddingProvider
+        ? await api.getAiProviderApiKey(resolvedEmbedding.providerConfig.id)
+        : null;
+      const keyDecision = resolveChatEmbeddingApiKey({
+        embeddingProviderId: resolvedEmbedding.providerConfig.id,
+        activeProviderId: aiSettings.activeProviderId,
+        activeProviderApiKey: activeEmbeddingApiKey,
+        embeddingRequiresApiKey,
+        embeddingMode: resolvedEmbedding.mode,
+      });
       let embApiKey = '';
-      try { embApiKey = (await api.getAiProviderApiKey(resolvedEmbedding.providerConfig.id)) ?? ''; } catch { /* Ollama */ }
+      if (keyDecision.kind === 'use-key') {
+        embApiKey = keyDecision.apiKey;
+      } else if (keyDecision.kind === 'load-provider-key') {
+        embApiKey = (await api.getAiProviderApiKey(keyDecision.providerId)) ?? '';
+        if (!embApiKey.trim()) {
+          throw new Error('Configured embedding provider key is missing');
+        }
+      } else if (keyDecision.kind === 'skip') {
+        throw new Error('Embedding provider is not the active chat provider');
+      }
       const vectors = await Promise.race([
         resolvedEmbedding.provider.embedTexts(
           {

@@ -60,6 +60,7 @@ import {
   createShellIntegrationController,
   isShellIntegrationDetected,
 } from '../../lib/terminal/shellIntegration';
+import { installPreserveScrollbackEd3Handler } from '../../lib/terminal/preserveScrollback';
 import { onMapleRegularLoaded, ensureCJKFallback, prepareTerminalFontForOpen } from '../../lib/fontLoader';
 import { api } from '../../lib/api';
 import { installTerminalClipboardSupport, readSystemClipboardText } from '../../lib/clipboardSupport';
@@ -734,6 +735,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const unicode11Addon = new Unicode11Addon();
     term.loadAddon(unicode11Addon);
     term.unicode.activeVersion = '11';
+    const preserveScrollbackDisposable = installPreserveScrollbackEd3Handler(term);
 
     // OSC 7 shell integration: capture current working directory
     // Shells emit \x1b]7;file://hostname/path\x07 on directory change
@@ -1083,6 +1085,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
       }
       osc133Disposable.dispose();
       osc633Disposable.dispose();
+      preserveScrollbackDisposable.dispose();
       shellIntegrationController.dispose();
       containerRef.current?.removeEventListener('compositionstart', handleCompositionStart);
       containerRef.current?.removeEventListener('compositionend', handleCompositionEnd);

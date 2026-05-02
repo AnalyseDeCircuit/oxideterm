@@ -231,6 +231,24 @@ describe('TerminalCommandBar', () => {
     expect(commandBarStateMock.submitCommand).toHaveBeenCalledWith(undefined);
   });
 
+  it('uses the configured terminal font for the command input', () => {
+    render(
+      <TerminalCommandBar
+        paneId="pane-1"
+        sessionId="session-1"
+        tabId="tab-1"
+        terminalType="local_terminal"
+        isActive
+        sendInput={vi.fn()}
+        focusTerminal={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('terminal.command_bar.command_placeholder')).toHaveStyle({
+      fontFamily: 'var(--terminal-font-family)',
+    });
+  });
+
   it('keeps Shift+Enter as a manual newline gesture instead of submitting', () => {
     render(
       <TerminalCommandBar

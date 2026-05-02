@@ -9,7 +9,8 @@ import { useSettingsStore, type AiMemorySettings, type AiSettings } from './sett
 import { useAppStore } from './appStore';
 import { gatherSidebarContext, buildContextReminder, type SidebarContext } from '../lib/sidebarContextProvider';
 import { getProvider, getProviderReasoningProtocol } from '../lib/ai/providerRegistry';
-import { resolveEmbeddingProvider } from '../lib/ai/embeddingConfig';
+import { requiresEmbeddingApiKey, resolveEmbeddingProvider } from '../lib/ai/embeddingConfig';
+import { resolveChatEmbeddingApiKey } from '../lib/ai/providerKeyScope';
 import { resolveAiReasoningEffort } from '../lib/ai/reasoningSettings';
 import { estimateTokens, estimateToolDefinitionsTokens, trimHistoryToTokenBudget, getModelContextWindow, responseReserve } from '../lib/ai/tokenUtils';
 import type { AiToolChoice, ChatMessage as ProviderChatMessage } from '../lib/ai/providers';
@@ -1210,8 +1211,29 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
           && resolvedEmbedding.model
         ) {
           try {
+            // The chat send path may unlock the active provider key. If RAG
+            // auto-selects a different embedding provider, do not unlock it as
+            // a side effect; that caused surprising biometric prompts. If the
+            // user explicitly configured an embedding provider, that one key is
+            // part of the request and remains supported.
+            const keyDecision = resolveChatEmbeddingApiKey({
+              embeddingProviderId: resolvedEmbedding.providerConfig.id,
+              activeProviderId: providerId,
+              activeProviderApiKey: apiKey,
+              embeddingRequiresApiKey: requiresEmbeddingApiKey(resolvedEmbedding.providerConfig),
+              embeddingMode: resolvedEmbedding.mode,
+            });
             let embApiKey = '';
-            try { embApiKey = (await api.getAiProviderApiKey(resolvedEmbedding.providerConfig.id)) ?? ''; } catch { /* Ollama */ }
+            if (keyDecision.kind === 'use-key') {
+              embApiKey = keyDecision.apiKey;
+            } else if (keyDecision.kind === 'load-provider-key') {
+              embApiKey = (await api.getAiProviderApiKey(keyDecision.providerId)) ?? '';
+              if (!embApiKey.trim()) {
+                throw new Error('Configured embedding provider key is missing');
+              }
+            } else if (keyDecision.kind === 'skip') {
+              throw new Error('Embedding provider is not the active chat provider');
+            }
             const vectors = await Promise.race([
               resolvedEmbedding.provider.embedTexts(
                 {

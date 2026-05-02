@@ -388,10 +388,11 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
           placeholder={placeholder}
           rows={Math.min(6, Math.max(1, state.value.split(/\r?\n/).length))}
           className="max-h-36 min-h-6 min-w-0 flex-1 resize-none bg-transparent py-0.5 text-sm leading-6 text-theme-text outline-none placeholder:text-theme-text-muted"
+          style={terminalFontStyle}
           spellCheck={false}
         />
         {state.focused && state.ghostText && !state.value.includes('\n') && (
-          <span className={cn('pointer-events-none max-w-[24rem] flex-shrink truncate text-sm leading-6 text-theme-text-muted/35', terminalFontClass)}>
+          <span className="pointer-events-none max-w-[24rem] flex-shrink truncate text-sm leading-6 text-theme-text-muted/35" style={terminalFontStyle}>
             {state.ghostText}
           </span>
         )}
@@ -540,7 +541,7 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
   }, [activeCategory, categories, deleteCategory]);
 
   return (
-    <div className={cn('absolute bottom-full right-3 z-30 mb-2 flex max-h-[min(520px,70vh)] w-[min(860px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30', terminalFontClass)}>
+    <div className="absolute bottom-full right-3 z-30 mb-2 flex max-h-[min(520px,70vh)] w-[min(860px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30" style={terminalFontStyle}>
       <div className="w-40 flex-shrink-0 border-r border-theme-border/60 bg-theme-bg/45 p-2">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-medium uppercase tracking-wide text-theme-text-muted">
@@ -621,6 +622,7 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('terminal.quick_commands.search_placeholder')}
               className="h-8 w-full rounded-md border border-theme-border/50 bg-theme-bg/70 pl-7 pr-2 text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60"
+              style={terminalFontStyle}
             />
           </div>
           <button type="button" onClick={startCreate} className="inline-flex h-8 items-center gap-1 rounded-md border border-theme-border/60 px-2 text-xs text-theme-text-muted hover:bg-theme-bg-hover hover:text-theme-text">
@@ -706,7 +708,7 @@ const QuickCommandRow: React.FC<QuickCommandRowProps> = ({ command, onInsert, on
             </span>
           )}
         </div>
-        <div className={cn('truncate text-xs text-theme-accent/85', terminalFontClass)}>{command.command}</div>
+        <div className="truncate text-xs text-theme-accent/85" style={terminalFontStyle}>{command.command}</div>
         {command.description && <div className="truncate text-xs text-theme-text-muted/70">{command.description}</div>}
       </button>
       <div className="flex flex-shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
@@ -754,7 +756,7 @@ const QuickCommandCategoryEditor: React.FC<QuickCommandCategoryEditorProps> = ({
   return (
     <div className="border-b border-theme-border/60 bg-theme-bg/35 p-2">
       <div className="grid gap-2 md:grid-cols-[1fr_220px]">
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.group_name_placeholder')} className={quickCommandInputClass} />
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.group_name_placeholder')} className={quickCommandInputClass} style={terminalFontStyle} />
         <Select value={icon} onValueChange={(value) => setIcon(value as QuickCommandIcon)}>
           <SelectTrigger className="h-8 border-theme-border/50 bg-theme-bg/70 px-2 text-sm">
             <SelectValue />
@@ -816,9 +818,9 @@ const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, catego
   return (
     <div className="border-b border-theme-border/60 bg-theme-bg/35 p-2">
       <div className="grid gap-2 md:grid-cols-[1fr_1.2fr]">
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.name_placeholder')} className={quickCommandInputClass} />
-        <input value={commandText} onChange={(event) => setCommandText(event.target.value)} placeholder={t('terminal.quick_commands.command_placeholder')} className={quickCommandInputClass} />
-        <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('terminal.quick_commands.description_placeholder')} className={quickCommandInputClass} />
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('terminal.quick_commands.name_placeholder')} className={quickCommandInputClass} style={terminalFontStyle} />
+        <input value={commandText} onChange={(event) => setCommandText(event.target.value)} placeholder={t('terminal.quick_commands.command_placeholder')} className={quickCommandInputClass} style={terminalFontStyle} />
+        <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t('terminal.quick_commands.description_placeholder')} className={quickCommandInputClass} style={terminalFontStyle} />
         <div className="grid grid-cols-2 gap-2">
           <Select value={selectedCategory} onValueChange={setSelectedCategory}>
             <SelectTrigger className="h-8 border-theme-border/50 bg-theme-bg/70 px-2 text-sm">
@@ -832,7 +834,7 @@ const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, catego
               ))}
             </SelectContent>
           </Select>
-          <input value={hostPattern} onChange={(event) => setHostPattern(event.target.value)} placeholder={t('terminal.quick_commands.host_pattern_placeholder')} className={quickCommandInputClass} />
+          <input value={hostPattern} onChange={(event) => setHostPattern(event.target.value)} placeholder={t('terminal.quick_commands.host_pattern_placeholder')} className={quickCommandInputClass} style={terminalFontStyle} />
         </div>
       </div>
       <div className="mt-2 flex justify-end gap-2">
@@ -864,8 +866,8 @@ const QuickCommandEditor: React.FC<QuickCommandEditorProps> = ({ command, catego
   );
 };
 
-const terminalFontClass = 'font-[family-name:var(--terminal-font-family)]';
-const quickCommandInputClass = 'h-8 rounded-md border border-theme-border/50 bg-theme-bg/70 px-2 text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60 font-[family-name:var(--terminal-font-family)]';
+const terminalFontStyle: React.CSSProperties = { fontFamily: 'var(--terminal-font-family)' };
+const quickCommandInputClass = 'h-8 rounded-md border border-theme-border/50 bg-theme-bg/70 px-2 text-sm text-theme-text outline-none placeholder:text-theme-text-muted focus:border-theme-accent/60';
 
 function quickCommandIcon(icon: QuickCommandIcon): React.ComponentType<{ className?: string }> {
   switch (icon) {
@@ -1042,7 +1044,7 @@ const TerminalCommandSuggestions: React.FC<SuggestionsProps> = ({ suggestions, h
   }, [suggestions]);
 
   return (
-    <div className={cn('absolute bottom-full left-3 mb-2 w-[min(720px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30', terminalFontClass)}>
+    <div className="absolute bottom-full left-3 mb-2 w-[min(720px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-theme-border bg-theme-bg-elevated/95 shadow-xl shadow-black/30" style={terminalFontStyle}>
       {groupedSuggestions.map(([group, entries]) => (
         <div key={group}>
           <div className="border-b border-theme-border/50 bg-theme-bg/60 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-theme-text-muted">
@@ -1059,7 +1061,7 @@ const TerminalCommandSuggestions: React.FC<SuggestionsProps> = ({ suggestions, h
                 index === highlightedIndex ? 'bg-theme-bg-hover text-theme-text' : 'text-theme-text-muted hover:bg-theme-bg-hover/60 hover:text-theme-text',
               )}
             >
-              <span className={cn('min-w-0 flex-1 truncate', terminalFontClass)}>{candidate.label}</span>
+              <span className="min-w-0 flex-1 truncate" style={terminalFontStyle}>{candidate.label}</span>
               {candidate.description && (
                 <span className="hidden min-w-0 flex-1 truncate text-xs text-theme-text-muted/70 sm:inline">
                   {candidate.description}

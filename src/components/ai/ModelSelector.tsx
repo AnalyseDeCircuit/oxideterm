@@ -23,6 +23,27 @@ type ModelSelectorProps = {
   dropdownPlacement?: 'up' | 'down';
 };
 
+type ProviderProbePlan =
+  | { kind: 'disabled' }
+  | { kind: 'implicit-key'; endpoint?: string }
+  | { kind: 'stored-key' };
+
+export function resolveModelSelectorProviderProbe(
+  provider: Pick<AiProvider, 'enabled' | 'type' | 'baseUrl'>,
+  isLocalProviderUrl: (baseUrl: string) => boolean,
+): ProviderProbePlan {
+  if (!provider.enabled) {
+    return { kind: 'disabled' };
+  }
+  if (provider.type === 'ollama') {
+    return { kind: 'implicit-key', endpoint: '/api/tags' };
+  }
+  if (provider.type === 'openai_compatible' && isLocalProviderUrl(provider.baseUrl)) {
+    return { kind: 'implicit-key', endpoint: '/models' };
+  }
+  return { kind: 'stored-key' };
+}
+
 export const ModelSelector = ({ onOpenSettings, dropdownPlacement = 'up' }: ModelSelectorProps) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -67,67 +88,51 @@ export const ModelSelector = ({ onOpenSettings, dropdownPlacement = 'up' }: Mode
     }
   }, []);
 
-  // Check key status on mount and when dropdown opens
+  // Check key status on mount and when dropdown opens. This must not decrypt
+  // every provider key: on macOS keychain reads can trigger Touch ID. The
+  // selector may inspect key existence for all providers, but it only performs
+  // online probes that do not need a secret (Ollama / local compatible APIs).
+  // Actual API key reads stay on explicit execution paths such as sending a
+  // chat request or manually refreshing one provider's model list.
   const checkAllKeys = useCallback(async () => {
     const status: Record<string, boolean> = {};
     const online: Record<string, boolean> = {};
     for (const provider of aiSettings.providers) {
-      if (!provider.enabled) {
+      const probe = resolveModelSelectorProviderProbe(provider, isLocalUrl);
+      if (probe.kind === 'disabled') {
         status[provider.id] = false;
         online[provider.id] = false;
         continue;
       }
-      if (provider.type === 'ollama') {
-        status[provider.id] = true; // Ollama doesn't need a key
-        try {
-          online[provider.id] = await checkLocalProviderOnline(provider.baseUrl, '/api/tags');
-        } catch (err) {
-          console.warn(`[ModelSelector] Failed to check Ollama (${provider.id}):`, err);
-          online[provider.id] = false;
-        }
-      } else if (provider.type === 'openai_compatible') {
-        const isLocal = isLocalUrl(provider.baseUrl);
-        if (isLocal) {
-          // Local servers (LM Studio etc.) — no auth needed
-          status[provider.id] = true;
+
+      if (probe.kind === 'implicit-key') {
+        status[provider.id] = true;
+        if (probe.endpoint) {
           try {
-            online[provider.id] = await checkLocalProviderOnline(provider.baseUrl, '/models');
+            online[provider.id] = await checkLocalProviderOnline(provider.baseUrl, probe.endpoint);
           } catch (err) {
-            console.warn(`[ModelSelector] Failed to check compatible provider (${provider.id}):`, err);
+            console.warn(`[ModelSelector] Failed to check local provider (${provider.id}):`, err);
             online[provider.id] = false;
           }
         } else {
-          // Cloud-hosted openai_compatible (Moonshot, DeepSeek, etc.) — needs API key
-          try {
-            const hasKey = await api.hasAiProviderApiKey(provider.id);
-            status[provider.id] = hasKey;
-            if (hasKey) {
-              const apiKey = await api.getAiProviderApiKey(provider.id);
-              const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : undefined;
-              online[provider.id] = await checkLocalProviderOnline(provider.baseUrl, '/models', headers);
-            } else {
-              online[provider.id] = false;
-            }
-          } catch (err) {
-            console.warn(`[ModelSelector] Failed to check compatible provider (${provider.id}):`, err);
-            status[provider.id] = false;
-            online[provider.id] = false;
-          }
+          online[provider.id] = true;
         }
-      } else {
+        continue;
+      }
+
+      if (probe.kind === 'stored-key') {
         try {
           // Only check provider-specific key - no fallback to legacy key for UI display
           status[provider.id] = await api.hasAiProviderApiKey(provider.id);
-          online[provider.id] = true;
         } catch {
           status[provider.id] = false;
-          online[provider.id] = true;
         }
+        online[provider.id] = true;
       }
     }
     setKeyStatus(status);
     setProviderOnline(online);
-  }, [aiSettings.providers, checkLocalProviderOnline]);
+  }, [aiSettings.providers, checkLocalProviderOnline, isLocalUrl]);
 
   // Check on mount so the trigger button indicator is accurate
   useEffect(() => {

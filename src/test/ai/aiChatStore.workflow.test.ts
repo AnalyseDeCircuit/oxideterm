@@ -57,10 +57,13 @@ const settingsStoreMock = vi.hoisted(() => ({
             baseUrl: 'https://api.example.com/v1',
             defaultModel: 'mock-model',
             models: ['mock-model'],
+            enabled: true,
+            createdAt: 1,
           },
         ],
         activeProviderId: 'provider-1',
         activeModel: 'mock-model',
+        embeddingConfig: { providerId: null as string | null, model: '' },
         contextVisibleLines: 50,
         contextMaxChars: 8000,
         modelContextWindows: { 'provider-1': { 'mock-model': 1000 } },
@@ -278,6 +281,23 @@ describe('aiChatStore workflows', () => {
     invokeMock.mockReset();
     providerStreamMock.mockReset();
     settingsStoreMock.state.settings.ai.enabled = true;
+    settingsStoreMock.state.settings.ai.baseUrl = 'https://api.example.com/v1';
+    settingsStoreMock.state.settings.ai.model = 'default-model';
+    settingsStoreMock.state.settings.ai.providers = [
+      {
+        id: 'provider-1',
+        type: 'openai_compatible',
+        name: 'Mock Provider',
+        baseUrl: 'https://api.example.com/v1',
+        defaultModel: 'mock-model',
+        models: ['mock-model'],
+        enabled: true,
+        createdAt: 1,
+      },
+    ];
+    settingsStoreMock.state.settings.ai.activeProviderId = 'provider-1';
+    settingsStoreMock.state.settings.ai.activeModel = 'mock-model';
+    settingsStoreMock.state.settings.ai.embeddingConfig = { providerId: null, model: '' };
     settingsStoreMock.state.settings.ai.toolUse.enabled = false;
     settingsStoreMock.state.settings.ai.toolUse.disabledTools = [];
     settingsStoreMock.state.settings.ai.toolUse.autoApproveTools = {};
@@ -311,6 +331,10 @@ describe('aiChatStore workflows', () => {
     apiMocks.getConnections.mockResolvedValue([]);
     apiMocks.localExecCommand.mockReset();
     apiMocks.localExecCommand.mockResolvedValue({ stdout: 'ok', stderr: '', exitCode: 0, timedOut: false });
+    apiMocks.getAiProviderApiKey.mockReset();
+    apiMocks.getAiProviderApiKey.mockResolvedValue('key-1');
+    apiMocks.ragSearch.mockReset();
+    apiMocks.ragSearch.mockResolvedValue([]);
     hasDeniedCommandsMock.mockReset();
     hasDeniedCommandsMock.mockReturnValue(false);
     streamText('summary text');
@@ -401,6 +425,112 @@ describe('aiChatStore workflows', () => {
         content: expect.stringContaining('@knowledge: Use the knowledge base. (intent=knowledge, preferred_target_view=files)'),
       }),
     ]));
+  });
+
+  it('does not unlock a non-active embedding provider when sending chat', async () => {
+    const embedTexts = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]);
+    settingsStoreMock.state.settings.ai.providers = [
+      {
+        id: 'chat-provider',
+        type: 'anthropic',
+        name: 'Chat Provider',
+        baseUrl: 'https://chat.example.com',
+        defaultModel: 'claude-test',
+        models: ['claude-test'],
+        enabled: true,
+        createdAt: 1,
+      },
+      {
+        id: 'embedding-provider',
+        type: 'openai',
+        name: 'Embedding Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        defaultModel: 'text-embedding-3-small',
+        models: ['text-embedding-3-small'],
+        enabled: true,
+        createdAt: 2,
+      },
+    ];
+    settingsStoreMock.state.settings.ai.activeProviderId = 'chat-provider';
+    settingsStoreMock.state.settings.ai.activeModel = 'claude-test';
+    settingsStoreMock.state.settings.ai.embeddingConfig = { providerId: null, model: '' };
+    getProviderMock.mockReturnValue({ streamCompletion: providerStreamMock, embedTexts });
+    streamText('assistant reply');
+    setConversation([]);
+
+    await useAiChatStore.getState().sendMessage('search the knowledge base');
+
+    expect(apiMocks.getAiProviderApiKey).toHaveBeenCalledTimes(1);
+    expect(apiMocks.getAiProviderApiKey).toHaveBeenCalledWith('chat-provider');
+    expect(apiMocks.getAiProviderApiKey).not.toHaveBeenCalledWith('embedding-provider');
+    expect(embedTexts).not.toHaveBeenCalled();
+    expect(apiMocks.ragSearch).toHaveBeenCalledWith(expect.objectContaining({
+      query: 'search the knowledge base',
+      queryVector: undefined,
+    }));
+  });
+
+  it('uses an explicitly configured non-active embedding provider without touching unrelated keys', async () => {
+    const embedTexts = vi.fn().mockResolvedValue([[0.4, 0.5, 0.6]]);
+    settingsStoreMock.state.settings.ai.providers = [
+      {
+        id: 'chat-provider',
+        type: 'anthropic',
+        name: 'Chat Provider',
+        baseUrl: 'https://chat.example.com',
+        defaultModel: 'claude-test',
+        models: ['claude-test'],
+        enabled: true,
+        createdAt: 1,
+      },
+      {
+        id: 'embedding-provider',
+        type: 'openai',
+        name: 'Embedding Provider',
+        baseUrl: 'https://api.openai.com/v1',
+        defaultModel: 'text-embedding-3-small',
+        models: ['text-embedding-3-small'],
+        enabled: true,
+        createdAt: 2,
+      },
+      {
+        id: 'unused-provider',
+        type: 'openai',
+        name: 'Unused Provider',
+        baseUrl: 'https://unused.example.com/v1',
+        defaultModel: 'text-embedding-3-small',
+        models: ['text-embedding-3-small'],
+        enabled: true,
+        createdAt: 3,
+      },
+    ];
+    settingsStoreMock.state.settings.ai.activeProviderId = 'chat-provider';
+    settingsStoreMock.state.settings.ai.activeModel = 'claude-test';
+    settingsStoreMock.state.settings.ai.embeddingConfig = {
+      providerId: 'embedding-provider',
+      model: 'text-embedding-3-small',
+    };
+    apiMocks.getAiProviderApiKey.mockImplementation(async (providerId: string) => `key:${providerId}`);
+    getProviderMock.mockReturnValue({ streamCompletion: providerStreamMock, embedTexts });
+    streamText('assistant reply');
+    setConversation([]);
+
+    await useAiChatStore.getState().sendMessage('search the knowledge base');
+
+    expect(apiMocks.getAiProviderApiKey).toHaveBeenCalledTimes(2);
+    expect(apiMocks.getAiProviderApiKey).toHaveBeenCalledWith('chat-provider');
+    expect(apiMocks.getAiProviderApiKey).toHaveBeenCalledWith('embedding-provider');
+    expect(apiMocks.getAiProviderApiKey).not.toHaveBeenCalledWith('unused-provider');
+    expect(embedTexts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'key:embedding-provider',
+        model: 'text-embedding-3-small',
+      }),
+      ['search the knowledge base'],
+    );
+    expect(apiMocks.ragSearch).toHaveBeenCalledWith(expect.objectContaining({
+      queryVector: [0.4, 0.5, 0.6],
+    }));
   });
 
   it('keeps the newer run state when an older aborted run finishes later', async () => {
