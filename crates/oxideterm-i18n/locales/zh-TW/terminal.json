@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "本機終端機"
+  },
+  "search": {
+    "placeholder": "搜尋",
+    "previous": "上一個",
+    "next": "下一個",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "新增本機終端機"
+  }
+}

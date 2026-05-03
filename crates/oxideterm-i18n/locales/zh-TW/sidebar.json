@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "使用中的工作階段",
+    "no_sessions": "無工作階段",
+    "add_new_connection": "按 + 新增連線",
+    "actions": {
+      "new_local_terminal": "新增本機終端機"
+    },
+    "panels": {
+      "sessions": "使用中的工作階段",
+      "session_manager": "工作階段管理員",
+      "files": "檔案管理員",
+      "connection_pool": "連線集區",
+      "connection_monitor": "連線監視器",
+      "connection_matrix": "連線矩陣",
+      "plugins": "外掛程式",
+      "ai": "OxideSens",
+      "activity": "活動"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "無工作階段",
+      "click_to_add": "按 + 新增連線"
+    }
+  }
+}

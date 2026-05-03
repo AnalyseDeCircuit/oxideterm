@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "Terminal cục bộ"
+  },
+  "search": {
+    "placeholder": "Tìm kiếm",
+    "previous": "trước",
+    "next": "tiếp",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "Terminal cục bộ mới"
+  }
+}

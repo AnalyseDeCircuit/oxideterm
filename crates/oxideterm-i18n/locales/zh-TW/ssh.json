@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "新增連線",
+      "subtitle": "輸入新的 SSH 連線詳細資料。",
+      "name": "名稱（選填）",
+      "name_placeholder": "我的伺服器",
+      "host": "目標主機 *",
+      "host_placeholder": "192.168.1.100",
+      "port": "連接埠",
+      "username": "目標使用者名稱 *",
+      "password": "密碼",
+      "save_password": "將密碼儲存至鑰匙圈",
+      "group": "群組",
+      "ungrouped": "未分組",
+      "agent_forwarding": "啟用 SSH 代理轉發",
+      "save_connection": "儲存連線以供日後使用",
+      "cancel": "取消",
+      "test": "測試",
+      "connect": "連線",
+      "validation_required": "請輸入目標主機、連接埠和目標使用者名稱。",
+      "test_pending": "當 russh 傳輸整合完成後，將啟用連線測試。"
+    },
+    "auth": {
+      "password": "密碼",
+      "default_key": "預設金鑰",
+      "ssh_key": "SSH 金鑰",
+      "certificate": "憑證",
+      "agent": "代理",
+      "two_factor": "雙重驗證"
+    }
+  }
+}

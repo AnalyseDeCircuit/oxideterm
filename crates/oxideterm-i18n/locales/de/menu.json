@@ -1,0 +1,23 @@
+{
+  "menu": {
+    "app": "OxideTerm",
+    "services": "Dienste",
+    "new_terminal": "Neues Terminal",
+    "close_tab": "Tab schließen",
+    "quit": "OxideTerm beenden",
+    "edit": "Bearbeiten",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "find": "Suchen",
+    "find_next": "Weitersuchen",
+    "find_previous": "Rückwärtssuchen",
+    "terminal": "Terminal",
+    "split_horizontal": "Horizontal teilen",
+    "split_vertical": "Vertikal teilen",
+    "close_pane": "Bereich schließen",
+    "window": "Fenster",
+    "next_tab": "Nächster Tab",
+    "previous_tab": "Vorheriger Tab",
+    "language": "Sprache"
+  }
+}

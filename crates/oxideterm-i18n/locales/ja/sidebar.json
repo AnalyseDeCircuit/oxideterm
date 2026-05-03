@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "アクティブなセッション",
+    "no_sessions": "セッションなし",
+    "add_new_connection": "+ をクリックして新しい接続を追加",
+    "actions": {
+      "new_local_terminal": "新しいローカルターミナル"
+    },
+    "panels": {
+      "sessions": "アクティブなセッション",
+      "session_manager": "セッションマネージャー",
+      "files": "ファイルマネージャー",
+      "connection_pool": "接続プール",
+      "connection_monitor": "接続モニター",
+      "connection_matrix": "接続マトリックス",
+      "plugins": "プラグイン",
+      "ai": "OxideSens",
+      "activity": "アクティビティ"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "セッションなし",
+      "click_to_add": "+ をクリックして新しい接続を追加"
+    }
+  }
+}

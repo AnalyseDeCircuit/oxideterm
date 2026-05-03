@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "Nuova connessione",
+      "subtitle": "Inserisci i dettagli per una nuova connessione SSH.",
+      "name": "Nome (opzionale)",
+      "name_placeholder": "Mio server",
+      "host": "Host di destinazione *",
+      "host_placeholder": "192.168.1.100",
+      "port": "Porta",
+      "username": "Nome utente di destinazione *",
+      "password": "Password",
+      "save_password": "Salva password nel portachiavi",
+      "group": "Gruppo",
+      "ungrouped": "Senza gruppo",
+      "agent_forwarding": "Abilita inoltro agente SSH",
+      "save_connection": "Salva connessione per uso futuro",
+      "cancel": "Annulla",
+      "test": "Test",
+      "connect": "Connetti",
+      "validation_required": "Inserisci host di destinazione, porta e nome utente.",
+      "test_pending": "Il test di connessione sarà abilitato quando il trasporto russh sarà integrato."
+    },
+    "auth": {
+      "password": "Password",
+      "default_key": "Chiave predefinita",
+      "ssh_key": "Chiave SSH",
+      "certificate": "Certificato",
+      "agent": "Agente",
+      "two_factor": "2FA"
+    }
+  }
+}

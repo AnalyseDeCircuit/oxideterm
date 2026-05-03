@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "Terminal local"
+  },
+  "search": {
+    "placeholder": "Rechercher",
+    "previous": "préc",
+    "next": "suiv",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "Nouveau terminal local"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "menu": {
+    "app": "OxideTerm",
+    "services": "Dịch vụ",
+    "new_terminal": "Terminal mới",
+    "close_tab": "Đóng tab",
+    "quit": "Thoát OxideTerm",
+    "edit": "Chỉnh sửa",
+    "copy": "Sao chép",
+    "paste": "Dán",
+    "find": "Tìm kiếm",
+    "find_next": "Tìm tiếp",
+    "find_previous": "Tìm trước",
+    "terminal": "Terminal",
+    "split_horizontal": "Chia ngang",
+    "split_vertical": "Chia dọc",
+    "close_pane": "Đóng khung",
+    "window": "Cửa sổ",
+    "next_tab": "Tab tiếp",
+    "previous_tab": "Tab trước",
+    "language": "Ngôn ngữ"
+  }
+}

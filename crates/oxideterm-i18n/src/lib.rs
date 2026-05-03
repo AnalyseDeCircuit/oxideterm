@@ -2,12 +2,68 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-const EN_US_PARTS: &[&str] = &[
-    include_str!("../locales/en-US/common.json"),
-    include_str!("../locales/en-US/menu.json"),
-    include_str!("../locales/en-US/sidebar.json"),
-    include_str!("../locales/en-US/ssh.json"),
-    include_str!("../locales/en-US/terminal.json"),
+const EN_PARTS: &[&str] = &[
+    include_str!("../locales/en/common.json"),
+    include_str!("../locales/en/menu.json"),
+    include_str!("../locales/en/sidebar.json"),
+    include_str!("../locales/en/ssh.json"),
+    include_str!("../locales/en/terminal.json"),
+];
+const DE_PARTS: &[&str] = &[
+    include_str!("../locales/de/common.json"),
+    include_str!("../locales/de/menu.json"),
+    include_str!("../locales/de/sidebar.json"),
+    include_str!("../locales/de/ssh.json"),
+    include_str!("../locales/de/terminal.json"),
+];
+const ES_ES_PARTS: &[&str] = &[
+    include_str!("../locales/es-ES/common.json"),
+    include_str!("../locales/es-ES/menu.json"),
+    include_str!("../locales/es-ES/sidebar.json"),
+    include_str!("../locales/es-ES/ssh.json"),
+    include_str!("../locales/es-ES/terminal.json"),
+];
+const FR_FR_PARTS: &[&str] = &[
+    include_str!("../locales/fr-FR/common.json"),
+    include_str!("../locales/fr-FR/menu.json"),
+    include_str!("../locales/fr-FR/sidebar.json"),
+    include_str!("../locales/fr-FR/ssh.json"),
+    include_str!("../locales/fr-FR/terminal.json"),
+];
+const IT_PARTS: &[&str] = &[
+    include_str!("../locales/it/common.json"),
+    include_str!("../locales/it/menu.json"),
+    include_str!("../locales/it/sidebar.json"),
+    include_str!("../locales/it/ssh.json"),
+    include_str!("../locales/it/terminal.json"),
+];
+const JA_PARTS: &[&str] = &[
+    include_str!("../locales/ja/common.json"),
+    include_str!("../locales/ja/menu.json"),
+    include_str!("../locales/ja/sidebar.json"),
+    include_str!("../locales/ja/ssh.json"),
+    include_str!("../locales/ja/terminal.json"),
+];
+const KO_PARTS: &[&str] = &[
+    include_str!("../locales/ko/common.json"),
+    include_str!("../locales/ko/menu.json"),
+    include_str!("../locales/ko/sidebar.json"),
+    include_str!("../locales/ko/ssh.json"),
+    include_str!("../locales/ko/terminal.json"),
+];
+const PT_BR_PARTS: &[&str] = &[
+    include_str!("../locales/pt-BR/common.json"),
+    include_str!("../locales/pt-BR/menu.json"),
+    include_str!("../locales/pt-BR/sidebar.json"),
+    include_str!("../locales/pt-BR/ssh.json"),
+    include_str!("../locales/pt-BR/terminal.json"),
+];
+const VI_PARTS: &[&str] = &[
+    include_str!("../locales/vi/common.json"),
+    include_str!("../locales/vi/menu.json"),
+    include_str!("../locales/vi/sidebar.json"),
+    include_str!("../locales/vi/ssh.json"),
+    include_str!("../locales/vi/terminal.json"),
 ];
 const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/common.json"),
@@ -16,11 +72,27 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/ssh.json"),
     include_str!("../locales/zh-CN/terminal.json"),
 ];
+const ZH_TW_PARTS: &[&str] = &[
+    include_str!("../locales/zh-TW/common.json"),
+    include_str!("../locales/zh-TW/menu.json"),
+    include_str!("../locales/zh-TW/sidebar.json"),
+    include_str!("../locales/zh-TW/ssh.json"),
+    include_str!("../locales/zh-TW/terminal.json"),
+];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Locale {
-    EnUs,
+    De,
+    En,
+    EsEs,
+    FrFr,
+    It,
+    Ja,
+    Ko,
+    PtBr,
+    Vi,
     ZhCn,
+    ZhTw,
 }
 
 #[derive(Clone, Debug)]
@@ -33,12 +105,21 @@ pub struct I18n {
 impl I18n {
     pub fn new(locale: Locale) -> Self {
         let mut catalogs = HashMap::new();
-        catalogs.insert(Locale::EnUs, LocaleCatalog::from_json_parts(EN_US_PARTS));
+        catalogs.insert(Locale::De, LocaleCatalog::from_json_parts(DE_PARTS));
+        catalogs.insert(Locale::En, LocaleCatalog::from_json_parts(EN_PARTS));
+        catalogs.insert(Locale::EsEs, LocaleCatalog::from_json_parts(ES_ES_PARTS));
+        catalogs.insert(Locale::FrFr, LocaleCatalog::from_json_parts(FR_FR_PARTS));
+        catalogs.insert(Locale::It, LocaleCatalog::from_json_parts(IT_PARTS));
+        catalogs.insert(Locale::Ja, LocaleCatalog::from_json_parts(JA_PARTS));
+        catalogs.insert(Locale::Ko, LocaleCatalog::from_json_parts(KO_PARTS));
+        catalogs.insert(Locale::PtBr, LocaleCatalog::from_json_parts(PT_BR_PARTS));
+        catalogs.insert(Locale::Vi, LocaleCatalog::from_json_parts(VI_PARTS));
         catalogs.insert(Locale::ZhCn, LocaleCatalog::from_json_parts(ZH_CN_PARTS));
+        catalogs.insert(Locale::ZhTw, LocaleCatalog::from_json_parts(ZH_TW_PARTS));
 
         Self {
             locale,
-            fallback_locale: Locale::EnUs,
+            fallback_locale: Locale::En,
             catalogs,
         }
     }
@@ -121,7 +202,7 @@ mod tests {
         let mut i18n = I18n::default();
         assert_eq!(i18n.t("menu.new_terminal"), "新建终端");
 
-        i18n.set_locale(Locale::EnUs);
+        i18n.set_locale(Locale::En);
         assert_eq!(i18n.t("menu.new_terminal"), "New Terminal");
     }
 
@@ -146,5 +227,64 @@ mod tests {
             r#"{"menu":{"copy":"Copy"}}"#,
             r#"{"menu":{"copy":"Duplicate"}}"#,
         ]);
+    }
+
+    #[test]
+    fn all_eleven_locales_load_without_panic() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            let name = i18n.t("app.name");
+            assert_eq!(name, "OxideTerm");
+        }
+    }
+
+    #[test]
+    fn language_names_are_autonyms_in_every_locale() {
+        let expected = [
+            ("language.english", "English"),
+            ("language.simplified_chinese", "简体中文"),
+            ("language.traditional_chinese", "繁體中文"),
+            ("language.german", "Deutsch"),
+            ("language.spanish", "Español"),
+            ("language.french", "Français"),
+            ("language.italian", "Italiano"),
+            ("language.japanese", "日本語"),
+            ("language.korean", "한국어"),
+            ("language.portuguese_brazil", "Português (Brasil)"),
+            ("language.vietnamese", "Tiếng Việt"),
+        ];
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for (key, value) in expected {
+                assert_eq!(i18n.t(key), value);
+            }
+        }
     }
 }

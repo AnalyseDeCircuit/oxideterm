@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "로컬 터미널"
+  },
+  "search": {
+    "placeholder": "검색",
+    "previous": "이전",
+    "next": "다음",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "새 로컬 터미널"
+  }
+}

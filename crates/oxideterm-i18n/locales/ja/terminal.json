@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "ローカルターミナル"
+  },
+  "search": {
+    "placeholder": "検索",
+    "previous": "前",
+    "next": "次",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "新しいローカルターミナル"
+  }
+}

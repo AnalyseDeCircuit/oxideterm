@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "Kết nối mới",
+      "subtitle": "Nhập chi tiết cho kết nối SSH mới.",
+      "name": "Tên (tùy chọn)",
+      "name_placeholder": "Máy chủ của tôi",
+      "host": "Máy chủ đích *",
+      "host_placeholder": "192.168.1.100",
+      "port": "Cổng",
+      "username": "Tên người dùng đích *",
+      "password": "Mật khẩu",
+      "save_password": "Lưu mật khẩu vào keychain",
+      "group": "Nhóm",
+      "ungrouped": "Không nhóm",
+      "agent_forwarding": "Bật chuyển tiếp SSH Agent",
+      "save_connection": "Lưu kết nối để dùng sau",
+      "cancel": "Hủy",
+      "test": "Kiểm tra",
+      "connect": "Kết nối",
+      "validation_required": "Vui lòng nhập máy chủ đích, cổng và tên người dùng.",
+      "test_pending": "Kiểm tra kết nối sẽ được bật khi russh được tích hợp."
+    },
+    "auth": {
+      "password": "Mật khẩu",
+      "default_key": "Khóa mặc định",
+      "ssh_key": "Khóa SSH",
+      "certificate": "Chứng chỉ",
+      "agent": "Đại lý",
+      "two_factor": "2FA"
+    }
+  }
+}

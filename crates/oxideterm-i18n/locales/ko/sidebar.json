@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "활성 세션",
+    "no_sessions": "세션 없음",
+    "add_new_connection": "+를 클릭하여 새 연결 추가",
+    "actions": {
+      "new_local_terminal": "새 로컬 터미널"
+    },
+    "panels": {
+      "sessions": "활성 세션",
+      "session_manager": "세션 관리자",
+      "files": "파일 관리자",
+      "connection_pool": "연결 풀",
+      "connection_monitor": "연결 모니터",
+      "connection_matrix": "연결 매트릭스",
+      "plugins": "플러그인",
+      "ai": "OxideSens",
+      "activity": "활동"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "세션 없음",
+      "click_to_add": "+를 클릭하여 새 연결 추가"
+    }
+  }
+}

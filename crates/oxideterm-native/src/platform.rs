@@ -9,6 +9,9 @@ use crate::{
     ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
     GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, Paste,
     PrevTab, Quit, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
+    SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
+    SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
+    SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
 };
 
 pub(crate) fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
@@ -78,8 +81,23 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
         Menu {
             name: i18n.t("menu.language").into(),
             items: vec![
-                MenuItem::action(locale_label(i18n, Locale::EnUs), SwitchLocaleEnglish),
+                MenuItem::action(locale_label(i18n, Locale::En), SwitchLocaleEnglish),
                 MenuItem::action(locale_label(i18n, Locale::ZhCn), SwitchLocaleChinese),
+                MenuItem::action(
+                    locale_label(i18n, Locale::ZhTw),
+                    SwitchLocaleTraditionalChinese,
+                ),
+                MenuItem::action(locale_label(i18n, Locale::De), SwitchLocaleGerman),
+                MenuItem::action(locale_label(i18n, Locale::EsEs), SwitchLocaleSpanish),
+                MenuItem::action(locale_label(i18n, Locale::FrFr), SwitchLocaleFrench),
+                MenuItem::action(locale_label(i18n, Locale::It), SwitchLocaleItalian),
+                MenuItem::action(locale_label(i18n, Locale::Ja), SwitchLocaleJapanese),
+                MenuItem::action(locale_label(i18n, Locale::Ko), SwitchLocaleKorean),
+                MenuItem::action(
+                    locale_label(i18n, Locale::PtBr),
+                    SwitchLocalePortugueseBrazil,
+                ),
+                MenuItem::action(locale_label(i18n, Locale::Vi), SwitchLocaleVietnamese),
             ],
         },
     ]
@@ -114,8 +132,17 @@ pub(crate) fn app_key_bindings() -> Vec<KeyBinding> {
 
 fn locale_label(i18n: &I18n, locale: Locale) -> String {
     let label = match locale {
-        Locale::EnUs => i18n.t("language.english"),
+        Locale::En => i18n.t("language.english"),
         Locale::ZhCn => i18n.t("language.simplified_chinese"),
+        Locale::ZhTw => i18n.t("language.traditional_chinese"),
+        Locale::De => i18n.t("language.german"),
+        Locale::EsEs => i18n.t("language.spanish"),
+        Locale::FrFr => i18n.t("language.french"),
+        Locale::It => i18n.t("language.italian"),
+        Locale::Ja => i18n.t("language.japanese"),
+        Locale::Ko => i18n.t("language.korean"),
+        Locale::PtBr => i18n.t("language.portuguese_brazil"),
+        Locale::Vi => i18n.t("language.vietnamese"),
     };
     if i18n.locale() == locale {
         format!("✓ {label}")

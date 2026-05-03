@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "새 연결",
+      "subtitle": "새 SSH 연결 세부 정보를 입력하세요.",
+      "name": "이름 (선택 사항)",
+      "name_placeholder": "내 서버",
+      "host": "대상 호스트 *",
+      "host_placeholder": "192.168.1.100",
+      "port": "포트",
+      "username": "대상 사용자 이름 *",
+      "password": "비밀번호",
+      "save_password": "비밀번호를 키체인에 저장",
+      "group": "그룹",
+      "ungrouped": "그룹 없음",
+      "agent_forwarding": "SSH 에이전트 전달 활성화",
+      "save_connection": "나중에 사용할 수 있도록 연결 저장",
+      "cancel": "취소",
+      "test": "테스트",
+      "connect": "연결",
+      "validation_required": "대상 호스트, 포트 및 대상 사용자 이름을 입력하세요.",
+      "test_pending": "russh 전송이 통합되면 연결 테스트가 활성화됩니다."
+    },
+    "auth": {
+      "password": "비밀번호",
+      "default_key": "기본 키",
+      "ssh_key": "SSH 키",
+      "certificate": "인증서",
+      "agent": "에이전트",
+      "two_factor": "2FA"
+    }
+  }
+}

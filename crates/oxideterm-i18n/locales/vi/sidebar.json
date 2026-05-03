@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "Phiên hoạt động",
+    "no_sessions": "Không có phiên",
+    "add_new_connection": "Nhấn + để thêm kết nối",
+    "actions": {
+      "new_local_terminal": "Terminal cục bộ mới"
+    },
+    "panels": {
+      "sessions": "Phiên hoạt động",
+      "session_manager": "Quản lý phiên",
+      "files": "Quản lý tệp",
+      "connection_pool": "Nhóm kết nối",
+      "connection_monitor": "Giám sát kết nối",
+      "connection_matrix": "Ma trận kết nối",
+      "plugins": "Plugin",
+      "ai": "OxideSens",
+      "activity": "Hoạt động"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "Không có phiên",
+      "click_to_add": "Nhấn + để thêm kết nối"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "新しい接続",
+      "subtitle": "新しいSSH接続の詳細を入力してください。",
+      "name": "名前（任意）",
+      "name_placeholder": "マイサーバー",
+      "host": "対象ホスト *",
+      "host_placeholder": "192.168.1.100",
+      "port": "ポート",
+      "username": "対象ユーザー名 *",
+      "password": "パスワード",
+      "save_password": "パスワードをキーチェーンに保存",
+      "group": "グループ",
+      "ungrouped": "グループなし",
+      "agent_forwarding": "SSHエージェント転送を有効にする",
+      "save_connection": "後で使用するために接続を保存",
+      "cancel": "キャンセル",
+      "test": "テスト",
+      "connect": "接続",
+      "validation_required": "対象ホスト、ポート、対象ユーザー名を入力してください。",
+      "test_pending": "russhトランスポートが統合されると接続テストが有効になります。"
+    },
+    "auth": {
+      "password": "パスワード",
+      "default_key": "デフォルトキー",
+      "ssh_key": "SSHキー",
+      "certificate": "証明書",
+      "agent": "エージェント",
+      "two_factor": "2FA"
+    }
+  }
+}

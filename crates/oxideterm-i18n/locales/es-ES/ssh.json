@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "Nueva conexión",
+      "subtitle": "Introduce los detalles para una nueva conexión SSH.",
+      "name": "Nombre (opcional)",
+      "name_placeholder": "Mi servidor",
+      "host": "Host de destino *",
+      "host_placeholder": "192.168.1.100",
+      "port": "Puerto",
+      "username": "Usuario de destino *",
+      "password": "Contraseña",
+      "save_password": "Guardar contraseña en el llavero",
+      "group": "Grupo",
+      "ungrouped": "Sin grupo",
+      "agent_forwarding": "Activar reenvío de agente SSH",
+      "save_connection": "Guardar conexión para uso futuro",
+      "cancel": "Cancelar",
+      "test": "Probar",
+      "connect": "Conectar",
+      "validation_required": "Por favor introduce host de destino, puerto y usuario.",
+      "test_pending": "La prueba de conexión se habilitará cuando el transporte russh esté integrado."
+    },
+    "auth": {
+      "password": "Contraseña",
+      "default_key": "Clave predeterminada",
+      "ssh_key": "Clave SSH",
+      "certificate": "Certificado",
+      "agent": "Agente",
+      "two_factor": "2FA"
+    }
+  }
+}

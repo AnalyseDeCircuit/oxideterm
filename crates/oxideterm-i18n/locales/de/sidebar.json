@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "Aktive Sitzungen",
+    "no_sessions": "Keine Sitzungen",
+    "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
+    "actions": {
+      "new_local_terminal": "Neues lokales Terminal"
+    },
+    "panels": {
+      "sessions": "Aktive Sitzungen",
+      "session_manager": "Sitzungsmanager",
+      "files": "Dateimanager",
+      "connection_pool": "Verbindungspool",
+      "connection_monitor": "Verbindungsmonitor",
+      "connection_matrix": "Verbindungsmatrix",
+      "plugins": "Plugins",
+      "ai": "OxideSens",
+      "activity": "Aktivität"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "Keine Sitzungen",
+      "click_to_add": "Klicken Sie + um eine neue Verbindung hinzuzufügen"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "menu": {
+    "app": "OxideTerm",
+    "services": "서비스",
+    "new_terminal": "새 터미널",
+    "close_tab": "탭 닫기",
+    "quit": "OxideTerm 종료",
+    "edit": "편집",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "find": "찾기",
+    "find_next": "다음 찾기",
+    "find_previous": "이전 찾기",
+    "terminal": "터미널",
+    "split_horizontal": "가로 분할",
+    "split_vertical": "세로 분할",
+    "close_pane": "창 닫기",
+    "window": "창",
+    "next_tab": "다음 탭",
+    "previous_tab": "이전 탭",
+    "language": "언어"
+  }
+}
