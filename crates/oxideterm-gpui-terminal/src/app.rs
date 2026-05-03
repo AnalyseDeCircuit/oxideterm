@@ -9,7 +9,7 @@ use gpui::{
     Bounds, ClipboardItem, Context, FocusHandle, Pixels, SharedString, Subscription, Timer, Window,
     px,
 };
-use oxideterm_terminal::{LocalTerminal, TermMode, TerminalEvent, TerminalSnapshot};
+use oxideterm_terminal::{TermMode, TerminalEvent, TerminalSession, TerminalSnapshot};
 use parking_lot::Mutex;
 
 use crate::terminal_ui::*;
@@ -24,7 +24,7 @@ pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 
 pub struct TerminalPane {
-    terminal: Arc<Mutex<LocalTerminal>>,
+    terminal: Arc<Mutex<TerminalSession>>,
     focus_handle: FocusHandle,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
@@ -53,7 +53,7 @@ pub struct TerminalPane {
 
 impl TerminalPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
-        let terminal = Arc::new(Mutex::new(LocalTerminal::spawn_default(
+        let terminal = Arc::new(Mutex::new(TerminalSession::local_default(
             DEFAULT_COLS,
             DEFAULT_ROWS,
         )?));
@@ -162,7 +162,7 @@ impl TerminalPane {
         let (changed, events) = {
             let mut terminal = self.terminal.lock();
             terminal.refresh_process_info();
-            let changed = terminal.drain_output();
+            let changed = terminal.read_pending();
             (changed, terminal.take_events())
         };
 

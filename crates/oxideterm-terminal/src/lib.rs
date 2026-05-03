@@ -19,6 +19,7 @@ mod color;
 mod data;
 mod process;
 mod search;
+mod session;
 
 pub use alacritty_terminal::term::TermMode;
 pub use data::{
@@ -26,6 +27,10 @@ pub use data::{
     TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
 };
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
+pub use session::{
+    SshPtySession, SshSessionConfig, TerminalResize, TerminalSession, TerminalSessionBackend,
+    TerminalSessionKind, TerminalSessionStatus,
+};
 
 use color::{
     OXIDETERM_DARK_THEME, attrs_from_flags, color_for_alacritty_request_with_override,
@@ -105,18 +110,21 @@ fn focus_report_sequence(enabled: bool, focused: bool) -> Option<&'static [u8]> 
     enabled.then_some(if focused { b"\x1b[I" } else { b"\x1b[O" })
 }
 
-pub struct LocalTerminal {
+pub struct LocalPtySession {
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     notifier: Notifier,
     event_rx: Receiver<AlacEvent>,
     pending_events: Vec<TerminalEvent>,
     io_thread: Option<JoinHandle<(EventLoop<tty::Pty, LocalEventListener>, State)>>,
     size: TerminalSize,
+    title: Option<String>,
     lifecycle: TerminalLifecycle,
     process: ProcessState,
 }
 
-impl LocalTerminal {
+pub type LocalTerminal = LocalPtySession;
+
+impl LocalPtySession {
     pub fn spawn_default(cols: usize, rows: usize) -> Result<Self> {
         let size = TerminalSize {
             cols: cols.max(2),
@@ -173,6 +181,7 @@ impl LocalTerminal {
             pending_events: Vec::new(),
             io_thread: Some(io_thread),
             size,
+            title: None,
             lifecycle: TerminalLifecycle::Running,
             process,
         })
@@ -263,10 +272,12 @@ impl LocalTerminal {
     fn handle_alacritty_event(&mut self, event: AlacEvent) -> bool {
         match event {
             AlacEvent::Title(title) => {
+                self.title = Some(title.clone());
                 self.pending_events.push(TerminalEvent::TitleChanged(title));
                 false
             }
             AlacEvent::ResetTitle => {
+                self.title = None;
                 self.pending_events.push(TerminalEvent::TitleReset);
                 false
             }
@@ -349,7 +360,12 @@ impl LocalTerminal {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
-        self.resize_with_cell_size(cols, rows, self.size.cell_width, self.size.cell_height)
+        self.apply_resize(TerminalResize::new(
+            cols,
+            rows,
+            self.size.cell_width,
+            self.size.cell_height,
+        ))
     }
 
     pub fn resize_with_cell_size(
@@ -359,11 +375,15 @@ impl LocalTerminal {
         cell_width: u16,
         cell_height: u16,
     ) -> Result<()> {
+        self.apply_resize(TerminalResize::new(cols, rows, cell_width, cell_height))
+    }
+
+    fn apply_resize(&mut self, resize: TerminalResize) -> Result<()> {
         let next = TerminalSize {
-            cols: cols.max(2),
-            rows: rows.max(2),
-            cell_width,
-            cell_height,
+            cols: resize.cols,
+            rows: resize.rows,
+            cell_width: resize.cell_width,
+            cell_height: resize.cell_height,
         };
 
         if next.cols == self.size.cols
@@ -588,7 +608,7 @@ fn mark_active_input_rows(rows: &mut [TerminalRow], cursor_row: usize) {
     }
 }
 
-impl Drop for LocalTerminal {
+impl Drop for LocalPtySession {
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -643,6 +663,42 @@ mod tests {
         assert!(TerminalLifecycle::Running.is_running());
         assert!(!TerminalLifecycle::Exited(Some(0)).is_running());
         assert!(!TerminalLifecycle::Closed.is_running());
+    }
+
+    #[test]
+    fn terminal_resize_request_clamps_to_minimum_grid() {
+        let resize = TerminalResize::new(0, 1, 12, 24);
+
+        assert_eq!(resize.cols, 2);
+        assert_eq!(resize.rows, 2);
+        assert_eq!(resize.cell_width, 12);
+        assert_eq!(resize.cell_height, 24);
+    }
+
+    #[test]
+    fn ssh_session_backend_exposes_disconnected_status_contract() {
+        let config = SshSessionConfig::new("example.com", 2222, "alice");
+        let mut session = TerminalSession::ssh(config, 1, 1);
+
+        assert_eq!(session.kind(), TerminalSessionKind::SshPty);
+        assert_eq!(session.title().as_deref(), Some("alice@example.com"));
+
+        let status = session.status();
+        assert_eq!(status.kind, TerminalSessionKind::SshPty);
+        assert_eq!(status.lifecycle, TerminalLifecycle::Closed);
+        assert_eq!(status.process_info, TerminalProcessInfo::default());
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.cols, 2);
+        assert_eq!(snapshot.rows, 2);
+        assert_eq!(snapshot.cursor_shape, TerminalCursorShape::Hidden);
+
+        session.resize_with_cell_size(80, 24, 8, 18).unwrap();
+        let resized = session.snapshot();
+        assert_eq!(resized.cols, 80);
+        assert_eq!(resized.rows, 24);
+
+        assert!(session.write_input(b"ls\n").is_err());
     }
 
     #[test]
