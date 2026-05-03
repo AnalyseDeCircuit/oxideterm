@@ -306,6 +306,16 @@ impl SshSessionConfig {
     }
 }
 
+impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
+    fn from(config: oxideterm_ssh::SshConfig) -> Self {
+        Self {
+            host: config.host,
+            port: config.port,
+            username: config.username,
+        }
+    }
+}
+
 pub struct SshPtySession {
     config: SshSessionConfig,
     resize: TerminalResize,

@@ -4789,10 +4789,25 @@ dependencies = [
  "gpui",
  "oxideterm-gpui-terminal",
  "oxideterm-i18n",
+ "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-theme",
  "oxideterm-workspace",
  "parking_lot",
+]
+
+[[package]]
+name = "oxideterm-ssh"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "parking_lot",
+ "russh",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -4803,6 +4818,7 @@ dependencies = [
  "anyhow",
  "crossbeam-channel",
  "libc",
+ "oxideterm-ssh",
  "tracing",
 ]
 
@@ -9473,6 +9489,7 @@ version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

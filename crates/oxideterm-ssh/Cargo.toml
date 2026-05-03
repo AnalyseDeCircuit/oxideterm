@@ -1,0 +1,15 @@
+[package]
+name = "oxideterm-ssh"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dashmap.workspace = true
+parking_lot.workspace = true
+russh = { path = "../russh" }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+zeroize.workspace = true

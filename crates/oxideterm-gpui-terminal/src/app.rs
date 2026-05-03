@@ -9,7 +9,9 @@ use gpui::{
     Bounds, ClipboardItem, Context, FocusHandle, Pixels, SharedString, Subscription, Timer, Window,
     px,
 };
-use oxideterm_terminal::{TermMode, TerminalEvent, TerminalSession, TerminalSnapshot};
+use oxideterm_terminal::{
+    SshSessionConfig, TermMode, TerminalEvent, TerminalSession, TerminalSnapshot,
+};
 use parking_lot::Mutex;
 
 use crate::terminal_ui::*;
@@ -57,6 +59,27 @@ impl TerminalPane {
             DEFAULT_COLS,
             DEFAULT_ROWS,
         )?));
+        Self::from_session(terminal, window, cx)
+    }
+
+    pub fn new_ssh(
+        config: SshSessionConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(TerminalSession::ssh(
+            config,
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+        )));
+        Self::from_session(terminal, window, cx)
+    }
+
+    fn from_session(
+        terminal: Arc<Mutex<TerminalSession>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
         let snapshot = terminal.lock().snapshot();
         let focus_handle = cx.focus_handle();
         let metrics = TerminalMetrics::measure(window);

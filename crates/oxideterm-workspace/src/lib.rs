@@ -21,6 +21,7 @@ pub enum SplitDirection {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TabKind {
     LocalTerminal,
+    SshTerminal,
 }
 
 #[derive(Clone, Debug)]

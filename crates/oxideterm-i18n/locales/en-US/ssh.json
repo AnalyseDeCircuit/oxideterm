@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "New Connection",
+      "subtitle": "Enter details for a new SSH connection.",
+      "name": "Name (optional)",
+      "name_placeholder": "My Server",
+      "host": "Target Host *",
+      "host_placeholder": "192.168.1.100",
+      "port": "Port",
+      "username": "Target Username *",
+      "password": "Password",
+      "save_password": "Save password to keychain",
+      "group": "Group",
+      "ungrouped": "Ungrouped",
+      "agent_forwarding": "Enable SSH Agent forwarding",
+      "save_connection": "Save connection for future use",
+      "cancel": "Cancel",
+      "test": "Test",
+      "connect": "Connect",
+      "validation_required": "Please enter target host, port, and target username.",
+      "test_pending": "Connection test will be enabled when the russh transport is wired in."
+    },
+    "auth": {
+      "password": "Password",
+      "default_key": "Default Key",
+      "ssh_key": "SSH Key",
+      "certificate": "Certificate",
+      "agent": "Agent",
+      "two_factor": "2FA"
+    }
+  }
+}

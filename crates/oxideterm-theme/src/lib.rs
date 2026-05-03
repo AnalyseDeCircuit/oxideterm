@@ -101,6 +101,12 @@ pub struct UiMetrics {
     pub empty_workspace_padding_x: f32,
     pub empty_workspace_padding_y: f32,
     pub titlebar_label_extra_offset: f32,
+    pub modal_width: f32,
+    pub modal_header_height: f32,
+    pub modal_footer_height: f32,
+    pub form_input_height: f32,
+    pub form_button_height: f32,
+    pub auth_tab_height: f32,
 }
 
 impl UiMetrics {
@@ -150,6 +156,12 @@ impl UiMetrics {
             empty_workspace_padding_x: 16.0,
             empty_workspace_padding_y: 8.0,
             titlebar_label_extra_offset: 18.0,
+            modal_width: 620.0,
+            modal_header_height: 78.0,
+            modal_footer_height: 58.0,
+            form_input_height: 42.0,
+            form_button_height: 36.0,
+            auth_tab_height: 36.0,
         }
     }
 
