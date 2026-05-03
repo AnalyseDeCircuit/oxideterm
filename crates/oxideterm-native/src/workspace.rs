@@ -8,6 +8,10 @@ use gpui::{
 };
 use oxideterm_gpui_terminal::TerminalPane;
 use oxideterm_i18n::{I18n, Locale};
+use oxideterm_ssh::{
+    AuthMethod, ConnectionConsumer, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
+};
+use oxideterm_terminal::SshSessionConfig;
 use oxideterm_theme::{ThemeTokens, default_tokens};
 use oxideterm_workspace::{
     MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TerminalSessionId,
@@ -35,6 +39,68 @@ struct SearchBarState {
     visible: bool,
     query: String,
     active_match: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SshAuthTab {
+    Password,
+    DefaultKey,
+    SshKey,
+    Certificate,
+    Agent,
+    TwoFactor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NewConnectionField {
+    Name,
+    Host,
+    Port,
+    Username,
+    Password,
+    Group,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionButtonAction {
+    Cancel,
+    Test,
+    Connect,
+}
+
+#[derive(Clone, Debug)]
+struct NewConnectionForm {
+    name: String,
+    host: String,
+    port: String,
+    username: String,
+    auth_tab: SshAuthTab,
+    password: String,
+    save_password: bool,
+    group: String,
+    agent_forwarding: bool,
+    save_connection: bool,
+    focused_field: NewConnectionField,
+    error: Option<String>,
+}
+
+impl Default for NewConnectionForm {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            host: String::new(),
+            port: "22".to_string(),
+            username: String::new(),
+            auth_tab: SshAuthTab::Password,
+            password: String::new(),
+            save_password: false,
+            group: String::new(),
+            agent_forwarding: false,
+            save_connection: true,
+            focused_field: NewConnectionField::Name,
+            error: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +136,10 @@ pub(crate) struct WorkspaceApp {
     sidebar_width: f32,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
+    new_connection_form: Option<NewConnectionForm>,
+    ssh_registry: SshConnectionRegistry,
+    node_router: NodeRouter,
+    next_ssh_node_id: u64,
     i18n: I18n,
     tokens: ThemeTokens,
 }
@@ -77,6 +147,8 @@ pub(crate) struct WorkspaceApp {
 impl WorkspaceApp {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
         let focus_handle = cx.focus_handle();
+        let ssh_registry = SshConnectionRegistry::default();
+        let node_router = NodeRouter::new(ssh_registry.clone());
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -92,6 +164,10 @@ impl WorkspaceApp {
             sidebar_width: default_tokens().metrics.sidebar_default_width,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::Sessions,
+            new_connection_form: None,
+            ssh_registry,
+            node_router,
+            next_ssh_node_id: 1,
             i18n: I18n::default(),
             tokens: default_tokens(),
         };
@@ -115,6 +191,47 @@ impl WorkspaceApp {
             id: tab_id,
             kind: TabKind::LocalTerminal,
             title: self.i18n.t("terminal.local_terminal"),
+            root_pane: PaneNode::leaf(pane_id, session_id),
+            active_pane_id: pane_id,
+        });
+        self.active_tab_id = Some(tab_id);
+        self.needs_active_pane_focus = true;
+        pane.read(cx).focus(window);
+        cx.notify();
+        Ok(())
+    }
+
+    fn create_ssh_terminal_tab(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let tab_id = self.alloc_tab_id();
+        let pane_id = self.alloc_pane_id();
+        let session_id = self.alloc_session_id();
+        let node_id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
+        self.next_ssh_node_id += 1;
+
+        self.node_router
+            .upsert_node(node_id.clone(), config.clone());
+        let _ = self.node_router.resolve_connection(
+            &node_id,
+            ConnectionConsumer::Terminal(session_id.0.to_string()),
+        );
+        let _pool_stats = self.ssh_registry.stats();
+
+        let pane = cx.new(|cx| {
+            TerminalPane::new_ssh(SshSessionConfig::from(config), window, cx)
+                .expect("failed to initialize ssh terminal pane")
+        });
+
+        self.panes.insert(pane_id, pane.clone());
+        self.tabs.push(Tab {
+            id: tab_id,
+            kind: TabKind::SshTerminal,
+            title,
             root_pane: PaneNode::leaf(pane_id, session_id),
             active_pane_id: pane_id,
         });
@@ -347,12 +464,120 @@ impl WorkspaceApp {
         }
     }
 
+    fn open_new_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_connection_form = Some(NewConnectionForm {
+            group: self.i18n.t("ssh.form.ungrouped"),
+            ..NewConnectionForm::default()
+        });
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    fn close_new_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_connection_form = None;
+        self.focus_active_pane(window, cx);
+        cx.notify();
+    }
+
+    fn submit_new_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let host = form.host.trim().to_string();
+        let username = form.username.trim().to_string();
+        let port = form.port.trim().parse::<u16>().ok();
+        if host.is_empty() || username.is_empty() || port.is_none() {
+            form.error = Some(self.i18n.t("ssh.form.validation_required"));
+            cx.notify();
+            return;
+        }
+
+        let auth = match form.auth_tab {
+            SshAuthTab::Password => AuthMethod::password(form.password.clone()),
+            SshAuthTab::Agent => AuthMethod::Agent,
+            SshAuthTab::DefaultKey | SshAuthTab::SshKey => AuthMethod::key("", None),
+            SshAuthTab::Certificate => AuthMethod::certificate("", "", None),
+            SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+        };
+        let config = SshConfig {
+            host: host.clone(),
+            port: port.unwrap_or(22),
+            username: username.clone(),
+            auth,
+            agent_forwarding: form.agent_forwarding,
+            ..SshConfig::default()
+        };
+        let title = if form.name.trim().is_empty() {
+            format!("{username}@{host}")
+        } else {
+            form.name.trim().to_string()
+        };
+        self.new_connection_form = None;
+        let _ = self.create_ssh_terminal_tab(config, title, window, cx);
+    }
+
+    fn handle_new_connection_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+
+        if modifiers.platform {
+            return false;
+        }
+
+        match key {
+            "escape" => {
+                self.close_new_connection_form(window, cx);
+                true
+            }
+            "enter" => {
+                self.submit_new_connection_form(window, cx);
+                true
+            }
+            "tab" => {
+                form.focused_field = next_connection_field(form.focused_field, !modifiers.shift);
+                cx.notify();
+                true
+            }
+            "backspace" => {
+                current_connection_field_mut(form).pop();
+                form.error = None;
+                cx.notify();
+                true
+            }
+            "space" => {
+                current_connection_field_mut(form).push(' ');
+                form.error = None;
+                cx.notify();
+                true
+            }
+            key if key.chars().count() == 1 && !modifiers.control && !modifiers.alt => {
+                current_connection_field_mut(form).push_str(key);
+                form.error = None;
+                cx.notify();
+                true
+            }
+            _ => true,
+        }
+    }
+
     fn handle_workspace_key(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.handle_new_connection_key(event, window, cx) {
+            return;
+        }
+
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -747,7 +972,7 @@ impl WorkspaceApp {
     fn render_sidebar_action(
         &self,
         icon: LucideIcon,
-        creates_terminal: bool,
+        opens_connection_form: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -766,11 +991,11 @@ impl WorkspaceApp {
                 rgb(theme.text),
             ));
 
-        if creates_terminal {
+        if opens_connection_form {
             button = button.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    let _ = this.create_local_terminal_tab(window, cx);
+                    this.open_new_connection_form(window, cx);
                 }),
             );
         }
@@ -834,6 +1059,7 @@ impl WorkspaceApp {
             let title = tab.title.clone();
             let tab_label = match tab.kind {
                 TabKind::LocalTerminal => format!(">_ {title}"),
+                TabKind::SshTerminal => format!("⇄ {title}"),
             };
             bar = bar.child(
                 div()
@@ -1010,6 +1236,409 @@ impl WorkspaceApp {
                             let _ = this.create_local_terminal_tab(window, cx);
                         }),
                     ),
+            )
+            .into_any_element()
+    }
+
+    fn render_new_connection_modal(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return div().into_any_element();
+        };
+        let theme = self.tokens.ui;
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba((theme.bg << 8) | 0xcc))
+            .child(
+                div()
+                    .w(px(self.tokens.metrics.modal_width))
+                    .rounded(px(self.tokens.radii.lg))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .child(
+                        div()
+                            .h(px(self.tokens.metrics.modal_header_height))
+                            .flex()
+                            .flex_col()
+                            .justify_center()
+                            .px_3()
+                            .bg(rgb(theme.bg_card))
+                            .border_b_1()
+                            .border_color(rgb(theme.border))
+                            .child(
+                                div()
+                                    .text_size(px(18.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child(self.i18n.t("ssh.form.title")),
+                            )
+                            .child(
+                                div()
+                                    .mt_1()
+                                    .text_size(px(14.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(self.i18n.t("ssh.form.subtitle")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_3()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.name"),
+                                &form.name,
+                                self.i18n.t("ssh.form.name_placeholder"),
+                                NewConnectionField::Name,
+                                false,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .gap_2()
+                                    .child(div().flex_1().child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.host"),
+                                        &form.host,
+                                        self.i18n.t("ssh.form.host_placeholder"),
+                                        NewConnectionField::Host,
+                                        false,
+                                        cx,
+                                    )))
+                                    .child(div().w(px(128.0)).child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.port"),
+                                        &form.port,
+                                        "22".to_string(),
+                                        NewConnectionField::Port,
+                                        false,
+                                        cx,
+                                    ))),
+                            )
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.username"),
+                                &form.username,
+                                "root".to_string(),
+                                NewConnectionField::Username,
+                                false,
+                                cx,
+                            ))
+                            .child(self.render_auth_tabs(form.auth_tab, cx))
+                            .when(form.auth_tab == SshAuthTab::Password, |content| {
+                                content
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.password"),
+                                        &form.password,
+                                        String::new(),
+                                        NewConnectionField::Password,
+                                        true,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_checkbox(
+                                        self.i18n.t("ssh.form.save_password"),
+                                        form.save_password,
+                                        |form| form.save_password = !form.save_password,
+                                        cx,
+                                    ))
+                            })
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.group"),
+                                &form.group,
+                                self.i18n.t("ssh.form.ungrouped"),
+                                NewConnectionField::Group,
+                                false,
+                                cx,
+                            ))
+                            .child(self.render_connection_checkbox(
+                                self.i18n.t("ssh.form.agent_forwarding"),
+                                form.agent_forwarding,
+                                |form| form.agent_forwarding = !form.agent_forwarding,
+                                cx,
+                            ))
+                            .child(self.render_connection_checkbox(
+                                self.i18n.t("ssh.form.save_connection"),
+                                form.save_connection,
+                                |form| form.save_connection = !form.save_connection,
+                                cx,
+                            ))
+                            .when_some(form.error.clone(), |content, error| {
+                                content.child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(rgb(theme.error))
+                                        .child(error),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .h(px(self.tokens.metrics.modal_footer_height))
+                            .px_3()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_end()
+                            .gap_2()
+                            .border_t_1()
+                            .border_color(rgb(theme.border))
+                            .bg(rgb(theme.bg_card))
+                            .child(self.render_connection_button(
+                                self.i18n.t("ssh.form.cancel"),
+                                false,
+                                ConnectionButtonAction::Cancel,
+                                cx,
+                            ))
+                            .child(self.render_connection_button(
+                                self.i18n.t("ssh.form.test"),
+                                false,
+                                ConnectionButtonAction::Test,
+                                cx,
+                            ))
+                            .child(self.render_connection_button(
+                                self.i18n.t("ssh.form.connect"),
+                                true,
+                                ConnectionButtonAction::Connect,
+                                cx,
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_connection_field(
+        &self,
+        label: String,
+        value: &str,
+        placeholder: String,
+        field: NewConnectionField,
+        secret: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let focused = self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.focused_field == field);
+        let display = if value.is_empty() {
+            placeholder
+        } else if secret {
+            "•".repeat(value.chars().count())
+        } else {
+            value.to_string()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(px(13.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(theme.text_heading))
+                    .child(label),
+            )
+            .child(
+                div()
+                    .id(("connection-field", field as u32))
+                    .h(px(self.tokens.metrics.form_input_height))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded(px(self.tokens.radii.md))
+                    .bg(rgb(theme.bg_sunken))
+                    .border_1()
+                    .border_color(if focused {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.border)
+                    })
+                    .text_size(px(14.0))
+                    .text_color(if value.is_empty() {
+                        rgb(theme.text_muted)
+                    } else {
+                        rgb(theme.text)
+                    })
+                    .cursor_pointer()
+                    .child(display)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            if let Some(form) = this.new_connection_form.as_mut() {
+                                form.focused_field = field;
+                            }
+                            window.focus(&this.focus_handle);
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let tabs = [
+            (SshAuthTab::Password, "ssh.auth.password"),
+            (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
+            (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
+            (SshAuthTab::Certificate, "ssh.auth.certificate"),
+            (SshAuthTab::Agent, "ssh.auth.agent"),
+            (SshAuthTab::TwoFactor, "ssh.auth.two_factor"),
+        ];
+        let mut row = div()
+            .h(px(self.tokens.metrics.auth_tab_height))
+            .flex()
+            .flex_row()
+            .rounded(px(self.tokens.radii.md))
+            .overflow_hidden()
+            .bg(rgb(theme.bg_sunken));
+        for (tab, key) in tabs {
+            let selected = tab == active_tab;
+            row = row.child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .bg(if selected {
+                        rgb(theme.bg)
+                    } else {
+                        rgb(theme.bg_sunken)
+                    })
+                    .text_size(px(13.0))
+                    .font_weight(if selected {
+                        gpui::FontWeight::SEMIBOLD
+                    } else {
+                        gpui::FontWeight::NORMAL
+                    })
+                    .text_color(if selected {
+                        rgb(theme.text_heading)
+                    } else {
+                        rgb(theme.text_muted)
+                    })
+                    .child(self.i18n.t(key))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if let Some(form) = this.new_connection_form.as_mut() {
+                                form.auth_tab = tab;
+                            }
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        row.into_any_element()
+    }
+
+    fn render_connection_checkbox(
+        &self,
+        label: String,
+        checked: bool,
+        toggle: fn(&mut NewConnectionForm),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .cursor_pointer()
+            .child(
+                div()
+                    .size(px(18.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(if checked {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.bg_sunken)
+                    })
+                    .text_size(px(12.0))
+                    .text_color(rgb(theme.text_heading))
+                    .child(if checked { "✓" } else { "" }),
+            )
+            .child(
+                div()
+                    .text_size(px(13.0))
+                    .text_color(rgb(theme.text))
+                    .child(label),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        toggle(form);
+                    }
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_connection_button(
+        &self,
+        label: String,
+        primary: bool,
+        action: ConnectionButtonAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(self.tokens.metrics.form_button_height))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(if primary {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.bg_panel)
+            })
+            .text_size(px(13.0))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(if primary {
+                rgb(theme.accent_text)
+            } else {
+                rgb(theme.text)
+            })
+            .cursor_pointer()
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| match action {
+                    ConnectionButtonAction::Cancel => {
+                        this.close_new_connection_form(window, cx);
+                    }
+                    ConnectionButtonAction::Test => {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.error = Some(this.i18n.t("ssh.form.test_pending"));
+                        }
+                        cx.notify();
+                    }
+                    ConnectionButtonAction::Connect => {
+                        this.submit_new_connection_form(window, cx);
+                    }
+                }),
             )
             .into_any_element()
     }
@@ -1294,5 +1923,42 @@ impl Render for WorkspaceApp {
                             ),
                     ),
             )
+            .when(self.new_connection_form.is_some(), |root| {
+                root.child(self.render_new_connection_modal(cx))
+            })
+    }
+}
+
+fn next_connection_field(field: NewConnectionField, forward: bool) -> NewConnectionField {
+    let fields = [
+        NewConnectionField::Name,
+        NewConnectionField::Host,
+        NewConnectionField::Port,
+        NewConnectionField::Username,
+        NewConnectionField::Password,
+        NewConnectionField::Group,
+    ];
+    let index = fields
+        .iter()
+        .position(|candidate| *candidate == field)
+        .unwrap_or(0);
+    let next = if forward {
+        (index + 1) % fields.len()
+    } else if index == 0 {
+        fields.len() - 1
+    } else {
+        index - 1
+    };
+    fields[next]
+}
+
+fn current_connection_field_mut(form: &mut NewConnectionForm) -> &mut String {
+    match form.focused_field {
+        NewConnectionField::Name => &mut form.name,
+        NewConnectionField::Host => &mut form.host,
+        NewConnectionField::Port => &mut form.port,
+        NewConnectionField::Username => &mut form.username,
+        NewConnectionField::Password => &mut form.password,
+        NewConnectionField::Group => &mut form.group,
     }
 }

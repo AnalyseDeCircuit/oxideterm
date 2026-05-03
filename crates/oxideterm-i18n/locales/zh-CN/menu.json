@@ -1,0 +1,23 @@
+{
+  "menu": {
+    "app": "OxideTerm",
+    "services": "服务",
+    "new_terminal": "新建终端",
+    "close_tab": "关闭标签页",
+    "quit": "退出 OxideTerm",
+    "edit": "编辑",
+    "copy": "复制",
+    "paste": "粘贴",
+    "find": "查找",
+    "find_next": "查找下一个",
+    "find_previous": "查找上一个",
+    "terminal": "终端",
+    "split_horizontal": "水平拆分",
+    "split_vertical": "垂直拆分",
+    "close_pane": "关闭窗格",
+    "window": "窗口",
+    "next_tab": "下一个标签页",
+    "previous_tab": "上一个标签页",
+    "language": "语言"
+  }
+}

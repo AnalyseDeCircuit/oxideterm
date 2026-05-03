@@ -9,4 +9,5 @@ alacritty_terminal.workspace = true
 anyhow.workspace = true
 crossbeam-channel.workspace = true
 libc.workspace = true
+oxideterm-ssh = { path = "../oxideterm-ssh" }
 tracing.workspace = true

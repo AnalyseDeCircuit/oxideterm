@@ -1,0 +1,12 @@
+{
+  "app": {
+    "name": "OxideTerm"
+  },
+  "language": {
+    "english": "English",
+    "simplified_chinese": "Simplified Chinese"
+  },
+  "titlebar": {
+    "open_recent_project": "Open Recent Project"
+  }
+}

@@ -9,6 +9,7 @@ anyhow.workspace = true
 gpui.workspace = true
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }

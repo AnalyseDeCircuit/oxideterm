@@ -1,0 +1,33 @@
+{
+  "ssh": {
+    "form": {
+      "title": "新建连接",
+      "subtitle": "输入新 SSH 连接的详细信息。",
+      "name": "名称（可选）",
+      "name_placeholder": "我的服务器",
+      "host": "目标主机 *",
+      "host_placeholder": "192.168.1.100",
+      "port": "端口",
+      "username": "目标用户名 *",
+      "password": "密码",
+      "save_password": "保存密码到钥匙串",
+      "group": "分组",
+      "ungrouped": "未分组",
+      "agent_forwarding": "启用 SSH Agent 转发",
+      "save_connection": "保存连接以便将来使用",
+      "cancel": "取消",
+      "test": "测试",
+      "connect": "连接",
+      "validation_required": "请填写目标主机、端口和目标用户名。",
+      "test_pending": "连接测试会在 russh 传输层接入后启用。"
+    },
+    "auth": {
+      "password": "密码",
+      "default_key": "默认密钥",
+      "ssh_key": "SSH 密钥",
+      "certificate": "证书",
+      "agent": "Agent",
+      "two_factor": "2FA"
+    }
+  }
+}

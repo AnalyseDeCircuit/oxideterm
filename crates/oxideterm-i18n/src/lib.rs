@@ -2,8 +2,20 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-const EN_US: &str = include_str!("../locales/en-US/native.json");
-const ZH_CN: &str = include_str!("../locales/zh-CN/native.json");
+const EN_US_PARTS: &[&str] = &[
+    include_str!("../locales/en-US/common.json"),
+    include_str!("../locales/en-US/menu.json"),
+    include_str!("../locales/en-US/sidebar.json"),
+    include_str!("../locales/en-US/ssh.json"),
+    include_str!("../locales/en-US/terminal.json"),
+];
+const ZH_CN_PARTS: &[&str] = &[
+    include_str!("../locales/zh-CN/common.json"),
+    include_str!("../locales/zh-CN/menu.json"),
+    include_str!("../locales/zh-CN/sidebar.json"),
+    include_str!("../locales/zh-CN/ssh.json"),
+    include_str!("../locales/zh-CN/terminal.json"),
+];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Locale {
@@ -21,8 +33,8 @@ pub struct I18n {
 impl I18n {
     pub fn new(locale: Locale) -> Self {
         let mut catalogs = HashMap::new();
-        catalogs.insert(Locale::EnUs, LocaleCatalog::from_json(EN_US));
-        catalogs.insert(Locale::ZhCn, LocaleCatalog::from_json(ZH_CN));
+        catalogs.insert(Locale::EnUs, LocaleCatalog::from_json_parts(EN_US_PARTS));
+        catalogs.insert(Locale::ZhCn, LocaleCatalog::from_json_parts(ZH_CN_PARTS));
 
         Self {
             locale,
@@ -65,10 +77,13 @@ struct LocaleCatalog {
 }
 
 impl LocaleCatalog {
-    fn from_json(source: &str) -> Self {
-        let value: Value = serde_json::from_str(source).expect("invalid native locale catalog");
+    fn from_json_parts(parts: &[&str]) -> Self {
         let mut messages = HashMap::new();
-        flatten_json("", &value, &mut messages);
+        for source in parts {
+            let value: Value =
+                serde_json::from_str(source).expect("invalid native locale catalog part");
+            flatten_json("", &value, &mut messages);
+        }
         Self { messages }
     }
 
@@ -90,7 +105,8 @@ fn flatten_json(prefix: &str, value: &Value, messages: &mut HashMap<String, Stri
             }
         }
         Value::String(message) => {
-            messages.insert(prefix.to_string(), message.clone());
+            let previous = messages.insert(prefix.to_string(), message.clone());
+            assert!(previous.is_none(), "duplicate native locale key: {prefix}");
         }
         _ => {}
     }
@@ -113,5 +129,22 @@ mod tests {
     fn falls_back_to_english_then_key() {
         let i18n = I18n::new(Locale::ZhCn);
         assert_eq!(i18n.t("missing.key"), "missing.key");
+    }
+
+    #[test]
+    fn split_catalogs_keep_expected_domains() {
+        let i18n = I18n::new(Locale::ZhCn);
+        assert_eq!(i18n.t("ssh.form.title"), "新建连接");
+        assert_eq!(i18n.t("sidebar.panels.sessions"), "活动会话");
+        assert_eq!(i18n.t("terminal.local_terminal"), "本地终端");
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate native locale key")]
+    fn duplicate_keys_are_rejected() {
+        let _ = LocaleCatalog::from_json_parts(&[
+            r#"{"menu":{"copy":"Copy"}}"#,
+            r#"{"menu":{"copy":"Duplicate"}}"#,
+        ]);
     }
 }

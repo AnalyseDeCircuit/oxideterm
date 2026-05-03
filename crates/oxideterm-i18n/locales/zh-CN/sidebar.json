@@ -1,0 +1,27 @@
+{
+  "sidebar": {
+    "active_sessions": "活动会话",
+    "no_sessions": "暂无会话",
+    "add_new_connection": "点击 + 添加新连接",
+    "actions": {
+      "new_local_terminal": "新建本地终端"
+    },
+    "panels": {
+      "sessions": "活动会话",
+      "session_manager": "会话管理器",
+      "files": "文件管理器",
+      "connection_pool": "连接池",
+      "connection_monitor": "连接监控",
+      "connection_matrix": "连接矩阵",
+      "plugins": "插件",
+      "ai": "OxideSens",
+      "activity": "活动"
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "暂无会话",
+      "click_to_add": "点击 + 添加新连接"
+    }
+  }
+}

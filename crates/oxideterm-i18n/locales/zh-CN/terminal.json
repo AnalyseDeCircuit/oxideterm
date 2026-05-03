@@ -1,0 +1,14 @@
+{
+  "terminal": {
+    "local_terminal": "本地终端"
+  },
+  "search": {
+    "placeholder": "搜索",
+    "previous": "上一个",
+    "next": "下一个",
+    "close": "x"
+  },
+  "workspace": {
+    "new_local_terminal": "新建本地终端"
+  }
+}
