@@ -19,7 +19,13 @@
       "test": "测试",
       "connect": "连接",
       "validation_required": "请填写目标主机、端口和目标用户名。",
-      "test_pending": "连接测试会在 russh 传输层接入后启用。"
+      "test_pending": "连接测试会在 russh 传输层接入后启用。",
+      "checking_host_key": "正在检查 SSH 主机密钥...",
+      "test_running": "正在测试 SSH 连接...",
+      "test_success": "SSH 连接测试成功。",
+      "key_path_not_ready": "SSH 密钥认证需要先接入密钥路径选择器。",
+      "certificate_not_ready": "证书认证需要先接入密钥和证书路径选择器。",
+      "keyboard_interactive_not_ready": "Keyboard-interactive 认证需要先接入原生提示流程。"
     },
     "auth": {
       "password": "密码",
@@ -28,6 +34,24 @@
       "certificate": "证书",
       "agent": "Agent",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "未知主机密钥",
+      "title_changed": "主机密钥已变更",
+      "title_error": "主机密钥错误",
+      "unknown_message": "这是 OxideTerm 第一次见到这个 SSH 主机密钥。继续前请确认指纹可信。",
+      "changed_warning": "这个主机保存过的 SSH 主机密钥和服务器当前密钥不一致，可能存在中间人攻击风险。",
+      "key_type_label": "密钥类型",
+      "fingerprint_label": "指纹",
+      "expected_fingerprint": "预期指纹",
+      "actual_fingerprint": "实际指纹",
+      "cancelled": "已取消 SSH 主机密钥确认。",
+      "changed_requires_remove": "主机密钥变更时必须先移除已保存的密钥。",
+      "actions": {
+        "cancel": "取消",
+        "trust_once": "仅信任本次",
+        "trust_save": "信任并保存"
+      }
     }
   }
 }

@@ -4794,6 +4794,7 @@ dependencies = [
  "oxideterm-theme",
  "oxideterm-workspace",
  "parking_lot",
+ "tokio",
 ]
 
 [[package]]

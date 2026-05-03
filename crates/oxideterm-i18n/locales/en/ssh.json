@@ -19,7 +19,13 @@
       "test": "Test",
       "connect": "Connect",
       "validation_required": "Please enter target host, port, and target username.",
-      "test_pending": "Connection test will be enabled when the russh transport is wired in."
+      "test_pending": "Connection test will be enabled when the russh transport is wired in.",
+      "checking_host_key": "Checking SSH host key...",
+      "test_running": "Testing SSH connection...",
+      "test_success": "SSH connection test succeeded.",
+      "key_path_not_ready": "SSH key authentication needs the key path picker before it can connect.",
+      "certificate_not_ready": "Certificate authentication needs key and certificate path pickers before it can connect.",
+      "keyboard_interactive_not_ready": "Keyboard-interactive authentication needs the native prompt flow before it can connect."
     },
     "auth": {
       "password": "Password",
@@ -28,6 +34,24 @@
       "certificate": "Certificate",
       "agent": "Agent",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "Unknown Host Key",
+      "title_changed": "Host Key Changed",
+      "title_error": "Host Key Error",
+      "unknown_message": "This is the first time OxideTerm has seen this SSH host key. Verify the fingerprint before continuing.",
+      "changed_warning": "The saved SSH host key for this host does not match the server key. This may indicate a man-in-the-middle attack.",
+      "key_type_label": "Key Type",
+      "fingerprint_label": "Fingerprint",
+      "expected_fingerprint": "Expected fingerprint",
+      "actual_fingerprint": "Actual fingerprint",
+      "cancelled": "SSH host key confirmation was cancelled.",
+      "changed_requires_remove": "Changed host keys are blocked until the saved key is removed.",
+      "actions": {
+        "cancel": "Cancel",
+        "trust_once": "Trust Once",
+        "trust_save": "Trust and Save"
+      }
     }
   }
 }

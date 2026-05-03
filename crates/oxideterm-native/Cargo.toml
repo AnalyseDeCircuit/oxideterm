@@ -14,3 +14,11 @@ oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 parking_lot.workspace = true
+tokio.workspace = true
+
+[package.metadata.bundle]
+identifier = "com.analysecircuit.OxideTerm"
+name = "OxideTerm"
+osx_minimum_system_version = "13.0"
+osx_info_plist_exts = ["resources/info/*"]
+osx_entitlements = "resources/OxideTerm.entitlements"

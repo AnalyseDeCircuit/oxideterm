@@ -1,0 +1,382 @@
+use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SidebarSection {
+    Sessions,
+    Connections,
+    Terminal,
+    Activity,
+    Network,
+    Extensions,
+    Assistant,
+    Automation,
+    Workspace,
+    Files,
+    Monitor,
+    Notifications,
+    Settings,
+}
+
+impl WorkspaceApp {
+    pub(super) fn set_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
+        self.active_sidebar_section = section;
+        if self.sidebar_collapsed {
+            self.sidebar_collapsed = false;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.sidebar_resizing = false;
+        cx.notify();
+    }
+
+    pub(super) fn sidebar_panel_width(&self) -> f32 {
+        (self.sidebar_width - self.tokens.metrics.activity_bar_width).max(0.0)
+    }
+
+    pub(super) fn set_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        self.sidebar_width = width.clamp(
+            self.tokens.metrics.sidebar_min_width,
+            self.tokens.metrics.sidebar_max_width,
+        );
+        cx.notify();
+    }
+
+    pub(super) fn start_sidebar_resize(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.sidebar_resizing = true;
+        self.set_sidebar_width(f32::from(event.position.x), cx);
+    }
+
+    pub(super) fn update_sidebar_resize(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self.sidebar_resizing {
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        self.set_sidebar_width(f32::from(event.position.x), cx);
+    }
+
+    pub(super) fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_resizing {
+            self.sidebar_resizing = false;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn render_title_bar(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(self.tokens.metrics.titlebar_height))
+            .flex()
+            .items_center()
+            .pl(px(self.tokens.metrics.titlebar_label_x()))
+            .pr_2()
+            .bg(rgb(theme.bg_active))
+            .border_b_1()
+            .border_color(rgb(theme.border))
+            .text_size(px(self.tokens.metrics.titlebar_label_font_size))
+            .text_color(rgb(theme.text_muted))
+            .child(self.i18n.t("titlebar.open_recent_project"))
+            .into_any_element()
+    }
+
+    pub(super) fn render_activity_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let top_items = [
+            (SidebarSection::Sessions, LucideIcon::Link2),
+            (SidebarSection::Connections, LucideIcon::LayoutList),
+            (SidebarSection::Terminal, LucideIcon::Terminal),
+            (SidebarSection::Activity, LucideIcon::Activity),
+            (SidebarSection::Network, LucideIcon::Network),
+            (SidebarSection::Extensions, LucideIcon::Puzzle),
+            (SidebarSection::Assistant, LucideIcon::Sparkles),
+            (SidebarSection::Automation, LucideIcon::Bot),
+        ];
+        let bottom_items = [
+            (SidebarSection::Workspace, LucideIcon::Square),
+            (SidebarSection::Files, LucideIcon::FolderOpen),
+            (SidebarSection::Monitor, LucideIcon::Monitor),
+            (SidebarSection::Notifications, LucideIcon::Bell),
+            (SidebarSection::Settings, LucideIcon::Settings),
+        ];
+
+        let mut bar = div()
+            .w(px(self.tokens.metrics.activity_bar_width))
+            .h_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .py_2()
+            .bg(rgb(theme.bg))
+            .border_r_1()
+            .border_color(rgb(theme.border));
+
+        bar = bar
+            .child(
+                div()
+                    .size(px(self.tokens.metrics.activity_icon_size))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.md))
+                    .cursor_pointer()
+                    .child(Self::render_lucide_icon(
+                        if self.sidebar_collapsed {
+                            LucideIcon::PanelLeft
+                        } else {
+                            LucideIcon::PanelLeftClose
+                        },
+                        self.tokens.metrics.activity_icon_glyph_size,
+                        rgb(theme.text_heading),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.toggle_sidebar(cx);
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(self.tokens.metrics.divider_width))
+                    .h(px(self.tokens.metrics.divider_height))
+                    .my_1()
+                    .bg(rgb(theme.divider)),
+            );
+
+        for (section, icon) in top_items {
+            bar = bar.child(self.render_activity_icon(section, icon, cx));
+        }
+
+        bar.child(div().flex_1())
+            .child(
+                div()
+                    .w(px(self.tokens.metrics.divider_width))
+                    .h(px(self.tokens.metrics.divider_height))
+                    .bg(rgb(theme.divider)),
+            )
+            .children(
+                bottom_items
+                    .into_iter()
+                    .map(|(section, icon)| self.render_activity_icon(section, icon, cx)),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_activity_icon(
+        &self,
+        section: SidebarSection,
+        icon: LucideIcon,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.active_sidebar_section == section;
+        div()
+            .id(("activity-icon", section as u64))
+            .relative()
+            .size(px(self.tokens.metrics.activity_icon_size))
+            .mb(px(self.tokens.spacing.icon_gap))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .bg(if active {
+                rgb(theme.bg_active)
+            } else {
+                rgb(theme.bg)
+            })
+            .border_1()
+            .border_color(if active {
+                rgb(theme.border)
+            } else {
+                rgb(theme.bg)
+            })
+            .cursor_pointer()
+            .when(active, |icon_el| {
+                icon_el.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(self.tokens.metrics.activity_indicator_inset))
+                        .bottom(px(self.tokens.metrics.activity_indicator_inset))
+                        .w(px(self.tokens.metrics.activity_indicator_width))
+                        .rounded(px(self.tokens.radii.active_indicator))
+                        .bg(rgb(theme.accent)),
+                )
+            })
+            .child(Self::render_lucide_icon(
+                icon,
+                self.tokens.metrics.activity_icon_glyph_size,
+                if active {
+                    rgb(theme.text_heading)
+                } else {
+                    rgb(theme.text)
+                },
+            ))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.set_sidebar_section(section, cx);
+                }),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {
+        svg()
+            .path(icon.path())
+            .size(px(size))
+            .text_color(color)
+            .into_any_element()
+    }
+
+    pub(super) fn render_sidebar_region(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .relative()
+            .w(px(self.sidebar_panel_width()))
+            .h_full()
+            .child(self.render_sidebar(cx))
+            .child(
+                div()
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(self.tokens.metrics.sidebar_resize_handle_width))
+                    .cursor(CursorStyle::ResizeColumn)
+                    .bg(if self.sidebar_resizing {
+                        rgb(theme.accent)
+                    } else {
+                        rgba(theme.bg << 8)
+                    })
+                    .hover(|handle| handle.bg(rgba((theme.accent << 8) | 0x80)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event, _window, cx| {
+                            this.start_sidebar_resize(event, cx);
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg_panel))
+            .border_r_1()
+            .border_color(rgb(theme.border))
+            .child(self.render_sidebar_header(cx))
+            .child(self.render_sidebar_content())
+            .into_any_element()
+    }
+
+    pub(super) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(self.tokens.metrics.sidebar_header_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .px_2()
+            .child(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("sidebar.panels.sessions")),
+            )
+            .child(self.render_sidebar_action(LucideIcon::Folder, false, cx))
+            .child(self.render_sidebar_action(LucideIcon::Network, false, cx))
+            .child(self.render_sidebar_action(LucideIcon::Plus, true, cx))
+            .into_any_element()
+    }
+
+    pub(super) fn render_sidebar_action(
+        &self,
+        icon: LucideIcon,
+        opens_connection_form: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut button = div()
+            .size(px(self.tokens.metrics.sidebar_action_size))
+            .ml_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .cursor_pointer()
+            .hover(move |button| button.bg(rgb(theme.bg_hover)))
+            .child(Self::render_lucide_icon(
+                icon,
+                self.tokens.metrics.sidebar_action_icon_size,
+                rgb(theme.text),
+            ));
+
+        if opens_connection_form {
+            button = button.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    this.open_new_connection_form(window, cx);
+                }),
+            );
+        }
+
+        button.into_any_element()
+    }
+
+    pub(super) fn render_sidebar_content(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .pt(px(self.tokens.metrics.empty_sidebar_top_padding))
+            .px(px(self.tokens.metrics.empty_sidebar_padding_x))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(div().mb_3().child(Self::render_lucide_icon(
+                        LucideIcon::Server,
+                        self.tokens.metrics.empty_sidebar_icon_size,
+                        rgb(theme.bg_active),
+                    )))
+                    .child(
+                        div()
+                            .w_full()
+                            .text_center()
+                            .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("sessions.tree.no_sessions")),
+                    )
+                    .child(
+                        div()
+                            .mt_2()
+                            .w_full()
+                            .text_center()
+                            .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("sessions.tree.click_to_add")),
+                    ),
+            )
+            .into_any_element()
+    }
+}

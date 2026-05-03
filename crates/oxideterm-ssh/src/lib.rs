@@ -10,6 +10,7 @@
 
 mod config;
 mod connection_registry;
+mod host_key;
 mod reconnect;
 mod router;
 mod transport;
@@ -20,6 +21,7 @@ pub use connection_registry::{
     HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, SshConnectionHandle, SshConnectionRegistry,
     WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
+pub use host_key::{HostKeyStatus, check_host_key};
 pub use reconnect::{
     PhaseEvent, PhaseResult, ReconnectJob, ReconnectOrchestratorStore, ReconnectPhase,
     ReconnectSnapshot, ReconnectTiming,

@@ -9,7 +9,10 @@ use alacritty_terminal::{
 };
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
-use oxideterm_ssh::{SshConfig, SshPtyHandle, SshTransportClient, SshTransportCommand};
+use oxideterm_ssh::{
+    ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPtyHandle, SshTransportClient,
+    SshTransportCommand,
+};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::error::TryRecvError;
 
@@ -303,15 +306,19 @@ impl TerminalSessionBackend for LocalPtySession {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct SshSessionConfig {
     config: SshConfig,
+    registry: Option<SshConnectionRegistry>,
+    consumer: Option<ConnectionConsumer>,
 }
 
 impl SshSessionConfig {
     pub fn new(host: impl Into<String>, port: u16, username: impl Into<String>) -> Self {
         Self {
             config: SshConfig::password(host, port, username, ""),
+            registry: None,
+            consumer: None,
         }
     }
 
@@ -326,11 +333,25 @@ impl SshSessionConfig {
     pub fn username(&self) -> &str {
         &self.config.username
     }
+
+    pub fn with_registry(
+        mut self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+    ) -> Self {
+        self.registry = Some(registry);
+        self.consumer = Some(consumer);
+        self
+    }
 }
 
 impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
     fn from(config: oxideterm_ssh::SshConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            registry: None,
+            consumer: None,
+        }
     }
 }
 
@@ -375,11 +396,17 @@ impl SshPtySession {
             let mut ssh_config = config.config.clone();
             ssh_config.cols = resize.cols as u32;
             ssh_config.rows = resize.rows as u32;
+            let registry = config.registry.clone();
+            let consumer = config.consumer.clone();
             runtime.spawn(async move {
-                let result = SshTransportClient::new(ssh_config)
-                    .connect_shell()
-                    .await
-                    .map_err(|error| error.to_string());
+                let client = SshTransportClient::new(ssh_config);
+                let result = match (registry, consumer) {
+                    (Some(registry), Some(consumer)) => {
+                        client.connect_shell_with_registry(registry, consumer).await
+                    }
+                    _ => client.connect_shell().await,
+                }
+                .map_err(|error| error.to_string());
                 let _ = connect_tx.send(result);
             });
         } else {
