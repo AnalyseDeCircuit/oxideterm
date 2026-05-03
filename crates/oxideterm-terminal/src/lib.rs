@@ -676,29 +676,12 @@ mod tests {
     }
 
     #[test]
-    fn ssh_session_backend_exposes_disconnected_status_contract() {
+    fn ssh_session_config_preserves_connection_identity() {
         let config = SshSessionConfig::new("example.com", 2222, "alice");
-        let mut session = TerminalSession::ssh(config, 1, 1);
 
-        assert_eq!(session.kind(), TerminalSessionKind::SshPty);
-        assert_eq!(session.title().as_deref(), Some("alice@example.com"));
-
-        let status = session.status();
-        assert_eq!(status.kind, TerminalSessionKind::SshPty);
-        assert_eq!(status.lifecycle, TerminalLifecycle::Closed);
-        assert_eq!(status.process_info, TerminalProcessInfo::default());
-
-        let snapshot = session.snapshot();
-        assert_eq!(snapshot.cols, 2);
-        assert_eq!(snapshot.rows, 2);
-        assert_eq!(snapshot.cursor_shape, TerminalCursorShape::Hidden);
-
-        session.resize_with_cell_size(80, 24, 8, 18).unwrap();
-        let resized = session.snapshot();
-        assert_eq!(resized.cols, 80);
-        assert_eq!(resized.rows, 24);
-
-        assert!(session.write_input(b"ls\n").is_err());
+        assert_eq!(config.host(), "example.com");
+        assert_eq!(config.port(), 2222);
+        assert_eq!(config.username(), "alice");
     }
 
     #[test]

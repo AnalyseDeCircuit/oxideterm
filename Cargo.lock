@@ -4819,6 +4819,7 @@ dependencies = [
  "crossbeam-channel",
  "libc",
  "oxideterm-ssh",
+ "tokio",
  "tracing",
 ]
 

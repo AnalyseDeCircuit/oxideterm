@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
     pub host: String,
     #[serde(default = "default_port")]
@@ -60,7 +60,7 @@ impl SshConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProxyHopConfig {
     pub host: String,
     #[serde(default = "default_port")]
@@ -69,7 +69,7 @@ pub struct ProxyHopConfig {
     pub auth: AuthMethod,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthMethod {
     Password {

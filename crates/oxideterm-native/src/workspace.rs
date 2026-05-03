@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use gpui::{
     AnyElement, App, Context, CursorStyle, FocusHandle, Focusable, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Rgba,
-    SharedString, Styled, Window, div, prelude::*, px, relative, rgb, rgba, svg,
+    SharedString, Styled, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_gpui_terminal::TerminalPane;
 use oxideterm_i18n::{I18n, Locale};
@@ -140,6 +140,7 @@ pub(crate) struct WorkspaceApp {
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
     new_connection_form: Option<NewConnectionForm>,
+    new_connection_caret_visible: bool,
     ssh_registry: SshConnectionRegistry,
     node_router: NodeRouter,
     next_ssh_node_id: u64,
@@ -168,12 +169,33 @@ impl WorkspaceApp {
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::Sessions,
             new_connection_form: None,
+            new_connection_caret_visible: true,
             ssh_registry,
             node_router,
             next_ssh_node_id: 1,
             i18n: I18n::default(),
             tokens: default_tokens(),
         };
+        cx.spawn(async move |weak, cx| {
+            loop {
+                Timer::after(Duration::from_millis(530)).await;
+                if weak
+                    .update(cx, |workspace, cx| {
+                        if workspace.new_connection_form.is_some() {
+                            workspace.new_connection_caret_visible =
+                                !workspace.new_connection_caret_visible;
+                            cx.notify();
+                        } else if !workspace.new_connection_caret_visible {
+                            workspace.new_connection_caret_visible = true;
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         workspace.create_local_terminal_tab(window, cx)?;
         Ok(workspace)
     }
@@ -472,6 +494,8 @@ impl WorkspaceApp {
             group: self.i18n.t("ssh.form.ungrouped"),
             ..NewConnectionForm::default()
         });
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
         cx.notify();
     }
@@ -532,7 +556,10 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         if modifiers.platform {
-            return false;
+            if key == "v" {
+                self.paste_into_new_connection_field(cx);
+            }
+            return true;
         }
 
         match key {
@@ -546,29 +573,48 @@ impl WorkspaceApp {
             }
             "tab" => {
                 form.focused_field = next_connection_field(form.focused_field, !modifiers.shift);
+                self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             "backspace" => {
                 current_connection_field_mut(form).pop();
                 form.error = None;
+                self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             "space" => {
                 current_connection_field_mut(form).push(' ');
                 form.error = None;
+                self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             key if key.chars().count() == 1 && !modifiers.control && !modifiers.alt => {
                 current_connection_field_mut(form).push_str(key);
                 form.error = None;
+                self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             _ => true,
         }
+    }
+
+    fn paste_into_new_connection_field(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
+        current_connection_field_mut(form).push_str(&single_line);
+        form.error = None;
+        self.new_connection_caret_visible = true;
+        cx.notify();
     }
 
     fn handle_workspace_key(
@@ -577,7 +623,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.handle_new_connection_key(event, window, cx) {
+        if self.new_connection_form.is_some() {
+            let _ = self.handle_new_connection_key(event, window, cx);
             return;
         }
 
@@ -1010,13 +1057,16 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .flex_1()
+            .w_full()
             .flex()
             .flex_col()
             .items_center()
             .pt(px(self.tokens.metrics.empty_sidebar_top_padding))
+            .px(px(self.tokens.metrics.empty_sidebar_padding_x))
             .text_color(rgb(theme.text_muted))
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .items_center()
@@ -1027,6 +1077,8 @@ impl WorkspaceApp {
                     )))
                     .child(
                         div()
+                            .w_full()
+                            .text_center()
                             .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_muted))
@@ -1035,6 +1087,8 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .mt_2()
+                            .w_full()
+                            .text_center()
                             .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("sessions.tree.click_to_add")),
@@ -1261,24 +1315,24 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w(px(self.tokens.metrics.modal_width))
-                    .rounded(px(self.tokens.radii.lg))
+                    .rounded(px(self.tokens.radii.md))
                     .overflow_hidden()
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
+                    .bg(rgb(theme.bg_elevated))
                     .child(
                         div()
-                            .h(px(self.tokens.metrics.modal_header_height))
                             .flex()
                             .flex_col()
                             .justify_center()
-                            .px_3()
-                            .bg(rgb(theme.bg_card))
+                            .px(px(self.tokens.metrics.modal_header_padding_x))
+                            .py(px(self.tokens.metrics.modal_header_padding_y))
+                            .bg(rgb(theme.bg_panel))
                             .border_b_1()
                             .border_color(rgb(theme.border))
                             .child(
                                 div()
-                                    .text_size(px(18.0))
+                                    .text_size(px(self.tokens.metrics.modal_title_font_size))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
                                     .child(self.i18n.t("ssh.form.title")),
@@ -1286,94 +1340,105 @@ impl WorkspaceApp {
                             .child(
                                 div()
                                     .mt_1()
-                                    .text_size(px(14.0))
+                                    .text_size(px(self.tokens.metrics.modal_description_font_size))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.i18n.t("ssh.form.subtitle")),
                             ),
                     )
                     .child(
                         div()
-                            .px_3()
-                            .py_3()
+                            .p(px(self.tokens.metrics.modal_body_padding))
                             .flex()
                             .flex_col()
-                            .gap_2()
-                            .child(self.render_connection_field(
-                                self.i18n.t("ssh.form.name"),
-                                &form.name,
-                                self.i18n.t("ssh.form.name_placeholder"),
-                                NewConnectionField::Name,
-                                false,
-                                cx,
-                            ))
+                            .gap(px(self.tokens.metrics.modal_body_gap))
                             .child(
                                 div()
                                     .flex()
-                                    .flex_row()
-                                    .gap_2()
-                                    .child(div().flex_1().child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.host"),
-                                        &form.host,
-                                        self.i18n.t("ssh.form.host_placeholder"),
-                                        NewConnectionField::Host,
-                                        false,
-                                        cx,
-                                    )))
-                                    .child(div().w(px(128.0)).child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.port"),
-                                        &form.port,
-                                        "22".to_string(),
-                                        NewConnectionField::Port,
-                                        false,
-                                        cx,
-                                    ))),
-                            )
-                            .child(self.render_connection_field(
-                                self.i18n.t("ssh.form.username"),
-                                &form.username,
-                                "root".to_string(),
-                                NewConnectionField::Username,
-                                false,
-                                cx,
-                            ))
-                            .child(self.render_auth_tabs(form.auth_tab, cx))
-                            .when(form.auth_tab == SshAuthTab::Password, |content| {
-                                content
+                                    .flex_col()
+                                    .gap(px(self.tokens.metrics.modal_section_gap))
                                     .child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.password"),
-                                        &form.password,
-                                        String::new(),
-                                        NewConnectionField::Password,
-                                        true,
+                                        self.i18n.t("ssh.form.name"),
+                                        &form.name,
+                                        self.i18n.t("ssh.form.name_placeholder"),
+                                        NewConnectionField::Name,
+                                        false,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .gap(px(self.tokens.metrics.form_host_port_gap))
+                                            .child(div().flex_1().child(
+                                                self.render_connection_field(
+                                                    self.i18n.t("ssh.form.host"),
+                                                    &form.host,
+                                                    self.i18n.t("ssh.form.host_placeholder"),
+                                                    NewConnectionField::Host,
+                                                    false,
+                                                    cx,
+                                                ),
+                                            ))
+                                            .child(
+                                                div()
+                                                    .w(px(self.tokens.metrics.form_port_width))
+                                                    .child(self.render_connection_field(
+                                                        self.i18n.t("ssh.form.port"),
+                                                        &form.port,
+                                                        "22".to_string(),
+                                                        NewConnectionField::Port,
+                                                        false,
+                                                        cx,
+                                                    )),
+                                            ),
+                                    )
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.username"),
+                                        &form.username,
+                                        "root".to_string(),
+                                        NewConnectionField::Username,
+                                        false,
+                                        cx,
+                                    ))
+                                    .child(self.render_auth_tabs(form.auth_tab, cx))
+                                    .when(form.auth_tab == SshAuthTab::Password, |content| {
+                                        content
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.password"),
+                                                &form.password,
+                                                String::new(),
+                                                NewConnectionField::Password,
+                                                true,
+                                                cx,
+                                            ))
+                                            .child(self.render_connection_checkbox(
+                                                self.i18n.t("ssh.form.save_password"),
+                                                form.save_password,
+                                                |form| form.save_password = !form.save_password,
+                                                cx,
+                                            ))
+                                    })
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.group"),
+                                        &form.group,
+                                        self.i18n.t("ssh.form.ungrouped"),
+                                        NewConnectionField::Group,
+                                        false,
                                         cx,
                                     ))
                                     .child(self.render_connection_checkbox(
-                                        self.i18n.t("ssh.form.save_password"),
-                                        form.save_password,
-                                        |form| form.save_password = !form.save_password,
+                                        self.i18n.t("ssh.form.agent_forwarding"),
+                                        form.agent_forwarding,
+                                        |form| form.agent_forwarding = !form.agent_forwarding,
                                         cx,
                                     ))
-                            })
-                            .child(self.render_connection_field(
-                                self.i18n.t("ssh.form.group"),
-                                &form.group,
-                                self.i18n.t("ssh.form.ungrouped"),
-                                NewConnectionField::Group,
-                                false,
-                                cx,
-                            ))
-                            .child(self.render_connection_checkbox(
-                                self.i18n.t("ssh.form.agent_forwarding"),
-                                form.agent_forwarding,
-                                |form| form.agent_forwarding = !form.agent_forwarding,
-                                cx,
-                            ))
-                            .child(self.render_connection_checkbox(
-                                self.i18n.t("ssh.form.save_connection"),
-                                form.save_connection,
-                                |form| form.save_connection = !form.save_connection,
-                                cx,
-                            ))
+                                    .child(self.render_connection_checkbox(
+                                        self.i18n.t("ssh.form.save_connection"),
+                                        form.save_connection,
+                                        |form| form.save_connection = !form.save_connection,
+                                        cx,
+                                    )),
+                            )
                             .when_some(form.error.clone(), |content, error| {
                                 content.child(
                                     div()
@@ -1386,7 +1451,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .h(px(self.tokens.metrics.modal_footer_height))
-                            .px_3()
+                            .px(px(self.tokens.metrics.modal_footer_padding_x))
                             .flex()
                             .flex_row()
                             .items_center()
@@ -1394,7 +1459,7 @@ impl WorkspaceApp {
                             .gap_2()
                             .border_t_1()
                             .border_color(rgb(theme.border))
-                            .bg(rgb(theme.bg_card))
+                            .bg(rgb(theme.bg_panel))
                             .child(self.render_connection_button(
                                 self.i18n.t("ssh.form.cancel"),
                                 false,
@@ -1442,48 +1507,80 @@ impl WorkspaceApp {
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(px(self.tokens.metrics.modal_field_gap))
             .child(
                 div()
-                    .text_size(px(13.0))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme.text_heading))
+                    .text_size(px(self.tokens.metrics.form_label_font_size))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
                     .child(label),
             )
             .child(
                 div()
                     .id(("connection-field", field as u32))
                     .h(px(self.tokens.metrics.form_input_height))
-                    .px_2()
+                    .px(px(self.tokens.metrics.form_input_padding_x))
                     .flex()
                     .items_center()
                     .rounded(px(self.tokens.radii.md))
-                    .bg(rgb(theme.bg_sunken))
+                    .bg(rgba((theme.bg << 8) | 0x80))
                     .border_1()
                     .border_color(if focused {
                         rgb(theme.accent)
                     } else {
                         rgb(theme.border)
                     })
-                    .text_size(px(14.0))
+                    .text_size(px(self.tokens.metrics.form_text_font_size))
                     .text_color(if value.is_empty() {
                         rgb(theme.text_muted)
                     } else {
                         rgb(theme.text)
                     })
                     .cursor_pointer()
-                    .child(display)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .when(
+                                focused && value.is_empty() && self.new_connection_caret_visible,
+                                |row| row.child(self.render_connection_caret()),
+                            )
+                            .child(
+                                div()
+                                    .text_color(if value.is_empty() {
+                                        rgb(theme.text_muted)
+                                    } else {
+                                        rgb(theme.text)
+                                    })
+                                    .child(display),
+                            )
+                            .when(
+                                focused && !value.is_empty() && self.new_connection_caret_visible,
+                                |row| row.child(self.render_connection_caret()),
+                            ),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
                             if let Some(form) = this.new_connection_form.as_mut() {
                                 form.focused_field = field;
                             }
+                            this.new_connection_caret_visible = true;
                             window.focus(&this.focus_handle);
                             cx.notify();
                         }),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn render_connection_caret(&self) -> AnyElement {
+        div()
+            .w(px(self.tokens.metrics.form_caret_width))
+            .h(px(self.tokens.metrics.form_caret_height))
+            .bg(rgb(self.tokens.ui.accent))
             .into_any_element()
     }
 
@@ -1501,9 +1598,10 @@ impl WorkspaceApp {
             .h(px(self.tokens.metrics.auth_tab_height))
             .flex()
             .flex_row()
-            .rounded(px(self.tokens.radii.md))
+            .p(px(self.tokens.metrics.auth_tab_padding))
+            .rounded(px(self.tokens.radii.xs))
             .overflow_hidden()
-            .bg(rgb(theme.bg_sunken));
+            .bg(rgb(theme.bg_panel));
         for (tab, key) in tabs {
             let selected = tab == active_tab;
             row = row.child(
@@ -1514,19 +1612,16 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
+                    .rounded(px(self.tokens.radii.xs))
                     .bg(if selected {
                         rgb(theme.bg)
                     } else {
-                        rgb(theme.bg_sunken)
+                        rgb(theme.bg_panel)
                     })
-                    .text_size(px(13.0))
-                    .font_weight(if selected {
-                        gpui::FontWeight::SEMIBOLD
-                    } else {
-                        gpui::FontWeight::NORMAL
-                    })
+                    .text_size(px(self.tokens.metrics.form_text_font_size))
+                    .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(if selected {
-                        rgb(theme.text_heading)
+                        rgb(theme.text)
                     } else {
                         rgb(theme.text_muted)
                     })
@@ -1561,25 +1656,29 @@ impl WorkspaceApp {
             .cursor_pointer()
             .child(
                 div()
-                    .size(px(18.0))
+                    .size(px(self.tokens.metrics.form_checkbox_size))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(self.tokens.radii.sm))
+                    .rounded(px(self.tokens.radii.xs))
                     .border_1()
-                    .border_color(rgb(theme.border))
+                    .border_color(if checked {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.border)
+                    })
                     .bg(if checked {
                         rgb(theme.accent)
                     } else {
-                        rgb(theme.bg_sunken)
+                        rgb(theme.bg)
                     })
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text_heading))
+                    .text_size(px(self.tokens.metrics.form_checkbox_glyph_size))
+                    .text_color(rgb(theme.accent_text))
                     .child(if checked { "✓" } else { "" }),
             )
             .child(
                 div()
-                    .text_size(px(13.0))
+                    .text_size(px(self.tokens.metrics.form_text_font_size))
                     .text_color(rgb(theme.text))
                     .child(label),
             )
@@ -1605,7 +1704,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .h(px(self.tokens.metrics.form_button_height))
-            .px_3()
+            .px(px(self.tokens.metrics.form_button_padding_x))
             .flex()
             .items_center()
             .justify_center()
@@ -1615,10 +1714,10 @@ impl WorkspaceApp {
             .bg(if primary {
                 rgb(theme.accent)
             } else {
-                rgb(theme.bg_panel)
+                rgb(theme.bg_elevated)
             })
-            .text_size(px(13.0))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_size(px(self.tokens.metrics.form_text_font_size))
+            .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(if primary {
                 rgb(theme.accent_text)
             } else {
@@ -1785,6 +1884,7 @@ impl Render for WorkspaceApp {
         window.set_window_title(&SharedString::from(title));
         if self.needs_active_pane_focus
             && !self.search.visible
+            && self.new_connection_form.is_none()
             && let Some(pane) = self.active_pane()
         {
             self.needs_active_pane_focus = false;
@@ -1809,6 +1909,13 @@ impl Render for WorkspaceApp {
             .font_family(SharedString::from(self.tokens.metrics.font_family))
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
+            .capture_key_down(cx.listener(|this, event, window, cx| {
+                if this.new_connection_form.is_some() {
+                    let _ = this.handle_new_connection_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
             .on_key_down(cx.listener(|this, event, window, cx| {
                 this.handle_workspace_key(event, window, cx);
             }))
@@ -1844,8 +1951,18 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &ClosePane, window, cx| {
                 this.close_active_pane(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &Copy, _window, cx| this.copy(cx)))
-            .on_action(cx.listener(|this, _: &Paste, _window, cx| this.paste(cx)))
+            .on_action(cx.listener(|this, _: &Copy, _window, cx| {
+                if this.new_connection_form.is_none() {
+                    this.copy(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Paste, _window, cx| {
+                if this.new_connection_form.is_some() {
+                    this.paste_into_new_connection_field(cx);
+                } else {
+                    this.paste(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &Find, window, cx| {
                 this.open_search(window, cx);
             }))
