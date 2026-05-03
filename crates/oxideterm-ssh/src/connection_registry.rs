@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    any::Any,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -97,6 +98,7 @@ struct ConnectionEntry {
     state: RwLock<ConnectionState>,
     ref_count: AtomicU64,
     consumers: RwLock<Vec<ConnectionConsumer>>,
+    physical: RwLock<Option<Arc<dyn Any + Send + Sync>>>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
     idle_timeout: Option<Duration>,
@@ -112,6 +114,7 @@ impl ConnectionEntry {
             state: RwLock::new(ConnectionState::Connecting),
             ref_count: AtomicU64::new(0),
             consumers: RwLock::new(Vec::new()),
+            physical: RwLock::new(None),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
@@ -159,6 +162,31 @@ impl SshConnectionHandle {
 
     pub fn state(&self) -> ConnectionState {
         self.entry.state.read().clone()
+    }
+
+    pub fn physical<T>(&self) -> Option<Arc<T>>
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        self.entry
+            .physical
+            .read()
+            .as_ref()
+            .cloned()
+            .and_then(|physical| Arc::downcast::<T>(physical).ok())
+    }
+
+    pub fn set_physical<T>(&self, physical: Arc<T>)
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        *self.entry.physical.write() = Some(physical);
+        self.entry.touch();
+    }
+
+    pub fn clear_physical(&self) {
+        *self.entry.physical.write() = None;
+        self.entry.touch();
     }
 }
 
@@ -342,5 +370,24 @@ mod tests {
 
         assert_eq!(handle.info().ref_count, 0);
         assert_eq!(handle.state(), ConnectionState::Idle);
+    }
+
+    #[test]
+    fn stores_one_physical_connection_slot_per_entry() {
+        let registry = SshConnectionRegistry::default();
+        let first = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            ConnectionConsumer::Terminal("a".into()),
+        );
+        let second = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            ConnectionConsumer::Sftp("b".into()),
+        );
+        first.set_physical(Arc::new(String::from("authenticated")));
+
+        assert_eq!(
+            second.physical::<String>().as_deref().map(String::as_str),
+            Some("authenticated")
+        );
     }
 }

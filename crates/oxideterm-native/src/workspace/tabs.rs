@@ -43,8 +43,11 @@ impl WorkspaceApp {
         self.node_router
             .upsert_node(node_id.clone(), config.clone());
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
-        let session_config =
-            SshSessionConfig::from(config).with_registry(self.ssh_registry.clone(), consumer);
+        let prompt_handler =
+            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let session_config = SshSessionConfig::from(config)
+            .with_registry(self.ssh_registry.clone(), consumer)
+            .with_prompt_handler(prompt_handler);
         let pane = cx.new(|cx| {
             TerminalPane::new_ssh(session_config, window, cx)
                 .expect("failed to initialize ssh terminal pane")

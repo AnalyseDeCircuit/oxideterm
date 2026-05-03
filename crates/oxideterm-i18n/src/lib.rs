@@ -252,6 +252,66 @@ mod tests {
     }
 
     #[test]
+    fn ssh_connection_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "ssh.form.checking_host_key",
+            "ssh.form.test_running",
+            "ssh.form.test_success",
+            "ssh.form.default_key_desc",
+            "ssh.form.passphrase",
+            "ssh.form.passphrase_placeholder",
+            "ssh.form.key_file",
+            "ssh.form.certificate_note",
+            "ssh.form.private_key",
+            "ssh.form.certificate",
+            "ssh.form.agent_desc",
+            "ssh.form.two_factor_desc",
+            "ssh.form.key_path_required",
+            "ssh.form.certificate_paths_required",
+            "ssh.form.key_path_not_ready",
+            "ssh.form.certificate_not_ready",
+            "ssh.form.keyboard_interactive_not_ready",
+            "ssh.host_key.title_unknown",
+            "ssh.host_key.title_changed",
+            "ssh.host_key.title_error",
+            "ssh.host_key.unknown_message",
+            "ssh.host_key.changed_warning",
+            "ssh.host_key.key_type_label",
+            "ssh.host_key.fingerprint_label",
+            "ssh.host_key.expected_fingerprint",
+            "ssh.host_key.actual_fingerprint",
+            "ssh.host_key.cancelled",
+            "ssh.host_key.changed_requires_remove",
+            "ssh.host_key.actions.cancel",
+            "ssh.host_key.actions.trust_once",
+            "ssh.host_key.actions.trust_save",
+            "ssh.kbi.title",
+            "ssh.kbi.continue",
+            "ssh.kbi.cancelled",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
     fn language_names_are_autonyms_in_every_locale() {
         let expected = [
             ("language.english", "English"),

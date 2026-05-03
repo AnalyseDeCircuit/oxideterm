@@ -15,6 +15,9 @@ pub(in crate::workspace) enum NewConnectionField {
     Port,
     Username,
     Password,
+    KeyPath,
+    CertPath,
+    Passphrase,
     Group,
 }
 
@@ -26,6 +29,9 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) username: String,
     pub(in crate::workspace) auth_tab: SshAuthTab,
     pub(in crate::workspace) password: String,
+    pub(in crate::workspace) key_path: String,
+    pub(in crate::workspace) cert_path: String,
+    pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) agent_forwarding: bool,
@@ -41,9 +47,12 @@ impl Default for NewConnectionForm {
             name: String::new(),
             host: String::new(),
             port: "22".to_string(),
-            username: String::new(),
+            username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
             password: String::new(),
+            key_path: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
             save_password: false,
             group: String::new(),
             agent_forwarding: false,
@@ -57,16 +66,53 @@ impl Default for NewConnectionForm {
 
 pub(in crate::workspace) fn next_connection_field(
     field: NewConnectionField,
+    auth_tab: SshAuthTab,
     forward: bool,
 ) -> NewConnectionField {
-    let fields = [
-        NewConnectionField::Name,
-        NewConnectionField::Host,
-        NewConnectionField::Port,
-        NewConnectionField::Username,
-        NewConnectionField::Password,
-        NewConnectionField::Group,
-    ];
+    let fields: Vec<NewConnectionField> = match auth_tab {
+        SshAuthTab::Password => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::Password,
+            NewConnectionField::Group,
+        ],
+        SshAuthTab::DefaultKey => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::Passphrase,
+            NewConnectionField::Group,
+        ],
+        SshAuthTab::SshKey => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::KeyPath,
+            NewConnectionField::Passphrase,
+            NewConnectionField::Group,
+        ],
+        SshAuthTab::Certificate => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::KeyPath,
+            NewConnectionField::CertPath,
+            NewConnectionField::Passphrase,
+            NewConnectionField::Group,
+        ],
+        SshAuthTab::Agent | SshAuthTab::TwoFactor => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::Group,
+        ],
+    };
     let index = fields
         .iter()
         .position(|candidate| *candidate == field)
@@ -90,6 +136,9 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
         NewConnectionField::Password => &mut form.password,
+        NewConnectionField::KeyPath => &mut form.key_path,
+        NewConnectionField::CertPath => &mut form.cert_path,
+        NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
     }
 }

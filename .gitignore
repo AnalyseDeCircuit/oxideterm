@@ -25,3 +25,4 @@ target/
 .env
 .env.local
 /docs/local
+.codex-private/

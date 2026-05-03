@@ -23,7 +23,10 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
-use self::new_connection::{HostKeyChallenge, NewConnectionForm, SshConnectionWorkerResult};
+use self::new_connection::{
+    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
+    SshConnectionWorkerResult,
+};
 use self::pane_tree::SplitDrag;
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
@@ -54,7 +57,9 @@ pub(crate) struct WorkspaceApp {
     new_connection_form: Option<NewConnectionForm>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
-    ssh_worker_rx: Option<std::sync::mpsc::Receiver<SshConnectionWorkerResult>>,
+    keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
+    ssh_worker_tx: std::sync::mpsc::Sender<SshConnectionWorkerResult>,
+    ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_registry: SshConnectionRegistry,
     node_router: NodeRouter,
     next_ssh_node_id: u64,
@@ -67,6 +72,7 @@ impl WorkspaceApp {
         let focus_handle = cx.focus_handle();
         let ssh_registry = SshConnectionRegistry::default();
         let node_router = NodeRouter::new(ssh_registry.clone());
+        let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -85,7 +91,9 @@ impl WorkspaceApp {
             new_connection_form: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
-            ssh_worker_rx: None,
+            keyboard_interactive_challenge: None,
+            ssh_worker_tx,
+            ssh_worker_rx,
             ssh_registry,
             node_router,
             next_ssh_node_id: 1,
@@ -102,7 +110,9 @@ impl WorkspaceApp {
                 if window_handle
                     .update(cx, |workspace, window, cx| {
                         workspace.poll_ssh_worker_results(window, cx);
-                        if workspace.new_connection_form.is_some() {
+                        if workspace.new_connection_form.is_some()
+                            || workspace.keyboard_interactive_challenge.is_some()
+                        {
                             workspace.new_connection_caret_visible =
                                 !workspace.new_connection_caret_visible;
                             cx.notify();
@@ -164,7 +174,11 @@ impl Render for WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.host_key_challenge.is_some() {
+                if this.keyboard_interactive_challenge.is_some() {
+                    let _ = this.handle_keyboard_interactive_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.host_key_challenge.is_some() {
                     if event.keystroke.key.as_str() == "escape" {
                         this.cancel_host_key_challenge(cx);
                     }
@@ -339,6 +353,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.host_key_challenge.is_some(), |root| {
                 root.child(self.render_host_key_dialog(cx))
+            })
+            .when(self.keyboard_interactive_challenge.is_some(), |root| {
+                root.child(self.render_keyboard_interactive_dialog(cx))
             })
     }
 }

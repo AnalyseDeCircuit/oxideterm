@@ -19,7 +19,24 @@
       "test": "Test",
       "connect": "Connetti",
       "validation_required": "Inserisci host di destinazione, porta e nome utente.",
-      "test_pending": "Il test di connessione sarà abilitato quando il trasporto russh sarà integrato."
+      "test_pending": "Il test di connessione sarà abilitato quando il trasporto russh sarà integrato.",
+      "checking_host_key": "Controllo della chiave host SSH...",
+      "test_running": "Test della connessione SSH...",
+      "test_success": "Test della connessione SSH riuscito.",
+      "key_path_not_ready": "L’autenticazione con chiave SSH richiede prima il selettore del percorso della chiave.",
+      "certificate_not_ready": "L’autenticazione con certificato richiede prima i selettori di chiave e certificato.",
+      "keyboard_interactive_not_ready": "L’autenticazione keyboard-interactive richiede prima il flusso di prompt nativo.",
+      "default_key_desc": "Usa la chiave SSH predefinita (es. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "Passphrase (opzionale)",
+      "passphrase_placeholder": "Passphrase chiave se crittografata",
+      "key_file": "File Chiave",
+      "certificate_note": "Questa opzione è per i certificati firmati da CA OpenSSH, non per le chiavi SSH normali. Se hai una chiave privata con passphrase, usa la scheda Chiave SSH.",
+      "private_key": "Chiave Privata",
+      "certificate": "Certificato",
+      "agent_desc": "Autentica usando il SSH Agent di sistema",
+      "two_factor_desc": "Autenticazione a Due Fattori (Keyboard-Interactive)",
+      "key_path_required": "Il percorso della chiave SSH è obbligatorio per l’autenticazione con chiave.",
+      "certificate_paths_required": "L’autenticazione con certificato richiede il percorso della chiave SSH e del certificato."
     },
     "auth": {
       "password": "Password",
@@ -28,6 +45,29 @@
       "certificate": "Certificato",
       "agent": "Agente",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "Chiave host sconosciuta",
+      "title_changed": "Chiave host modificata",
+      "title_error": "Errore chiave host",
+      "unknown_message": "Questa è la prima volta che OxideTerm vede questa chiave host SSH. Verifica l’impronta prima di continuare.",
+      "changed_warning": "La chiave host SSH salvata per questo host non corrisponde alla chiave del server. Potrebbe indicare un attacco man-in-the-middle.",
+      "key_type_label": "Tipo chiave",
+      "fingerprint_label": "Impronta",
+      "expected_fingerprint": "Impronta prevista",
+      "actual_fingerprint": "Impronta attuale",
+      "cancelled": "Conferma della chiave host SSH annullata.",
+      "changed_requires_remove": "Le chiavi host modificate sono bloccate finché la chiave salvata non viene rimossa.",
+      "actions": {
+        "cancel": "Annulla",
+        "trust_once": "Fidati una volta",
+        "trust_save": "Fidati e salva"
+      }
+    },
+    "kbi": {
+      "title": "Autenticazione interattiva da tastiera",
+      "continue": "Continua",
+      "cancelled": "L'autenticazione interattiva da tastiera è stata annullata."
     }
   }
 }

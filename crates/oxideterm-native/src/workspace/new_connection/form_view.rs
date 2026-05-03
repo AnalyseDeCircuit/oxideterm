@@ -49,7 +49,8 @@ impl WorkspaceApp {
                 true
             }
             "tab" => {
-                form.focused_field = next_connection_field(form.focused_field, !modifiers.shift);
+                form.focused_field =
+                    next_connection_field(form.focused_field, form.auth_tab, !modifiers.shift);
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
@@ -218,6 +219,79 @@ impl WorkspaceApp {
                                                 cx,
                                             ))
                                     })
+                                    .when(form.auth_tab == SshAuthTab::DefaultKey, |content| {
+                                        content
+                                            .child(self.render_connection_hint(
+                                                self.i18n.t("ssh.form.default_key_desc"),
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.passphrase"),
+                                                &form.passphrase,
+                                                self.i18n.t("ssh.form.passphrase_placeholder"),
+                                                NewConnectionField::Passphrase,
+                                                true,
+                                                cx,
+                                            ))
+                                    })
+                                    .when(form.auth_tab == SshAuthTab::SshKey, |content| {
+                                        content
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.key_file"),
+                                                &form.key_path,
+                                                "~/.ssh/id_ed25519".to_string(),
+                                                NewConnectionField::KeyPath,
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.passphrase"),
+                                                &form.passphrase,
+                                                self.i18n.t("ssh.form.passphrase_placeholder"),
+                                                NewConnectionField::Passphrase,
+                                                true,
+                                                cx,
+                                            ))
+                                    })
+                                    .when(form.auth_tab == SshAuthTab::Certificate, |content| {
+                                        content
+                                            .child(self.render_connection_hint(
+                                                self.i18n.t("ssh.form.certificate_note"),
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.private_key"),
+                                                &form.key_path,
+                                                "~/.ssh/id_ed25519".to_string(),
+                                                NewConnectionField::KeyPath,
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.certificate"),
+                                                &form.cert_path,
+                                                "~/.ssh/id_ed25519-cert.pub".to_string(),
+                                                NewConnectionField::CertPath,
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.passphrase"),
+                                                &form.passphrase,
+                                                self.i18n.t("ssh.form.passphrase_placeholder"),
+                                                NewConnectionField::Passphrase,
+                                                true,
+                                                cx,
+                                            ))
+                                    })
+                                    .when(form.auth_tab == SshAuthTab::Agent, |content| {
+                                        content.child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.agent_desc"),
+                                        ))
+                                    })
+                                    .when(form.auth_tab == SshAuthTab::TwoFactor, |content| {
+                                        content.child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.two_factor_desc"),
+                                        ))
+                                    })
                                     .child(self.render_connection_field(
                                         self.i18n.t("ssh.form.group"),
                                         &form.group,
@@ -280,6 +354,14 @@ impl WorkspaceApp {
                             )),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn render_connection_hint(&self, text: String) -> AnyElement {
+        div()
+            .text_size(px(12.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(text)
             .into_any_element()
     }
 
@@ -376,7 +458,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_connection_caret(&self) -> AnyElement {
+    pub(in crate::workspace) fn render_connection_caret(&self) -> AnyElement {
         div()
             .w(px(self.tokens.metrics.form_caret_width))
             .h(px(self.tokens.metrics.form_caret_height))

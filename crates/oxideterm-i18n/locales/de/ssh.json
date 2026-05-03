@@ -19,7 +19,24 @@
       "test": "Testen",
       "connect": "Verbinden",
       "validation_required": "Bitte geben Sie Zielhost, Port und Ziel-Benutzername ein.",
-      "test_pending": "Verbindungstest wird aktiviert, wenn der russh-Transport eingebunden ist."
+      "test_pending": "Verbindungstest wird aktiviert, wenn der russh-Transport eingebunden ist.",
+      "checking_host_key": "SSH-Hostschlüssel wird geprüft...",
+      "test_running": "SSH-Verbindung wird getestet...",
+      "test_success": "SSH-Verbindungstest erfolgreich.",
+      "key_path_not_ready": "SSH-Schlüsselauthentifizierung benötigt zuerst die Schlüsselauswahl.",
+      "certificate_not_ready": "Zertifikatauthentifizierung benötigt zuerst Schlüssel- und Zertifikatpfad-Auswahl.",
+      "keyboard_interactive_not_ready": "Keyboard-interactive-Authentifizierung benötigt zuerst den nativen Eingabefluss.",
+      "default_key_desc": "Standard-SSH-Schlüssel verwenden (z.B. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "Passphrase (optional)",
+      "passphrase_placeholder": "Schlüssel-Passphrase, falls verschlüsselt",
+      "key_file": "Schlüsseldatei",
+      "certificate_note": "Diese Option ist nur für OpenSSH-CA-signierte Zertifikate, nicht für reguläre SSH-Schlüssel. Wenn Sie einen privaten Schlüssel mit Passphrase haben, verwenden Sie stattdessen den SSH-Schlüssel-Tab.",
+      "private_key": "Privater Schlüssel",
+      "certificate": "Zertifikat",
+      "agent_desc": "Mit dem System-SSH-Agent authentifizieren",
+      "two_factor_desc": "Zwei-Faktor-Authentifizierung (Keyboard-Interactive)",
+      "key_path_required": "Der SSH-Schlüsselpfad ist für die Schlüsselauthentifizierung erforderlich.",
+      "certificate_paths_required": "Für die Zertifikatsauthentifizierung sind SSH-Schlüsselpfad und Zertifikatspfad erforderlich."
     },
     "auth": {
       "password": "Passwort",
@@ -28,6 +45,29 @@
       "certificate": "Zertifikat",
       "agent": "Agent",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "Unbekannter Hostschlüssel",
+      "title_changed": "Hostschlüssel geändert",
+      "title_error": "Hostschlüsselfehler",
+      "unknown_message": "OxideTerm sieht diesen SSH-Hostschlüssel zum ersten Mal. Prüfen Sie den Fingerabdruck, bevor Sie fortfahren.",
+      "changed_warning": "Der gespeicherte SSH-Hostschlüssel für diesen Host stimmt nicht mit dem Serverschlüssel überein. Dies kann auf einen Man-in-the-Middle-Angriff hinweisen.",
+      "key_type_label": "Schlüsseltyp",
+      "fingerprint_label": "Fingerabdruck",
+      "expected_fingerprint": "Erwarteter Fingerabdruck",
+      "actual_fingerprint": "Aktueller Fingerabdruck",
+      "cancelled": "SSH-Hostschlüsselbestätigung wurde abgebrochen.",
+      "changed_requires_remove": "Geänderte Hostschlüssel bleiben blockiert, bis der gespeicherte Schlüssel entfernt wird.",
+      "actions": {
+        "cancel": "Abbrechen",
+        "trust_once": "Einmal vertrauen",
+        "trust_save": "Vertrauen und speichern"
+      }
+    },
+    "kbi": {
+      "title": "Keyboard-Interactive-Authentifizierung",
+      "continue": "Fortfahren",
+      "cancelled": "Keyboard-Interactive-Authentifizierung wurde abgebrochen."
     }
   }
 }

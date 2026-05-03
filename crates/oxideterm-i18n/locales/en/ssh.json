@@ -25,7 +25,18 @@
       "test_success": "SSH connection test succeeded.",
       "key_path_not_ready": "SSH key authentication needs the key path picker before it can connect.",
       "certificate_not_ready": "Certificate authentication needs key and certificate path pickers before it can connect.",
-      "keyboard_interactive_not_ready": "Keyboard-interactive authentication needs the native prompt flow before it can connect."
+      "keyboard_interactive_not_ready": "Keyboard-interactive authentication needs the native prompt flow before it can connect.",
+      "default_key_desc": "Use the default SSH key (e.g. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "Passphrase (optional)",
+      "passphrase_placeholder": "Key passphrase if encrypted",
+      "key_file": "Key File",
+      "certificate_note": "This is for OpenSSH CA-signed certificates, not regular SSH keys. If you have a private key with a passphrase, use the SSH Key tab instead.",
+      "private_key": "Private Key",
+      "certificate": "Certificate",
+      "agent_desc": "Authenticate using the system SSH Agent",
+      "two_factor_desc": "Two-Factor Authentication (Keyboard-Interactive)",
+      "key_path_required": "SSH key path is required for key authentication.",
+      "certificate_paths_required": "SSH key and certificate paths are required for certificate authentication."
     },
     "auth": {
       "password": "Password",
@@ -52,6 +63,11 @@
         "trust_once": "Trust Once",
         "trust_save": "Trust and Save"
       }
+    },
+    "kbi": {
+      "title": "Keyboard-Interactive Authentication",
+      "continue": "Continue",
+      "cancelled": "Keyboard-interactive authentication was cancelled."
     }
   }
 }

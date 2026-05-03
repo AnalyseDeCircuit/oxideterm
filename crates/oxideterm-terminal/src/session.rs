@@ -10,8 +10,8 @@ use alacritty_terminal::{
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
 use oxideterm_ssh::{
-    ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPtyHandle, SshTransportClient,
-    SshTransportCommand,
+    ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPromptHandler, SshPtyHandle,
+    SshTransportClient, SshTransportCommand,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::error::TryRecvError;
@@ -306,11 +306,12 @@ impl TerminalSessionBackend for LocalPtySession {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SshSessionConfig {
     config: SshConfig,
     registry: Option<SshConnectionRegistry>,
     consumer: Option<ConnectionConsumer>,
+    prompt_handler: Option<Arc<dyn SshPromptHandler>>,
 }
 
 impl SshSessionConfig {
@@ -319,6 +320,7 @@ impl SshSessionConfig {
             config: SshConfig::password(host, port, username, ""),
             registry: None,
             consumer: None,
+            prompt_handler: None,
         }
     }
 
@@ -343,6 +345,11 @@ impl SshSessionConfig {
         self.consumer = Some(consumer);
         self
     }
+
+    pub fn with_prompt_handler(mut self, prompt_handler: Arc<dyn SshPromptHandler>) -> Self {
+        self.prompt_handler = Some(prompt_handler);
+        self
+    }
 }
 
 impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
@@ -351,7 +358,19 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             config,
             registry: None,
             consumer: None,
+            prompt_handler: None,
         }
+    }
+}
+
+impl std::fmt::Debug for SshSessionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshSessionConfig")
+            .field("config", &self.config)
+            .field("registry", &self.registry)
+            .field("consumer", &self.consumer)
+            .field("prompt_handler", &self.prompt_handler.is_some())
+            .finish()
     }
 }
 
@@ -398,8 +417,12 @@ impl SshPtySession {
             ssh_config.rows = resize.rows as u32;
             let registry = config.registry.clone();
             let consumer = config.consumer.clone();
+            let prompt_handler = config.prompt_handler.clone();
             runtime.spawn(async move {
-                let client = SshTransportClient::new(ssh_config);
+                let mut client = SshTransportClient::new(ssh_config);
+                if let Some(prompt_handler) = prompt_handler {
+                    client = client.with_prompt_handler(prompt_handler);
+                }
                 let result = match (registry, consumer) {
                     (Some(registry), Some(consumer)) => {
                         client.connect_shell_with_registry(registry, consumer).await

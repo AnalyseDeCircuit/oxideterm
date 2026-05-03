@@ -19,7 +19,24 @@
       "test": "Kiểm tra",
       "connect": "Kết nối",
       "validation_required": "Vui lòng nhập máy chủ đích, cổng và tên người dùng.",
-      "test_pending": "Kiểm tra kết nối sẽ được bật khi russh được tích hợp."
+      "test_pending": "Kiểm tra kết nối sẽ được bật khi russh được tích hợp.",
+      "checking_host_key": "Đang kiểm tra khóa máy chủ SSH...",
+      "test_running": "Đang kiểm tra kết nối SSH...",
+      "test_success": "Kiểm tra kết nối SSH thành công.",
+      "key_path_not_ready": "Xác thực khóa SSH cần bộ chọn đường dẫn khóa trước.",
+      "certificate_not_ready": "Xác thực chứng chỉ cần bộ chọn đường dẫn khóa và chứng chỉ trước.",
+      "keyboard_interactive_not_ready": "Xác thực keyboard-interactive cần luồng nhắc native trước.",
+      "default_key_desc": "Sử dụng SSH key mặc định (vd: ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "Passphrase (tùy chọn)",
+      "passphrase_placeholder": "Passphrase key nếu được mã hóa",
+      "key_file": "File Key",
+      "certificate_note": "Tùy chọn này dành cho chứng chỉ được ký bởi CA OpenSSH, không phải khóa SSH thông thường. Nếu bạn có khóa riêng có cụm mật khẩu, hãy sử dụng tab Khóa SSH.",
+      "private_key": "Private Key",
+      "certificate": "Chứng chỉ",
+      "agent_desc": "Xác thực bằng SSH Agent hệ thống",
+      "two_factor_desc": "Xác thực hai yếu tố (Keyboard-Interactive)",
+      "key_path_required": "Đường dẫn SSH key là bắt buộc cho xác thực bằng key.",
+      "certificate_paths_required": "Xác thực bằng chứng chỉ cần cả đường dẫn SSH key và chứng chỉ."
     },
     "auth": {
       "password": "Mật khẩu",
@@ -28,6 +45,29 @@
       "certificate": "Chứng chỉ",
       "agent": "Đại lý",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "Khóa máy chủ không xác định",
+      "title_changed": "Khóa máy chủ đã thay đổi",
+      "title_error": "Lỗi khóa máy chủ",
+      "unknown_message": "Đây là lần đầu OxideTerm thấy khóa máy chủ SSH này. Hãy xác minh dấu vân tay trước khi tiếp tục.",
+      "changed_warning": "Khóa máy chủ SSH đã lưu cho máy này không khớp với khóa máy chủ. Điều này có thể là tấn công trung gian.",
+      "key_type_label": "Loại khóa",
+      "fingerprint_label": "Dấu vân tay",
+      "expected_fingerprint": "Dấu vân tay mong đợi",
+      "actual_fingerprint": "Dấu vân tay thực tế",
+      "cancelled": "Đã hủy xác nhận khóa máy chủ SSH.",
+      "changed_requires_remove": "Khóa máy chủ đã thay đổi bị chặn cho đến khi khóa đã lưu được xóa.",
+      "actions": {
+        "cancel": "Hủy",
+        "trust_once": "Tin cậy một lần",
+        "trust_save": "Tin cậy và lưu"
+      }
+    },
+    "kbi": {
+      "title": "Xác thực tương tác bàn phím",
+      "continue": "Tiếp tục",
+      "cancelled": "Xác thực tương tác bàn phím đã bị hủy."
     }
   }
 }

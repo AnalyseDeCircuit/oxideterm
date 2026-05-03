@@ -30,4 +30,7 @@ pub use router::{
     NodeId, NodeReadiness, NodeRouter, NodeState, NodeStateEvent, NodeStateSnapshot, RouteError,
     TerminalEndpoint,
 };
-pub use transport::{SshPtyHandle, SshTransportClient, SshTransportCommand, SshTransportError};
+pub use transport::{
+    KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, SshPromptError, SshPromptHandler,
+    SshPtyHandle, SshTransportClient, SshTransportCommand, SshTransportError,
+};

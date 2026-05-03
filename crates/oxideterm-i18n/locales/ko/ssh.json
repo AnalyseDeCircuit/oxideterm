@@ -19,7 +19,24 @@
       "test": "테스트",
       "connect": "연결",
       "validation_required": "대상 호스트, 포트 및 대상 사용자 이름을 입력하세요.",
-      "test_pending": "russh 전송이 통합되면 연결 테스트가 활성화됩니다."
+      "test_pending": "russh 전송이 통합되면 연결 테스트가 활성화됩니다.",
+      "checking_host_key": "SSH 호스트 키를 확인하는 중...",
+      "test_running": "SSH 연결을 테스트하는 중...",
+      "test_success": "SSH 연결 테스트에 성공했습니다.",
+      "key_path_not_ready": "SSH 키 인증에는 먼저 키 경로 선택기가 필요합니다.",
+      "certificate_not_ready": "인증서 인증에는 먼저 키 및 인증서 경로 선택기가 필요합니다.",
+      "keyboard_interactive_not_ready": "Keyboard-interactive 인증에는 먼저 네이티브 프롬프트 흐름이 필요합니다.",
+      "default_key_desc": "기본 SSH 키 사용 (예: ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "패스프레이즈 (선택사항)",
+      "passphrase_placeholder": "암호화된 경우 키 패스프레이즈",
+      "key_file": "키 파일",
+      "certificate_note": "이 옵션은 OpenSSH CA 서명 인증서용이며, 일반 SSH 키가 아닙니다. 암호가 있는 개인 키를 사용하려면 SSH 키 탭을 사용하세요.",
+      "private_key": "개인 키",
+      "certificate": "인증서",
+      "agent_desc": "시스템 SSH Agent로 인증",
+      "two_factor_desc": "이중 인증 (Keyboard-Interactive)",
+      "key_path_required": "키 인증에는 SSH 키 경로가 필요합니다.",
+      "certificate_paths_required": "인증서 인증에는 SSH 키 경로와 인증서 경로가 필요합니다."
     },
     "auth": {
       "password": "비밀번호",
@@ -28,6 +45,29 @@
       "certificate": "인증서",
       "agent": "에이전트",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "알 수 없는 호스트 키",
+      "title_changed": "호스트 키가 변경됨",
+      "title_error": "호스트 키 오류",
+      "unknown_message": "OxideTerm이 이 SSH 호스트 키를 처음 보았습니다. 계속하기 전에 지문을 확인하세요.",
+      "changed_warning": "이 호스트에 저장된 SSH 호스트 키가 서버 키와 일치하지 않습니다. 중간자 공격일 수 있습니다.",
+      "key_type_label": "키 유형",
+      "fingerprint_label": "지문",
+      "expected_fingerprint": "예상 지문",
+      "actual_fingerprint": "실제 지문",
+      "cancelled": "SSH 호스트 키 확인이 취소되었습니다.",
+      "changed_requires_remove": "변경된 호스트 키는 저장된 키를 제거할 때까지 차단됩니다.",
+      "actions": {
+        "cancel": "취소",
+        "trust_once": "이번만 신뢰",
+        "trust_save": "신뢰하고 저장"
+      }
+    },
+    "kbi": {
+      "title": "키보드 대화형 인증",
+      "continue": "계속",
+      "cancelled": "키보드 대화형 인증이 취소되었습니다."
     }
   }
 }

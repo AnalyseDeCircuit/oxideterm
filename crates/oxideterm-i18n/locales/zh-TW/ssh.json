@@ -19,7 +19,24 @@
       "test": "測試",
       "connect": "連線",
       "validation_required": "請輸入目標主機、連接埠和目標使用者名稱。",
-      "test_pending": "當 russh 傳輸整合完成後，將啟用連線測試。"
+      "test_pending": "當 russh 傳輸整合完成後，將啟用連線測試。",
+      "checking_host_key": "正在檢查 SSH 主機金鑰...",
+      "test_running": "正在測試 SSH 連線...",
+      "test_success": "SSH 連線測試成功。",
+      "key_path_not_ready": "SSH 金鑰驗證需要先接入金鑰路徑選擇器。",
+      "certificate_not_ready": "憑證驗證需要先接入金鑰與憑證路徑選擇器。",
+      "keyboard_interactive_not_ready": "Keyboard-interactive 驗證需要先接入原生提示流程。",
+      "default_key_desc": "使用預設 SSH 金鑰（例如 ~/.ssh/id_rsa、~/.ssh/id_ed25519）",
+      "passphrase": "密碼短語（選填）",
+      "passphrase_placeholder": "加密金鑰的密碼短語",
+      "key_file": "金鑰檔案",
+      "certificate_note": "此選項僅用於 OpenSSH CA 簽發的憑證認證，而非普通 SSH 金鑰。如果你只有帶密語的私鑰，請使用「SSH 金鑰」選項。",
+      "private_key": "私鑰",
+      "certificate": "憑證",
+      "agent_desc": "使用系統 SSH Agent 進行驗證",
+      "two_factor_desc": "雙因素驗證（Keyboard-Interactive）",
+      "key_path_required": "SSH 金鑰路徑是金鑰驗證必填項。",
+      "certificate_paths_required": "憑證驗證需要 SSH 金鑰路徑和憑證路徑。"
     },
     "auth": {
       "password": "密碼",
@@ -28,6 +45,29 @@
       "certificate": "憑證",
       "agent": "代理",
       "two_factor": "雙重驗證"
+    },
+    "host_key": {
+      "title_unknown": "未知主機金鑰",
+      "title_changed": "主機金鑰已變更",
+      "title_error": "主機金鑰錯誤",
+      "unknown_message": "這是 OxideTerm 第一次見到這個 SSH 主機金鑰。繼續前請確認指紋可信。",
+      "changed_warning": "這個主機已儲存的 SSH 主機金鑰與伺服器目前金鑰不一致，可能存在中間人攻擊風險。",
+      "key_type_label": "金鑰類型",
+      "fingerprint_label": "指紋",
+      "expected_fingerprint": "預期指紋",
+      "actual_fingerprint": "實際指紋",
+      "cancelled": "已取消 SSH 主機金鑰確認。",
+      "changed_requires_remove": "主機金鑰變更時必須先移除已儲存的金鑰。",
+      "actions": {
+        "cancel": "取消",
+        "trust_once": "僅信任本次",
+        "trust_save": "信任並儲存"
+      }
+    },
+    "kbi": {
+      "title": "鍵盤互動認證",
+      "continue": "繼續",
+      "cancelled": "鍵盤互動認證已取消。"
     }
   }
 }

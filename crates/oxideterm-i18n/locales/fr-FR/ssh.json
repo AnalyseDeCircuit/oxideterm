@@ -19,7 +19,24 @@
       "test": "Tester",
       "connect": "Connexion",
       "validation_required": "Veuillez saisir l'hôte cible, le port et le nom d'utilisateur.",
-      "test_pending": "Le test de connexion sera activé lorsque le transport russh sera intégré."
+      "test_pending": "Le test de connexion sera activé lorsque le transport russh sera intégré.",
+      "checking_host_key": "Vérification de la clé d’hôte SSH...",
+      "test_running": "Test de la connexion SSH...",
+      "test_success": "Test de connexion SSH réussi.",
+      "key_path_not_ready": "L’authentification par clé SSH nécessite d’abord le sélecteur de chemin de clé.",
+      "certificate_not_ready": "L’authentification par certificat nécessite d’abord les sélecteurs de clé et de certificat.",
+      "keyboard_interactive_not_ready": "L’authentification keyboard-interactive nécessite d’abord le flux natif de saisie.",
+      "default_key_desc": "Utiliser la clé SSH par défaut (ex. ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "Phrase secrète (optionnel)",
+      "passphrase_placeholder": "Phrase secrète de la clé si chiffrée",
+      "key_file": "Fichier de clé",
+      "certificate_note": "Cette option est pour les certificats signés par une CA OpenSSH, pas pour les clés SSH classiques. Si vous avez une clé privée avec une phrase secrète, utilisez l'onglet Clé SSH.",
+      "private_key": "Clé privée",
+      "certificate": "Certificat",
+      "agent_desc": "S'authentifier en utilisant l'agent SSH système",
+      "two_factor_desc": "Authentification à deux facteurs (Keyboard-Interactive)",
+      "key_path_required": "Le chemin de la clé SSH est requis pour l’authentification par clé.",
+      "certificate_paths_required": "L’authentification par certificat nécessite le chemin de la clé SSH et du certificat."
     },
     "auth": {
       "password": "Mot de passe",
@@ -28,6 +45,29 @@
       "certificate": "Certificat",
       "agent": "Agent",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "Clé d’hôte inconnue",
+      "title_changed": "Clé d’hôte modifiée",
+      "title_error": "Erreur de clé d’hôte",
+      "unknown_message": "OxideTerm voit cette clé d’hôte SSH pour la première fois. Vérifiez l’empreinte avant de continuer.",
+      "changed_warning": "La clé d’hôte SSH enregistrée pour cet hôte ne correspond pas à la clé du serveur. Cela peut indiquer une attaque de l’homme du milieu.",
+      "key_type_label": "Type de clé",
+      "fingerprint_label": "Empreinte",
+      "expected_fingerprint": "Empreinte attendue",
+      "actual_fingerprint": "Empreinte actuelle",
+      "cancelled": "Confirmation de clé d’hôte SSH annulée.",
+      "changed_requires_remove": "Les clés d’hôte modifiées sont bloquées tant que la clé enregistrée n’est pas supprimée.",
+      "actions": {
+        "cancel": "Annuler",
+        "trust_once": "Faire confiance une fois",
+        "trust_save": "Faire confiance et enregistrer"
+      }
+    },
+    "kbi": {
+      "title": "Authentification clavier interactive",
+      "continue": "Continuer",
+      "cancelled": "L’authentification clavier interactive a été annulée."
     }
   }
 }

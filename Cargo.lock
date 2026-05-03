@@ -4805,6 +4805,8 @@ dependencies = [
  "parking_lot",
  "russh",
  "serde",
+ "signature 2.2.0",
+ "ssh-encoding",
  "thiserror 2.0.18",
  "tokio",
  "uuid",

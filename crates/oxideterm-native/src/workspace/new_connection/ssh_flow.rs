@@ -1,7 +1,11 @@
-use std::{result::Result as StdResult, sync::mpsc};
+use std::{future::Future, pin::Pin, result::Result as StdResult, sync::Arc, sync::mpsc};
 
 use gpui::{Context, Window};
-use oxideterm_ssh::{AuthMethod, HostKeyStatus, SshConfig, SshTransportClient, check_host_key};
+use oxideterm_ssh::{
+    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, SshConfig, SshPromptError,
+    SshPromptHandler, SshTransportClient, check_host_key,
+};
+use tokio::sync::oneshot;
 
 use super::{
     form_state::{NewConnectionForm, SshAuthTab},
@@ -25,6 +29,43 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
     Test {
         result: StdResult<(), String>,
     },
+    KeyboardInteractivePrompt {
+        request: KeyboardInteractivePromptRequest,
+        response_tx: oneshot::Sender<Result<Vec<String>, SshPromptError>>,
+    },
+}
+
+#[derive(Clone)]
+pub(in crate::workspace) struct NativeSshPromptHandler {
+    tx: mpsc::Sender<SshConnectionWorkerResult>,
+}
+
+impl NativeSshPromptHandler {
+    pub(in crate::workspace) fn new(tx: mpsc::Sender<SshConnectionWorkerResult>) -> Self {
+        Self { tx }
+    }
+}
+
+impl SshPromptHandler for NativeSshPromptHandler {
+    fn keyboard_interactive(
+        &self,
+        request: KeyboardInteractivePromptRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SshPromptError>> + Send + '_>> {
+        Box::pin(async move {
+            let (response_tx, response_rx) = oneshot::channel();
+            self.tx
+                .send(SshConnectionWorkerResult::KeyboardInteractivePrompt {
+                    request,
+                    response_tx,
+                })
+                .map_err(|_| {
+                    SshPromptError::Failed("native SSH prompt UI is unavailable".into())
+                })?;
+            response_rx
+                .await
+                .map_err(|_| SshPromptError::Failed("native SSH prompt UI was closed".into()))?
+        })
+    }
 }
 
 impl WorkspaceApp {
@@ -50,6 +91,7 @@ impl WorkspaceApp {
     ) {
         self.new_connection_form = None;
         self.host_key_challenge = None;
+        self.cancel_keyboard_interactive_challenge(cx);
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -76,8 +118,7 @@ impl WorkspaceApp {
             form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
         }
 
-        let (tx, rx) = mpsc::channel();
-        self.ssh_worker_rx = Some(rx);
+        let tx = self.ssh_worker_tx.clone();
         let host = config.host.clone();
         let port = config.port;
         let worker_config = config.clone();
@@ -118,22 +159,34 @@ impl WorkspaceApp {
         let auth = match form.auth_tab {
             SshAuthTab::Password => AuthMethod::password(form.password.clone()),
             SshAuthTab::Agent => AuthMethod::Agent,
-            SshAuthTab::DefaultKey => AuthMethod::key("", None),
+            SshAuthTab::DefaultKey => AuthMethod::key(
+                "",
+                (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+            ),
             SshAuthTab::SshKey => {
-                form.error = Some(self.i18n.t("ssh.form.key_path_not_ready"));
-                cx.notify();
-                return None;
+                if form.key_path.trim().is_empty() {
+                    form.error = Some(self.i18n.t("ssh.form.key_path_required"));
+                    cx.notify();
+                    return None;
+                }
+                AuthMethod::key(
+                    form.key_path.trim().to_string(),
+                    (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+                )
             }
             SshAuthTab::Certificate => {
-                form.error = Some(self.i18n.t("ssh.form.certificate_not_ready"));
-                cx.notify();
-                return None;
+                if form.key_path.trim().is_empty() || form.cert_path.trim().is_empty() {
+                    form.error = Some(self.i18n.t("ssh.form.certificate_paths_required"));
+                    cx.notify();
+                    return None;
+                }
+                AuthMethod::certificate(
+                    form.key_path.trim().to_string(),
+                    form.cert_path.trim().to_string(),
+                    (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+                )
             }
-            SshAuthTab::TwoFactor => {
-                form.error = Some(self.i18n.t("ssh.form.keyboard_interactive_not_ready"));
-                cx.notify();
-                return None;
-            }
+            SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
         };
         let config = SshConfig {
             host: host.clone(),
@@ -158,21 +211,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let mut results = Vec::new();
-        let mut disconnected = false;
-        if let Some(rx) = self.ssh_worker_rx.as_ref() {
-            loop {
-                match rx.try_recv() {
-                    Ok(result) => results.push(result),
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
-                    }
+        loop {
+            match self.ssh_worker_rx.try_recv() {
+                Ok(result) => results.push(result),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    break;
                 }
             }
-        }
-        if disconnected || !results.is_empty() {
-            self.ssh_worker_rx = None;
         }
 
         for result in results {
@@ -192,6 +238,12 @@ impl WorkspaceApp {
                         });
                     }
                     cx.notify();
+                }
+                SshConnectionWorkerResult::KeyboardInteractivePrompt {
+                    request,
+                    response_tx,
+                } => {
+                    self.open_keyboard_interactive_challenge(request, response_tx, window, cx);
                 }
             }
         }
@@ -257,13 +309,19 @@ impl WorkspaceApp {
             form.pending = true;
             form.error = Some(self.i18n.t("ssh.form.test_running"));
         }
-        let (tx, rx) = mpsc::channel();
-        self.ssh_worker_rx = Some(rx);
+        let tx = self.ssh_worker_tx.clone();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime
-                    .block_on(SshTransportClient::new(config).test_connection())
-                    .map_err(|error| error.to_string()),
+                Ok(runtime) => {
+                    let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
+                    runtime
+                        .block_on(
+                            SshTransportClient::new(config)
+                                .with_prompt_handler(prompt_handler)
+                                .test_connection(),
+                        )
+                        .map_err(|error| error.to_string())
+                }
                 Err(error) => Err(format!("failed to initialize SSH runtime: {error}")),
             };
             let _ = tx.send(SshConnectionWorkerResult::Test { result });

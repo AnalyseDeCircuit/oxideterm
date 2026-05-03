@@ -79,6 +79,13 @@ correctness.
   pixel/token equivalent instead of inventing a nearby value.
 - I18n strings must come from the i18n catalog, not inline UI literals, except
   for protocol constants or temporary debug text.
+- Runtime i18n is an 11-locale system: `en`, `zh-CN`, `zh-TW`, `de`, `es-ES`,
+  `fr-FR`, `it`, `ja`, `ko`, `pt-BR`, and `vi`. Any new user-facing key must be
+  added to every locale domain file in the same change.
+- Language names are autonyms in every locale. Do not translate labels such as
+  "English" or "Deutsch" into the current UI language.
+- I18n domain files should stay split by feature area. Do not rebuild one giant
+  per-locale JSON catalog.
 
 ## Terminal Surface
 
@@ -101,8 +108,33 @@ correctness.
 - SSH output must pass through Alacritty's Term and Processor before rendering.
 - SSH input, resize, and shutdown must map to transport commands. They must not
   bypass the session abstraction.
+- SSH keyboard-interactive prompts are modal focus owners. Direct 2FA,
+  password-to-KBI fallback, and chained partial-success KBI must all route
+  through the same native prompt handler.
+- SSH `none` auth probing is intentional and must stay aligned with the Tauri
+  backend semantics.
+- SSH public-key, certificate, and agent auth must negotiate RSA signature
+  algorithms in the same semantic order as the Tauri backend.
+- SSH agent forwarding must reject unsolicited server-opened agent channels
+  unless forwarding was requested, and must relay accepted channels to the local
+  agent socket with a concurrency limit.
+- SSH tabs, SFTP, port forwards, and IDE consumers must acquire SSH connections
+  through the registry/router path. Long-term shape is one authenticated
+  physical SSH connection per connection key, with many channel consumers.
+- The registry may own the authenticated physical SSH handle; consumers open
+  channels from that shared handle instead of creating redundant physical
+  connections for the same connection key.
 - Session tests should avoid real network calls unless explicitly marked as
   integration tests.
+
+## Source Boundaries
+
+- OxideTerm native code must not copy, mechanically translate, or closely mirror
+  Zed GPL implementation code.
+- External terminal references are acceptable only as behavioral references:
+  public protocols, user-visible behavior, and independently designed tests.
+- Source comments and identifiers should use OxideTerm terminology, not Zed
+  terminology, outside of local planning/audit documents.
 
 ## Verification Expectations
 

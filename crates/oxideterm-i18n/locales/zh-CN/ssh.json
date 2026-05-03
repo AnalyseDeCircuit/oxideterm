@@ -25,7 +25,18 @@
       "test_success": "SSH 连接测试成功。",
       "key_path_not_ready": "SSH 密钥认证需要先接入密钥路径选择器。",
       "certificate_not_ready": "证书认证需要先接入密钥和证书路径选择器。",
-      "keyboard_interactive_not_ready": "Keyboard-interactive 认证需要先接入原生提示流程。"
+      "keyboard_interactive_not_ready": "Keyboard-interactive 认证需要先接入原生提示流程。",
+      "default_key_desc": "使用默认 SSH 密钥 (如 ~/.ssh/id_rsa, ~/.ssh/id_ed25519)",
+      "passphrase": "口令（可选）",
+      "passphrase_placeholder": "加密密钥的口令",
+      "key_file": "密钥文件",
+      "certificate_note": "此选项仅用于 OpenSSH CA 签发的证书认证，而非普通 SSH 密钥。如果你只有带口令的私钥，请使用「SSH 密钥」选项。",
+      "private_key": "私钥",
+      "certificate": "证书",
+      "agent_desc": "使用系统 SSH Agent 认证",
+      "two_factor_desc": "双因素认证 (Keyboard-Interactive)",
+      "key_path_required": "SSH 密钥路径是密钥认证必填项。",
+      "certificate_paths_required": "证书认证需要 SSH 密钥路径和证书路径。"
     },
     "auth": {
       "password": "密码",
@@ -52,6 +63,11 @@
         "trust_once": "仅信任本次",
         "trust_save": "信任并保存"
       }
+    },
+    "kbi": {
+      "title": "键盘交互认证",
+      "continue": "继续",
+      "cancelled": "键盘交互认证已取消。"
     }
   }
 }

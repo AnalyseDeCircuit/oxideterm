@@ -19,7 +19,24 @@
       "test": "テスト",
       "connect": "接続",
       "validation_required": "対象ホスト、ポート、対象ユーザー名を入力してください。",
-      "test_pending": "russhトランスポートが統合されると接続テストが有効になります。"
+      "test_pending": "russhトランスポートが統合されると接続テストが有効になります。",
+      "checking_host_key": "SSHホストキーを確認しています...",
+      "test_running": "SSH接続をテストしています...",
+      "test_success": "SSH接続テストに成功しました。",
+      "key_path_not_ready": "SSHキー認証には、先にキーパス選択が必要です。",
+      "certificate_not_ready": "証明書認証には、先にキーと証明書パスの選択が必要です。",
+      "keyboard_interactive_not_ready": "Keyboard-interactive認証には、先にネイティブのプロンプトフローが必要です。",
+      "default_key_desc": "デフォルトのSSHキーを使用（例：~/.ssh/id_rsa、~/.ssh/id_ed25519）",
+      "passphrase": "パスフレーズ（オプション）",
+      "passphrase_placeholder": "暗号化されている場合はキーパスフレーズ",
+      "key_file": "キーファイル",
+      "certificate_note": "この項目は OpenSSH CA 署名証明書用です。通常の SSH 鍵ではありません。パスフレーズ付きの秘密鍵をお持ちの場合は、「SSH 鍵」タブをご使用ください。",
+      "private_key": "秘密鍵",
+      "certificate": "証明書",
+      "agent_desc": "システムSSHエージェントを使用して認証",
+      "two_factor_desc": "二要素認証（Keyboard-Interactive）",
+      "key_path_required": "鍵認証には SSH キーのパスが必要です。",
+      "certificate_paths_required": "証明書認証には SSH キーのパスと証明書のパスが必要です。"
     },
     "auth": {
       "password": "パスワード",
@@ -28,6 +45,29 @@
       "certificate": "証明書",
       "agent": "エージェント",
       "two_factor": "2FA"
+    },
+    "host_key": {
+      "title_unknown": "不明なホストキー",
+      "title_changed": "ホストキーが変更されました",
+      "title_error": "ホストキーエラー",
+      "unknown_message": "OxideTermがこのSSHホストキーを見るのは初めてです。続行する前にフィンガープリントを確認してください。",
+      "changed_warning": "このホストに保存されたSSHホストキーがサーバーキーと一致しません。中間者攻撃の可能性があります。",
+      "key_type_label": "キータイプ",
+      "fingerprint_label": "フィンガープリント",
+      "expected_fingerprint": "期待されるフィンガープリント",
+      "actual_fingerprint": "実際のフィンガープリント",
+      "cancelled": "SSHホストキーの確認をキャンセルしました。",
+      "changed_requires_remove": "変更されたホストキーは、保存済みキーを削除するまでブロックされます。",
+      "actions": {
+        "cancel": "キャンセル",
+        "trust_once": "今回だけ信頼",
+        "trust_save": "信頼して保存"
+      }
+    },
+    "kbi": {
+      "title": "キーボード対話認証",
+      "continue": "続行",
+      "cancelled": "キーボード対話認証はキャンセルされました。"
     }
   }
 }
