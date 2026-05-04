@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/oxideterm-gpui-markdown",
   "crates/oxideterm-gpui-terminal",
   "crates/oxideterm-i18n",
   "crates/oxideterm-native",
