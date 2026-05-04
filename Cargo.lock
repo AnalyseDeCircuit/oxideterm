@@ -5905,6 +5905,7 @@ dependencies = [
  "libc",
  "oxideterm-ssh",
  "oxideterm-terminal-graphics",
+ "polling",
  "tokio",
  "tracing",
 ]

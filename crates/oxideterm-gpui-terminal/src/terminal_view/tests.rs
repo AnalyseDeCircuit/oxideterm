@@ -685,6 +685,56 @@ fn terminal_element_batches_adjacent_cells_with_same_style() {
 }
 
 #[test]
+fn terminal_element_shapes_zero_width_marks_with_base_cell() {
+    let mut snapshot = selection_snapshot("e");
+    snapshot.lines[0].cells[0].zerowidth = "\u{301}".to_string();
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+    let first_run = layout.text_runs.first().expect("text run");
+
+    assert_eq!(first_run.text, "e\u{301}");
+    assert_eq!(first_run.cells, 1);
+    assert_eq!(first_run.style.len, "e\u{301}".len());
+}
+
+#[test]
+fn terminal_element_keeps_emoji_zwj_cluster_in_one_wide_cell() {
+    let mut snapshot = selection_snapshot(" ");
+    snapshot.lines[0].cells[0].ch = '👨';
+    snapshot.lines[0].cells[0].zerowidth = "\u{200d}👩\u{200d}👧\u{200d}👦".to_string();
+    snapshot.lines[0].cells[0].wide = true;
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+    let first_run = layout.text_runs.first().expect("text run");
+
+    assert_eq!(first_run.text, "👨‍👩‍👧‍👦");
+    assert_eq!(first_run.cells, 2);
+    assert_eq!(first_run.style.len, "👨‍👩‍👧‍👦".len());
+}
+
+#[test]
 fn terminal_element_keeps_powerline_separators_as_cell_painted_runs() {
     let snapshot =
         selection_snapshot("a\u{e0b0}\u{e0b1}\u{e0b2}\u{e0b3}\u{e0b4}\u{e0b5}\u{e0b6}\u{e0b7}b");

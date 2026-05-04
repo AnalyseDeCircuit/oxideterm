@@ -9,6 +9,9 @@ Copyright 2016-2025 The Alacritty Project Contributors.
 Licensed under the Apache License, Version 2.0.
 Used through the alacritty_terminal crate for terminal emulation, PTY state,
 and terminal protocol behavior.
+The native local graphics PTY loop adapts Alacritty's event-loop structure
+under the same Apache-2.0 OR MIT terms, with OxideTerm-specific graphics
+protocol interception added before ANSI parsing.
 
 Lucide
 Copyright (c) 2020, Lucide Contributors.

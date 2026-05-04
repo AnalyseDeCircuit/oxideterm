@@ -12,6 +12,7 @@ pub(crate) fn text_run_for_cell(
     link: bool,
     metrics: &TerminalMetrics,
 ) -> TextRun {
+    let text_len = cell.ch.len_utf8() + cell.zerowidth.len();
     let weight = if cell.attrs.bold {
         FontWeight::BOLD
     } else {
@@ -24,7 +25,7 @@ pub(crate) fn text_run_for_cell(
     };
 
     TextRun {
-        len: cell.ch.len_utf8(),
+        len: text_len,
         font: Font {
             family: metrics.font.family.clone(),
             features: metrics.font.features.clone(),

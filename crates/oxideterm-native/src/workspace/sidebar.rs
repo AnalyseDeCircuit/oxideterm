@@ -267,9 +267,13 @@ impl WorkspaceApp {
             ))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
                     if section == SidebarSection::Settings {
-                        this.open_settings(cx);
+                        this.open_settings(window, cx);
+                    } else if section == SidebarSection::Workspace {
+                        this.active_sidebar_section = section;
+                        this.persist_sidebar_settings();
+                        let _ = this.create_local_terminal_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

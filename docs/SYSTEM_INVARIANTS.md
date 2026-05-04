@@ -143,11 +143,72 @@ correctness.
 - Link rendering must not decorate editable active input in a way that conflicts
   with shell completion or syntax highlighting.
 
+## Terminal Graphics And UTF-8
+
+- Terminal graphics protocol detection must never corrupt normal UTF-8 text.
+- Graphics ingress must not treat raw 8-bit C1 bytes in the `0x80..0xbf` range
+  as OSC/DCS/APC graphics delimiters on the main terminal byte stream. Those
+  byte values are valid UTF-8 continuation bytes and appear in Powerline glyphs
+  such as `❯` and in CJK text.
+- Graphics ingress may intercept ESC-form control sequences such as `ESC ]`,
+  `ESC P`, and `ESC _`. If support for 8-bit C1 controls is ever reintroduced,
+  it must be guarded by an explicit encoding/protocol mode and backed by tests
+  proving that UTF-8 Powerline and CJK filenames are unchanged.
+- Add or preserve regression coverage for representative UTF-8 terminal text
+  whenever graphics parsing changes. The coverage must include at least a
+  Powerline prompt glyph and CJK filenames.
+- Graphics control sequences must be consumed only after they are positively
+  identified as supported image protocol payloads. Unsupported OSC/DCS/APC
+  sequences must pass through to the terminal parser in their ESC-form bytes.
+- Do not advertise or acknowledge a terminal graphics capability until the
+  protocol paths commonly used by real TUI clients are implemented. For Kitty
+  Graphics this includes direct payloads and file/temp-file transmission modes
+  (`t=d`, `t=f`, and `t=t`) because applications such as `yazi` may send image
+  paths rather than inline image bytes after receiving an `OK` response.
+- Kitty Graphics cursor movement must follow the upstream protocol exactly:
+  `C=0` or omitted moves the cursor after placement, while `C=1` means no cursor
+  movement. Do not synthesize placeholder spaces for `C=1`; TUI previewers such
+  as `yazi` rely on this for `kgp-old` image uploads.
+- Terminal graphics capability/query responses must be written from the backend
+  IO path with protocol-level latency. Do not route Kitty/SIXEL/iTerm2 probe
+  responses through UI repaint or snapshot polling; TUI clients such as `yazi`
+  use short probe deadlines and will otherwise fall back to external preview
+  tools.
+- Kitty file/temp-file payloads are base64-encoded UTF-8 paths. Decode the path,
+  enforce storage limits before reading, and delete temp-file payloads after a
+  successful read when the protocol marks them temporary.
+- Incomplete graphics sequences and Kitty chunk assembly must obey storage
+  limits while still incomplete. Do not wait until final decode to enforce
+  memory limits.
+- Image decoding must not be allowed to monopolize the PTY reader. Large,
+  malformed, or unsupported payloads should fail with a bounded error path
+  rather than blocking terminal input, scrolling, or pane close.
+- RenderImage creation must not happen in paint for already-decoded image data.
+  Use a cache keyed by stable image id and version so cursor blink, scroll, and
+  repaint do not repeatedly materialize the same image.
+- Terminal graphics protocol/state data is RGBA. GPUI `RenderImage` raster data
+  is a renderer contract, not a protocol contract: in GPUI 0.2.2 `RenderImage`
+  is documented as BGRA and GPUI's own image element converts raster frames from
+  RGBA to BGRA before `RenderImage::new`. Route all terminal image materializing
+  through the GPUI adapter/cache boundary and do not swap channels in protocol
+  decoders or terminal snapshots. If GPUI exposes a runtime pixel-format API or
+  changes this contract, update only that adapter and its tests.
+- Terminal graphics changes require manual checks in TUI applications that emit
+  image protocols, especially `yazi`, because those workloads combine UTF-8
+  filenames, alternate-screen rendering, and image previews.
+
 ## Backend Sessions
 
 - Local and SSH terminal sessions must expose the same session contract:
   read_pending, write_input, resize, shutdown, title, lifecycle, process state,
   search, and snapshot.
+- Closing a pane must not synchronously block the UI thread while waiting for a
+  local PTY/event-loop thread to finish. Running sessions should receive a
+  shutdown signal and detach from UI teardown; child-exit cleanup may join only
+  after the backend has naturally exited.
+- Killing or closing a pane that is running a TUI app must be treated as a
+  lifecycle operation, not as a blocking process wait from the render/input
+  path.
 - SSH output must pass through Alacritty's Term and Processor before rendering.
 - SSH input, resize, and shutdown must map to transport commands. They must not
   bypass the session abstraction.
@@ -186,5 +247,11 @@ correctness.
   not receive those inputs.
 - UI token changes require at least `cargo check -p oxideterm-native`.
 - Terminal backend changes require terminal crate tests and native check.
+- Terminal graphics changes require tests proving ordinary UTF-8 text passes
+  through unchanged, including Powerline glyphs and CJK text.
+- Terminal graphics changes require a bounded-memory test or review for
+  incomplete control sequences and chunked image payloads.
+- Pane lifecycle changes require a manual TUI close/kill check so closing a pane
+  running an alternate-screen app does not freeze the UI.
 - Whole-workspace changes should run `cargo check --workspace` and
   `git diff --check`.

@@ -80,6 +80,7 @@ pub struct TerminalImageSnapshot {
     pub pixel_width: u32,
     pub pixel_height: u32,
     pub placeholder: bool,
+    pub version: u64,
     pub data: Option<TerminalImageData>,
 }
 

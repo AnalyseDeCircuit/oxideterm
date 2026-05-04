@@ -8,7 +8,6 @@ use std::{
 
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
-    event_loop::{EventLoop, Msg, Notifier, State},
     grid::{Dimensions, Scroll},
     index::Line,
     sync::FairMutex,
@@ -26,6 +25,7 @@ use oxideterm_terminal_graphics::{
 
 mod color;
 mod data;
+mod local_graphics_event_loop;
 mod process;
 mod search;
 mod session;
@@ -46,6 +46,7 @@ use color::{
     OXIDETERM_DARK_THEME, attrs_from_flags, color_for_alacritty_request_with_override,
     style_colors_for_cell,
 };
+use local_graphics_event_loop::{LocalGraphicsEventLoop, LocalGraphicsMsg, LocalGraphicsNotifier};
 use process::{ProcessState, TerminalSignal, signal_process_group};
 use search::{append_grid_line_text, search_logical_line_matches, viewport_row_for_grid_line};
 
@@ -105,6 +106,7 @@ fn window_size(size: TerminalSize) -> WindowSize {
 
 pub(crate) struct TerminalGraphicsState {
     images: HashMap<TerminalImageId, TerminalImageData>,
+    image_versions: HashMap<TerminalImageId, u64>,
     placements: Vec<TerminalImagePlacement>,
     image_order: VecDeque<TerminalImageId>,
     storage_bytes: usize,
@@ -115,6 +117,7 @@ impl Default for TerminalGraphicsState {
     fn default() -> Self {
         Self {
             images: HashMap::new(),
+            image_versions: HashMap::new(),
             placements: Vec::new(),
             image_order: VecDeque::new(),
             storage_bytes: 0,
@@ -126,13 +129,21 @@ impl Default for TerminalGraphicsState {
 impl TerminalGraphicsState {
     pub(crate) fn handle_event(&mut self, event: TerminalGraphicsEvent) -> Option<Vec<u8>> {
         match event {
-            TerminalGraphicsEvent::ImageReady(image) => {
+            TerminalGraphicsEvent::ImageReady(mut image) => {
                 if let Some(previous) = self.images.remove(&image.id) {
                     self.storage_bytes = self
                         .storage_bytes
                         .saturating_sub(image_storage_bytes(&previous));
                     self.image_order.retain(|id| *id != image.id);
                 }
+                let next_version = self
+                    .image_versions
+                    .get(&image.id)
+                    .copied()
+                    .unwrap_or_default()
+                    + 1;
+                image.version = next_version;
+                self.image_versions.insert(image.id, next_version);
                 self.storage_bytes += image_storage_bytes(&image);
                 self.image_order.push_back(image.id);
                 self.images.insert(image.id, image);
@@ -183,6 +194,11 @@ impl TerminalGraphicsState {
                     pixel_width: placement.pixel_width,
                     pixel_height: placement.pixel_height,
                     placeholder: placement.placeholder,
+                    version: self
+                        .images
+                        .get(&placement.id)
+                        .map(|image| image.version)
+                        .unwrap_or_default(),
                     data: self.images.get(&placement.id).cloned(),
                 })
             })
@@ -250,14 +266,16 @@ fn focus_report_sequence(enabled: bool, focused: bool) -> Option<&'static [u8]> 
 
 pub struct LocalPtySession {
     term: Arc<FairMutex<Term<LocalEventListener>>>,
-    notifier: Notifier,
+    notifier: LocalGraphicsNotifier,
     event_rx: Receiver<AlacEvent>,
+    graphics_rx: Receiver<TerminalGraphicsEvent>,
     pending_events: Vec<TerminalEvent>,
-    io_thread: Option<JoinHandle<(EventLoop<tty::Pty, LocalEventListener>, State)>>,
+    io_thread: Option<JoinHandle<()>>,
     size: TerminalSize,
     title: Option<String>,
     lifecycle: TerminalLifecycle,
     process: ProcessState,
+    graphics: TerminalGraphicsState,
 }
 
 pub type LocalTerminal = LocalPtySession;
@@ -280,6 +298,7 @@ impl LocalPtySession {
         });
 
         let (event_tx, event_rx) = unbounded();
+        let (graphics_tx, graphics_rx) = unbounded();
 
         let mut config = Config::default();
         config.scrolling_history = 10000;
@@ -306,22 +325,32 @@ impl LocalPtySession {
         let shell_pid = Some(pty.child().id());
         let pty_master = pty.file().try_clone().ok();
         let process = ProcessState::new(shell_pid, pty_master, cwd);
-        let event_loop = EventLoop::new(term.clone(), listener, pty, true, false)
-            .context("failed to create terminal event loop")?;
+        let event_loop = LocalGraphicsEventLoop::new(
+            term.clone(),
+            listener,
+            pty,
+            true,
+            graphics_tx,
+            size,
+            GraphicsOptions::default(),
+        )
+        .context("failed to create terminal event loop")?;
         let pty_tx = event_loop.channel();
-        let notifier = Notifier(pty_tx);
+        let notifier = LocalGraphicsNotifier(pty_tx);
         let io_thread = event_loop.spawn();
 
         Ok(Self {
             term,
             notifier,
             event_rx,
+            graphics_rx,
             pending_events: Vec::new(),
             io_thread: Some(io_thread),
             size,
             title: None,
             lifecycle: TerminalLifecycle::Running,
             process,
+            graphics: TerminalGraphicsState::default(),
         })
     }
 
@@ -331,6 +360,12 @@ impl LocalPtySession {
             if self.handle_alacritty_event(event) {
                 changed = true;
             }
+        }
+        while let Ok(event) = self.graphics_rx.try_recv() {
+            if let Some(response) = self.graphics.handle_event(event) {
+                let _ = self.write_input(&response);
+            }
+            changed = true;
         }
         changed
     }
@@ -478,12 +513,12 @@ impl LocalPtySession {
         }
 
         if self.lifecycle.is_running() {
-            let _ = self.notifier.0.send(Msg::Shutdown);
+            let _ = self.notifier.0.send(LocalGraphicsMsg::Shutdown);
+            self.detach_io_thread();
         }
 
         self.lifecycle = TerminalLifecycle::Closed;
         self.process.mark_exited();
-        self.join_io_thread();
     }
 
     fn join_io_thread(&mut self) {
@@ -491,10 +526,14 @@ impl LocalPtySession {
             if let Err(error) = io_thread.join() {
                 tracing::debug!(
                     ?error,
-                    "terminal event loop thread panicked during shutdown"
+                    "terminal graphics event loop thread panicked during shutdown"
                 );
             }
         }
+    }
+
+    fn detach_io_thread(&mut self) {
+        let _ = self.io_thread.take();
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
@@ -619,7 +658,7 @@ impl LocalPtySession {
 
     pub fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
-        snapshot_from_term(&term, self.size, &TerminalGraphicsState::default())
+        snapshot_from_term(&term, self.size, &self.graphics)
     }
 }
 
@@ -776,6 +815,7 @@ mod tests {
         term::Config,
         vte::ansi::{Color, NamedColor, Processor, Rgb, StdSyncHandler},
     };
+    use oxideterm_terminal_graphics::GraphicsIngress;
 
     use crate::{
         color::{
@@ -943,9 +983,10 @@ mod tests {
         graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
             id: TerminalImageId(1),
             protocol: TerminalImageProtocol::Kitty,
+            version: 0,
             width: 1,
             height: 1,
-            rgba: vec![0, 0, 0, 255],
+            rgba: vec![0, 0, 0, 255].into(),
             name: None,
         }));
         graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
@@ -964,15 +1005,54 @@ mod tests {
         graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
             id: TerminalImageId(2),
             protocol: TerminalImageProtocol::Kitty,
+            version: 0,
             width: 1,
             height: 1,
-            rgba: vec![255, 255, 255, 255],
+            rgba: vec![255, 255, 255, 255].into(),
             name: None,
         }));
 
         assert!(!graphics.images.contains_key(&TerminalImageId(1)));
         assert!(graphics.images.contains_key(&TerminalImageId(2)));
         assert!(graphics.placements.is_empty());
+    }
+
+    #[test]
+    fn yazi_kgp_old_sequence_anchors_image_at_moved_cursor_in_snapshot() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 24,
+            cell_width: 10,
+            cell_height: 20,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        let payload = "AAAA/////wAAAP8A";
+        let sequence =
+            format!("\x1b7\x1b[6;41H\x1b_Gq=2,a=T,z=-1,C=1,f=24,s=2,v=2,m=0;{payload}\x1b\\\x1b8");
+
+        let events = ingress.advance_with(
+            sequence.as_bytes(),
+            |bytes| {
+                let mut term = term.borrow_mut();
+                parser.advance(&mut *term, bytes);
+            },
+            || graphics_cursor_from_term(&term.borrow(), size),
+        );
+        for event in events {
+            graphics.handle_event(event);
+        }
+
+        let snapshot = snapshot_from_term(&term.borrow(), size, &graphics);
+        assert_eq!(snapshot.images.len(), 1);
+        let image = &snapshot.images[0];
+        assert_eq!(image.row, 5);
+        assert_eq!(image.col, 40);
+        assert_eq!(image.cols, 1);
+        assert_eq!(image.rows, 1);
+        assert!(image.data.is_some());
     }
 
     #[test]

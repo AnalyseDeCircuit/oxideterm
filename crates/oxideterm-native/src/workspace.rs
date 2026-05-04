@@ -12,7 +12,8 @@ use anyhow::Result;
 use gpui::{
     AnyElement, App, Context, CursorStyle, FocusHandle, Focusable, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Rgba,
-    SharedString, Styled, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
+    ScrollWheelEvent, SharedString, Styled, Timer, Window, div, prelude::*, px, relative, rgb,
+    rgba, svg,
 };
 use oxideterm_gpui_terminal::{TerminalPane, TerminalUiPreferences, TerminalUiTheme};
 use oxideterm_i18n::{I18n, Locale};
@@ -57,6 +58,7 @@ pub(crate) struct WorkspaceApp {
     tabs: Vec<Tab>,
     active_tab_id: Option<TabId>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
+    tab_scroll_x: f32,
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
@@ -110,6 +112,7 @@ impl WorkspaceApp {
             tabs: Vec::new(),
             active_tab_id: None,
             panes: HashMap::new(),
+            tab_scroll_x: 0.0,
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
@@ -279,10 +282,10 @@ impl Render for WorkspaceApp {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
-                _ => self.render_empty_workspace(cx),
+                _ => self.render_empty_workspace(),
             }
         } else {
-            self.render_empty_workspace(cx)
+            self.render_empty_workspace()
         };
 
         div()
@@ -385,8 +388,8 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &CloseSearch, window, cx| {
                 this.close_search(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenSettings, _window, cx| {
-                this.open_settings(cx);
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.open_settings(window, cx);
             }))
             .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, window, cx| {
                 this.switch_locale(Locale::En, window, cx);

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, sync::Arc};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -52,9 +52,10 @@ pub enum TerminalImageProtocol {
 pub struct TerminalImageData {
     pub id: TerminalImageId,
     pub protocol: TerminalImageProtocol,
+    pub version: u64,
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    pub rgba: Arc<[u8]>,
     pub name: Option<String>,
 }
 
@@ -88,6 +89,12 @@ pub struct GraphicsAdvance {
     pub events: Vec<TerminalGraphicsEvent>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TerminalGraphicsSegment {
+    Terminal(Vec<u8>),
+    Event(TerminalGraphicsEvent),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GraphicsCursor {
     pub line: i32,
@@ -117,6 +124,12 @@ pub enum GraphicsError {
     InvalidBase64,
     #[error("unsupported image payload")]
     UnsupportedImage,
+    #[error("invalid image path payload")]
+    InvalidPath,
+    #[error("{0}")]
+    Io(String),
+    #[error("image payload is larger than the configured storage limit")]
+    StorageLimitExceeded,
     #[error("{0}")]
     Decode(String),
 }
@@ -137,7 +150,12 @@ pub struct GraphicsIngress {
     options: GraphicsOptions,
     state: ParserState,
     next_image_id: u64,
-    kitty_chunks: HashMap<u64, Vec<u8>>,
+    kitty_chunks: HashMap<u64, KittyChunkAssembly>,
+}
+
+struct KittyChunkAssembly {
+    params: HashMap<String, String>,
+    encoded: Vec<u8>,
 }
 
 impl GraphicsIngress {
@@ -165,14 +183,99 @@ impl GraphicsIngress {
         result
     }
 
+    pub fn advance_segments<F>(
+        &mut self,
+        bytes: &[u8],
+        mut cursor: F,
+    ) -> Vec<TerminalGraphicsSegment>
+    where
+        F: FnMut() -> GraphicsCursor,
+    {
+        if !self.options.enabled {
+            return vec![TerminalGraphicsSegment::Terminal(bytes.to_vec())];
+        }
+
+        let mut segments = Vec::new();
+        let mut terminal_bytes = Vec::new();
+        for &byte in bytes {
+            let before_state = self.state.clone();
+            let mut result = GraphicsAdvance::default();
+            self.advance_byte(byte, cursor(), &mut result);
+            terminal_bytes.extend(result.terminal_bytes);
+            if !result.events.is_empty() {
+                if !terminal_bytes.is_empty() {
+                    segments.push(TerminalGraphicsSegment::Terminal(std::mem::take(
+                        &mut terminal_bytes,
+                    )));
+                }
+                segments.extend(
+                    result
+                        .events
+                        .into_iter()
+                        .map(TerminalGraphicsSegment::Event),
+                );
+            } else if entered_control_sequence(&before_state, &self.state)
+                && !terminal_bytes.is_empty()
+            {
+                segments.push(TerminalGraphicsSegment::Terminal(std::mem::take(
+                    &mut terminal_bytes,
+                )));
+            }
+        }
+
+        if !terminal_bytes.is_empty() {
+            segments.push(TerminalGraphicsSegment::Terminal(terminal_bytes));
+        }
+        segments
+    }
+
+    pub fn advance_with<F, C>(
+        &mut self,
+        bytes: &[u8],
+        mut emit_terminal: F,
+        mut cursor: C,
+    ) -> Vec<TerminalGraphicsEvent>
+    where
+        F: FnMut(&[u8]),
+        C: FnMut() -> GraphicsCursor,
+    {
+        if !self.options.enabled {
+            emit_terminal(bytes);
+            return Vec::new();
+        }
+
+        let mut events = Vec::new();
+        let mut terminal_bytes = Vec::new();
+        for &byte in bytes {
+            let before_state = self.state.clone();
+            let mut result = GraphicsAdvance::default();
+            self.advance_byte(byte, cursor(), &mut result);
+            terminal_bytes.extend(result.terminal_bytes);
+            if !result.events.is_empty() {
+                if !terminal_bytes.is_empty() {
+                    emit_terminal(&terminal_bytes);
+                    terminal_bytes.clear();
+                }
+                events.extend(result.events);
+            } else if entered_control_sequence(&before_state, &self.state)
+                && !terminal_bytes.is_empty()
+            {
+                emit_terminal(&terminal_bytes);
+                terminal_bytes.clear();
+            }
+        }
+
+        if !terminal_bytes.is_empty() {
+            emit_terminal(&terminal_bytes);
+        }
+        events
+    }
+
     fn advance_byte(&mut self, byte: u8, cursor: GraphicsCursor, result: &mut GraphicsAdvance) {
         let state = std::mem::replace(&mut self.state, ParserState::Ground);
         match state {
             ParserState::Ground => match byte {
                 0x1b => self.state = ParserState::Esc,
-                0x90 => self.state = ParserState::Dcs(Vec::new()),
-                0x9d => self.state = ParserState::Osc(Vec::new()),
-                0x9f => self.state = ParserState::Apc(Vec::new()),
                 _ => result.terminal_bytes.push(byte),
             },
             ParserState::Esc => match byte {
@@ -186,11 +289,10 @@ impl GraphicsIngress {
             },
             ParserState::Osc(mut data) => match byte {
                 0x07 => self.dispatch_osc(data, cursor, result),
-                0x9c => self.dispatch_osc(data, cursor, result),
                 0x1b => self.state = ParserState::OscEsc(data),
                 _ => {
                     data.push(byte);
-                    self.state = ParserState::Osc(data);
+                    self.state = self.parser_state_or_size_error(ParserState::Osc(data), result);
                 }
             },
             ParserState::OscEsc(data) => match byte {
@@ -203,11 +305,10 @@ impl GraphicsIngress {
                 }
             },
             ParserState::Dcs(mut data) => match byte {
-                0x9c => self.dispatch_dcs(data, cursor, result),
                 0x1b => self.state = ParserState::DcsEsc(data),
                 _ => {
                     data.push(byte);
-                    self.state = ParserState::Dcs(data);
+                    self.state = self.parser_state_or_size_error(ParserState::Dcs(data), result);
                 }
             },
             ParserState::DcsEsc(mut data) => match byte {
@@ -215,15 +316,14 @@ impl GraphicsIngress {
                 _ => {
                     data.push(0x1b);
                     data.push(byte);
-                    self.state = ParserState::Dcs(data);
+                    self.state = self.parser_state_or_size_error(ParserState::Dcs(data), result);
                 }
             },
             ParserState::Apc(mut data) => match byte {
-                0x9c => self.dispatch_apc(data, cursor, result),
                 0x1b => self.state = ParserState::ApcEsc(data),
                 _ => {
                     data.push(byte);
-                    self.state = ParserState::Apc(data);
+                    self.state = self.parser_state_or_size_error(ParserState::Apc(data), result);
                 }
             },
             ParserState::ApcEsc(mut data) => match byte {
@@ -231,9 +331,24 @@ impl GraphicsIngress {
                 _ => {
                     data.push(0x1b);
                     data.push(byte);
-                    self.state = ParserState::Apc(data);
+                    self.state = self.parser_state_or_size_error(ParserState::Apc(data), result);
                 }
             },
+        }
+    }
+
+    fn parser_state_or_size_error(
+        &self,
+        state: ParserState,
+        result: &mut GraphicsAdvance,
+    ) -> ParserState {
+        if parser_state_len(&state) <= encoded_storage_limit(self.options.storage_limit_mb) {
+            state
+        } else {
+            result.events.push(TerminalGraphicsEvent::Error(
+                GraphicsError::StorageLimitExceeded.to_string(),
+            ));
+            ParserState::Ground
         }
     }
 
@@ -311,28 +426,28 @@ impl GraphicsIngress {
             return;
         }
 
-        if let Some((params, _)) = parse_kitty_params_and_payload(&data[1..]) {
-            match params.get("a").map(String::as_str).unwrap_or("t") {
-                "d" => {
-                    let id = params
-                        .get("i")
-                        .and_then(|value| value.parse::<u64>().ok())
-                        .map(TerminalImageId);
-                    result.events.push(TerminalGraphicsEvent::Delete { id });
-                    return;
-                }
-                "q" => {
-                    let id = params
-                        .get("i")
-                        .and_then(|value| value.parse::<u64>().ok())
-                        .unwrap_or_default();
-                    result
-                        .events
-                        .push(TerminalGraphicsEvent::Respond(kitty_query_response(id)));
-                    return;
-                }
-                _ => {}
+        let (params, payload) = parse_kitty_command(&data[1..]);
+        match params.get("a").map(String::as_str).unwrap_or("t") {
+            "d" => {
+                let id = params
+                    .get("i")
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .map(TerminalImageId);
+                result.events.push(TerminalGraphicsEvent::Delete { id });
+                return;
             }
+            "q" => {
+                let id = params
+                    .get("i")
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or_default();
+                result
+                    .events
+                    .push(TerminalGraphicsEvent::Respond(kitty_query_response(id)));
+                return;
+            }
+            _ if payload.is_none() => return,
+            _ => {}
         }
 
         match self.decode_kitty(&data[1..], cursor) {
@@ -360,6 +475,7 @@ impl GraphicsIngress {
         let payload = BASE64
             .decode(&data[separator + 1..])
             .map_err(|_| GraphicsError::InvalidBase64)?;
+        enforce_storage_limit(payload.len(), self.options.storage_limit_mb)?;
         let name = params
             .get("name")
             .and_then(|value| BASE64.decode(value).ok())
@@ -374,9 +490,10 @@ impl GraphicsIngress {
         let image = TerminalImageData {
             id: self.next_id(),
             protocol: TerminalImageProtocol::Iterm2,
+            version: 0,
             width: width.unwrap_or(decoded.width),
             height: height.unwrap_or(decoded.height),
-            rgba: decoded.rgba,
+            rgba: decoded.rgba.into(),
             name,
         };
         let do_not_move = params
@@ -398,6 +515,7 @@ impl GraphicsIngress {
         sequence: &[u8],
         cursor: GraphicsCursor,
     ) -> Result<(TerminalImageData, TerminalImagePlacement, Vec<u8>), GraphicsError> {
+        enforce_storage_limit(sequence.len(), self.options.storage_limit_mb)?;
         let decoded = icy_sixel::SixelImage::decode(sequence)
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
         let width = decoded.width as u32;
@@ -406,9 +524,10 @@ impl GraphicsIngress {
         let image = TerminalImageData {
             id: self.next_id(),
             protocol: TerminalImageProtocol::Sixel,
+            version: 0,
             width,
             height,
-            rgba: decoded.pixels,
+            rgba: decoded.pixels.into(),
             name: None,
         };
         let (placement, advance) =
@@ -434,15 +553,27 @@ impl GraphicsIngress {
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_else(|| self.next_image_id);
         let more = params.get("m").is_some_and(|value| value == "1");
-        let mut encoded = self.kitty_chunks.remove(&explicit_id).unwrap_or_default();
-        encoded.extend_from_slice(payload);
+        let mut assembly =
+            self.kitty_chunks
+                .remove(&explicit_id)
+                .unwrap_or_else(|| KittyChunkAssembly {
+                    params: params.clone(),
+                    encoded: Vec::new(),
+                });
+        for (key, value) in &params {
+            assembly.params.insert(key.clone(), value.clone());
+        }
+        assembly.encoded.extend_from_slice(payload);
+        if assembly.encoded.len() > encoded_storage_limit(self.options.storage_limit_mb) {
+            return Err(GraphicsError::StorageLimitExceeded);
+        }
         if more {
-            self.kitty_chunks.insert(explicit_id, encoded);
+            self.kitty_chunks.insert(explicit_id, assembly);
             return Ok(None);
         }
-        let complete = BASE64
-            .decode(encoded)
-            .map_err(|_| GraphicsError::InvalidBase64)?;
+        let params = assembly.params;
+        let complete =
+            decode_kitty_payload(&params, &assembly.encoded, self.options.storage_limit_mb)?;
 
         let decoded = match params.get("f").map(String::as_str) {
             Some("24") => decode_raw_rgb(&complete, &params)?,
@@ -454,12 +585,13 @@ impl GraphicsIngress {
         let image = TerminalImageData {
             id: image_id,
             protocol: TerminalImageProtocol::Kitty,
+            version: 0,
             width: decoded.width,
             height: decoded.height,
-            rgba: decoded.rgba,
+            rgba: decoded.rgba.into(),
             name: None,
         };
-        let move_cursor = !params.get("C").is_some_and(|value| value == "0");
+        let move_cursor = !params.get("C").is_some_and(|value| value == "1");
         let (placement, advance) = self.placement_for_image(
             image.id,
             image.protocol,
@@ -501,6 +633,11 @@ impl GraphicsIngress {
         };
         (placement, advance)
     }
+}
+
+fn entered_control_sequence(before: &ParserState, after: &ParserState) -> bool {
+    matches!(before, ParserState::Ground | ParserState::Esc)
+        && !matches!(after, ParserState::Ground | ParserState::Esc)
 }
 
 #[derive(Clone, Debug)]
@@ -553,6 +690,35 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         height,
         rgba: image.into_raw(),
     })
+}
+
+fn decode_kitty_payload(
+    params: &HashMap<String, String>,
+    encoded: &[u8],
+    storage_limit_mb: u32,
+) -> Result<Vec<u8>, GraphicsError> {
+    let payload = BASE64
+        .decode(encoded)
+        .map_err(|_| GraphicsError::InvalidBase64)?;
+    enforce_storage_limit(payload.len(), storage_limit_mb)?;
+
+    let transmission = params.get("t").map(String::as_str).unwrap_or("d");
+    match transmission {
+        "d" => Ok(payload),
+        "f" | "t" => {
+            let path = String::from_utf8(payload).map_err(|_| GraphicsError::InvalidPath)?;
+            let path = path.trim_end_matches('\0');
+            let metadata =
+                fs::metadata(path).map_err(|error| GraphicsError::Io(error.to_string()))?;
+            enforce_storage_limit(metadata.len() as usize, storage_limit_mb)?;
+            let bytes = fs::read(path).map_err(|error| GraphicsError::Io(error.to_string()))?;
+            if transmission == "t" {
+                let _ = fs::remove_file(path);
+            }
+            Ok(bytes)
+        }
+        _ => Err(GraphicsError::UnsupportedImage),
+    }
 }
 
 fn decode_raw_rgb(
@@ -619,6 +785,34 @@ fn enforce_pixel_limit(width: u32, height: u32, pixel_limit: u32) -> Result<(), 
     }
 }
 
+fn enforce_storage_limit(bytes: usize, storage_limit_mb: u32) -> Result<(), GraphicsError> {
+    let limit = storage_limit_mb.max(1) as usize * 1024 * 1024;
+    if bytes <= limit {
+        Ok(())
+    } else {
+        Err(GraphicsError::StorageLimitExceeded)
+    }
+}
+
+fn encoded_storage_limit(storage_limit_mb: u32) -> usize {
+    // Base64 payloads are roughly 4/3 of decoded data. Keep a small allowance
+    // for protocol parameters while still bounding incomplete graphics control
+    // sequences before they can stall the PTY reader.
+    storage_limit_mb.max(1) as usize * 1024 * 1024 * 2
+}
+
+fn parser_state_len(state: &ParserState) -> usize {
+    match state {
+        ParserState::Osc(data)
+        | ParserState::OscEsc(data)
+        | ParserState::Dcs(data)
+        | ParserState::DcsEsc(data)
+        | ParserState::Apc(data)
+        | ParserState::ApcEsc(data) => data.len(),
+        ParserState::Ground | ParserState::Esc => 0,
+    }
+}
+
 fn parse_semicolon_params(data: &[u8]) -> HashMap<String, String> {
     split_params(data, b';')
 }
@@ -633,6 +827,16 @@ fn parse_kitty_params_and_payload(data: &[u8]) -> Option<(HashMap<String, String
         parse_comma_params(&data[..separator]),
         &data[separator + 1..],
     ))
+}
+
+fn parse_kitty_command(data: &[u8]) -> (HashMap<String, String>, Option<&[u8]>) {
+    match data.iter().position(|byte| *byte == b';') {
+        Some(separator) => (
+            parse_comma_params(&data[..separator]),
+            Some(&data[separator + 1..]),
+        ),
+        None => (parse_comma_params(data), None),
+    }
 }
 
 fn kitty_query_response(id: u64) -> Vec<u8> {
@@ -753,7 +957,7 @@ mod tests {
     fn kitty_raw_rgba_image_is_placed_and_respects_no_cursor_move() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let payload = BASE64.encode([0, 255, 0, 255]);
-        let seq = format!("\x1b_Ga=t,f=32,s=1,v=1,i=42,C=0;{payload}\x1b\\");
+        let seq = format!("\x1b_Ga=t,f=32,s=1,v=1,i=42,C=1;{payload}\x1b\\");
         let result = ingress.advance(seq.as_bytes(), cursor());
 
         assert!(result.terminal_bytes.is_empty());
@@ -769,6 +973,134 @@ mod tests {
                 })
             )
         }));
+    }
+
+    #[test]
+    fn kitty_yazi_kgp_old_upload_uses_no_cursor_movement() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([0, 0, 0, 255, 255, 255]);
+        let seq = format!("\x1b_Gq=2,a=T,z=-1,C=1,f=24,s=2,v=1,m=0;{payload}\x1b\\");
+        let result = ingress.advance(seq.as_bytes(), cursor());
+
+        assert!(result.terminal_bytes.is_empty());
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::ImageReady(TerminalImageData {
+                    width: 2,
+                    height: 1,
+                    protocol: TerminalImageProtocol::Kitty,
+                    ..
+                })
+            )
+        }));
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Place(TerminalImagePlacement {
+                    row: 0,
+                    col: 0,
+                    cols: 1,
+                    rows: 1,
+                    ..
+                })
+            )
+        }));
+    }
+
+    #[test]
+    fn kitty_yazi_kgp_old_chunked_upload_without_explicit_id_completes() {
+        let raw = [0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 0];
+        let payload = BASE64.encode(raw);
+        let split = payload.len() / 2;
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+
+        let first = format!(
+            "\x1b_Gq=2,a=T,z=-1,C=1,f=24,s=2,v=2,m=1;{}\x1b\\",
+            &payload[..split]
+        );
+        let second = format!("\x1b_Gm=0;{}\x1b\\", &payload[split..]);
+
+        assert!(
+            ingress
+                .advance(first.as_bytes(), cursor())
+                .events
+                .is_empty()
+        );
+        let result = ingress.advance(second.as_bytes(), cursor());
+
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::ImageReady(TerminalImageData {
+                    id: TerminalImageId(1),
+                    width: 2,
+                    height: 2,
+                    protocol: TerminalImageProtocol::Kitty,
+                    ..
+                })
+            )
+        }));
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Place(TerminalImagePlacement {
+                    id: TerminalImageId(1),
+                    row: 0,
+                    col: 0,
+                    ..
+                })
+            )
+        }));
+    }
+
+    #[test]
+    fn kitty_yazi_kgp_old_delete_without_payload_clears_all_images() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let result = ingress.advance(b"\x1b_Gq=2,a=d,d=A\x1b\\", cursor());
+
+        assert_eq!(
+            result.events,
+            vec![TerminalGraphicsEvent::Delete { id: None }]
+        );
+        assert!(result.terminal_bytes.is_empty());
+    }
+
+    #[test]
+    fn advance_with_anchors_image_after_preceding_terminal_text() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([0, 255, 0, 255]);
+        let seq = format!("abc\x1b_Ga=t,f=32,s=1,v=1,i=42;{payload}\x1b\\xyz");
+        let mut terminal_bytes = Vec::new();
+        let col = std::cell::Cell::new(0usize);
+        let events = ingress.advance_with(
+            seq.as_bytes(),
+            |bytes| {
+                col.set(
+                    col.get()
+                        + bytes
+                            .iter()
+                            .filter(|byte| !matches!(byte, b'\r' | b'\n'))
+                            .count(),
+                );
+                terminal_bytes.extend_from_slice(bytes);
+            },
+            || GraphicsCursor {
+                col: col.get(),
+                ..cursor()
+            },
+        );
+
+        let placement = events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::Place(placement) => Some(placement),
+                _ => None,
+            })
+            .expect("image placement");
+        assert_eq!(placement.col, 3);
+        assert!(terminal_bytes.starts_with(b"abc "));
+        assert!(terminal_bytes.ends_with(b"xyz"));
     }
 
     #[test]
@@ -798,6 +1130,45 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
         );
+    }
+
+    #[test]
+    fn kitty_file_transmission_decodes_image_from_path() {
+        let mut png = RgbaImage::new(1, 1);
+        png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-kitty-file-{}-图片.png",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+
+        let payload = BASE64.encode(path.to_string_lossy().as_bytes());
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let seq = format!("\x1b_Ga=T,t=f,f=100,i=12;{payload}\x1b\\");
+        let result = ingress.advance(seq.as_bytes(), cursor());
+
+        let _ = std::fs::remove_file(path);
+
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::ImageReady(TerminalImageData {
+                    id: TerminalImageId(12),
+                    protocol: TerminalImageProtocol::Kitty,
+                    width: 1,
+                    height: 1,
+                    ..
+                })
+            )
+        }));
     }
 
     #[test]
@@ -836,7 +1207,17 @@ mod tests {
     }
 
     #[test]
-    fn eight_bit_c1_terminators_are_consumed() {
+    fn utf8_continuation_bytes_are_not_treated_as_c1_graphics_controls() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let text = "❯ 2025-2026春季毕设安排.pdf";
+        let result = ingress.advance(text.as_bytes(), cursor());
+
+        assert_eq!(result.terminal_bytes, text.as_bytes());
+        assert!(result.events.is_empty());
+    }
+
+    #[test]
+    fn eight_bit_c1_graphics_starters_pass_through_to_terminal_parser() {
         let mut png = RgbaImage::new(1, 1);
         png.put_pixel(0, 0, image::Rgba([255, 255, 0, 255]));
         let mut bytes = Vec::new();
@@ -853,13 +1234,8 @@ mod tests {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let result = ingress.advance(&seq, cursor());
 
-        assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
-        );
-        assert!(!result.terminal_bytes.starts_with(b"\x1b]"));
+        assert_eq!(result.terminal_bytes, seq);
+        assert!(result.events.is_empty());
     }
 
     fn ingress_advance_chunks(bytes: &[u8]) -> GraphicsAdvance {
