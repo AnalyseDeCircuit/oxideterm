@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use alacritty_terminal::{
     event::Event as AlacEvent,
@@ -13,7 +13,7 @@ use oxideterm_ssh::{
     ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPromptHandler, SshPtyHandle,
     SshTransportClient, SshTransportCommand,
 };
-use oxideterm_terminal_graphics::{GraphicsAdvance, GraphicsIngress};
+use oxideterm_terminal_graphics::GraphicsIngress;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::error::TryRecvError;
 
@@ -490,22 +490,21 @@ impl SshPtySession {
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let mut term = self.term.lock();
-        let cursor = graphics_cursor_from_term(
-            &term,
-            TerminalSize {
-                cols: self.resize.cols,
-                rows: self.resize.rows,
-                cell_width: self.resize.cell_width,
-                cell_height: self.resize.cell_height,
+        let size = TerminalSize {
+            cols: self.resize.cols,
+            rows: self.resize.rows,
+            cell_width: self.resize.cell_width,
+            cell_height: self.resize.cell_height,
+        };
+        let cursor = Cell::new(graphics_cursor_from_term(&term, size));
+        let events = self.graphics_ingress.advance_with(
+            bytes,
+            |terminal_bytes| {
+                self.parser.advance(&mut *term, terminal_bytes);
+                cursor.set(graphics_cursor_from_term(&term, size));
             },
+            || cursor.get(),
         );
-        let GraphicsAdvance {
-            terminal_bytes,
-            events,
-        } = self.graphics_ingress.advance(bytes, cursor);
-        if !terminal_bytes.is_empty() {
-            self.parser.advance(&mut *term, &terminal_bytes);
-        }
         drop(term);
         for event in events {
             if let Some(response) = self.graphics.handle_event(event) {

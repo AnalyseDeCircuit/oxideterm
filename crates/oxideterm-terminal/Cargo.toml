@@ -11,5 +11,6 @@ crossbeam-channel.workspace = true
 libc.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
+polling.workspace = true
 tokio.workspace = true
 tracing.workspace = true

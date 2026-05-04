@@ -18,6 +18,7 @@ impl Render for TerminalPane {
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let mut snapshot = self.snapshot.clone();
         snapshot.cursor_shape = self.preferences.cursor_shape;
+        let rendered_images = self.image_cache.render_images(&snapshot.images);
 
         let (lifecycle, process_info) = {
             let terminal = self.terminal.lock();
@@ -121,8 +122,9 @@ impl Render for TerminalPane {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .child(TerminalElement::new(
+                    .child(TerminalElement::new_with_images(
                         snapshot,
+                        rendered_images,
                         self.selection.filter(|s| !s.is_empty()),
                         self.metrics.clone(),
                         self.cursor_visible,

@@ -203,8 +203,8 @@ impl SettingsTab {
 }
 
 impl WorkspaceApp {
-    pub(super) fn open_settings(&mut self, cx: &mut Context<Self>) {
-        self.open_settings_tab(cx);
+    pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings_tab(window, cx);
     }
 
     pub(super) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {

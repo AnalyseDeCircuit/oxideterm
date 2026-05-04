@@ -6,11 +6,10 @@ use gpui::{
     Window, fill, point, px, relative, rgb,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalImageSnapshot, TerminalSearchMatch,
-    TerminalSnapshot,
+    TerminalColor, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 
-use crate::app::{TerminalInputHandler, TerminalPane};
+use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage};
 use crate::terminal_ui::*;
 use crate::terminal_view::links::*;
 use crate::terminal_view::selection::TerminalSelection;
@@ -27,6 +26,7 @@ pub(crate) use style::*;
 
 pub(crate) struct TerminalElement {
     snapshot: TerminalSnapshot,
+    rendered_images: Vec<TerminalRenderedImage>,
     selection: Option<TerminalSelection>,
     metrics: TerminalMetrics,
     cursor_visible: bool,
@@ -76,7 +76,7 @@ pub(crate) struct BatchedTextRun {
 
 #[derive(Clone)]
 pub(crate) struct TerminalImageLayout {
-    pub(crate) image: TerminalImageSnapshot,
+    pub(crate) image: TerminalRenderedImage,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,6 +93,7 @@ pub(crate) struct TerminalScrollbar {
 }
 
 impl TerminalElement {
+    #[allow(dead_code)]
     pub(crate) fn new(
         snapshot: TerminalSnapshot,
         selection: Option<TerminalSelection>,
@@ -105,8 +106,37 @@ impl TerminalElement {
         hovered_link: Option<TerminalLinkRange>,
         input: Option<TerminalElementInput>,
     ) -> Self {
+        Self::new_with_images(
+            snapshot,
+            Vec::new(),
+            selection,
+            metrics,
+            cursor_visible,
+            marked_text,
+            search_query,
+            search_matches,
+            selected_search_match,
+            hovered_link,
+            input,
+        )
+    }
+
+    pub(crate) fn new_with_images(
+        snapshot: TerminalSnapshot,
+        rendered_images: Vec<TerminalRenderedImage>,
+        selection: Option<TerminalSelection>,
+        metrics: TerminalMetrics,
+        cursor_visible: bool,
+        marked_text: Option<String>,
+        search_query: Option<String>,
+        search_matches: Vec<TerminalSearchMatch>,
+        selected_search_match: Option<usize>,
+        hovered_link: Option<TerminalLinkRange>,
+        input: Option<TerminalElementInput>,
+    ) -> Self {
         Self {
             snapshot,
+            rendered_images,
             selection,
             metrics,
             cursor_visible,
@@ -146,13 +176,12 @@ impl TerminalElement {
         };
         let mut selections = Vec::new();
         let images = self
-            .snapshot
-            .images
+            .rendered_images
             .iter()
             .filter(|image| {
-                image.row < self.snapshot.rows
-                    && image.row + image.rows > visible_rows.start
-                    && image.row < visible_rows.end
+                image.snapshot.row < self.snapshot.rows
+                    && image.snapshot.row + image.snapshot.rows > visible_rows.start
+                    && image.snapshot.row < visible_rows.end
             })
             .cloned()
             .map(|image| TerminalImageLayout { image })
@@ -230,19 +259,23 @@ impl TerminalElement {
                     selections.push(rect);
                 }
 
-                if cell.ch != ' ' || (self.cursor_visible && cell.cursor) {
+                if cell.ch != ' '
+                    || !cell.zerowidth.is_empty()
+                    || (self.cursor_visible && cell.cursor)
+                {
                     let link = !block_cursor
                         && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
                         && link_ranges_contain(&link_ranges, row_index, col_index);
                     let style = text_run_for_cell(cell, fg, link, &self.metrics);
-                    if powerline_separator(cell.ch).is_some() {
+                    let cell_text = cell_text(cell);
+                    if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
                         if let Some(run) = current_run.take() {
                             text_runs.push(run);
                         }
                         text_runs.push(BatchedTextRun {
                             row: row_index,
                             col: col_index,
-                            text: cell.ch.to_string(),
+                            text: cell_text,
                             cells: cell_width,
                             style,
                         });
@@ -253,9 +286,9 @@ impl TerminalElement {
                             && run.col + run.cells == col_index
                             && text_run_style_matches(&run.style, &style)
                         {
-                            run.text.push(cell.ch);
+                            run.text.push_str(&cell_text);
                             run.cells += cell_width;
-                            run.style.len += cell.ch.len_utf8();
+                            run.style.len += cell_text.len();
                             continue;
                         }
                     }
@@ -266,7 +299,7 @@ impl TerminalElement {
                     current_run = Some(BatchedTextRun {
                         row: row_index,
                         col: col_index,
-                        text: cell.ch.to_string(),
+                        text: cell_text,
                         cells: cell_width,
                         style,
                     });
@@ -306,6 +339,17 @@ impl TerminalElement {
             cursor,
             scrollbar,
         }
+    }
+}
+
+fn cell_text(cell: &oxideterm_terminal::TerminalCell) -> String {
+    if cell.zerowidth.is_empty() {
+        cell.ch.to_string()
+    } else {
+        let mut text = String::with_capacity(cell.ch.len_utf8() + cell.zerowidth.len());
+        text.push(cell.ch);
+        text.push_str(&cell.zerowidth);
+        text
     }
 }
 

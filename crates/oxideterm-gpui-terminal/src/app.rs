@@ -17,11 +17,14 @@ use parking_lot::Mutex;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
+mod image_cache;
 mod ime;
 mod interactions;
 mod render;
 mod scrollbar;
 
+use image_cache::ImageRenderCache;
+pub(crate) use image_cache::TerminalRenderedImage;
 pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 
@@ -49,6 +52,7 @@ pub struct TerminalPane {
     cursor_visible: bool,
     cursor_blink_terminal_enabled: bool,
     last_cursor_blink: Instant,
+    image_cache: ImageRenderCache,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
     pending_pty_resize: Option<(usize, usize, u16, u16)>,
@@ -155,6 +159,7 @@ impl TerminalPane {
             cursor_visible: true,
             cursor_blink_terminal_enabled: false,
             last_cursor_blink: Instant::now(),
+            image_cache: ImageRenderCache::default(),
             bounds: None,
             last_pty_resize: None,
             pending_pty_resize: None,

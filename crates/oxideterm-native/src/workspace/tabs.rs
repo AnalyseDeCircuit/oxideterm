@@ -27,6 +27,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
+        self.reveal_active_tab(window);
         cx.notify();
         Ok(())
     }
@@ -70,11 +71,12 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
+        self.reveal_active_tab(window);
         cx.notify();
         Ok(())
     }
 
-    pub(super) fn open_settings_tab(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Settings) {
             tab.id
         } else {
@@ -96,6 +98,7 @@ impl WorkspaceApp {
             self.sidebar_collapsed = false;
         }
         self.persist_sidebar_settings();
+        self.reveal_active_tab(window);
         cx.notify();
     }
 
@@ -152,6 +155,7 @@ impl WorkspaceApp {
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
             self.focus_active_pane(window, cx);
+            self.reveal_active_tab(window);
             cx.notify();
         }
     }
@@ -200,6 +204,7 @@ impl WorkspaceApp {
         self.needs_active_pane_focus =
             self.active_tab_id.is_some() && self.active_surface == ActiveSurface::Terminal;
         self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
         cx.notify();
     }
 
@@ -219,6 +224,7 @@ impl WorkspaceApp {
         self.sync_active_tab_surface();
         self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
         self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
         cx.notify();
     }
 
@@ -228,12 +234,79 @@ impl WorkspaceApp {
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
             self.focus_active_pane(window, cx);
+            self.reveal_active_tab(window);
             cx.notify();
         }
     }
 
+    fn tabbar_viewport_width(&self, window: &Window) -> f32 {
+        let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
+        let sidebar_width = if self.sidebar_collapsed {
+            self.tokens.metrics.activity_bar_width
+        } else {
+            self.sidebar_width
+        };
+        (window_width - sidebar_width).max(0.0)
+    }
+
+    fn tabbar_content_width(&self) -> f32 {
+        self.tokens.metrics.tabbar_leading_offset
+            + self.tabs.len() as f32 * self.tokens.metrics.tab_width
+    }
+
+    fn tabbar_max_scroll(&self, window: &Window) -> f32 {
+        (self.tabbar_content_width() - self.tabbar_viewport_width(window)).max(0.0)
+    }
+
+    fn clamp_tab_scroll(&mut self, window: &Window) {
+        self.tab_scroll_x = self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+    }
+
+    fn reveal_active_tab(&mut self, window: &Window) {
+        let Some(index) = self.active_tab_index() else {
+            self.clamp_tab_scroll(window);
+            return;
+        };
+        let tab_left = self.tokens.metrics.tabbar_leading_offset
+            + index as f32 * self.tokens.metrics.tab_width;
+        let tab_right = tab_left + self.tokens.metrics.tab_width;
+        let viewport_width = self.tabbar_viewport_width(window);
+
+        if tab_left < self.tab_scroll_x {
+            self.tab_scroll_x = tab_left;
+        } else if tab_right > self.tab_scroll_x + viewport_width {
+            self.tab_scroll_x = tab_right - viewport_width;
+        }
+        self.clamp_tab_scroll(window);
+    }
+
+    pub(super) fn handle_tabbar_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event
+            .delta
+            .pixel_delta(px(self.tokens.metrics.tabbar_height));
+        let horizontal = if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+            f32::from(delta.x)
+        } else {
+            f32::from(delta.y)
+        };
+        if horizontal == 0.0 {
+            return;
+        }
+
+        self.tab_scroll_x += horizontal;
+        self.clamp_tab_scroll(window);
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let scroll_x = self.tab_scroll_x.max(0.0);
         let mut bar = div()
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
@@ -243,7 +316,19 @@ impl WorkspaceApp {
             .overflow_hidden()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg));
+            .bg(rgb(theme.bg))
+            .on_scroll_wheel(cx.listener(|this, event, window, cx| {
+                this.handle_tabbar_scroll(event, window, cx);
+            }));
+
+        let mut tabs_row = div()
+            .h_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .flex_none()
+            .relative()
+            .left(px(-scroll_x));
 
         for tab in &self.tabs {
             let tab_id = tab.id;
@@ -264,11 +349,12 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.text_muted)
             };
-            bar = bar.child(
+            tabs_row = tabs_row.child(
                 div()
                     .id(("workspace-tab", tab_id.0))
                     .h_full()
                     .flex_none()
+                    .w(px(self.tokens.metrics.tab_width))
                     .min_w(px(self.tokens.metrics.tab_min_width))
                     .max_w(px(self.tokens.metrics.tab_max_width))
                     .px_3()
@@ -344,60 +430,12 @@ impl WorkspaceApp {
             );
         }
 
-        bar.child(
-            div()
-                .id("workspace-new-tab")
-                .h(px(self.tokens.metrics.new_tab_button_height))
-                .w(px(self.tokens.metrics.new_tab_button_width))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .border_r_1()
-                .border_color(rgb(theme.border))
-                .bg(rgb(theme.bg))
-                .text_color(rgb(theme.text_muted))
-                .cursor_pointer()
-                .child(Self::render_lucide_icon(
-                    LucideIcon::Plus,
-                    self.tokens.metrics.tab_icon_size,
-                    rgb(theme.text_muted),
-                ))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
-                        let _ = this.create_local_terminal_tab(window, cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-        )
-        .into_any_element()
+        bar = bar.child(tabs_row);
+        bar.into_any_element()
     }
 
-    pub(super) fn render_empty_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_empty_workspace(&self) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .flex_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(theme.bg))
-            .child(
-                div()
-                    .px(px(self.tokens.metrics.empty_workspace_padding_x))
-                    .py(px(self.tokens.metrics.empty_workspace_padding_y))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgb(theme.bg_hover))
-                    .text_color(rgb(theme.text))
-                    .cursor_pointer()
-                    .child(self.i18n.t("workspace.new_local_terminal"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, window, cx| {
-                            let _ = this.create_local_terminal_tab(window, cx);
-                        }),
-                    ),
-            )
-            .into_any_element()
+        div().flex_1().bg(rgb(theme.bg)).into_any_element()
     }
 }
