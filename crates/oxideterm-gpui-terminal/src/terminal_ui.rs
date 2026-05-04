@@ -4,7 +4,7 @@ use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
     Window, px, rgb,
 };
-use oxideterm_terminal::{TerminalLifecycle, TerminalProcessInfo};
+use oxideterm_terminal::{TerminalCursorShape, TerminalLifecycle, TerminalProcessInfo};
 
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
@@ -27,6 +27,7 @@ pub struct TerminalUiPreferences {
     pub font_family: String,
     pub font_size: f32,
     pub line_height: f32,
+    pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
     pub copy_on_select: bool,
     pub theme: TerminalUiTheme,
@@ -38,6 +39,7 @@ impl Default for TerminalUiPreferences {
             font_family: TERMINAL_FONT.to_string(),
             font_size: TERMINAL_FONT_SIZE,
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
+            cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
             theme: TerminalUiTheme::default(),
@@ -127,10 +129,6 @@ pub(crate) struct TerminalMetrics {
 }
 
 impl TerminalMetrics {
-    pub(crate) fn measure(window: &mut Window) -> Self {
-        Self::measure_with_preferences(window, &TerminalUiPreferences::default())
-    }
-
     pub(crate) fn measure_with_preferences(
         window: &mut Window,
         preferences: &TerminalUiPreferences,

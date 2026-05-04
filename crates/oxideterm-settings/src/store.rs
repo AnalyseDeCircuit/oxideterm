@@ -63,26 +63,20 @@ fn now_ms() -> u64 {
 }
 
 pub fn default_settings_path() -> PathBuf {
-    if cfg!(target_os = "macos")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("OxideTerm")
-            .join(SETTINGS_FILENAME);
+    if cfg!(windows) {
+        if let Some(config_home) = std::env::var_os("APPDATA") {
+            return PathBuf::from(config_home)
+                .join("OxideTerm")
+                .join(SETTINGS_FILENAME);
+        }
     }
-    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(config_home)
-            .join("oxideterm")
-            .join(SETTINGS_FILENAME);
-    }
+
     if let Some(home) = std::env::var_os("HOME") {
         return PathBuf::from(home)
-            .join(".config")
-            .join("oxideterm")
+            .join(".oxideterm")
             .join(SETTINGS_FILENAME);
     }
+
     PathBuf::from(SETTINGS_FILENAME)
 }
 
@@ -374,6 +368,16 @@ mod tests {
         entries.insert(APP_LANG_KEY.to_string(), "fr-FR".to_string());
         let sanitized = sanitize_settings_value(legacy_local_storage_value(&entries)).unwrap();
         assert_eq!(sanitized.settings.general.language, Language::FrFr);
+    }
+
+    #[test]
+    fn default_settings_path_matches_tauri_data_directory() {
+        let path = default_settings_path();
+        if cfg!(windows) {
+            assert!(path.ends_with(Path::new("OxideTerm").join(SETTINGS_FILENAME)));
+        } else {
+            assert!(path.ends_with(Path::new(".oxideterm").join(SETTINGS_FILENAME)));
+        }
     }
 
     #[test]

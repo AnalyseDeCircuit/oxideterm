@@ -83,6 +83,11 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.active_surface == ActiveSurface::Settings && self.focused_settings_input.is_some() {
+            let _ = self.handle_settings_input_key(event, cx);
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
         {
             self.close_settings(window, cx);

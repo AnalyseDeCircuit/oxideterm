@@ -9,6 +9,11 @@ use oxideterm_theme::ThemeTokens;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum SelectAnchorId {
     SettingsLanguage,
+    SettingsTerminalFontFamily,
+    SettingsTerminalFontSizeSlider,
+    SettingsTerminalEncoding,
+    SettingsTerminalAdaptiveRenderer,
+    SettingsTerminalCursorStyle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

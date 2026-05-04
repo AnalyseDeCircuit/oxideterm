@@ -2,12 +2,14 @@
 members = [
   "crates/oxideterm-gpui-markdown",
   "crates/oxideterm-gpui-terminal",
+  "crates/oxideterm-code-editor",
   "crates/oxideterm-i18n",
   "crates/oxideterm-native",
   "crates/oxideterm-settings",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
   "crates/oxideterm-theme",
+  "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
   "crates/russh",
 ]
@@ -24,6 +26,7 @@ anyhow = "1.0"
 crossbeam-channel = "0.5"
 dashmap = "6.1"
 gpui = "=0.2.2"
+gpui-component = { version = "=0.5.1", default-features = false }
 libc = "0.2"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }

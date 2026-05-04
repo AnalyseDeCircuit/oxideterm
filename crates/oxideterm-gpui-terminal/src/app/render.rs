@@ -15,7 +15,9 @@ impl Focusable for TerminalPane {
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.metrics = TerminalMetrics::measure(window);
+        self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
+        let mut snapshot = self.snapshot.clone();
+        snapshot.cursor_shape = self.preferences.cursor_shape;
 
         let (lifecycle, process_info) = {
             let terminal = self.terminal.lock();
@@ -46,7 +48,7 @@ impl Render for TerminalPane {
                 rgb(self.theme.background)
             })
             .text_color(rgb(self.theme.foreground))
-            .font_family(SharedString::from(TERMINAL_FONT))
+            .font_family(SharedString::from(self.preferences.font_family.clone()))
             .text_size(self.metrics.font_size)
             .line_height(self.metrics.line_height)
             .track_focus(&self.focus_handle)
@@ -120,7 +122,7 @@ impl Render for TerminalPane {
                     .right_0()
                     .bottom_0()
                     .child(TerminalElement::new(
-                        self.snapshot.clone(),
+                        snapshot,
                         self.selection.filter(|s| !s.is_empty()),
                         self.metrics.clone(),
                         self.cursor_visible,

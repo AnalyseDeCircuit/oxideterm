@@ -2,7 +2,7 @@ use gpui::{AnchoredPositionMode, Corner, StatefulInteractiveElement, anchored, d
 use oxideterm_settings::{
     AdaptiveRendererMode, AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit,
     ConflictAction, CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, IdeAgentMode,
-    Language, PersistedSettings, RendererType, TerminalEncoding, UiDensity, UpdateChannel,
+    Language, PersistedSettings, TerminalEncoding, UiDensity, UpdateChannel,
 };
 
 use super::*;
@@ -15,6 +15,8 @@ use crate::ui::{
         select_trigger,
     },
     separator::{SeparatorOrientation, separator},
+    slider::{SliderView, slider},
+    text_input::{TextInputView, text_input},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,14 +56,33 @@ pub(super) enum TerminalSettingsPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SettingsSelect {
     Language,
+    TerminalFontFamily,
+    TerminalEncoding,
+    TerminalAdaptiveRenderer,
+    TerminalCursorStyle,
 }
 
 impl SettingsSelect {
     fn anchor_id(self) -> SelectAnchorId {
         match self {
             Self::Language => SelectAnchorId::SettingsLanguage,
+            Self::TerminalFontFamily => SelectAnchorId::SettingsTerminalFontFamily,
+            Self::TerminalEncoding => SelectAnchorId::SettingsTerminalEncoding,
+            Self::TerminalAdaptiveRenderer => SelectAnchorId::SettingsTerminalAdaptiveRenderer,
+            Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SettingsInput {
+    TerminalFontSize,
+    TerminalLineHeight,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SettingsSlider {
+    TerminalFontSize,
 }
 
 impl TerminalSettingsPage {
@@ -193,6 +214,9 @@ impl WorkspaceApp {
 
     pub(super) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active_surface = ActiveSurface::Terminal;
+        self.open_settings_select = None;
+        self.focused_settings_input = None;
+        self.settings_slider_drag = None;
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -379,6 +403,13 @@ impl WorkspaceApp {
         self.tokens = tokens_from_settings(&settings);
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
+        let terminal_preferences = self.terminal_preferences();
+        for pane in self.panes.values() {
+            let preferences = terminal_preferences.clone();
+            let _ = pane.update(cx, |pane, cx| {
+                pane.set_preferences(preferences, cx);
+            });
+        }
         let _ = self.settings_store.save();
         self.sync_tab_titles(cx);
         cx.notify();
@@ -543,25 +574,154 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn handle_settings_input_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(input) = self.focused_settings_input else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+
+        match key {
+            "escape" | "enter" => {
+                self.focused_settings_input = None;
+                self.settings_input_draft.clear();
+                self.new_connection_caret_visible = true;
+                cx.notify();
+                true
+            }
+            "backspace" if !modifiers.platform && !modifiers.control => {
+                self.settings_input_draft.pop();
+                self.apply_settings_input_draft(input, cx);
+                true
+            }
+            _ if modifiers.platform || modifiers.control || modifiers.alt => true,
+            _ => {
+                let Some(text) = settings_text_from_keystroke(&event.keystroke) else {
+                    return true;
+                };
+                self.settings_input_draft.push_str(text);
+                self.apply_settings_input_draft(input, cx);
+                true
+            }
+        }
+    }
+
+    pub(super) fn update_settings_slider_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_slider_drag == Some(SettingsSlider::TerminalFontSize) {
+            self.set_font_size_from_position(f32::from(event.position.x), cx);
+        }
+    }
+
+    pub(super) fn finish_settings_slider_drag(&mut self, cx: &mut Context<Self>) {
+        if self.settings_slider_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn focus_settings_input(
+        &mut self,
+        input: SettingsInput,
+        current_value: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_select = None;
+        self.focused_settings_input = Some(input);
+        self.settings_input_draft = current_value;
+        self.new_connection_caret_visible = true;
+        cx.notify();
+    }
+
+    fn apply_settings_input_draft(&mut self, input: SettingsInput, cx: &mut Context<Self>) {
+        match input {
+            SettingsInput::TerminalFontSize => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(|settings| settings.terminal.font_size = value.clamp(8, 32), cx);
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::TerminalLineHeight => {
+                if let Ok(value) = self.settings_input_draft.parse::<f64>() {
+                    self.edit_settings(
+                        |settings| settings.terminal.line_height = value.clamp(0.8, 2.0),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    fn set_font_size_from_position(&mut self, x: f32, cx: &mut Context<Self>) {
+        let Some(anchor) = self
+            .select_anchors
+            .get(&SelectAnchorId::SettingsTerminalFontSizeSlider)
+            .copied()
+        else {
+            return;
+        };
+        let left = f32::from(anchor.bounds.left());
+        let width = f32::from(anchor.bounds.size.width).max(1.0);
+        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let value = (8.0 + percent * (32.0 - 8.0)).round() as i64;
+        if self.settings_store.settings().terminal.font_size != value {
+            self.edit_settings(|settings| settings.terminal.font_size = value, cx);
+        }
+    }
+
     fn render_settings_select_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open_select = self.open_settings_select?;
         let anchor = *self.select_anchors.get(&open_select.anchor_id())?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
-        let selected = self.settings_store.settings().general.language;
+        let settings = self.settings_store.settings();
 
-        match (self.active_settings_tab, open_select) {
+        let popup = match (self.active_settings_tab, open_select) {
             (SettingsTab::General, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {
                     let label = self.language_label(language);
                     popup = popup.child(
-                        select_option(&self.tokens, label, language == selected).on_mouse_down(
+                        select_option(&self.tokens, label, language == settings.general.language)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        |settings| settings.general.language = language,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalFontFamily) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &family in font_family_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            font_family_label(family),
+                            family == settings.terminal.font_family,
+                        )
+                        .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_settings_select = None;
                                 this.edit_settings(
-                                    |settings| settings.general.language = language,
+                                    |settings| settings.terminal.font_family = family,
                                     cx,
                                 );
                                 cx.stop_propagation();
@@ -569,24 +729,98 @@ impl WorkspaceApp {
                         ),
                     );
                 }
-                Some(
-                    deferred(
-                        anchored()
-                            .anchor(Corner::TopLeft)
-                            .position(anchor.bounds.bottom_left())
-                            .offset(point(
-                                px(0.0),
-                                px(self.tokens.metrics.settings_select_popup_gap),
-                            ))
-                            .position_mode(AnchoredPositionMode::Window)
-                            .child(popup),
-                    )
-                    .with_priority(100)
-                    .into_any_element(),
-                )
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalEncoding) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &encoding in terminal_encoding_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            terminal_encoding_label(encoding),
+                            encoding == settings.terminal.terminal_encoding,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.terminal.terminal_encoding = encoding,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalAdaptiveRenderer) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &mode in adaptive_renderer_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            adaptive_renderer_label(mode, &self.i18n),
+                            mode == settings.terminal.adaptive_renderer,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.terminal.adaptive_renderer = mode,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalCursorStyle) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &style in cursor_style_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            cursor_style_label(style, &self.i18n),
+                            style == settings.terminal.cursor_style,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.terminal.cursor_style = style,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
             }
             _ => None,
-        }
+        }?;
+
+        Some(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(anchor.bounds.bottom_left())
+                    .offset(point(
+                        px(0.0),
+                        px(self.tokens.metrics.settings_select_popup_gap),
+                    ))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(popup),
+            )
+            .with_priority(100)
+            .into_any_element(),
+        )
     }
 
     fn language_select_row(&self, selected: Language, cx: &mut Context<Self>) -> AnyElement {
@@ -598,6 +832,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
+                    this.focused_settings_input = None;
                     this.open_settings_select =
                         if this.open_settings_select == Some(SettingsSelect::Language) {
                             None
@@ -626,6 +861,45 @@ impl WorkspaceApp {
             "settings_view.general.language_hint",
             control.into_any_element(),
         )
+    }
+
+    fn select_setting_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        select_id: SettingsSelect,
+        value: String,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let anchor_id = select_id.anchor_id();
+        let workspace = cx.entity();
+        let trigger = select_trigger(&self.tokens, value, false, false)
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.focused_settings_input = None;
+                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
+                        None
+                    } else {
+                        Some(select_id)
+                    };
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+        let control = div().relative().w(px(width)).child(select_anchor_probe(
+            anchor_id,
+            trigger,
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        ));
+
+        self.setting_row(label_key, hint_key, control.into_any_element())
     }
 
     fn count_row(&self, label_key: &str, hint_key: &str, count: usize) -> AnyElement {
@@ -725,6 +999,226 @@ impl WorkspaceApp {
             )
             .child(control)
             .into_any_element()
+    }
+
+    fn terminal_preview(&self, settings: &PersistedSettings) -> AnyElement {
+        let family = settings
+            .terminal
+            .font_family
+            .terminal_family_name(&settings.terminal.custom_font_family);
+        div()
+            .w_full()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .p(px(self.tokens.metrics.settings_font_preview_padding))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mb(px(self
+                        .tokens
+                        .metrics
+                        .settings_font_preview_label_margin_bottom))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.terminal.font_preview")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .font_family(&family)
+                    .text_size(px(settings.terminal.font_size as f32))
+                    .line_height(px(
+                        settings.terminal.font_size as f32 * settings.terminal.line_height as f32
+                    ))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child("ABCDEFG abcdefg 0123456789")
+                    .child("Thực thi lệnh chậm - lưu, tổ chức, chạy")
+                    .child(
+                        div()
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child("-> => == != <= >= {}"),
+                    )
+                    .child(
+                        div()
+                            .text_color(rgb(self.tokens.ui.success))
+                            .child("天地玄黄 The quick brown fox"),
+                    )
+                    .child(
+                        div()
+                            .text_color(rgb(self.tokens.ui.warning))
+                            .child("       󰊤  "),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn number_input(
+        &self,
+        input: SettingsInput,
+        value: String,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = self.focused_settings_input == Some(input);
+        let display_value = if focused {
+            self.settings_input_draft.as_str()
+        } else {
+            value.as_str()
+        };
+        text_input(
+            &self.tokens,
+            TextInputView {
+                value: display_value,
+                placeholder: value.clone(),
+                focused,
+                caret_visible: self.new_connection_caret_visible,
+                secret: false,
+                selected_all: false,
+            },
+        )
+        .w(px(width))
+        .justify_center()
+        .cursor(CursorStyle::IBeam)
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| {
+                let current = match input {
+                    SettingsInput::TerminalFontSize => {
+                        this.settings_store.settings().terminal.font_size.to_string()
+                    }
+                    SettingsInput::TerminalLineHeight => {
+                        compact_decimal(this.settings_store.settings().terminal.line_height)
+                    }
+                };
+                this.focus_settings_input(input, current, cx);
+                window.focus(&this.focus_handle);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn font_size_row(&self, settings: &PersistedSettings, cx: &mut Context<Self>) -> AnyElement {
+        let slider_view = SliderView {
+            min: 8.0,
+            max: 32.0,
+            value: settings.terminal.font_size as f32,
+            disabled: false,
+        };
+        let workspace = cx.entity();
+        let control = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .w(px(self.tokens.metrics.settings_slider_width))
+                    .child(select_anchor_probe(
+                        SelectAnchorId::SettingsTerminalFontSizeSlider,
+                        slider(&self.tokens, slider_view)
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                                    this.open_settings_select = None;
+                                    this.focused_settings_input = None;
+                                    this.settings_slider_drag = Some(SettingsSlider::TerminalFontSize);
+                                    this.set_font_size_from_position(f32::from(event.position.x), cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                                    this.finish_settings_slider_drag(cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .on_mouse_move(
+                                cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                                    this.update_settings_slider_drag(event, cx);
+                                }),
+                            ),
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_select_anchor(anchor, cx);
+                            });
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(self.number_input(
+                        SettingsInput::TerminalFontSize,
+                        settings.terminal.font_size.to_string(),
+                        self.tokens.metrics.settings_font_size_input_width,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child("px"),
+                    ),
+            )
+            .into_any_element();
+
+        self.setting_row(
+            "settings_view.terminal.font_size",
+            "settings_view.terminal.font_size_hint",
+            control,
+        )
+    }
+
+    fn decimal_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        input: SettingsInput,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.setting_row(
+            label_key,
+            hint_key,
+            self.number_input(
+                input,
+                value,
+                self.tokens.metrics.settings_number_input_width,
+                cx,
+            ),
+        )
+    }
+
+    fn checkbox_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        checked: bool,
+        setter: fn(&mut PersistedSettings, bool),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.setting_row(
+            label_key,
+            hint_key,
+            checkbox(&self.tokens, String::new(), checked)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.edit_settings(|settings| setter(settings, !checked), cx);
+                    }),
+                )
+                .into_any_element(),
+        )
     }
 
     fn settings_general(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -933,86 +1427,51 @@ impl WorkspaceApp {
                     "settings_view.terminal.font",
                     "settings_view.terminal.font_family_hint",
                     vec![
-                        self.cycle_row(
+                        self.select_setting_row(
                             "settings_view.terminal.font_family",
                             "settings_view.terminal.font_family_hint",
+                            SettingsSelect::TerminalFontFamily,
                             font_family_label(settings.terminal.font_family),
-                            cycle_font_family,
+                            self.tokens.metrics.settings_select_width,
                             cx,
                         ),
-                        self.value_row(
-                            "settings_view.terminal.custom_font_stack",
-                            "settings_view.terminal.custom_font_stack_hint",
-                            if settings.terminal.custom_font_family.trim().is_empty() {
-                                self.i18n.t("settings_view.terminal.custom_font")
-                            } else {
-                                settings.terminal.custom_font_family.clone()
-                            },
-                        ),
-                        self.value_row(
-                            "settings_view.terminal.font_preview",
-                            "settings_view.terminal.font_family_hint",
-                            "ABCDEFG abcdefg 0123456789 -> => != 天地玄黄".to_string(),
-                        ),
-                        self.number_row(
-                            "settings_view.terminal.font_size",
-                            "settings_view.terminal.font_size_hint",
-                            settings.terminal.font_size,
-                            1,
-                            8,
-                            40,
-                            set_terminal_font_size,
-                            cx,
-                        ),
+                        self.terminal_preview(settings),
                         self.card_separator(),
-                        self.number_row(
+                        self.font_size_row(settings, cx),
+                        self.card_separator(),
+                        self.decimal_row(
                             "settings_view.terminal.line_height",
                             "settings_view.terminal.line_height_hint",
-                            (settings.terminal.line_height * 100.0).round() as i64,
-                            5,
-                            80,
-                            200,
-                            set_terminal_line_height_percent,
+                            SettingsInput::TerminalLineHeight,
+                            compact_decimal(settings.terminal.line_height),
                             cx,
                         ),
                         self.card_separator(),
-                        self.cycle_row(
+                        self.select_setting_row(
                             "settings_view.terminal.encoding",
                             "settings_view.terminal.encoding_hint",
+                            SettingsSelect::TerminalEncoding,
                             terminal_encoding_label(settings.terminal.terminal_encoding),
-                            cycle_terminal_encoding,
+                            self.tokens.metrics.settings_select_width,
                             cx,
                         ),
                         self.card_separator(),
-                        self.cycle_row(
-                            "settings_view.terminal.renderer",
-                            "settings_view.terminal.renderer_hint",
-                            renderer_label(settings.terminal.renderer, &self.i18n),
-                            cycle_renderer,
-                            cx,
-                        ),
-                        self.cycle_row(
+                        self.select_setting_row(
                             "settings_view.terminal.adaptive_renderer",
                             "settings_view.terminal.adaptive_renderer_hint",
+                            SettingsSelect::TerminalAdaptiveRenderer,
                             adaptive_renderer_label(
                                 settings.terminal.adaptive_renderer,
                                 &self.i18n,
                             ),
-                            cycle_adaptive_renderer,
+                            self.tokens.metrics.settings_select_width,
                             cx,
                         ),
-                        self.bool_row(
+                        self.checkbox_row(
                             "settings_view.terminal.show_fps_overlay",
                             "settings_view.terminal.show_fps_overlay_hint",
                             settings.terminal.show_fps_overlay,
                             set_show_fps_overlay,
-                            cx,
-                        ),
-                        self.bool_row(
-                            "settings_view.terminal.gpu_canvas_experiments",
-                            "settings_view.terminal.gpu_canvas_experiments_hint",
-                            settings.experimental.gpu_canvas,
-                            set_gpu_canvas,
                             cx,
                         ),
                     ],
@@ -1021,15 +1480,16 @@ impl WorkspaceApp {
                     "settings_view.terminal.cursor",
                     "settings_view.terminal.cursor_style_hint",
                     vec![
-                        self.cycle_row(
+                        self.select_setting_row(
                             "settings_view.terminal.cursor_style",
                             "settings_view.terminal.cursor_style_hint",
+                            SettingsSelect::TerminalCursorStyle,
                             cursor_style_label(settings.terminal.cursor_style, &self.i18n),
-                            cycle_cursor_style,
+                            self.tokens.metrics.settings_select_narrow_width,
                             cx,
                         ),
                         self.card_separator(),
-                        self.bool_row(
+                        self.checkbox_row(
                             "settings_view.terminal.cursor_blink",
                             "settings_view.terminal.cursor_blink_hint",
                             settings.terminal.cursor_blink,
@@ -2212,24 +2672,12 @@ impl WorkspaceApp {
     }
 }
 
-fn set_terminal_font_size(settings: &mut PersistedSettings, value: i64) {
-    settings.terminal.font_size = value;
-}
-
-fn set_terminal_line_height_percent(settings: &mut PersistedSettings, value: i64) {
-    settings.terminal.line_height = value as f64 / 100.0;
-}
-
 fn set_terminal_cursor_blink(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.cursor_blink = value;
 }
 
 fn set_show_fps_overlay(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.show_fps_overlay = value;
-}
-
-fn set_gpu_canvas(settings: &mut PersistedSettings, value: bool) {
-    settings.experimental.gpu_canvas = value;
 }
 
 fn set_paste_protection(settings: &mut PersistedSettings, value: bool) {
@@ -2254,6 +2702,63 @@ fn set_middle_click_paste(settings: &mut PersistedSettings, value: bool) {
 
 fn set_selection_requires_shift(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.selection_requires_shift = value;
+}
+
+fn compact_decimal(value: f64) -> String {
+    let text = format!("{value:.1}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn settings_text_from_keystroke(keystroke: &gpui::Keystroke) -> Option<&str> {
+    if keystroke.modifiers.platform || keystroke.modifiers.control {
+        return None;
+    }
+    let text = keystroke.key_char.as_deref()?;
+    if text.is_empty() || text.chars().any(char::is_control) {
+        return None;
+    }
+    Some(text)
+}
+
+fn font_family_options() -> &'static [FontFamily] {
+    &[
+        FontFamily::Jetbrains,
+        FontFamily::Meslo,
+        FontFamily::Maple,
+        FontFamily::Cascadia,
+        FontFamily::Consolas,
+        FontFamily::Menlo,
+        FontFamily::Custom,
+    ]
+}
+
+fn terminal_encoding_options() -> &'static [TerminalEncoding] {
+    &[
+        TerminalEncoding::Utf8,
+        TerminalEncoding::Gbk,
+        TerminalEncoding::Gb18030,
+        TerminalEncoding::Big5,
+        TerminalEncoding::ShiftJis,
+        TerminalEncoding::EucJp,
+        TerminalEncoding::EucKr,
+        TerminalEncoding::Windows1252,
+    ]
+}
+
+fn adaptive_renderer_options() -> &'static [AdaptiveRendererMode] {
+    &[
+        AdaptiveRendererMode::Auto,
+        AdaptiveRendererMode::Always60,
+        AdaptiveRendererMode::Off,
+    ]
+}
+
+fn cursor_style_options() -> &'static [SettingsCursorStyle] {
+    &[
+        SettingsCursorStyle::Block,
+        SettingsCursorStyle::Underline,
+        SettingsCursorStyle::Bar,
+    ]
 }
 
 fn set_terminal_scrollback(settings: &mut PersistedSettings, value: i64) {
@@ -2462,55 +2967,6 @@ fn cycle_update_channel(settings: &mut PersistedSettings) {
     };
 }
 
-fn cycle_font_family(settings: &mut PersistedSettings) {
-    settings.terminal.font_family = match settings.terminal.font_family {
-        FontFamily::Jetbrains => FontFamily::Meslo,
-        FontFamily::Meslo => FontFamily::Maple,
-        FontFamily::Maple => FontFamily::Cascadia,
-        FontFamily::Cascadia => FontFamily::Consolas,
-        FontFamily::Consolas => FontFamily::Menlo,
-        FontFamily::Menlo => FontFamily::Custom,
-        FontFamily::Custom => FontFamily::Jetbrains,
-    };
-}
-
-fn cycle_renderer(settings: &mut PersistedSettings) {
-    settings.terminal.renderer = match settings.terminal.renderer {
-        RendererType::Auto => RendererType::Webgl,
-        RendererType::Webgl => RendererType::Canvas,
-        RendererType::Canvas => RendererType::Auto,
-    };
-}
-
-fn cycle_terminal_encoding(settings: &mut PersistedSettings) {
-    settings.terminal.terminal_encoding = match settings.terminal.terminal_encoding {
-        TerminalEncoding::Utf8 => TerminalEncoding::Gbk,
-        TerminalEncoding::Gbk => TerminalEncoding::Gb18030,
-        TerminalEncoding::Gb18030 => TerminalEncoding::Big5,
-        TerminalEncoding::Big5 => TerminalEncoding::ShiftJis,
-        TerminalEncoding::ShiftJis => TerminalEncoding::EucJp,
-        TerminalEncoding::EucJp => TerminalEncoding::EucKr,
-        TerminalEncoding::EucKr => TerminalEncoding::Windows1252,
-        TerminalEncoding::Windows1252 => TerminalEncoding::Utf8,
-    };
-}
-
-fn cycle_adaptive_renderer(settings: &mut PersistedSettings) {
-    settings.terminal.adaptive_renderer = match settings.terminal.adaptive_renderer {
-        AdaptiveRendererMode::Auto => AdaptiveRendererMode::Always60,
-        AdaptiveRendererMode::Always60 => AdaptiveRendererMode::Off,
-        AdaptiveRendererMode::Off => AdaptiveRendererMode::Auto,
-    };
-}
-
-fn cycle_cursor_style(settings: &mut PersistedSettings) {
-    settings.terminal.cursor_style = match settings.terminal.cursor_style {
-        SettingsCursorStyle::Block => SettingsCursorStyle::Underline,
-        SettingsCursorStyle::Underline => SettingsCursorStyle::Bar,
-        SettingsCursorStyle::Bar => SettingsCursorStyle::Block,
-    };
-}
-
 fn cycle_background_fit(settings: &mut PersistedSettings) {
     settings.terminal.background_fit = match settings.terminal.background_fit {
         BackgroundFit::Cover => BackgroundFit::Contain,
@@ -2588,14 +3044,6 @@ fn update_channel_label(channel: UpdateChannel, i18n: &I18n) -> String {
     }
 }
 
-fn renderer_label(renderer: RendererType, i18n: &I18n) -> String {
-    match renderer {
-        RendererType::Auto => i18n.t("settings_view.terminal.renderer_auto"),
-        RendererType::Webgl => "WebGL".to_string(),
-        RendererType::Canvas => "Canvas".to_string(),
-    }
-}
-
 fn terminal_encoding_label(encoding: TerminalEncoding) -> String {
     match encoding {
         TerminalEncoding::Utf8 => "UTF-8",
@@ -2664,13 +3112,13 @@ fn ide_agent_label(mode: IdeAgentMode, i18n: &I18n) -> String {
 
 fn font_family_label(family: FontFamily) -> String {
     match family {
-        FontFamily::Jetbrains => "JetBrains Mono".to_string(),
-        FontFamily::Meslo => "MesloLGS".to_string(),
-        FontFamily::Maple => "Maple Mono".to_string(),
+        FontFamily::Jetbrains => "JetBrains Mono NF (Subset) ✓".to_string(),
+        FontFamily::Meslo => "MesloLGS NF (Subset) ✓".to_string(),
+        FontFamily::Maple => "Maple Mono NF CN (Subset) ✓".to_string(),
         FontFamily::Cascadia => "Cascadia Code".to_string(),
         FontFamily::Consolas => "Consolas".to_string(),
         FontFamily::Menlo => "Menlo".to_string(),
-        FontFamily::Custom => "Custom".to_string(),
+        FontFamily::Custom => "Custom...".to_string(),
     }
 }
 

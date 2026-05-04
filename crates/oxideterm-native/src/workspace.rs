@@ -15,11 +15,13 @@ use gpui::{
 };
 use oxideterm_gpui_terminal::{TerminalPane, TerminalUiPreferences, TerminalUiTheme};
 use oxideterm_i18n::{I18n, Locale};
-use oxideterm_settings::{Language, PersistedSettings, SettingsStore};
+use oxideterm_settings::{
+    CursorStyle as SettingsCursorStyle, Language, PersistedSettings, SettingsStore,
+};
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
 };
-use oxideterm_terminal::SshSessionConfig;
+use oxideterm_terminal::{SshSessionConfig, TerminalCursorShape};
 use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
 use oxideterm_workspace::{
     MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TerminalSessionId,
@@ -32,7 +34,9 @@ use self::new_connection::{
     SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
-use self::settings::{ActiveSurface, SettingsSelect, SettingsTab, TerminalSettingsPage};
+use self::settings::{
+    ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab, TerminalSettingsPage,
+};
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
 use crate::ui::select::{OverlayAnchor, SelectAnchorId};
@@ -65,6 +69,9 @@ pub(crate) struct WorkspaceApp {
     terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
+    focused_settings_input: Option<SettingsInput>,
+    settings_input_draft: String,
+    settings_slider_drag: Option<SettingsSlider>,
     new_connection_form: Option<NewConnectionForm>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
@@ -115,6 +122,9 @@ impl WorkspaceApp {
             terminal_settings_page: TerminalSettingsPage::Display,
             open_settings_select: None,
             select_anchors: HashMap::new(),
+            focused_settings_input: None,
+            settings_input_draft: String::new(),
+            settings_slider_drag: None,
             new_connection_form: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
@@ -140,6 +150,7 @@ impl WorkspaceApp {
                         workspace.poll_ssh_worker_results(window, cx);
                         if workspace.new_connection_form.is_some()
                             || workspace.keyboard_interactive_challenge.is_some()
+                            || workspace.focused_settings_input.is_some()
                         {
                             workspace.new_connection_caret_visible =
                                 !workspace.new_connection_caret_visible;
@@ -168,6 +179,11 @@ impl WorkspaceApp {
                 .terminal_family_name(&terminal.custom_font_family),
             font_size: terminal.font_size as f32,
             line_height: terminal.line_height as f32,
+            cursor_shape: match terminal.cursor_style {
+                SettingsCursorStyle::Block => TerminalCursorShape::Block,
+                SettingsCursorStyle::Underline => TerminalCursorShape::Underline,
+                SettingsCursorStyle::Bar => TerminalCursorShape::Bar,
+            },
             cursor_blink: terminal.cursor_blink,
             copy_on_select: terminal.copy_on_select,
             theme: TerminalUiTheme::new(
@@ -283,6 +299,12 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.active_surface == ActiveSurface::Settings
+                    && this.focused_settings_input.is_some()
+                {
+                    let _ = this.handle_settings_input_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
                 }
             }))
             .on_key_down(cx.listener(|this, event, window, cx| {
@@ -291,12 +313,14 @@ impl Render for WorkspaceApp {
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, cx);
                 this.update_split_drag(event, window, cx);
+                this.update_settings_slider_drag(event, cx);
             }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.finish_sidebar_resize(cx);
                     this.finish_split_drag(cx);
+                    this.finish_settings_slider_drag(cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {

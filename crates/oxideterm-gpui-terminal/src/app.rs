@@ -28,6 +28,7 @@ use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     focus_handle: FocusHandle,
+    preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
     snapshot: TerminalSnapshot,
@@ -133,8 +134,9 @@ impl TerminalPane {
         Ok(Self {
             terminal,
             focus_handle,
+            preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
-            theme: preferences.theme,
+            theme: preferences.theme.clone(),
             snapshot,
             metrics,
             selection: None,
@@ -163,6 +165,20 @@ impl TerminalPane {
 
     pub fn title(&self) -> SharedString {
         self.title.clone()
+    }
+
+    pub fn set_preferences(
+        &mut self,
+        preferences: TerminalUiPreferences,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings = TerminalUiSettings::from_preferences(&preferences);
+        self.theme = preferences.theme.clone();
+        self.preferences = preferences;
+        self.last_pty_resize = None;
+        self.pending_pty_resize = None;
+        self.reset_cursor_blink();
+        cx.notify();
     }
 
     pub fn focus(&self, window: &mut Window) {
@@ -326,7 +342,7 @@ impl TerminalPane {
             self.focused,
             self.cursor_blink_terminal_enabled,
             alt_screen,
-            self.snapshot.cursor_shape,
+            self.preferences.cursor_shape,
         )
     }
 
