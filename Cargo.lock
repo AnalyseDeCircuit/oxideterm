@@ -5842,6 +5842,7 @@ dependencies = [
  "gpui",
  "image",
  "oxideterm-terminal",
+ "oxideterm-terminal-unicode",
  "parking_lot",
 ]
 
@@ -5919,6 +5920,15 @@ dependencies = [
  "icy_sixel",
  "image",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "oxideterm-terminal-unicode"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-terminal",
+ "unicode-bidi",
+ "unicode-segmentation",
 ]
 
 [[package]]

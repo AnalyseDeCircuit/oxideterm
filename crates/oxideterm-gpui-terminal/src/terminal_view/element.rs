@@ -8,6 +8,7 @@ use gpui::{
 use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
+use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
 
 use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage};
 use crate::terminal_ui::*;
@@ -35,6 +36,7 @@ pub(crate) struct TerminalElement {
     search_matches: Vec<TerminalSearchMatch>,
     selected_search_match: Option<usize>,
     hovered_link: Option<TerminalLinkRange>,
+    bidi_enabled: bool,
     input: Option<TerminalElementInput>,
 }
 
@@ -134,6 +136,36 @@ impl TerminalElement {
         hovered_link: Option<TerminalLinkRange>,
         input: Option<TerminalElementInput>,
     ) -> Self {
+        Self::new_with_images_and_bidi(
+            snapshot,
+            rendered_images,
+            selection,
+            metrics,
+            cursor_visible,
+            marked_text,
+            search_query,
+            search_matches,
+            selected_search_match,
+            hovered_link,
+            true,
+            input,
+        )
+    }
+
+    pub(crate) fn new_with_images_and_bidi(
+        snapshot: TerminalSnapshot,
+        rendered_images: Vec<TerminalRenderedImage>,
+        selection: Option<TerminalSelection>,
+        metrics: TerminalMetrics,
+        cursor_visible: bool,
+        marked_text: Option<String>,
+        search_query: Option<String>,
+        search_matches: Vec<TerminalSearchMatch>,
+        selected_search_match: Option<usize>,
+        hovered_link: Option<TerminalLinkRange>,
+        bidi_enabled: bool,
+        input: Option<TerminalElementInput>,
+    ) -> Self {
         Self {
             snapshot,
             rendered_images,
@@ -145,6 +177,7 @@ impl TerminalElement {
             search_matches,
             selected_search_match,
             hovered_link,
+            bidi_enabled,
             input,
         }
     }
@@ -160,20 +193,24 @@ impl TerminalElement {
 
     fn layout_for_rows(&self, visible_rows: Range<usize>) -> TerminalElementLayout {
         let mut backgrounds = Vec::new();
-        let search_matches = if self.search_matches.is_empty() {
-            search_match_rects_for_rows(
-                &self.snapshot,
-                self.search_query.as_deref(),
-                visible_rows.clone(),
-            )
-        } else {
-            visible_search_match_rects(
-                &self.search_matches,
-                self.snapshot.display_offset,
-                visible_rows.clone(),
-                self.selected_search_match,
-            )
-        };
+        let search_matches = map_rects_to_visual(
+            &self.snapshot,
+            self.bidi_enabled,
+            if self.search_matches.is_empty() {
+                search_match_rects_for_rows(
+                    &self.snapshot,
+                    self.search_query.as_deref(),
+                    visible_rows.clone(),
+                )
+            } else {
+                visible_search_match_rects(
+                    &self.search_matches,
+                    self.snapshot.display_offset,
+                    visible_rows.clone(),
+                    self.selected_search_match,
+                )
+            },
+        );
         let mut selections = Vec::new();
         let images = self
             .rendered_images
@@ -202,15 +239,21 @@ impl TerminalElement {
             };
             let mut current_background: Option<TerminalRect> = None;
             let mut current_selection: Option<TerminalRect> = None;
+            let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
 
             for (col_index, cell) in row.cells.iter().enumerate() {
+                let paint_col = if visual_line.has_bidi {
+                    visual_line.visual_col_for_logical_col(col_index)
+                } else {
+                    col_index
+                };
                 if self.cursor_visible
                     && cell.cursor
                     && self.snapshot.cursor_shape != TerminalCursorShape::Hidden
                 {
                     cursor = Some(TerminalCursor {
                         row: row_index,
-                        col: col_index,
+                        col: paint_col,
                         shape: self.snapshot.cursor_shape,
                     });
                 }
@@ -235,7 +278,7 @@ impl TerminalElement {
                         &mut current_background,
                         &mut backgrounds,
                         row_index,
-                        col_index,
+                        paint_col,
                         cell_width,
                         bg,
                     );
@@ -251,12 +294,16 @@ impl TerminalElement {
                         &mut current_selection,
                         &mut selections,
                         row_index,
-                        col_index,
+                        paint_col,
                         cell_width,
                         to_hsla(TerminalColor::rgb(0x2d, 0x4f, 0x7f)),
                     );
                 } else if let Some(rect) = current_selection.take() {
                     selections.push(rect);
+                }
+
+                if visual_line.has_bidi {
+                    continue;
                 }
 
                 if cell.ch != ' '
@@ -308,6 +355,22 @@ impl TerminalElement {
                 }
             }
 
+            if visual_line.has_bidi {
+                if let Some(run) = current_run.take() {
+                    text_runs.push(run);
+                }
+                push_visual_text_runs(
+                    row_index,
+                    row,
+                    &visual_line,
+                    &link_ranges,
+                    &self.metrics,
+                    self.cursor_visible,
+                    self.snapshot.cursor_shape,
+                    &mut text_runs,
+                );
+            }
+
             if let Some(rect) = current_background.take() {
                 backgrounds.push(rect);
             }
@@ -327,9 +390,17 @@ impl TerminalElement {
             text_runs,
             marked_text: self.marked_text.as_ref().and_then(|text| {
                 ime_cursor_bounds?;
+                let marked_col = self
+                    .snapshot
+                    .lines
+                    .get(self.snapshot.cursor_row)
+                    .map(|row| visual_line_for_row_with_bidi(row, self.bidi_enabled))
+                    .filter(|line| line.has_bidi)
+                    .map(|line| line.visual_col_for_logical_col(self.snapshot.cursor_col))
+                    .unwrap_or(self.snapshot.cursor_col);
                 Some(BatchedTextRun {
                     row: self.snapshot.cursor_row,
-                    col: self.snapshot.cursor_col,
+                    col: marked_col,
                     text: text.clone(),
                     cells: text.encode_utf16().count().max(1),
                     style: marked_text_run(text, &self.metrics),
@@ -340,6 +411,120 @@ impl TerminalElement {
             scrollbar,
         }
     }
+}
+
+fn visual_line_for_row_with_bidi(
+    row: &oxideterm_terminal::TerminalRow,
+    bidi_enabled: bool,
+) -> TerminalVisualLine {
+    if bidi_enabled {
+        visual_line_for_row(row)
+    } else {
+        TerminalVisualLine::identity(row)
+    }
+}
+
+fn push_visual_text_runs(
+    row_index: usize,
+    row: &oxideterm_terminal::TerminalRow,
+    visual_line: &TerminalVisualLine,
+    link_ranges: &[TerminalLinkRange],
+    metrics: &TerminalMetrics,
+    cursor_visible: bool,
+    cursor_shape: TerminalCursorShape,
+    text_runs: &mut Vec<BatchedTextRun>,
+) {
+    let mut current_run: Option<BatchedTextRun> = None;
+    for cluster in &visual_line.clusters {
+        let Some(cell) = row.cells.get(cluster.logical_col) else {
+            continue;
+        };
+        if cell.ch == ' ' && cell.zerowidth.is_empty() {
+            if let Some(run) = current_run.take() {
+                text_runs.push(run);
+            }
+            continue;
+        }
+
+        let block_cursor =
+            cursor_visible && cell.cursor && cursor_shape == TerminalCursorShape::Block;
+        let fg = if block_cursor {
+            to_hsla(TerminalColor::rgb(0x0d, 0x0f, 0x12))
+        } else {
+            to_hsla(cell.fg)
+        };
+        let link = !block_cursor
+            && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+            && link_ranges_contain(link_ranges, row_index, cluster.logical_col);
+        let style = text_run_for_cell(cell, fg, link, metrics);
+        if cell.zerowidth.is_empty() && powerline_separator(cell.ch).is_some() {
+            if let Some(run) = current_run.take() {
+                text_runs.push(run);
+            }
+            text_runs.push(BatchedTextRun {
+                row: row_index,
+                col: cluster.visual_col,
+                text: cluster.text.clone(),
+                cells: cluster.cells,
+                style,
+            });
+            continue;
+        }
+
+        if let Some(run) = &mut current_run {
+            if run.col + run.cells == cluster.visual_col
+                && text_run_style_matches(&run.style, &style)
+            {
+                run.text.push_str(&cluster.text);
+                run.cells += cluster.cells;
+                run.style.len += cluster.text.len();
+                continue;
+            }
+        }
+
+        if let Some(run) = current_run.take() {
+            text_runs.push(run);
+        }
+        current_run = Some(BatchedTextRun {
+            row: row_index,
+            col: cluster.visual_col,
+            text: cluster.text.clone(),
+            cells: cluster.cells,
+            style,
+        });
+    }
+
+    if let Some(run) = current_run.take() {
+        text_runs.push(run);
+    }
+}
+
+fn map_rects_to_visual(
+    snapshot: &TerminalSnapshot,
+    bidi_enabled: bool,
+    rects: Vec<TerminalRect>,
+) -> Vec<TerminalRect> {
+    let mut mapped = Vec::with_capacity(rects.len());
+    for rect in rects {
+        let Some(row) = snapshot.lines.get(rect.row) else {
+            continue;
+        };
+        let visual_line = visual_line_for_row_with_bidi(row, bidi_enabled);
+        if !visual_line.has_bidi {
+            mapped.push(rect);
+            continue;
+        }
+
+        for range in visual_line.visual_rects_for_logical_range(rect.col..rect.col + rect.cells) {
+            mapped.push(TerminalRect {
+                row: rect.row,
+                col: range.start,
+                cells: range.end.saturating_sub(range.start),
+                color: rect.color,
+            });
+        }
+    }
+    mapped
 }
 
 fn cell_text(cell: &oxideterm_terminal::TerminalCell) -> String {

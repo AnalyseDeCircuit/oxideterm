@@ -735,6 +735,112 @@ fn terminal_element_keeps_emoji_zwj_cluster_in_one_wide_cell() {
 }
 
 #[test]
+fn terminal_element_shapes_rtl_row_as_visual_runs() {
+    let snapshot = selection_snapshot("السلام عليكم");
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+
+    assert!(layout.text_runs.len() < "السلام عليكم".chars().count());
+    assert_eq!(
+        layout.text_runs.iter().map(|run| run.cells).sum::<usize>(),
+        "السلام عليكم".chars().filter(|ch| *ch != ' ').count()
+    );
+    assert!(layout.text_runs.iter().any(|run| run.text.contains("س")));
+}
+
+#[test]
+fn terminal_element_keeps_rtl_text_at_content_start_with_trailing_blanks() {
+    let snapshot = selection_snapshot("שלום");
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+
+    assert_eq!(
+        layout
+            .text_runs
+            .iter()
+            .map(|run| run.col)
+            .min()
+            .expect("text run"),
+        0
+    );
+    assert!(layout.text_runs.iter().all(|run| run.col < 4));
+}
+
+#[test]
+fn terminal_element_maps_rtl_cursor_to_visual_column() {
+    let mut snapshot = selection_snapshot("abc שלום def");
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 4;
+    snapshot.lines[0].cells[4].cursor = true;
+    let expected_col = oxideterm_terminal_unicode::visual_line_for_row(&snapshot.lines[0])
+        .visual_col_for_logical_col(4);
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+
+    assert_ne!(expected_col, 4);
+    assert_eq!(layout.cursor.expect("cursor").col, expected_col);
+}
+
+#[test]
+fn terminal_element_maps_rtl_search_highlight_to_visual_rect() {
+    let snapshot = selection_snapshot("abc שלום def");
+    let expected_rect = oxideterm_terminal_unicode::visual_line_for_row(&snapshot.lines[0])
+        .visual_rects_for_logical_range(4..8)
+        .next()
+        .expect("visual rect");
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        Some("שלום".to_string()),
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+
+    assert_eq!(layout.search_matches.len(), 1);
+    assert_eq!(layout.search_matches[0].col, expected_rect.start);
+    assert_eq!(layout.search_matches[0].cells, 4);
+}
+
+#[test]
 fn terminal_element_keeps_powerline_separators_as_cell_painted_runs() {
     let snapshot =
         selection_snapshot("a\u{e0b0}\u{e0b1}\u{e0b2}\u{e0b3}\u{e0b4}\u{e0b5}\u{e0b6}\u{e0b7}b");

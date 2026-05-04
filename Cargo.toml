@@ -9,6 +9,7 @@ members = [
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
   "crates/oxideterm-terminal-graphics",
+  "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
   "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
@@ -41,5 +42,7 @@ ssh-encoding = "0.2"
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net"] }
 tracing = "0.1"
+unicode-bidi = "0.3"
+unicode-segmentation = "1.12"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 zeroize = { version = "1.8", features = ["serde"] }

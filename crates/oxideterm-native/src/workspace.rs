@@ -196,6 +196,7 @@ impl WorkspaceApp {
             },
             cursor_blink: terminal.cursor_blink,
             copy_on_select: terminal.copy_on_select,
+            bidi_enabled: terminal.unicode.bidi_enabled,
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,
                 self.tokens.terminal.foreground,

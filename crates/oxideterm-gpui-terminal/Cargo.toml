@@ -9,4 +9,5 @@ anyhow.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 parking_lot.workspace = true
