@@ -122,7 +122,7 @@ impl Render for TerminalPane {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .child(TerminalElement::new_with_images(
+                    .child(TerminalElement::new_with_images_and_bidi(
                         snapshot,
                         rendered_images,
                         self.selection.filter(|s| !s.is_empty()),
@@ -136,6 +136,7 @@ impl Render for TerminalPane {
                             .unwrap_or_default(),
                         self.selected_search_match,
                         self.hovered_link.clone(),
+                        self.settings.bidi_enabled,
                         Some(TerminalElementInput {
                             focus_handle: self.focus_handle.clone(),
                             view: cx.entity(),

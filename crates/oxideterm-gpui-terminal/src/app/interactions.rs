@@ -5,6 +5,7 @@ use gpui::{
     MouseUpEvent, Pixels, ScrollWheelEvent, TouchPhase, px,
 };
 use oxideterm_terminal::{TermMode, TerminalSearchMatch};
+use oxideterm_terminal_unicode::visual_line_for_row;
 
 use super::{ScrollbarDrag, ScrollbarGeometry, TerminalPane};
 use crate::terminal_ui::*;
@@ -186,9 +187,19 @@ impl TerminalPane {
         .floor()
         .max(0.0) as usize;
 
+        let row = row.min(self.snapshot.rows.saturating_sub(1));
+        let logical_col = self
+            .snapshot
+            .lines
+            .get(row)
+            .map(visual_line_for_row)
+            .filter(|line| line.has_bidi)
+            .map(|line| line.logical_col_for_visual_col(col))
+            .unwrap_or(col);
+
         TerminalPoint {
-            row: row.min(self.snapshot.rows.saturating_sub(1)),
-            col: col.min(self.snapshot.cols.saturating_sub(1)),
+            row,
+            col: logical_col.min(self.snapshot.cols.saturating_sub(1)),
         }
     }
 

@@ -394,6 +394,25 @@ impl Default for TerminalGraphicsSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalUnicodeSettings {
+    pub bidi_enabled: bool,
+    pub rtl_debug_overlay: bool,
+    #[serde(flatten)]
+    pub extra: ExtraFields,
+}
+
+impl Default for TerminalUnicodeSettings {
+    fn default() -> Self {
+        Self {
+            bidi_enabled: true,
+            rtl_debug_overlay: false,
+            extra: ExtraFields::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub theme: String,
     pub font_family: FontFamily,
@@ -425,6 +444,7 @@ pub struct TerminalSettings {
     pub highlight_rules: Vec<Value>,
     pub in_band_transfer: InBandTransferSettings,
     pub graphics: TerminalGraphicsSettings,
+    pub unicode: TerminalUnicodeSettings,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -462,6 +482,7 @@ impl Default for TerminalSettings {
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),
+            unicode: TerminalUnicodeSettings::default(),
             extra: ExtraFields::new(),
         }
     }

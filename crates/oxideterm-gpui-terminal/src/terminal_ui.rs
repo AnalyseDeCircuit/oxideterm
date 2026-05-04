@@ -21,6 +21,7 @@ pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 pub(crate) const TERMINAL_BLINK_MODE: TerminalBlinkMode = TerminalBlinkMode::On;
 pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
+pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
 
 #[derive(Clone)]
 pub struct TerminalUiPreferences {
@@ -30,6 +31,7 @@ pub struct TerminalUiPreferences {
     pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
     pub copy_on_select: bool,
+    pub bidi_enabled: bool,
     pub theme: TerminalUiTheme,
 }
 
@@ -42,6 +44,7 @@ impl Default for TerminalUiPreferences {
             cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
+            bidi_enabled: TERMINAL_BIDI_ENABLED,
             theme: TerminalUiTheme::default(),
         }
     }
@@ -52,6 +55,7 @@ pub(crate) struct TerminalUiSettings {
     pub(crate) blink_mode: TerminalBlinkMode,
     pub(crate) copy_on_select: bool,
     pub(crate) keep_selection_on_copy: bool,
+    pub(crate) bidi_enabled: bool,
 }
 
 impl Default for TerminalUiSettings {
@@ -60,6 +64,7 @@ impl Default for TerminalUiSettings {
             blink_mode: TERMINAL_BLINK_MODE,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+            bidi_enabled: TERMINAL_BIDI_ENABLED,
         }
     }
 }
@@ -74,6 +79,7 @@ impl TerminalUiSettings {
             },
             copy_on_select: preferences.copy_on_select,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+            bidi_enabled: preferences.bidi_enabled,
         }
     }
 }

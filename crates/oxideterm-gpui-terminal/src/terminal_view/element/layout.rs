@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use gpui::{Bounds, Hsla, Pixels, point, px, rgba, size};
 use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
+use oxideterm_terminal_unicode::visual_line_for_row;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
@@ -186,7 +187,7 @@ pub(crate) fn ime_cursor_bounds_for_snapshot(
 
     Some(Bounds::new(
         point(
-            px(snapshot.cursor_col as f32 * metrics.cell_width_f32()),
+            px(cursor_visual_col(snapshot) as f32 * metrics.cell_width_f32()),
             px(snapshot.cursor_row as f32 * metrics.line_height_f32()),
         ),
         size(
@@ -194,4 +195,14 @@ pub(crate) fn ime_cursor_bounds_for_snapshot(
             metrics.line_height,
         ),
     ))
+}
+
+fn cursor_visual_col(snapshot: &TerminalSnapshot) -> usize {
+    snapshot
+        .lines
+        .get(snapshot.cursor_row)
+        .map(visual_line_for_row)
+        .filter(|line| line.has_bidi)
+        .map(|line| line.visual_col_for_logical_col(snapshot.cursor_col))
+        .unwrap_or(snapshot.cursor_col)
 }

@@ -1,0 +1,10 @@
+[package]
+name = "oxideterm-terminal-unicode"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+unicode-bidi.workspace = true
+unicode-segmentation.workspace = true
