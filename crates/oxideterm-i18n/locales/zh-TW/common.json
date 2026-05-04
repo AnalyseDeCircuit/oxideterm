@@ -17,5 +17,9 @@
   },
   "titlebar": {
     "open_recent_project": "開啟最近專案"
+  },
+  "common": {
+    "enabled": "已啟用",
+    "disabled": "已停用"
   }
 }

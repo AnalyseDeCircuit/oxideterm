@@ -158,6 +158,8 @@ pub struct UiMetrics {
     pub ui_menu_icon_size: f32,
     pub ui_select_max_height: f32,
     pub ui_select_min_width: f32,
+    pub ui_select_check_size: f32,
+    pub ui_select_shadow_alpha: f32,
     pub ui_progress_height: f32,
     pub ui_slider_track_height: f32,
     pub ui_slider_thumb_size: f32,
@@ -171,6 +173,12 @@ pub struct UiMetrics {
     pub ui_command_list_max_height: f32,
     pub ui_font_hud_padding_x: f32,
     pub ui_font_hud_padding_y: f32,
+    pub settings_page_gap: f32,
+    pub settings_card_padding: f32,
+    pub settings_card_gap: f32,
+    pub settings_card_title_nudge_y: f32,
+    pub settings_select_width: f32,
+    pub settings_select_popup_gap: f32,
 }
 
 impl UiMetrics {
@@ -277,6 +285,8 @@ impl UiMetrics {
             ui_menu_icon_size: 16.0,
             ui_select_max_height: 384.0,
             ui_select_min_width: 128.0,
+            ui_select_check_size: 14.0,
+            ui_select_shadow_alpha: 0.20,
             ui_progress_height: 8.0,
             ui_slider_track_height: 6.0,
             ui_slider_thumb_size: 16.0,
@@ -290,6 +300,12 @@ impl UiMetrics {
             ui_command_list_max_height: 400.0,
             ui_font_hud_padding_x: 20.0,
             ui_font_hud_padding_y: 12.0,
+            settings_page_gap: 32.0,
+            settings_card_padding: 20.0,
+            settings_card_gap: 20.0,
+            settings_card_title_nudge_y: -4.0,
+            settings_select_width: 200.0,
+            settings_select_popup_gap: 4.0,
         }
     }
 

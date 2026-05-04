@@ -18,6 +18,7 @@
     "window": "Ventana",
     "next_tab": "Pestaña siguiente",
     "previous_tab": "Pestaña anterior",
-    "language": "Idioma"
+    "language": "Idioma",
+    "settings": "Configuración"
   }
 }

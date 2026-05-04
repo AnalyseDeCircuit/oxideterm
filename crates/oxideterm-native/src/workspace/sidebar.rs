@@ -268,7 +268,12 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.set_sidebar_section(section, cx);
+                    if section == SidebarSection::Settings {
+                        this.open_settings(cx);
+                    } else {
+                        this.active_surface = ActiveSurface::Terminal;
+                        this.set_sidebar_section(section, cx);
+                    }
                 }),
             )
             .into_any_element()

@@ -160,6 +160,10 @@ impl SettingsStore {
         self.updated_at
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn save(&mut self) -> Result<SettingsSaveResult> {
         let sanitized = sanitize_settings_value(self.settings.to_value())?;
         let updated_at = now_ms();

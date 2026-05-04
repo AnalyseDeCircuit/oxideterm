@@ -18,6 +18,7 @@
     "window": "Fenster",
     "next_tab": "Nächster Tab",
     "previous_tab": "Vorheriger Tab",
-    "language": "Sprache"
+    "language": "Sprache",
+    "settings": "Einstellungen"
   }
 }

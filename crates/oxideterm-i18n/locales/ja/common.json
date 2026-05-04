@@ -17,5 +17,9 @@
   },
   "titlebar": {
     "open_recent_project": "最近のプロジェクトを開く"
+  },
+  "common": {
+    "enabled": "有効",
+    "disabled": "無効"
   }
 }

@@ -60,6 +60,33 @@ correctness.
 - Modal visual hierarchy must match the source UI being translated: overlay,
   dialog container, header, body, footer, separators, controls.
 
+## Floating Primitive Layering
+
+- Floating UI primitives must not render their popup content as ordinary
+  children of a row, card, pane, or scroll item.
+- This rule applies to select, menu, dropdown menu, tooltip, popover, context
+  menu, autocomplete suggestions, command suggestions, and any future floating
+  surface.
+- The trigger belongs in normal layout. The floating content belongs in an
+  overlay/portal layer owned by the nearest surface or root entity and rendered
+  after normal page content.
+- Floating content must not rely on local sibling order to appear above later
+  cards or rows. If it needs to escape clipping, scrolling, or sibling paint
+  order, it belongs in the overlay/portal path.
+- Overlay state must be semantic enough to avoid page-specific hacks: track the
+  active overlay identity and its anchor/bounds rather than expanding the
+  feature view inline.
+- Opening a floating primitive must close conflicting floating primitives.
+  Surface switches, tab switches, navigation, Escape, item activation, and
+  outside click must close the floating surface unless the primitive explicitly
+  documents another behavior.
+- Floating primitives are focus/input boundaries. Text, paste, IME, and command
+  input must not leak to the terminal or underlying pane while the floating
+  surface owns that interaction.
+- Floating primitive visuals must use semantic tokens for background, border,
+  shadow, radius, spacing, typography, text, hover, active, selected, disabled,
+  and focus states. Feature pages must not hard-code these values.
+
 ## Semantic Design Tokens
 
 - UI code must not introduce raw hard-coded colors for product UI.

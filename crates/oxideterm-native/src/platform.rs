@@ -7,8 +7,8 @@ use oxideterm_theme::UiMetrics;
 
 use crate::{
     ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
-    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, Paste,
-    PrevTab, Quit, OpenSettings, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
+    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, OpenSettings,
+    Paste, PrevTab, Quit, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
     SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
     SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
     SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,

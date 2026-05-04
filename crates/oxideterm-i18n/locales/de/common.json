@@ -17,5 +17,9 @@
   },
   "titlebar": {
     "open_recent_project": "Letztes Projekt öffnen"
+  },
+  "common": {
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert"
   }
 }

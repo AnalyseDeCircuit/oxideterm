@@ -75,6 +75,14 @@ impl WorkspaceApp {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
+        if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
+            if key == "escape" && !modifiers.platform {
+                self.open_settings_select = None;
+                cx.notify();
+            }
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
         {
             self.close_settings(window, cx);

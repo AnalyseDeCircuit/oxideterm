@@ -32,14 +32,14 @@ use self::new_connection::{
     SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
-use self::settings::{ActiveSurface, SettingsTab};
+use self::settings::{ActiveSurface, SettingsSelect, SettingsTab, TerminalSettingsPage};
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
+use crate::ui::select::{OverlayAnchor, SelectAnchorId};
 use crate::{
     ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
-    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab,
-    OpenSettings, Paste, PrevTab, SplitHorizontal, SplitVertical, SwitchLocaleChinese,
-    SwitchLocaleEnglish,
+    GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, OpenSettings,
+    Paste, PrevTab, SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish,
     SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese,
     SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
     SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
@@ -62,6 +62,9 @@ pub(crate) struct WorkspaceApp {
     active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,
     active_settings_tab: SettingsTab,
+    terminal_settings_page: TerminalSettingsPage,
+    open_settings_select: Option<SettingsSelect>,
+    select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     new_connection_form: Option<NewConnectionForm>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
@@ -109,6 +112,9 @@ impl WorkspaceApp {
             ),
             active_surface: ActiveSurface::Terminal,
             active_settings_tab: SettingsTab::General,
+            terminal_settings_page: TerminalSettingsPage::Display,
+            open_settings_select: None,
+            select_anchors: HashMap::new(),
             new_connection_form: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,

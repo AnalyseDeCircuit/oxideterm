@@ -289,6 +289,29 @@ Exit criteria:
   placeholders.
 - `cargo check -p oxideterm-native`
 
+Phase 2 implementation status (2026-05-04):
+
+- Implemented in `crates/oxideterm-native/src/workspace/settings.rs` as a
+  workspace child module so settings routing, focus handoff, live token updates,
+  and persistence stay coordinated with the root workspace entity.
+- Added `ActiveSurface::Terminal | Settings`, `Cmd+,`, the macOS Settings menu
+  item, and the activity-bar Settings icon route.
+- Added the Tauri `SettingsView.tsx` shell translation: left `w-56` equivalent
+  navigation, grouped nav sections with separators, `settings_view.title`, right
+  scrollable `max-w-4xl` / `p-10` equivalent content area, and the complete tab
+  order from Tauri.
+- Added native routes for General, Portable, Terminal, Appearance, Local,
+  Connections, SSH, Reconnect, SFTP, IDE, AI, Knowledge, Keybindings, and Help.
+- Added real persisted controls for the settings already represented in
+  `oxideterm-settings`, including common terminal, appearance, local terminal,
+  connection pool, reconnect, SFTP, IDE, and AI fields. Rich editors and
+  management tables remain Phase 3 work, but the routes are no longer empty
+  placeholders.
+- Imported Tauri `settings.json` and `settings_view.json` locale domains for all
+  11 native locales and wired them into `oxideterm-i18n`.
+- Verified with `cargo fmt --check`, `cargo check -p oxideterm-native`,
+  `cargo test -p oxideterm-i18n`, and `cargo test -p oxideterm-native`.
+
 ## Phase 3: Complete Settings Surface
 
 Implement every Tauri settings tab as a native settings surface. A control is
@@ -545,6 +568,33 @@ Exit criteria:
 - `cargo test -p oxideterm-settings`
 - `cargo check -p oxideterm-native`
 - `git diff --check`
+
+Phase 3 implementation status (2026-05-04):
+
+- Checked the settings navigation icons against Tauri `SettingsView.tsx` and
+  `lucide-react@0.577.0`. Native now uses the same tab-to-icon mapping:
+  `Monitor`, `HardDrive`, `Terminal`, `Square`, `Shield`, `Key`, `WifiOff`,
+  `Code2`, `Sparkles`, `BookOpen`, `Keyboard`, and `HelpCircle`.
+- Added the missing Lucide SVG assets used by the Tauri settings sidebar to
+  `crates/oxideterm-native/src/assets.rs`.
+- Expanded the native General and Portable settings surfaces with language,
+  data directory, update channel, portable runtime, biometric/password, CLI
+  companion, and disabled native action rows where the backend action is not
+  available yet.
+- Expanded Terminal settings coverage across display, input, command bar,
+  command marks, history, in-band transfer, background image, and highlight-rule
+  management surfaces. Values backed by `oxideterm-settings` are editable and
+  persisted.
+- Expanded Appearance settings coverage for theme/custom-theme management
+  surfaces, density, radius, UI font, animation speed, frosted glass, and
+  sidebar collapsed default.
+- Expanded Local Terminal, Connections, SSH keys/auth status, Reconnect, SFTP,
+  IDE, AI, Knowledge, Keybindings, and Help surfaces so every Tauri route has
+  visible native rows for the corresponding settings and management actions.
+- Language changes from the native settings page now update the in-memory
+  `I18n` instance immediately, in addition to being persisted.
+- Verified that the settings surface uses existing locale keys from the imported
+  Tauri locale domains; no `zh-CN` settings keys are missing.
 
 ## Phase 4: Runtime Wiring And Hardening
 
