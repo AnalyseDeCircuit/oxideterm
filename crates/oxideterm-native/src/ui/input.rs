@@ -43,6 +43,7 @@ pub(crate) fn input(tokens: &ThemeTokens, view: InputView<'_>) -> Div {
             caret_visible: view.caret_visible,
             secret: view.input_type == InputType::Password,
             selected_all: view.selected_all,
+            marked_text: None,
         },
     )
     .opacity(if view.disabled { 0.5 } else { 1.0 })

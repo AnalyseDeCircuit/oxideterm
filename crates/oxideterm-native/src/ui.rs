@@ -28,4 +28,4 @@ pub(crate) use checkbox::checkbox;
 pub(crate) use form_field::form_field;
 pub(crate) use modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay};
 pub(crate) use tabs::{segmented_tab, segmented_tabs};
-pub(crate) use text_input::{TextInputView, text_input};
+pub(crate) use text_input::{TextInputView, text_input, text_input_anchor_probe};

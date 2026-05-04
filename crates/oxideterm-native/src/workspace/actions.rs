@@ -1,4 +1,6 @@
+use super::ime::WorkspaceImeTarget;
 use super::*;
+use crate::ui::text_input_anchor_probe;
 
 #[derive(Default)]
 pub(super) struct SearchBarState {
@@ -23,6 +25,7 @@ impl WorkspaceApp {
     pub(super) fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = false;
         self.search.active_match = None;
+        self.ime_marked_text = None;
         if let Some(pane) = self.active_pane() {
             let _ = pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
         }
@@ -102,14 +105,6 @@ impl WorkspaceApp {
                     self.search.query.pop();
                     self.update_search_query(cx);
                 }
-                "space" => {
-                    self.search.query.push(' ');
-                    self.update_search_query(cx);
-                }
-                key if key.chars().count() == 1 && !modifiers.control && !modifiers.alt => {
-                    self.search.query.push_str(key);
-                    self.update_search_query(cx);
-                }
                 _ => {}
             }
             return;
@@ -159,6 +154,8 @@ impl WorkspaceApp {
 
     pub(super) fn render_search_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let target = WorkspaceImeTarget::Search;
+        let workspace = cx.entity();
         let query = if self.search.query.is_empty() {
             self.i18n.t("search.placeholder")
         } else {
@@ -176,7 +173,8 @@ impl WorkspaceApp {
             .border_color(rgb(theme.border))
             .text_size(px(self.tokens.metrics.searchbar_font_size))
             .text_color(rgb(theme.text))
-            .child(
+            .child(text_input_anchor_probe(
+                target.anchor_id(),
                 div()
                     .flex_1()
                     .h(px(self.tokens.metrics.search_input_height))
@@ -190,8 +188,21 @@ impl WorkspaceApp {
                     } else {
                         rgb(theme.text)
                     })
-                    .child(query),
-            )
+                    .child(query)
+                    .when_some(self.marked_text_for_target(target), |input, marked| {
+                        input.child(
+                            div()
+                                .underline()
+                                .text_color(rgb(theme.text))
+                                .child(marked.to_string()),
+                        )
+                    }),
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_text_input_anchor(anchor, cx);
+                    });
+                },
+            ))
             .child(
                 div()
                     .px_2()

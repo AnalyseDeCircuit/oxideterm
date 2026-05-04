@@ -15,8 +15,10 @@ use super::{
 use crate::ui::{
     ButtonTone, TextInputView, button, checkbox, form_field, modal_body, modal_container,
     modal_footer, modal_header, modal_overlay, segmented_tab, segmented_tabs, text_input,
+    text_input_anchor_probe,
 };
 use crate::workspace::WorkspaceApp;
+use crate::workspace::ime::WorkspaceImeTarget;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {
@@ -58,6 +60,13 @@ impl WorkspaceApp {
                 _ => return true,
             }
         }
+        let focused_field_accepts_ime = matches!(
+            form.focused_field,
+            NewConnectionField::Name
+                | NewConnectionField::Host
+                | NewConnectionField::Username
+                | NewConnectionField::Group
+        );
 
         if modifiers.platform {
             match key {
@@ -118,6 +127,9 @@ impl WorkspaceApp {
                 true
             }
             "space" => {
+                if focused_field_accepts_ime {
+                    return true;
+                }
                 insert_text_into_current_connection_field(form, " ");
                 form.error = None;
                 self.new_connection_caret_visible = true;
@@ -125,6 +137,9 @@ impl WorkspaceApp {
                 true
             }
             _ => {
+                if focused_field_accepts_ime {
+                    return true;
+                }
                 let Some(text) = text_input else {
                     return true;
                 };
@@ -389,34 +404,46 @@ impl WorkspaceApp {
             .new_connection_form
             .as_ref()
             .is_some_and(|form| connection_field_is_selected(form, field));
+        let target = WorkspaceImeTarget::NewConnection(field);
+        let workspace = cx.entity();
         form_field(
             &self.tokens,
             label,
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value,
-                    placeholder,
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
-                    secret,
-                    selected_all,
+            text_input_anchor_probe(
+                target.anchor_id(),
+                text_input(
+                    &self.tokens,
+                    TextInputView {
+                        value,
+                        placeholder,
+                        focused,
+                        caret_visible: self.new_connection_caret_visible,
+                        secret,
+                        selected_all,
+                        marked_text: self.marked_text_for_target(target),
+                    },
+                )
+                .id(("connection-field", field as u32))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.field_focused = true;
+                            form.focused_field = field;
+                            clear_connection_selection(form);
+                        }
+                        this.ime_marked_text = None;
+                        this.new_connection_caret_visible = true;
+                        window.focus(&this.focus_handle);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ),
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_text_input_anchor(anchor, cx);
+                    });
                 },
-            )
-            .id(("connection-field", field as u32))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    if let Some(form) = this.new_connection_form.as_mut() {
-                        form.field_focused = true;
-                        form.focused_field = field;
-                        clear_connection_selection(form);
-                    }
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
             ),
         )
     }

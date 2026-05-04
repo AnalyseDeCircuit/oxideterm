@@ -1,4 +1,5 @@
 mod actions;
+mod ime;
 mod new_connection;
 mod pane_tree;
 mod settings;
@@ -29,6 +30,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
+use self::ime::WorkspaceImeElement;
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
     SshConnectionWorkerResult,
@@ -40,6 +42,7 @@ use self::settings::{
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
 use crate::ui::select::{OverlayAnchor, SelectAnchorId};
+use crate::ui::text_input::{TextInputAnchor, TextInputAnchorId};
 use crate::{
     ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,
     GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewTerminal, NextTab, OpenSettings,
@@ -69,6 +72,8 @@ pub(crate) struct WorkspaceApp {
     terminal_settings_page: TerminalSettingsPage,
     open_settings_select: Option<SettingsSelect>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
+    text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
+    ime_marked_text: Option<String>,
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
@@ -122,6 +127,8 @@ impl WorkspaceApp {
             terminal_settings_page: TerminalSettingsPage::Display,
             open_settings_select: None,
             select_anchors: HashMap::new(),
+            text_input_anchors: HashMap::new(),
+            ime_marked_text: None,
             focused_settings_input: None,
             settings_input_draft: String::new(),
             settings_slider_drag: None,
@@ -489,5 +496,9 @@ impl Render for WorkspaceApp {
             .when(self.keyboard_interactive_challenge.is_some(), |root| {
                 root.child(self.render_keyboard_interactive_dialog(cx))
             })
+            .child(WorkspaceImeElement::new(
+                cx.entity(),
+                self.focus_handle.clone(),
+            ))
     }
 }

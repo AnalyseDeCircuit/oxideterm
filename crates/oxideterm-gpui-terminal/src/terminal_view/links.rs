@@ -6,6 +6,12 @@ use std::{
 
 use oxideterm_terminal::{TerminalCell, TerminalColor, TerminalSnapshot};
 
+#[derive(Clone, Debug)]
+struct LinkText {
+    text: String,
+    boundaries: Vec<usize>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalLinkRange {
     pub(crate) row: usize,
@@ -73,12 +79,50 @@ pub(crate) fn detect_link_ranges_for_rows(
         let Some(row) = snapshot.lines.get(row_index) else {
             continue;
         };
-        let text = row.text();
+        let link_text = link_text_for_row(row);
         links.extend(detect_osc8_ranges(row_index, row));
-        links.extend(detect_url_ranges(row_index, &text, &links));
-        links.extend(detect_path_ranges(row_index, &text, &links));
+        links.extend(detect_url_ranges(row_index, &link_text, &links));
+        links.extend(detect_path_ranges(row_index, &link_text, &links));
     }
     links
+}
+
+fn link_text_for_row(row: &oxideterm_terminal::TerminalRow) -> LinkText {
+    let mut text = String::new();
+    let mut boundaries = Vec::new();
+    let mut skip_wide_spacer = false;
+    let mut last_end_col = 0;
+
+    for (col, cell) in row.cells.iter().enumerate() {
+        if skip_wide_spacer {
+            skip_wide_spacer = false;
+            continue;
+        }
+
+        boundaries.push(col);
+        text.push(cell.ch);
+        last_end_col = col + if cell.wide { 2 } else { 1 };
+
+        for ch in cell.zerowidth.chars() {
+            boundaries.push(col);
+            text.push(ch);
+        }
+
+        skip_wide_spacer = cell.wide;
+    }
+
+    boundaries.push(last_end_col);
+    LinkText { text, boundaries }
+}
+
+fn char_range_to_cell_range(
+    link_text: &LinkText,
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize)> {
+    let start_col = *link_text.boundaries.get(start)?;
+    let end_col = *link_text.boundaries.get(end)?;
+    (end_col > start_col).then_some((start_col, end_col))
 }
 
 pub(crate) fn detect_osc8_ranges(
@@ -120,12 +164,12 @@ pub(crate) fn terminal_link_kind_for_target(target: &str) -> TerminalLinkKind {
     }
 }
 
-pub(crate) fn detect_url_ranges(
+fn detect_url_ranges(
     row: usize,
-    text: &str,
+    link_text: &LinkText,
     existing_links: &[TerminalLinkRange],
 ) -> Vec<TerminalLinkRange> {
-    let chars: Vec<char> = text.chars().collect();
+    let chars: Vec<char> = link_text.text.chars().collect();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -145,15 +189,18 @@ pub(crate) fn detect_url_ranges(
         }
         let end = trim_link_end(&chars, start, index);
         if end > start + prefix_len {
+            let Some((start_col, end_col)) = char_range_to_cell_range(link_text, start, end) else {
+                continue;
+            };
             if existing_links.iter().any(|link| {
-                link.row == row && ranges_overlap(start, end, link.start_col, link.end_col)
+                link.row == row && ranges_overlap(start_col, end_col, link.start_col, link.end_col)
             }) {
                 continue;
             }
             ranges.push(TerminalLinkRange {
                 row,
-                start_col: start,
-                end_col: end,
+                start_col,
+                end_col,
                 target: chars[start..end].iter().collect(),
                 kind: TerminalLinkKind::Url,
             });
@@ -162,12 +209,12 @@ pub(crate) fn detect_url_ranges(
     ranges
 }
 
-pub(crate) fn detect_path_ranges(
+fn detect_path_ranges(
     row: usize,
-    text: &str,
+    link_text: &LinkText,
     existing_links: &[TerminalLinkRange],
 ) -> Vec<TerminalLinkRange> {
-    let chars: Vec<char> = text.chars().collect();
+    let chars: Vec<char> = link_text.text.chars().collect();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -182,18 +229,20 @@ pub(crate) fn detect_path_ranges(
         if end <= start {
             continue;
         }
-        if existing_links
-            .iter()
-            .any(|link| link.row == row && ranges_overlap(start, end, link.start_col, link.end_col))
-        {
+        let Some((start_col, end_col)) = char_range_to_cell_range(link_text, start, end) else {
+            continue;
+        };
+        if existing_links.iter().any(|link| {
+            link.row == row && ranges_overlap(start_col, end_col, link.start_col, link.end_col)
+        }) {
             continue;
         }
         let token: String = chars[start..end].iter().collect();
         if is_path_like(&token) {
             ranges.push(TerminalLinkRange {
                 row,
-                start_col: start,
-                end_col: end,
+                start_col,
+                end_col,
                 target: token,
                 kind: TerminalLinkKind::Path,
             });

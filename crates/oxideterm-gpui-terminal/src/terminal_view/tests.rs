@@ -107,6 +107,59 @@ fn selection_snapshot(text: &str) -> TerminalSnapshot {
     snapshot
 }
 
+fn row_from_text_with_wide_spacers(text: &str) -> oxideterm_terminal::TerminalRow {
+    let mut cells = Vec::new();
+    for ch in text.chars() {
+        let wide = matches!(
+            ch as u32,
+            0x1100..=0x115f
+                | 0x2e80..=0xa4cf
+                | 0xac00..=0xd7a3
+                | 0xf900..=0xfaff
+                | 0xfe10..=0xfe19
+                | 0xfe30..=0xfe6f
+                | 0xff00..=0xff60
+                | 0xffe0..=0xffe6
+        );
+        cells.push(TerminalCell {
+            ch,
+            zerowidth: String::new(),
+            wide,
+            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            attrs: Default::default(),
+            hyperlink: None,
+            cursor: false,
+        });
+        if wide {
+            cells.push(TerminalCell {
+                ch: ' ',
+                zerowidth: String::new(),
+                wide: false,
+                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+                attrs: Default::default(),
+                hyperlink: None,
+                cursor: false,
+            });
+        }
+    }
+    oxideterm_terminal::TerminalRow {
+        cells,
+        wrapped: false,
+        active_input: false,
+    }
+}
+
+fn wide_snapshot(text: &str) -> TerminalSnapshot {
+    let row = row_from_text_with_wide_spacers(text);
+    let mut snapshot = test_snapshot(0, 0);
+    snapshot.cols = row.cells.len().max(40);
+    snapshot.rows = 1;
+    snapshot.lines = vec![row];
+    snapshot
+}
+
 fn visible_layout_bounds(rows: usize) -> Bounds<Pixels> {
     Bounds::new(
         point(px(0.0), px(0.0)),
@@ -417,6 +470,40 @@ fn link_detection_finds_path_like_targets() {
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Path);
     assert_eq!(links[0].target, "./crates/oxideterm-native/src/main.rs");
+}
+
+#[test]
+fn link_detection_preserves_unicode_wide_path_segments() {
+    let target = "~/Documents/OxideTerm/tauri版本代码/src";
+    let snapshot = wide_snapshot(target);
+    let links = detect_link_ranges(&snapshot);
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].kind, TerminalLinkKind::Path);
+    assert_eq!(links[0].start_col, 0);
+    assert_eq!(
+        links[0].end_col,
+        target.chars().map(display_cell_width).sum::<usize>()
+    );
+    assert_eq!(links[0].target, target);
+}
+
+fn display_cell_width(ch: char) -> usize {
+    if matches!(
+        ch as u32,
+        0x1100..=0x115f
+            | 0x2e80..=0xa4cf
+            | 0xac00..=0xd7a3
+            | 0xf900..=0xfaff
+            | 0xfe10..=0xfe19
+            | 0xfe30..=0xfe6f
+            | 0xff00..=0xff60
+            | 0xffe0..=0xffe6
+    ) {
+        2
+    } else {
+        1
+    }
 }
 
 #[test]

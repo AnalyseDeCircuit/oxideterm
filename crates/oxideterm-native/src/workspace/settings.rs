@@ -5,6 +5,7 @@ use oxideterm_settings::{
     Language, PersistedSettings, TerminalEncoding, UiDensity, UpdateChannel,
 };
 
+use super::ime::WorkspaceImeTarget;
 use super::*;
 use crate::ui::{
     button,
@@ -16,7 +17,7 @@ use crate::ui::{
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},
-    text_input::{TextInputView, text_input},
+    text_input::{TextInputView, text_input, text_input_anchor_probe},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,7 +75,7 @@ impl SettingsSelect {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SettingsInput {
     TerminalFontSize,
     TerminalLineHeight,
@@ -599,15 +600,7 @@ impl WorkspaceApp {
                 self.apply_settings_input_draft(input, cx);
                 true
             }
-            _ if modifiers.platform || modifiers.control || modifiers.alt => true,
-            _ => {
-                let Some(text) = settings_text_from_keystroke(&event.keystroke) else {
-                    return true;
-                };
-                self.settings_input_draft.push_str(text);
-                self.apply_settings_input_draft(input, cx);
-                true
-            }
+            _ => true,
         }
     }
 
@@ -615,9 +608,11 @@ impl WorkspaceApp {
         let mut changed = false;
         if self.focused_settings_input.take().is_some() {
             self.settings_input_draft.clear();
+            self.ime_marked_text = None;
             changed = true;
         }
         if self.open_settings_select.take().is_some() {
+            self.ime_marked_text = None;
             changed = true;
         }
         if let Some(form) = self.new_connection_form.as_mut()
@@ -625,6 +620,7 @@ impl WorkspaceApp {
         {
             form.field_focused = false;
             form.selected_field = None;
+            self.ime_marked_text = None;
             changed = true;
         }
         if changed {
@@ -662,7 +658,11 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn apply_settings_input_draft(&mut self, input: SettingsInput, cx: &mut Context<Self>) {
+    pub(super) fn apply_settings_input_draft(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) {
         match input {
             SettingsInput::TerminalFontSize => {
                 if let Ok(value) = self.settings_input_draft.parse::<i64>() {
@@ -1095,38 +1095,50 @@ impl WorkspaceApp {
         } else {
             value.as_str()
         };
-        text_input(
-            &self.tokens,
-            TextInputView {
-                value: display_value,
-                placeholder: value.clone(),
-                focused,
-                caret_visible: self.new_connection_caret_visible,
-                secret: false,
-                selected_all: false,
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: display_value,
+                    placeholder: value.clone(),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .w(px(width))
+            .justify_center()
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let current = match input {
+                        SettingsInput::TerminalFontSize => this
+                            .settings_store
+                            .settings()
+                            .terminal
+                            .font_size
+                            .to_string(),
+                        SettingsInput::TerminalLineHeight => {
+                            compact_decimal(this.settings_store.settings().terminal.line_height)
+                        }
+                    };
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
+            ),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
             },
-        )
-        .w(px(width))
-        .justify_center()
-        .cursor(CursorStyle::IBeam)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, window, cx| {
-                let current = match input {
-                    SettingsInput::TerminalFontSize => this
-                        .settings_store
-                        .settings()
-                        .terminal
-                        .font_size
-                        .to_string(),
-                    SettingsInput::TerminalLineHeight => {
-                        compact_decimal(this.settings_store.settings().terminal.line_height)
-                    }
-                };
-                this.focus_settings_input(input, current, cx);
-                window.focus(&this.focus_handle);
-                cx.stop_propagation();
-            }),
         )
         .into_any_element()
     }
@@ -2740,17 +2752,6 @@ fn set_selection_requires_shift(settings: &mut PersistedSettings, value: bool) {
 fn compact_decimal(value: f64) -> String {
     let text = format!("{value:.1}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
-}
-
-fn settings_text_from_keystroke(keystroke: &gpui::Keystroke) -> Option<&str> {
-    if keystroke.modifiers.platform || keystroke.modifiers.control {
-        return None;
-    }
-    let text = keystroke.key_char.as_deref()?;
-    if text.is_empty() || text.chars().any(char::is_control) {
-        return None;
-    }
-    Some(text)
 }
 
 fn font_family_options() -> &'static [FontFamily] {

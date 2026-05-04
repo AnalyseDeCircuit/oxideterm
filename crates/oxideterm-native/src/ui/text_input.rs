@@ -1,5 +1,25 @@
-use gpui::{Div, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{
+    AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
+    IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px, rgb, rgba,
+};
 use oxideterm_theme::ThemeTokens;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct TextInputAnchorId(pub(crate) u64);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TextInputAnchor {
+    pub(crate) id: TextInputAnchorId,
+    pub(crate) bounds: Bounds<Pixels>,
+}
+
+type TextInputBoundsCallback = Box<dyn FnOnce(TextInputAnchor, &mut Window, &mut App)>;
+
+pub(crate) struct TextInputAnchorProbe {
+    id: TextInputAnchorId,
+    child: Option<AnyElement>,
+    on_bounds: Option<TextInputBoundsCallback>,
+}
 
 pub(crate) struct TextInputView<'a> {
     pub value: &'a str,
@@ -8,11 +28,97 @@ pub(crate) struct TextInputView<'a> {
     pub caret_visible: bool,
     pub secret: bool,
     pub selected_all: bool,
+    pub marked_text: Option<&'a str>,
+}
+
+pub(crate) fn text_input_anchor_probe(
+    id: TextInputAnchorId,
+    child: impl IntoElement,
+    on_bounds: impl FnOnce(TextInputAnchor, &mut Window, &mut App) + 'static,
+) -> TextInputAnchorProbe {
+    TextInputAnchorProbe {
+        id,
+        child: Some(child.into_any_element()),
+        on_bounds: Some(Box::new(on_bounds)),
+    }
+}
+
+impl IntoElement for TextInputAnchorProbe {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TextInputAnchorProbe {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let layout_id = self
+            .child
+            .as_mut()
+            .expect("text input anchor child should render once")
+            .request_layout(window, cx);
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        if let Some(child) = self.child.as_mut() {
+            child.prepaint(window, cx);
+        }
+        if let Some(on_bounds) = self.on_bounds.take() {
+            let anchor = TextInputAnchor {
+                id: self.id,
+                bounds,
+            };
+            window.on_next_frame(move |window, cx| on_bounds(anchor, window, cx));
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(child) = self.child.as_mut() {
+            child.paint(window, cx);
+        }
+    }
 }
 
 pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
     let theme = tokens.ui;
     let empty = view.value.is_empty();
+    let marked = view.marked_text.unwrap_or_default();
     let display = if empty {
         view.placeholder
     } else if view.secret {
@@ -20,7 +126,13 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
     } else {
         view.value.to_string()
     };
-    let show_selection = view.focused && view.selected_all && !empty;
+    let marked_display = if view.secret {
+        "•".repeat(marked.chars().count())
+    } else {
+        marked.to_string()
+    };
+    let visually_empty = empty && marked.is_empty();
+    let show_selection = view.focused && view.selected_all && !empty && marked.is_empty();
 
     div()
         .h(px(tokens.metrics.ui_control_height))
@@ -36,7 +148,7 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
             rgb(theme.border)
         })
         .text_size(px(tokens.metrics.ui_text_sm))
-        .text_color(if empty {
+        .text_color(if visually_empty {
             rgb(theme.text_muted)
         } else {
             rgb(theme.text)
@@ -48,7 +160,7 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                 .flex()
                 .flex_row()
                 .items_center()
-                .when(view.focused && empty, |row| {
+                .when(view.focused && visually_empty, |row| {
                     row.child(text_caret(tokens, view.caret_visible))
                 })
                 .child(
@@ -59,7 +171,7 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                                 .bg(rgb(theme.accent))
                                 .text_color(rgb(theme.accent_text))
                         })
-                        .text_color(if empty {
+                        .text_color(if visually_empty {
                             rgb(theme.text_muted)
                         } else if show_selection {
                             rgb(theme.accent_text)
@@ -68,7 +180,15 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                         })
                         .child(display),
                 )
-                .when(view.focused && !empty && !show_selection, |row| {
+                .when(view.focused && !marked.is_empty(), |row| {
+                    row.child(
+                        div()
+                            .underline()
+                            .text_color(rgb(theme.text))
+                            .child(marked_display),
+                    )
+                })
+                .when(view.focused && !visually_empty && !show_selection, |row| {
                     row.child(text_caret(tokens, view.caret_visible))
                 }),
         )

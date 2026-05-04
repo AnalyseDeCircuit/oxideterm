@@ -5,14 +5,14 @@ use gpui::{
 use oxideterm_ssh::{KeyboardInteractivePromptRequest, SshPromptError};
 use tokio::sync::oneshot;
 
-use super::form_state::text_from_keystroke;
-use crate::ui::{TextInputView, form_field, text_input};
+use crate::ui::{TextInputView, form_field, text_input, text_input_anchor_probe};
 use crate::workspace::WorkspaceApp;
+use crate::workspace::ime::WorkspaceImeTarget;
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
     request: KeyboardInteractivePromptRequest,
-    responses: Vec<String>,
-    focused_prompt: usize,
+    pub(in crate::workspace) responses: Vec<String>,
+    pub(in crate::workspace) focused_prompt: usize,
     response_tx: Option<oneshot::Sender<Result<Vec<String>, SshPromptError>>>,
 }
 
@@ -58,7 +58,6 @@ impl WorkspaceApp {
         };
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        let text_input = text_from_keystroke(&event.keystroke).map(str::to_string);
 
         if modifiers.platform {
             if key == "v" {
@@ -100,25 +99,7 @@ impl WorkspaceApp {
                 cx.notify();
                 true
             }
-            "space" => {
-                if let Some(response) = challenge.responses.get_mut(challenge.focused_prompt) {
-                    response.push(' ');
-                }
-                self.new_connection_caret_visible = true;
-                cx.notify();
-                true
-            }
-            _ => {
-                let Some(text) = text_input else {
-                    return true;
-                };
-                if let Some(response) = challenge.responses.get_mut(challenge.focused_prompt) {
-                    response.push_str(&text);
-                }
-                self.new_connection_caret_visible = true;
-                cx.notify();
-                true
-            }
+            _ => true,
         }
     }
 
@@ -191,6 +172,8 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap));
         for (index, prompt) in challenge.request.prompts.iter().enumerate() {
+            let target = WorkspaceImeTarget::KeyboardInteractive(index);
+            let workspace = cx.entity();
             let focused = challenge.focused_prompt == index;
             let value = challenge
                 .responses
@@ -200,29 +183,39 @@ impl WorkspaceApp {
             prompt_list = prompt_list.child(form_field(
                 &self.tokens,
                 prompt.prompt.clone(),
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value,
-                        placeholder: String::new(),
-                        focused,
-                        caret_visible: self.new_connection_caret_visible,
-                        secret: !prompt.echo,
-                        selected_all: false,
+                text_input_anchor_probe(
+                    target.anchor_id(),
+                    text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value,
+                            placeholder: String::new(),
+                            focused,
+                            caret_visible: self.new_connection_caret_visible,
+                            secret: !prompt.echo,
+                            selected_all: false,
+                            marked_text: self.marked_text_for_target(target),
+                        },
+                    )
+                    .id(("kbi-prompt", index))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            if let Some(challenge) = this.keyboard_interactive_challenge.as_mut() {
+                                challenge.focused_prompt = index;
+                            }
+                            this.ime_marked_text = None;
+                            this.new_connection_caret_visible = true;
+                            window.focus(&this.focus_handle);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+                    move |anchor, _window, cx| {
+                        let _ = workspace.update(cx, |this, cx| {
+                            this.update_text_input_anchor(anchor, cx);
+                        });
                     },
-                )
-                .id(("kbi-prompt", index))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
-                        if let Some(challenge) = this.keyboard_interactive_challenge.as_mut() {
-                            challenge.focused_prompt = index;
-                        }
-                        this.new_connection_caret_visible = true;
-                        window.focus(&this.focus_handle);
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
                 ),
             ));
         }
