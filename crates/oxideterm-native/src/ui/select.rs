@@ -133,7 +133,7 @@ pub(crate) fn select_trigger(
             tokens.ui.text
         }))
         .opacity(if disabled { 0.5 } else { 1.0 })
-        .child(div().flex_1().overflow_hidden().child(value.into()))
+        .child(div().flex_1().min_w(px(0.0)).truncate().child(value.into()))
         .child(
             div()
                 .ml(px(tokens.spacing.two))

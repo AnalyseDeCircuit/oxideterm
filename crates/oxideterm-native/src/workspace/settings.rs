@@ -210,13 +210,14 @@ impl WorkspaceApp {
                 div()
                     .id("settings-content-scroll")
                     .flex_1()
+                    .min_w(px(0.0))
+                    .min_h(px(0.0))
                     .overflow_y_scroll()
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(896.0))
-                            .mx_auto()
-                            .p(px(40.0))
+                            .min_w(px(0.0))
+                            .p(px(self.tokens.metrics.settings_content_padding))
                             .child(self.render_settings_tab_content(cx)),
                     ),
             )
@@ -391,6 +392,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
@@ -414,6 +416,7 @@ impl WorkspaceApp {
     fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
         div()
             .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
@@ -692,14 +695,17 @@ impl WorkspaceApp {
     fn setting_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
         div()
             .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .justify_between()
-            .gap(px(24.0))
+            .gap(px(self.tokens.metrics.settings_row_gap))
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
