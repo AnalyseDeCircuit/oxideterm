@@ -203,20 +203,21 @@ impl SettingsTab {
 
 impl WorkspaceApp {
     pub(super) fn open_settings(&mut self, cx: &mut Context<Self>) {
-        self.active_surface = ActiveSurface::Settings;
-        self.active_sidebar_section = SidebarSection::Settings;
-        if self.sidebar_collapsed {
-            self.sidebar_collapsed = false;
-        }
-        self.persist_sidebar_settings();
-        cx.notify();
+        self.open_settings_tab(cx);
     }
 
     pub(super) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let close_active_settings_tab = self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.open_settings_select = None;
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
+        if close_active_settings_tab {
+            self.close_active_tab(window, cx);
+            return;
+        }
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -610,6 +611,28 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if self.focused_settings_input.take().is_some() {
+            self.settings_input_draft.clear();
+            changed = true;
+        }
+        if self.open_settings_select.take().is_some() {
+            changed = true;
+        }
+        if let Some(form) = self.new_connection_form.as_mut()
+            && form.field_focused
+        {
+            form.field_focused = false;
+            form.selected_field = None;
+            changed = true;
+        }
+        if changed {
+            self.new_connection_caret_visible = true;
+            cx.notify();
+        }
+    }
+
     pub(super) fn update_settings_slider_drag(
         &mut self,
         event: &MouseMoveEvent,
@@ -643,7 +666,10 @@ impl WorkspaceApp {
         match input {
             SettingsInput::TerminalFontSize => {
                 if let Ok(value) = self.settings_input_draft.parse::<i64>() {
-                    self.edit_settings(|settings| settings.terminal.font_size = value.clamp(8, 32), cx);
+                    self.edit_settings(
+                        |settings| settings.terminal.font_size = value.clamp(8, 32),
+                        cx,
+                    );
                 } else {
                     cx.notify();
                 }
@@ -1087,9 +1113,12 @@ impl WorkspaceApp {
             MouseButton::Left,
             cx.listener(move |this, _event, window, cx| {
                 let current = match input {
-                    SettingsInput::TerminalFontSize => {
-                        this.settings_store.settings().terminal.font_size.to_string()
-                    }
+                    SettingsInput::TerminalFontSize => this
+                        .settings_store
+                        .settings()
+                        .terminal
+                        .font_size
+                        .to_string(),
                     SettingsInput::TerminalLineHeight => {
                         compact_decimal(this.settings_store.settings().terminal.line_height)
                     }
@@ -1127,8 +1156,12 @@ impl WorkspaceApp {
                                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                                     this.open_settings_select = None;
                                     this.focused_settings_input = None;
-                                    this.settings_slider_drag = Some(SettingsSlider::TerminalFontSize);
-                                    this.set_font_size_from_position(f32::from(event.position.x), cx);
+                                    this.settings_slider_drag =
+                                        Some(SettingsSlider::TerminalFontSize);
+                                    this.set_font_size_from_position(
+                                        f32::from(event.position.x),
+                                        cx,
+                                    );
                                     cx.stop_propagation();
                                 }),
                             )
@@ -1139,11 +1172,11 @@ impl WorkspaceApp {
                                     cx.stop_propagation();
                                 }),
                             )
-                            .on_mouse_move(
-                                cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                            .on_mouse_move(cx.listener(
+                                |this, event: &MouseMoveEvent, _window, cx| {
                                     this.update_settings_slider_drag(event, cx);
-                                }),
-                            ),
+                                },
+                            )),
                         move |anchor, _window, cx| {
                             let _ = workspace.update(cx, |this, cx| {
                                 this.update_select_anchor(anchor, cx);

@@ -19,7 +19,14 @@ impl WorkspaceApp {
         let Some(active_index) = self.active_tab_index() else {
             return;
         };
-        if self.tabs[active_index].root_pane.pane_count() >= MAX_PANES_PER_TAB {
+        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
+            return;
+        };
+        if self.tabs[active_index]
+            .root_pane
+            .as_ref()
+            .is_none_or(|root_pane| root_pane.pane_count() >= MAX_PANES_PER_TAB)
+        {
             return;
         }
 
@@ -33,11 +40,10 @@ impl WorkspaceApp {
         });
 
         let tab = &mut self.tabs[active_index];
-        if tab
-            .root_pane
-            .split_active(tab.active_pane_id, group_id, direction, pane_id, session_id)
-        {
-            tab.active_pane_id = pane_id;
+        if tab.root_pane.as_mut().is_some_and(|root_pane| {
+            root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
+        }) {
+            tab.active_pane_id = Some(pane_id);
             self.panes.insert(pane_id, pane.clone());
             self.needs_active_pane_focus = true;
             pane.read(cx).focus(window);
@@ -51,8 +57,14 @@ impl WorkspaceApp {
         let Some(active_index) = self.active_tab_index() else {
             return;
         };
-        let active_pane_id = self.tabs[active_index].active_pane_id;
-        if self.tabs[active_index].root_pane.pane_count() <= 1 {
+        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
+            return;
+        };
+        if self.tabs[active_index]
+            .root_pane
+            .as_ref()
+            .is_none_or(|root_pane| root_pane.pane_count() <= 1)
+        {
             return;
         }
 
@@ -61,11 +73,14 @@ impl WorkspaceApp {
         }
 
         let tab = &mut self.tabs[active_index];
-        if let Some(next_active) = tab.root_pane.close_pane(active_pane_id) {
-            if let Some(replacement) = tab.root_pane.single_child_replacement() {
-                tab.root_pane = replacement;
+        let Some(root_pane) = tab.root_pane.as_mut() else {
+            return;
+        };
+        if let Some(next_active) = root_pane.close_pane(active_pane_id) {
+            if let Some(replacement) = root_pane.single_child_replacement() {
+                tab.root_pane = Some(replacement);
             }
-            tab.active_pane_id = next_active;
+            tab.active_pane_id = Some(next_active);
             self.needs_active_pane_focus = true;
             self.focus_active_pane(window, cx);
             cx.notify();
@@ -118,7 +133,10 @@ impl WorkspaceApp {
         };
         let next_sizes = adjusted_split_sizes(&drag.start_sizes, drag.handle_index, delta_fraction);
         if let Some(tab) = self.active_tab_mut()
-            && tab.root_pane.update_group_sizes(drag.group_id, &next_sizes)
+            && tab
+                .root_pane
+                .as_mut()
+                .is_some_and(|root_pane| root_pane.update_group_sizes(drag.group_id, &next_sizes))
         {
             cx.notify();
         }
@@ -157,7 +175,7 @@ impl WorkspaceApp {
                             let pane_id = *pane_id;
                             move |this, _event, window, cx| {
                                 if let Some(tab) = this.active_tab_mut() {
-                                    tab.active_pane_id = pane_id;
+                                    tab.active_pane_id = Some(pane_id);
                                 }
                                 this.needs_active_pane_focus = true;
                                 this.focus_active_pane(window, cx);

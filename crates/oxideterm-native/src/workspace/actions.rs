@@ -136,13 +136,23 @@ impl WorkspaceApp {
 
     pub(super) fn sync_tab_titles(&mut self, cx: &App) {
         for tab in &mut self.tabs {
-            if let Some(pane) = self.panes.get(&tab.active_pane_id) {
-                let title = pane.read(cx).title().to_string();
-                tab.title = if title.is_empty() {
-                    self.i18n.t("terminal.local_terminal")
-                } else {
-                    title
-                };
+            match tab.kind {
+                TabKind::Settings => {
+                    tab.title = self.i18n.t("settings_view.title");
+                }
+                TabKind::LocalTerminal | TabKind::SshTerminal => {
+                    let Some(active_pane_id) = tab.active_pane_id else {
+                        continue;
+                    };
+                    if let Some(pane) = self.panes.get(&active_pane_id) {
+                        let title = pane.read(cx).title().to_string();
+                        tab.title = if title.is_empty() {
+                            self.i18n.t("terminal.local_terminal")
+                        } else {
+                            title
+                        };
+                    }
+                }
             }
         }
     }

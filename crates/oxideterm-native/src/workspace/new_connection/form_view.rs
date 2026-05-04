@@ -39,6 +39,26 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
         let text_input = text_from_keystroke(&event.keystroke).map(str::to_string);
 
+        if !form.field_focused {
+            match key {
+                "escape" => {
+                    self.close_new_connection_form(window, cx);
+                    return true;
+                }
+                "enter" => {
+                    self.submit_new_connection_form(window, cx);
+                    return true;
+                }
+                "tab" => {
+                    form.field_focused = true;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                    return true;
+                }
+                _ => return true,
+            }
+        }
+
         if modifiers.platform {
             match key {
                 "a" => {
@@ -84,6 +104,7 @@ impl WorkspaceApp {
             "tab" => {
                 form.focused_field =
                     next_connection_field(form.focused_field, form.auth_tab, !modifiers.shift);
+                form.field_focused = true;
                 clear_connection_selection(form);
                 self.new_connection_caret_visible = true;
                 cx.notify();
@@ -313,7 +334,7 @@ impl WorkspaceApp {
                         .when_some(form.error.clone(), |content, error| {
                             content.child(
                                 div()
-                                    .text_size(px(12.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.error))
                                     .child(error),
                             )
@@ -345,7 +366,7 @@ impl WorkspaceApp {
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
         div()
-            .text_size(px(12.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(text)
             .into_any_element()
@@ -363,7 +384,7 @@ impl WorkspaceApp {
         let focused = self
             .new_connection_form
             .as_ref()
-            .is_some_and(|form| form.focused_field == field);
+            .is_some_and(|form| form.field_focused && form.focused_field == field);
         let selected_all = self
             .new_connection_form
             .as_ref()
@@ -387,11 +408,13 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     if let Some(form) = this.new_connection_form.as_mut() {
+                        form.field_focused = true;
                         form.focused_field = field;
                         clear_connection_selection(form);
                     }
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
+                    cx.stop_propagation();
                     cx.notify();
                 }),
             ),

@@ -26,3 +26,4 @@ target/
 .env.local
 /docs/local
 .codex-private/
+tauri版本代码/*

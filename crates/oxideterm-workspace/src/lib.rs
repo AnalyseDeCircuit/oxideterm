@@ -22,6 +22,7 @@ pub enum SplitDirection {
 pub enum TabKind {
     LocalTerminal,
     SshTerminal,
+    Settings,
 }
 
 #[derive(Clone, Debug)]
@@ -29,8 +30,8 @@ pub struct Tab {
     pub id: TabId,
     pub kind: TabKind,
     pub title: String,
-    pub root_pane: PaneNode,
-    pub active_pane_id: PaneId,
+    pub root_pane: Option<PaneNode>,
+    pub active_pane_id: Option<PaneId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -167,11 +167,7 @@ impl TerminalPane {
         self.title.clone()
     }
 
-    pub fn set_preferences(
-        &mut self,
-        preferences: TerminalUiPreferences,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
         self.settings = TerminalUiSettings::from_preferences(&preferences);
         self.theme = preferences.theme.clone();
         self.preferences = preferences;

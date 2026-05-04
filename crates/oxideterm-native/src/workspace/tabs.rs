@@ -20,10 +20,11 @@ impl WorkspaceApp {
             id: tab_id,
             kind: TabKind::LocalTerminal,
             title: self.i18n.t("terminal.local_terminal"),
-            root_pane: PaneNode::leaf(pane_id, session_id),
-            active_pane_id: pane_id,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
         });
         self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
         cx.notify();
@@ -62,14 +63,40 @@ impl WorkspaceApp {
             id: tab_id,
             kind: TabKind::SshTerminal,
             title,
-            root_pane: PaneNode::leaf(pane_id, session_id),
-            active_pane_id: pane_id,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
         });
         self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
         cx.notify();
         Ok(())
+    }
+
+    pub(super) fn open_settings_tab(&mut self, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Settings) {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id();
+            self.tabs.push(Tab {
+                id: tab_id,
+                kind: TabKind::Settings,
+                title: self.i18n.t("settings_view.title"),
+                root_pane: None,
+                active_pane_id: None,
+            });
+            tab_id
+        };
+        self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Settings;
+        self.active_sidebar_section = SidebarSection::Settings;
+        self.needs_active_pane_focus = false;
+        if self.sidebar_collapsed {
+            self.sidebar_collapsed = false;
+        }
+        self.persist_sidebar_settings();
+        cx.notify();
     }
 
     pub(super) fn alloc_tab_id(&mut self) -> TabId {
@@ -106,7 +133,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn active_pane_id(&self) -> Option<PaneId> {
-        self.active_tab().map(|tab| tab.active_pane_id)
+        self.active_tab().and_then(|tab| tab.active_pane_id)
     }
 
     pub(super) fn active_pane(&self) -> Option<gpui::Entity<TerminalPane>> {
@@ -122,9 +149,22 @@ impl WorkspaceApp {
     ) {
         if self.tabs.iter().any(|tab| tab.id == tab_id) {
             self.active_tab_id = Some(tab_id);
-            self.needs_active_pane_focus = true;
+            self.sync_active_tab_surface();
+            self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
             self.focus_active_pane(window, cx);
             cx.notify();
+        }
+    }
+
+    pub(super) fn sync_active_tab_surface(&mut self) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::Settings)
+        {
+            self.active_surface = ActiveSurface::Settings;
+            self.active_sidebar_section = SidebarSection::Settings;
+        } else {
+            self.active_surface = ActiveSurface::Terminal;
         }
     }
 
@@ -142,7 +182,9 @@ impl WorkspaceApp {
         };
         let tab = self.tabs.remove(index);
         let mut pane_ids = Vec::new();
-        tab.root_pane.collect_pane_ids(&mut pane_ids);
+        if let Some(root_pane) = &tab.root_pane {
+            root_pane.collect_pane_ids(&mut pane_ids);
+        }
         for pane_id in pane_ids {
             if let Some(pane) = self.panes.remove(&pane_id) {
                 let _ = pane.update(cx, |pane, _cx| pane.shutdown());
@@ -152,9 +194,11 @@ impl WorkspaceApp {
         self.active_tab_id = if self.tabs.is_empty() {
             None
         } else {
-            Some(self.tabs[index.saturating_sub(1).min(self.tabs.len() - 1)].id)
+            Some(self.tabs[index.min(self.tabs.len() - 1)].id)
         };
-        self.needs_active_pane_focus = self.active_tab_id.is_some();
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus =
+            self.active_tab_id.is_some() && self.active_surface == ActiveSurface::Terminal;
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -172,7 +216,8 @@ impl WorkspaceApp {
             current - 1
         };
         self.active_tab_id = Some(self.tabs[next].id);
-        self.needs_active_pane_focus = true;
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -180,7 +225,8 @@ impl WorkspaceApp {
     pub(super) fn go_to_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(tab) = self.tabs.get(index) {
             self.active_tab_id = Some(tab.id);
-            self.needs_active_pane_focus = true;
+            self.sync_active_tab_surface();
+            self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
             self.focus_active_pane(window, cx);
             cx.notify();
         }
@@ -194,25 +240,39 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .pl(px(self.tokens.metrics.tabbar_leading_offset))
-            .pr_1()
+            .overflow_hidden()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_hover));
+            .bg(rgb(theme.bg));
 
         for tab in &self.tabs {
             let tab_id = tab.id;
             let active = Some(tab_id) == self.active_tab_id;
             let title = tab.title.clone();
-            let tab_label = match tab.kind {
-                TabKind::LocalTerminal => format!(">_ {title}"),
-                TabKind::SshTerminal => format!("⇄ {title}"),
+            let icon = match tab.kind {
+                TabKind::LocalTerminal => LucideIcon::Square,
+                TabKind::SshTerminal => LucideIcon::Terminal,
+                TabKind::Settings => LucideIcon::Settings,
+            };
+            let tab_text = if matches!(tab.kind, TabKind::Settings) {
+                self.i18n.t("settings_view.title")
+            } else {
+                title
+            };
+            let tab_text_color = if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
             };
             bar = bar.child(
                 div()
                     .id(("workspace-tab", tab_id.0))
                     .h_full()
-                    .w(px(self.tokens.metrics.tab_width))
-                    .px_2()
+                    .flex_none()
+                    .min_w(px(self.tokens.metrics.tab_min_width))
+                    .max_w(px(self.tokens.metrics.tab_max_width))
+                    .px_3()
+                    .relative()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -220,9 +280,9 @@ impl WorkspaceApp {
                     .border_r_1()
                     .border_color(rgb(theme.border))
                     .bg(if active {
-                        rgb(theme.bg_active)
-                    } else {
                         rgb(theme.bg_panel)
+                    } else {
+                        rgb(theme.bg)
                     })
                     .text_color(if active {
                         rgb(theme.text)
@@ -235,25 +295,49 @@ impl WorkspaceApp {
                             this.set_active_tab(tab_id, window, cx);
                         }),
                     )
+                    .when(active, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .h(px(self.tokens.metrics.tab_active_accent_height))
+                                .bg(rgb(theme.accent)),
+                        )
+                    })
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        self.tokens.metrics.tab_icon_size,
+                        tab_text_color,
+                    ))
                     .child(
                         div()
                             .flex_1()
                             .truncate()
                             .text_size(px(self.tokens.metrics.tab_font_size))
-                            .child(tab_label),
+                            .child(tab_text),
                     )
                     .child(
                         div()
-                            .px_1()
+                            .size(px(self.tokens.metrics.tab_close_button_size))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
                             .cursor_pointer()
-                            .text_size(px(self.tokens.metrics.tab_font_size))
                             .text_color(rgb(theme.text_muted))
-                            .child("x")
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                self.tokens.metrics.tab_close_icon_size,
+                                rgb(theme.text_muted),
+                            ))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, window, cx| {
                                     this.set_active_tab(tab_id, window, cx);
                                     this.close_active_tab(window, cx);
+                                    cx.stop_propagation();
                                 }),
                             ),
                     ),
@@ -265,20 +349,25 @@ impl WorkspaceApp {
                 .id("workspace-new-tab")
                 .h(px(self.tokens.metrics.new_tab_button_height))
                 .w(px(self.tokens.metrics.new_tab_button_width))
-                .ml_1()
+                .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(self.tokens.radii.sm))
-                .bg(rgb(theme.bg_hover))
+                .border_r_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg))
                 .text_color(rgb(theme.text_muted))
-                .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
                 .cursor_pointer()
-                .child("+")
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Plus,
+                    self.tokens.metrics.tab_icon_size,
+                    rgb(theme.text_muted),
+                ))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, window, cx| {
                         let _ = this.create_local_terminal_tab(window, cx);
+                        cx.stop_propagation();
                     }),
                 ),
         )

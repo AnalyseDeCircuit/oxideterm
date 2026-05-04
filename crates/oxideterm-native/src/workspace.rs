@@ -255,7 +255,9 @@ impl Render for WorkspaceApp {
             .unwrap_or_else(|| "OxideTerm".to_string());
         window.set_window_title(&SharedString::from(title));
         if self.needs_active_pane_focus
-            && self.active_surface == ActiveSurface::Terminal
+            && self
+                .active_tab()
+                .is_some_and(|tab| tab.kind != TabKind::Settings)
             && !self.search.visible
             && self.new_connection_form.is_none()
             && let Some(pane) = self.active_pane()
@@ -266,10 +268,12 @@ impl Render for WorkspaceApp {
             });
         }
 
-        let content = if self.active_surface == ActiveSurface::Settings {
-            self.render_settings_surface(cx)
-        } else if let Some(tab) = self.active_tab() {
-            self.render_pane_tree(&tab.root_pane, cx)
+        let content = if let Some(tab) = self.active_tab() {
+            match (&tab.kind, &tab.root_pane) {
+                (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
+                _ => self.render_empty_workspace(cx),
+            }
         } else {
             self.render_empty_workspace(cx)
         };
@@ -315,6 +319,12 @@ impl Render for WorkspaceApp {
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
             }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                    this.blur_text_inputs(cx);
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {

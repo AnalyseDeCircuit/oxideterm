@@ -31,6 +31,7 @@ pub(crate) enum LucideIcon {
     Square,
     Terminal,
     WifiOff,
+    X,
 }
 
 impl LucideIcon {
@@ -62,6 +63,7 @@ impl LucideIcon {
             Self::Square => "lucide/square.svg",
             Self::Terminal => "lucide/terminal.svg",
             Self::WifiOff => "lucide/wifi-off.svg",
+            Self::X => "lucide/x.svg",
         }
     }
 }
@@ -100,6 +102,7 @@ impl AssetSource for NativeAssets {
             "lucide/square.svg" => SQUARE,
             "lucide/terminal.svg" => TERMINAL,
             "lucide/wifi-off.svg" => WIFI_OFF,
+            "lucide/x.svg" => X,
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(svg.as_bytes())))
@@ -137,6 +140,7 @@ impl AssetSource for NativeAssets {
                 "square.svg",
                 "terminal.svg",
                 "wifi-off.svg",
+                "x.svg",
             ]
             .into_iter()
             .map(SharedString::from)
@@ -177,3 +181,4 @@ const SPARKLES: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const SQUARE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"#;
 const TERMINAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>"#;
 const WIFI_OFF: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></svg>"#;
+const X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;

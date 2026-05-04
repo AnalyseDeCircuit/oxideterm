@@ -220,6 +220,7 @@ impl WorkspaceApp {
                         }
                         this.new_connection_caret_visible = true;
                         window.focus(&this.focus_handle);
+                        cx.stop_propagation();
                         cx.notify();
                     }),
                 ),

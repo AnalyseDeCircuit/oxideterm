@@ -48,13 +48,13 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                 .flex()
                 .flex_row()
                 .items_center()
-                .when(view.focused && empty && view.caret_visible, |row| {
-                    row.child(text_caret(tokens))
+                .when(view.focused && empty, |row| {
+                    row.child(text_caret(tokens, view.caret_visible))
                 })
                 .child(
                     div()
                         .when(show_selection, |text| {
-                            text.px(px(2.0))
+                            text.px(px(tokens.metrics.form_selection_padding_x))
                                 .rounded(px(tokens.radii.xs))
                                 .bg(rgb(theme.accent))
                                 .text_color(rgb(theme.accent_text))
@@ -68,16 +68,16 @@ pub(crate) fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
                         })
                         .child(display),
                 )
-                .when(
-                    view.focused && !empty && view.caret_visible && !show_selection,
-                    |row| row.child(text_caret(tokens)),
-                ),
+                .when(view.focused && !empty && !show_selection, |row| {
+                    row.child(text_caret(tokens, view.caret_visible))
+                }),
         )
 }
 
-pub(crate) fn text_caret(tokens: &ThemeTokens) -> Div {
+pub(crate) fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
     div()
         .w(px(tokens.metrics.form_caret_width))
         .h(px(tokens.metrics.form_caret_height))
         .bg(rgb(tokens.ui.accent))
+        .opacity(if visible { 1.0 } else { 0.0 })
 }
