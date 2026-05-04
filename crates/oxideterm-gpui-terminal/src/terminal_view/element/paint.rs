@@ -1,11 +1,15 @@
+use std::sync::Arc;
+
 use gpui::{
-    App, Bounds, PathBuilder, Pixels, Point, SharedString, Window, fill, point, px, rgb, rgba, size,
+    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, SharedString, Window, fill,
+    point, px, rgb, rgba, size,
 };
+use image::{Frame, RgbaImage};
 use oxideterm_terminal::TerminalCursorShape;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
-    BatchedTextRun, TerminalCursor, TerminalRect, TerminalScrollbar,
+    BatchedTextRun, TerminalCursor, TerminalImageLayout, TerminalRect, TerminalScrollbar,
 };
 use crate::terminal_view::element::{
     PowerlineDirection, PowerlineShape, PowerlineWeight, powerline_separator,
@@ -29,6 +33,36 @@ pub(crate) fn paint_terminal_rect(
         ),
     );
     window.paint_quad(fill(bounds, rect.color));
+}
+
+pub(crate) fn paint_terminal_image(
+    image: &TerminalImageLayout,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+) {
+    let bounds = Bounds::new(
+        origin
+            + point(
+                px(image.image.col as f32 * metrics.cell_width_f32()),
+                px(image.image.row as f32 * metrics.line_height_f32()),
+            ),
+        size(
+            px(image.image.cols as f32 * metrics.cell_width_f32()),
+            px(image.image.rows as f32 * metrics.line_height_f32()),
+        ),
+    );
+
+    let Some(data) = &image.image.data else {
+        window.paint_quad(fill(bounds, rgba(0x528bff29)));
+        return;
+    };
+    let Some(buffer) = RgbaImage::from_raw(data.width, data.height, data.rgba.clone()) else {
+        window.paint_quad(fill(bounds, rgba(0xff555529)));
+        return;
+    };
+    let render_image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
+    let _ = window.paint_image(bounds, Corners::all(px(0.0)), render_image, 0, false);
 }
 
 pub(crate) fn paint_text_run(

@@ -8,6 +8,7 @@ members = [
   "crates/oxideterm-settings",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
+  "crates/oxideterm-terminal-graphics",
   "crates/oxideterm-theme",
   "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
@@ -23,10 +24,13 @@ version = "0.1.0"
 [workspace.dependencies]
 alacritty_terminal = "0.26.0"
 anyhow = "1.0"
+base64 = "0.22"
 crossbeam-channel = "0.5"
 dashmap = "6.1"
 gpui = "=0.2.2"
 gpui-component = { version = "=0.5.1", default-features = false }
+icy_sixel = "0.5.0"
+image = "0.25.10"
 libc = "0.2"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }

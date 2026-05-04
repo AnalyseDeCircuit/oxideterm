@@ -1,4 +1,7 @@
 use alacritty_terminal::vte::ansi::CursorShape as AlacCursorShape;
+pub use oxideterm_terminal_graphics::{
+    GraphicsOptions, TerminalImageData, TerminalImageId, TerminalImageProtocol,
+};
 
 #[derive(Clone, Debug)]
 pub struct TerminalCell {
@@ -63,6 +66,21 @@ pub struct TerminalSnapshot {
     pub display_offset: usize,
     pub scrollback_lines: usize,
     pub lines: Vec<TerminalRow>,
+    pub images: Vec<TerminalImageSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalImageSnapshot {
+    pub id: TerminalImageId,
+    pub protocol: TerminalImageProtocol,
+    pub row: usize,
+    pub col: usize,
+    pub cols: usize,
+    pub rows: usize,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub placeholder: bool,
+    pub data: Option<TerminalImageData>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

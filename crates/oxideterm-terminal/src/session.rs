@@ -13,14 +13,15 @@ use oxideterm_ssh::{
     ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPromptHandler, SshPtyHandle,
     SshTransportClient, SshTransportCommand,
 };
+use oxideterm_terminal_graphics::{GraphicsAdvance, GraphicsIngress};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::error::TryRecvError;
 
 use crate::{
-    LocalEventListener, LocalPtySession, TermMode, TerminalEvent, TerminalLifecycle,
-    TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
-    append_grid_line_text, focus_report_sequence, normalize_paste_line_endings,
-    search_logical_line_matches, snapshot_from_term,
+    LocalEventListener, LocalPtySession, TermMode, TerminalEvent, TerminalGraphicsState,
+    TerminalLifecycle, TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
+    append_grid_line_text, focus_report_sequence, graphics_cursor_from_term,
+    normalize_paste_line_endings, search_logical_line_matches, snapshot_from_term,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -386,6 +387,8 @@ pub struct SshPtySession {
     connect_rx: Receiver<Result<SshPtyHandle, String>>,
     handle: Option<SshPtyHandle>,
     title: Option<String>,
+    graphics_ingress: GraphicsIngress,
+    graphics: TerminalGraphicsState,
 }
 
 impl SshPtySession {
@@ -448,6 +451,8 @@ impl SshPtySession {
             connect_rx,
             handle: None,
             title: None,
+            graphics_ingress: GraphicsIngress::new(crate::GraphicsOptions::default()),
+            graphics: TerminalGraphicsState::default(),
         }
     }
 
@@ -485,7 +490,28 @@ impl SshPtySession {
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let mut term = self.term.lock();
-        self.parser.advance(&mut *term, bytes);
+        let cursor = graphics_cursor_from_term(
+            &term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+        );
+        let GraphicsAdvance {
+            terminal_bytes,
+            events,
+        } = self.graphics_ingress.advance(bytes, cursor);
+        if !terminal_bytes.is_empty() {
+            self.parser.advance(&mut *term, &terminal_bytes);
+        }
+        drop(term);
+        for event in events {
+            if let Some(response) = self.graphics.handle_event(event) {
+                let _ = self.write_input(&response);
+            }
+        }
     }
 
     fn drain_transport_output(&mut self) -> bool {
@@ -751,6 +777,7 @@ impl TerminalSessionBackend for SshPtySession {
                 cell_width: self.resize.cell_width,
                 cell_height: self.resize.cell_height,
             },
+            &self.graphics,
         )
     }
 

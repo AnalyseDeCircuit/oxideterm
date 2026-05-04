@@ -28,6 +28,7 @@ fn test_snapshot(display_offset: usize, scrollback_lines: usize) -> TerminalSnap
         display_offset,
         scrollback_lines,
         lines: Vec::new(),
+        images: Vec::new(),
     }
 }
 

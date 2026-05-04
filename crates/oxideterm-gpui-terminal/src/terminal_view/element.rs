@@ -6,7 +6,8 @@ use gpui::{
     Window, fill, point, px, relative, rgb,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+    TerminalColor, TerminalCursorShape, TerminalImageSnapshot, TerminalSearchMatch,
+    TerminalSnapshot,
 };
 
 use crate::app::{TerminalInputHandler, TerminalPane};
@@ -48,6 +49,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) backgrounds: Vec<TerminalRect>,
     pub(crate) search_matches: Vec<TerminalRect>,
     pub(crate) selections: Vec<TerminalRect>,
+    pub(crate) images: Vec<TerminalImageLayout>,
     pub(crate) text_runs: Vec<BatchedTextRun>,
     pub(crate) marked_text: Option<BatchedTextRun>,
     pub(crate) ime_cursor_bounds: Option<Bounds<Pixels>>,
@@ -70,6 +72,11 @@ pub(crate) struct BatchedTextRun {
     pub(crate) text: String,
     pub(crate) cells: usize,
     pub(crate) style: TextRun,
+}
+
+#[derive(Clone)]
+pub(crate) struct TerminalImageLayout {
+    pub(crate) image: TerminalImageSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,6 +145,18 @@ impl TerminalElement {
             )
         };
         let mut selections = Vec::new();
+        let images = self
+            .snapshot
+            .images
+            .iter()
+            .filter(|image| {
+                image.row < self.snapshot.rows
+                    && image.row + image.rows > visible_rows.start
+                    && image.row < visible_rows.end
+            })
+            .cloned()
+            .map(|image| TerminalImageLayout { image })
+            .collect();
         let mut text_runs = Vec::new();
         let mut cursor = None;
         let scrollbar = terminal_scrollbar(&self.snapshot, &self.metrics);
@@ -271,6 +290,7 @@ impl TerminalElement {
             backgrounds,
             search_matches,
             selections,
+            images,
             text_runs,
             marked_text: self.marked_text.as_ref().and_then(|text| {
                 ime_cursor_bounds?;
@@ -364,6 +384,9 @@ impl Element for TerminalElement {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for rect in &layout.backgrounds {
                 paint_terminal_rect(rect, origin, &self.metrics, window);
+            }
+            for image in &layout.images {
+                paint_terminal_image(image, origin, &self.metrics, window);
             }
             for rect in &layout.search_matches {
                 paint_terminal_rect(rect, origin, &self.metrics, window);

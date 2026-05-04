@@ -1,4 +1,10 @@
-use std::{borrow::Cow, collections::HashMap, env, sync::Arc, thread::JoinHandle};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, VecDeque},
+    env,
+    sync::Arc,
+    thread::JoinHandle,
+};
 
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
@@ -14,6 +20,9 @@ use alacritty_terminal::{
 };
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use oxideterm_terminal_graphics::{
+    DEFAULT_STORAGE_LIMIT_MB, GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement,
+};
 
 mod color;
 mod data;
@@ -23,7 +32,8 @@ mod session;
 
 pub use alacritty_terminal::term::TermMode;
 pub use data::{
-    TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape, TerminalRow,
+    GraphicsOptions, TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape,
+    TerminalImageData, TerminalImageId, TerminalImageProtocol, TerminalImageSnapshot, TerminalRow,
     TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
 };
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
@@ -88,6 +98,134 @@ fn window_size(size: TerminalSize) -> WindowSize {
     WindowSize {
         num_lines: size.rows as u16,
         num_cols: size.cols as u16,
+        cell_width: size.cell_width,
+        cell_height: size.cell_height,
+    }
+}
+
+pub(crate) struct TerminalGraphicsState {
+    images: HashMap<TerminalImageId, TerminalImageData>,
+    placements: Vec<TerminalImagePlacement>,
+    image_order: VecDeque<TerminalImageId>,
+    storage_bytes: usize,
+    storage_limit_bytes: usize,
+}
+
+impl Default for TerminalGraphicsState {
+    fn default() -> Self {
+        Self {
+            images: HashMap::new(),
+            placements: Vec::new(),
+            image_order: VecDeque::new(),
+            storage_bytes: 0,
+            storage_limit_bytes: DEFAULT_STORAGE_LIMIT_MB as usize * 1024 * 1024,
+        }
+    }
+}
+
+impl TerminalGraphicsState {
+    pub(crate) fn handle_event(&mut self, event: TerminalGraphicsEvent) -> Option<Vec<u8>> {
+        match event {
+            TerminalGraphicsEvent::ImageReady(image) => {
+                if let Some(previous) = self.images.remove(&image.id) {
+                    self.storage_bytes = self
+                        .storage_bytes
+                        .saturating_sub(image_storage_bytes(&previous));
+                    self.image_order.retain(|id| *id != image.id);
+                }
+                self.storage_bytes += image_storage_bytes(&image);
+                self.image_order.push_back(image.id);
+                self.images.insert(image.id, image);
+                self.evict_images_over_budget();
+                None
+            }
+            TerminalGraphicsEvent::Place(placement) => {
+                self.placements
+                    .retain(|existing| existing.id != placement.id);
+                self.placements.push(placement);
+                None
+            }
+            TerminalGraphicsEvent::Delete { id } => {
+                if let Some(id) = id {
+                    self.remove_image(id);
+                    self.placements.retain(|placement| placement.id != id);
+                } else {
+                    self.images.clear();
+                    self.placements.clear();
+                    self.image_order.clear();
+                    self.storage_bytes = 0;
+                }
+                None
+            }
+            TerminalGraphicsEvent::Respond(bytes) => Some(bytes),
+            TerminalGraphicsEvent::Error(error) => {
+                tracing::debug!(%error, "terminal graphics protocol error");
+                None
+            }
+        }
+    }
+
+    fn visible_images(&self, display_offset: usize, rows: usize) -> Vec<TerminalImageSnapshot> {
+        self.placements
+            .iter()
+            .filter_map(|placement| {
+                let row = viewport_row_for_grid_line(placement.line, display_offset)?;
+                if row >= rows || placement.col >= usize::MAX {
+                    return None;
+                }
+                Some(TerminalImageSnapshot {
+                    id: placement.id,
+                    protocol: placement.protocol,
+                    row,
+                    col: placement.col,
+                    cols: placement.cols,
+                    rows: placement.rows,
+                    pixel_width: placement.pixel_width,
+                    pixel_height: placement.pixel_height,
+                    placeholder: placement.placeholder,
+                    data: self.images.get(&placement.id).cloned(),
+                })
+            })
+            .collect()
+    }
+
+    fn evict_images_over_budget(&mut self) {
+        while self.storage_bytes > self.storage_limit_bytes {
+            let Some(id) = self.image_order.pop_front() else {
+                self.storage_bytes = 0;
+                break;
+            };
+            self.remove_image(id);
+            self.placements.retain(|placement| placement.id != id);
+        }
+    }
+
+    fn remove_image(&mut self, id: TerminalImageId) {
+        if let Some(image) = self.images.remove(&id) {
+            self.storage_bytes = self
+                .storage_bytes
+                .saturating_sub(image_storage_bytes(&image));
+        }
+        self.image_order.retain(|existing| *existing != id);
+    }
+}
+
+fn image_storage_bytes(image: &TerminalImageData) -> usize {
+    image.rgba.len()
+}
+
+pub(crate) fn graphics_cursor_from_term<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+) -> GraphicsCursor {
+    let content = term.renderable_content();
+    let line = content.cursor.point.line.0;
+    GraphicsCursor {
+        line,
+        row: viewport_row_for_grid_line(line, content.display_offset).unwrap_or_default(),
+        col: content.cursor.point.column.0,
+        cols: size.cols,
+        rows: size.rows,
         cell_width: size.cell_width,
         cell_height: size.cell_height,
     }
@@ -481,7 +619,7 @@ impl LocalPtySession {
 
     pub fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
-        snapshot_from_term(&term, self.size)
+        snapshot_from_term(&term, self.size, &TerminalGraphicsState::default())
     }
 }
 
@@ -503,7 +641,11 @@ fn normalize_paste_line_endings(text: &str) -> String {
     normalized
 }
 
-fn snapshot_from_term<T: EventListener>(term: &Term<T>, size: TerminalSize) -> TerminalSnapshot {
+pub(crate) fn snapshot_from_term<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+) -> TerminalSnapshot {
     let content = term.renderable_content();
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
     let mut rows = vec![
@@ -589,6 +731,7 @@ fn snapshot_from_term<T: EventListener>(term: &Term<T>, size: TerminalSize) -> T
         display_offset: content.display_offset,
         scrollback_lines,
         lines: rows,
+        images: graphics.visible_images(content.display_offset, size.rows),
     }
 }
 
@@ -791,6 +934,48 @@ mod tests {
     }
 
     #[test]
+    fn graphics_state_evicts_images_and_placements_over_budget() {
+        let mut graphics = TerminalGraphicsState {
+            storage_limit_bytes: 4,
+            ..TerminalGraphicsState::default()
+        };
+
+        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            id: TerminalImageId(1),
+            protocol: TerminalImageProtocol::Kitty,
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255],
+            name: None,
+        }));
+        graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
+            id: TerminalImageId(1),
+            protocol: TerminalImageProtocol::Kitty,
+            line: 0,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            z_index: 0,
+            placeholder: true,
+        }));
+        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            id: TerminalImageId(2),
+            protocol: TerminalImageProtocol::Kitty,
+            width: 1,
+            height: 1,
+            rgba: vec![255, 255, 255, 255],
+            name: None,
+        }));
+
+        assert!(!graphics.images.contains_key(&TerminalImageId(1)));
+        assert!(graphics.images.contains_key(&TerminalImageId(2)));
+        assert!(graphics.placements.is_empty());
+    }
+
+    #[test]
     fn snapshot_preserves_soft_wrapped_visual_rows() {
         let size = TerminalSize {
             cols: 10,
@@ -802,7 +987,7 @@ mod tests {
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"012345678901234567890123456789X");
 
-        let snapshot = snapshot_from_term(&term, size);
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
         let row_text = |row: usize| -> String {
             snapshot.lines[row]
                 .cells

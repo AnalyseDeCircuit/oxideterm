@@ -365,6 +365,35 @@ impl Default for InBandTransferSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalGraphicsSettings {
+    pub enabled: bool,
+    pub sixel: bool,
+    pub iterm2_inline: bool,
+    pub kitty: bool,
+    pub pixel_limit: i64,
+    pub storage_limit_mb: i64,
+    pub show_placeholder: bool,
+    #[serde(flatten)]
+    pub extra: ExtraFields,
+}
+
+impl Default for TerminalGraphicsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sixel: true,
+            iterm2_inline: true,
+            kitty: true,
+            pixel_limit: 16_777_216,
+            storage_limit_mb: 16,
+            show_placeholder: true,
+            extra: ExtraFields::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub theme: String,
     pub font_family: FontFamily,
@@ -395,6 +424,7 @@ pub struct TerminalSettings {
     pub background_enabled_tabs: Vec<String>,
     pub highlight_rules: Vec<Value>,
     pub in_band_transfer: InBandTransferSettings,
+    pub graphics: TerminalGraphicsSettings,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -431,6 +461,7 @@ impl Default for TerminalSettings {
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
+            graphics: TerminalGraphicsSettings::default(),
             extra: ExtraFields::new(),
         }
     }

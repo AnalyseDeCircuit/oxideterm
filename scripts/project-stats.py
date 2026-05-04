@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXCLUDE_DIRS = {
     "target", ".git", "node_modules", "dist", "build",
     ".cache", "out", "coverage", ".turbo", ".next",
+    "tauri版本代码",
 }
 
 EXT_TO_LANG = {

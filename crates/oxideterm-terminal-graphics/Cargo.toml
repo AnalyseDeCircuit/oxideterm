@@ -1,12 +1,13 @@
 [package]
-name = "oxideterm-gpui-terminal"
+name = "oxideterm-terminal-graphics"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gpui.workspace = true
+base64.workspace = true
+icy_sixel.workspace = true
 image.workspace = true
-oxideterm-terminal = { path = "../oxideterm-terminal" }
-parking_lot.workspace = true
+thiserror.workspace = true
+
