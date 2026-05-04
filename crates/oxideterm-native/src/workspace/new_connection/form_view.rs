@@ -1,14 +1,20 @@
 use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
-    px, rgb, rgba,
+    AnyElement, ClipboardItem, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window,
+    div, prelude::*, px, rgb,
 };
 
 use super::{
     form_state::{
-        NewConnectionField, NewConnectionForm, SshAuthTab, current_connection_field_mut,
-        next_connection_field,
+        NewConnectionField, NewConnectionForm, SshAuthTab, backspace_current_connection_field,
+        clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
+        current_connection_field, insert_text_into_current_connection_field, next_connection_field,
+        select_current_connection_field, text_from_keystroke,
     },
     ssh_flow::SshConnectionIntent,
+};
+use crate::ui::{
+    ButtonTone, TextInputView, button, checkbox, form_field, modal_body, modal_container,
+    modal_footer, modal_header, modal_overlay, segmented_tab, segmented_tabs, text_input,
 };
 use crate::workspace::WorkspaceApp;
 
@@ -31,10 +37,37 @@ impl WorkspaceApp {
         };
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        let text_input = text_from_keystroke(&event.keystroke).map(str::to_string);
 
         if modifiers.platform {
-            if key == "v" {
-                self.paste_into_new_connection_field(cx);
+            match key {
+                "a" => {
+                    select_current_connection_field(form);
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+                "c" => {
+                    if form.selected_field == Some(form.focused_field) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            current_connection_field(form).to_string(),
+                        ));
+                    }
+                }
+                "x" => {
+                    if form.selected_field == Some(form.focused_field) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            current_connection_field(form).to_string(),
+                        ));
+                        clear_current_connection_field(form);
+                        form.error = None;
+                        self.new_connection_caret_visible = true;
+                        cx.notify();
+                    }
+                }
+                "v" => {
+                    self.paste_into_new_connection_field(cx);
+                }
+                _ => {}
             }
             return true;
         }
@@ -51,32 +84,35 @@ impl WorkspaceApp {
             "tab" => {
                 form.focused_field =
                     next_connection_field(form.focused_field, form.auth_tab, !modifiers.shift);
+                clear_connection_selection(form);
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             "backspace" => {
-                current_connection_field_mut(form).pop();
+                backspace_current_connection_field(form);
                 form.error = None;
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
             "space" => {
-                current_connection_field_mut(form).push(' ');
+                insert_text_into_current_connection_field(form, " ");
                 form.error = None;
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
-            key if key.chars().count() == 1 && !modifiers.control && !modifiers.alt => {
-                current_connection_field_mut(form).push_str(key);
+            _ => {
+                let Some(text) = text_input else {
+                    return true;
+                };
+                insert_text_into_current_connection_field(form, &text);
                 form.error = None;
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
-            _ => true,
         }
     }
 
@@ -89,7 +125,7 @@ impl WorkspaceApp {
         };
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
-        current_connection_field_mut(form).push_str(&single_line);
+        insert_text_into_current_connection_field(form, &single_line);
         form.error = None;
         self.new_connection_caret_visible = true;
         cx.notify();
@@ -103,258 +139,208 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgba((theme.bg << 8) | 0xcc))
-            .child(
-                div()
-                    .w(px(self.tokens.metrics.modal_width))
-                    .rounded(px(self.tokens.radii.md))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_elevated))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .px(px(self.tokens.metrics.modal_header_padding_x))
-                            .py(px(self.tokens.metrics.modal_header_padding_y))
-                            .bg(rgb(theme.bg_panel))
-                            .border_b_1()
-                            .border_color(rgb(theme.border))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.modal_title_font_size))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(theme.text_heading))
-                                    .child(self.i18n.t("ssh.form.title")),
-                            )
-                            .child(
-                                div()
-                                    .mt_1()
-                                    .text_size(px(self.tokens.metrics.modal_description_font_size))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("ssh.form.subtitle")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .p(px(self.tokens.metrics.modal_body_padding))
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.metrics.modal_body_gap))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(self.tokens.metrics.modal_section_gap))
-                                    .child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.name"),
-                                        &form.name,
-                                        self.i18n.t("ssh.form.name_placeholder"),
-                                        NewConnectionField::Name,
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_row()
-                                            .gap(px(self.tokens.metrics.form_host_port_gap))
-                                            .child(div().flex_1().child(
+        modal_overlay(
+            &self.tokens,
+            modal_container(&self.tokens)
+                .child(modal_header(
+                    &self.tokens,
+                    self.i18n.t("ssh.form.title"),
+                    self.i18n.t("ssh.form.subtitle"),
+                ))
+                .child(
+                    modal_body(&self.tokens)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(self.tokens.metrics.modal_section_gap))
+                                .child(self.render_connection_field(
+                                    self.i18n.t("ssh.form.name"),
+                                    &form.name,
+                                    self.i18n.t("ssh.form.name_placeholder"),
+                                    NewConnectionField::Name,
+                                    false,
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .gap(px(self.tokens.metrics.form_host_port_gap))
+                                        .child(div().flex_1().child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.host"),
+                                            &form.host,
+                                            self.i18n.t("ssh.form.host_placeholder"),
+                                            NewConnectionField::Host,
+                                            false,
+                                            cx,
+                                        )))
+                                        .child(
+                                            div().w(px(self.tokens.metrics.form_port_width)).child(
                                                 self.render_connection_field(
-                                                    self.i18n.t("ssh.form.host"),
-                                                    &form.host,
-                                                    self.i18n.t("ssh.form.host_placeholder"),
-                                                    NewConnectionField::Host,
+                                                    self.i18n.t("ssh.form.port"),
+                                                    &form.port,
+                                                    "22".to_string(),
+                                                    NewConnectionField::Port,
                                                     false,
                                                     cx,
                                                 ),
-                                            ))
-                                            .child(
-                                                div()
-                                                    .w(px(self.tokens.metrics.form_port_width))
-                                                    .child(self.render_connection_field(
-                                                        self.i18n.t("ssh.form.port"),
-                                                        &form.port,
-                                                        "22".to_string(),
-                                                        NewConnectionField::Port,
-                                                        false,
-                                                        cx,
-                                                    )),
                                             ),
-                                    )
-                                    .child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.username"),
-                                        &form.username,
-                                        "root".to_string(),
-                                        NewConnectionField::Username,
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(self.render_auth_tabs(form.auth_tab, cx))
-                                    .when(form.auth_tab == SshAuthTab::Password, |content| {
-                                        content
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.password"),
-                                                &form.password,
-                                                String::new(),
-                                                NewConnectionField::Password,
-                                                true,
-                                                cx,
-                                            ))
-                                            .child(self.render_connection_checkbox(
-                                                self.i18n.t("ssh.form.save_password"),
-                                                form.save_password,
-                                                |form| form.save_password = !form.save_password,
-                                                cx,
-                                            ))
-                                    })
-                                    .when(form.auth_tab == SshAuthTab::DefaultKey, |content| {
-                                        content
-                                            .child(self.render_connection_hint(
-                                                self.i18n.t("ssh.form.default_key_desc"),
-                                            ))
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.passphrase"),
-                                                &form.passphrase,
-                                                self.i18n.t("ssh.form.passphrase_placeholder"),
-                                                NewConnectionField::Passphrase,
-                                                true,
-                                                cx,
-                                            ))
-                                    })
-                                    .when(form.auth_tab == SshAuthTab::SshKey, |content| {
-                                        content
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.key_file"),
-                                                &form.key_path,
-                                                "~/.ssh/id_ed25519".to_string(),
-                                                NewConnectionField::KeyPath,
-                                                false,
-                                                cx,
-                                            ))
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.passphrase"),
-                                                &form.passphrase,
-                                                self.i18n.t("ssh.form.passphrase_placeholder"),
-                                                NewConnectionField::Passphrase,
-                                                true,
-                                                cx,
-                                            ))
-                                    })
-                                    .when(form.auth_tab == SshAuthTab::Certificate, |content| {
-                                        content
-                                            .child(self.render_connection_hint(
-                                                self.i18n.t("ssh.form.certificate_note"),
-                                            ))
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.private_key"),
-                                                &form.key_path,
-                                                "~/.ssh/id_ed25519".to_string(),
-                                                NewConnectionField::KeyPath,
-                                                false,
-                                                cx,
-                                            ))
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.certificate"),
-                                                &form.cert_path,
-                                                "~/.ssh/id_ed25519-cert.pub".to_string(),
-                                                NewConnectionField::CertPath,
-                                                false,
-                                                cx,
-                                            ))
-                                            .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.passphrase"),
-                                                &form.passphrase,
-                                                self.i18n.t("ssh.form.passphrase_placeholder"),
-                                                NewConnectionField::Passphrase,
-                                                true,
-                                                cx,
-                                            ))
-                                    })
-                                    .when(form.auth_tab == SshAuthTab::Agent, |content| {
-                                        content.child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.agent_desc"),
-                                        ))
-                                    })
-                                    .when(form.auth_tab == SshAuthTab::TwoFactor, |content| {
-                                        content.child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.two_factor_desc"),
-                                        ))
-                                    })
-                                    .child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.group"),
-                                        &form.group,
-                                        self.i18n.t("ssh.form.ungrouped"),
-                                        NewConnectionField::Group,
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(self.render_connection_checkbox(
-                                        self.i18n.t("ssh.form.agent_forwarding"),
-                                        form.agent_forwarding,
-                                        |form| form.agent_forwarding = !form.agent_forwarding,
-                                        cx,
-                                    ))
-                                    .child(self.render_connection_checkbox(
-                                        self.i18n.t("ssh.form.save_connection"),
-                                        form.save_connection,
-                                        |form| form.save_connection = !form.save_connection,
-                                        cx,
-                                    )),
-                            )
-                            .when_some(form.error.clone(), |content, error| {
-                                content.child(
-                                    div()
-                                        .text_size(px(12.0))
-                                        .text_color(rgb(theme.error))
-                                        .child(error),
+                                        ),
                                 )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .h(px(self.tokens.metrics.modal_footer_height))
-                            .px(px(self.tokens.metrics.modal_footer_padding_x))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_end()
-                            .gap_2()
-                            .border_t_1()
-                            .border_color(rgb(theme.border))
-                            .bg(rgb(theme.bg_panel))
-                            .child(self.render_connection_button(
-                                self.i18n.t("ssh.form.cancel"),
-                                false,
-                                ConnectionButtonAction::Cancel,
-                                cx,
-                            ))
-                            .child(self.render_connection_button(
-                                self.i18n.t("ssh.form.test"),
-                                false,
-                                ConnectionButtonAction::Test,
-                                cx,
-                            ))
-                            .child(self.render_connection_button(
-                                self.i18n.t("ssh.form.connect"),
-                                true,
-                                ConnectionButtonAction::Connect,
-                                cx,
-                            )),
-                    ),
-            )
-            .into_any_element()
+                                .child(self.render_connection_field(
+                                    self.i18n.t("ssh.form.username"),
+                                    &form.username,
+                                    "root".to_string(),
+                                    NewConnectionField::Username,
+                                    false,
+                                    cx,
+                                ))
+                                .child(self.render_auth_tabs(form.auth_tab, cx))
+                                .when(form.auth_tab == SshAuthTab::Password, |content| {
+                                    content
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.password"),
+                                            &form.password,
+                                            String::new(),
+                                            NewConnectionField::Password,
+                                            true,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_checkbox(
+                                            self.i18n.t("ssh.form.save_password"),
+                                            form.save_password,
+                                            |form| form.save_password = !form.save_password,
+                                            cx,
+                                        ))
+                                })
+                                .when(form.auth_tab == SshAuthTab::DefaultKey, |content| {
+                                    content
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.default_key_desc"),
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.passphrase"),
+                                            &form.passphrase,
+                                            self.i18n.t("ssh.form.passphrase_placeholder"),
+                                            NewConnectionField::Passphrase,
+                                            true,
+                                            cx,
+                                        ))
+                                })
+                                .when(form.auth_tab == SshAuthTab::SshKey, |content| {
+                                    content
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.key_file"),
+                                            &form.key_path,
+                                            "~/.ssh/id_ed25519".to_string(),
+                                            NewConnectionField::KeyPath,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.passphrase"),
+                                            &form.passphrase,
+                                            self.i18n.t("ssh.form.passphrase_placeholder"),
+                                            NewConnectionField::Passphrase,
+                                            true,
+                                            cx,
+                                        ))
+                                })
+                                .when(form.auth_tab == SshAuthTab::Certificate, |content| {
+                                    content
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.certificate_note"),
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.private_key"),
+                                            &form.key_path,
+                                            "~/.ssh/id_ed25519".to_string(),
+                                            NewConnectionField::KeyPath,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.certificate"),
+                                            &form.cert_path,
+                                            "~/.ssh/id_ed25519-cert.pub".to_string(),
+                                            NewConnectionField::CertPath,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.passphrase"),
+                                            &form.passphrase,
+                                            self.i18n.t("ssh.form.passphrase_placeholder"),
+                                            NewConnectionField::Passphrase,
+                                            true,
+                                            cx,
+                                        ))
+                                })
+                                .when(form.auth_tab == SshAuthTab::Agent, |content| {
+                                    content.child(
+                                        self.render_connection_hint(
+                                            self.i18n.t("ssh.form.agent_desc"),
+                                        ),
+                                    )
+                                })
+                                .when(form.auth_tab == SshAuthTab::TwoFactor, |content| {
+                                    content.child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.two_factor_desc"),
+                                    ))
+                                })
+                                .child(self.render_connection_field(
+                                    self.i18n.t("ssh.form.group"),
+                                    &form.group,
+                                    self.i18n.t("ssh.form.ungrouped"),
+                                    NewConnectionField::Group,
+                                    false,
+                                    cx,
+                                ))
+                                .child(self.render_connection_checkbox(
+                                    self.i18n.t("ssh.form.agent_forwarding"),
+                                    form.agent_forwarding,
+                                    |form| form.agent_forwarding = !form.agent_forwarding,
+                                    cx,
+                                ))
+                                .child(self.render_connection_checkbox(
+                                    self.i18n.t("ssh.form.save_connection"),
+                                    form.save_connection,
+                                    |form| form.save_connection = !form.save_connection,
+                                    cx,
+                                )),
+                        )
+                        .when_some(form.error.clone(), |content, error| {
+                            content.child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(theme.error))
+                                    .child(error),
+                            )
+                        }),
+                )
+                .child(
+                    modal_footer(&self.tokens)
+                        .child(self.render_connection_button(
+                            self.i18n.t("ssh.form.cancel"),
+                            false,
+                            ConnectionButtonAction::Cancel,
+                            cx,
+                        ))
+                        .child(self.render_connection_button(
+                            self.i18n.t("ssh.form.test"),
+                            false,
+                            ConnectionButtonAction::Test,
+                            cx,
+                        ))
+                        .child(self.render_connection_button(
+                            self.i18n.t("ssh.form.connect"),
+                            true,
+                            ConnectionButtonAction::Connect,
+                            cx,
+                        )),
+                ),
+        )
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -374,100 +360,45 @@ impl WorkspaceApp {
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let focused = self
             .new_connection_form
             .as_ref()
             .is_some_and(|form| form.focused_field == field);
-        let display = if value.is_empty() {
-            placeholder
-        } else if secret {
-            "•".repeat(value.chars().count())
-        } else {
-            value.to_string()
-        };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_field_gap))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.form_label_font_size))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text))
-                    .child(label),
+        let selected_all = self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| connection_field_is_selected(form, field));
+        form_field(
+            &self.tokens,
+            label,
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder,
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret,
+                    selected_all,
+                },
             )
-            .child(
-                div()
-                    .id(("connection-field", field as u32))
-                    .h(px(self.tokens.metrics.form_input_height))
-                    .px(px(self.tokens.metrics.form_input_padding_x))
-                    .flex()
-                    .items_center()
-                    .rounded(px(self.tokens.radii.md))
-                    .bg(rgba((theme.bg << 8) | 0x80))
-                    .border_1()
-                    .border_color(if focused {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.border)
-                    })
-                    .text_size(px(self.tokens.metrics.form_text_font_size))
-                    .text_color(if value.is_empty() {
-                        rgb(theme.text_muted)
-                    } else {
-                        rgb(theme.text)
-                    })
-                    .cursor_pointer()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .when(
-                                focused && value.is_empty() && self.new_connection_caret_visible,
-                                |row| row.child(self.render_connection_caret()),
-                            )
-                            .child(
-                                div()
-                                    .text_color(if value.is_empty() {
-                                        rgb(theme.text_muted)
-                                    } else {
-                                        rgb(theme.text)
-                                    })
-                                    .child(display),
-                            )
-                            .when(
-                                focused && !value.is_empty() && self.new_connection_caret_visible,
-                                |row| row.child(self.render_connection_caret()),
-                            ),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            if let Some(form) = this.new_connection_form.as_mut() {
-                                form.focused_field = field;
-                            }
-                            this.new_connection_caret_visible = true;
-                            window.focus(&this.focus_handle);
-                            cx.notify();
-                        }),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_connection_caret(&self) -> AnyElement {
-        div()
-            .w(px(self.tokens.metrics.form_caret_width))
-            .h(px(self.tokens.metrics.form_caret_height))
-            .bg(rgb(self.tokens.ui.accent))
-            .into_any_element()
+            .id(("connection-field", field as u32))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.focused_field = field;
+                        clear_connection_selection(form);
+                    }
+                    this.new_connection_caret_visible = true;
+                    window.focus(&this.focus_handle);
+                    cx.notify();
+                }),
+            ),
+        )
     }
 
     fn render_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let tabs = [
             (SshAuthTab::Password, "ssh.auth.password"),
             (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
@@ -476,47 +407,20 @@ impl WorkspaceApp {
             (SshAuthTab::Agent, "ssh.auth.agent"),
             (SshAuthTab::TwoFactor, "ssh.auth.two_factor"),
         ];
-        let mut row = div()
-            .h(px(self.tokens.metrics.auth_tab_height))
-            .flex()
-            .flex_row()
-            .p(px(self.tokens.metrics.auth_tab_padding))
-            .rounded(px(self.tokens.radii.xs))
-            .overflow_hidden()
-            .bg(rgb(theme.bg_panel));
+        let mut row = segmented_tabs(&self.tokens);
         for (tab, key) in tabs {
             let selected = tab == active_tab;
             row = row.child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .rounded(px(self.tokens.radii.xs))
-                    .bg(if selected {
-                        rgb(theme.bg)
-                    } else {
-                        rgb(theme.bg_panel)
-                    })
-                    .text_size(px(self.tokens.metrics.form_text_font_size))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(if selected {
-                        rgb(theme.text)
-                    } else {
-                        rgb(theme.text_muted)
-                    })
-                    .child(self.i18n.t(key))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Some(form) = this.new_connection_form.as_mut() {
-                                form.auth_tab = tab;
-                            }
-                            cx.notify();
-                        }),
-                    ),
+                segmented_tab(&self.tokens, self.i18n.t(key), selected).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.auth_tab = tab;
+                            clear_connection_selection(form);
+                        }
+                        cx.notify();
+                    }),
+                ),
             );
         }
         row.into_any_element()
@@ -529,41 +433,7 @@ impl WorkspaceApp {
         toggle: fn(&mut NewConnectionForm),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .cursor_pointer()
-            .child(
-                div()
-                    .size(px(self.tokens.metrics.form_checkbox_size))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.xs))
-                    .border_1()
-                    .border_color(if checked {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.border)
-                    })
-                    .bg(if checked {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.bg)
-                    })
-                    .text_size(px(self.tokens.metrics.form_checkbox_glyph_size))
-                    .text_color(rgb(theme.accent_text))
-                    .child(if checked { "✓" } else { "" }),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.form_text_font_size))
-                    .text_color(rgb(theme.text))
-                    .child(label),
-            )
+        checkbox(&self.tokens, label, checked)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -583,44 +453,29 @@ impl WorkspaceApp {
         action: ConnectionButtonAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(self.tokens.metrics.form_button_height))
-            .px(px(self.tokens.metrics.form_button_padding_x))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(if primary {
-                rgb(theme.accent)
+        button(
+            &self.tokens,
+            label,
+            if primary {
+                ButtonTone::Primary
             } else {
-                rgb(theme.bg_elevated)
-            })
-            .text_size(px(self.tokens.metrics.form_text_font_size))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(if primary {
-                rgb(theme.accent_text)
-            } else {
-                rgb(theme.text)
-            })
-            .cursor_pointer()
-            .child(label)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| match action {
-                    ConnectionButtonAction::Cancel => {
-                        this.close_new_connection_form(window, cx);
-                    }
-                    ConnectionButtonAction::Test => {
-                        this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
-                    }
-                    ConnectionButtonAction::Connect => {
-                        this.submit_new_connection_form(window, cx);
-                    }
-                }),
-            )
-            .into_any_element()
+                ButtonTone::Secondary
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| match action {
+                ConnectionButtonAction::Cancel => {
+                    this.close_new_connection_form(window, cx);
+                }
+                ConnectionButtonAction::Test => {
+                    this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
+                }
+                ConnectionButtonAction::Connect => {
+                    this.submit_new_connection_form(window, cx);
+                }
+            }),
+        )
+        .into_any_element()
     }
 }

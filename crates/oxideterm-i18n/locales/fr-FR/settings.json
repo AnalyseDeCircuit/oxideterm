@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Paramètres",
+    "general": {
+      "title": "Général",
+      "language": "Langue",
+      "theme": "Thème"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "font_size": "Taille de police",
+      "font_family": "Police",
+      "selection_copy": "Copier à la sélection",
+      "paste_protection": "Protection au collage"
+    },
+    "sidebar_ui": {
+      "title": "Interface de la barre latérale",
+      "width": "Largeur"
+    },
+    "toast": {
+      "renderer_changed": "Moteur de rendu modifié",
+      "renderer_changed_desc": "Le moteur de rendu du terminal est passé à {{renderer}}. Les nouveaux terminaux utiliseront ce moteur, les existants ne sont pas affectés."
+    }
+  }
+}

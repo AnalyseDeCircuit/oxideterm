@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "設定",
+    "general": {
+      "title": "一般",
+      "language": "言語",
+      "theme": "テーマ"
+    },
+    "terminal": {
+      "title": "ターミナル",
+      "font_size": "フォントサイズ",
+      "font_family": "フォントファミリー",
+      "selection_copy": "選択時にコピー",
+      "paste_protection": "ペースト保護"
+    },
+    "sidebar_ui": {
+      "title": "サイドバーインターフェース",
+      "width": "幅"
+    },
+    "toast": {
+      "renderer_changed": "レンダラーが変更されました",
+      "renderer_changed_desc": "ターミナルレンダラーが{{renderer}}に切り替わりました。新しいターミナルはこのレンダラーを使用し、既存のものは影響を受けません。"
+    }
+  }
+}

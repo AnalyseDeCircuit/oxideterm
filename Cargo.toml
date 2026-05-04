@@ -3,6 +3,7 @@ members = [
   "crates/oxideterm-gpui-terminal",
   "crates/oxideterm-i18n",
   "crates/oxideterm-native",
+  "crates/oxideterm-settings",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
   "crates/oxideterm-theme",

@@ -50,20 +50,41 @@ pub struct TerminalPane {
     last_cursor_blink: Instant,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
+    pending_pty_resize: Option<(usize, usize, u16, u16)>,
+    pty_resize_generation: u64,
     _subscriptions: Vec<Subscription>,
 }
 
+const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(50);
+
 impl TerminalPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
+        Self::new_with_preferences(TerminalUiPreferences::default(), window, cx)
+    }
+
+    pub fn new_with_preferences(
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
         let terminal = Arc::new(Mutex::new(TerminalSession::local_default(
             DEFAULT_COLS,
             DEFAULT_ROWS,
         )?));
-        Self::from_session(terminal, window, cx)
+        Self::from_session(terminal, preferences, window, cx)
     }
 
     pub fn new_ssh(
         config: SshSessionConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        Self::new_ssh_with_preferences(config, TerminalUiPreferences::default(), window, cx)
+    }
+
+    pub fn new_ssh_with_preferences(
+        config: SshSessionConfig,
+        preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
@@ -72,17 +93,18 @@ impl TerminalPane {
             DEFAULT_COLS,
             DEFAULT_ROWS,
         )));
-        Self::from_session(terminal, window, cx)
+        Self::from_session(terminal, preferences, window, cx)
     }
 
     fn from_session(
         terminal: Arc<Mutex<TerminalSession>>,
+        preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
         let snapshot = terminal.lock().snapshot();
         let focus_handle = cx.focus_handle();
-        let metrics = TerminalMetrics::measure(window);
+        let metrics = TerminalMetrics::measure_with_preferences(window, &preferences);
         window.focus(&focus_handle);
         terminal.lock().set_focused(true)?;
 
@@ -111,8 +133,8 @@ impl TerminalPane {
         Ok(Self {
             terminal,
             focus_handle,
-            settings: TerminalUiSettings::default(),
-            theme: TerminalUiTheme::default(),
+            settings: TerminalUiSettings::from_preferences(&preferences),
+            theme: preferences.theme,
             snapshot,
             metrics,
             selection: None,
@@ -133,6 +155,8 @@ impl TerminalPane {
             last_cursor_blink: Instant::now(),
             bounds: None,
             last_pty_resize: None,
+            pending_pty_resize: None,
+            pty_resize_generation: 0,
             _subscriptions: vec![focus_in, focus_out],
         })
     }
@@ -347,18 +371,45 @@ impl TerminalPane {
         let cell_height_px = (line_height * scale_factor).ceil().max(1.0) as u16;
         let resize = (cols, rows, cell_width_px, cell_height_px);
 
-        if self.last_pty_resize != Some(resize) {
-            let resized = {
-                let mut terminal = self.terminal.lock();
-                terminal
-                    .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
-                    .is_ok()
-            };
-            if resized {
-                self.last_pty_resize = Some(resize);
-                self.snapshot = self.terminal.lock().snapshot();
-                cx.notify();
-            }
+        if self.last_pty_resize == Some(resize) || self.pending_pty_resize == Some(resize) {
+            return;
+        }
+
+        self.pending_pty_resize = Some(resize);
+        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+        let generation = self.pty_resize_generation;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(PTY_RESIZE_DEBOUNCE).await;
+            let _ = weak.update(cx, |view, cx| {
+                view.flush_pending_pty_resize(generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn flush_pending_pty_resize(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if generation != self.pty_resize_generation {
+            return;
+        }
+        let Some((cols, rows, cell_width_px, cell_height_px)) = self.pending_pty_resize.take()
+        else {
+            return;
+        };
+        let resize = (cols, rows, cell_width_px, cell_height_px);
+        if self.last_pty_resize == Some(resize) {
+            return;
+        }
+
+        let resized = {
+            let mut terminal = self.terminal.lock();
+            terminal
+                .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
+                .is_ok()
+        };
+        if resized {
+            self.last_pty_resize = Some(resize);
+            self.snapshot = self.terminal.lock().snapshot();
+            cx.notify();
         }
     }
 

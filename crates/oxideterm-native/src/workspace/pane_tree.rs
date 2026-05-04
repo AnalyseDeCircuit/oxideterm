@@ -26,8 +26,10 @@ impl WorkspaceApp {
         let group_id = self.alloc_pane_id();
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
+        let preferences = self.terminal_preferences();
         let pane = cx.new(|cx| {
-            TerminalPane::new(window, cx).expect("failed to initialize split terminal pane")
+            TerminalPane::new_with_preferences(preferences, window, cx)
+                .expect("failed to initialize split terminal pane")
         });
 
         let tab = &mut self.tabs[active_index];

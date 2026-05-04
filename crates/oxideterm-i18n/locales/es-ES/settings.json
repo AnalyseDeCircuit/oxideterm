@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Configuración",
+    "general": {
+      "title": "General",
+      "language": "Idioma",
+      "theme": "Tema"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "font_size": "Tamaño de fuente",
+      "font_family": "Familia de fuente",
+      "selection_copy": "Copiar al seleccionar",
+      "paste_protection": "Protección de pegado"
+    },
+    "sidebar_ui": {
+      "title": "Interfaz de barra lateral",
+      "width": "Ancho"
+    },
+    "toast": {
+      "renderer_changed": "Renderizador cambiado",
+      "renderer_changed_desc": "El renderizador del terminal cambió a {{renderer}}. Los nuevos terminales usarán este renderizador, los existentes no se verán afectados."
+    }
+  }
+}

@@ -23,6 +23,29 @@ pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
 
 #[derive(Clone)]
+pub struct TerminalUiPreferences {
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub cursor_blink: bool,
+    pub copy_on_select: bool,
+    pub theme: TerminalUiTheme,
+}
+
+impl Default for TerminalUiPreferences {
+    fn default() -> Self {
+        Self {
+            font_family: TERMINAL_FONT.to_string(),
+            font_size: TERMINAL_FONT_SIZE,
+            line_height: TERMINAL_LINE_HEIGHT_RATIO,
+            cursor_blink: true,
+            copy_on_select: TERMINAL_COPY_ON_SELECT,
+            theme: TerminalUiTheme::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct TerminalUiSettings {
     pub(crate) blink_mode: TerminalBlinkMode,
     pub(crate) copy_on_select: bool,
@@ -34,6 +57,20 @@ impl Default for TerminalUiSettings {
         Self {
             blink_mode: TERMINAL_BLINK_MODE,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
+            keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+        }
+    }
+}
+
+impl TerminalUiSettings {
+    pub(crate) fn from_preferences(preferences: &TerminalUiPreferences) -> Self {
+        Self {
+            blink_mode: if preferences.cursor_blink {
+                TerminalBlinkMode::On
+            } else {
+                TerminalBlinkMode::Off
+            },
+            copy_on_select: preferences.copy_on_select,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
         }
     }
@@ -60,6 +97,18 @@ impl Default for TerminalUiTheme {
     }
 }
 
+impl TerminalUiTheme {
+    pub fn new(background: u32, foreground: u32, cursor: u32) -> Self {
+        Self {
+            background,
+            bell_background: 0x17131a,
+            foreground,
+            header_background: background,
+            header_foreground: cursor,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TerminalBlinkMode {
     #[allow(dead_code)]
@@ -79,9 +128,16 @@ pub(crate) struct TerminalMetrics {
 
 impl TerminalMetrics {
     pub(crate) fn measure(window: &mut Window) -> Self {
-        let font_size = px(TERMINAL_FONT_SIZE);
-        let line_height = px(TERMINAL_FONT_SIZE * TERMINAL_LINE_HEIGHT_RATIO);
-        let font = terminal_font();
+        Self::measure_with_preferences(window, &TerminalUiPreferences::default())
+    }
+
+    pub(crate) fn measure_with_preferences(
+        window: &mut Window,
+        preferences: &TerminalUiPreferences,
+    ) -> Self {
+        let font_size = px(preferences.font_size);
+        let line_height = px(preferences.font_size * preferences.line_height);
+        let font = terminal_font_with_family(&preferences.font_family);
         let font_id = window.text_system().resolve_font(&font);
         let measured_width = window
             .text_system()
@@ -123,9 +179,14 @@ pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: P
         .width
 }
 
+#[cfg(test)]
 pub(crate) fn terminal_font() -> Font {
+    terminal_font_with_family(TERMINAL_FONT)
+}
+
+pub(crate) fn terminal_font_with_family(family: &str) -> Font {
     Font {
-        family: SharedString::from(TERMINAL_FONT),
+        family: SharedString::from(family.to_string()),
         features: terminal_font_features(),
         fallbacks: Some(FontFallbacks::from_fonts(vec![
             "JetBrainsMono Nerd Font Mono".to_string(),

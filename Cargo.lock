@@ -4789,12 +4789,23 @@ dependencies = [
  "gpui",
  "oxideterm-gpui-terminal",
  "oxideterm-i18n",
+ "oxideterm-settings",
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-theme",
  "oxideterm-workspace",
  "parking_lot",
  "tokio",
+]
+
+[[package]]
+name = "oxideterm-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -17,18 +17,66 @@ pub(super) enum SidebarSection {
     Settings,
 }
 
+impl SidebarSection {
+    pub(super) fn from_settings_key(key: &str) -> Self {
+        match key {
+            "connections" | "saved" => Self::Connections,
+            "sftp" | "terminal" => Self::Terminal,
+            "forwards" | "activity" => Self::Activity,
+            "network" => Self::Network,
+            "extensions" => Self::Extensions,
+            "ai" | "assistant" => Self::Assistant,
+            "automation" => Self::Automation,
+            "workspace" => Self::Workspace,
+            "files" => Self::Files,
+            "monitor" => Self::Monitor,
+            "notifications" => Self::Notifications,
+            "settings" => Self::Settings,
+            _ => Self::Sessions,
+        }
+    }
+
+    pub(super) fn as_settings_key(self) -> &'static str {
+        match self {
+            Self::Sessions => "sessions",
+            Self::Connections => "connections",
+            Self::Terminal => "terminal",
+            Self::Activity => "activity",
+            Self::Network => "network",
+            Self::Extensions => "extensions",
+            Self::Assistant => "ai",
+            Self::Automation => "automation",
+            Self::Workspace => "workspace",
+            Self::Files => "files",
+            Self::Monitor => "monitor",
+            Self::Notifications => "notifications",
+            Self::Settings => "settings",
+        }
+    }
+}
+
 impl WorkspaceApp {
+    pub(super) fn persist_sidebar_settings(&mut self) {
+        self.settings_store.settings_mut().sidebar_ui.collapsed = self.sidebar_collapsed;
+        self.settings_store.settings_mut().sidebar_ui.width = self.sidebar_width.round() as i64;
+        self.settings_store.settings_mut().sidebar_ui.active_section =
+            self.active_sidebar_section.as_settings_key().to_string();
+        let _ = self.settings_store.save();
+    }
+
     pub(super) fn set_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
         self.active_sidebar_section = section;
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;
         }
+        self.persist_sidebar_settings();
         cx.notify();
     }
 
     pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
         self.sidebar_resizing = false;
+        self.persist_sidebar_settings();
         cx.notify();
     }
 
@@ -62,6 +110,7 @@ impl WorkspaceApp {
     pub(super) fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
         if self.sidebar_resizing {
             self.sidebar_resizing = false;
+            self.persist_sidebar_settings();
             cx.notify();
         }
     }
@@ -281,6 +330,7 @@ impl WorkspaceApp {
 
     pub(super) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let title = self.i18n.t("sidebar.panels.sessions").to_uppercase();
         div()
             .h(px(self.tokens.metrics.sidebar_header_height))
             .flex()
@@ -294,7 +344,7 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.sidebar_title_font_size))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("sidebar.panels.sessions")),
+                    .child(title),
             )
             .child(self.render_sidebar_action(LucideIcon::Folder, false, cx))
             .child(self.render_sidebar_action(LucideIcon::Network, false, cx))
@@ -344,32 +394,32 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center()
-            .pt(px(self.tokens.metrics.empty_sidebar_top_padding))
             .px(px(self.tokens.metrics.empty_sidebar_padding_x))
             .text_color(rgb(theme.text_muted))
             .child(
                 div()
                     .w_full()
+                    .h(px(self.tokens.metrics.empty_sidebar_height))
                     .flex()
                     .flex_col()
                     .items_center()
+                    .justify_center()
                     .child(div().mb_3().child(Self::render_lucide_icon(
                         LucideIcon::Server,
                         self.tokens.metrics.empty_sidebar_icon_size,
-                        rgb(theme.bg_active),
+                        rgba((theme.text_muted << 8) | 0x4d),
                     )))
                     .child(
                         div()
                             .w_full()
                             .text_center()
                             .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
-                            .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("sessions.tree.no_sessions")),
                     )
                     .child(
                         div()
-                            .mt_2()
+                            .mt_1()
                             .w_full()
                             .text_center()
                             .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))

@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Einstellungen",
+    "general": {
+      "title": "Allgemein",
+      "language": "Sprache",
+      "theme": "Design"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "font_size": "Schriftgröße",
+      "font_family": "Schriftart",
+      "selection_copy": "Bei Auswahl kopieren",
+      "paste_protection": "Einfügeschutz"
+    },
+    "sidebar_ui": {
+      "title": "Seitenleisten-Oberfläche",
+      "width": "Breite"
+    },
+    "toast": {
+      "renderer_changed": "Renderer geändert",
+      "renderer_changed_desc": "Terminal-Renderer auf {{renderer}} umgestellt. Neue Terminals verwenden diesen Renderer, bestehende sind nicht betroffen."
+    }
+  }
+}

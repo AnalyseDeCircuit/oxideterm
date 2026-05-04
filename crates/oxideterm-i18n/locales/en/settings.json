@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Settings",
+    "general": {
+      "title": "General",
+      "language": "Language",
+      "theme": "Theme"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "font_size": "Font Size",
+      "font_family": "Font Family",
+      "selection_copy": "Copy on Selection",
+      "paste_protection": "Paste Protection"
+    },
+    "sidebar_ui": {
+      "title": "Sidebar Interface",
+      "width": "Width"
+    },
+    "toast": {
+      "renderer_changed": "Renderer changed",
+      "renderer_changed_desc": "Terminal renderer switched to {{renderer}}. New terminals will use this renderer, existing ones are unaffected."
+    }
+  }
+}

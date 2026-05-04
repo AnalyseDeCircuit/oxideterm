@@ -75,6 +75,12 @@ impl WorkspaceApp {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
+        if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
+        {
+            self.close_settings(window, cx);
+            return;
+        }
+
         if self.search.visible && !modifiers.platform {
             match key {
                 "escape" => self.close_search(window, cx),
@@ -104,6 +110,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.i18n.set_locale(locale);
+        self.settings_store.settings_mut().general.language = settings_language_from_locale(locale);
+        let _ = self.settings_store.save();
         self.sync_tab_titles(cx);
 
         let menus = crate::platform::app_menus(&self.i18n);

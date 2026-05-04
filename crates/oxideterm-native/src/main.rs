@@ -1,5 +1,6 @@
 mod assets;
 mod platform;
+mod ui;
 mod workspace;
 
 use gpui::{App, AppContext, Application, Bounds, actions, px, size};
@@ -31,6 +32,7 @@ actions!(
         FindNext,
         FindPrev,
         CloseSearch,
+        OpenSettings,
         SwitchLocaleEnglish,
         SwitchLocaleChinese,
         SwitchLocaleTraditionalChinese,

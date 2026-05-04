@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Cài đặt",
+    "general": {
+      "title": "Chung",
+      "language": "Ngôn ngữ",
+      "theme": "Giao diện"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "font_size": "Cỡ chữ",
+      "font_family": "Phông chữ",
+      "selection_copy": "Sao chép khi chọn",
+      "paste_protection": "Bảo vệ dán"
+    },
+    "sidebar_ui": {
+      "title": "Giao diện thanh bên",
+      "width": "Chiều rộng"
+    },
+    "toast": {
+      "renderer_changed": "Đã thay đổi trình kết xuất",
+      "renderer_changed_desc": "Trình kết xuất terminal đã chuyển sang {{renderer}}. Terminal mới sẽ sử dụng trình kết xuất này, các terminal hiện có không bị ảnh hưởng."
+    }
+  }
+}

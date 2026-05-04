@@ -28,8 +28,20 @@ correctness.
 
 ## Text Fields
 
+- GPUI forms must compose shared OxideTerm UI primitives for text input,
+  checkbox, button, tabs, modal, and form-field layout. Feature pages must not
+  hand-copy those controls inline.
 - Text fields must render an explicit caret when they are not backed by a native
   platform text input.
+- Text field visuals, including focus border, placeholder, password masking,
+  selected text, and caret geometry, must be implemented in the shared text input
+  primitive before reuse in feature forms.
+- Custom/native text fields must insert committed text from the platform text
+  payload, not the keybinding/key-name string. In GPUI terms, form input must
+  use `key_char` for typed text and reserve `key` for shortcuts/navigation.
+  This is security-critical for SSH passwords because shifted symbols,
+  Option/Alt characters, and non-US keyboard layouts can otherwise authenticate
+  with different bytes than the user typed.
 - The caret blink state belongs to the focused text field or form model, not to
   the terminal cursor.
 - Caret blink timing must be centralized or tokenized enough that it can be
@@ -93,6 +105,10 @@ correctness.
 - Terminal input handlers must assume they are active only when their pane owns
   focus and no modal has intercepted the input.
 - Terminal resize must be driven by actual pane bounds, not whole-window bounds.
+- Terminal backend resize should be coalesced with the same intent as the Tauri
+  terminal resize path: UI layout may update per frame, but PTY/SSH resize
+  commands must be deduplicated and debounced so window dragging does not flood
+  the backend.
 - PTY resize must be resent after delayed connection setup if the UI resized
   while the backend was connecting.
 - Rendered terminal rows are visual rows. Selection and copy may reason about

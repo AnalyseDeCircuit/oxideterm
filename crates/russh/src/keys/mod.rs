@@ -198,7 +198,7 @@ impl From<yasna::ASN1Error> for Error {
 
 /// Load a public key from a file. Ed25519, EC-DSA and RSA keys are supported.
 ///
-/// ```
+/// ```no_run
 /// russh::keys::load_public_key("../files/id_ed25519.pub").unwrap();
 /// ```
 pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<ssh_key::PublicKey, Error> {

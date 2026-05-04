@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "设置",
+    "general": {
+      "title": "常规",
+      "language": "语言 / Language",
+      "theme": "主题"
+    },
+    "terminal": {
+      "title": "终端",
+      "font_size": "字号",
+      "font_family": "字体",
+      "selection_copy": "选中即复制",
+      "paste_protection": "粘贴保护"
+    },
+    "sidebar_ui": {
+      "title": "侧边栏界面",
+      "width": "宽度"
+    },
+    "toast": {
+      "renderer_changed": "渲染器已更改",
+      "renderer_changed_desc": "终端渲染器已切换到 {{renderer}}。新终端将使用此渲染器，已打开的终端不受影响。"
+    }
+  }
+}

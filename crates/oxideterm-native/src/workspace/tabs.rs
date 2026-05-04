@@ -9,8 +9,11 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id();
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
-        let pane =
-            cx.new(|cx| TerminalPane::new(window, cx).expect("failed to initialize terminal pane"));
+        let preferences = self.terminal_preferences();
+        let pane = cx.new(|cx| {
+            TerminalPane::new_with_preferences(preferences, window, cx)
+                .expect("failed to initialize terminal pane")
+        });
 
         self.panes.insert(pane_id, pane.clone());
         self.tabs.push(Tab {
@@ -48,8 +51,9 @@ impl WorkspaceApp {
         let session_config = SshSessionConfig::from(config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler);
+        let preferences = self.terminal_preferences();
         let pane = cx.new(|cx| {
-            TerminalPane::new_ssh(session_config, window, cx)
+            TerminalPane::new_ssh_with_preferences(session_config, preferences, window, cx)
                 .expect("failed to initialize ssh terminal pane")
         });
 

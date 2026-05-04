@@ -5,6 +5,8 @@ use gpui::{
 use oxideterm_ssh::{KeyboardInteractivePromptRequest, SshPromptError};
 use tokio::sync::oneshot;
 
+use super::form_state::text_from_keystroke;
+use crate::ui::{TextInputView, form_field, text_input};
 use crate::workspace::WorkspaceApp;
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
@@ -56,6 +58,7 @@ impl WorkspaceApp {
         };
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        let text_input = text_from_keystroke(&event.keystroke).map(str::to_string);
 
         if modifiers.platform {
             if key == "v" {
@@ -105,15 +108,17 @@ impl WorkspaceApp {
                 cx.notify();
                 true
             }
-            key if key.chars().count() == 1 && !modifiers.control && !modifiers.alt => {
+            _ => {
+                let Some(text) = text_input else {
+                    return true;
+                };
                 if let Some(response) = challenge.responses.get_mut(challenge.focused_prompt) {
-                    response.push_str(key);
+                    response.push_str(&text);
                 }
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
-            _ => true,
         }
     }
 
@@ -192,64 +197,33 @@ impl WorkspaceApp {
                 .get(index)
                 .map(String::as_str)
                 .unwrap_or_default();
-            let display = if prompt.echo {
-                value.to_string()
-            } else {
-                "•".repeat(value.chars().count())
-            };
-            prompt_list =
-                prompt_list.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(self.tokens.metrics.modal_field_gap))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.form_label_font_size))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text))
-                                .child(prompt.prompt.clone()),
-                        )
-                        .child(
-                            div()
-                                .id(("kbi-prompt", index))
-                                .h(px(self.tokens.metrics.form_input_height))
-                                .px(px(self.tokens.metrics.form_input_padding_x))
-                                .flex()
-                                .items_center()
-                                .rounded(px(self.tokens.radii.md))
-                                .bg(rgba((theme.bg << 8) | 0x80))
-                                .border_1()
-                                .border_color(if focused {
-                                    rgb(theme.accent)
-                                } else {
-                                    rgb(theme.border)
-                                })
-                                .text_size(px(self.tokens.metrics.form_text_font_size))
-                                .text_color(rgb(theme.text))
-                                .cursor_pointer()
-                                .overflow_hidden()
-                                .child(
-                                    div().flex().flex_row().items_center().child(display).when(
-                                        focused && self.new_connection_caret_visible,
-                                        |row| row.child(self.render_connection_caret()),
-                                    ),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, window, cx| {
-                                        if let Some(challenge) =
-                                            this.keyboard_interactive_challenge.as_mut()
-                                        {
-                                            challenge.focused_prompt = index;
-                                        }
-                                        this.new_connection_caret_visible = true;
-                                        window.focus(&this.focus_handle);
-                                        cx.notify();
-                                    }),
-                                ),
-                        ),
-                );
+            prompt_list = prompt_list.child(form_field(
+                &self.tokens,
+                prompt.prompt.clone(),
+                text_input(
+                    &self.tokens,
+                    TextInputView {
+                        value,
+                        placeholder: String::new(),
+                        focused,
+                        caret_visible: self.new_connection_caret_visible,
+                        secret: !prompt.echo,
+                        selected_all: false,
+                    },
+                )
+                .id(("kbi-prompt", index))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, window, cx| {
+                        if let Some(challenge) = this.keyboard_interactive_challenge.as_mut() {
+                            challenge.focused_prompt = index;
+                        }
+                        this.new_connection_caret_visible = true;
+                        window.focus(&this.focus_handle);
+                        cx.notify();
+                    }),
+                ),
+            ));
         }
 
         div()

@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "설정",
+    "general": {
+      "title": "일반",
+      "language": "언어",
+      "theme": "테마"
+    },
+    "terminal": {
+      "title": "터미널",
+      "font_size": "글꼴 크기",
+      "font_family": "글꼴",
+      "selection_copy": "선택 시 복사",
+      "paste_protection": "붙여넣기 보호"
+    },
+    "sidebar_ui": {
+      "title": "사이드바 인터페이스",
+      "width": "너비"
+    },
+    "toast": {
+      "renderer_changed": "렌더러 변경됨",
+      "renderer_changed_desc": "터미널 렌더러가 {{renderer}}(으)로 전환되었습니다. 새 터미널은 이 렌더러를 사용하며, 기존 터미널은 영향을 받지 않습니다."
+    }
+  }
+}
