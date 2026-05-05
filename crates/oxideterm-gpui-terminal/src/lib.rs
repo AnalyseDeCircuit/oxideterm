@@ -6,5 +6,6 @@ mod terminal_view;
 pub use app::TerminalPane;
 pub use background_cache::BackgroundImageRenderCache;
 pub use terminal_ui::{
-    TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalUiPreferences, TerminalUiTheme,
+    TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalHighlightRenderMode,
+    TerminalHighlightRule, TerminalPasteLabels, TerminalUiPreferences, TerminalUiTheme,
 };

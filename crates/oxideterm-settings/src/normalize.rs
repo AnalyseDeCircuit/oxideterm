@@ -343,6 +343,10 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         in_band.insert("provider".to_string(), json!("trzsz"));
     }
 
+    if let Some(value) = get_path_mut(&mut settings, &["terminal", "highlightRules"]) {
+        *value = sanitize_highlight_rules_value(value);
+    }
+
     let settings =
         serde_json::from_value(settings).context("sanitized settings did not match schema")?;
     Ok(SanitizedSettings {

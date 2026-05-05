@@ -23,10 +23,11 @@ use tokio::sync::mpsc::error::TryRecvError;
 pub use crate::backpressure::{TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind};
 
 use crate::{
-    LocalEventListener, LocalPtySession, TermMode, TerminalEvent, TerminalGraphicsState,
-    TerminalLifecycle, TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
-    append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
-    graphics_cursor_from_term, search_logical_line_matches, snapshot_from_term,
+    LocalEventListener, LocalPtyConfig, LocalPtySession, TermMode, TerminalEvent,
+    TerminalGraphicsState, TerminalLifecycle, TerminalProcessInfo, TerminalSearchMatch,
+    TerminalSize, TerminalSnapshot, append_grid_line_text, backpressure::MagicScanWindow,
+    focus_report_sequence, graphics_cursor_from_term, search_logical_line_matches,
+    snapshot_from_term,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -128,6 +129,24 @@ impl TerminalSession {
             backend: Box::new(LocalPtySession::spawn_with_graphics_and_encoding(
                 cols,
                 rows,
+                graphics_options,
+                encoding,
+            )?),
+        })
+    }
+
+    pub fn local_with_config_graphics_and_encoding(
+        cols: usize,
+        rows: usize,
+        config: LocalPtyConfig,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+    ) -> Result<Self> {
+        Ok(Self {
+            backend: Box::new(LocalPtySession::spawn_with_config_graphics_and_encoding(
+                cols,
+                rows,
+                config,
                 graphics_options,
                 encoding,
             )?),

@@ -10,8 +10,8 @@ use gpui::{
     px,
 };
 use oxideterm_terminal::{
-    GraphicsOptions, SshSessionConfig, TermMode, TerminalDrainBudget, TerminalEvent,
-    TerminalSession, TerminalSnapshot,
+    GraphicsOptions, LocalPtyConfig, SshSessionConfig, TermMode, TerminalDrainBudget,
+    TerminalEvent, TerminalSession, TerminalSnapshot,
 };
 use parking_lot::Mutex;
 
@@ -39,6 +39,7 @@ pub struct TerminalPane {
     snapshot: TerminalSnapshot,
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
+    pending_paste: Option<String>,
     marked_text: Option<String>,
     search_query: Option<String>,
     selected_search_match: Option<usize>,
@@ -50,6 +51,7 @@ pub struct TerminalPane {
     terminal_exited: bool,
     scroll_px: Pixels,
     scrollbar_drag: Option<ScrollbarDrag>,
+    copy_on_select_generation: u64,
     focused: bool,
     cursor_visible: bool,
     cursor_blink_terminal_enabled: bool,
@@ -65,7 +67,7 @@ pub struct TerminalPane {
     _subscriptions: Vec<Subscription>,
 }
 
-const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(50);
+const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
 
 impl TerminalPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
@@ -81,6 +83,24 @@ impl TerminalPane {
             TerminalSession::local_with_graphics_and_encoding(
                 DEFAULT_COLS,
                 DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+            )?,
+        ));
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
+    pub fn new_local_with_config_and_preferences(
+        config: LocalPtyConfig,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::local_with_config_graphics_and_encoding(
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                config,
                 graphics_options_from_preferences(&preferences),
                 preferences.terminal_encoding,
             )?,
@@ -155,6 +175,7 @@ impl TerminalPane {
             snapshot,
             metrics,
             selection: None,
+            pending_paste: None,
             marked_text: None,
             search_query: None,
             selected_search_match: None,
@@ -166,6 +187,7 @@ impl TerminalPane {
             terminal_exited: false,
             scroll_px: px(0.0),
             scrollbar_drag: None,
+            copy_on_select_generation: 0,
             focused: true,
             cursor_visible: true,
             cursor_blink_terminal_enabled: false,
@@ -240,16 +262,50 @@ impl TerminalPane {
     }
 
     pub fn copy_to_clipboard(&mut self, cx: &mut Context<Self>) {
-        self.copy_current_selection_or_snapshot(cx);
+        self.copy_from_platform_shortcut(cx);
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection
+            .is_some_and(|selection| !selection.is_empty())
+    }
+
+    pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.terminal_accepts_input() && self.terminal.lock().paste_text(text).is_ok() {
+            self.last_terminal_input = Instant::now();
+            self.reset_cursor_blink();
+            cx.notify();
+        }
     }
 
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
-            && self.terminal_accepts_input()
-            && self.terminal.lock().paste_text(&text).is_ok()
-        {
-            self.last_terminal_input = Instant::now();
-            self.reset_cursor_blink();
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        if !self.terminal_accepts_input() {
+            return;
+        }
+        if self.settings.paste_protection && paste_needs_confirmation(&text) {
+            self.pending_paste = Some(text);
+            cx.notify();
+            return;
+        }
+        self.paste_text(&text, cx);
+    }
+
+    pub(crate) fn confirm_pending_paste(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.pending_paste.take() else {
+            return;
+        };
+        self.paste_text(&text, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_pending_paste(&mut self, cx: &mut Context<Self>) {
+        if self.pending_paste.take().is_some() {
             cx.notify();
         }
     }
@@ -332,10 +388,14 @@ impl TerminalPane {
                 let _ = hint;
             }
             TerminalEvent::ClipboardStore(text) => {
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                if self.settings.osc52_clipboard {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
             }
             TerminalEvent::ClipboardLoad(formatter) => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                if self.settings.osc52_clipboard
+                    && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+                {
                     let response = formatter(&text);
                     self.send_protocol_bytes(response.as_bytes(), cx);
                 }
@@ -499,6 +559,14 @@ impl TerminalPane {
             .map(|bounds| bounds.origin)
             .unwrap_or_else(|| gpui::point(px(0.0), px(0.0)))
     }
+}
+
+pub fn paste_needs_confirmation(text: &str) -> bool {
+    const PASTE_LINE_THRESHOLD: usize = 1;
+    const PASTE_CHAR_THRESHOLD: usize = 50;
+
+    text.contains('\n')
+        && (text.split('\n').count() > PASTE_LINE_THRESHOLD || text.len() > PASTE_CHAR_THRESHOLD)
 }
 
 fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> GraphicsOptions {

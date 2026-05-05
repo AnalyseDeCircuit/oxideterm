@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "로컬 터미널"
+    "local_terminal": "로컬 터미널",
+    "paste": {
+      "title": "여러 줄 감지됨 ({{count}}줄)",
+      "more_lines": "... {{count}}줄 더",
+      "confirm": "확인",
+      "cancel": "취소",
+      "paste": "붙여넣기"
+    }
   },
   "search": {
     "placeholder": "검색",

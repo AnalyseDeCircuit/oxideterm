@@ -121,6 +121,17 @@ impl WorkspaceApp {
         self.settings_store.settings_mut().general.language = settings_language_from_locale(locale);
         let _ = self.settings_store.save();
         self.sync_tab_titles(cx);
+        let panes = self
+            .panes
+            .iter()
+            .map(|(pane_id, pane)| (*pane_id, pane.clone()))
+            .collect::<Vec<_>>();
+        for (pane_id, pane) in panes {
+            let preferences = self.terminal_preferences_for_pane(pane_id);
+            let _ = pane.update(cx, |pane, cx| {
+                pane.set_preferences(preferences, cx);
+            });
+        }
 
         let menus = crate::platform::app_menus(&self.i18n);
         let _ = cx.update_window(window.window_handle(), move |_root, _window, app| {
@@ -129,25 +140,10 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn sync_tab_titles(&mut self, cx: &App) {
+    pub(super) fn sync_tab_titles(&mut self, _cx: &App) {
         for tab in &mut self.tabs {
-            match tab.kind {
-                TabKind::Settings => {
-                    tab.title = self.i18n.t("settings_view.title");
-                }
-                TabKind::LocalTerminal | TabKind::SshTerminal => {
-                    let Some(active_pane_id) = tab.active_pane_id else {
-                        continue;
-                    };
-                    if let Some(pane) = self.panes.get(&active_pane_id) {
-                        let title = pane.read(cx).title().to_string();
-                        tab.title = if title.is_empty() {
-                            self.i18n.t("terminal.local_terminal")
-                        } else {
-                            title
-                        };
-                    }
-                }
+            if let TabTitleSource::I18nKey(key) = tab.title_source {
+                tab.title = self.i18n.t(key);
             }
         }
     }

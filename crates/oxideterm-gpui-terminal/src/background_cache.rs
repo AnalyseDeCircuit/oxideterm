@@ -1,7 +1,7 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, mpsc},
     time::UNIX_EPOCH,
 };
 
@@ -15,6 +15,9 @@ const DEFAULT_BACKGROUND_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub struct BackgroundImageRenderCache {
     entries: HashMap<BackgroundImageCacheKey, CachedBackgroundImage>,
     order: VecDeque<BackgroundImageCacheKey>,
+    pending: HashSet<BackgroundImageCacheKey>,
+    sender: mpsc::Sender<BackgroundImageLoadResult>,
+    receiver: mpsc::Receiver<BackgroundImageLoadResult>,
     bytes: usize,
     byte_limit: usize,
 }
@@ -22,6 +25,17 @@ pub struct BackgroundImageRenderCache {
 struct CachedBackgroundImage {
     image: Arc<RenderImage>,
     bytes: usize,
+}
+
+enum BackgroundImageLoadResult {
+    Loaded {
+        key: BackgroundImageCacheKey,
+        image: Arc<RenderImage>,
+        bytes: usize,
+    },
+    Failed {
+        key: BackgroundImageCacheKey,
+    },
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -42,6 +56,8 @@ impl BackgroundImageRenderCache {
         &mut self,
         background: &TerminalBackgroundPreferences,
     ) -> Option<Arc<RenderImage>> {
+        self.drain_completed();
+
         if background.blur <= 0.01 {
             return None;
         }
@@ -52,29 +68,53 @@ impl BackgroundImageRenderCache {
             return self.entries.get(&key).map(|entry| entry.image.clone());
         }
 
-        let pixels = image::open(&background.path)
-            .ok()?
-            .blur(background.blur)
-            .into_rgba8();
-        let width = pixels.width();
-        let height = pixels.height();
-        let bytes = pixels.len();
-        let mut pixels = pixels.into_raw();
-        convert_rgba_pixels_to_gpui_bgra(&mut pixels);
-        let buffer = RgbaImage::from_raw(width, height, pixels)?;
-        let image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
+        if self.pending.insert(key.clone()) {
+            let sender = self.sender.clone();
+            let background = background.clone();
+            std::thread::spawn(move || {
+                let result = match load_blurred_background_image(key.clone(), &background) {
+                    Some((image, bytes)) => BackgroundImageLoadResult::Loaded { key, image, bytes },
+                    None => BackgroundImageLoadResult::Failed { key },
+                };
+                let _ = sender.send(result);
+            });
+        }
 
-        self.entries.insert(
-            key.clone(),
-            CachedBackgroundImage {
-                image: image.clone(),
-                bytes,
-            },
-        );
-        self.order.push_back(key);
-        self.bytes += bytes;
-        self.evict_over_budget();
-        Some(image)
+        None
+    }
+
+    pub fn drain_completed(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok(result) = self.receiver.try_recv() {
+            match result {
+                BackgroundImageLoadResult::Loaded { key, image, bytes } => {
+                    self.pending.remove(&key);
+                    if let Some(existing) = self.entries.remove(&key) {
+                        self.bytes = self.bytes.saturating_sub(existing.bytes);
+                    }
+                    self.entries.insert(
+                        key.clone(),
+                        CachedBackgroundImage {
+                            image: image.clone(),
+                            bytes,
+                        },
+                    );
+                    self.touch(&key);
+                    self.bytes += bytes;
+                    self.evict_over_budget();
+                    changed = true;
+                }
+                BackgroundImageLoadResult::Failed { key } => {
+                    self.pending.remove(&key);
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     fn touch(&mut self, key: &BackgroundImageCacheKey) {
@@ -97,9 +137,13 @@ impl BackgroundImageRenderCache {
 
 impl Default for BackgroundImageRenderCache {
     fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
         Self {
             entries: HashMap::new(),
             order: VecDeque::new(),
+            pending: HashSet::new(),
+            sender,
+            receiver,
             bytes: 0,
             byte_limit: DEFAULT_BACKGROUND_IMAGE_CACHE_BYTES,
         }
@@ -130,4 +174,25 @@ fn convert_rgba_pixels_to_gpui_bgra(pixels: &mut [u8]) {
     for pixel in pixels.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
+}
+
+fn load_blurred_background_image(
+    key: BackgroundImageCacheKey,
+    background: &TerminalBackgroundPreferences,
+) -> Option<(Arc<RenderImage>, usize)> {
+    if key != BackgroundImageCacheKey::new(background) {
+        return None;
+    }
+
+    let pixels = image::open(&background.path)
+        .ok()?
+        .blur(background.blur)
+        .into_rgba8();
+    let width = pixels.width();
+    let height = pixels.height();
+    let bytes = pixels.len();
+    let mut pixels = pixels.into_raw();
+    convert_rgba_pixels_to_gpui_bgra(&mut pixels);
+    let buffer = RgbaImage::from_raw(width, height, pixels)?;
+    Some((Arc::new(RenderImage::new(vec![Frame::new(buffer)])), bytes))
 }

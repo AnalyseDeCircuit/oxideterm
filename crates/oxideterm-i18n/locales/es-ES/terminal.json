@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "Terminal local"
+    "local_terminal": "Terminal local",
+    "paste": {
+      "title": "Múltiples líneas detectadas ({{count}} líneas)",
+      "more_lines": "... {{count}} líneas más",
+      "confirm": "Confirmar",
+      "cancel": "Cancelar",
+      "paste": "Pegar"
+    }
   },
   "search": {
     "placeholder": "Buscar",

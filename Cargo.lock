@@ -5845,6 +5845,7 @@ dependencies = [
  "oxideterm-terminal",
  "oxideterm-terminal-unicode",
  "parking_lot",
+ "regex",
 ]
 
 [[package]]
@@ -5870,6 +5871,7 @@ dependencies = [
  "oxideterm-workspace",
  "parking_lot",
  "raw-window-handle",
+ "regex",
  "tokio",
  "windows 0.61.3",
 ]

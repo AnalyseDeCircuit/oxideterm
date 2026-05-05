@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "Terminale locale"
+    "local_terminal": "Terminale locale",
+    "paste": {
+      "title": "Rilevate righe multiple ({{count}} righe)",
+      "more_lines": "... altre {{count}} righe",
+      "confirm": "Conferma",
+      "cancel": "Annulla",
+      "paste": "Incolla"
+    }
   },
   "search": {
     "placeholder": "Cerca",

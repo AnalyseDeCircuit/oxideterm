@@ -1,4 +1,5 @@
 mod element;
+mod highlight;
 mod input;
 mod links;
 mod selection;

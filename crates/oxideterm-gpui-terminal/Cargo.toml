@@ -12,3 +12,4 @@ oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 parking_lot.workspace = true
+regex.workspace = true

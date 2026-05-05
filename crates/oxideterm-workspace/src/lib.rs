@@ -25,11 +25,18 @@ pub enum TabKind {
     Settings,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TabTitleSource {
+    Static,
+    I18nKey(&'static str),
+}
+
 #[derive(Clone, Debug)]
 pub struct Tab {
     pub id: TabId,
     pub kind: TabKind,
     pub title: String,
+    pub title_source: TabTitleSource,
     pub root_pane: Option<PaneNode>,
     pub active_pane_id: Option<PaneId>,
 }

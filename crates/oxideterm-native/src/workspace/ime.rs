@@ -22,7 +22,7 @@ impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
             Self::Search => 1,
-            Self::Settings(input) => 1_000 + input as u64,
+            Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
         };
@@ -258,8 +258,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if self.text_input_anchors.get(&anchor.id) != Some(&anchor) {
+            let should_notify = self
+                .active_ime_target()
+                .is_some_and(|target| target.anchor_id() == anchor.id);
             self.text_input_anchors.insert(anchor.id, anchor);
-            cx.notify();
+            if should_notify {
+                cx.notify();
+            }
         }
     }
 

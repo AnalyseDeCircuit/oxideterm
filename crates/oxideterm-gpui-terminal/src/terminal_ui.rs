@@ -7,6 +7,9 @@ use gpui::{
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_terminal::{TerminalColor, TerminalCursorShape, TerminalEncoding};
 
+pub const MAX_HIGHLIGHT_RULES: usize = 32;
+pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
+
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
 pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
@@ -21,8 +24,13 @@ pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
 pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 pub(crate) const TERMINAL_BLINK_MODE: TerminalBlinkMode = TerminalBlinkMode::On;
+pub(crate) const TERMINAL_PASTE_PROTECTION: bool = true;
+pub(crate) const TERMINAL_SMART_COPY: bool = true;
+pub(crate) const TERMINAL_OSC52_CLIPBOARD: bool = true;
 pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
+pub(crate) const TERMINAL_MIDDLE_CLICK_PASTE: bool = false;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
+pub(crate) const TERMINAL_SELECTION_REQUIRES_SHIFT: bool = false;
 pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
 
 #[derive(Clone)]
@@ -32,12 +40,19 @@ pub struct TerminalUiPreferences {
     pub line_height: f32,
     pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
+    pub paste_protection: bool,
+    pub smart_copy: bool,
+    pub osc52_clipboard: bool,
     pub copy_on_select: bool,
+    pub middle_click_paste: bool,
+    pub selection_requires_shift: bool,
     pub bidi_enabled: bool,
     pub terminal_encoding: TerminalEncoding,
     pub theme: TerminalUiTheme,
     pub render_policy: EffectiveRenderPolicy,
     pub background: Option<TerminalBackgroundPreferences>,
+    pub paste_labels: TerminalPasteLabels,
+    pub highlight_rules: Vec<TerminalHighlightRule>,
 }
 
 impl Default for TerminalUiPreferences {
@@ -48,14 +63,63 @@ impl Default for TerminalUiPreferences {
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
             cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
+            paste_protection: TERMINAL_PASTE_PROTECTION,
+            smart_copy: TERMINAL_SMART_COPY,
+            osc52_clipboard: TERMINAL_OSC52_CLIPBOARD,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
+            middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
+            selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
             terminal_encoding: TerminalEncoding::Utf8,
             theme: TerminalUiTheme::default(),
             render_policy: EffectiveRenderPolicy::quality(),
             background: None,
+            paste_labels: TerminalPasteLabels::default(),
+            highlight_rules: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalPasteLabels {
+    pub title_template: String,
+    pub more_lines_template: String,
+    pub confirm: String,
+    pub cancel: String,
+    pub paste: String,
+}
+
+impl Default for TerminalPasteLabels {
+    fn default() -> Self {
+        Self {
+            title_template: "Multiple lines detected ({{count}} lines)".to_string(),
+            more_lines_template: "... {{count}} more lines".to_string(),
+            confirm: "Confirm".to_string(),
+            cancel: "Cancel".to_string(),
+            paste: "Paste".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerminalHighlightRenderMode {
+    #[default]
+    Background,
+    Underline,
+    Outline,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TerminalHighlightRule {
+    pub id: String,
+    pub pattern: String,
+    pub is_regex: bool,
+    pub case_sensitive: bool,
+    pub foreground: Option<String>,
+    pub background: Option<String>,
+    pub render_mode: TerminalHighlightRenderMode,
+    pub enabled: bool,
+    pub priority: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -77,8 +141,13 @@ pub enum TerminalBackgroundFit {
 #[derive(Clone)]
 pub(crate) struct TerminalUiSettings {
     pub(crate) blink_mode: TerminalBlinkMode,
+    pub(crate) paste_protection: bool,
+    pub(crate) smart_copy: bool,
+    pub(crate) osc52_clipboard: bool,
     pub(crate) copy_on_select: bool,
+    pub(crate) middle_click_paste: bool,
     pub(crate) keep_selection_on_copy: bool,
+    pub(crate) selection_requires_shift: bool,
     pub(crate) bidi_enabled: bool,
 }
 
@@ -86,8 +155,13 @@ impl Default for TerminalUiSettings {
     fn default() -> Self {
         Self {
             blink_mode: TERMINAL_BLINK_MODE,
+            paste_protection: TERMINAL_PASTE_PROTECTION,
+            smart_copy: TERMINAL_SMART_COPY,
+            osc52_clipboard: TERMINAL_OSC52_CLIPBOARD,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
+            middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+            selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
         }
     }
@@ -101,8 +175,13 @@ impl TerminalUiSettings {
             } else {
                 TerminalBlinkMode::Off
             },
+            paste_protection: preferences.paste_protection,
+            smart_copy: preferences.smart_copy,
+            osc52_clipboard: preferences.osc52_clipboard,
             copy_on_select: preferences.copy_on_select,
+            middle_click_paste: preferences.middle_click_paste,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
+            selection_requires_shift: preferences.selection_requires_shift,
             bidi_enabled: preferences.bidi_enabled,
         }
     }

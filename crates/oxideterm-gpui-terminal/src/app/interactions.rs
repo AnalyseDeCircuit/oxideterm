@@ -1,8 +1,8 @@
-use std::env;
+use std::{env, time::Duration};
 
 use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, ScrollWheelEvent, TouchPhase, px,
+    MouseUpEvent, Pixels, ScrollWheelEvent, Timer, TouchPhase, px,
 };
 use oxideterm_terminal::{TermMode, TerminalSearchMatch};
 use oxideterm_terminal_unicode::visual_line_for_row;
@@ -15,6 +15,20 @@ impl TerminalPane {
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+
+        if self.pending_paste.is_some() && !modifiers.platform && !modifiers.control {
+            match key {
+                "enter" => {
+                    self.confirm_pending_paste(cx);
+                    return;
+                }
+                "escape" => {
+                    self.cancel_pending_paste(cx);
+                    return;
+                }
+                _ => {}
+            }
+        }
 
         if modifiers.platform && modifiers.shift && key.eq_ignore_ascii_case("k") {
             let result = if modifiers.alt {
@@ -39,6 +53,13 @@ impl TerminalPane {
             self.terminal.lock().scroll_to_top();
             self.snapshot = self.terminal.lock().snapshot();
             cx.notify();
+            return;
+        }
+
+        if self.settings.smart_copy
+            && is_smart_copy_shortcut(event)
+            && self.copy_selection_to_clipboard_if_present(cx)
+        {
             return;
         }
 
@@ -158,22 +179,63 @@ impl TerminalPane {
         }
     }
 
+    pub(super) fn copy_from_platform_shortcut(&mut self, cx: &mut Context<Self>) {
+        if cfg!(target_os = "macos") {
+            self.copy_current_selection_or_snapshot(cx);
+            return;
+        }
+
+        if self.settings.smart_copy && self.copy_selection_to_clipboard_if_present(cx) {
+            return;
+        }
+
+        self.send_protocol_bytes(&[0x03], cx);
+    }
+
     fn copy_selection_after_select_if_configured(&mut self, cx: &mut Context<Self>) {
         if !self.settings.copy_on_select {
             return;
         }
-        let Some(text) = self.selected_text().filter(|text| !text.is_empty()) else {
+        let Some(_) = self.selected_text().filter(|text| !text.is_empty()) else {
             return;
         };
 
-        cx.write_to_clipboard(ClipboardItem::new_string(text));
-        if !self.settings.keep_selection_on_copy {
-            self.selection = None;
-        }
+        self.copy_on_select_generation = self.copy_on_select_generation.wrapping_add(1);
+        let generation = self.copy_on_select_generation;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(120)).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.copy_on_select_generation != generation || !this.settings.copy_on_select {
+                    return;
+                }
+                let Some(current_text) = this.selected_text().filter(|text| !text.is_empty())
+                else {
+                    return;
+                };
+                cx.write_to_clipboard(ClipboardItem::new_string(current_text));
+                if !this.settings.keep_selection_on_copy {
+                    this.selection = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn selected_text(&self) -> Option<String> {
         selected_text_for_selection(&self.snapshot, self.selection?)
+    }
+
+    fn copy_selection_to_clipboard_if_present(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.selected_text().filter(|text| !text.is_empty()) else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        if !self.settings.keep_selection_on_copy {
+            self.selection = None;
+            cx.notify();
+        }
+        true
     }
 
     fn terminal_point_for_position(&self, position: gpui::Point<Pixels>) -> TerminalPoint {
@@ -414,6 +476,13 @@ impl TerminalPane {
         }
 
         let mode = self.terminal.lock().mode();
+        if event.button == MouseButton::Middle
+            && self.settings.middle_click_paste
+            && !mouse_tracking_active(mode)
+        {
+            return;
+        }
+
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.terminal_point_for_position(event.position);
             self.last_mouse_report_point = Some(point);
@@ -422,7 +491,7 @@ impl TerminalPane {
             {
                 self.send_protocol_bytes(&report, cx);
             }
-        } else {
+        } else if self.selection_allowed(event.modifiers.shift) {
             match event.click_count {
                 0 | 1 => self.start_selection(
                     event.position,
@@ -436,6 +505,9 @@ impl TerminalPane {
                 2 => self.select_word(event.position, cx),
                 _ => self.select_line(event.position, cx),
             }
+        } else {
+            self.selecting = false;
+            self.selection = None;
         }
     }
 
@@ -467,7 +539,9 @@ impl TerminalPane {
             {
                 self.send_protocol_bytes(&report, cx);
             }
-        } else if event.pressed_button == Some(MouseButton::Left) {
+        } else if event.pressed_button == Some(MouseButton::Left)
+            && self.selection_allowed(event.modifiers.shift)
+        {
             self.update_selection(event.position, cx);
         }
     }
@@ -479,6 +553,15 @@ impl TerminalPane {
         }
 
         let mode = self.terminal.lock().mode();
+        if event.button == MouseButton::Middle
+            && self.settings.middle_click_paste
+            && !mouse_tracking_active(mode)
+        {
+            self.last_mouse_report_point = None;
+            self.paste_from_clipboard(cx);
+            return;
+        }
+
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.terminal_point_for_position(event.position);
             self.last_mouse_report_point = None;
@@ -487,9 +570,32 @@ impl TerminalPane {
             {
                 self.send_protocol_bytes(&report, cx);
             }
-        } else {
+        } else if self.selection_allowed(event.modifiers.shift) {
             self.finish_selection(event.position, cx);
+            self.last_mouse_report_point = None;
+        } else {
+            self.selecting = false;
             self.last_mouse_report_point = None;
         }
     }
+
+    fn selection_allowed(&self, shift: bool) -> bool {
+        !self.settings.selection_requires_shift || shift
+    }
+}
+
+fn mouse_tracking_active(mode: TermMode) -> bool {
+    mode.intersects(TermMode::MOUSE_MODE)
+}
+
+fn is_smart_copy_shortcut(event: &KeyDownEvent) -> bool {
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+    let modifiers = event.keystroke.modifiers;
+    modifiers.control
+        && !modifiers.platform
+        && !modifiers.alt
+        && !modifiers.shift
+        && event.keystroke.key.eq_ignore_ascii_case("c")
 }

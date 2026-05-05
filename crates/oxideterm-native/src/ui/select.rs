@@ -23,6 +23,9 @@ pub(crate) enum SelectAnchorId {
     SettingsTerminalEncoding,
     SettingsTerminalAdaptiveRenderer,
     SettingsTerminalCursorStyle,
+    SettingsLocalShell,
+    SettingsHighlightPreset,
+    SettingsHighlightRenderMode(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

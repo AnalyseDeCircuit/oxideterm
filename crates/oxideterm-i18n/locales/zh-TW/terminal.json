@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "本機終端機"
+    "local_terminal": "本機終端機",
+    "paste": {
+      "title": "偵測到多行內容（{{count}} 行）",
+      "more_lines": "... 還有 {{count}} 行",
+      "confirm": "確認",
+      "cancel": "取消",
+      "paste": "貼上"
+    }
   },
   "search": {
     "placeholder": "搜尋",

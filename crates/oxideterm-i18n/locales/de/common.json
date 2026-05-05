@@ -18,6 +18,20 @@
   "titlebar": {
     "open_recent_project": "Letztes Projekt öffnen"
   },
+  "layout": {
+    "empty": {
+      "title": "OxideTerm",
+      "new_connection": "Neue Verbindung",
+      "new_local_terminal": "Lokales Terminal",
+      "keyboard_shortcuts": "Tastaturkürzel"
+    },
+    "status": {
+      "sync_ready": "Synchronisierung bereit"
+    }
+  },
+  "command_palette": {
+    "title": "Befehlspalette"
+  },
   "common": {
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert"

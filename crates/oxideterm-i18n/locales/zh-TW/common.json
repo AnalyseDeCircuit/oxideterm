@@ -18,6 +18,20 @@
   "titlebar": {
     "open_recent_project": "開啟最近專案"
   },
+  "layout": {
+    "empty": {
+      "title": "OxideTerm",
+      "new_connection": "新增連線",
+      "new_local_terminal": "本機終端",
+      "keyboard_shortcuts": "鍵盤快捷鍵"
+    },
+    "status": {
+      "sync_ready": "同步就緒"
+    }
+  },
+  "command_palette": {
+    "title": "命令面板"
+  },
   "common": {
     "enabled": "已啟用",
     "disabled": "已停用"

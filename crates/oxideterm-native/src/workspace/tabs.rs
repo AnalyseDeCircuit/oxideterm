@@ -10,16 +10,23 @@ impl WorkspaceApp {
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
         let preferences = self.terminal_preferences_for_tab_kind(&TabKind::LocalTerminal);
+        let terminal_config = self.local_terminal_config();
         let pane = cx.new(|cx| {
-            TerminalPane::new_with_preferences(preferences, window, cx)
-                .expect("failed to initialize terminal pane")
+            TerminalPane::new_local_with_config_and_preferences(
+                terminal_config,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("failed to initialize terminal pane")
         });
 
         self.panes.insert(pane_id, pane.clone());
         self.tabs.push(Tab {
             id: tab_id,
             kind: TabKind::LocalTerminal,
-            title: self.i18n.t("terminal.local_terminal"),
+            title: self.local_terminal_tab_title(),
+            title_source: TabTitleSource::Static,
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
@@ -64,6 +71,7 @@ impl WorkspaceApp {
             id: tab_id,
             kind: TabKind::SshTerminal,
             title,
+            title_source: TabTitleSource::Static,
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
@@ -85,6 +93,7 @@ impl WorkspaceApp {
                 id: tab_id,
                 kind: TabKind::Settings,
                 title: self.i18n.t("settings_view.title"),
+                title_source: TabTitleSource::I18nKey("settings_view.title"),
                 root_pane: None,
                 active_pane_id: None,
             });
@@ -289,12 +298,18 @@ impl WorkspaceApp {
         self.clamp_tab_scroll(window);
     }
 
-    fn tab_display_title(&self, tab: &Tab) -> String {
-        if matches!(tab.kind, TabKind::Settings) {
-            self.i18n.t("settings_view.title")
-        } else {
-            tab.title.clone()
+    pub(super) fn tab_display_title(&self, tab: &Tab) -> String {
+        let title = match tab.title_source {
+            TabTitleSource::Static => tab.title.clone(),
+            TabTitleSource::I18nKey(key) => self.i18n.t(key),
+        };
+        if matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+            let pane_count = tab.root_pane.as_ref().map_or(1, PaneNode::pane_count);
+            if pane_count > 1 {
+                return format!("{title} ({pane_count})");
+            }
         }
+        title
     }
 
     fn tab_visual_width(&self, tab: &Tab) -> f32 {
@@ -460,8 +475,192 @@ impl WorkspaceApp {
         bar.into_any_element()
     }
 
-    pub(super) fn render_empty_workspace(&self) -> AnyElement {
+    pub(super) fn render_empty_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        div().flex_1().bg(rgb(theme.bg)).into_any_element()
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px(px(16.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(384.0))
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(24.0))
+                            .child(self.render_welcome_brand())
+                            .child(self.render_welcome_actions(cx))
+                            .child(self.render_welcome_shortcuts()),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .px(px(16.0))
+                    .border_t_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.accent))
+                    .child(self.i18n.t("layout.status.sync_ready")),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_brand(&self) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .text_size(px(48.0))
+                    .line_height(px(56.0))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("layout.empty.title"))
+                    .child(
+                        div()
+                            .w(px(3.0))
+                            .h(px(34.0))
+                            .ml(px(6.0))
+                            .rounded(px(2.0))
+                            .bg(rgb(self.tokens.ui.accent)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_center()
+            .gap(px(12.0))
+            .child(self.render_welcome_action_button(
+                LucideIcon::Plus,
+                "layout.empty.new_connection",
+                true,
+                cx,
+            ))
+            .child(self.render_welcome_action_button(
+                LucideIcon::Terminal,
+                "layout.empty.new_local_terminal",
+                false,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_welcome_action_button(
+        &self,
+        icon: LucideIcon,
+        label_key: &str,
+        opens_connection_form: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(40.0))
+            .px(px(18.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border_strong << 8) | 0xcc))
+            .bg(rgba((theme.bg_panel << 8) | 0x8c))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(move |button| button.bg(rgb(theme.bg_hover)))
+            .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text)))
+            .child(self.i18n.t(label_key))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if opens_connection_form {
+                        this.open_new_connection_form(window, cx);
+                    } else {
+                        let _ = this.create_local_terminal_tab(window, cx);
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_shortcuts(&self) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .justify_center()
+            .gap_x(px(20.0))
+            .gap_y(px(8.0))
+            .pt(px(4.0))
+            .child(self.render_welcome_shortcut(shortcut_key("K"), "command_palette.title"))
+            .child(self.render_welcome_shortcut(shortcut_key("N"), "layout.empty.new_connection"))
+            .child(
+                self.render_welcome_shortcut(shortcut_key("T"), "layout.empty.new_local_terminal"),
+            )
+            .child(
+                self.render_welcome_shortcut(shortcut_key("/"), "layout.empty.keyboard_shortcuts"),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_shortcut(&self, key: String, label_key: &str) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .font_family(SharedString::from("JetBrainsMono Nerd Font"))
+                    .text_size(px(11.0))
+                    .line_height(px(14.0))
+                    .text_color(rgb(theme.text))
+                    .child(key),
+            )
+            .child(self.i18n.t(label_key))
+            .into_any_element()
+    }
+}
+
+fn shortcut_key(key: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌘{key}")
+    } else {
+        format!("Ctrl+{key}")
     }
 }

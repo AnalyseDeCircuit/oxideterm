@@ -12,6 +12,7 @@ use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
 
 use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage};
 use crate::terminal_ui::*;
+use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
 use crate::terminal_view::links::*;
 use crate::terminal_view::selection::TerminalSelection;
 
@@ -36,6 +37,7 @@ pub(crate) struct TerminalElement {
     search_query: Option<String>,
     search_matches: Vec<TerminalSearchMatch>,
     selected_search_match: Option<usize>,
+    highlight_rules: Vec<TerminalHighlightRule>,
     hovered_link: Option<TerminalLinkRange>,
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
@@ -51,6 +53,9 @@ pub(crate) struct TerminalElementInput {
 #[allow(dead_code)]
 pub(crate) struct TerminalElementLayout {
     pub(crate) backgrounds: Vec<TerminalRect>,
+    pub(crate) highlight_backgrounds: Vec<TerminalRect>,
+    pub(crate) highlight_underlines: Vec<TerminalRect>,
+    pub(crate) highlight_outlines: Vec<TerminalRect>,
     pub(crate) search_matches: Vec<TerminalRect>,
     pub(crate) selections: Vec<TerminalRect>,
     pub(crate) images: Vec<TerminalImageLayout>,
@@ -183,11 +188,17 @@ impl TerminalElement {
             search_query,
             search_matches,
             selected_search_match,
+            highlight_rules: Vec::new(),
             hovered_link,
             bidi_enabled,
             input,
             transparent_background: false,
         }
+    }
+
+    pub(crate) fn highlight_rules(mut self, rules: Vec<TerminalHighlightRule>) -> Self {
+        self.highlight_rules = rules;
+        self
     }
 
     pub(crate) fn transparent_background(mut self, transparent_background: bool) -> Self {
@@ -206,6 +217,11 @@ impl TerminalElement {
 
     fn layout_for_rows(&self, visible_rows: Range<usize>) -> TerminalElementLayout {
         let mut backgrounds = Vec::new();
+        let highlight_layout = terminal_highlights_for_rows(
+            &self.snapshot,
+            &self.highlight_rules,
+            visible_rows.clone(),
+        );
         let search_matches = map_rects_to_visual(
             &self.snapshot,
             self.bidi_enabled,
@@ -277,6 +293,10 @@ impl TerminalElement {
                     && self.snapshot.cursor_shape == TerminalCursorShape::Block;
                 let fg = if block_cursor {
                     to_hsla(terminal_color_from_hex(self.theme.background))
+                } else if let Some(highlight_fg) =
+                    highlight_layout.foreground_for_cell(row_index, col_index)
+                {
+                    highlight_fg
                 } else {
                     to_hsla(cell.fg)
                 };
@@ -382,6 +402,7 @@ impl TerminalElement {
                     self.cursor_visible,
                     self.snapshot.cursor_shape,
                     &self.theme,
+                    &highlight_layout,
                     &mut text_runs,
                 );
             }
@@ -399,6 +420,21 @@ impl TerminalElement {
 
         TerminalElementLayout {
             backgrounds,
+            highlight_backgrounds: map_rects_to_visual(
+                &self.snapshot,
+                self.bidi_enabled,
+                highlight_layout.backgrounds,
+            ),
+            highlight_underlines: map_rects_to_visual(
+                &self.snapshot,
+                self.bidi_enabled,
+                highlight_layout.underlines,
+            ),
+            highlight_outlines: map_rects_to_visual(
+                &self.snapshot,
+                self.bidi_enabled,
+                highlight_layout.outlines,
+            ),
             search_matches,
             selections,
             images,
@@ -448,6 +484,7 @@ fn push_visual_text_runs(
     cursor_visible: bool,
     cursor_shape: TerminalCursorShape,
     theme: &TerminalUiTheme,
+    highlight_layout: &TerminalHighlightLayout,
     text_runs: &mut Vec<BatchedTextRun>,
 ) {
     let mut current_run: Option<BatchedTextRun> = None;
@@ -466,6 +503,10 @@ fn push_visual_text_runs(
             cursor_visible && cell.cursor && cursor_shape == TerminalCursorShape::Block;
         let fg = if block_cursor {
             to_hsla(terminal_color_from_hex(theme.background))
+        } else if let Some(highlight_fg) =
+            highlight_layout.foreground_for_cell(row_index, cluster.logical_col)
+        {
+            highlight_fg
         } else {
             to_hsla(cell.fg)
         };
@@ -632,6 +673,9 @@ impl Element for TerminalElement {
             for rect in &layout.backgrounds {
                 paint_terminal_rect(rect, origin, &self.metrics, window);
             }
+            for rect in &layout.highlight_backgrounds {
+                paint_terminal_rect(rect, origin, &self.metrics, window);
+            }
             for image in &layout.images {
                 paint_terminal_image(image, origin, &self.metrics, window);
             }
@@ -646,6 +690,12 @@ impl Element for TerminalElement {
             }
             if let Some(marked_text) = &layout.marked_text {
                 paint_text_run(marked_text, origin, &self.metrics, window, cx);
+            }
+            for rect in &layout.highlight_underlines {
+                paint_terminal_underline(rect, origin, &self.metrics, window);
+            }
+            for rect in &layout.highlight_outlines {
+                paint_terminal_outline(rect, origin, &self.metrics, window);
             }
         });
         if let Some(input) = &self.input {

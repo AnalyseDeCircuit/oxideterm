@@ -117,18 +117,89 @@ impl WorkspaceApp {
 
     pub(super) fn render_title_bar(&self) -> AnyElement {
         let theme = self.tokens.ui;
+        let titlebar_bg = titlebar_background(theme.bg_panel, theme.bg_active, theme.accent);
+        let titlebar_border = mix_rgb(titlebar_bg, theme.border, 0.65);
+        let label_color = readable_color(titlebar_bg, theme.accent, theme.text_heading);
+        let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
+        let label_padding_left = if cfg!(target_os = "macos") {
+            self.tokens.metrics.titlebar_label_x()
+        } else {
+            12.0
+        };
+
         div()
             .h(px(self.tokens.metrics.titlebar_height))
             .flex()
+            .flex_row()
             .items_center()
-            .pl(px(self.tokens.metrics.titlebar_label_x()))
-            .pr_2()
-            .bg(rgb(theme.bg_active))
+            .window_control_area(gpui::WindowControlArea::Drag)
+            .bg(rgb(titlebar_bg))
             .border_b_1()
-            .border_color(rgb(theme.border))
+            .border_color(rgb(titlebar_border))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
-            .text_color(rgb(theme.text_muted))
-            .child(self.i18n.t("titlebar.open_recent_project"))
+            .text_color(rgb(text_color))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .pl(px(label_padding_left))
+                    .text_color(rgb(label_color))
+                    .child(self.i18n.t("titlebar.open_recent_project")),
+            )
+            .when(cfg!(target_os = "windows"), |bar| {
+                bar.child(self.render_windows_titlebar_controls(titlebar_bg, text_color))
+            })
+            .into_any_element()
+    }
+
+    fn render_windows_titlebar_controls(&self, titlebar_bg: u32, text_color: u32) -> AnyElement {
+        div()
+            .h_full()
+            .flex()
+            .flex_row()
+            .window_control_area(gpui::WindowControlArea::Drag)
+            .child(self.windows_titlebar_button(
+                "−",
+                gpui::WindowControlArea::Min,
+                titlebar_button_hover(titlebar_bg),
+                text_color,
+            ))
+            .child(self.windows_titlebar_button(
+                "□",
+                gpui::WindowControlArea::Max,
+                titlebar_button_hover(titlebar_bg),
+                text_color,
+            ))
+            .child(self.windows_titlebar_button(
+                "×",
+                gpui::WindowControlArea::Close,
+                0xc42b1c,
+                0xffffff,
+            ))
+            .into_any_element()
+    }
+
+    fn windows_titlebar_button(
+        &self,
+        glyph: &'static str,
+        control_area: gpui::WindowControlArea,
+        hover_bg: u32,
+        text_color: u32,
+    ) -> AnyElement {
+        div()
+            .w(px(46.0))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(13.0))
+            .text_color(rgb(text_color))
+            .window_control_area(control_area)
+            .hover(move |button| button.bg(rgb(hover_bg)))
+            .child(glyph)
             .into_any_element()
     }
 
@@ -438,4 +509,54 @@ impl WorkspaceApp {
             )
             .into_any_element()
     }
+}
+
+fn titlebar_background(panel: u32, active: u32, accent: u32) -> u32 {
+    let base = mix_rgb(panel, active, 0.42);
+    mix_rgb(base, accent, 0.08)
+}
+
+fn titlebar_button_hover(background: u32) -> u32 {
+    if relative_luminance(background) > 0.45 {
+        mix_rgb(background, 0x000000, 0.10)
+    } else {
+        mix_rgb(background, 0xffffff, 0.12)
+    }
+}
+
+fn readable_color(background: u32, preferred: u32, fallback: u32) -> u32 {
+    if contrast_ratio(background, preferred) >= 3.0 {
+        preferred
+    } else {
+        fallback
+    }
+}
+
+fn mix_rgb(a: u32, b: u32, amount: f32) -> u32 {
+    let amount = amount.clamp(0.0, 1.0);
+    let mix = |shift: u32| {
+        let left = ((a >> shift) & 0xffu32) as f32;
+        let right = ((b >> shift) & 0xffu32) as f32;
+        (left + (right - left) * amount).round().clamp(0.0, 255.0) as u32
+    };
+    (mix(16) << 16) | (mix(8) << 8) | mix(0)
+}
+
+fn contrast_ratio(a: u32, b: u32) -> f32 {
+    let l1 = relative_luminance(a);
+    let l2 = relative_luminance(b);
+    let (light, dark) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
+    (light + 0.05) / (dark + 0.05)
+}
+
+fn relative_luminance(color: u32) -> f32 {
+    let channel = |shift: u32| {
+        let value = ((color >> shift) & 0xffu32) as f32 / 255.0;
+        if value <= 0.03928 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    channel(16) * 0.2126 + channel(8) * 0.7152 + channel(0) * 0.0722
 }

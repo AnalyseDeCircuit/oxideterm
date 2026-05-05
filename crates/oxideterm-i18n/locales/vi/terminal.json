@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "Terminal cục bộ"
+    "local_terminal": "Terminal cục bộ",
+    "paste": {
+      "title": "Phát hiện nhiều dòng ({{count}} dòng)",
+      "more_lines": "... {{count}} dòng nữa",
+      "confirm": "Xác nhận",
+      "cancel": "Hủy",
+      "paste": "Dán"
+    }
   },
   "search": {
     "placeholder": "Tìm kiếm",

@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "ローカルターミナル"
+    "local_terminal": "ローカルターミナル",
+    "paste": {
+      "title": "複数行が検出されました ({{count}}行)",
+      "more_lines": "... さらに{{count}}行",
+      "confirm": "確認",
+      "cancel": "キャンセル",
+      "paste": "ペースト"
+    }
   },
   "search": {
     "placeholder": "検索",

@@ -18,6 +18,20 @@
   "titlebar": {
     "open_recent_project": "打开最近项目"
   },
+  "layout": {
+    "empty": {
+      "title": "OxideTerm",
+      "new_connection": "新建连接",
+      "new_local_terminal": "本地终端",
+      "keyboard_shortcuts": "快捷键"
+    },
+    "status": {
+      "sync_ready": "同步就绪"
+    }
+  },
+  "command_palette": {
+    "title": "命令面板"
+  },
   "common": {
     "enabled": "已启用",
     "disabled": "已禁用"

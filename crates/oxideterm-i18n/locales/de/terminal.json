@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "Lokales Terminal"
+    "local_terminal": "Lokales Terminal",
+    "paste": {
+      "title": "Mehrere Zeilen erkannt ({{count}} Zeilen)",
+      "more_lines": "... {{count}} weitere Zeilen",
+      "confirm": "Bestätigen",
+      "cancel": "Abbrechen",
+      "paste": "Einfügen"
+    }
   },
   "search": {
     "placeholder": "Suchen",

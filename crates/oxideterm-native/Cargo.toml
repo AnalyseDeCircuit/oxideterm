@@ -16,6 +16,7 @@ oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 parking_lot.workspace = true
+regex.workspace = true
 tokio.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]

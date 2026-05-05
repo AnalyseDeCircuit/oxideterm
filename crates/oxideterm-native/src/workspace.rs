@@ -16,27 +16,29 @@ use gpui::{
     div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_gpui_terminal::{
-    BackgroundImageRenderCache, TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalPane,
-    TerminalUiPreferences, TerminalUiTheme,
+    BackgroundImageRenderCache, TerminalBackgroundFit, TerminalBackgroundPreferences,
+    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule, TerminalPane,
+    TerminalPasteLabels, TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_render_policy::{
     DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
 };
 use oxideterm_settings::{
-    BackgroundFit, CursorStyle as SettingsCursorStyle, FrostedGlassMode, Language,
-    PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
+    BackgroundFit, CursorStyle as SettingsCursorStyle, FrostedGlassMode, HighlightRuleRenderMode,
+    Language, PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
 };
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
 };
 use oxideterm_terminal::{
-    SshSessionConfig, TerminalCursorShape, TerminalEncoding as SessionTerminalEncoding,
+    LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
+    TerminalEncoding as SessionTerminalEncoding, scan_shells,
 };
 use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
 use oxideterm_workspace::{
-    MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TerminalSessionId,
-    adjusted_split_sizes, balanced_sizes,
+    MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource,
+    TerminalSessionId, adjusted_split_sizes, balanced_sizes,
 };
 
 use self::actions::SearchBarState;
@@ -90,6 +92,9 @@ pub(crate) struct WorkspaceApp {
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
+    background_blur_preview: Option<i64>,
+    background_blur_commit_generation: u64,
+    background_cache_poll_scheduled: bool,
     new_connection_form: Option<NewConnectionForm>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
@@ -107,6 +112,7 @@ pub(crate) struct WorkspaceApp {
     applied_vibrancy_mode: NativeVibrancyMode,
     background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
+    local_shells: Vec<ShellInfo>,
 }
 
 impl WorkspaceApp {
@@ -114,6 +120,7 @@ impl WorkspaceApp {
         let focus_handle = cx.focus_handle();
         let settings_store = SettingsStore::load_default()?;
         let settings = settings_store.settings().clone();
+        let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
         let detected_graphics = detect_graphics(window);
         let render_profile_override = render_profile_from_env();
@@ -160,6 +167,9 @@ impl WorkspaceApp {
             focused_settings_input: None,
             settings_input_draft: String::new(),
             settings_slider_drag: None,
+            background_blur_preview: None,
+            background_blur_commit_generation: 0,
+            background_cache_poll_scheduled: false,
             new_connection_form: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
@@ -177,6 +187,7 @@ impl WorkspaceApp {
             applied_vibrancy_mode: initial_vibrancy_mode,
             background_image_cache,
             settings_store,
+            local_shells,
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window
@@ -250,11 +261,46 @@ impl WorkspaceApp {
                 SettingsCursorStyle::Bar => TerminalCursorShape::Bar,
             },
             cursor_blink: terminal.cursor_blink,
+            paste_protection: terminal.paste_protection,
+            smart_copy: terminal.smart_copy,
+            osc52_clipboard: terminal.osc52_clipboard,
             copy_on_select: terminal.copy_on_select,
+            middle_click_paste: terminal.middle_click_paste,
+            selection_requires_shift: terminal.selection_requires_shift,
             bidi_enabled: terminal.unicode.bidi_enabled,
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             render_policy: self.render_policy.clone(),
             background: self.terminal_background_preferences(background_key),
+            paste_labels: TerminalPasteLabels {
+                title_template: self.i18n.t("terminal.paste.title"),
+                more_lines_template: self.i18n.t("terminal.paste.more_lines"),
+                confirm: self.i18n.t("terminal.paste.confirm"),
+                cancel: self.i18n.t("terminal.paste.cancel"),
+                paste: self.i18n.t("terminal.paste.paste"),
+            },
+            highlight_rules: terminal
+                .highlight_rules
+                .iter()
+                .map(|rule| UiHighlightRule {
+                    id: rule.id.clone(),
+                    pattern: rule.pattern.clone(),
+                    is_regex: rule.is_regex,
+                    case_sensitive: rule.case_sensitive,
+                    foreground: rule.foreground.clone(),
+                    background: rule.background.clone(),
+                    render_mode: match rule.render_mode {
+                        HighlightRuleRenderMode::Background => {
+                            TerminalHighlightRenderMode::Background
+                        }
+                        HighlightRuleRenderMode::Underline => {
+                            TerminalHighlightRenderMode::Underline
+                        }
+                        HighlightRuleRenderMode::Outline => TerminalHighlightRenderMode::Outline,
+                    },
+                    enabled: rule.enabled,
+                    priority: rule.priority,
+                })
+                .collect(),
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,
                 self.tokens.terminal.foreground,
@@ -423,7 +469,7 @@ impl Render for WorkspaceApp {
         self.sync_tab_titles(cx);
         let title = self
             .active_tab()
-            .map(|tab| tab.title.clone())
+            .map(|tab| self.tab_display_title(tab))
             .unwrap_or_else(|| "OxideTerm".to_string());
         window.set_window_title(&SharedString::from(title));
         let vibrancy_mode =
@@ -450,14 +496,15 @@ impl Render for WorkspaceApp {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
-                _ => self.render_empty_workspace(),
+                _ => self.render_empty_workspace(cx),
             }
         } else {
-            self.render_empty_workspace()
+            self.render_empty_workspace(cx)
         };
         let content = self.wrap_content_background(
             content,
             self.active_tab().map(|tab| tab_background_key(&tab.kind)),
+            cx,
         );
 
         div()
@@ -694,6 +741,7 @@ impl WorkspaceApp {
         &mut self,
         content: AnyElement,
         background_key: Option<&str>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(background_key) = background_key else {
             return content;
@@ -707,6 +755,9 @@ impl WorkspaceApp {
         let blurred_image = self
             .background_image_cache
             .render_blurred_image(&background);
+        if self.background_image_cache.has_pending() {
+            self.schedule_background_cache_poll(cx);
+        }
 
         div()
             .size_full()
@@ -715,6 +766,26 @@ impl WorkspaceApp {
             .child(workspace_background_image_layer(background, blurred_image))
             .child(div().relative().size_full().child(content))
             .into_any_element()
+    }
+
+    fn schedule_background_cache_poll(&mut self, cx: &mut Context<Self>) {
+        if self.background_cache_poll_scheduled {
+            return;
+        }
+        self.background_cache_poll_scheduled = true;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(16)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.background_cache_poll_scheduled = false;
+                if this.background_image_cache.drain_completed() {
+                    cx.notify();
+                }
+                if this.background_image_cache.has_pending() {
+                    this.schedule_background_cache_poll(cx);
+                }
+            });
+        })
+        .detach();
     }
 }
 

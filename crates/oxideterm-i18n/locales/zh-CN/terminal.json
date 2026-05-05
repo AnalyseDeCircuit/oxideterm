@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "本地终端"
+    "local_terminal": "本地终端",
+    "paste": {
+      "title": "检测到多行内容 ({{count}} 行)",
+      "more_lines": "... 还有 {{count}} 行",
+      "confirm": "确认",
+      "cancel": "取消",
+      "paste": "粘贴"
+    }
   },
   "search": {
     "placeholder": "搜索",

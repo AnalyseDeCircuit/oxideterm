@@ -1,6 +1,13 @@
 {
   "terminal": {
-    "local_terminal": "Local Terminal"
+    "local_terminal": "Local Terminal",
+    "paste": {
+      "title": "Multiple lines detected ({{count}} lines)",
+      "more_lines": "... {{count}} more lines",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "paste": "Paste"
+    }
   },
   "search": {
     "placeholder": "Search",

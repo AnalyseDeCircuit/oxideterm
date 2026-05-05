@@ -32,6 +32,49 @@ pub(crate) fn paint_terminal_rect(
     window.paint_quad(fill(bounds, rect.color));
 }
 
+pub(crate) fn paint_terminal_underline(
+    rect: &TerminalRect,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+) {
+    let bounds = Bounds::new(
+        origin
+            + point(
+                px(rect.col as f32 * metrics.cell_width_f32()),
+                px((rect.row + 1) as f32 * metrics.line_height_f32() - 2.0),
+            ),
+        size(px(rect.cells as f32 * metrics.cell_width_f32()), px(2.0)),
+    );
+    window.paint_quad(fill(bounds, rect.color));
+}
+
+pub(crate) fn paint_terminal_outline(
+    rect: &TerminalRect,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+) {
+    let x = rect.col as f32 * metrics.cell_width_f32();
+    let y = rect.row as f32 * metrics.line_height_f32();
+    let width = rect.cells as f32 * metrics.cell_width_f32();
+    let height = metrics.line_height_f32();
+    for bounds in [
+        Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
+        Bounds::new(
+            origin + point(px(x), px(y + height - 1.0)),
+            size(px(width), px(1.0)),
+        ),
+        Bounds::new(origin + point(px(x), px(y)), size(px(1.0), px(height))),
+        Bounds::new(
+            origin + point(px(x + width - 1.0), px(y)),
+            size(px(1.0), px(height)),
+        ),
+    ] {
+        window.paint_quad(fill(bounds, rect.color));
+    }
+}
+
 pub(crate) fn paint_terminal_image(
     image: &TerminalImageLayout,
     origin: gpui::Point<Pixels>,

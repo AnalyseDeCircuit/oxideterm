@@ -18,6 +18,20 @@
   "titlebar": {
     "open_recent_project": "最近のプロジェクトを開く"
   },
+  "layout": {
+    "empty": {
+      "title": "OxideTerm",
+      "new_connection": "新規接続",
+      "new_local_terminal": "ローカルターミナル",
+      "keyboard_shortcuts": "キーボードショートカット"
+    },
+    "status": {
+      "sync_ready": "同期準備完了"
+    }
+  },
+  "command_palette": {
+    "title": "コマンドパレット"
+  },
   "common": {
     "enabled": "有効",
     "disabled": "無効"
