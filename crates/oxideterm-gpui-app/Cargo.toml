@@ -1,0 +1,38 @@
+[package]
+name = "oxideterm-gpui-app"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "oxideterm-native"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
+oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+parking_lot.workspace = true
+regex.workspace = true
+tokio.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
+[package.metadata.bundle]
+identifier = "com.analysecircuit.OxideTerm"
+name = "OxideTerm"
+osx_minimum_system_version = "13.0"
+osx_info_plist_exts = ["resources/info/*"]
+osx_entitlements = "resources/OxideTerm.entitlements"

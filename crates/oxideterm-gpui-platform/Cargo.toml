@@ -1,0 +1,14 @@
+[package]
+name = "oxideterm-gpui-platform"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

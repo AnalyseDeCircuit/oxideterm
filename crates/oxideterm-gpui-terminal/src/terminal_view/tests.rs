@@ -302,7 +302,7 @@ fn marked_text_is_laid_out_at_terminal_cursor() {
 
 #[test]
 fn double_click_word_selection_uses_terminal_semantic_word_boundaries() {
-    let snapshot = selection_snapshot("cargo test ./crates/oxideterm-native");
+    let snapshot = selection_snapshot("cargo test ./crates/oxideterm-gpui-app");
     let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 15 })
         .expect("word selection");
 
@@ -310,7 +310,7 @@ fn double_click_word_selection_uses_terminal_semantic_word_boundaries() {
         selection.normalized(),
         (
             TerminalPoint { row: 0, col: 11 },
-            TerminalPoint { row: 0, col: 35 }
+            TerminalPoint { row: 0, col: 37 }
         )
     );
 }
@@ -465,12 +465,12 @@ fn link_detection_finds_urls_and_trims_trailing_punctuation() {
 
 #[test]
 fn link_detection_finds_path_like_targets() {
-    let snapshot = selection_snapshot("see ./crates/oxideterm-native/src/main.rs");
+    let snapshot = selection_snapshot("see ./crates/oxideterm-gpui-app/src/main.rs");
     let links = detect_link_ranges(&snapshot);
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, TerminalLinkKind::Path);
-    assert_eq!(links[0].target, "./crates/oxideterm-native/src/main.rs");
+    assert_eq!(links[0].target, "./crates/oxideterm-gpui-app/src/main.rs");
 }
 
 #[test]

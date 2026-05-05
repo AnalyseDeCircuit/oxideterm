@@ -1,0 +1,9 @@
+[package]
+name = "oxideterm-gpui-ui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-theme = { path = "../oxideterm-theme" }

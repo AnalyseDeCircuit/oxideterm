@@ -1,10 +1,13 @@
 [workspace]
 members = [
   "crates/oxideterm-gpui-markdown",
+  "crates/oxideterm-gpui-platform",
+  "crates/oxideterm-gpui-settings-view",
   "crates/oxideterm-gpui-terminal",
+  "crates/oxideterm-gpui-ui",
   "crates/oxideterm-code-editor",
   "crates/oxideterm-i18n",
-  "crates/oxideterm-native",
+  "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",
   "crates/oxideterm-settings",
   "crates/oxideterm-ssh",
