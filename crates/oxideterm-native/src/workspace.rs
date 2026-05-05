@@ -37,7 +37,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
-use self::ime::WorkspaceImeElement;
+use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
     SshConnectionWorkerResult,
@@ -391,6 +391,9 @@ impl Render for WorkspaceApp {
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.keyboard_interactive_challenge.is_some() {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
                     let _ = this.handle_keyboard_interactive_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -401,12 +404,20 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.new_connection_form.is_some() {
+                    if this.active_ime_target().is_some()
+                        && keystroke_commits_platform_text(&event.keystroke)
+                    {
+                        return;
+                    }
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.active_surface == ActiveSurface::Settings
                     && this.focused_settings_input.is_some()
                 {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();

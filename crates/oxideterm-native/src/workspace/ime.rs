@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui::{
     App, Bounds, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId, InputHandler,
-    InspectorElementId, LayoutId, Pixels, Style, UTF16Selection, Window, point, px,
+    InspectorElementId, Keystroke, LayoutId, Pixels, Style, UTF16Selection, Window, point, px,
 };
 
 use super::WorkspaceApp;
@@ -111,6 +111,17 @@ impl Element for WorkspaceImeElement {
 pub(super) struct WorkspaceInputHandler {
     view: Entity<WorkspaceApp>,
     fallback_bounds: Bounds<Pixels>,
+}
+
+pub(super) fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
+    if keystroke.modifiers.platform || keystroke.modifiers.control {
+        return false;
+    }
+
+    keystroke
+        .key_char
+        .as_deref()
+        .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
 }
 
 impl InputHandler for WorkspaceInputHandler {
@@ -427,4 +438,66 @@ fn byte_index_for_utf16(value: &str, offset: usize) -> usize {
         utf16_count += ch.len_utf16();
     }
     value.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Keystroke, Modifiers};
+
+    use super::keystroke_commits_platform_text;
+
+    fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
+        Keystroke {
+            key: key.to_string(),
+            key_char: key_char.map(str::to_string),
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn printable_keystrokes_are_deferred_to_platform_text_input() {
+        assert!(keystroke_commits_platform_text(&key(
+            "a",
+            Some("a"),
+            Modifiers::default()
+        )));
+        assert!(keystroke_commits_platform_text(&key(
+            "space",
+            Some(" "),
+            Modifiers::default()
+        )));
+        assert!(keystroke_commits_platform_text(&key(
+            "s",
+            Some("ß"),
+            Modifiers {
+                alt: true,
+                ..Modifiers::default()
+            }
+        )));
+    }
+
+    #[test]
+    fn shortcuts_and_control_keys_stay_on_manual_key_path() {
+        assert!(!keystroke_commits_platform_text(&key(
+            "backspace",
+            None,
+            Modifiers::default()
+        )));
+        assert!(!keystroke_commits_platform_text(&key(
+            "v",
+            None,
+            Modifiers {
+                platform: true,
+                ..Modifiers::default()
+            }
+        )));
+        assert!(!keystroke_commits_platform_text(&key(
+            "a",
+            Some("\u{1}"),
+            Modifiers {
+                control: true,
+                ..Modifiers::default()
+            }
+        )));
+    }
 }
