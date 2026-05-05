@@ -6,7 +6,7 @@ use gpui::{
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_terminal::{
-    TerminalCursorShape, TerminalEncoding, TerminalLifecycle, TerminalProcessInfo,
+    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalLifecycle, TerminalProcessInfo,
 };
 
 pub(crate) const DEFAULT_COLS: usize = 120;
@@ -16,6 +16,7 @@ pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
+pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
 pub(crate) const SCROLLBAR_WIDTH: f32 = 3.0;
 pub(crate) const SCROLLBAR_GAP: f32 = 6.0;
 pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
@@ -105,11 +106,19 @@ impl Default for TerminalUiTheme {
         Self {
             background: OXIDETERM_TERMINAL_BACKGROUND,
             bell_background: 0x17131a,
-            foreground: 0xe6e8eb,
+            foreground: OXIDETERM_TERMINAL_FOREGROUND,
             header_background: 0x1b1f24,
             header_foreground: 0x8bbdff,
         }
     }
+}
+
+pub(crate) fn terminal_color_from_hex(hex: u32) -> TerminalColor {
+    TerminalColor::rgb(
+        ((hex >> 16) & 0xff) as u8,
+        ((hex >> 8) & 0xff) as u8,
+        (hex & 0xff) as u8,
+    )
 }
 
 impl TerminalUiTheme {

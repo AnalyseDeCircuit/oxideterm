@@ -30,6 +30,7 @@ pub(crate) struct TerminalElement {
     rendered_images: Vec<TerminalRenderedImage>,
     selection: Option<TerminalSelection>,
     metrics: TerminalMetrics,
+    theme: TerminalUiTheme,
     cursor_visible: bool,
     marked_text: Option<String>,
     search_query: Option<String>,
@@ -113,6 +114,7 @@ impl TerminalElement {
             Vec::new(),
             selection,
             metrics,
+            TerminalUiTheme::default(),
             cursor_visible,
             marked_text,
             search_query,
@@ -128,6 +130,7 @@ impl TerminalElement {
         rendered_images: Vec<TerminalRenderedImage>,
         selection: Option<TerminalSelection>,
         metrics: TerminalMetrics,
+        theme: TerminalUiTheme,
         cursor_visible: bool,
         marked_text: Option<String>,
         search_query: Option<String>,
@@ -141,6 +144,7 @@ impl TerminalElement {
             rendered_images,
             selection,
             metrics,
+            theme,
             cursor_visible,
             marked_text,
             search_query,
@@ -157,6 +161,7 @@ impl TerminalElement {
         rendered_images: Vec<TerminalRenderedImage>,
         selection: Option<TerminalSelection>,
         metrics: TerminalMetrics,
+        theme: TerminalUiTheme,
         cursor_visible: bool,
         marked_text: Option<String>,
         search_query: Option<String>,
@@ -171,6 +176,7 @@ impl TerminalElement {
             rendered_images,
             selection,
             metrics,
+            theme,
             cursor_visible,
             marked_text,
             search_query,
@@ -226,6 +232,7 @@ impl TerminalElement {
         let mut text_runs = Vec::new();
         let mut cursor = None;
         let scrollbar = terminal_scrollbar(&self.snapshot, &self.metrics);
+        let terminal_background = terminal_background(&self.theme);
         let cursor_row_visible = visible_rows.contains(&self.snapshot.cursor_row);
         let ime_cursor_bounds = cursor_row_visible
             .then(|| ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics))
@@ -262,18 +269,18 @@ impl TerminalElement {
                     && cell.cursor
                     && self.snapshot.cursor_shape == TerminalCursorShape::Block;
                 let fg = if block_cursor {
-                    to_hsla(TerminalColor::rgb(0x0d, 0x0f, 0x12))
+                    to_hsla(terminal_color_from_hex(self.theme.background))
                 } else {
                     to_hsla(cell.fg)
                 };
                 let bg = if block_cursor {
-                    to_hsla(TerminalColor::rgb(0x52, 0x8b, 0xff))
+                    to_hsla(terminal_color_from_hex(self.theme.header_foreground))
                 } else {
                     to_hsla(cell.bg)
                 };
                 let cell_width = if cell.wide { 2 } else { 1 };
 
-                if bg != terminal_background() {
+                if bg != terminal_background {
                     extend_or_push_rect(
                         &mut current_background,
                         &mut backgrounds,
@@ -367,6 +374,7 @@ impl TerminalElement {
                     &self.metrics,
                     self.cursor_visible,
                     self.snapshot.cursor_shape,
+                    &self.theme,
                     &mut text_runs,
                 );
             }
@@ -432,6 +440,7 @@ fn push_visual_text_runs(
     metrics: &TerminalMetrics,
     cursor_visible: bool,
     cursor_shape: TerminalCursorShape,
+    theme: &TerminalUiTheme,
     text_runs: &mut Vec<BatchedTextRun>,
 ) {
     let mut current_run: Option<BatchedTextRun> = None;
@@ -449,7 +458,7 @@ fn push_visual_text_runs(
         let block_cursor =
             cursor_visible && cell.cursor && cursor_shape == TerminalCursorShape::Block;
         let fg = if block_cursor {
-            to_hsla(TerminalColor::rgb(0x0d, 0x0f, 0x12))
+            to_hsla(terminal_color_from_hex(theme.background))
         } else {
             to_hsla(cell.fg)
         };
@@ -606,7 +615,7 @@ impl Element for TerminalElement {
             window.set_window_cursor_style(CursorStyle::PointingHand);
         }
 
-        window.paint_quad(fill(bounds, rgb(OXIDETERM_TERMINAL_BACKGROUND)));
+        window.paint_quad(fill(bounds, rgb(self.theme.background)));
         let origin =
             bounds.origin + point(px(TERMINAL_CONTENT_PADDING), px(TERMINAL_CONTENT_PADDING));
 
@@ -645,7 +654,13 @@ impl Element for TerminalElement {
             && let Some(cursor) = layout.cursor
         {
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                paint_cursor(cursor, origin, &self.metrics, window);
+                paint_cursor(
+                    cursor,
+                    origin,
+                    &self.metrics,
+                    self.theme.header_foreground,
+                    window,
+                );
             });
         }
         if let Some(scrollbar) = layout.scrollbar {

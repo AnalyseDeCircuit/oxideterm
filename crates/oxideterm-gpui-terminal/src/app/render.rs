@@ -2,6 +2,7 @@ use gpui::{
     App, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Render, SharedString, Window, div, prelude::*, px, rgb,
 };
+use oxideterm_terminal::TerminalSnapshot;
 
 use super::TerminalPane;
 use crate::terminal_ui::*;
@@ -18,6 +19,7 @@ impl Render for TerminalPane {
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let mut snapshot = self.snapshot.clone();
         snapshot.cursor_shape = self.preferences.cursor_shape;
+        apply_theme_defaults_to_snapshot(&mut snapshot, &self.theme);
         let rendered_images = self.image_cache.render_images(
             &snapshot.images,
             self.preferences
@@ -133,6 +135,7 @@ impl Render for TerminalPane {
                         rendered_images,
                         self.selection.filter(|s| !s.is_empty()),
                         self.metrics.clone(),
+                        self.theme.clone(),
                         self.cursor_visible,
                         self.marked_text.clone(),
                         self.search_query.clone(),
@@ -149,5 +152,23 @@ impl Render for TerminalPane {
                         }),
                     )),
             )
+    }
+}
+
+fn apply_theme_defaults_to_snapshot(snapshot: &mut TerminalSnapshot, theme: &TerminalUiTheme) {
+    let default_background = terminal_color_from_hex(OXIDETERM_TERMINAL_BACKGROUND);
+    let default_foreground = terminal_color_from_hex(OXIDETERM_TERMINAL_FOREGROUND);
+    let themed_background = terminal_color_from_hex(theme.background);
+    let themed_foreground = terminal_color_from_hex(theme.foreground);
+
+    for row in &mut snapshot.lines {
+        for cell in &mut row.cells {
+            if cell.bg == default_background {
+                cell.bg = themed_background;
+            }
+            if cell.fg == default_foreground {
+                cell.fg = themed_foreground;
+            }
+        }
     }
 }

@@ -462,9 +462,17 @@ pub struct ThemeTokens {
 
 impl ThemeTokens {
     pub fn from_builtin(theme: BuiltInTheme) -> Self {
+        let ui = apply_tauri_ui_overrides(
+            if theme.id == "default" {
+                "neutral"
+            } else {
+                theme.id
+            },
+            derive_ui_colors_from_terminal(theme.terminal),
+        );
         Self {
             terminal: theme.terminal,
-            ui: derive_ui_colors_from_terminal(theme.terminal),
+            ui,
             metrics: UiMetrics::tauri_default(),
             radii: UiRadii::tauri_default(),
             spacing: UiSpacing::tauri_default(),
@@ -534,6 +542,7 @@ fn clamp_channel(value: i32) -> u32 {
 }
 
 include!("generated.rs");
+include!("generated_ui.rs");
 
 #[cfg(test)]
 mod tests {
@@ -548,10 +557,24 @@ mod tests {
 
     #[test]
     fn derives_ui_colors_like_tauri() {
-        let ui = derive_ui_colors_from_terminal(theme_by_id("default").terminal);
+        let ui = ThemeTokens::from_builtin(theme_by_id("default")).ui;
         assert_eq!(ui.bg, 0x09090b);
-        assert_eq!(ui.bg_panel, 0x18181a);
-        assert_eq!(ui.bg_hover, 0x272729);
+        assert_eq!(ui.bg_panel, 0x18181b);
+        assert_eq!(ui.bg_hover, 0x27272a);
         assert_eq!(ui.accent, 0xea580c);
+    }
+
+    #[test]
+    fn applies_tauri_css_theme_overrides() {
+        let oxide = ThemeTokens::from_builtin(theme_by_id("oxide")).ui;
+        assert_eq!(oxide.bg_panel, 0x4a2613);
+        assert_eq!(oxide.bg_card, 0x522c17);
+        assert_eq!(oxide.border, 0x6d3c20);
+        assert_eq!(oxide.text_muted, 0xd4b49a);
+
+        let github = ThemeTokens::from_builtin(theme_by_id("github-dark")).ui;
+        assert_eq!(github.bg_panel, 0x161b22);
+        assert_eq!(github.bg_elevated, 0x1c2332);
+        assert_eq!(github.accent, 0x58a6ff);
     }
 }

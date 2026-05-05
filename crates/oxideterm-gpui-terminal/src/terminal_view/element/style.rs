@@ -161,6 +161,6 @@ pub(crate) fn to_hsla(color: TerminalColor) -> Hsla {
     to_rgba(color).into()
 }
 
-pub(crate) fn terminal_background() -> Hsla {
-    rgb(OXIDETERM_TERMINAL_BACKGROUND).into()
+pub(crate) fn terminal_background(theme: &TerminalUiTheme) -> Hsla {
+    to_hsla(terminal_color_from_hex(theme.background))
 }

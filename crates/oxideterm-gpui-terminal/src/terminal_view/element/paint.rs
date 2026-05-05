@@ -265,6 +265,7 @@ pub(crate) fn paint_cursor(
     cursor: TerminalCursor,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
+    cursor_color: u32,
     window: &mut Window,
 ) {
     let cell_width = metrics.cell_width_f32();
@@ -280,7 +281,7 @@ pub(crate) fn paint_cursor(
                     ),
                 size(metrics.cell_width, px(2.0)),
             );
-            window.paint_quad(fill(bounds, rgb(0x528bff)));
+            window.paint_quad(fill(bounds, rgb(cursor_color)));
         }
         TerminalCursorShape::Bar => {
             let bounds = Bounds::new(
@@ -291,12 +292,12 @@ pub(crate) fn paint_cursor(
                     ),
                 size(px(2.0), metrics.line_height),
             );
-            window.paint_quad(fill(bounds, rgb(0x528bff)));
+            window.paint_quad(fill(bounds, rgb(cursor_color)));
         }
         TerminalCursorShape::Hollow => {
             let x = cursor.col as f32 * cell_width;
             let y = cursor.row as f32 * line_height;
-            let color = rgb(0x528bff);
+            let color = rgb(cursor_color);
             for bounds in [
                 Bounds::new(
                     origin + point(px(x), px(y)),

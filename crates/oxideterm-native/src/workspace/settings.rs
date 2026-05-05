@@ -1271,6 +1271,8 @@ impl WorkspaceApp {
             .terminal
             .font_family
             .terminal_family_name(&settings.terminal.custom_font_family);
+        let preview_line_height =
+            px(settings.terminal.font_size as f32 * settings.terminal.line_height as f32);
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
@@ -1296,24 +1298,32 @@ impl WorkspaceApp {
                     .flex_col()
                     .font_family(&family)
                     .text_size(px(settings.terminal.font_size as f32))
-                    .line_height(px(
-                        settings.terminal.font_size as f32 * settings.terminal.line_height as f32
-                    ))
                     .text_color(rgb(self.tokens.ui.text))
-                    .child("ABCDEFG abcdefg 0123456789")
-                    .child("Thực thi lệnh chậm - lưu, tổ chức, chạy")
                     .child(
                         div()
+                            .line_height(preview_line_height)
+                            .child("ABCDEFG abcdefg 0123456789"),
+                    )
+                    .child(
+                        div()
+                            .line_height(preview_line_height)
+                            .child("Thực thi lệnh chậm - lưu, tổ chức, chạy"),
+                    )
+                    .child(
+                        div()
+                            .line_height(preview_line_height)
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child("-> => == != <= >= {}"),
                     )
                     .child(
                         div()
+                            .line_height(preview_line_height)
                             .text_color(rgb(self.tokens.ui.success))
                             .child("天地玄黄 The quick brown fox"),
                     )
                     .child(
                         div()
+                            .line_height(preview_line_height)
                             .text_color(rgb(self.tokens.ui.warning))
                             .child("       󰊤  "),
                     ),
