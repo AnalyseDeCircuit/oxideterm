@@ -10,8 +10,8 @@ use gpui::{
     px,
 };
 use oxideterm_terminal::{
-    SshSessionConfig, TermMode, TerminalDrainBudget, TerminalEvent, TerminalSession,
-    TerminalSnapshot,
+    GraphicsOptions, SshSessionConfig, TermMode, TerminalDrainBudget, TerminalEvent,
+    TerminalSession, TerminalSnapshot,
 };
 use parking_lot::Mutex;
 
@@ -75,10 +75,14 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let terminal = Arc::new(Mutex::new(TerminalSession::local_default(
-            DEFAULT_COLS,
-            DEFAULT_ROWS,
-        )?));
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::local_with_graphics_and_encoding(
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+            )?,
+        ));
         Self::from_session(terminal, preferences, window, cx)
     }
 
@@ -96,10 +100,12 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let terminal = Arc::new(Mutex::new(TerminalSession::ssh(
+        let terminal = Arc::new(Mutex::new(TerminalSession::ssh_with_graphics_and_encoding(
             config,
             DEFAULT_COLS,
             DEFAULT_ROWS,
+            graphics_options_from_preferences(&preferences),
+            preferences.terminal_encoding,
         )));
         Self::from_session(terminal, preferences, window, cx)
     }
@@ -164,7 +170,11 @@ impl TerminalPane {
             last_cursor_blink: Instant::now(),
             last_terminal_input: Instant::now(),
             last_drain_budget_exhausted: false,
-            image_cache: ImageRenderCache::default(),
+            image_cache: {
+                let mut cache = ImageRenderCache::default();
+                cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
+                cache
+            },
             bounds: None,
             last_pty_resize: None,
             pending_pty_resize: None,
@@ -178,8 +188,15 @@ impl TerminalPane {
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
+        if self.preferences.terminal_encoding != preferences.terminal_encoding {
+            self.terminal
+                .lock()
+                .set_encoding(preferences.terminal_encoding);
+        }
         self.settings = TerminalUiSettings::from_preferences(&preferences);
         self.theme = preferences.theme.clone();
+        self.image_cache
+            .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.preferences = preferences;
         self.last_pty_resize = None;
         self.pending_pty_resize = None;
@@ -251,12 +268,13 @@ impl TerminalPane {
     }
 
     fn next_drain_budget(&self) -> TerminalDrainBudget {
+        let drain = self.preferences.render_policy.drain;
         if self.last_drain_budget_exhausted {
-            TerminalDrainBudget::throughput()
+            TerminalDrainBudget::new(drain.throughput_bytes, drain.max_events)
         } else if self.last_terminal_input.elapsed() <= Duration::from_millis(220) {
-            TerminalDrainBudget::interactive()
+            TerminalDrainBudget::new(drain.interactive_bytes, drain.max_events)
         } else {
-            TerminalDrainBudget::normal()
+            TerminalDrainBudget::new(drain.normal_bytes, drain.max_events)
         }
     }
 
@@ -301,13 +319,16 @@ impl TerminalPane {
             TerminalEvent::MagicDetected(kind) => {
                 let _ = kind;
             }
+            TerminalEvent::EncodingHint(hint) => {
+                let _ = hint;
+            }
             TerminalEvent::ClipboardStore(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
             }
             TerminalEvent::ClipboardLoad(formatter) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     let response = formatter(&text);
-                    self.send_bytes(response.as_bytes(), cx);
+                    self.send_protocol_bytes(response.as_bytes(), cx);
                 }
             }
         }
@@ -320,12 +341,24 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn send_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+    fn send_protocol_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         if !self.terminal_accepts_input() {
             return;
         }
 
-        if self.terminal.lock().write_input(bytes).is_ok() {
+        if self.terminal.lock().write_protocol_bytes(bytes).is_ok() {
+            self.last_terminal_input = Instant::now();
+            self.reset_cursor_blink();
+            cx.notify();
+        }
+    }
+
+    fn send_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if !self.terminal_accepts_input() {
+            return;
+        }
+
+        if self.terminal.lock().write_text(text).is_ok() {
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
@@ -338,7 +371,7 @@ impl TerminalPane {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.marked_text = None;
-        self.send_bytes(text.as_bytes(), cx);
+        self.send_text(text, cx);
     }
 
     fn set_marked_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -456,6 +489,20 @@ impl TerminalPane {
         self.bounds
             .map(|bounds| bounds.origin)
             .unwrap_or_else(|| gpui::point(px(0.0), px(0.0)))
+    }
+}
+
+fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> GraphicsOptions {
+    let graphics = preferences.render_policy.terminal_graphics;
+    let storage_limit_mb = graphics.storage_limit_bytes.div_ceil(1024 * 1024);
+    GraphicsOptions {
+        enabled: true,
+        sixel: true,
+        iterm2_inline: true,
+        kitty: true,
+        pixel_limit: graphics.pixel_limit.min(u32::MAX as usize) as u32,
+        storage_limit_mb: storage_limit_mb.min(u32::MAX as usize) as u32,
+        show_placeholder: graphics.show_placeholders,
     }
 }
 

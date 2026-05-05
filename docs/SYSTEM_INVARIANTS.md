@@ -143,6 +143,30 @@ correctness.
 - Link rendering must not decorate editable active input in a way that conflicts
   with shell completion or syntax highlighting.
 
+## Native Render Policy
+
+- Native GPUI does not expose a product-level CPU renderer fallback in the
+  current GPUI version. OxideTerm must not present WebGL, Canvas, or CPU
+  renderer choices as if they were real native renderers.
+- Renderer compatibility settings must be expressed as an OxideTerm render
+  policy: quality, low-power, or compatibility. The policy may reduce expensive
+  visual work, but it must not change terminal protocol semantics.
+- Software-emulated graphics may automatically enter compatibility mode. Unknown
+  macOS/Windows GPU information must not be treated as failure; users can still
+  choose low-power or compatibility manually.
+- Safe-mode environment overrides such as `OXIDETERM_RENDER_PROFILE` apply only
+  to the current process. They must not rewrite persisted user settings.
+- High-cost visuals must go through the effective render policy before use:
+  native vibrancy, background images and blur, animations, terminal inline image
+  decoding, image cache budgets, repaint cadence, and per-frame drain budgets.
+- Compatibility mode keeps core terminal behavior intact: local/SSH input,
+  output, resize, selection, search, copy/paste, mouse reporting, and protocol
+  parsing must continue to work. It may replace decoded images with bounded
+  placeholders and disable nonessential visual effects.
+- If GPUI cannot create a graphics context, startup must fail with a clear
+  diagnostic and a safe-mode hint. Do not silently black-screen or claim a CPU
+  backend exists.
+
 ## Terminal Graphics And UTF-8
 
 - Terminal graphics protocol detection must never corrupt normal UTF-8 text.

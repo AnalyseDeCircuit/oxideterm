@@ -13,6 +13,7 @@ pub(crate) enum SelectAnchorId {
     SettingsAppearanceDensity,
     SettingsAppearanceBorderRadiusSlider,
     SettingsAppearanceAnimation,
+    SettingsAppearanceRenderProfile,
     SettingsAppearanceFrostedGlass,
     SettingsAppearanceBackgroundOpacitySlider,
     SettingsAppearanceBackgroundBlurSlider,

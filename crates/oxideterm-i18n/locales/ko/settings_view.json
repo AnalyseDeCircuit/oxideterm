@@ -375,7 +375,13 @@
       "frosted_glass_off": "끄기",
       "frosted_glass_css": "CSS 흐림",
       "frosted_glass_native": "네이티브 Vibrancy",
-      "frosted_glass_native_hint": "네이티브 Vibrancy (macOS/Windows만)"
+      "frosted_glass_native_hint": "네이티브 Vibrancy (macOS/Windows만)",
+      "render_profile": "렌더링 구성",
+      "render_profile_hint": "약한 GPU 또는 저전력 환경에 맞춰 비용이 큰 네이티브 효과를 조정",
+      "render_profile_auto": "자동",
+      "render_profile_quality": "고품질",
+      "render_profile_low_power": "저전력",
+      "render_profile_compatibility": "호환 모드"
     },
     "custom_theme": {
       "create": "새 테마",

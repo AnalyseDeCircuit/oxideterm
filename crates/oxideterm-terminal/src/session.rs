@@ -13,7 +13,10 @@ use oxideterm_ssh::{
     ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPromptHandler, SshPtyHandle,
     SshTransportClient, SshTransportCommand,
 };
-use oxideterm_terminal_graphics::GraphicsIngress;
+use oxideterm_terminal_encoding::{
+    EncodingMismatchDetector, TerminalEncoding, TerminalInputEncoder, TerminalOutputDecoder,
+};
+use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::error::TryRecvError;
 
@@ -23,8 +26,7 @@ use crate::{
     LocalEventListener, LocalPtySession, TermMode, TerminalEvent, TerminalGraphicsState,
     TerminalLifecycle, TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
     append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
-    graphics_cursor_from_term, normalize_paste_line_endings, search_logical_line_matches,
-    snapshot_from_term,
+    graphics_cursor_from_term, search_logical_line_matches, snapshot_from_term,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,7 +72,10 @@ pub trait TerminalSessionBackend: Send {
     fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport;
     fn take_events(&mut self) -> Vec<TerminalEvent>;
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;
+    fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()>;
+    fn write_text(&mut self, text: &str) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;
+    fn set_encoding(&mut self, encoding: TerminalEncoding);
     fn mode(&self) -> TermMode;
     fn set_focused(&mut self, focused: bool) -> Result<()>;
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()>;
@@ -102,14 +107,67 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn local_default(cols: usize, rows: usize) -> Result<Self> {
+        Self::local_with_graphics_options(cols, rows, GraphicsOptions::default())
+    }
+
+    pub fn local_with_graphics_options(
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+    ) -> Result<Self> {
+        Self::local_with_graphics_and_encoding(cols, rows, graphics_options, TerminalEncoding::Utf8)
+    }
+
+    pub fn local_with_graphics_and_encoding(
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+    ) -> Result<Self> {
         Ok(Self {
-            backend: Box::new(LocalPtySession::spawn_default(cols, rows)?),
+            backend: Box::new(LocalPtySession::spawn_with_graphics_and_encoding(
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+            )?),
         })
     }
 
     pub fn ssh(config: SshSessionConfig, cols: usize, rows: usize) -> Self {
+        Self::ssh_with_graphics_options(config, cols, rows, GraphicsOptions::default())
+    }
+
+    pub fn ssh_with_graphics_options(
+        config: SshSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+    ) -> Self {
+        Self::ssh_with_graphics_and_encoding(
+            config,
+            cols,
+            rows,
+            graphics_options,
+            TerminalEncoding::Utf8,
+        )
+    }
+
+    pub fn ssh_with_graphics_and_encoding(
+        config: SshSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+    ) -> Self {
         Self {
-            backend: Box::new(SshPtySession::new(config, cols, rows)),
+            backend: Box::new(SshPtySession::new(
+                config,
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+            )),
         }
     }
 
@@ -141,8 +199,20 @@ impl TerminalSession {
         self.backend.write_input(bytes)
     }
 
+    pub fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.backend.write_protocol_bytes(bytes)
+    }
+
+    pub fn write_text(&mut self, text: &str) -> Result<()> {
+        self.backend.write_text(text)
+    }
+
     pub fn paste_text(&mut self, text: &str) -> Result<()> {
         self.backend.paste_text(text)
+    }
+
+    pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
+        self.backend.set_encoding(encoding);
     }
 
     pub fn lifecycle(&self) -> TerminalLifecycle {
@@ -258,8 +328,20 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::write_input(self, bytes)
     }
 
+    fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        LocalPtySession::write_protocol_bytes(self, bytes)
+    }
+
+    fn write_text(&mut self, text: &str) -> Result<()> {
+        LocalPtySession::write_text(self, text)
+    }
+
     fn paste_text(&mut self, text: &str) -> Result<()> {
         LocalPtySession::paste_text(self, text)
+    }
+
+    fn set_encoding(&mut self, encoding: TerminalEncoding) {
+        LocalPtySession::set_encoding(self, encoding);
     }
 
     fn mode(&self) -> TermMode {
@@ -404,10 +486,20 @@ pub struct SshPtySession {
     output_queue: VecDeque<Vec<u8>>,
     output_queue_bytes: usize,
     magic_scan: MagicScanWindow,
+    encoding: TerminalEncoding,
+    output_decoder: TerminalOutputDecoder,
+    input_encoder: TerminalInputEncoder,
+    encoding_detector: EncodingMismatchDetector,
 }
 
 impl SshPtySession {
-    pub fn new(config: SshSessionConfig, cols: usize, rows: usize) -> Self {
+    pub fn new(
+        config: SshSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+    ) -> Self {
         let resize = TerminalResize::new(cols, rows, 0, 0);
         let size = TerminalSize {
             cols: resize.cols,
@@ -466,11 +558,15 @@ impl SshPtySession {
             connect_rx,
             handle: None,
             title: None,
-            graphics_ingress: GraphicsIngress::new(crate::GraphicsOptions::default()),
+            graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
             output_queue: VecDeque::new(),
             output_queue_bytes: 0,
             magic_scan: MagicScanWindow::default(),
+            encoding,
+            output_decoder: TerminalOutputDecoder::new(encoding),
+            input_encoder: TerminalInputEncoder::new(encoding),
+            encoding_detector: EncodingMismatchDetector::new(encoding),
         }
     }
 
@@ -497,7 +593,7 @@ impl SshPtySession {
             }
             Err(error) => {
                 self.lifecycle = TerminalLifecycle::Exited(None);
-                self.feed_transport_output(
+                self.feed_utf8_terminal_output(
                     format!("\r\nSSH connection failed: {error}\r\n").as_bytes(),
                 );
                 self.pending_events.push(TerminalEvent::ChildExited(None));
@@ -521,7 +617,11 @@ impl SshPtySession {
         let events = self.graphics_ingress.advance_with(
             bytes,
             |terminal_bytes| {
-                self.parser.advance(&mut *term, terminal_bytes);
+                if let Some(hint) = self.encoding_detector.observe(terminal_bytes) {
+                    self.pending_events.push(TerminalEvent::EncodingHint(hint));
+                }
+                let decoded = self.output_decoder.decode_to_utf8_bytes(terminal_bytes);
+                self.parser.advance(&mut *term, decoded.as_ref());
                 cursor.set(graphics_cursor_from_term(&term, size));
             },
             || cursor.get(),
@@ -529,9 +629,14 @@ impl SshPtySession {
         drop(term);
         for event in events {
             if let Some(response) = self.graphics.handle_event(event) {
-                let _ = self.write_input(&response);
+                let _ = self.write_protocol_bytes(&response);
             }
         }
+    }
+
+    fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
+        let mut term = self.term.lock();
+        self.parser.advance(&mut *term, bytes);
     }
 
     fn drain_transport_output(&mut self) -> TerminalDrainReport {
@@ -629,7 +734,7 @@ impl SshPtySession {
                 true
             }
             AlacEvent::PtyWrite(text) => {
-                let _ = self.write_input(text.as_bytes());
+                let _ = self.write_protocol_bytes(text.as_bytes());
                 false
             }
             AlacEvent::ClipboardStore(_, text) => {
@@ -723,20 +828,37 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
+        self.write_protocol_bytes(bytes)
+    }
+
+    fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.lifecycle.is_running() && !bytes.is_empty() {
             self.send_command(SshTransportCommand::Data(bytes.to_vec()))?;
         }
         Ok(())
     }
 
-    fn paste_text(&mut self, text: &str) -> Result<()> {
-        let paste_text = if self.mode().contains(TermMode::BRACKETED_PASTE) {
-            format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', ""))
-        } else {
-            normalize_paste_line_endings(text)
-        };
+    fn write_text(&mut self, text: &str) -> Result<()> {
+        let encoded = self.input_encoder.encode_text(text);
+        self.write_protocol_bytes(encoded.as_ref())
+    }
 
-        self.write_input(paste_text.as_bytes())
+    fn paste_text(&mut self, text: &str) -> Result<()> {
+        let bytes = self
+            .input_encoder
+            .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
+        self.write_protocol_bytes(&bytes)
+    }
+
+    fn set_encoding(&mut self, encoding: TerminalEncoding) {
+        if self.encoding == encoding {
+            return;
+        }
+        self.encoding = encoding;
+        self.output_decoder.set_encoding(encoding);
+        self.output_decoder.reset();
+        self.input_encoder.set_encoding(encoding);
+        self.encoding_detector.set_encoding(encoding);
     }
 
     fn mode(&self) -> TermMode {
@@ -751,7 +873,7 @@ impl TerminalSessionBackend for SshPtySession {
         };
 
         if let Some(report) = focus_report_sequence(should_report, focused) {
-            self.write_input(report)?;
+            self.write_protocol_bytes(report)?;
         }
 
         Ok(())
@@ -866,11 +988,11 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn terminate_active_task(&mut self) -> Result<()> {
-        self.write_input(b"\x03")
+        self.write_protocol_bytes(b"\x03")
     }
 
     fn kill_active_task(&mut self) -> Result<()> {
-        self.write_input(b"\x03")
+        self.write_protocol_bytes(b"\x03")
     }
 
     fn shutdown(&mut self) {

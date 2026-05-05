@@ -295,8 +295,15 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     sanitize_enum(
         &mut settings,
         &["appearance", "frostedGlass"],
-        &["off", "css", "native"],
+        &["off", "css", "native", "system", "mica", "acrylic"],
         "off",
+        &mut validation_warnings,
+    );
+    sanitize_enum(
+        &mut settings,
+        &["appearance", "renderProfile"],
+        &["auto", "quality", "low-power", "compatibility"],
+        "auto",
         &mut validation_warnings,
     );
     sanitize_enum(

@@ -375,7 +375,13 @@
       "frosted_glass_off": "オフ",
       "frosted_glass_css": "CSSぼかし",
       "frosted_glass_native": "ネイティブVibrancy",
-      "frosted_glass_native_hint": "ネイティブVibrancy（macOS/Windowsのみ）"
+      "frosted_glass_native_hint": "ネイティブVibrancy（macOS/Windowsのみ）",
+      "render_profile": "レンダリング構成",
+      "render_profile_hint": "弱い GPU や低電力向けに高コストのネイティブ効果を調整",
+      "render_profile_auto": "自動",
+      "render_profile_quality": "高品質",
+      "render_profile_low_power": "低電力",
+      "render_profile_compatibility": "互換モード"
     },
     "custom_theme": {
       "create": "新規テーマ",

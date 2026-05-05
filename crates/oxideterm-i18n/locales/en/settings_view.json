@@ -375,7 +375,13 @@
       "frosted_glass_off": "Off",
       "frosted_glass_css": "CSS Blur",
       "frosted_glass_native": "Native Vibrancy",
-      "frosted_glass_native_hint": "Native vibrancy (macOS/Windows only)"
+      "frosted_glass_native_hint": "Native vibrancy (macOS/Windows only)",
+      "render_profile": "Render Profile",
+      "render_profile_hint": "Adjust expensive native visuals for weak GPUs or low-power use",
+      "render_profile_auto": "Auto",
+      "render_profile_quality": "High Quality",
+      "render_profile_low_power": "Low Power",
+      "render_profile_compatibility": "Compatibility"
     },
     "custom_theme": {
       "create": "New Theme",

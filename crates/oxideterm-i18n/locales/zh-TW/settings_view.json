@@ -375,7 +375,13 @@
       "frosted_glass_off": "關閉",
       "frosted_glass_css": "CSS 模糊",
       "frosted_glass_native": "原生毛玻璃",
-      "frosted_glass_native_hint": "原生毛玻璃效果（僅 macOS/Windows）"
+      "frosted_glass_native_hint": "原生毛玻璃效果（僅 macOS/Windows）",
+      "render_profile": "渲染配置",
+      "render_profile_hint": "為弱 GPU 或低功耗場景調整高成本原生視覺效果",
+      "render_profile_auto": "自動",
+      "render_profile_quality": "高品質",
+      "render_profile_low_power": "低功耗",
+      "render_profile_compatibility": "相容模式"
     },
     "custom_theme": {
       "create": "新增主題",

@@ -14,6 +14,9 @@ use crate::{
     SwitchLocaleTraditionalChinese, SwitchLocaleVietnamese,
 };
 
+pub(crate) mod rendering;
+pub(crate) mod vibrancy;
+
 pub(crate) fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     let metrics = UiMetrics::tauri_default();
     WindowOptions {

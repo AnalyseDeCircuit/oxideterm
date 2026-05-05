@@ -375,7 +375,13 @@
       "frosted_glass_off": "Désactivé",
       "frosted_glass_css": "Flou CSS",
       "frosted_glass_native": "Vibrancy natif",
-      "frosted_glass_native_hint": "Vibrancy natif (macOS/Windows uniquement)"
+      "frosted_glass_native_hint": "Vibrancy natif (macOS/Windows uniquement)",
+      "render_profile": "Profil de rendu",
+      "render_profile_hint": "Ajuste les effets natifs coûteux pour GPU faibles ou basse consommation",
+      "render_profile_auto": "Auto",
+      "render_profile_quality": "Haute qualité",
+      "render_profile_low_power": "Économie d’énergie",
+      "render_profile_compatibility": "Compatibilité"
     },
     "custom_theme": {
       "create": "Nouveau thème",

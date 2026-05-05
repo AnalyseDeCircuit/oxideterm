@@ -5,9 +5,11 @@ members = [
   "crates/oxideterm-code-editor",
   "crates/oxideterm-i18n",
   "crates/oxideterm-native",
+  "crates/oxideterm-render-policy",
   "crates/oxideterm-settings",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
+  "crates/oxideterm-terminal-encoding",
   "crates/oxideterm-terminal-graphics",
   "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
@@ -28,6 +30,7 @@ anyhow = "1.0"
 base64 = "0.22"
 crossbeam-channel = "0.5"
 dashmap = "6.1"
+encoding_rs = "0.8"
 gpui = "=0.2.2"
 gpui-component = { version = "=0.5.1", default-features = false }
 icy_sixel = "0.5.0"
@@ -35,6 +38,7 @@ image = "0.25.10"
 libc = "0.2"
 parking_lot = "0.12"
 polling = "3.11"
+raw-window-handle = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 signature = "2"
@@ -45,4 +49,15 @@ tracing = "0.1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1.12"
 uuid = { version = "1.23", features = ["v4", "serde"] }
+windows = "0.61"
 zeroize = { version = "1.8", features = ["serde"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3
+
+[profile.dev]
+opt-level = 1

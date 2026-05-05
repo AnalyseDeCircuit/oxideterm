@@ -4,8 +4,8 @@ use gpui::{
 };
 use oxideterm_settings::{
     AdaptiveRendererMode, AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit,
-    ConflictAction, CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language,
-    PersistedSettings, TerminalEncoding, UiDensity, UpdateChannel,
+    ConflictAction, CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, IdeAgentMode,
+    Language, PersistedSettings, TerminalEncoding, UiDensity, UpdateChannel,
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 
@@ -64,6 +64,8 @@ pub(super) enum SettingsSelect {
     AppearanceTheme,
     AppearanceDensity,
     AppearanceAnimation,
+    AppearanceRenderProfile,
+    AppearanceFrostedGlass,
     AppearanceBackgroundFit,
     TerminalFontFamily,
     TerminalEncoding,
@@ -78,6 +80,8 @@ impl SettingsSelect {
             Self::AppearanceTheme => SelectAnchorId::SettingsAppearanceTheme,
             Self::AppearanceDensity => SelectAnchorId::SettingsAppearanceDensity,
             Self::AppearanceAnimation => SelectAnchorId::SettingsAppearanceAnimation,
+            Self::AppearanceRenderProfile => SelectAnchorId::SettingsAppearanceRenderProfile,
+            Self::AppearanceFrostedGlass => SelectAnchorId::SettingsAppearanceFrostedGlass,
             Self::AppearanceBackgroundFit => SelectAnchorId::SettingsAppearanceBackgroundFit,
             Self::TerminalFontFamily => SelectAnchorId::SettingsTerminalFontFamily,
             Self::TerminalEncoding => SelectAnchorId::SettingsTerminalEncoding,
@@ -419,6 +423,11 @@ impl WorkspaceApp {
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
         self.tokens = tokens_from_settings(&settings);
+        self.render_policy = compute_render_policy(
+            self.render_profile_override
+                .unwrap_or(settings.appearance.render_profile),
+            &self.detected_graphics,
+        );
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
         let terminal_preferences = self.terminal_preferences();
@@ -881,6 +890,55 @@ impl WorkspaceApp {
                                 this.open_settings_select = None;
                                 this.edit_settings(
                                     |settings| settings.appearance.animation_speed = speed,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Appearance, SettingsSelect::AppearanceRenderProfile) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &profile in render_profile_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            render_profile_label(profile, &self.i18n),
+                            profile == settings.appearance.render_profile,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.appearance.render_profile = profile,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &native_mode in crate::platform::vibrancy::available_modes() {
+                    let mode = frosted_glass_mode_from_native(native_mode);
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            frosted_glass_label(mode, &self.i18n),
+                            native_vibrancy_mode(settings.appearance.frosted_glass) == native_mode,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.appearance.frosted_glass = mode,
                                     cx,
                                 );
                                 cx.stop_propagation();
@@ -2080,6 +2138,26 @@ impl WorkspaceApp {
                     self.appearance_select_control(
                         SettingsSelect::AppearanceAnimation,
                         animation_label(settings.appearance.animation_speed, &self.i18n),
+                        self.tokens.metrics.settings_appearance_select_width,
+                        cx,
+                    ),
+                ),
+                self.appearance_row(
+                    "settings_view.appearance.render_profile",
+                    "settings_view.appearance.render_profile_hint",
+                    self.appearance_select_control(
+                        SettingsSelect::AppearanceRenderProfile,
+                        render_profile_label(settings.appearance.render_profile, &self.i18n),
+                        self.tokens.metrics.settings_appearance_select_width,
+                        cx,
+                    ),
+                ),
+                self.appearance_row(
+                    "settings_view.appearance.frosted_glass",
+                    "settings_view.appearance.frosted_glass_native_hint",
+                    self.appearance_select_control(
+                        SettingsSelect::AppearanceFrostedGlass,
+                        frosted_glass_label(settings.appearance.frosted_glass, &self.i18n),
                         self.tokens.metrics.settings_appearance_select_width,
                         cx,
                     ),
@@ -4193,6 +4271,50 @@ fn animation_label(speed: AnimationSpeed, i18n: &I18n) -> String {
         AnimationSpeed::Reduced => i18n.t("settings_view.appearance.animation_reduced"),
         AnimationSpeed::Normal => i18n.t("settings_view.appearance.animation_normal"),
         AnimationSpeed::Fast => i18n.t("settings_view.appearance.animation_fast"),
+    }
+}
+
+fn frosted_glass_mode_from_native(
+    mode: crate::platform::vibrancy::NativeVibrancyMode,
+) -> FrostedGlassMode {
+    match mode {
+        crate::platform::vibrancy::NativeVibrancyMode::Off => FrostedGlassMode::Off,
+        crate::platform::vibrancy::NativeVibrancyMode::System => FrostedGlassMode::System,
+        crate::platform::vibrancy::NativeVibrancyMode::Mica => FrostedGlassMode::Mica,
+        crate::platform::vibrancy::NativeVibrancyMode::Acrylic => FrostedGlassMode::Acrylic,
+    }
+}
+
+fn frosted_glass_label(mode: FrostedGlassMode, i18n: &I18n) -> String {
+    match mode {
+        FrostedGlassMode::Off | FrostedGlassMode::Css => {
+            i18n.t("settings_view.appearance.frosted_glass_off")
+        }
+        FrostedGlassMode::Native | FrostedGlassMode::System => {
+            i18n.t("settings_view.appearance.frosted_glass_native")
+        }
+        FrostedGlassMode::Mica => "Mica".to_string(),
+        FrostedGlassMode::Acrylic => "Acrylic".to_string(),
+    }
+}
+
+fn render_profile_options() -> &'static [RenderProfile] {
+    &[
+        RenderProfile::Auto,
+        RenderProfile::Quality,
+        RenderProfile::LowPower,
+        RenderProfile::Compatibility,
+    ]
+}
+
+fn render_profile_label(profile: RenderProfile, i18n: &I18n) -> String {
+    match profile {
+        RenderProfile::Auto => i18n.t("settings_view.appearance.render_profile_auto"),
+        RenderProfile::Quality => i18n.t("settings_view.appearance.render_profile_quality"),
+        RenderProfile::LowPower => i18n.t("settings_view.appearance.render_profile_low_power"),
+        RenderProfile::Compatibility => {
+            i18n.t("settings_view.appearance.render_profile_compatibility")
+        }
     }
 }
 

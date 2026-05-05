@@ -56,7 +56,7 @@ impl TerminalPane {
         if let Some(sequence) =
             oxideterm_key_escape_sequence(&event.keystroke, &mode, false, key_event_type)
         {
-            self.send_bytes(sequence.as_bytes(), cx);
+            self.send_protocol_bytes(sequence.as_bytes(), cx);
         }
     }
 
@@ -68,7 +68,7 @@ impl TerminalPane {
             false,
             KittyKeyEventType::Release,
         ) {
-            self.send_bytes(sequence.as_bytes(), cx);
+            self.send_protocol_bytes(sequence.as_bytes(), cx);
         }
     }
 
@@ -88,7 +88,7 @@ impl TerminalPane {
             let report_count = rows.unsigned_abs().max(1);
             if let Some(report) = mouse_scroll_report(point, event, mode) {
                 for _ in 0..report_count {
-                    self.send_bytes(&report, cx);
+                    self.send_protocol_bytes(&report, cx);
                 }
             }
             return;
@@ -98,7 +98,7 @@ impl TerminalPane {
             && !event.modifiers.shift
         {
             let bytes = alt_scroll(rows);
-            self.send_bytes(&bytes, cx);
+            self.send_protocol_bytes(&bytes, cx);
             return;
         }
 
@@ -420,7 +420,7 @@ impl TerminalPane {
             if let Some(report) =
                 mouse_button_report(point, event.button, event.modifiers, true, mode)
             {
-                self.send_bytes(&report, cx);
+                self.send_protocol_bytes(&report, cx);
             }
         } else {
             match event.click_count {
@@ -465,7 +465,7 @@ impl TerminalPane {
             if let Some(report) =
                 mouse_moved_report(point, event.pressed_button, event.modifiers, mode)
             {
-                self.send_bytes(&report, cx);
+                self.send_protocol_bytes(&report, cx);
             }
         } else if event.pressed_button == Some(MouseButton::Left) {
             self.update_selection(event.position, cx);
@@ -485,7 +485,7 @@ impl TerminalPane {
             if let Some(report) =
                 mouse_button_report(point, event.button, event.modifiers, false, mode)
             {
-                self.send_bytes(&report, cx);
+                self.send_protocol_bytes(&report, cx);
             }
         } else {
             self.finish_selection(event.position, cx);

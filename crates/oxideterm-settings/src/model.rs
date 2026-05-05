@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+pub use oxideterm_render_policy::RenderProfile;
+
 pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_TERMINAL_SCROLLBACK: i64 = 1000;
 pub const TERMINAL_SCROLLBACK_MIN: i64 = 500;
@@ -198,6 +200,9 @@ pub enum FrostedGlassMode {
     Off,
     Css,
     Native,
+    System,
+    Mica,
+    Acrylic,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -514,6 +519,7 @@ pub struct AppearanceSettings {
     pub ui_font_family: String,
     pub animation_speed: AnimationSpeed,
     pub frosted_glass: FrostedGlassMode,
+    pub render_profile: RenderProfile,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -527,6 +533,7 @@ impl Default for AppearanceSettings {
             ui_font_family: String::new(),
             animation_speed: AnimationSpeed::Normal,
             frosted_glass: FrostedGlassMode::Off,
+            render_profile: RenderProfile::Auto,
             extra: ExtraFields::new(),
         }
     }

@@ -61,10 +61,26 @@ fn main() {
 
             let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);
 
-            cx.open_window(platform::window_options(bounds), |window, cx| {
-                cx.new(|cx| WorkspaceApp::new(window, cx).expect("failed to initialize workspace"))
-            })
-            .expect("failed to open OxideTerm native window");
+            if let Err(err) = cx.open_window(platform::window_options(bounds), |window, cx| {
+                cx.new(|cx| {
+                    WorkspaceApp::new(window, cx).unwrap_or_else(|err| {
+                        panic!(
+                            "failed to initialize OxideTerm workspace: {err:#}\n\
+                             OxideTerm native uses GPUI's GPU-backed renderer. \
+                             To retry with lightweight visual effects, launch with \
+                             OXIDETERM_RENDER_PROFILE=compatibility."
+                        )
+                    })
+                })
+            }) {
+                eprintln!(
+                    "OxideTerm could not open a native GPUI window: {err:#}\n\
+                     GPUI 0.2.2 does not expose a CPU renderer fallback. \
+                     Try updating GPU drivers, disabling incompatible graphics layers, \
+                     or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
+                );
+                cx.quit();
+            }
         });
 }
 

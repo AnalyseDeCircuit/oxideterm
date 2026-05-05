@@ -375,7 +375,13 @@
       "frosted_glass_off": "Tắt",
       "frosted_glass_css": "Làm mờ CSS",
       "frosted_glass_native": "Vibrancy gốc",
-      "frosted_glass_native_hint": "Vibrancy gốc (chỉ macOS/Windows)"
+      "frosted_glass_native_hint": "Vibrancy gốc (chỉ macOS/Windows)",
+      "render_profile": "Cấu hình hiển thị",
+      "render_profile_hint": "Điều chỉnh hiệu ứng native tốn tài nguyên cho GPU yếu hoặc tiết kiệm pin",
+      "render_profile_auto": "Tự động",
+      "render_profile_quality": "Chất lượng cao",
+      "render_profile_low_power": "Tiết kiệm điện",
+      "render_profile_compatibility": "Tương thích"
     },
     "custom_theme": {
       "create": "Chủ đề mới",

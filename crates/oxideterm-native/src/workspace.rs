@@ -17,13 +17,19 @@ use gpui::{
 };
 use oxideterm_gpui_terminal::{TerminalPane, TerminalUiPreferences, TerminalUiTheme};
 use oxideterm_i18n::{I18n, Locale};
+use oxideterm_render_policy::{
+    DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
+};
 use oxideterm_settings::{
-    CursorStyle as SettingsCursorStyle, Language, PersistedSettings, SettingsStore,
+    CursorStyle as SettingsCursorStyle, FrostedGlassMode, Language, PersistedSettings,
+    SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
 };
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
 };
-use oxideterm_terminal::{SshSessionConfig, TerminalCursorShape};
+use oxideterm_terminal::{
+    SshSessionConfig, TerminalCursorShape, TerminalEncoding as SessionTerminalEncoding,
+};
 use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
 use oxideterm_workspace::{
     MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TerminalSessionId,
@@ -42,6 +48,8 @@ use self::settings::{
 };
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
+use crate::platform::rendering::detect_graphics;
+use crate::platform::vibrancy::{NativeVibrancyMode, apply_window_vibrancy};
 use crate::ui::select::{OverlayAnchor, SelectAnchorId};
 use crate::ui::text_input::{TextInputAnchor, TextInputAnchorId};
 use crate::{
@@ -90,6 +98,10 @@ pub(crate) struct WorkspaceApp {
     next_ssh_node_id: u64,
     i18n: I18n,
     tokens: ThemeTokens,
+    detected_graphics: DetectedGraphics,
+    render_profile_override: Option<RenderProfile>,
+    render_policy: EffectiveRenderPolicy,
+    applied_vibrancy_mode: NativeVibrancyMode,
     settings_store: SettingsStore,
 }
 
@@ -99,6 +111,12 @@ impl WorkspaceApp {
         let settings_store = SettingsStore::load_default()?;
         let settings = settings_store.settings().clone();
         let tokens = tokens_from_settings(&settings);
+        let detected_graphics = detect_graphics(window);
+        let render_profile_override = render_profile_from_env();
+        let render_policy = compute_render_policy(
+            render_profile_override.unwrap_or(settings.appearance.render_profile),
+            &detected_graphics,
+        );
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig {
             idle_timeout: Some(Duration::from_secs(
                 settings.connection_pool.idle_timeout_secs as u64,
@@ -107,6 +125,7 @@ impl WorkspaceApp {
         });
         let node_router = NodeRouter::new(ssh_registry.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
+        let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -146,8 +165,13 @@ impl WorkspaceApp {
             next_ssh_node_id: 1,
             i18n: I18n::new(locale_from_settings(settings.general.language)),
             tokens,
+            detected_graphics,
+            render_profile_override,
+            render_policy,
+            applied_vibrancy_mode: initial_vibrancy_mode,
             settings_store,
         };
+        let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window
             .window_handle()
             .downcast::<Self>()
@@ -197,12 +221,27 @@ impl WorkspaceApp {
             cursor_blink: terminal.cursor_blink,
             copy_on_select: terminal.copy_on_select,
             bidi_enabled: terminal.unicode.bidi_enabled,
+            terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
+            render_policy: self.render_policy.clone(),
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,
                 self.tokens.terminal.foreground,
                 self.tokens.terminal.cursor,
             ),
         }
+    }
+}
+
+fn session_terminal_encoding(encoding: SettingsTerminalEncoding) -> SessionTerminalEncoding {
+    match encoding {
+        SettingsTerminalEncoding::Utf8 => SessionTerminalEncoding::Utf8,
+        SettingsTerminalEncoding::Gbk => SessionTerminalEncoding::Gbk,
+        SettingsTerminalEncoding::Gb18030 => SessionTerminalEncoding::Gb18030,
+        SettingsTerminalEncoding::Big5 => SessionTerminalEncoding::Big5,
+        SettingsTerminalEncoding::ShiftJis => SessionTerminalEncoding::ShiftJis,
+        SettingsTerminalEncoding::EucJp => SessionTerminalEncoding::EucJp,
+        SettingsTerminalEncoding::EucKr => SessionTerminalEncoding::EucKr,
+        SettingsTerminalEncoding::Windows1252 => SessionTerminalEncoding::Windows1252,
     }
 }
 
@@ -251,6 +290,51 @@ fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
     tokens
 }
 
+fn native_vibrancy_mode(mode: FrostedGlassMode) -> NativeVibrancyMode {
+    match mode {
+        FrostedGlassMode::Off | FrostedGlassMode::Css => NativeVibrancyMode::Off,
+        FrostedGlassMode::Native | FrostedGlassMode::System => NativeVibrancyMode::System,
+        FrostedGlassMode::Mica => NativeVibrancyMode::Mica,
+        FrostedGlassMode::Acrylic => NativeVibrancyMode::Acrylic,
+    }
+}
+
+fn effective_vibrancy_mode(
+    settings: &PersistedSettings,
+    policy: &EffectiveRenderPolicy,
+) -> NativeVibrancyMode {
+    if policy.allow_vibrancy {
+        native_vibrancy_mode(settings.appearance.frosted_glass)
+    } else {
+        NativeVibrancyMode::Off
+    }
+}
+
+fn render_profile_from_env() -> Option<RenderProfile> {
+    let value = std::env::var("OXIDETERM_RENDER_PROFILE").ok()?;
+    let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+    match normalized.as_str() {
+        "auto" => Some(RenderProfile::Auto),
+        "quality" | "high-quality" | "high" => Some(RenderProfile::Quality),
+        "low-power" | "lowpower" | "low" => Some(RenderProfile::LowPower),
+        "compatibility" | "compat" | "safe" | "safe-mode" => Some(RenderProfile::Compatibility),
+        _ => None,
+    }
+}
+
+fn workspace_background(tokens: &ThemeTokens, mode: NativeVibrancyMode) -> Rgba {
+    match mode {
+        NativeVibrancyMode::Off => rgb(tokens.ui.bg),
+        NativeVibrancyMode::System | NativeVibrancyMode::Mica | NativeVibrancyMode::Acrylic => {
+            rgba((tokens.ui.bg << 8) | alpha_byte(tokens.metrics.window_vibrancy_tint_alpha))
+        }
+    }
+}
+
+fn alpha_byte(alpha: f32) -> u32 {
+    (alpha.clamp(0.0, 1.0) * 255.0).round() as u32
+}
+
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -265,6 +349,12 @@ impl Render for WorkspaceApp {
             .map(|tab| tab.title.clone())
             .unwrap_or_else(|| "OxideTerm".to_string());
         window.set_window_title(&SharedString::from(title));
+        let vibrancy_mode =
+            effective_vibrancy_mode(self.settings_store.settings(), &self.render_policy);
+        if self.applied_vibrancy_mode != vibrancy_mode {
+            let _ = apply_window_vibrancy(window, vibrancy_mode);
+            self.applied_vibrancy_mode = vibrancy_mode;
+        }
         if self.needs_active_pane_focus
             && self
                 .active_tab()
@@ -294,7 +384,7 @@ impl Render for WorkspaceApp {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(workspace_background(&self.tokens, vibrancy_mode))
             .text_color(rgb(self.tokens.ui.text))
             .font_family(SharedString::from(self.tokens.metrics.font_family))
             .track_focus(&self.focus_handle)

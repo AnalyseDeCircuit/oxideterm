@@ -4,7 +4,10 @@ use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
     Window, px, rgb,
 };
-use oxideterm_terminal::{TerminalCursorShape, TerminalLifecycle, TerminalProcessInfo};
+use oxideterm_render_policy::EffectiveRenderPolicy;
+use oxideterm_terminal::{
+    TerminalCursorShape, TerminalEncoding, TerminalLifecycle, TerminalProcessInfo,
+};
 
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
@@ -32,7 +35,9 @@ pub struct TerminalUiPreferences {
     pub cursor_blink: bool,
     pub copy_on_select: bool,
     pub bidi_enabled: bool,
+    pub terminal_encoding: TerminalEncoding,
     pub theme: TerminalUiTheme,
+    pub render_policy: EffectiveRenderPolicy,
 }
 
 impl Default for TerminalUiPreferences {
@@ -45,7 +50,9 @@ impl Default for TerminalUiPreferences {
             cursor_blink: true,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
+            terminal_encoding: TerminalEncoding::Utf8,
             theme: TerminalUiTheme::default(),
+            render_policy: EffectiveRenderPolicy::quality(),
         }
     }
 }

@@ -39,18 +39,28 @@ impl Default for ImageRenderCache {
 }
 
 impl ImageRenderCache {
+    pub(crate) fn set_byte_limit(&mut self, byte_limit: usize) {
+        self.byte_limit = byte_limit;
+        self.evict_over_budget();
+    }
+
     pub(crate) fn render_images(
         &mut self,
         images: &[TerminalImageSnapshot],
+        decode_images: bool,
     ) -> Vec<TerminalRenderedImage> {
         images
             .iter()
             .cloned()
             .map(|snapshot| {
-                let render_image = snapshot
-                    .data
-                    .as_ref()
-                    .and_then(|data| self.image_for_snapshot(&snapshot, data.rgba.len()));
+                let render_image = if decode_images {
+                    snapshot
+                        .data
+                        .as_ref()
+                        .and_then(|data| self.image_for_snapshot(&snapshot, data.rgba.len()))
+                } else {
+                    None
+                };
                 TerminalRenderedImage {
                     snapshot,
                     render_image,
@@ -146,8 +156,8 @@ mod tests {
             }),
         };
 
-        let first = cache.render_images(std::slice::from_ref(&snapshot));
-        let second = cache.render_images(std::slice::from_ref(&snapshot));
+        let first = cache.render_images(std::slice::from_ref(&snapshot), true);
+        let second = cache.render_images(std::slice::from_ref(&snapshot), true);
 
         let first = first[0].render_image.as_ref().unwrap();
         let second = second[0].render_image.as_ref().unwrap();
@@ -179,7 +189,7 @@ mod tests {
             }),
         };
 
-        let rendered = cache.render_images(&[snapshot]);
+        let rendered = cache.render_images(&[snapshot], true);
         let image = rendered[0].render_image.as_ref().unwrap();
 
         assert_eq!(image.as_bytes(0), Some([0, 0, 255, 255].as_slice()));
@@ -190,5 +200,36 @@ mod tests {
         let pixels = gpui_render_image_pixels_from_protocol_rgba(vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
         assert_eq!(pixels, vec![3, 2, 1, 4, 7, 6, 5, 8]);
+    }
+
+    #[test]
+    fn render_cache_can_suppress_decode_for_compatibility_mode() {
+        let mut cache = ImageRenderCache::default();
+        let snapshot = TerminalImageSnapshot {
+            id: TerminalImageId(11),
+            protocol: TerminalImageProtocol::Kitty,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            placeholder: true,
+            version: 1,
+            data: Some(TerminalImageData {
+                id: TerminalImageId(11),
+                protocol: TerminalImageProtocol::Kitty,
+                version: 1,
+                width: 1,
+                height: 1,
+                rgba: vec![255, 0, 0, 255].into(),
+                name: None,
+            }),
+        };
+
+        let rendered = cache.render_images(&[snapshot], false);
+
+        assert!(rendered[0].render_image.is_none());
+        assert!(cache.entries.is_empty());
     }
 }

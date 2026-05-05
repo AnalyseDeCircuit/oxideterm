@@ -5841,6 +5841,7 @@ dependencies = [
  "anyhow",
  "gpui",
  "image",
+ "oxideterm-render-policy",
  "oxideterm-terminal",
  "oxideterm-terminal-unicode",
  "parking_lot",
@@ -5861,13 +5862,23 @@ dependencies = [
  "gpui",
  "oxideterm-gpui-terminal",
  "oxideterm-i18n",
+ "oxideterm-render-policy",
  "oxideterm-settings",
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-theme",
  "oxideterm-workspace",
  "parking_lot",
+ "raw-window-handle",
  "tokio",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "oxideterm-render-policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -5875,6 +5886,7 @@ name = "oxideterm-settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "oxideterm-render-policy",
  "serde",
  "serde_json",
  "tempfile",
@@ -5905,10 +5917,18 @@ dependencies = [
  "crossbeam-channel",
  "libc",
  "oxideterm-ssh",
+ "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",
  "polling",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "oxideterm-terminal-encoding"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
 ]
 
 [[package]]

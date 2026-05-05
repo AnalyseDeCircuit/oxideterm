@@ -18,7 +18,13 @@ impl Render for TerminalPane {
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let mut snapshot = self.snapshot.clone();
         snapshot.cursor_shape = self.preferences.cursor_shape;
-        let rendered_images = self.image_cache.render_images(&snapshot.images);
+        let rendered_images = self.image_cache.render_images(
+            &snapshot.images,
+            self.preferences
+                .render_policy
+                .terminal_graphics
+                .decode_images,
+        );
 
         let (lifecycle, process_info) = {
             let terminal = self.terminal.lock();

@@ -19,6 +19,7 @@ use alacritty_terminal::{
 };
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use oxideterm_terminal_encoding::{EncodingHint, TerminalInputEncoder};
 use oxideterm_terminal_graphics::{
     DEFAULT_STORAGE_LIMIT_MB, GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement,
 };
@@ -36,6 +37,10 @@ pub use data::{
     GraphicsOptions, TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape,
     TerminalImageData, TerminalImageId, TerminalImageProtocol, TerminalImageSnapshot, TerminalRow,
     TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
+};
+pub use oxideterm_terminal_encoding::{
+    EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,
+    TerminalInputEncoder as RawTerminalInputEncoder, TerminalOutputDecoder,
 };
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
 pub use session::{
@@ -74,6 +79,7 @@ pub enum TerminalEvent {
     BlinkChanged(bool),
     ChildExited(Option<i32>),
     MagicDetected(TerminalMagicKind),
+    EncodingHint(EncodingHint),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),
 }
@@ -275,6 +281,7 @@ pub struct LocalPtySession {
     event_rx: Receiver<AlacEvent>,
     graphics_rx: Receiver<TerminalGraphicsEvent>,
     magic_rx: Receiver<TerminalMagicKind>,
+    terminal_event_rx: Receiver<TerminalEvent>,
     stats_rx: Receiver<LocalPtyReadReport>,
     pending_events: Vec<TerminalEvent>,
     io_thread: Option<JoinHandle<()>>,
@@ -283,12 +290,36 @@ pub struct LocalPtySession {
     lifecycle: TerminalLifecycle,
     process: ProcessState,
     graphics: TerminalGraphicsState,
+    encoding: TerminalEncoding,
+    input_encoder: TerminalInputEncoder,
 }
 
 pub type LocalTerminal = LocalPtySession;
 
 impl LocalPtySession {
     pub fn spawn_default(cols: usize, rows: usize) -> Result<Self> {
+        Self::spawn_with_graphics_and_encoding(
+            cols,
+            rows,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+        )
+    }
+
+    pub fn spawn_with_graphics_options(
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+    ) -> Result<Self> {
+        Self::spawn_with_graphics_and_encoding(cols, rows, graphics_options, TerminalEncoding::Utf8)
+    }
+
+    pub fn spawn_with_graphics_and_encoding(
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+    ) -> Result<Self> {
         let size = TerminalSize {
             cols: cols.max(2),
             rows: rows.max(2),
@@ -307,6 +338,7 @@ impl LocalPtySession {
         let (event_tx, event_rx) = unbounded();
         let (graphics_tx, graphics_rx) = unbounded();
         let (magic_tx, magic_rx) = unbounded();
+        let (terminal_event_tx, terminal_event_rx) = unbounded();
         let (stats_tx, stats_rx) = unbounded();
 
         let mut config = Config::default();
@@ -341,9 +373,11 @@ impl LocalPtySession {
             true,
             graphics_tx,
             magic_tx,
+            terminal_event_tx,
             stats_tx,
             size,
-            GraphicsOptions::default(),
+            graphics_options,
+            encoding,
         )
         .context("failed to create terminal event loop")?;
         let pty_tx = event_loop.channel();
@@ -356,6 +390,7 @@ impl LocalPtySession {
             event_rx,
             graphics_rx,
             magic_rx,
+            terminal_event_rx,
             stats_rx,
             pending_events: Vec::new(),
             io_thread: Some(io_thread),
@@ -364,6 +399,8 @@ impl LocalPtySession {
             lifecycle: TerminalLifecycle::Running,
             process,
             graphics: TerminalGraphicsState::default(),
+            encoding,
+            input_encoder: TerminalInputEncoder::new(encoding),
         })
     }
 
@@ -401,7 +438,7 @@ impl LocalPtySession {
             };
             report.events_drained += 1;
             if let Some(response) = self.graphics.handle_event(event) {
-                let _ = self.write_input(&response);
+                let _ = self.write_protocol_bytes(&response);
             }
             changed = true;
         }
@@ -414,11 +451,20 @@ impl LocalPtySession {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
 
+        while report.events_drained < budget.max_events {
+            let Ok(event) = self.terminal_event_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
+            self.pending_events.push(event);
+        }
+
         report.changed = changed;
         report.budget_exhausted |= report.events_drained >= budget.max_events
             && (!self.event_rx.is_empty()
                 || !self.graphics_rx.is_empty()
                 || !self.magic_rx.is_empty()
+                || !self.terminal_event_rx.is_empty()
                 || !self.stats_rx.is_empty());
         report.drain_duration = started.elapsed();
         report
@@ -429,10 +475,31 @@ impl LocalPtySession {
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
+        self.write_protocol_bytes(bytes)
+    }
+
+    pub fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.lifecycle.is_running() && !bytes.is_empty() {
             self.notifier.notify(Cow::Owned(bytes.to_vec()));
         }
         Ok(())
+    }
+
+    pub fn write_text(&mut self, text: &str) -> Result<()> {
+        let encoded = self.input_encoder.encode_text(text);
+        self.write_protocol_bytes(encoded.as_ref())
+    }
+
+    pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
+        if self.encoding == encoding {
+            return;
+        }
+        self.encoding = encoding;
+        self.input_encoder.set_encoding(encoding);
+        let _ = self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::SetEncoding(encoding));
     }
 
     pub fn lifecycle(&self) -> TerminalLifecycle {
@@ -469,13 +536,10 @@ impl LocalPtySession {
     }
 
     pub fn paste_text(&mut self, text: &str) -> Result<()> {
-        let paste_text = if self.mode().contains(TermMode::BRACKETED_PASTE) {
-            format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', ""))
-        } else {
-            normalize_paste_line_endings(text)
-        };
-
-        self.write_input(paste_text.as_bytes())
+        let bytes = self
+            .input_encoder
+            .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
+        self.write_protocol_bytes(&bytes)
     }
 
     pub fn mode(&self) -> TermMode {
@@ -490,7 +554,7 @@ impl LocalPtySession {
         };
 
         if let Some(report) = focus_report_sequence(should_report, focused) {
-            self.write_input(report)?;
+            self.write_protocol_bytes(report)?;
         }
 
         Ok(())
@@ -523,7 +587,7 @@ impl LocalPtySession {
                 true
             }
             AlacEvent::PtyWrite(text) => {
-                let _ = self.write_input(text.as_bytes());
+                let _ = self.write_protocol_bytes(text.as_bytes());
                 false
             }
             AlacEvent::ClipboardStore(_, text) => {
@@ -541,12 +605,12 @@ impl LocalPtySession {
                     .then(|| self.term.lock().colors()[index])
                     .flatten();
                 let color = color_for_alacritty_request_with_override(index, override_color);
-                let _ = self.write_input(formatter(color).as_bytes());
+                let _ = self.write_protocol_bytes(formatter(color).as_bytes());
                 false
             }
             AlacEvent::TextAreaSizeRequest(formatter) => {
                 let response = formatter(window_size(self.size));
-                let _ = self.write_input(response.as_bytes());
+                let _ = self.write_protocol_bytes(response.as_bytes());
                 false
             }
             AlacEvent::ChildExit(status) => {
@@ -714,24 +778,6 @@ impl LocalPtySession {
         let term = self.term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)
     }
-}
-
-fn normalize_paste_line_endings(text: &str) -> String {
-    let mut normalized = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\r' => {
-                normalized.push('\r');
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-            }
-            '\n' => normalized.push('\r'),
-            _ => normalized.push(ch),
-        }
-    }
-    normalized
 }
 
 pub(crate) fn snapshot_from_term<T: EventListener>(

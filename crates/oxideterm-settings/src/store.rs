@@ -232,7 +232,7 @@ mod tests {
     use crate::{
         APP_LANG_KEY, CUSTOM_THEMES_KEY, KEYBINDINGS_KEY, LAUNCHER_ENABLED_KEY,
         LEGACY_FOCUSED_NODE_KEY, LEGACY_TREE_EXPANDED_KEY, LEGACY_UI_STATE_KEY,
-        NEW_CONNECTION_SAVE_KEY, SETTINGS_STORAGE_KEY,
+        NEW_CONNECTION_SAVE_KEY, RenderProfile, SETTINGS_STORAGE_KEY,
         model::{FontFamily, Language, RendererType},
     };
 
@@ -249,6 +249,7 @@ mod tests {
         assert_eq!(settings.terminal.renderer, RendererType::default());
         assert_eq!(settings.buffer.max_lines, 8000);
         assert_eq!(settings.appearance.border_radius, 6);
+        assert_eq!(settings.appearance.render_profile, RenderProfile::Auto);
         assert_eq!(settings.connection_defaults.username, "root");
         assert_eq!(settings.sidebar_ui.width, 300);
         assert_eq!(settings.connection_pool.idle_timeout_secs, 1800);
@@ -266,6 +267,7 @@ mod tests {
         );
         assert_eq!(value["terminal"]["terminalEncoding"], "utf-8");
         assert_eq!(value["appearance"]["uiDensity"], "comfortable");
+        assert_eq!(value["appearance"]["renderProfile"], "auto");
         assert_eq!(value["sftp"]["conflictAction"], "ask");
     }
 

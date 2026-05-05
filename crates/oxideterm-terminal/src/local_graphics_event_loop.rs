@@ -29,11 +29,14 @@ use alacritty_terminal::{
     vte::ansi,
 };
 use crossbeam_channel::Sender as CrossbeamSender;
+use oxideterm_terminal_encoding::{
+    EncodingMismatchDetector, TerminalEncoding, TerminalOutputDecoder,
+};
 use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGraphicsEvent};
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
 use crate::{
-    TerminalSize,
+    TerminalEvent, TerminalSize,
     backpressure::{
         LOCAL_MAX_LOCKED_PARSE_BYTES, LOCAL_PTY_READ_BUFFER_BYTES, MagicScanWindow,
         TerminalMagicKind, Utf8ResidualGuard,
@@ -51,6 +54,7 @@ pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
     Shutdown,
     Resize(WindowSize),
+    SetEncoding(TerminalEncoding),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -70,9 +74,11 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     drain_on_exit: bool,
     graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
     magic_tx: CrossbeamSender<TerminalMagicKind>,
+    event_tx: CrossbeamSender<TerminalEvent>,
     stats_tx: CrossbeamSender<LocalPtyReadReport>,
     size: TerminalSize,
     graphics_options: GraphicsOptions,
+    encoding: TerminalEncoding,
 }
 
 impl<U> LocalGraphicsEventLoop<U>
@@ -86,9 +92,11 @@ where
         drain_on_exit: bool,
         graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
         magic_tx: CrossbeamSender<TerminalMagicKind>,
+        terminal_event_tx: CrossbeamSender<TerminalEvent>,
         stats_tx: CrossbeamSender<LocalPtyReadReport>,
         size: TerminalSize,
         graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
         Ok(Self {
@@ -101,9 +109,11 @@ where
             drain_on_exit,
             graphics_tx,
             magic_tx,
+            event_tx: terminal_event_tx,
             stats_tx,
             size,
             graphics_options,
+            encoding,
         })
     }
 
@@ -113,6 +123,7 @@ where
         bytes: &[u8],
         size: TerminalSize,
         magic_tx: &CrossbeamSender<TerminalMagicKind>,
+        event_tx: &CrossbeamSender<TerminalEvent>,
         graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
     ) -> (usize, bool) {
         for kind in state.magic_scan.scan(bytes) {
@@ -124,8 +135,12 @@ where
         let events = state.graphics.advance_with(
             bytes,
             |terminal_bytes| {
+                if let Some(hint) = state.encoding_detector.observe(terminal_bytes) {
+                    let _ = event_tx.send(TerminalEvent::EncodingHint(hint));
+                }
+                let decoded = state.output_decoder.decode_to_utf8_bytes(terminal_bytes);
                 parsed_bytes += terminal_bytes.len();
-                state.parser.advance(terminal, terminal_bytes);
+                state.parser.advance(terminal, decoded.as_ref());
                 cursor.set(graphics_cursor_from_term(terminal, size));
             },
             || cursor.get(),
@@ -166,6 +181,9 @@ where
                         cell_height: window_size.cell_height,
                     };
                     self.pty.on_resize(window_size);
+                }
+                LocalGraphicsMsg::SetEncoding(encoding) => {
+                    state.set_encoding(encoding);
                 }
                 LocalGraphicsMsg::Shutdown => return false,
             }
@@ -220,6 +238,7 @@ where
                     &guarded,
                     self.size,
                     &self.magic_tx,
+                    &self.event_tx,
                     &self.graphics_tx,
                 );
                 parsed_bytes = bytes;
@@ -265,6 +284,7 @@ where
         let size = self.size;
         let magic_tx = self.magic_tx.clone();
         let graphics_tx = self.graphics_tx.clone();
+        let event_tx = self.event_tx.clone();
         let mut terminal = self.terminal.lock_unfair();
         let (processed, graphics_changed) = Self::advance_guarded_bytes(
             state,
@@ -272,6 +292,7 @@ where
             &residual,
             size,
             &magic_tx,
+            &event_tx,
             &graphics_tx,
         );
         drop(terminal);
@@ -326,7 +347,8 @@ where
         std::thread::Builder::new()
             .name("OxideTerm PTY graphics reader".to_string())
             .spawn(move || {
-                let mut state = LocalGraphicsState::new(self.graphics_options.clone());
+                let mut state =
+                    LocalGraphicsState::new(self.graphics_options.clone(), self.encoding);
                 let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
                 let mut interest = PollingEvent::readable(0);
@@ -518,10 +540,12 @@ struct LocalGraphicsState {
     graphics: GraphicsIngress,
     utf8_guard: Utf8ResidualGuard,
     magic_scan: MagicScanWindow,
+    output_decoder: TerminalOutputDecoder,
+    encoding_detector: EncodingMismatchDetector,
 }
 
 impl LocalGraphicsState {
-    fn new(graphics_options: GraphicsOptions) -> Self {
+    fn new(graphics_options: GraphicsOptions, encoding: TerminalEncoding) -> Self {
         Self {
             write_list: VecDeque::new(),
             writing: None,
@@ -529,7 +553,15 @@ impl LocalGraphicsState {
             graphics: GraphicsIngress::new(graphics_options),
             utf8_guard: Utf8ResidualGuard::default(),
             magic_scan: MagicScanWindow::default(),
+            output_decoder: TerminalOutputDecoder::new(encoding),
+            encoding_detector: EncodingMismatchDetector::new(encoding),
         }
+    }
+
+    fn set_encoding(&mut self, encoding: TerminalEncoding) {
+        self.output_decoder.set_encoding(encoding);
+        self.output_decoder.reset();
+        self.encoding_detector.set_encoding(encoding);
     }
 
     fn ensure_next(&mut self) {

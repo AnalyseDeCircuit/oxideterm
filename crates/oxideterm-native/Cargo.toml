@@ -9,6 +9,7 @@ anyhow.workspace = true
 gpui.workspace = true
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
@@ -16,6 +17,10 @@ oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 parking_lot.workspace = true
 tokio.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [package.metadata.bundle]
 identifier = "com.analysecircuit.OxideTerm"
