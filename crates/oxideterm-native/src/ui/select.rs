@@ -9,6 +9,14 @@ use oxideterm_theme::ThemeTokens;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum SelectAnchorId {
     SettingsLanguage,
+    SettingsAppearanceTheme,
+    SettingsAppearanceDensity,
+    SettingsAppearanceBorderRadiusSlider,
+    SettingsAppearanceAnimation,
+    SettingsAppearanceFrostedGlass,
+    SettingsAppearanceBackgroundOpacitySlider,
+    SettingsAppearanceBackgroundBlurSlider,
+    SettingsAppearanceBackgroundFit,
     SettingsTerminalFontFamily,
     SettingsTerminalFontSizeSlider,
     SettingsTerminalEncoding,

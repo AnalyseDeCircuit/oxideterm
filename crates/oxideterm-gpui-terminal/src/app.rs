@@ -10,7 +10,8 @@ use gpui::{
     px,
 };
 use oxideterm_terminal::{
-    SshSessionConfig, TermMode, TerminalEvent, TerminalSession, TerminalSnapshot,
+    SshSessionConfig, TermMode, TerminalDrainBudget, TerminalEvent, TerminalSession,
+    TerminalSnapshot,
 };
 use parking_lot::Mutex;
 
@@ -52,6 +53,8 @@ pub struct TerminalPane {
     cursor_visible: bool,
     cursor_blink_terminal_enabled: bool,
     last_cursor_blink: Instant,
+    last_terminal_input: Instant,
+    last_drain_budget_exhausted: bool,
     image_cache: ImageRenderCache,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
@@ -159,6 +162,8 @@ impl TerminalPane {
             cursor_visible: true,
             cursor_blink_terminal_enabled: false,
             last_cursor_blink: Instant::now(),
+            last_terminal_input: Instant::now(),
+            last_drain_budget_exhausted: false,
             image_cache: ImageRenderCache::default(),
             bounds: None,
             last_pty_resize: None,
@@ -217,29 +222,42 @@ impl TerminalPane {
             && self.terminal_accepts_input()
             && self.terminal.lock().paste_text(&text).is_ok()
         {
+            self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
         }
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
-        let (changed, events) = {
+        let budget = self.next_drain_budget();
+        let (report, events) = {
             let mut terminal = self.terminal.lock();
             terminal.refresh_process_info();
-            let changed = terminal.read_pending();
-            (changed, terminal.take_events())
+            let report = terminal.read_pending_with_budget(budget);
+            (report, terminal.take_events())
         };
+        self.last_drain_budget_exhausted = report.budget_exhausted;
 
         for event in events {
             self.handle_terminal_event(event, cx);
         }
 
-        if changed {
+        if report.changed {
             self.snapshot = self.terminal.lock().snapshot();
             cx.notify();
         }
 
         self.update_cursor_blink(cx);
+    }
+
+    fn next_drain_budget(&self) -> TerminalDrainBudget {
+        if self.last_drain_budget_exhausted {
+            TerminalDrainBudget::throughput()
+        } else if self.last_terminal_input.elapsed() <= Duration::from_millis(220) {
+            TerminalDrainBudget::interactive()
+        } else {
+            TerminalDrainBudget::normal()
+        }
     }
 
     fn handle_terminal_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
@@ -280,6 +298,9 @@ impl TerminalPane {
                 };
                 cx.notify();
             }
+            TerminalEvent::MagicDetected(kind) => {
+                let _ = kind;
+            }
             TerminalEvent::ClipboardStore(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
             }
@@ -305,6 +326,7 @@ impl TerminalPane {
         }
 
         if self.terminal.lock().write_input(bytes).is_ok() {
+            self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
         }

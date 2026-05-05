@@ -1,4 +1,4 @@
-use std::{cell::Cell, sync::Arc};
+use std::{cell::Cell, collections::VecDeque, sync::Arc, time::Instant};
 
 use alacritty_terminal::{
     event::Event as AlacEvent,
@@ -15,13 +15,16 @@ use oxideterm_ssh::{
 };
 use oxideterm_terminal_graphics::GraphicsIngress;
 use tokio::runtime::Runtime;
-use tokio::sync::broadcast::error::TryRecvError;
+use tokio::sync::mpsc::error::TryRecvError;
+
+pub use crate::backpressure::{TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind};
 
 use crate::{
     LocalEventListener, LocalPtySession, TermMode, TerminalEvent, TerminalGraphicsState,
     TerminalLifecycle, TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
-    append_grid_line_text, focus_report_sequence, graphics_cursor_from_term,
-    normalize_paste_line_endings, search_logical_line_matches, snapshot_from_term,
+    append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
+    graphics_cursor_from_term, normalize_paste_line_endings, search_logical_line_matches,
+    snapshot_from_term,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,6 +67,7 @@ pub trait TerminalSessionBackend: Send {
     fn process_info(&self) -> TerminalProcessInfo;
     fn refresh_process_info(&mut self);
     fn read_pending(&mut self) -> bool;
+    fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport;
     fn take_events(&mut self) -> Vec<TerminalEvent>;
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;
@@ -123,6 +127,10 @@ impl TerminalSession {
 
     pub fn read_pending(&mut self) -> bool {
         self.backend.read_pending()
+    }
+
+    pub fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+        self.backend.read_pending_with_budget(budget)
     }
 
     pub fn take_events(&mut self) -> Vec<TerminalEvent> {
@@ -236,6 +244,10 @@ impl TerminalSessionBackend for LocalPtySession {
 
     fn read_pending(&mut self) -> bool {
         self.drain_output()
+    }
+
+    fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+        LocalPtySession::drain_output_with_budget(self, budget)
     }
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {
@@ -389,6 +401,9 @@ pub struct SshPtySession {
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    output_queue: VecDeque<Vec<u8>>,
+    output_queue_bytes: usize,
+    magic_scan: MagicScanWindow,
 }
 
 impl SshPtySession {
@@ -453,6 +468,9 @@ impl SshPtySession {
             title: None,
             graphics_ingress: GraphicsIngress::new(crate::GraphicsOptions::default()),
             graphics: TerminalGraphicsState::default(),
+            output_queue: VecDeque::new(),
+            output_queue_bytes: 0,
+            magic_scan: MagicScanWindow::default(),
         }
     }
 
@@ -489,6 +507,9 @@ impl SshPtySession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
+        for kind in self.magic_scan.scan(bytes) {
+            self.pending_events.push(TerminalEvent::MagicDetected(kind));
+        }
         let mut term = self.term.lock();
         let size = TerminalSize {
             cols: self.resize.cols,
@@ -513,32 +534,71 @@ impl SshPtySession {
         }
     }
 
-    fn drain_transport_output(&mut self) -> bool {
-        let mut changed = false;
+    fn drain_transport_output(&mut self) -> TerminalDrainReport {
+        self.drain_transport_output_with_budget(TerminalDrainBudget::unlimited())
+    }
+
+    fn drain_transport_output_with_budget(
+        &mut self,
+        budget: TerminalDrainBudget,
+    ) -> TerminalDrainReport {
+        let started = Instant::now();
+        let mut report = TerminalDrainReport::default();
         loop {
+            if report.drained_bytes >= budget.max_bytes
+                || report.events_drained >= budget.max_events
+            {
+                report.budget_exhausted = !self.output_queue.is_empty();
+                break;
+            }
+
+            if let Some(bytes) = self.output_queue.pop_front() {
+                self.output_queue_bytes = self.output_queue_bytes.saturating_sub(bytes.len());
+                report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
+                report.events_drained += 1;
+                self.feed_transport_output(&bytes);
+                report.mark_changed();
+                continue;
+            }
+
             let result = {
                 let Some(handle) = self.handle.as_mut() else {
-                    return changed;
+                    break;
                 };
                 handle.output_rx.try_recv()
             };
 
             match result {
                 Ok(bytes) => {
+                    if report.drained_bytes > 0
+                        && report.drained_bytes.saturating_add(bytes.len()) > budget.max_bytes
+                    {
+                        self.output_queue_bytes =
+                            self.output_queue_bytes.saturating_add(bytes.len());
+                        self.output_queue.push_back(bytes);
+                        report.budget_exhausted = true;
+                        break;
+                    }
+                    report.drained_bytes = report.drained_bytes.saturating_add(bytes.len());
+                    report.events_drained += 1;
                     self.feed_transport_output(&bytes);
-                    changed = true;
+                    report.mark_changed();
                 }
-                Err(TryRecvError::Lagged(_)) => continue,
-                Err(TryRecvError::Closed) => {
+                Err(TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                     }
-                    return true;
+                    report.mark_changed();
+                    break;
                 }
-                Err(TryRecvError::Empty) => return changed,
+                Err(TryRecvError::Empty) => break,
             }
         }
+
+        report.pending_bytes = self.output_queue_bytes;
+        report.drain_duration = started.elapsed();
+        report
     }
 
     fn handle_alacritty_event(&mut self, event: AlacEvent) -> bool {
@@ -624,13 +684,38 @@ impl TerminalSessionBackend for SshPtySession {
 
     fn read_pending(&mut self) -> bool {
         let mut changed = self.process_connect_result();
-        changed |= self.drain_transport_output();
+        changed |= self.drain_transport_output().changed;
         while let Ok(event) = self.event_rx.try_recv() {
             if self.handle_alacritty_event(event) {
                 changed = true;
             }
         }
         changed
+    }
+
+    fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+        let started = Instant::now();
+        let mut report = TerminalDrainReport::default();
+        if self.process_connect_result() {
+            report.mark_changed();
+        }
+        report.combine(self.drain_transport_output_with_budget(budget));
+
+        while report.events_drained < budget.max_events {
+            let Ok(event) = self.event_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
+            if self.handle_alacritty_event(event) {
+                report.mark_changed();
+            }
+        }
+
+        if report.events_drained >= budget.max_events && !self.event_rx.is_empty() {
+            report.budget_exhausted = true;
+        }
+        report.drain_duration = started.elapsed();
+        report
     }
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {

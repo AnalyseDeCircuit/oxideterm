@@ -32,10 +32,14 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGraphicsEvent};
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
-use crate::{TerminalSize, graphics_cursor_from_term};
-
-const READ_BUFFER_SIZE: usize = 0x10_0000;
-const MAX_LOCKED_READ: usize = u16::MAX as usize;
+use crate::{
+    TerminalSize,
+    backpressure::{
+        LOCAL_MAX_LOCKED_PARSE_BYTES, LOCAL_PTY_READ_BUFFER_BYTES, MagicScanWindow,
+        TerminalMagicKind, Utf8ResidualGuard,
+    },
+    graphics_cursor_from_term,
+};
 #[cfg(windows)]
 const PTY_READ_WRITE_TOKEN: usize = 2;
 #[cfg(not(windows))]
@@ -49,6 +53,13 @@ pub(crate) enum LocalGraphicsMsg {
     Resize(WindowSize),
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LocalPtyReadReport {
+    pub(crate) raw_bytes: usize,
+    pub(crate) parsed_bytes: usize,
+    pub(crate) budget_exhausted: bool,
+}
+
 pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     poll: Arc<Poller>,
     pty: tty::Pty,
@@ -58,6 +69,8 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     event_proxy: U,
     drain_on_exit: bool,
     graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
+    magic_tx: CrossbeamSender<TerminalMagicKind>,
+    stats_tx: CrossbeamSender<LocalPtyReadReport>,
     size: TerminalSize,
     graphics_options: GraphicsOptions,
 }
@@ -72,6 +85,8 @@ where
         pty: tty::Pty,
         drain_on_exit: bool,
         graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
+        magic_tx: CrossbeamSender<TerminalMagicKind>,
+        stats_tx: CrossbeamSender<LocalPtyReadReport>,
         size: TerminalSize,
         graphics_options: GraphicsOptions,
     ) -> io::Result<Self> {
@@ -85,9 +100,51 @@ where
             event_proxy,
             drain_on_exit,
             graphics_tx,
+            magic_tx,
+            stats_tx,
             size,
             graphics_options,
         })
+    }
+
+    fn advance_guarded_bytes(
+        state: &mut LocalGraphicsState,
+        terminal: &mut Term<U>,
+        bytes: &[u8],
+        size: TerminalSize,
+        magic_tx: &CrossbeamSender<TerminalMagicKind>,
+        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+    ) -> (usize, bool) {
+        for kind in state.magic_scan.scan(bytes) {
+            let _ = magic_tx.send(kind);
+        }
+
+        let cursor = Cell::new(graphics_cursor_from_term(terminal, size));
+        let mut parsed_bytes = 0usize;
+        let events = state.graphics.advance_with(
+            bytes,
+            |terminal_bytes| {
+                parsed_bytes += terminal_bytes.len();
+                state.parser.advance(terminal, terminal_bytes);
+                cursor.set(graphics_cursor_from_term(terminal, size));
+            },
+            || cursor.get(),
+        );
+
+        let mut graphics_changed = false;
+        for event in events {
+            match event {
+                TerminalGraphicsEvent::Respond(bytes) => {
+                    state.push_priority_write(Cow::Owned(bytes));
+                }
+                event => {
+                    graphics_changed = true;
+                    let _ = graphics_tx.send(event);
+                }
+            }
+        }
+
+        (parsed_bytes, graphics_changed)
     }
 
     pub(crate) fn channel(&self) -> LocalGraphicsEventLoopSender {
@@ -117,17 +174,26 @@ where
         true
     }
 
-    fn pty_read(&mut self, state: &mut LocalGraphicsState, buf: &mut [u8]) -> io::Result<()> {
+    fn pty_read(
+        &mut self,
+        state: &mut LocalGraphicsState,
+        buf: &mut [u8],
+    ) -> io::Result<LocalPtyReadReport> {
         let mut unprocessed = 0;
         let mut processed = 0;
+        let mut raw_bytes = 0;
         let mut graphics_changed = false;
+        let mut budget_exhausted = false;
         let terminal_lease = self.terminal.lease();
         let mut terminal = None;
 
         loop {
             match self.pty.reader().read(&mut buf[unprocessed..]) {
                 Ok(0) if unprocessed == 0 => break,
-                Ok(got) => unprocessed += got,
+                Ok(got) => {
+                    unprocessed += got;
+                    raw_bytes += got;
+                }
                 Err(err) => match err.kind() {
                     ErrorKind::Interrupted | ErrorKind::WouldBlock if unprocessed == 0 => break,
                     ErrorKind::Interrupted | ErrorKind::WouldBlock => {}
@@ -138,42 +204,33 @@ where
             let terminal = match &mut terminal {
                 Some(terminal) => terminal,
                 None => terminal.insert(match self.terminal.try_lock_unfair() {
-                    None if unprocessed >= READ_BUFFER_SIZE => self.terminal.lock_unfair(),
+                    None if unprocessed >= LOCAL_PTY_READ_BUFFER_BYTES => {
+                        self.terminal.lock_unfair()
+                    }
                     None => continue,
                     Some(terminal) => terminal,
                 }),
             };
 
-            let cursor = Cell::new(graphics_cursor_from_term(&**terminal, self.size));
             let mut parsed_bytes = 0usize;
-            let events = state.graphics.advance_with(
-                &buf[..unprocessed],
-                |terminal_bytes| {
-                    parsed_bytes += terminal_bytes.len();
-                    state.parser.advance(&mut **terminal, terminal_bytes);
-                    cursor.set(graphics_cursor_from_term(&**terminal, self.size));
-                },
-                || cursor.get(),
-            );
-
-            if !events.is_empty() {
-                for event in events {
-                    match event {
-                        TerminalGraphicsEvent::Respond(bytes) => {
-                            state.push_priority_write(Cow::Owned(bytes));
-                        }
-                        event => {
-                            graphics_changed = true;
-                            let _ = self.graphics_tx.send(event);
-                        }
-                    }
-                }
+            if let Some(guarded) = state.utf8_guard.push(&buf[..unprocessed]) {
+                let (bytes, changed) = Self::advance_guarded_bytes(
+                    state,
+                    terminal,
+                    &guarded,
+                    self.size,
+                    &self.magic_tx,
+                    &self.graphics_tx,
+                );
+                parsed_bytes = bytes;
+                graphics_changed |= changed;
             }
 
             processed += parsed_bytes;
             unprocessed = 0;
 
-            if processed >= MAX_LOCKED_READ {
+            if processed >= LOCAL_MAX_LOCKED_PARSE_BYTES {
+                budget_exhausted = true;
                 break;
             }
         }
@@ -189,7 +246,49 @@ where
             self.event_proxy.send_event(Event::Wakeup);
         }
 
-        Ok(())
+        Ok(LocalPtyReadReport {
+            raw_bytes,
+            parsed_bytes: processed,
+            budget_exhausted,
+        })
+    }
+
+    fn flush_utf8_residual(
+        &mut self,
+        state: &mut LocalGraphicsState,
+    ) -> io::Result<LocalPtyReadReport> {
+        let Some(residual) = state.utf8_guard.flush() else {
+            return Ok(LocalPtyReadReport::default());
+        };
+        let raw_bytes = residual.len();
+
+        let size = self.size;
+        let magic_tx = self.magic_tx.clone();
+        let graphics_tx = self.graphics_tx.clone();
+        let mut terminal = self.terminal.lock_unfair();
+        let (processed, graphics_changed) = Self::advance_guarded_bytes(
+            state,
+            &mut *terminal,
+            &residual,
+            size,
+            &magic_tx,
+            &graphics_tx,
+        );
+        drop(terminal);
+
+        if state.needs_write() {
+            self.pty_write(state)?;
+        }
+
+        if graphics_changed || processed > 0 {
+            self.event_proxy.send_event(Event::Wakeup);
+        }
+
+        Ok(LocalPtyReadReport {
+            raw_bytes,
+            parsed_bytes: processed,
+            budget_exhausted: false,
+        })
     }
 
     fn pty_write(&mut self, state: &mut LocalGraphicsState) -> io::Result<()> {
@@ -228,7 +327,7 @@ where
             .name("OxideTerm PTY graphics reader".to_string())
             .spawn(move || {
                 let mut state = LocalGraphicsState::new(self.graphics_options.clone());
-                let mut buf = [0u8; READ_BUFFER_SIZE];
+                let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
                 let mut interest = PollingEvent::readable(0);
 
@@ -276,7 +375,12 @@ where
                                         self.event_proxy.send_event(Event::ChildExit(status));
                                     }
                                     if self.drain_on_exit {
-                                        let _ = self.pty_read(&mut state, &mut buf);
+                                        if let Ok(report) = self.pty_read(&mut state, &mut buf) {
+                                            self.send_read_report(report);
+                                        }
+                                    }
+                                    if let Ok(report) = self.flush_utf8_residual(&mut state) {
+                                        self.send_read_report(report);
                                     }
                                     self.terminal.lock().exit();
                                     self.event_proxy.send_event(Event::Wakeup);
@@ -288,19 +392,22 @@ where
                                     continue;
                                 }
 
-                                if event.readable
-                                    && let Err(error) = self.pty_read(&mut state, &mut buf)
-                                {
-                                    #[cfg(target_os = "linux")]
-                                    if error.raw_os_error() == Some(libc::EIO) {
-                                        continue;
-                                    }
+                                if event.readable {
+                                    match self.pty_read(&mut state, &mut buf) {
+                                        Ok(report) => self.send_read_report(report),
+                                        Err(error) => {
+                                            #[cfg(target_os = "linux")]
+                                            if error.raw_os_error() == Some(libc::EIO) {
+                                                continue;
+                                            }
 
-                                    tracing::error!(
-                                        %error,
-                                        "local graphics event loop PTY read failed"
-                                    );
-                                    break 'event_loop;
+                                            tracing::error!(
+                                                %error,
+                                                "local graphics event loop PTY read failed"
+                                            );
+                                            break 'event_loop;
+                                        }
+                                    }
                                 }
 
                                 if event.writable
@@ -333,6 +440,12 @@ where
                 let _ = self.pty.deregister(&self.poll);
             })
             .expect("failed to spawn local graphics event loop")
+    }
+
+    fn send_read_report(&self, report: LocalPtyReadReport) {
+        if report.raw_bytes > 0 || report.parsed_bytes > 0 || report.budget_exhausted {
+            let _ = self.stats_tx.send(report);
+        }
     }
 }
 
@@ -403,6 +516,8 @@ struct LocalGraphicsState {
     writing: Option<Writing>,
     parser: ansi::Processor,
     graphics: GraphicsIngress,
+    utf8_guard: Utf8ResidualGuard,
+    magic_scan: MagicScanWindow,
 }
 
 impl LocalGraphicsState {
@@ -412,6 +527,8 @@ impl LocalGraphicsState {
             writing: None,
             parser: ansi::Processor::new(),
             graphics: GraphicsIngress::new(graphics_options),
+            utf8_guard: Utf8ResidualGuard::default(),
+            magic_scan: MagicScanWindow::default(),
         }
     }
 

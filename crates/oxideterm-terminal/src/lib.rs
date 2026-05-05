@@ -23,6 +23,7 @@ use oxideterm_terminal_graphics::{
     DEFAULT_STORAGE_LIMIT_MB, GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement,
 };
 
+mod backpressure;
 mod color;
 mod data;
 mod local_graphics_event_loop;
@@ -38,15 +39,18 @@ pub use data::{
 };
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
 pub use session::{
-    SshPtySession, SshSessionConfig, TerminalResize, TerminalSession, TerminalSessionBackend,
-    TerminalSessionKind, TerminalSessionStatus,
+    SshPtySession, SshSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
+    TerminalResize, TerminalSession, TerminalSessionBackend, TerminalSessionKind,
+    TerminalSessionStatus,
 };
 
 use color::{
     OXIDETERM_DARK_THEME, attrs_from_flags, color_for_alacritty_request_with_override,
     style_colors_for_cell,
 };
-use local_graphics_event_loop::{LocalGraphicsEventLoop, LocalGraphicsMsg, LocalGraphicsNotifier};
+use local_graphics_event_loop::{
+    LocalGraphicsEventLoop, LocalGraphicsMsg, LocalGraphicsNotifier, LocalPtyReadReport,
+};
 use process::{ProcessState, TerminalSignal, signal_process_group};
 use search::{append_grid_line_text, search_logical_line_matches, viewport_row_for_grid_line};
 
@@ -69,6 +73,7 @@ pub enum TerminalEvent {
     Wakeup,
     BlinkChanged(bool),
     ChildExited(Option<i32>),
+    MagicDetected(TerminalMagicKind),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),
 }
@@ -269,6 +274,8 @@ pub struct LocalPtySession {
     notifier: LocalGraphicsNotifier,
     event_rx: Receiver<AlacEvent>,
     graphics_rx: Receiver<TerminalGraphicsEvent>,
+    magic_rx: Receiver<TerminalMagicKind>,
+    stats_rx: Receiver<LocalPtyReadReport>,
     pending_events: Vec<TerminalEvent>,
     io_thread: Option<JoinHandle<()>>,
     size: TerminalSize,
@@ -299,6 +306,8 @@ impl LocalPtySession {
 
         let (event_tx, event_rx) = unbounded();
         let (graphics_tx, graphics_rx) = unbounded();
+        let (magic_tx, magic_rx) = unbounded();
+        let (stats_tx, stats_rx) = unbounded();
 
         let mut config = Config::default();
         config.scrolling_history = 10000;
@@ -331,6 +340,8 @@ impl LocalPtySession {
             pty,
             true,
             graphics_tx,
+            magic_tx,
+            stats_tx,
             size,
             GraphicsOptions::default(),
         )
@@ -344,6 +355,8 @@ impl LocalPtySession {
             notifier,
             event_rx,
             graphics_rx,
+            magic_rx,
+            stats_rx,
             pending_events: Vec::new(),
             io_thread: Some(io_thread),
             size,
@@ -355,19 +368,60 @@ impl LocalPtySession {
     }
 
     pub fn drain_output(&mut self) -> bool {
+        self.drain_output_with_budget(TerminalDrainBudget::unlimited())
+            .changed
+    }
+
+    pub fn drain_output_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+        let started = std::time::Instant::now();
+        let mut report = TerminalDrainReport::default();
         let mut changed = false;
-        while let Ok(event) = self.event_rx.try_recv() {
+        while report.events_drained < budget.max_events {
+            let Ok(stats) = self.stats_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
+            report.drained_bytes = report.drained_bytes.saturating_add(stats.raw_bytes);
+            report.budget_exhausted |= stats.budget_exhausted;
+        }
+
+        while report.events_drained < budget.max_events {
+            let Ok(event) = self.event_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
             if self.handle_alacritty_event(event) {
                 changed = true;
             }
         }
-        while let Ok(event) = self.graphics_rx.try_recv() {
+
+        while report.events_drained < budget.max_events {
+            let Ok(event) = self.graphics_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
             if let Some(response) = self.graphics.handle_event(event) {
                 let _ = self.write_input(&response);
             }
             changed = true;
         }
-        changed
+
+        while report.events_drained < budget.max_events {
+            let Ok(kind) = self.magic_rx.try_recv() else {
+                break;
+            };
+            report.events_drained += 1;
+            self.pending_events.push(TerminalEvent::MagicDetected(kind));
+        }
+
+        report.changed = changed;
+        report.budget_exhausted |= report.events_drained >= budget.max_events
+            && (!self.event_rx.is_empty()
+                || !self.graphics_rx.is_empty()
+                || !self.magic_rx.is_empty()
+                || !self.stats_rx.is_empty());
+        report.drain_duration = started.elapsed();
+        report
     }
 
     pub fn take_events(&mut self) -> Vec<TerminalEvent> {

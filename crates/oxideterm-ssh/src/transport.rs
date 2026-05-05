@@ -17,8 +17,11 @@ use russh::{
 };
 use signature::Signer as SignatureSigner;
 use ssh_encoding::Encode;
-use tokio::sync::Semaphore;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::{
+    sync::Semaphore,
+    sync::{Mutex, mpsc},
+    time::{Instant, sleep_until},
+};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -67,6 +70,13 @@ const KBI_USER_PROMPT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_PASSWORD_KBI_FALLBACK_ROUNDS: usize = 5;
 const RSA_AUTH_ALGORITHMS: [Option<HashAlg>; 3] =
     [Some(HashAlg::Sha512), Some(HashAlg::Sha256), None];
+const SSH_COMMAND_CHANNEL_CAPACITY: usize = 1024;
+const SSH_OUTPUT_CHANNEL_CAPACITY: usize = 1024;
+const SSH_OUTPUT_BATCH_MAX_BYTES: usize = 64 * 1024;
+const SSH_OUTPUT_FLUSH_MS: u64 = 4;
+const SSH_OUTPUT_INTERACTIVE_FLUSH_MS: u64 = 1;
+const SSH_OUTPUT_INTERACTIVE_WINDOW_MS: u64 = 120;
+const UTF8_RESIDUAL_MAX_BYTES: usize = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SshTransportError {
@@ -151,7 +161,7 @@ pub trait SshPromptHandler: Send + Sync {
 pub struct SshPtyHandle {
     pub session_id: String,
     pub command_tx: mpsc::Sender<SshTransportCommand>,
-    pub output_rx: broadcast::Receiver<Vec<u8>>,
+    pub output_rx: mpsc::Receiver<Vec<u8>>,
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
 }
 
@@ -224,6 +234,190 @@ impl RusshSigner for LocalKeySigner {
     ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send {
         let key = Arc::clone(&self.key);
         async move { sign_auth_payload_with_hash_alg(key.as_ref(), hash_alg, to_sign) }
+    }
+}
+
+struct SshOutputBatcher {
+    pending: Vec<u8>,
+    utf8_guard: RawUtf8ResidualGuard,
+    flush_deadline: Option<Instant>,
+    interactive_until: Option<Instant>,
+}
+
+impl SshOutputBatcher {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            utf8_guard: RawUtf8ResidualGuard::default(),
+            flush_deadline: None,
+            interactive_until: None,
+        }
+    }
+
+    fn note_interaction(&mut self) {
+        self.interactive_until =
+            Some(Instant::now() + Duration::from_millis(SSH_OUTPUT_INTERACTIVE_WINDOW_MS));
+        self.refresh_deadline();
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        if let Some(guarded) = self.utf8_guard.push(bytes) {
+            self.pending.extend_from_slice(&guarded);
+        }
+        self.refresh_deadline();
+        self.pending.len() >= SSH_OUTPUT_BATCH_MAX_BYTES
+    }
+
+    fn flush_due(&self) -> Option<Instant> {
+        (!self.pending.is_empty())
+            .then_some(self.flush_deadline?)
+            .or(None)
+    }
+
+    fn take_flush(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_empty() {
+            self.flush_deadline = None;
+            return None;
+        }
+        self.flush_deadline = None;
+        Some(std::mem::take(&mut self.pending))
+    }
+
+    fn take_final_flush(&mut self) -> Option<Vec<u8>> {
+        if let Some(residual) = self.utf8_guard.flush() {
+            self.pending.extend_from_slice(&residual);
+        }
+        self.take_flush()
+    }
+
+    fn refresh_deadline(&mut self) {
+        if self.pending.is_empty() {
+            self.flush_deadline = None;
+            return;
+        }
+
+        let now = Instant::now();
+        let interactive = self
+            .interactive_until
+            .is_some_and(|deadline| deadline > now);
+        let delay = if interactive {
+            SSH_OUTPUT_INTERACTIVE_FLUSH_MS
+        } else {
+            SSH_OUTPUT_FLUSH_MS
+        };
+        self.flush_deadline = Some(now + Duration::from_millis(delay));
+    }
+}
+
+#[derive(Default)]
+struct RawUtf8ResidualGuard {
+    residual: Vec<u8>,
+}
+
+impl RawUtf8ResidualGuard {
+    fn push(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+        if bytes.is_empty() && self.residual.is_empty() {
+            return None;
+        }
+
+        let mut combined = Vec::with_capacity(self.residual.len() + bytes.len());
+        combined.extend_from_slice(&self.residual);
+        combined.extend_from_slice(bytes);
+        self.residual.clear();
+
+        let split = split_before_incomplete_utf8_tail(&combined);
+        if split < combined.len() {
+            self.residual.extend_from_slice(&combined[split..]);
+            combined.truncate(split);
+        }
+
+        if self.residual.len() >= UTF8_RESIDUAL_MAX_BYTES {
+            combined.extend_from_slice(&self.residual);
+            self.residual.clear();
+        }
+
+        (!combined.is_empty()).then_some(combined)
+    }
+
+    fn flush(&mut self) -> Option<Vec<u8>> {
+        (!self.residual.is_empty()).then(|| std::mem::take(&mut self.residual))
+    }
+}
+
+fn split_before_incomplete_utf8_tail(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    let max_tail = len.min(UTF8_RESIDUAL_MAX_BYTES - 1);
+
+    for tail_len in 1..=max_tail {
+        let start = len - tail_len;
+        let first = bytes[start];
+        let width = utf8_char_width(first);
+        if width == 0 {
+            continue;
+        }
+
+        if width > tail_len
+            && bytes[start + 1..]
+                .iter()
+                .all(|byte| is_utf8_continuation(*byte))
+        {
+            return start;
+        }
+
+        break;
+    }
+
+    len
+}
+
+fn utf8_char_width(byte: u8) -> usize {
+    match byte {
+        0x00..=0x7f => 1,
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 0,
+    }
+}
+
+fn is_utf8_continuation(byte: u8) -> bool {
+    (0x80..=0xbf).contains(&byte)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_utf8_guard_keeps_incomplete_scalar_tail() {
+        let mut guard = RawUtf8ResidualGuard::default();
+
+        assert_eq!(guard.push(&[0xe4, 0xbd]), None);
+        assert_eq!(guard.push(&[0xa0]), Some("你".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn raw_utf8_guard_flushes_invalid_bytes_unchanged() {
+        let mut guard = RawUtf8ResidualGuard::default();
+
+        assert_eq!(guard.push(&[0xff, b'a']), Some(vec![0xff, b'a']));
+    }
+
+    #[test]
+    fn output_batcher_holds_utf8_tail_until_final_flush() {
+        let mut batcher = SshOutputBatcher::new();
+
+        assert!(!batcher.push(&[0xe4, 0xbd]));
+        assert_eq!(batcher.take_flush(), None);
+        assert_eq!(batcher.take_final_flush(), Some(vec![0xe4, 0xbd]));
+    }
+
+    #[test]
+    fn output_batcher_flushes_complete_text() {
+        let mut batcher = SshOutputBatcher::new();
+
+        assert!(!batcher.push(b"abc"));
+        assert_eq!(batcher.take_flush(), Some(b"abc".to_vec()));
     }
 }
 
@@ -394,24 +588,45 @@ impl SshTransportClient {
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
 
         let session_id = uuid::Uuid::new_v4().to_string();
-        let (command_tx, mut command_rx) = mpsc::channel::<SshTransportCommand>(1024);
-        let (output_tx, output_rx) = broadcast::channel::<Vec<u8>>(1024);
+        let (command_tx, mut command_rx) =
+            mpsc::channel::<SshTransportCommand>(SSH_COMMAND_CHANNEL_CAPACITY);
+        let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(SSH_OUTPUT_CHANNEL_CAPACITY);
         let task_session_id = session_id.clone();
 
         tokio::spawn(async move {
+            let mut output_batcher = SshOutputBatcher::new();
             loop {
+                let flush_deadline = output_batcher.flush_due();
                 tokio::select! {
+                    _ = async move {
+                        if let Some(deadline) = flush_deadline {
+                            sleep_until(deadline).await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    } => {
+                        if let Some(bytes) = output_batcher.take_flush()
+                            && output_tx.send(bytes).await.is_err()
+                        {
+                            break;
+                        }
+                    }
                     Some(command) = command_rx.recv() => {
                         match command {
                             SshTransportCommand::Data(data) => {
+                                output_batcher.note_interaction();
                                 if channel.data(data.as_slice()).await.is_err() {
                                     break;
                                 }
                             }
                             SshTransportCommand::Resize { cols, rows } => {
+                                output_batcher.note_interaction();
                                 let _ = channel.window_change(cols as u32, rows as u32, 0, 0).await;
                             }
                             SshTransportCommand::Close => {
+                                if let Some(bytes) = output_batcher.take_final_flush() {
+                                    let _ = output_tx.send(bytes).await;
+                                }
                                 let _ = channel.eof().await;
                                 break;
                             }
@@ -420,12 +635,27 @@ impl SshTransportClient {
                     Some(message) = channel.wait() => {
                         match message {
                             ChannelMsg::Data { data } => {
-                                let _ = output_tx.send(data.to_vec());
+                                if output_batcher.push(&data)
+                                    && let Some(bytes) = output_batcher.take_flush()
+                                    && output_tx.send(bytes).await.is_err()
+                                {
+                                    break;
+                                }
                             }
                             ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
-                                let _ = output_tx.send(data.to_vec());
+                                if output_batcher.push(&data)
+                                    && let Some(bytes) = output_batcher.take_flush()
+                                    && output_tx.send(bytes).await.is_err()
+                                {
+                                    break;
+                                }
                             }
-                            ChannelMsg::Eof | ChannelMsg::Close => break,
+                            ChannelMsg::Eof | ChannelMsg::Close => {
+                                if let Some(bytes) = output_batcher.take_final_flush() {
+                                    let _ = output_tx.send(bytes).await;
+                                }
+                                break;
+                            }
                             ChannelMsg::ExitStatus { .. } | ChannelMsg::ExitSignal { .. } => {}
                             _ => {}
                         }
@@ -433,8 +663,12 @@ impl SshTransportClient {
                     else => break,
                 }
             }
+            if let Some(bytes) = output_batcher.take_final_flush() {
+                let _ = output_tx.send(bytes).await;
+            }
             let _ = output_tx
-                .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes());
+                .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes())
+                .await;
         });
 
         Ok(SshPtyHandle {
