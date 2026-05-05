@@ -9,7 +9,7 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id();
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
-        let preferences = self.terminal_preferences();
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::LocalTerminal);
         let pane = cx.new(|cx| {
             TerminalPane::new_with_preferences(preferences, window, cx)
                 .expect("failed to initialize terminal pane")
@@ -53,7 +53,7 @@ impl WorkspaceApp {
         let session_config = SshSessionConfig::from(config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler);
-        let preferences = self.terminal_preferences();
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let pane = cx.new(|cx| {
             TerminalPane::new_ssh_with_preferences(session_config, preferences, window, cx)
                 .expect("failed to initialize ssh terminal pane")
@@ -251,7 +251,11 @@ impl WorkspaceApp {
 
     fn tabbar_content_width(&self) -> f32 {
         self.tokens.metrics.tabbar_leading_offset
-            + self.tabs.len() as f32 * self.tokens.metrics.tab_width
+            + self
+                .tabs
+                .iter()
+                .map(|tab| self.tab_visual_width(tab))
+                .sum::<f32>()
     }
 
     fn tabbar_max_scroll(&self, window: &Window) -> f32 {
@@ -268,8 +272,13 @@ impl WorkspaceApp {
             return;
         };
         let tab_left = self.tokens.metrics.tabbar_leading_offset
-            + index as f32 * self.tokens.metrics.tab_width;
-        let tab_right = tab_left + self.tokens.metrics.tab_width;
+            + self
+                .tabs
+                .iter()
+                .take(index)
+                .map(|tab| self.tab_visual_width(tab))
+                .sum::<f32>();
+        let tab_right = tab_left + self.tab_visual_width(&self.tabs[index]);
         let viewport_width = self.tabbar_viewport_width(window);
 
         if tab_left < self.tab_scroll_x {
@@ -278,6 +287,27 @@ impl WorkspaceApp {
             self.tab_scroll_x = tab_right - viewport_width;
         }
         self.clamp_tab_scroll(window);
+    }
+
+    fn tab_display_title(&self, tab: &Tab) -> String {
+        if matches!(tab.kind, TabKind::Settings) {
+            self.i18n.t("settings_view.title")
+        } else {
+            tab.title.clone()
+        }
+    }
+
+    fn tab_visual_width(&self, tab: &Tab) -> f32 {
+        let metrics = self.tokens.metrics;
+        let title_width = self.tab_display_title(tab).chars().count() as f32
+            * metrics.tab_font_size
+            * metrics.tab_title_width_ratio;
+        let fixed_width = metrics.tab_padding_x * 2.0
+            + metrics.tab_icon_size
+            + metrics.tab_gap * 2.0
+            + metrics.tab_close_button_size;
+
+        (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
     }
 
     pub(super) fn handle_tabbar_scroll(
@@ -333,17 +363,13 @@ impl WorkspaceApp {
         for tab in &self.tabs {
             let tab_id = tab.id;
             let active = Some(tab_id) == self.active_tab_id;
-            let title = tab.title.clone();
+            let tab_width = self.tab_visual_width(tab);
             let icon = match tab.kind {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
                 TabKind::Settings => LucideIcon::Settings,
             };
-            let tab_text = if matches!(tab.kind, TabKind::Settings) {
-                self.i18n.t("settings_view.title")
-            } else {
-                title
-            };
+            let tab_text = self.tab_display_title(tab);
             let tab_text_color = if active {
                 rgb(theme.text)
             } else {
@@ -354,15 +380,15 @@ impl WorkspaceApp {
                     .id(("workspace-tab", tab_id.0))
                     .h_full()
                     .flex_none()
-                    .w(px(self.tokens.metrics.tab_width))
+                    .w(px(tab_width))
                     .min_w(px(self.tokens.metrics.tab_min_width))
                     .max_w(px(self.tokens.metrics.tab_max_width))
-                    .px_3()
+                    .px(px(self.tokens.metrics.tab_padding_x))
                     .relative()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_2()
+                    .gap(px(self.tokens.metrics.tab_gap))
                     .border_r_1()
                     .border_color(rgb(theme.border))
                     .bg(if active {

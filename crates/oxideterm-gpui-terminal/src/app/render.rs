@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use gpui::{
-    App, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Render, SharedString, Window, div, prelude::*, px, rgb,
+    AnyElement, App, Context, FocusHandle, Focusable, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, div,
+    prelude::*, rgb,
 };
 use oxideterm_terminal::TerminalSnapshot;
 
@@ -28,25 +31,38 @@ impl Render for TerminalPane {
                 .decode_images,
         );
 
-        let (lifecycle, process_info) = {
-            let terminal = self.terminal.lock();
-            (terminal.lifecycle(), terminal.process_info())
-        };
-        let link_preview = self
-            .hovered_link
-            .as_ref()
-            .map(|link| format!(" · link {}", link.target))
-            .unwrap_or_default();
-        let header = format!(
-            "{} · {}x{} · offset {} · {}{} · partial",
-            self.title,
-            self.snapshot.cols,
-            self.snapshot.rows,
-            self.snapshot.display_offset,
-            terminal_lifecycle_label(&lifecycle),
-            terminal_process_header(&process_info),
-        );
-        let header = format!("{header}{link_preview}");
+        let background = self.preferences.background.clone().filter(|background| {
+            self.preferences.render_policy.allow_background_images && background.path.exists()
+        });
+        let background_layer = background.as_ref().map(|background| {
+            terminal_background_layer(
+                background.clone(),
+                self.background_image_cache.render_blurred_image(background),
+            )
+        });
+        let terminal_element = TerminalElement::new_with_images_and_bidi(
+            snapshot,
+            rendered_images,
+            self.selection.filter(|s| !s.is_empty()),
+            self.metrics.clone(),
+            self.theme.clone(),
+            self.cursor_visible,
+            self.marked_text.clone(),
+            self.search_query.clone(),
+            self.search_query
+                .as_deref()
+                .map(|query| self.terminal.lock().search_matches(query))
+                .unwrap_or_default(),
+            self.selected_search_match,
+            self.hovered_link.clone(),
+            self.settings.bidi_enabled,
+            Some(TerminalElementInput {
+                focus_handle: self.focus_handle.clone(),
+                view: cx.entity(),
+            }),
+        )
+        .transparent_background(background.is_some());
+
         div()
             .id("terminal-pane")
             .size_full()
@@ -110,19 +126,7 @@ impl Render for TerminalPane {
             .on_scroll_wheel(cx.listener(|this, event, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
-            .child(
-                div()
-                    .absolute()
-                    .right_3()
-                    .bottom_3()
-                    .px_2()
-                    .py_1()
-                    .rounded_sm()
-                    .bg(rgb(self.theme.header_background))
-                    .text_color(rgb(self.theme.header_foreground))
-                    .text_size(px(12.0))
-                    .child(header),
-            )
+            .when_some(background_layer, |pane, background| pane.child(background))
             .child(
                 div()
                     .absolute()
@@ -130,28 +134,47 @@ impl Render for TerminalPane {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .child(TerminalElement::new_with_images_and_bidi(
-                        snapshot,
-                        rendered_images,
-                        self.selection.filter(|s| !s.is_empty()),
-                        self.metrics.clone(),
-                        self.theme.clone(),
-                        self.cursor_visible,
-                        self.marked_text.clone(),
-                        self.search_query.clone(),
-                        self.search_query
-                            .as_deref()
-                            .map(|query| self.terminal.lock().search_matches(query))
-                            .unwrap_or_default(),
-                        self.selected_search_match,
-                        self.hovered_link.clone(),
-                        self.settings.bidi_enabled,
-                        Some(TerminalElementInput {
-                            focus_handle: self.focus_handle.clone(),
-                            view: cx.entity(),
-                        }),
-                    )),
+                    .child(terminal_element),
             )
+    }
+}
+
+fn terminal_background_layer(
+    background: TerminalBackgroundPreferences,
+    blurred_image: Option<Arc<RenderImage>>,
+) -> AnyElement {
+    let image = if let Some(blurred_image) = blurred_image {
+        gpui::img(blurred_image)
+            .size_full()
+            .object_fit(terminal_background_object_fit(background.fit))
+            .opacity(background.opacity.clamp(0.0, 1.0))
+            .into_any_element()
+    } else {
+        gpui::img(background.path)
+            .size_full()
+            .object_fit(terminal_background_object_fit(background.fit))
+            .opacity(background.opacity.clamp(0.0, 1.0))
+            .with_fallback(|| div().size_full().into_any_element())
+            .into_any_element()
+    };
+
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .overflow_hidden()
+        .child(image)
+        .into_any_element()
+}
+
+fn terminal_background_object_fit(fit: TerminalBackgroundFit) -> ObjectFit {
+    match fit {
+        TerminalBackgroundFit::Cover => ObjectFit::Cover,
+        TerminalBackgroundFit::Contain => ObjectFit::Contain,
+        TerminalBackgroundFit::Fill => ObjectFit::Fill,
+        TerminalBackgroundFit::Tile => ObjectFit::None,
     }
 }
 

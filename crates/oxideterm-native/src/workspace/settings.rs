@@ -1,6 +1,6 @@
 use gpui::{
-    AnchoredPositionMode, Corner, Div, ObjectFit, StatefulInteractiveElement, StyledImage,
-    anchored, deferred, point,
+    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, StatefulInteractiveElement,
+    StyledImage, anchored, deferred, point,
 };
 use oxideterm_settings::{
     AdaptiveRendererMode, AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit,
@@ -274,7 +274,7 @@ impl WorkspaceApp {
     fn render_settings_nav(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let mut nav = div()
-            .w(px(224.0))
+            .w(px(self.tokens.metrics.settings_nav_width))
             .h_full()
             .flex()
             .flex_col()
@@ -435,11 +435,17 @@ impl WorkspaceApp {
                 .unwrap_or(settings.appearance.render_profile),
             &self.detected_graphics,
         );
+        self.background_image_cache
+            .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
-        let terminal_preferences = self.terminal_preferences();
-        for pane in self.panes.values() {
-            let preferences = terminal_preferences.clone();
+        let panes = self
+            .panes
+            .iter()
+            .map(|(pane_id, pane)| (*pane_id, pane.clone()))
+            .collect::<Vec<_>>();
+        for (pane_id, pane) in panes {
+            let preferences = self.terminal_preferences_for_pane(pane_id);
             let _ = pane.update(cx, |pane, cx| {
                 pane.set_preferences(preferences, cx);
             });
@@ -2351,7 +2357,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn appearance_action_button(&self, icon: LucideIcon, label: String) -> AnyElement {
+    fn appearance_action_button(&self, icon: LucideIcon, label: String) -> Div {
         div()
             .h(px(self.tokens.metrics.settings_appearance_action_height))
             .px(px(10.0))
@@ -2373,7 +2379,6 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text),
             ))
             .child(label)
-            .into_any_element()
     }
 
     fn appearance_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
@@ -2747,10 +2752,19 @@ impl WorkspaceApp {
                             .flex_row()
                             .items_center()
                             .gap(px(8.0))
-                            .child(self.appearance_action_button(
-                                LucideIcon::Plus,
-                                self.i18n.t("settings_view.terminal.bg_add"),
-                            ))
+                            .child(
+                                self.appearance_action_button(
+                                    LucideIcon::Plus,
+                                    self.i18n.t("settings_view.terminal.bg_add"),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.pick_background_image(cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                            )
                             .when(settings.terminal.background_image.is_some(), |actions| {
                                 actions.child(
                                     div()
@@ -2815,6 +2829,38 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(self.background_thumbnail(current, true, cx))
             .into_any_element()
+    }
+
+    fn pick_background_image(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(SharedString::from(
+                self.i18n.t("settings_view.terminal.bg_add"),
+            )),
+        });
+        cx.spawn(async move |weak, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            if !is_supported_background_image(&path) {
+                return;
+            }
+            let image_path = path.to_string_lossy().to_string();
+            let _ = weak.update(cx, |this, cx| {
+                this.edit_settings(
+                    move |settings| {
+                        settings.terminal.background_image = Some(image_path);
+                    },
+                    cx,
+                );
+            });
+        })
+        .detach();
     }
 
     fn background_thumbnail(
@@ -3930,6 +3976,18 @@ fn background_fit_options() -> &'static [BackgroundFit] {
         BackgroundFit::Fill,
         BackgroundFit::Tile,
     ]
+}
+
+fn is_supported_background_image(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn background_tab_options() -> &'static [(&'static str, &'static str, LucideIcon)] {

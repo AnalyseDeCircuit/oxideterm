@@ -6,23 +6,26 @@ mod settings;
 mod sidebar;
 mod tabs;
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use gpui::{
     AnyElement, App, Context, CursorStyle, FocusHandle, Focusable, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Rgba,
-    ScrollWheelEvent, SharedString, Styled, Timer, Window, div, prelude::*, px, relative, rgb,
-    rgba, svg,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Pixels,
+    Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled, StyledImage, Timer, Window,
+    div, prelude::*, px, relative, rgb, rgba, svg,
 };
-use oxideterm_gpui_terminal::{TerminalPane, TerminalUiPreferences, TerminalUiTheme};
+use oxideterm_gpui_terminal::{
+    BackgroundImageRenderCache, TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalPane,
+    TerminalUiPreferences, TerminalUiTheme,
+};
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_render_policy::{
     DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
 };
 use oxideterm_settings::{
-    CursorStyle as SettingsCursorStyle, FrostedGlassMode, Language, PersistedSettings,
-    SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
+    BackgroundFit, CursorStyle as SettingsCursorStyle, FrostedGlassMode, Language,
+    PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
 };
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
@@ -102,6 +105,7 @@ pub(crate) struct WorkspaceApp {
     render_profile_override: Option<RenderProfile>,
     render_policy: EffectiveRenderPolicy,
     applied_vibrancy_mode: NativeVibrancyMode,
+    background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
 }
 
@@ -126,6 +130,8 @@ impl WorkspaceApp {
         let node_router = NodeRouter::new(ssh_registry.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
+        let mut background_image_cache = BackgroundImageRenderCache::default();
+        background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -169,6 +175,7 @@ impl WorkspaceApp {
             render_profile_override,
             render_policy,
             applied_vibrancy_mode: initial_vibrancy_mode,
+            background_image_cache,
             settings_store,
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
@@ -204,7 +211,31 @@ impl WorkspaceApp {
         Ok(workspace)
     }
 
-    pub(crate) fn terminal_preferences(&self) -> TerminalUiPreferences {
+    pub(crate) fn terminal_preferences_for_tab_kind(
+        &self,
+        kind: &TabKind,
+    ) -> TerminalUiPreferences {
+        self.terminal_preferences_for_background_key(tab_background_key(kind))
+    }
+
+    pub(crate) fn terminal_preferences_for_pane(&self, pane_id: PaneId) -> TerminalUiPreferences {
+        let key = self
+            .tabs
+            .iter()
+            .find_map(|tab| {
+                tab.root_pane
+                    .as_ref()
+                    .is_some_and(|root| root.contains_pane(pane_id))
+                    .then_some(tab_background_key(&tab.kind))
+            })
+            .unwrap_or("local_terminal");
+        self.terminal_preferences_for_background_key(key)
+    }
+
+    fn terminal_preferences_for_background_key(
+        &self,
+        background_key: &str,
+    ) -> TerminalUiPreferences {
         let settings = self.settings_store.settings();
         let terminal = &settings.terminal;
         TerminalUiPreferences {
@@ -223,12 +254,58 @@ impl WorkspaceApp {
             bidi_enabled: terminal.unicode.bidi_enabled,
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             render_policy: self.render_policy.clone(),
+            background: self.terminal_background_preferences(background_key),
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,
                 self.tokens.terminal.foreground,
                 self.tokens.terminal.cursor,
             ),
         }
+    }
+
+    fn terminal_background_preferences(
+        &self,
+        background_key: &str,
+    ) -> Option<TerminalBackgroundPreferences> {
+        if !self.render_policy.allow_background_images {
+            return None;
+        }
+        let terminal = &self.settings_store.settings().terminal;
+        if !terminal.background_enabled
+            || !terminal
+                .background_enabled_tabs
+                .iter()
+                .any(|tab| tab == background_key)
+        {
+            return None;
+        }
+        let path = PathBuf::from(terminal.background_image.as_deref()?);
+        if !path.exists() {
+            return None;
+        }
+        Some(TerminalBackgroundPreferences {
+            path,
+            opacity: terminal.background_opacity.clamp(0.0, 1.0) as f32,
+            blur: terminal.background_blur.clamp(0, 20) as f32,
+            fit: terminal_background_fit(terminal.background_fit),
+        })
+    }
+}
+
+fn tab_background_key(kind: &TabKind) -> &'static str {
+    match kind {
+        TabKind::LocalTerminal => "local_terminal",
+        TabKind::SshTerminal => "terminal",
+        TabKind::Settings => "settings",
+    }
+}
+
+fn terminal_background_fit(fit: BackgroundFit) -> TerminalBackgroundFit {
+    match fit {
+        BackgroundFit::Cover => TerminalBackgroundFit::Cover,
+        BackgroundFit::Contain => TerminalBackgroundFit::Contain,
+        BackgroundFit::Fill => TerminalBackgroundFit::Fill,
+        BackgroundFit::Tile => TerminalBackgroundFit::Tile,
     }
 }
 
@@ -378,6 +455,10 @@ impl Render for WorkspaceApp {
         } else {
             self.render_empty_workspace()
         };
+        let content = self.wrap_content_background(
+            content,
+            self.active_tab().map(|tab| tab_background_key(&tab.kind)),
+        );
 
         div()
             .id("workspace-root")
@@ -605,5 +686,73 @@ impl Render for WorkspaceApp {
                 cx.entity(),
                 self.focus_handle.clone(),
             ))
+    }
+}
+
+impl WorkspaceApp {
+    fn wrap_content_background(
+        &mut self,
+        content: AnyElement,
+        background_key: Option<&str>,
+    ) -> AnyElement {
+        let Some(background_key) = background_key else {
+            return content;
+        };
+        if matches!(background_key, "terminal" | "local_terminal") {
+            return content;
+        }
+        let Some(background) = self.terminal_background_preferences(background_key) else {
+            return content;
+        };
+        let blurred_image = self
+            .background_image_cache
+            .render_blurred_image(&background);
+
+        div()
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .child(workspace_background_image_layer(background, blurred_image))
+            .child(div().relative().size_full().child(content))
+            .into_any_element()
+    }
+}
+
+fn workspace_background_image_layer(
+    background: TerminalBackgroundPreferences,
+    blurred_image: Option<Arc<RenderImage>>,
+) -> AnyElement {
+    let image = if let Some(blurred_image) = blurred_image {
+        gpui::img(blurred_image)
+            .size_full()
+            .object_fit(workspace_background_object_fit(background.fit))
+            .opacity(background.opacity.clamp(0.0, 1.0))
+            .into_any_element()
+    } else {
+        gpui::img(background.path)
+            .size_full()
+            .object_fit(workspace_background_object_fit(background.fit))
+            .opacity(background.opacity.clamp(0.0, 1.0))
+            .with_fallback(|| div().size_full().into_any_element())
+            .into_any_element()
+    };
+
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .overflow_hidden()
+        .child(image)
+        .into_any_element()
+}
+
+fn workspace_background_object_fit(fit: TerminalBackgroundFit) -> ObjectFit {
+    match fit {
+        TerminalBackgroundFit::Cover => ObjectFit::Cover,
+        TerminalBackgroundFit::Contain => ObjectFit::Contain,
+        TerminalBackgroundFit::Fill => ObjectFit::Fill,
+        TerminalBackgroundFit::Tile => ObjectFit::None,
     }
 }

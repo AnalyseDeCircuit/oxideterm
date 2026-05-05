@@ -39,6 +39,7 @@ pub(crate) struct TerminalElement {
     hovered_link: Option<TerminalLinkRange>,
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
+    transparent_background: bool,
 }
 
 #[derive(Clone)]
@@ -185,7 +186,13 @@ impl TerminalElement {
             hovered_link,
             bidi_enabled,
             input,
+            transparent_background: false,
         }
+    }
+
+    pub(crate) fn transparent_background(mut self, transparent_background: bool) -> Self {
+        self.transparent_background = transparent_background;
+        self
     }
 
     #[allow(dead_code)]
@@ -615,7 +622,9 @@ impl Element for TerminalElement {
             window.set_window_cursor_style(CursorStyle::PointingHand);
         }
 
-        window.paint_quad(fill(bounds, rgb(self.theme.background)));
+        if !self.transparent_background {
+            window.paint_quad(fill(bounds, rgb(self.theme.background)));
+        }
         let origin =
             bounds.origin + point(px(TERMINAL_CONTENT_PADDING), px(TERMINAL_CONTENT_PADDING));
 

@@ -15,6 +15,7 @@ use oxideterm_terminal::{
 };
 use parking_lot::Mutex;
 
+use crate::background_cache::BackgroundImageRenderCache;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
@@ -56,6 +57,7 @@ pub struct TerminalPane {
     last_terminal_input: Instant,
     last_drain_budget_exhausted: bool,
     image_cache: ImageRenderCache,
+    background_image_cache: BackgroundImageRenderCache,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
     pending_pty_resize: Option<(usize, usize, u16, u16)>,
@@ -175,6 +177,11 @@ impl TerminalPane {
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
                 cache
             },
+            background_image_cache: {
+                let mut cache = BackgroundImageRenderCache::default();
+                cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
+                cache
+            },
             bounds: None,
             last_pty_resize: None,
             pending_pty_resize: None,
@@ -196,6 +203,8 @@ impl TerminalPane {
         self.settings = TerminalUiSettings::from_preferences(&preferences);
         self.theme = preferences.theme.clone();
         self.image_cache
+            .set_byte_limit(preferences.render_policy.image_cache_bytes);
+        self.background_image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.preferences = preferences;
         self.last_pty_resize = None;

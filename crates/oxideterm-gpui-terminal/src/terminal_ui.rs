@@ -1,13 +1,11 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
     Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
-use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalLifecycle, TerminalProcessInfo,
-};
+use oxideterm_terminal::{TerminalColor, TerminalCursorShape, TerminalEncoding};
 
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
@@ -39,6 +37,7 @@ pub struct TerminalUiPreferences {
     pub terminal_encoding: TerminalEncoding,
     pub theme: TerminalUiTheme,
     pub render_policy: EffectiveRenderPolicy,
+    pub background: Option<TerminalBackgroundPreferences>,
 }
 
 impl Default for TerminalUiPreferences {
@@ -54,8 +53,25 @@ impl Default for TerminalUiPreferences {
             terminal_encoding: TerminalEncoding::Utf8,
             theme: TerminalUiTheme::default(),
             render_policy: EffectiveRenderPolicy::quality(),
+            background: None,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalBackgroundPreferences {
+    pub path: PathBuf,
+    pub opacity: f32,
+    pub blur: f32,
+    pub fit: TerminalBackgroundFit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalBackgroundFit {
+    Cover,
+    Contain,
+    Fill,
+    Tile,
 }
 
 #[derive(Clone)]
@@ -97,7 +113,6 @@ pub struct TerminalUiTheme {
     pub background: u32,
     pub(crate) bell_background: u32,
     pub foreground: u32,
-    pub(crate) header_background: u32,
     pub(crate) header_foreground: u32,
 }
 
@@ -107,7 +122,6 @@ impl Default for TerminalUiTheme {
             background: OXIDETERM_TERMINAL_BACKGROUND,
             bell_background: 0x17131a,
             foreground: OXIDETERM_TERMINAL_FOREGROUND,
-            header_background: 0x1b1f24,
             header_foreground: 0x8bbdff,
         }
     }
@@ -127,7 +141,6 @@ impl TerminalUiTheme {
             background,
             bell_background: 0x17131a,
             foreground,
-            header_background: background,
             header_foreground: cursor,
         }
     }
@@ -235,44 +248,4 @@ pub(crate) fn terminal_font_with_family(family: &str) -> Font {
 
 pub(crate) fn terminal_font_features() -> FontFeatures {
     FontFeatures::disable_ligatures()
-}
-
-pub(crate) fn terminal_lifecycle_label(lifecycle: &TerminalLifecycle) -> String {
-    match lifecycle {
-        TerminalLifecycle::Running => "running".to_string(),
-        TerminalLifecycle::Exited(Some(code)) => format!("exited({code})"),
-        TerminalLifecycle::Exited(None) => "exited".to_string(),
-        TerminalLifecycle::Closed => "closed".to_string(),
-    }
-}
-
-pub(crate) fn terminal_process_header(process_info: &TerminalProcessInfo) -> String {
-    let mut parts = Vec::new();
-    if let Some(pid) = process_info.shell_pid {
-        parts.push(format!("pid {pid}"));
-    }
-    if let Some(foreground_pid) = process_info
-        .foreground_pid
-        .filter(|foreground_pid| Some(*foreground_pid) != process_info.shell_pid)
-    {
-        parts.push(format!("fg {foreground_pid}"));
-    }
-    if let Some(process_group_id) = process_info
-        .foreground_process_group_id
-        .filter(|process_group_id| Some(*process_group_id) != process_info.foreground_pid)
-    {
-        parts.push(format!("pgid {process_group_id}"));
-    }
-    if let Some(command) = process_info.command.as_deref() {
-        parts.push(command.to_string());
-    }
-    if let Some(cwd) = process_info.cwd.as_ref().and_then(|cwd| cwd.file_name()) {
-        parts.push(cwd.to_string_lossy().to_string());
-    }
-
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" · {}", parts.join(" · "))
-    }
 }
