@@ -478,45 +478,27 @@ impl WorkspaceApp {
     pub(super) fn render_empty_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .flex_1()
-            .min_h(px(0.0))
+            .size_full()
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_center()
+            .px(px(16.0))
             .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text_muted))
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
             .child(
                 div()
-                    .flex_1()
-                    .min_h(px(0.0))
+                    .w_full()
+                    .max_w(px(384.0))
                     .flex()
+                    .flex_col()
                     .items_center()
-                    .justify_center()
-                    .px(px(16.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(384.0))
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(24.0))
-                            .child(self.render_welcome_brand())
-                            .child(self.render_welcome_actions(cx))
-                            .child(self.render_welcome_shortcuts()),
-                    ),
-            )
-            .child(
-                div()
-                    .h(px(28.0))
-                    .flex()
-                    .items_center()
-                    .px(px(16.0))
-                    .border_t_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(theme.accent))
-                    .child(self.i18n.t("layout.status.sync_ready")),
+                    .gap(px(24.0))
+                    .child(self.render_welcome_brand())
+                    .child(self.render_welcome_actions(cx))
+                    .child(self.render_welcome_shortcuts()),
             )
             .into_any_element()
     }
@@ -531,7 +513,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .text_size(px(48.0))
-                    .line_height(px(56.0))
+                    .line_height(px(48.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t("layout.empty.title"))

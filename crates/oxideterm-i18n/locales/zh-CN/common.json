@@ -24,9 +24,6 @@
       "new_connection": "新建连接",
       "new_local_terminal": "本地终端",
       "keyboard_shortcuts": "快捷键"
-    },
-    "status": {
-      "sync_ready": "同步就绪"
     }
   },
   "command_palette": {

@@ -1,0 +1,636 @@
+impl WorkspaceApp {
+    fn highlight_rules_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rules = &settings.terminal.highlight_rules;
+        let limit_text = self
+            .i18n
+            .t("settings_view.terminal.highlight_rules.limit")
+            .replace("{{count}}", &MAX_HIGHLIGHT_RULES.to_string());
+        let add_disabled = rules.len() >= MAX_HIGHLIGHT_RULES;
+        let workspace = cx.entity();
+
+        let mut body = div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_card_gap))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(
+                                        self.i18n
+                                            .t("settings_view.terminal.highlight_rules.title")
+                                            .to_uppercase(),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(
+                                        self.i18n.t(
+                                            "settings_view.terminal.highlight_rules.description",
+                                        ),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(px(8.0))
+                            .child(
+                                div().relative().w(px(168.0)).child(select_anchor_probe(
+                                    SelectAnchorId::SettingsHighlightPreset,
+                                    select_trigger(
+                                        &self.tokens,
+                                        self.i18n
+                                            .t("settings_view.terminal.highlight_rules.add_preset"),
+                                        false,
+                                        add_disabled,
+                                    )
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            if this
+                                                .settings_store
+                                                .settings()
+                                                .terminal
+                                                .highlight_rules
+                                                .len()
+                                                < MAX_HIGHLIGHT_RULES
+                                            {
+                                                this.open_settings_select =
+                                                    Some(SettingsSelect::HighlightPreset);
+                                                this.focused_settings_input = None;
+                                            }
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                                    move |anchor, _window, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.update_select_anchor(anchor, cx);
+                                        });
+                                    },
+                                )),
+                            )
+                            .child(
+                                button_with(
+                                    &self.tokens,
+                                    self.i18n
+                                        .t("settings_view.terminal.highlight_rules.add_rule"),
+                                    ButtonOptions {
+                                        variant: ButtonVariant::Default,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: add_disabled,
+                                    },
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if this
+                                            .settings_store
+                                            .settings()
+                                            .terminal
+                                            .highlight_rules
+                                            .len()
+                                            < MAX_HIGHLIGHT_RULES
+                                        {
+                                            this.add_highlight_rule(cx);
+                                        }
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(limit_text)
+                    .child(
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.priority_hint"),
+                    ),
+            )
+            .child(self.card_separator());
+
+        if rules.is_empty() {
+            body = body.child(
+                div()
+                    .w_full()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgba((self.tokens.ui.bg_sunken << 8) | 0x99))
+                    .px(px(16.0))
+                    .py(px(32.0))
+                    .text_align(gpui::TextAlign::Center)
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.terminal.highlight_rules.empty")),
+            );
+        } else {
+            for (index, rule) in rules.iter().enumerate() {
+                body = body.child(self.highlight_rule_row(index, rule, rules.len(), cx));
+            }
+        }
+
+        body.child(self.card_separator())
+            .child(self.highlight_preview(rules))
+            .into_any_element()
+    }
+
+    fn highlight_rule_row(
+        &self,
+        index: usize,
+        rule: &HighlightRule,
+        total: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let status_color = if rule.enabled {
+            self.tokens.ui.accent
+        } else {
+            self.tokens.ui.text_muted
+        };
+        let title = if rule.label.trim().is_empty() {
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.untitled_rule")
+        } else {
+            rule.label.clone()
+        };
+        let mode_label = highlight_render_mode_label(rule.render_mode, &self.i18n);
+
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(self.tokens.ui.text))
+                                            .child(title),
+                                    )
+                                    .child(self.text_badge(
+                                        if rule.enabled {
+                                            self.i18n
+                                                .t("settings_view.terminal.highlight_rules.enabled")
+                                        } else {
+                                            self.i18n.t(
+                                                "settings_view.terminal.highlight_rules.disabled",
+                                            )
+                                        },
+                                        status_color,
+                                    ))
+                                    .when(rule.is_regex, |row| {
+                                        row.child(
+                                            self.text_badge(
+                                                self.i18n.t(
+                                                    "settings_view.terminal.highlight_rules.regex",
+                                                ),
+                                                self.tokens.ui.text_muted,
+                                            ),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .font_family("JetBrainsMono Nerd Font")
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(summarize_highlight_pattern(&rule.pattern)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(px(6.0))
+                            .child(self.highlight_small_button(
+                                "↑".to_string(),
+                                index > 0,
+                                move |this, cx| this.move_highlight_rule(index, -1, cx),
+                                cx,
+                            ))
+                            .child(self.highlight_small_button(
+                                "↓".to_string(),
+                                index + 1 < total,
+                                move |this, cx| this.move_highlight_rule(index, 1, cx),
+                                cx,
+                            ))
+                            .child(self.highlight_small_button(
+                                self.i18n.t("settings_view.terminal.highlight_rules.delete"),
+                                true,
+                                move |this, cx| this.remove_highlight_rule(index, cx),
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .grid()
+                    .gap(px(12.0))
+                    .child(
+                        self.highlight_input_block(
+                            self.i18n.t("settings_view.terminal.highlight_rules.label"),
+                            SettingsInput::HighlightLabel(index),
+                            rule.label.clone(),
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.label_placeholder"),
+                            220.0,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.highlight_input_block(
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.pattern"),
+                            SettingsInput::HighlightPattern(index),
+                            rule.pattern.clone(),
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.pattern_placeholder"),
+                            360.0,
+                            cx,
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_end()
+                    .gap(px(12.0))
+                    .child(
+                        self.highlight_input_block(
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.foreground"),
+                            SettingsInput::HighlightForeground(index),
+                            rule.foreground.clone().unwrap_or_default(),
+                            "#f8fafc".to_string(),
+                            150.0,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.highlight_input_block(
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.background"),
+                            SettingsInput::HighlightBackground(index),
+                            rule.background.clone().unwrap_or_default(),
+                            "#991b1b".to_string(),
+                            150.0,
+                            cx,
+                        ),
+                    )
+                    .child(self.highlight_render_mode_control(index, mode_label, cx))
+                    .child(
+                        self.highlight_checkbox(
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.enabled"),
+                            rule.enabled,
+                            move |settings, value| {
+                                if let Some(rule) = settings.terminal.highlight_rules.get_mut(index)
+                                {
+                                    rule.enabled = value;
+                                }
+                            },
+                            cx,
+                        ),
+                    )
+                    .child(self.highlight_checkbox(
+                        self.i18n.t("settings_view.terminal.highlight_rules.regex"),
+                        rule.is_regex,
+                        move |settings, value| {
+                            if let Some(rule) = settings.terminal.highlight_rules.get_mut(index) {
+                                rule.is_regex = value;
+                            }
+                        },
+                        cx,
+                    ))
+                    .child(
+                        self.highlight_checkbox(
+                            self.i18n
+                                .t("settings_view.terminal.highlight_rules.case_sensitive"),
+                            rule.case_sensitive,
+                            move |settings, value| {
+                                if let Some(rule) = settings.terminal.highlight_rules.get_mut(index)
+                                {
+                                    rule.case_sensitive = value;
+                                }
+                            },
+                            cx,
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(if highlight_rule_validation_error(rule).is_some() {
+                        rgb(self.tokens.ui.warning)
+                    } else {
+                        rgb(self.tokens.ui.text_muted)
+                    })
+                    .child(
+                        highlight_rule_validation_error(rule)
+                            .map(|reason| {
+                                self.i18n.t(&format!(
+                                    "settings_view.terminal.highlight_rules.validation.{reason}"
+                                ))
+                            })
+                            .unwrap_or_else(|| {
+                                self.i18n.t(if rule.is_regex {
+                                    "settings_view.terminal.highlight_rules.mode_hint.regex"
+                                } else {
+                                    "settings_view.terminal.highlight_rules.mode_hint.literal"
+                                })
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn highlight_small_button(
+        &self,
+        label: String,
+        enabled: bool,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        button_with(
+            &self.tokens,
+            label,
+            ButtonOptions {
+                variant: ButtonVariant::Ghost,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: !enabled,
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                if enabled {
+                    action(this, cx);
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn highlight_input_block(
+        &self,
+        label: String,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(label),
+            )
+            .child(self.settings_text_input_control(input, value, placeholder, width, cx))
+            .into_any_element()
+    }
+
+    fn highlight_render_mode_control(
+        &self,
+        index: usize,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let select_id = SettingsSelect::HighlightRenderMode(index);
+        let anchor_id = select_id.anchor_id();
+        let workspace = cx.entity();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.render_mode"),
+                    ),
+            )
+            .child(
+                div().relative().w(px(148.0)).child(select_anchor_probe(
+                    anchor_id,
+                    select_trigger(&self.tokens, value, false, false)
+                        .cursor_pointer()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select =
+                                    if this.open_settings_select == Some(select_id) {
+                                        None
+                                    } else {
+                                        Some(select_id)
+                                    };
+                                this.focused_settings_input = None;
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    move |anchor, _window, cx| {
+                        let _ = workspace.update(cx, |this, cx| {
+                            this.update_select_anchor(anchor, cx);
+                        });
+                    },
+                )),
+            )
+            .into_any_element()
+    }
+
+    fn highlight_checkbox(
+        &self,
+        label: String,
+        checked: bool,
+        setter: impl Fn(&mut PersistedSettings, bool) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        checkbox(&self.tokens, label, checked)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.edit_settings(
+                        |settings| {
+                            setter(settings, !checked);
+                            settings.terminal.highlight_rules =
+                                reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+                        },
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn highlight_preview(&self, rules: &[HighlightRule]) -> AnyElement {
+        let lines = [
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_error"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_warning"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_ok"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_trace"),
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.preview_line_audit"),
+        ];
+        let mut preview = div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(0x071018))
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.preview"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.preview_hint"),
+                            ),
+                    ),
+            );
+        let mut sample = div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba(0xffffff0d))
+            .bg(rgb(0x020617))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .font_family("JetBrainsMono Nerd Font")
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .line_height(px(24.0))
+            .text_color(rgb(0xe2e8f0));
+        for line in lines {
+            sample = sample.child(self.highlight_preview_line(&line, rules));
+        }
+        preview = preview.child(sample);
+        preview.into_any_element()
+    }
+
+    fn highlight_preview_line(&self, line: &str, rules: &[HighlightRule]) -> AnyElement {
+        let matches = accepted_highlight_preview_matches(line, rules);
+        let mut row = div().flex().flex_row().flex_wrap();
+        let mut cursor = 0;
+        for matched in matches {
+            if matched.start > cursor {
+                row = row.child(line[cursor..matched.start].to_string());
+            }
+            row = row.child(highlight_preview_segment(
+                &line[matched.start..matched.end],
+                matched.rule,
+            ));
+            cursor = matched.end;
+        }
+        if cursor < line.len() {
+            row = row.child(line[cursor..].to_string());
+        }
+        row.into_any_element()
+    }
+}

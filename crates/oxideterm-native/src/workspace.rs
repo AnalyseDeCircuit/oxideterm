@@ -139,7 +139,7 @@ impl WorkspaceApp {
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
-        let mut workspace = Self {
+        let workspace = Self {
             focus_handle,
             tabs: Vec::new(),
             active_tab_id: None,
@@ -218,7 +218,6 @@ impl WorkspaceApp {
             }
         })
         .detach();
-        workspace.create_local_terminal_tab(window, cx)?;
         Ok(workspace)
     }
 
@@ -458,6 +457,22 @@ fn alpha_byte(alpha: f32) -> u32 {
     (alpha.clamp(0.0, 1.0) * 255.0).round() as u32
 }
 
+fn settings_ui_font_family(configured_family: &str) -> SharedString {
+    css_font_family_head(configured_family).unwrap_or_else(|| SharedString::from("Inter"))
+}
+
+fn settings_mono_font_family() -> SharedString {
+    SharedString::from("JetBrains Mono")
+}
+
+fn css_font_family_head(configured_family: &str) -> Option<SharedString> {
+    configured_family
+        .split(',')
+        .map(|family| family.trim().trim_matches(['"', '\'']))
+        .find(|family| !family.is_empty())
+        .map(|family| SharedString::from(family.to_string()))
+}
+
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -514,7 +529,9 @@ impl Render for WorkspaceApp {
             .flex_col()
             .bg(workspace_background(&self.tokens, vibrancy_mode))
             .text_color(rgb(self.tokens.ui.text))
-            .font_family(SharedString::from(self.tokens.metrics.font_family))
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {

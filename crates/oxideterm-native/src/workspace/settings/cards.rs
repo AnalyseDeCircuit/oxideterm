@@ -1,0 +1,687 @@
+impl WorkspaceApp {
+    fn settings_card(
+        &self,
+        title_key: &str,
+        _description_key: &str,
+        rows: Vec<AnyElement>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_card_gap))
+            .child(
+                div()
+                    .mb(px(self.tokens.metrics.settings_card_title_nudge_y))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t(title_key).to_uppercase()),
+            )
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_card_gap))
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn terminal_input_settings_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut rows = div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mb(px(16.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(
+                        self.i18n
+                            .t("settings_view.terminal.input_safety")
+                            .to_uppercase(),
+                    ),
+            )
+            .child(self.checkbox_row(
+                "settings_view.terminal.paste_protection",
+                "settings_view.terminal.paste_protection_hint",
+                settings.terminal.paste_protection,
+                set_paste_protection,
+                cx,
+            ))
+            .child(self.settings_row_with_margin(
+                self.checkbox_row(
+                    "settings_view.terminal.osc52_clipboard",
+                    "settings_view.terminal.osc52_clipboard_hint",
+                    settings.terminal.osc52_clipboard,
+                    set_osc52_clipboard,
+                    cx,
+                ),
+                16.0,
+            ));
+
+        if !cfg!(target_os = "macos") {
+            rows = rows.child(self.settings_row_with_margin(
+                self.checkbox_row(
+                    "settings_view.terminal.smart_copy",
+                    "settings_view.terminal.smart_copy_hint",
+                    settings.terminal.smart_copy,
+                    set_smart_copy,
+                    cx,
+                ),
+                16.0,
+            ));
+        }
+
+        rows.child(self.settings_row_with_margin(
+            self.checkbox_row(
+                "settings_view.terminal.copy_on_select",
+                "settings_view.terminal.copy_on_select_hint",
+                settings.terminal.copy_on_select,
+                set_copy_on_select,
+                cx,
+            ),
+            16.0,
+        ))
+        .child(self.settings_row_with_margin(
+            self.checkbox_row(
+                "settings_view.terminal.middle_click_paste",
+                "settings_view.terminal.middle_click_paste_hint",
+                settings.terminal.middle_click_paste,
+                set_middle_click_paste,
+                cx,
+            ),
+            16.0,
+        ))
+        .child(self.settings_row_with_margin(
+            self.checkbox_row(
+                "settings_view.terminal.selection_requires_shift",
+                "settings_view.terminal.selection_requires_shift_hint",
+                settings.terminal.selection_requires_shift,
+                set_selection_requires_shift,
+                cx,
+            ),
+            16.0,
+        ))
+        .child(
+            div()
+                .my(px(20.0))
+                .h(px(1.0))
+                .w_full()
+                .bg(rgba((self.tokens.ui.border << 8) | 0x80)),
+        )
+        .child(self.checkbox_row(
+            "settings_view.terminal.autosuggest_local_history",
+            "settings_view.terminal.autosuggest_local_history_hint",
+            settings.terminal.autosuggest.local_shell_history,
+            set_autosuggest_local_history,
+            cx,
+        ))
+        .into_any_element()
+    }
+
+    fn settings_row_with_margin(&self, row: AnyElement, margin_top: f32) -> AnyElement {
+        div().mt(px(margin_top)).child(row).into_any_element()
+    }
+
+    fn card_title(&self, title_key: &str) -> AnyElement {
+        div()
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(self.tokens.ui.text))
+            .child(self.i18n.t(title_key).to_uppercase())
+            .into_any_element()
+    }
+
+    fn card_separator(&self) -> AnyElement {
+        div()
+            .h(px(1.0))
+            .w_full()
+            .bg(rgba((self.tokens.ui.border << 8) | 0x80))
+            .into_any_element()
+    }
+
+    fn settings_background_active(&self) -> bool {
+        self.terminal_background_preferences("settings").is_some()
+    }
+
+    fn settings_panel_background(&self, color: u32) -> Rgba {
+        if self.settings_background_active() {
+            rgba((color << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
+        } else {
+            rgb(color)
+        }
+    }
+
+    fn text_badge(&self, label: String, color: u32) -> AnyElement {
+        div()
+            .px(px(8.0))
+            .py(px(2.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((color << 8) | 0x1a))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(color))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn outline_button(&self, label: String, size: ButtonSize) -> AnyElement {
+        button_with(
+            &self.tokens,
+            label,
+            ButtonOptions {
+                variant: ButtonVariant::Outline,
+                size,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+        )
+        .into_any_element()
+    }
+
+    fn terminal_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut tabs = div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(self.settings_panel_background(theme.bg_card))
+            .p(px(8.0));
+
+        for page in TerminalSettingsPage::all() {
+            let page_id = *page;
+            let active = self.terminal_settings_page == page_id;
+            let item = div()
+                .rounded(px(self.tokens.radii.md))
+                .px(px(12.0))
+                .py(px(6.0))
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(if active {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text_muted)
+                })
+                .bg(if active {
+                    rgba((theme.accent << 8) | 0x26)
+                } else {
+                    rgba(0x00000000)
+                })
+                .cursor_pointer()
+                .hover(move |style| {
+                    if active {
+                        style
+                    } else {
+                        style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text))
+                    }
+                })
+                .child(self.i18n.t(page_id.label_key()))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.terminal_settings_page = page_id;
+                        cx.notify();
+                    }),
+                );
+            tabs = tabs.child(item);
+        }
+
+        tabs.into_any_element()
+    }
+
+    fn value_row(&self, label_key: &str, hint_key: &str, value: String) -> AnyElement {
+        self.setting_row(
+            label_key,
+            hint_key,
+            select_trigger(&self.tokens, value, false, false)
+                .w(px(self.tokens.metrics.settings_select_width))
+                .into_any_element(),
+        )
+    }
+
+    pub(super) fn update_select_anchor(&mut self, anchor: OverlayAnchor, cx: &mut Context<Self>) {
+        if self.select_anchors.get(&anchor.id) != Some(&anchor) {
+            let should_notify = self
+                .open_settings_select
+                .is_some_and(|select| select.anchor_id() == anchor.id)
+                || self
+                    .settings_slider_drag
+                    .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
+            self.select_anchors.insert(anchor.id, anchor);
+            if should_notify {
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn handle_settings_input_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(input) = self.focused_settings_input else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+
+        match key {
+            "escape" | "enter" => {
+                self.focused_settings_input = None;
+                self.settings_input_draft.clear();
+                self.new_connection_caret_visible = true;
+                cx.notify();
+                true
+            }
+            "backspace" if !modifiers.platform && !modifiers.control => {
+                self.settings_input_draft.pop();
+                self.apply_settings_input_draft(input, cx);
+                true
+            }
+            _ => true,
+        }
+    }
+
+    pub(super) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if self.focused_settings_input.take().is_some() {
+            self.settings_input_draft.clear();
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.open_settings_select.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if let Some(form) = self.new_connection_form.as_mut()
+            && form.field_focused
+        {
+            form.field_focused = false;
+            form.selected_field = None;
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if changed {
+            self.new_connection_caret_visible = true;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn update_settings_slider_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(slider) = self.settings_slider_drag {
+            self.apply_settings_slider_from_position(slider, f32::from(event.position.x), cx);
+        }
+    }
+
+    fn apply_settings_slider_from_position(
+        &mut self,
+        slider: SettingsSlider,
+        x: f32,
+        cx: &mut Context<Self>,
+    ) {
+        match slider {
+            SettingsSlider::TerminalFontSize => {
+                self.set_font_size_from_position(x, cx);
+            }
+            SettingsSlider::AppearanceBorderRadius => {
+                self.set_settings_slider_from_position(
+                    SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
+                    x,
+                    0.0,
+                    24.0,
+                    |settings, value| settings.appearance.border_radius = value.round() as i64,
+                    cx,
+                );
+            }
+            SettingsSlider::AppearanceBackgroundOpacity => {
+                self.set_settings_slider_from_position(
+                    SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider,
+                    x,
+                    3.0,
+                    50.0,
+                    |settings, value| {
+                        settings.terminal.background_opacity = value.round() as f64 / 100.0
+                    },
+                    cx,
+                );
+            }
+            SettingsSlider::AppearanceBackgroundBlur => {
+                self.set_background_blur_preview_from_position(x, cx);
+            }
+        }
+    }
+
+    pub(super) fn finish_settings_slider_drag(&mut self, cx: &mut Context<Self>) {
+        if self.settings_slider_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn focus_settings_input(
+        &mut self,
+        input: SettingsInput,
+        current_value: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_select = None;
+        self.focused_settings_input = Some(input);
+        self.settings_input_draft = current_value;
+        self.new_connection_caret_visible = true;
+        cx.notify();
+    }
+
+    fn current_settings_input_value(&self, input: SettingsInput) -> String {
+        let settings = self.settings_store.settings();
+        match input {
+            SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
+            SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
+            SettingsInput::AppearanceUiFont => settings.appearance.ui_font_family.clone(),
+            SettingsInput::LocalDefaultCwd => settings
+                .local_terminal
+                .default_cwd
+                .clone()
+                .unwrap_or_default(),
+            SettingsInput::LocalOhMyPoshTheme => settings
+                .local_terminal
+                .oh_my_posh_theme
+                .clone()
+                .unwrap_or_default(),
+            SettingsInput::HighlightLabel(index) => settings
+                .terminal
+                .highlight_rules
+                .get(index)
+                .map(|rule| rule.label.clone())
+                .unwrap_or_default(),
+            SettingsInput::HighlightPattern(index) => settings
+                .terminal
+                .highlight_rules
+                .get(index)
+                .map(|rule| rule.pattern.clone())
+                .unwrap_or_default(),
+            SettingsInput::HighlightForeground(index) => settings
+                .terminal
+                .highlight_rules
+                .get(index)
+                .and_then(|rule| rule.foreground.clone())
+                .unwrap_or_default(),
+            SettingsInput::HighlightBackground(index) => settings
+                .terminal
+                .highlight_rules
+                .get(index)
+                .and_then(|rule| rule.background.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(super) fn apply_settings_input_draft(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) {
+        match input {
+            SettingsInput::TerminalFontSize => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| settings.terminal.font_size = value.clamp(8, 32),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::TerminalLineHeight => {
+                if let Ok(value) = self.settings_input_draft.parse::<f64>() {
+                    self.edit_settings(
+                        |settings| settings.terminal.line_height = value.clamp(0.8, 2.0),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::AppearanceUiFont => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(|settings| settings.appearance.ui_font_family = value, cx);
+            }
+            SettingsInput::LocalDefaultCwd => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        settings.local_terminal.default_cwd =
+                            (!value.is_empty()).then(|| value.clone());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::LocalOhMyPoshTheme => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        settings.local_terminal.oh_my_posh_theme =
+                            (!value.is_empty()).then(|| value.clone());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::HighlightLabel(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_highlight_rule(index, move |rule| rule.label = value.clone(), cx);
+            }
+            SettingsInput::HighlightPattern(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_highlight_rule(index, move |rule| rule.pattern = value.clone(), cx);
+            }
+            SettingsInput::HighlightForeground(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_highlight_rule(
+                    index,
+                    move |rule| {
+                        rule.foreground = (!value.is_empty()).then(|| value.clone());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::HighlightBackground(index) => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_highlight_rule(
+                    index,
+                    move |rule| {
+                        rule.background = (!value.is_empty()).then(|| value.clone());
+                    },
+                    cx,
+                );
+            }
+        }
+    }
+
+    fn edit_highlight_rule(
+        &mut self,
+        index: usize,
+        edit: impl FnOnce(&mut HighlightRule),
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(
+            move |settings| {
+                if let Some(rule) = settings.terminal.highlight_rules.get_mut(index) {
+                    edit(rule);
+                }
+                settings.terminal.highlight_rules =
+                    reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+            },
+            cx,
+        );
+    }
+
+    fn add_highlight_rule(&mut self, cx: &mut Context<Self>) {
+        self.add_highlight_preset(vec![create_default_highlight_rule(|_| {})], cx);
+    }
+
+    fn add_highlight_preset(&mut self, rules: Vec<HighlightRule>, cx: &mut Context<Self>) {
+        self.edit_settings(
+            move |settings| {
+                settings.terminal.highlight_rules.extend(rules);
+                settings.terminal.highlight_rules =
+                    reindex_highlight_rules(settings.terminal.highlight_rules.clone())
+                        .into_iter()
+                        .take(MAX_HIGHLIGHT_RULES)
+                        .collect();
+            },
+            cx,
+        );
+    }
+
+    fn remove_highlight_rule(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.edit_settings(
+            move |settings| {
+                if index < settings.terminal.highlight_rules.len() {
+                    settings.terminal.highlight_rules.remove(index);
+                }
+                settings.terminal.highlight_rules =
+                    reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+            },
+            cx,
+        );
+    }
+
+    fn move_highlight_rule(&mut self, index: usize, direction: isize, cx: &mut Context<Self>) {
+        self.edit_settings(
+            move |settings| {
+                let len = settings.terminal.highlight_rules.len();
+                let next = if direction < 0 {
+                    index.checked_sub(1)
+                } else if index + 1 < len {
+                    Some(index + 1)
+                } else {
+                    None
+                };
+                if let Some(next) = next {
+                    settings.terminal.highlight_rules.swap(index, next);
+                }
+                settings.terminal.highlight_rules =
+                    reindex_highlight_rules(settings.terminal.highlight_rules.clone());
+            },
+            cx,
+        );
+    }
+
+    fn set_font_size_from_position(&mut self, x: f32, cx: &mut Context<Self>) {
+        let Some(anchor) = self
+            .select_anchors
+            .get(&SelectAnchorId::SettingsTerminalFontSizeSlider)
+            .copied()
+        else {
+            return;
+        };
+        let left = f32::from(anchor.bounds.left());
+        let width = f32::from(anchor.bounds.size.width).max(1.0);
+        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let value = (8.0 + percent * (32.0 - 8.0)).round() as i64;
+        if self.settings_store.settings().terminal.font_size != value {
+            self.edit_settings(|settings| settings.terminal.font_size = value, cx);
+        }
+    }
+
+    fn set_settings_slider_from_position(
+        &mut self,
+        anchor_id: SelectAnchorId,
+        x: f32,
+        min: f32,
+        max: f32,
+        apply: fn(&mut PersistedSettings, f32),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(anchor) = self.select_anchors.get(&anchor_id).copied() else {
+            return;
+        };
+        let left = f32::from(anchor.bounds.left());
+        let width = f32::from(anchor.bounds.size.width).max(1.0);
+        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let value = min + percent * (max - min);
+        self.edit_settings(|settings| apply(settings, value), cx);
+    }
+
+    fn set_background_blur_preview_from_position(&mut self, x: f32, cx: &mut Context<Self>) {
+        let Some(anchor) = self
+            .select_anchors
+            .get(&SelectAnchorId::SettingsAppearanceBackgroundBlurSlider)
+            .copied()
+        else {
+            return;
+        };
+        let left = f32::from(anchor.bounds.left());
+        let width = f32::from(anchor.bounds.size.width).max(1.0);
+        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let value = (percent * 20.0).round() as i64;
+        if self.background_blur_preview == Some(value)
+            || (self.background_blur_preview.is_none()
+                && self.settings_store.settings().terminal.background_blur == value)
+        {
+            return;
+        }
+
+        self.background_blur_preview = Some(value);
+        self.background_blur_commit_generation =
+            self.background_blur_commit_generation.wrapping_add(1);
+        let generation = self.background_blur_commit_generation;
+        cx.notify();
+
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(150)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.commit_background_blur_preview(generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn commit_background_blur_preview(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.background_blur_commit_generation != generation {
+            return;
+        }
+        let Some(value) = self.background_blur_preview.take() else {
+            return;
+        };
+        if self.settings_store.settings().terminal.background_blur != value {
+            self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
+        } else {
+            cx.notify();
+        }
+    }
+}

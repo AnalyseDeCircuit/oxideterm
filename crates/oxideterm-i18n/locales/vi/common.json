@@ -24,9 +24,6 @@
       "new_connection": "Kết nối mới",
       "new_local_terminal": "Terminal cục bộ",
       "keyboard_shortcuts": "Phím tắt"
-    },
-    "status": {
-      "sync_ready": "Đồng bộ sẵn sàng"
     }
   },
   "command_palette": {

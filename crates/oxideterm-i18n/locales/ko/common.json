@@ -24,9 +24,6 @@
       "new_connection": "새 연결",
       "new_local_terminal": "로컬 터미널",
       "keyboard_shortcuts": "키보드 단축키"
-    },
-    "status": {
-      "sync_ready": "동기화 준비됨"
     }
   },
   "command_palette": {

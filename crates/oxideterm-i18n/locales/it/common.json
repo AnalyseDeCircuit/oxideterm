@@ -24,9 +24,6 @@
       "new_connection": "Nuova Connessione",
       "new_local_terminal": "Terminale locale",
       "keyboard_shortcuts": "Scorciatoie da tastiera"
-    },
-    "status": {
-      "sync_ready": "Sincronizzazione pronta"
     }
   },
   "command_palette": {
