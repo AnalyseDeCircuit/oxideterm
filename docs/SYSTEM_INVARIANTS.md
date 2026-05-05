@@ -83,6 +83,10 @@ correctness.
 - Floating primitives are focus/input boundaries. Text, paste, IME, and command
   input must not leak to the terminal or underlying pane while the floating
   surface owns that interaction.
+- Floating primitives are scroll boundaries. Wheel/trackpad scroll handled by
+  a select, menu, tooltip, popover, context menu, or autocomplete surface must
+  stop propagation so parent pages, cards, panes, and terminals do not scroll at
+  the same time.
 - Floating primitive visuals must use semantic tokens for background, border,
   shadow, radius, spacing, typography, text, hover, active, selected, disabled,
   and focus states. Feature pages must not hard-code these values.

@@ -16,7 +16,8 @@ use crate::ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox::checkbox,
     select::{
-        OverlayAnchor, SelectAnchorId, select_anchor_probe, select_option, select_overlay_popup,
+        OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,
+        select_overlay_popup, select_panel_overlay_popup_with_max_height, select_separator,
         select_trigger,
     },
     separator::{SeparatorOrientation, separator},
@@ -330,10 +331,16 @@ impl WorkspaceApp {
             .items_center()
             .gap_3()
             .rounded(px(self.tokens.radii.md))
-            .bg(if active {
-                rgb(theme.bg_active)
+            .border_1()
+            .border_color(if active {
+                rgba((theme.border << 8) | 0xff)
             } else {
+                rgba(0x00000000)
+            })
+            .bg(if active {
                 rgb(theme.bg_panel)
+            } else {
+                rgba(0x00000000)
             })
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::NORMAL)
@@ -345,7 +352,7 @@ impl WorkspaceApp {
             .cursor_pointer()
             .hover(move |item| {
                 item.bg(if active {
-                    rgb(theme.bg_active)
+                    rgb(theme.bg_panel)
                 } else {
                     rgb(theme.bg_hover)
                 })
@@ -827,8 +834,53 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Appearance, SettingsSelect::AppearanceTheme) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for theme in BUILT_IN_THEMES {
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width,
+                    self.tokens.metrics.settings_theme_select_popup_max_height,
+                );
+
+                popup = popup.child(select_label(
+                    &self.tokens,
+                    self.i18n.t("settings_view.appearance.theme_group_oxide"),
+                ));
+                for &theme_id in OXIDE_THEME_IDS {
+                    if !built_in_theme_exists(theme_id) {
+                        continue;
+                    }
+                    let next_theme = theme_id.to_string();
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            theme_display_name(theme_id),
+                            theme_id == settings.terminal.theme.as_str(),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.terminal.theme = next_theme.clone(),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+
+                popup = popup
+                    .child(select_separator(&self.tokens))
+                    .child(select_label(
+                        &self.tokens,
+                        self.i18n.t("settings_view.appearance.theme_group_classic"),
+                    ));
+                let mut classic_themes: Vec<_> = BUILT_IN_THEMES
+                    .iter()
+                    .filter(|theme| !is_oxide_theme(theme.id))
+                    .collect();
+                classic_themes.sort_by_key(|theme| theme.id);
+                for theme in classic_themes {
                     let theme_id = theme.id.to_string();
                     popup = popup.child(
                         select_option(
@@ -3962,6 +4014,30 @@ fn theme_display_name(id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+const OXIDE_THEME_IDS: &[&str] = &[
+    "azurite",
+    "bismuth",
+    "chromium-oxide",
+    "cobalt",
+    "cuprite",
+    "hematite",
+    "malachite",
+    "magnetite",
+    "ochre",
+    "oxide",
+    "paper-oxide",
+    "silver-oxide",
+    "verdigris",
+];
+
+fn is_oxide_theme(id: &str) -> bool {
+    OXIDE_THEME_IDS.contains(&id)
+}
+
+fn built_in_theme_exists(id: &str) -> bool {
+    BUILT_IN_THEMES.iter().any(|theme| theme.id == id)
 }
 
 fn set_terminal_scrollback(settings: &mut PersistedSettings, value: i64) {

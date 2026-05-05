@@ -593,7 +593,7 @@ impl Render for WorkspaceApp {
                     ),
             )
             .when(self.new_connection_form.is_some(), |root| {
-                root.child(self.render_new_connection_modal(cx))
+                root.child(self.render_new_connection_modal(window, cx))
             })
             .when(self.host_key_challenge.is_some(), |root| {
                 root.child(self.render_host_key_dialog(cx))

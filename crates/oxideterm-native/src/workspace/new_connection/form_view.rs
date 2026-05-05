@@ -169,15 +169,21 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_new_connection_modal(
         &self,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(form) = self.new_connection_form.as_ref() else {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
+        let modal_max_height = f32::from(window.viewport_size().height)
+            * self.tokens.metrics.modal_max_viewport_height_ratio;
         modal_overlay(
             &self.tokens,
             modal_container(&self.tokens)
+                .max_h(px(modal_max_height))
+                .flex()
+                .flex_col()
                 .child(modal_header(
                     &self.tokens,
                     self.i18n.t("ssh.form.title"),
@@ -185,6 +191,10 @@ impl WorkspaceApp {
                 ))
                 .child(
                     modal_body(&self.tokens)
+                        .id("new-connection-modal-body-scroll")
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_y_scroll()
                         .child(
                             div()
                                 .flex()
@@ -357,6 +367,7 @@ impl WorkspaceApp {
                 )
                 .child(
                     modal_footer(&self.tokens)
+                        .flex_none()
                         .child(self.render_connection_button(
                             self.i18n.t("ssh.form.cancel"),
                             false,

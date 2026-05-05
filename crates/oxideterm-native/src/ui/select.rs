@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, px, rgb,
-    rgba,
+    InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -157,11 +157,20 @@ pub(crate) fn select_trigger(
         )
 }
 
-pub(crate) fn select_popup(tokens: &ThemeTokens, width: f32) -> Div {
+pub(crate) fn select_popup(tokens: &ThemeTokens, width: f32) -> Stateful<Div> {
+    select_popup_with_max_height(tokens, width, tokens.metrics.ui_select_max_height)
+}
+
+pub(crate) fn select_popup_with_max_height(
+    tokens: &ThemeTokens,
+    width: f32,
+    max_height: f32,
+) -> Stateful<Div> {
     div()
+        .id("select-popup-scroll")
         .w(px(width.max(tokens.metrics.ui_select_min_width)))
-        .max_h(px(tokens.metrics.ui_select_max_height))
-        .overflow_hidden()
+        .max_h(px(max_height))
+        .overflow_y_scroll()
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgb(tokens.ui.border))
@@ -169,10 +178,35 @@ pub(crate) fn select_popup(tokens: &ThemeTokens, width: f32) -> Div {
         .p(px(tokens.metrics.ui_menu_padding))
         .text_color(rgb(tokens.ui.text))
         .shadow_lg()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
 
-pub(crate) fn select_overlay_popup(tokens: &ThemeTokens, width: f32) -> Div {
+pub(crate) fn select_panel_popup_with_max_height(
+    tokens: &ThemeTokens,
+    width: f32,
+    max_height: f32,
+) -> Stateful<Div> {
+    select_popup_with_max_height(tokens, width, max_height).bg(rgb(tokens.ui.bg_panel))
+}
+
+pub(crate) fn select_overlay_popup(tokens: &ThemeTokens, width: f32) -> Stateful<Div> {
     select_popup(tokens, width)
+}
+
+pub(crate) fn select_overlay_popup_with_max_height(
+    tokens: &ThemeTokens,
+    width: f32,
+    max_height: f32,
+) -> Stateful<Div> {
+    select_popup_with_max_height(tokens, width, max_height)
+}
+
+pub(crate) fn select_panel_overlay_popup_with_max_height(
+    tokens: &ThemeTokens,
+    width: f32,
+    max_height: f32,
+) -> Stateful<Div> {
+    select_panel_popup_with_max_height(tokens, width, max_height)
 }
 
 pub(crate) fn select_option(tokens: &ThemeTokens, label: impl Into<String>, selected: bool) -> Div {
@@ -225,12 +259,14 @@ pub(crate) fn select_item(tokens: &ThemeTokens, label: impl Into<String>, select
 }
 
 pub(crate) fn select_label(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
+    let label = label.into().to_uppercase();
     div()
         .px(px(tokens.metrics.ui_menu_item_padding_x))
         .py(px(tokens.metrics.ui_menu_item_padding_y))
-        .text_size(px(tokens.metrics.ui_text_sm))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .child(label.into())
+        .text_size(px(tokens.metrics.ui_text_xs))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(tokens.ui.text_muted))
+        .child(label)
 }
 
 pub(crate) fn select_separator(tokens: &ThemeTokens) -> Div {

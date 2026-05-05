@@ -48,6 +48,7 @@ pub(crate) fn dialog_header(tokens: &ThemeTokens) -> Div {
     div()
         .flex()
         .flex_col()
+        .flex_none()
         .justify_center()
         .px(px(tokens.metrics.modal_header_padding_x))
         .py(px(tokens.metrics.modal_header_padding_y))
