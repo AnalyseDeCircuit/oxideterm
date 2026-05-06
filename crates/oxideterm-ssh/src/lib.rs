@@ -31,7 +31,8 @@ pub use router::{
     TerminalEndpoint,
 };
 pub use transport::{
-    KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, ProxyChainPreflightChallenge,
+    BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
+    ProxyChainPreflightChallenge, RemoteForwardHandler, RemoteForwardedTcpIp, SshForwardStream,
     SshPromptError, SshPromptHandler, SshPtyHandle, SshTransportClient, SshTransportCommand,
     SshTransportError,
 };

@@ -343,6 +343,20 @@ impl WorkspaceApp {
     }
 
     pub(super) fn unregister_ssh_terminal_session(&mut self, session_id: TerminalSessionId) {
+        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_session_id = session_id.0.to_string();
+        std::thread::spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            runtime.block_on(async move {
+                let _ = forwarding_registry.remove(&forwarding_session_id).await;
+            });
+        });
+
         let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
             return;
         };

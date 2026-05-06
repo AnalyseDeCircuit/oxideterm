@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use parking_lot::RwLock;
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
     keys::{
@@ -25,6 +26,7 @@ use russh::{
 use signature::Signer as SignatureSigner;
 use ssh_encoding::Encode;
 use tokio::{
+    io::{AsyncRead, AsyncWrite},
     sync::Semaphore,
     sync::{Mutex, mpsc},
     time::{Instant, sleep_until},
@@ -33,7 +35,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     AuthMethod, ConnectionConsumer, ConnectionState, ProxyHopConfig, SshConfig,
-    SshConnectionRegistry,
+    SshConnectionHandle, SshConnectionRegistry,
     host_key::{
         HostKeyStatus, HostKeyVerification, check_host_key, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,
@@ -137,6 +139,29 @@ pub enum SshTransportCommand {
     Close,
 }
 
+pub trait SshForwardStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> SshForwardStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+pub type BoxedSshForwardStream = Box<dyn SshForwardStream>;
+
+pub struct RemoteForwardedTcpIp {
+    pub connected_address: String,
+    pub connected_port: u16,
+    pub originator_address: String,
+    pub originator_port: u16,
+    pub stream: BoxedSshForwardStream,
+}
+
+pub trait RemoteForwardHandler: Send + Sync {
+    fn handle_remote_forward(
+        &self,
+        event: RemoteForwardedTcpIp,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+}
+
+type RemoteForwardHandlerSlot = Arc<RwLock<Option<Arc<dyn RemoteForwardHandler>>>>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProxyChainPreflightChallenge {
     pub step_index: usize,
@@ -181,7 +206,14 @@ pub struct SshPtyHandle {
     pub session_id: String,
     pub command_tx: mpsc::Sender<SshTransportCommand>,
     pub output_rx: mpsc::Receiver<Vec<u8>>,
+    ssh_connection: Option<SshConnectionHandle>,
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
+}
+
+impl SshPtyHandle {
+    pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
+        self.ssh_connection.clone()
+    }
 }
 
 impl Drop for SshPtyHandle {
@@ -201,28 +233,130 @@ pub struct SshTransportClient {
 struct PooledSshConnection {
     target: Mutex<client::Handle<NativeClientHandler>>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
+    remote_forward_handler: RemoteForwardHandlerSlot,
 }
 
 impl PooledSshConnection {
-    fn direct(handle: client::Handle<NativeClientHandler>) -> Self {
+    fn direct(
+        handle: client::Handle<NativeClientHandler>,
+        remote_forward_handler: RemoteForwardHandlerSlot,
+    ) -> Self {
         Self {
             target: Mutex::new(handle),
             _jump_handles: Vec::new(),
+            remote_forward_handler,
         }
     }
 
     fn tunneled(
         target: client::Handle<NativeClientHandler>,
         jump_handles: Vec<client::Handle<NativeClientHandler>>,
+        remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Self {
         Self {
             target: Mutex::new(target),
             _jump_handles: jump_handles,
+            remote_forward_handler,
         }
     }
 
     async fn is_closed(&self) -> bool {
         self.target.lock().await.is_closed()
+    }
+}
+
+impl SshConnectionHandle {
+    pub async fn open_direct_tcpip(
+        &self,
+        host: &str,
+        port: u16,
+        origin_host: &str,
+        origin_port: u16,
+    ) -> Result<BoxedSshForwardStream, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for port forwarding".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot open a port forward".to_string(),
+            ));
+        }
+
+        let handle = pooled.target.lock().await;
+        let stream =
+            open_direct_tcpip_stream_with_origin(&handle, host, port, origin_host, origin_port)
+                .await?;
+        Ok(Box::new(stream))
+    }
+
+    pub async fn request_remote_tcpip_forward(
+        &self,
+        bind_address: &str,
+        bind_port: u16,
+    ) -> Result<u16, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for remote port forwarding".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot request remote port forwarding".to_string(),
+            ));
+        }
+
+        let handle = pooled.target.lock().await;
+        handle
+            .tcpip_forward(bind_address, bind_port as u32)
+            .await
+            .map(|port| port as u16)
+            .map_err(|error| {
+                SshTransportError::ConnectionFailed(format!(
+                    "failed to request remote port forward {bind_address}:{bind_port}: {error}"
+                ))
+            })
+    }
+
+    pub async fn cancel_remote_tcpip_forward(
+        &self,
+        bind_address: &str,
+        bind_port: u16,
+    ) -> Result<(), SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for remote port forwarding".to_string(),
+            ));
+        };
+        let handle = pooled.target.lock().await;
+        handle
+            .cancel_tcpip_forward(bind_address, bind_port as u32)
+            .await
+            .map_err(|error| {
+                SshTransportError::ConnectionFailed(format!(
+                    "failed to cancel remote port forward {bind_address}:{bind_port}: {error}"
+                ))
+            })
+    }
+
+    pub fn set_remote_forward_handler(
+        &self,
+        handler: Arc<dyn RemoteForwardHandler>,
+    ) -> Result<(), SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for remote port forwarding".to_string(),
+            ));
+        };
+        *pooled.remote_forward_handler.write() = Some(handler);
+        Ok(())
+    }
+
+    pub fn clear_remote_forward_handler(&self) {
+        if let Some(pooled) = self.physical::<PooledSshConnection>() {
+            *pooled.remote_forward_handler.write() = None;
+        }
     }
 }
 
@@ -529,6 +663,7 @@ impl SshTransportClient {
             .open_shell_from_pooled(
                 pooled,
                 Some((registry.clone(), connection_id.clone(), consumer.clone())),
+                Some(connection.clone()),
             )
             .await;
 
@@ -552,30 +687,35 @@ impl SshTransportClient {
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
     ) -> Result<SshPtyHandle, SshTransportError> {
         let pooled = self.connect_authenticated_connection().await?;
-        self.open_shell_from_pooled(pooled, registry_release).await
+        self.open_shell_from_pooled(pooled, registry_release, None)
+            .await
     }
 
     async fn connect_authenticated_connection(
         &self,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
+        let remote_forward_handler = Arc::new(RwLock::new(None));
         if self
             .config
             .proxy_chain
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
         {
-            return self.connect_authenticated_proxy_connection().await;
+            return self
+                .connect_authenticated_proxy_connection(remote_forward_handler)
+                .await;
         }
 
-        self.connect_direct_authenticated_handle(&self.config)
+        self.connect_direct_authenticated_handle(&self.config, remote_forward_handler.clone())
             .await
-            .map(PooledSshConnection::direct)
+            .map(|handle| PooledSshConnection::direct(handle, remote_forward_handler))
             .map(Arc::new)
     }
 
     async fn connect_direct_authenticated_handle(
         &self,
         config: &SshConfig,
+        remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
         let socket_addr = resolve_socket_addr(&config.host, config.port)?;
 
@@ -587,6 +727,7 @@ impl SshTransportClient {
             config.trust_host_key,
             config.expected_host_key_fingerprint.clone(),
             config.agent_forwarding,
+            remote_forward_handler,
         );
         let mut handle = tokio::time::timeout(
             Duration::from_secs(config.timeout_secs),
@@ -602,6 +743,7 @@ impl SshTransportClient {
 
     async fn connect_authenticated_proxy_connection(
         &self,
+        remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
         let chain = self.config.proxy_chain.as_deref().unwrap_or_default();
         if chain.is_empty() {
@@ -643,11 +785,16 @@ impl SshTransportClient {
             )
         })?;
         let target = self
-            .connect_target_via_proxy_stream(stream, self.config.timeout_secs)
+            .connect_target_via_proxy_stream(
+                stream,
+                self.config.timeout_secs,
+                remote_forward_handler.clone(),
+            )
             .await?;
         Ok(Arc::new(PooledSshConnection::tunneled(
             target,
             jump_handles,
+            remote_forward_handler,
         )))
     }
 
@@ -702,6 +849,7 @@ impl SshTransportClient {
         &self,
         stream: russh::ChannelStream<client::Msg>,
         timeout_secs: u64,
+        remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
         let handler = NativeClientHandler::new(
             self.config.host.clone(),
@@ -710,6 +858,7 @@ impl SshTransportClient {
             self.config.trust_host_key,
             self.config.expected_host_key_fingerprint.clone(),
             self.config.agent_forwarding,
+            remote_forward_handler,
         );
         let mut handle = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
@@ -731,6 +880,7 @@ impl SshTransportClient {
         self,
         pooled: Arc<PooledSshConnection>,
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
+        ssh_connection: Option<SshConnectionHandle>,
     ) -> Result<SshPtyHandle, SshTransportError> {
         let mut channel = {
             let handle = pooled.target.lock().await;
@@ -847,6 +997,7 @@ impl SshTransportClient {
             session_id,
             command_tx,
             output_rx,
+            ssh_connection,
             registry_release,
         })
     }
@@ -947,8 +1098,18 @@ async fn open_direct_tcpip_stream(
     host: &str,
     port: u16,
 ) -> Result<russh::ChannelStream<client::Msg>, SshTransportError> {
+    open_direct_tcpip_stream_with_origin(handle, host, port, "127.0.0.1", 0).await
+}
+
+async fn open_direct_tcpip_stream_with_origin(
+    handle: &client::Handle<NativeClientHandler>,
+    host: &str,
+    port: u16,
+    origin_host: &str,
+    origin_port: u16,
+) -> Result<russh::ChannelStream<client::Msg>, SshTransportError> {
     handle
-        .channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 0)
+        .channel_open_direct_tcpip(host, port as u32, origin_host, origin_port as u32)
         .await
         .map(|channel| channel.into_stream())
         .map_err(|error| {
@@ -988,6 +1149,7 @@ fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
         hop.trust_host_key,
         hop.expected_host_key_fingerprint.clone(),
         hop.agent_forwarding,
+        Arc::new(RwLock::new(None)),
     )
 }
 
@@ -1024,6 +1186,7 @@ struct NativeClientHandler {
     expected_host_key_fingerprint: Option<String>,
     agent_forwarding_requested: bool,
     agent_forward_semaphore: Arc<Semaphore>,
+    remote_forward_handler: RemoteForwardHandlerSlot,
 }
 
 impl NativeClientHandler {
@@ -1034,6 +1197,7 @@ impl NativeClientHandler {
         trust_host_key: Option<bool>,
         expected_host_key_fingerprint: Option<String>,
         agent_forwarding_requested: bool,
+        remote_forward_handler: RemoteForwardHandlerSlot,
     ) -> Self {
         Self {
             host,
@@ -1043,6 +1207,7 @@ impl NativeClientHandler {
             expected_host_key_fingerprint,
             agent_forwarding_requested,
             agent_forward_semaphore: Arc::new(Semaphore::new(16)),
+            remote_forward_handler,
         }
     }
 }
@@ -1118,6 +1283,33 @@ impl client::Handler for NativeClientHandler {
         tokio::spawn(async move {
             handle_agent_forward_channel(channel).await;
             drop(permit);
+        });
+        Ok(())
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<client::Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(handler) = self.remote_forward_handler.read().clone() else {
+            let _ = channel.eof().await;
+            return Ok(());
+        };
+
+        let event = RemoteForwardedTcpIp {
+            connected_address: connected_address.to_string(),
+            connected_port: connected_port as u16,
+            originator_address: originator_address.to_string(),
+            originator_port: originator_port as u16,
+            stream: Box::new(channel.into_stream()),
+        };
+        tokio::spawn(async move {
+            handler.handle_remote_forward(event).await;
         });
         Ok(())
     }

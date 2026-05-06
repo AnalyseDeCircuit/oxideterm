@@ -13,6 +13,7 @@ anyhow.workspace = true
 chrono.workspace = true
 gpui.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }

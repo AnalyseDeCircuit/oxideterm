@@ -5884,6 +5884,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-forwarding"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "oxideterm-ssh",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "oxideterm-gpui-app"
 version = "0.1.0"
 dependencies = [
@@ -5891,6 +5904,7 @@ dependencies = [
  "chrono",
  "gpui",
  "oxideterm-connections",
+ "oxideterm-forwarding",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-settings-view",
  "oxideterm-gpui-terminal",
@@ -5952,6 +5966,7 @@ dependencies = [
  "gpui",
  "image",
  "oxideterm-render-policy",
+ "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-terminal-unicode",
  "parking_lot",

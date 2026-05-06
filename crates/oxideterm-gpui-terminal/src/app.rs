@@ -9,6 +9,7 @@ use gpui::{
     Bounds, ClipboardItem, Context, FocusHandle, Pixels, SharedString, Subscription, Timer, Window,
     px,
 };
+use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
     GraphicsOptions, LocalPtyConfig, SshSessionConfig, TermMode, TerminalDrainBudget,
     TerminalEvent, TerminalLifecycle, TerminalSession, TerminalSnapshot,
@@ -245,6 +246,10 @@ impl TerminalPane {
 
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.terminal.lock().lifecycle()
+    }
+
+    pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
+        self.terminal.lock().ssh_connection_handle()
     }
 
     pub fn set_search_query(
