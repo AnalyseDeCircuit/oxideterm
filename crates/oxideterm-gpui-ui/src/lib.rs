@@ -24,7 +24,7 @@ pub mod toaster;
 pub mod tooltip;
 
 pub use button::{ButtonTone, button};
-pub use checkbox::checkbox;
+pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
 pub use form_field::form_field;
 pub use modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay};
 pub use tabs::{segmented_tab, segmented_tabs};
