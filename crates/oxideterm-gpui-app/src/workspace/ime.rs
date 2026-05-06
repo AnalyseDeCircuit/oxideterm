@@ -7,6 +7,7 @@ use gpui::{
 
 use super::WorkspaceApp;
 use super::new_connection::NewConnectionField;
+use super::session_manager::SessionManagerInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 
@@ -14,6 +15,7 @@ use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 pub(super) enum WorkspaceImeTarget {
     Search,
     Settings(SettingsInput),
+    SessionManager(SessionManagerInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
 }
@@ -23,6 +25,7 @@ impl WorkspaceImeTarget {
         let id = match self {
             Self::Search => 1,
             Self::Settings(input) => 1_000 + input.anchor_key(),
+            Self::SessionManager(input) => 1_500 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
         };
@@ -286,6 +289,14 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager)
+            && let Some(input) = self.session_manager.focused_input
+        {
+            return Some(WorkspaceImeTarget::SessionManager(input));
+        }
+
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
@@ -306,6 +317,18 @@ impl WorkspaceApp {
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
+                } else {
+                    None
+                }
+            }
+            WorkspaceImeTarget::SessionManager(input) => {
+                if self.session_manager.focused_input == Some(input) {
+                    Some(match input {
+                        SessionManagerInput::Search => self.session_manager.search_query.clone(),
+                        SessionManagerInput::NewGroup => {
+                            self.session_manager.new_group_name.clone()
+                        }
+                    })
                 } else {
                     None
                 }
@@ -360,6 +383,28 @@ impl WorkspaceApp {
                 if self.focused_settings_input == Some(input) {
                     replace_utf16(&mut self.settings_input_draft, replacement_range, text);
                     self.apply_settings_input_draft(input, cx);
+                }
+            }
+            WorkspaceImeTarget::SessionManager(input) => {
+                if self.session_manager.focused_input == Some(input) {
+                    match input {
+                        SessionManagerInput::Search => {
+                            replace_utf16(
+                                &mut self.session_manager.search_query,
+                                replacement_range,
+                                text,
+                            );
+                            self.clear_session_selection_for_invisible_rows();
+                        }
+                        SessionManagerInput::NewGroup => {
+                            replace_utf16(
+                                &mut self.session_manager.new_group_name,
+                                replacement_range,
+                                text,
+                            );
+                        }
+                    }
+                    cx.notify();
                 }
             }
             WorkspaceImeTarget::NewConnection(field) => {

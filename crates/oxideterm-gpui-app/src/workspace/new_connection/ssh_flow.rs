@@ -11,12 +11,18 @@ use super::{
     form_state::{NewConnectionForm, SshAuthTab},
     host_key_dialog::HostKeyChallenge,
 };
-use crate::workspace::WorkspaceApp;
+use crate::workspace::{
+    WorkspaceApp,
+    session_manager::{
+        form_from_saved_connection, save_request_from_form, ssh_config_from_saved_connection,
+    },
+};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
     Test,
     Connect,
+    ConnectSaved(String),
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {
@@ -78,6 +84,7 @@ impl WorkspaceApp {
             group: self.i18n.t("ssh.form.ungrouped"),
             ..NewConnectionForm::default()
         });
+        self.editing_saved_connection_id = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -90,6 +97,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.new_connection_form = None;
+        self.editing_saved_connection_id = None;
         self.host_key_challenge = None;
         self.cancel_keyboard_interactive_challenge(cx);
         self.focus_active_pane(window, cx);
@@ -101,6 +109,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editing_saved_connection_id.is_some() {
+            self.save_editing_connection(window, cx);
+            return;
+        }
         self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
     }
 
@@ -134,6 +146,110 @@ impl WorkspaceApp {
                 config: worker_config,
                 title: worker_title,
                 intent,
+                status,
+            });
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_saved_connection(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.connection_store.get(id).cloned() else {
+            return;
+        };
+        let Some(config) = ssh_config_from_saved_connection(&conn) else {
+            self.open_saved_connection_editor(
+                id,
+                Some(
+                    self.i18n
+                        .t("sessionManager.edit_properties.password_placeholder"),
+                ),
+                window,
+                cx,
+            );
+            return;
+        };
+        let title = conn.name.clone();
+        self.start_saved_connection_flow(id.to_string(), config, title, cx);
+    }
+
+    pub(in crate::workspace) fn open_saved_connection_editor(
+        &mut self,
+        id: &str,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.connection_store.get(id).cloned() else {
+            return;
+        };
+        self.new_connection_form = Some(form_from_saved_connection(&conn, error));
+        self.editing_saved_connection_id = Some(id.to_string());
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.editing_saved_connection_id.clone() else {
+            return;
+        };
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return;
+        };
+        match save_request_from_form(form, Some(id)) {
+            Ok(request) => match self.connection_store.upsert(request) {
+                Ok(_) => {
+                    self.new_connection_form = None;
+                    self.editing_saved_connection_id = None;
+                    self.session_manager.status =
+                        Some(self.i18n.t("sessionManager.edit_properties.save"));
+                    self.focus_active_pane(window, cx);
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.error = Some(error.to_string());
+                    }
+                }
+            },
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn start_saved_connection_flow(
+        &mut self,
+        id: String,
+        config: SshConfig,
+        title: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        let tx = self.ssh_worker_tx.clone();
+        let host = config.host.clone();
+        let port = config.port;
+        let worker_config = config.clone();
+        let worker_title = title.clone();
+        std::thread::spawn(move || {
+            let status = match tokio::runtime::Runtime::new() {
+                Ok(runtime) => runtime.block_on(check_host_key(&host, port, 10)),
+                Err(error) => HostKeyStatus::Error {
+                    message: format!("failed to initialize SSH runtime: {error}"),
+                },
+            };
+            let _ = tx.send(SshConnectionWorkerResult::Preflight {
+                config: worker_config,
+                title: worker_title,
+                intent: SshConnectionIntent::ConnectSaved(id),
                 status,
             });
         });
@@ -280,6 +396,8 @@ impl WorkspaceApp {
             HostKeyStatus::Error { message } => {
                 if let Some(form) = self.new_connection_form.as_mut() {
                     form.error = Some(message);
+                } else {
+                    self.session_manager.status = Some(message);
                 }
                 cx.notify();
             }
@@ -296,8 +414,27 @@ impl WorkspaceApp {
     ) {
         match intent {
             SshConnectionIntent::Connect => {
+                if self
+                    .new_connection_form
+                    .as_ref()
+                    .is_some_and(|form| form.save_connection)
+                    && let Some(form) = self.new_connection_form.as_ref()
+                    && let Ok(request) = save_request_from_form(form, None)
+                    && let Err(error) = self.connection_store.upsert(request)
+                    && let Some(form) = self.new_connection_form.as_mut()
+                {
+                    form.error = Some(error.to_string());
+                    cx.notify();
+                    return;
+                }
                 self.new_connection_form = None;
                 self.host_key_challenge = None;
+                let _ = self.create_ssh_terminal_tab(config, title, window, cx);
+            }
+            SshConnectionIntent::ConnectSaved(id) => {
+                self.host_key_challenge = None;
+                let _ = self.connection_store.mark_used(&id);
+                self.session_manager.status = None;
                 let _ = self.create_ssh_terminal_tab(config, title, window, cx);
             }
             SshConnectionIntent::Test => self.start_ssh_test(config, cx),

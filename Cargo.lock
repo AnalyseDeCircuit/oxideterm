@@ -1177,6 +1177,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link 0.2.1",
 ]
@@ -5825,11 +5826,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-connections"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "oxideterm-gpui-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "gpui",
+ "oxideterm-connections",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-settings-view",
  "oxideterm-gpui-terminal",

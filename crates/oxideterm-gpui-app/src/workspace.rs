@@ -2,6 +2,7 @@ mod actions;
 mod ime;
 mod new_connection;
 mod pane_tree;
+mod session_manager;
 mod settings;
 mod sidebar;
 mod tabs;
@@ -15,6 +16,7 @@ use gpui::{
     Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled, StyledImage, Timer, Window,
     div, prelude::*, px, relative, rgb, rgba, svg,
 };
+use oxideterm_connections::ConnectionStore;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
@@ -31,6 +33,7 @@ use oxideterm_render_policy::{
 use oxideterm_settings::{
     BackgroundFit, CursorStyle as SettingsCursorStyle, FrostedGlassMode, HighlightRuleRenderMode,
     Language, PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
+    default_settings_path,
 };
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
@@ -49,9 +52,10 @@ use self::actions::SearchBarState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
-    SshConnectionWorkerResult,
+    SshAuthTab, SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
+use self::session_manager::SessionManagerState;
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
 use crate::{
@@ -98,6 +102,7 @@ pub(crate) struct WorkspaceApp {
     background_blur_commit_generation: u64,
     background_cache_poll_scheduled: bool,
     new_connection_form: Option<NewConnectionForm>,
+    editing_saved_connection_id: Option<String>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
@@ -114,6 +119,8 @@ pub(crate) struct WorkspaceApp {
     applied_vibrancy_mode: NativeVibrancyMode,
     background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
+    connection_store: ConnectionStore,
+    session_manager: SessionManagerState,
     local_shells: Vec<ShellInfo>,
 }
 
@@ -121,6 +128,7 @@ impl WorkspaceApp {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
         let focus_handle = cx.focus_handle();
         let settings_store = SettingsStore::load_default()?;
+        let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
         let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
@@ -173,6 +181,7 @@ impl WorkspaceApp {
             background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
             new_connection_form: None,
+            editing_saved_connection_id: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
             keyboard_interactive_challenge: None,
@@ -189,6 +198,8 @@ impl WorkspaceApp {
             applied_vibrancy_mode: initial_vibrancy_mode,
             background_image_cache,
             settings_store,
+            connection_store,
+            session_manager: SessionManagerState::default(),
             local_shells,
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
@@ -343,6 +354,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
     match kind {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
+        TabKind::SessionManager => "session_manager",
         TabKind::Settings => "settings",
     }
 }
@@ -498,7 +510,7 @@ impl Render for WorkspaceApp {
         if self.needs_active_pane_focus
             && self
                 .active_tab()
-                .is_some_and(|tab| tab.kind != TabKind::Settings)
+                .is_some_and(|tab| !matches!(tab.kind, TabKind::Settings | TabKind::SessionManager))
             && !self.search.visible
             && self.new_connection_form.is_none()
             && let Some(pane) = self.active_pane()
@@ -512,6 +524,7 @@ impl Render for WorkspaceApp {
         let content = if let Some(tab) = self.active_tab() {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (TabKind::SessionManager, _) => self.render_session_manager_surface(cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }
@@ -557,6 +570,17 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     let _ = this.handle_new_connection_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::SessionManager)
+                    && this.session_manager.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_session_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.active_surface == ActiveSurface::Settings
@@ -845,4 +869,12 @@ fn workspace_background_object_fit(fit: TerminalBackgroundFit) -> ObjectFit {
         TerminalBackgroundFit::Fill => ObjectFit::Fill,
         TerminalBackgroundFit::Tile => ObjectFit::None,
     }
+}
+
+fn default_connections_path() -> PathBuf {
+    default_settings_path()
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("connections.json")
 }

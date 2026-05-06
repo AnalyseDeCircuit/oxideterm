@@ -1,0 +1,111 @@
+{
+  "sessionManager": {
+    "title": "Gestor de sesiones",
+    "toolbar": {
+      "search_placeholder": "Buscar conexiones...",
+      "new_connection": "Nueva conexión",
+      "import": "Importar",
+      "export": "Exportar",
+      "auto_route": "Ruta automática"
+    },
+    "folder_tree": {
+      "all_connections": "Todas las conexiones",
+      "ungrouped": "Sin grupo",
+      "recent": "Recientes",
+      "new_group": "Nuevo grupo",
+      "new_group_description": "Crea un grupo directamente desde el gestor de sesiones. Usa / para crear grupos anidados.",
+      "new_group_placeholder": "Producción/Núcleo",
+      "rename_group": "Renombrar grupo",
+      "delete_group": "Eliminar grupo",
+      "new_subgroup": "Nuevo subgrupo",
+      "confirm_delete_group": "¿Eliminar grupo \"{{name}}\"? Las conexiones se moverán a Sin grupo."
+    },
+    "table": {
+      "name": "Nombre",
+      "host": "Host",
+      "port": "Puerto",
+      "username": "Usuario",
+      "auth_type": "Auth",
+      "group": "Grupo",
+      "tags": "Etiquetas",
+      "last_used": "Último uso",
+      "actions": "Acciones",
+      "no_connections": "No se encontraron conexiones",
+      "no_connections_hint": "Cree una nueva conexión para comenzar",
+      "no_search_results": "Ninguna conexión coincide con su búsqueda",
+      "select_all": "Seleccionar todo",
+      "selected_count": "{{count}} seleccionado(s)",
+      "never_used": "Nunca"
+    },
+    "time": {
+      "just_now": "Ahora mismo",
+      "minutes_ago": "Hace {{count}}min",
+      "hours_ago": "Hace {{count}}h",
+      "days_ago": "Hace {{count}}d"
+    },
+    "actions": {
+      "connect": "Conectar",
+      "edit": "Editar",
+      "duplicate": "Duplicar",
+      "delete": "Eliminar",
+      "test_connection": "Probar conexión",
+      "manage_tags": "Gestionar etiquetas",
+      "move_to_group": "Mover a grupo",
+      "confirm_delete": "¿Eliminar conexión \"{{name}}\"?",
+      "confirm_batch_delete": "¿Eliminar {{count}} conexiones seleccionadas?"
+    },
+    "batch": {
+      "title": "Acciones en lote",
+      "delete": "Eliminar selección",
+      "move_to_group": "Mover a grupo",
+      "add_tags": "Agregar etiquetas"
+    },
+    "tags": {
+      "add_tag": "Agregar etiqueta...",
+      "remove_tag": "Eliminar etiqueta \"{{tag}}\""
+    },
+    "toast": {
+      "connection_deleted": "Conexión eliminada",
+      "connections_deleted": "{{count}} conexiones eliminadas",
+      "connection_duplicated": "Conexión duplicada",
+      "group_created": "Grupo creado",
+      "create_group_failed": "No se pudo crear el grupo",
+      "connections_moved": "{{count}} conexiones movidas a \"{{group}}\"",
+      "tags_updated": "Etiquetas actualizadas",
+      "test_in_progress": "Probando conexión...",
+      "test_success": "Conexión exitosa",
+      "test_failed": "Prueba de conexión fallida",
+      "test_elapsed": "Conectado en {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Este host intermedio no admite keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Este host intermedio usa un tipo de autenticación no compatible",
+      "test_host_key_changed": "La clave de host ha cambiado. Esperado: {{expected}}. Actual: {{actual}}."
+    },
+    "edit_properties": {
+      "title": "Editar conexión",
+      "description": "Modificar las propiedades de la conexión.",
+      "name": "Nombre",
+      "host": "Host",
+      "port": "Puerto",
+      "username": "Usuario",
+      "auth_type": "Autenticación",
+      "auth_password": "Contraseña",
+      "auth_key": "Clave SSH",
+      "auth_agent": "Agent",
+      "saved_password": "Contraseña guardada",
+      "password_placeholder": "Haz clic en el icono del ojo para cargar la contraseña guardada desde el llavero del sistema",
+      "show_password": "Mostrar contraseña guardada",
+      "hide_password": "Ocultar contraseña guardada",
+      "password_hint": "Las contraseñas permanecen en el llavero del sistema hasta que las cargues aquí explícitamente para verlas o editarlas.",
+      "key_path": "Ruta del archivo de clave",
+      "browse": "Examinar",
+      "agent_hint": "Usar SSH Agent del sistema para autenticación.",
+      "group": "Grupo",
+      "ungrouped": "Sin grupo",
+      "color": "Color",
+      "clear_color": "Borrar",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "saving": "Guardando..."
+    }
+  }
+}

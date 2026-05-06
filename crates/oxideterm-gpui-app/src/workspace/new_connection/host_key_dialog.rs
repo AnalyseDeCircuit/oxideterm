@@ -7,7 +7,7 @@ use oxideterm_ssh::{HostKeyStatus, SshConfig};
 use super::ssh_flow::SshConnectionIntent;
 use crate::workspace::WorkspaceApp;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum HostKeyButtonAction {
     Cancel,
     TrustOnce,
@@ -61,6 +61,8 @@ impl WorkspaceApp {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.pending = false;
             form.error = Some(self.i18n.t("ssh.host_key.cancelled"));
+        } else {
+            self.session_manager.status = Some(self.i18n.t("ssh.host_key.cancelled"));
         }
         cx.notify();
     }

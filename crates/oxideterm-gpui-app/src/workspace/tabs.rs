@@ -162,7 +162,9 @@ impl WorkspaceApp {
         if self.tabs.iter().any(|tab| tab.id == tab_id) {
             self.active_tab_id = Some(tab_id);
             self.sync_active_tab_surface();
-            self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
+            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+            });
             self.focus_active_pane(window, cx);
             self.reveal_active_tab(window);
             cx.notify();
@@ -170,14 +172,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn sync_active_tab_surface(&mut self) {
-        if self
-            .active_tab()
-            .is_some_and(|tab| tab.kind == TabKind::Settings)
-        {
-            self.active_surface = ActiveSurface::Settings;
-            self.active_sidebar_section = SidebarSection::Settings;
-        } else {
-            self.active_surface = ActiveSurface::Terminal;
+        match self.active_tab().map(|tab| &tab.kind) {
+            Some(TabKind::Settings) => {
+                self.active_surface = ActiveSurface::Settings;
+                self.active_sidebar_section = SidebarSection::Settings;
+            }
+            Some(TabKind::SessionManager) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Connections;
+            }
+            _ => {
+                self.active_surface = ActiveSurface::Terminal;
+            }
         }
     }
 
@@ -210,8 +216,9 @@ impl WorkspaceApp {
             Some(self.tabs[index.min(self.tabs.len() - 1)].id)
         };
         self.sync_active_tab_surface();
-        self.needs_active_pane_focus =
-            self.active_tab_id.is_some() && self.active_surface == ActiveSurface::Terminal;
+        self.needs_active_pane_focus = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
         cx.notify();
@@ -231,7 +238,9 @@ impl WorkspaceApp {
         };
         self.active_tab_id = Some(self.tabs[next].id);
         self.sync_active_tab_surface();
-        self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
+        self.needs_active_pane_focus = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
         cx.notify();
@@ -241,7 +250,9 @@ impl WorkspaceApp {
         if let Some(tab) = self.tabs.get(index) {
             self.active_tab_id = Some(tab.id);
             self.sync_active_tab_surface();
-            self.needs_active_pane_focus = self.active_surface == ActiveSurface::Terminal;
+            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+            });
             self.focus_active_pane(window, cx);
             self.reveal_active_tab(window);
             cx.notify();
@@ -275,7 +286,7 @@ impl WorkspaceApp {
         self.tab_scroll_x = self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
     }
 
-    fn reveal_active_tab(&mut self, window: &Window) {
+    pub(super) fn reveal_active_tab(&mut self, window: &Window) {
         let Some(index) = self.active_tab_index() else {
             self.clamp_tab_scroll(window);
             return;
@@ -382,6 +393,7 @@ impl WorkspaceApp {
             let icon = match tab.kind {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
+                TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::Settings => LucideIcon::Settings,
             };
             let tab_text = self.tab_display_title(tab);

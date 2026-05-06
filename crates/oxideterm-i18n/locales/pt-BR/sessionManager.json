@@ -1,0 +1,111 @@
+{
+  "sessionManager": {
+    "title": "Gerenciador de sessões",
+    "toolbar": {
+      "search_placeholder": "Pesquisar conexões...",
+      "new_connection": "Nova conexão",
+      "import": "Importar",
+      "export": "Exportar",
+      "auto_route": "Rota automática"
+    },
+    "folder_tree": {
+      "all_connections": "Todas as conexões",
+      "ungrouped": "Sem grupo",
+      "recent": "Recentes",
+      "new_group": "Novo grupo",
+      "new_group_description": "Crie um grupo diretamente no gerenciador de sessões. Use / para criar grupos aninhados.",
+      "new_group_placeholder": "Produção/Núcleo",
+      "rename_group": "Renomear grupo",
+      "delete_group": "Excluir grupo",
+      "new_subgroup": "Novo subgrupo",
+      "confirm_delete_group": "Excluir grupo \"{{name}}\"? As conexões serão movidas para Sem grupo."
+    },
+    "table": {
+      "name": "Nome",
+      "host": "Host",
+      "port": "Porta",
+      "username": "Usuário",
+      "auth_type": "Auth",
+      "group": "Grupo",
+      "tags": "Tags",
+      "last_used": "Último uso",
+      "actions": "Ações",
+      "no_connections": "Nenhuma conexão encontrada",
+      "no_connections_hint": "Crie uma nova conexão para começar",
+      "no_search_results": "Nenhuma conexão corresponde à sua pesquisa",
+      "select_all": "Selecionar tudo",
+      "selected_count": "{{count}} selecionado(s)",
+      "never_used": "Nunca"
+    },
+    "time": {
+      "just_now": "Agora mesmo",
+      "minutes_ago": "{{count}}min atrás",
+      "hours_ago": "{{count}}h atrás",
+      "days_ago": "{{count}}d atrás"
+    },
+    "actions": {
+      "connect": "Conectar",
+      "edit": "Editar",
+      "duplicate": "Duplicar",
+      "delete": "Excluir",
+      "test_connection": "Testar conexão",
+      "manage_tags": "Gerenciar tags",
+      "move_to_group": "Mover para grupo",
+      "confirm_delete": "Excluir conexão \"{{name}}\"?",
+      "confirm_batch_delete": "Excluir {{count}} conexões selecionadas?"
+    },
+    "batch": {
+      "title": "Ações em lote",
+      "delete": "Excluir seleção",
+      "move_to_group": "Mover para grupo",
+      "add_tags": "Adicionar tags"
+    },
+    "tags": {
+      "add_tag": "Adicionar tag...",
+      "remove_tag": "Remover tag \"{{tag}}\""
+    },
+    "toast": {
+      "connection_deleted": "Conexão excluída",
+      "connections_deleted": "{{count}} conexões excluídas",
+      "connection_duplicated": "Conexão duplicada",
+      "group_created": "Grupo criado",
+      "create_group_failed": "Falha ao criar grupo",
+      "connections_moved": "{{count}} conexões movidas para \"{{group}}\"",
+      "tags_updated": "Tags atualizadas",
+      "test_in_progress": "Testando conexão...",
+      "test_success": "Conexão bem-sucedida",
+      "test_failed": "Teste de conexão falhou",
+      "test_elapsed": "Conectado em {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Este jump host não oferece suporte a keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Este jump host usa um tipo de autenticação sem suporte",
+      "test_host_key_changed": "A chave do host foi alterada. Esperado: {{expected}}. Atual: {{actual}}."
+    },
+    "edit_properties": {
+      "title": "Editar conexão",
+      "description": "Modificar as propriedades da conexão.",
+      "name": "Nome",
+      "host": "Host",
+      "port": "Porta",
+      "username": "Usuário",
+      "auth_type": "Autenticação",
+      "auth_password": "Senha",
+      "auth_key": "Chave SSH",
+      "auth_agent": "Agent",
+      "saved_password": "Senha salva",
+      "password_placeholder": "Clique no ícone de olho para carregar a senha salva do chaveiro do sistema",
+      "show_password": "Mostrar senha salva",
+      "hide_password": "Ocultar senha salva",
+      "password_hint": "As senhas permanecem no chaveiro do sistema até que você as carregue explicitamente aqui para visualizar ou editar.",
+      "key_path": "Caminho do arquivo de chave",
+      "browse": "Procurar",
+      "agent_hint": "Usar SSH Agent do sistema para autenticação.",
+      "group": "Grupo",
+      "ungrouped": "Sem grupo",
+      "color": "Cor",
+      "clear_color": "Limpar",
+      "cancel": "Cancelar",
+      "save": "Salvar",
+      "saving": "Salvando..."
+    }
+  }
+}

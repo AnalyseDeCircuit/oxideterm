@@ -341,6 +341,8 @@ impl WorkspaceApp {
                 cx.listener(move |this, _event, window, cx| {
                     if section == SidebarSection::Settings {
                         this.open_settings(window, cx);
+                    } else if section == SidebarSection::Connections {
+                        this.open_session_manager_tab(window, cx);
                     } else if section == SidebarSection::Workspace {
                         this.active_sidebar_section = section;
                         this.persist_sidebar_settings();

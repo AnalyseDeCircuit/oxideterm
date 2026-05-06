@@ -1,0 +1,111 @@
+{
+  "sessionManager": {
+    "title": "Session Manager",
+    "toolbar": {
+      "search_placeholder": "Search connections...",
+      "new_connection": "New Connection",
+      "import": "Import",
+      "export": "Export",
+      "auto_route": "Auto-Route"
+    },
+    "folder_tree": {
+      "all_connections": "All Connections",
+      "ungrouped": "Ungrouped",
+      "recent": "Recent",
+      "new_group": "New Group",
+      "new_group_description": "Create a group directly from Session Manager. Use / to create nested groups.",
+      "new_group_placeholder": "Production/Core",
+      "rename_group": "Rename Group",
+      "delete_group": "Delete Group",
+      "new_subgroup": "New Subgroup",
+      "confirm_delete_group": "Delete group \"{{name}}\"? Connections will be moved to Ungrouped."
+    },
+    "table": {
+      "name": "Name",
+      "host": "Host",
+      "port": "Port",
+      "username": "Username",
+      "auth_type": "Auth",
+      "group": "Group",
+      "tags": "Tags",
+      "last_used": "Last Used",
+      "actions": "Actions",
+      "no_connections": "No connections found",
+      "no_connections_hint": "Create a new connection to get started",
+      "no_search_results": "No connections match your search",
+      "select_all": "Select all",
+      "selected_count": "{{count}} selected",
+      "never_used": "Never"
+    },
+    "time": {
+      "just_now": "Just now",
+      "minutes_ago": "{{count}}m ago",
+      "hours_ago": "{{count}}h ago",
+      "days_ago": "{{count}}d ago"
+    },
+    "actions": {
+      "connect": "Connect",
+      "edit": "Edit",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "test_connection": "Test Connection",
+      "manage_tags": "Manage Tags",
+      "move_to_group": "Move to Group",
+      "confirm_delete": "Delete connection \"{{name}}\"?",
+      "confirm_batch_delete": "Delete {{count}} selected connections?"
+    },
+    "batch": {
+      "title": "Batch Actions",
+      "delete": "Delete Selected",
+      "move_to_group": "Move to Group",
+      "add_tags": "Add Tags"
+    },
+    "tags": {
+      "add_tag": "Add tag...",
+      "remove_tag": "Remove tag \"{{tag}}\""
+    },
+    "toast": {
+      "connection_deleted": "Connection deleted",
+      "connections_deleted": "{{count}} connections deleted",
+      "connection_duplicated": "Connection duplicated",
+      "group_created": "Group created",
+      "create_group_failed": "Failed to create group",
+      "connections_moved": "{{count}} connections moved to \"{{group}}\"",
+      "tags_updated": "Tags updated",
+      "test_in_progress": "Testing connection...",
+      "test_success": "Connection successful",
+      "test_failed": "Connection test failed",
+      "test_elapsed": "Connected in {{ms}}ms",
+      "proxy_hop_kbi_unsupported": "Jump host does not support keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host uses an unsupported auth type",
+      "test_host_key_changed": "Host key changed. Expected: {{expected}}. Actual: {{actual}}."
+    },
+    "edit_properties": {
+      "title": "Edit Connection",
+      "description": "Modify the connection properties.",
+      "name": "Name",
+      "host": "Host",
+      "port": "Port",
+      "username": "Username",
+      "auth_type": "Authentication",
+      "auth_password": "Password",
+      "auth_key": "SSH Key",
+      "auth_agent": "Agent",
+      "saved_password": "Saved Password",
+      "password_placeholder": "Click the eye icon to load the saved password from the system keychain",
+      "show_password": "Show saved password",
+      "hide_password": "Hide saved password",
+      "password_hint": "Passwords stay in the system keychain until you explicitly load them here for viewing or editing.",
+      "key_path": "Key File Path",
+      "browse": "Browse",
+      "agent_hint": "Use system SSH Agent for authentication.",
+      "group": "Group",
+      "ungrouped": "Ungrouped",
+      "color": "Color",
+      "clear_color": "Clear",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving..."
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "sessionManager": {
+    "title": "工作階段管理器",
+    "toolbar": {
+      "search_placeholder": "搜尋連線...",
+      "new_connection": "新建連線",
+      "import": "匯入",
+      "export": "匯出",
+      "auto_route": "自動路由"
+    },
+    "folder_tree": {
+      "all_connections": "所有連線",
+      "ungrouped": "未分組",
+      "recent": "最近使用",
+      "new_group": "新建群組",
+      "new_group_description": "直接在工作階段管理器中建立群組。使用 / 建立巢狀群組。",
+      "new_group_placeholder": "正式環境/核心",
+      "rename_group": "重新命名群組",
+      "delete_group": "刪除群組",
+      "new_subgroup": "新建子群組",
+      "confirm_delete_group": "刪除群組 \"{{name}}\"？連線將被移至未分組。"
+    },
+    "table": {
+      "name": "名稱",
+      "host": "主機",
+      "port": "連接埠",
+      "username": "使用者名稱",
+      "auth_type": "認證",
+      "group": "群組",
+      "tags": "標籤",
+      "last_used": "上次使用",
+      "actions": "操作",
+      "no_connections": "未找到連線",
+      "no_connections_hint": "建立新連線以開始使用",
+      "no_search_results": "沒有符合的連線",
+      "select_all": "全選",
+      "selected_count": "已選擇 {{count}} 項",
+      "never_used": "從未使用"
+    },
+    "time": {
+      "just_now": "剛剛",
+      "minutes_ago": "{{count}}分鐘前",
+      "hours_ago": "{{count}}小時前",
+      "days_ago": "{{count}}天前"
+    },
+    "actions": {
+      "connect": "連線",
+      "edit": "編輯",
+      "duplicate": "複製",
+      "delete": "刪除",
+      "test_connection": "測試連線",
+      "manage_tags": "管理標籤",
+      "move_to_group": "移動到群組",
+      "confirm_delete": "刪除連線 \"{{name}}\"？",
+      "confirm_batch_delete": "刪除選取的 {{count}} 個連線？"
+    },
+    "batch": {
+      "title": "批次操作",
+      "delete": "刪除選取",
+      "move_to_group": "移動到群組",
+      "add_tags": "新增標籤"
+    },
+    "tags": {
+      "add_tag": "新增標籤...",
+      "remove_tag": "移除標籤 \"{{tag}}\""
+    },
+    "toast": {
+      "connection_deleted": "連線已刪除",
+      "connections_deleted": "已刪除 {{count}} 個連線",
+      "connection_duplicated": "連線已複製",
+      "group_created": "群組已建立",
+      "create_group_failed": "建立群組失敗",
+      "connections_moved": "{{count}} 個連線已移至 \"{{group}}\"",
+      "tags_updated": "標籤已更新",
+      "test_in_progress": "正在測試連線...",
+      "test_success": "連線成功",
+      "test_failed": "連線測試失敗",
+      "test_elapsed": "已在 {{ms}}ms 內連線",
+      "proxy_hop_kbi_unsupported": "此跳板主機暫不支援 keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "此跳板主機使用了不支援的驗證類型",
+      "test_host_key_changed": "主機金鑰已變更。預期值：{{expected}}。實際值：{{actual}}。"
+    },
+    "edit_properties": {
+      "title": "編輯連線",
+      "description": "修改連線屬性。",
+      "name": "名稱",
+      "host": "主機",
+      "port": "連接埠",
+      "username": "使用者名稱",
+      "auth_type": "驗證方式",
+      "auth_password": "密碼",
+      "auth_key": "SSH 金鑰",
+      "auth_agent": "Agent",
+      "saved_password": "已儲存的密碼",
+      "password_placeholder": "點擊眼睛圖示以從系統鑰匙圈載入已儲存的密碼",
+      "show_password": "顯示已儲存的密碼",
+      "hide_password": "隱藏已儲存的密碼",
+      "password_hint": "密碼會保留在系統鑰匙圈中，直到您明確在這裡載入以供查看或編輯。",
+      "key_path": "金鑰檔案路徑",
+      "browse": "瀏覽",
+      "agent_hint": "使用系統 SSH Agent 進行驗證。",
+      "group": "群組",
+      "ungrouped": "未分組",
+      "color": "顏色",
+      "clear_color": "清除",
+      "cancel": "取消",
+      "save": "儲存",
+      "saving": "儲存中..."
+    }
+  }
+}

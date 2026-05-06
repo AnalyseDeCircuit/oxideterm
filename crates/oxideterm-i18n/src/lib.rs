@@ -8,6 +8,7 @@ const EN_PARTS: &[&str] = &[
     include_str!("../locales/en/sidebar.json"),
     include_str!("../locales/en/settings.json"),
     include_str!("../locales/en/settings_view.json"),
+    include_str!("../locales/en/sessionManager.json"),
     include_str!("../locales/en/ssh.json"),
     include_str!("../locales/en/terminal.json"),
 ];
@@ -17,6 +18,7 @@ const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/sidebar.json"),
     include_str!("../locales/de/settings.json"),
     include_str!("../locales/de/settings_view.json"),
+    include_str!("../locales/de/sessionManager.json"),
     include_str!("../locales/de/ssh.json"),
     include_str!("../locales/de/terminal.json"),
 ];
@@ -26,6 +28,7 @@ const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/sidebar.json"),
     include_str!("../locales/es-ES/settings.json"),
     include_str!("../locales/es-ES/settings_view.json"),
+    include_str!("../locales/es-ES/sessionManager.json"),
     include_str!("../locales/es-ES/ssh.json"),
     include_str!("../locales/es-ES/terminal.json"),
 ];
@@ -35,6 +38,7 @@ const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/sidebar.json"),
     include_str!("../locales/fr-FR/settings.json"),
     include_str!("../locales/fr-FR/settings_view.json"),
+    include_str!("../locales/fr-FR/sessionManager.json"),
     include_str!("../locales/fr-FR/ssh.json"),
     include_str!("../locales/fr-FR/terminal.json"),
 ];
@@ -44,6 +48,7 @@ const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/sidebar.json"),
     include_str!("../locales/it/settings.json"),
     include_str!("../locales/it/settings_view.json"),
+    include_str!("../locales/it/sessionManager.json"),
     include_str!("../locales/it/ssh.json"),
     include_str!("../locales/it/terminal.json"),
 ];
@@ -53,6 +58,7 @@ const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/sidebar.json"),
     include_str!("../locales/ja/settings.json"),
     include_str!("../locales/ja/settings_view.json"),
+    include_str!("../locales/ja/sessionManager.json"),
     include_str!("../locales/ja/ssh.json"),
     include_str!("../locales/ja/terminal.json"),
 ];
@@ -62,6 +68,7 @@ const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/sidebar.json"),
     include_str!("../locales/ko/settings.json"),
     include_str!("../locales/ko/settings_view.json"),
+    include_str!("../locales/ko/sessionManager.json"),
     include_str!("../locales/ko/ssh.json"),
     include_str!("../locales/ko/terminal.json"),
 ];
@@ -71,6 +78,7 @@ const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/sidebar.json"),
     include_str!("../locales/pt-BR/settings.json"),
     include_str!("../locales/pt-BR/settings_view.json"),
+    include_str!("../locales/pt-BR/sessionManager.json"),
     include_str!("../locales/pt-BR/ssh.json"),
     include_str!("../locales/pt-BR/terminal.json"),
 ];
@@ -80,6 +88,7 @@ const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/sidebar.json"),
     include_str!("../locales/vi/settings.json"),
     include_str!("../locales/vi/settings_view.json"),
+    include_str!("../locales/vi/sessionManager.json"),
     include_str!("../locales/vi/ssh.json"),
     include_str!("../locales/vi/terminal.json"),
 ];
@@ -89,6 +98,7 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/sidebar.json"),
     include_str!("../locales/zh-CN/settings.json"),
     include_str!("../locales/zh-CN/settings_view.json"),
+    include_str!("../locales/zh-CN/sessionManager.json"),
     include_str!("../locales/zh-CN/ssh.json"),
     include_str!("../locales/zh-CN/terminal.json"),
 ];
@@ -98,6 +108,7 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/sidebar.json"),
     include_str!("../locales/zh-TW/settings.json"),
     include_str!("../locales/zh-TW/settings_view.json"),
+    include_str!("../locales/zh-TW/sessionManager.json"),
     include_str!("../locales/zh-TW/ssh.json"),
     include_str!("../locales/zh-TW/terminal.json"),
 ];

@@ -25,6 +25,7 @@ enum ConnectionButtonAction {
     Cancel,
     Test,
     Connect,
+    Save,
 }
 
 impl WorkspaceApp {
@@ -186,8 +187,16 @@ impl WorkspaceApp {
                 .flex_col()
                 .child(modal_header(
                     &self.tokens,
-                    self.i18n.t("ssh.form.title"),
-                    self.i18n.t("ssh.form.subtitle"),
+                    if self.editing_saved_connection_id.is_some() {
+                        self.i18n.t("sessionManager.edit_properties.title")
+                    } else {
+                        self.i18n.t("ssh.form.title")
+                    },
+                    if self.editing_saved_connection_id.is_some() {
+                        self.i18n.t("sessionManager.edit_properties.description")
+                    } else {
+                        self.i18n.t("ssh.form.subtitle")
+                    },
                 ))
                 .child(
                     modal_body(&self.tokens)
@@ -374,16 +383,26 @@ impl WorkspaceApp {
                             ConnectionButtonAction::Cancel,
                             cx,
                         ))
+                        .when(self.editing_saved_connection_id.is_none(), |footer| {
+                            footer.child(self.render_connection_button(
+                                self.i18n.t("ssh.form.test"),
+                                false,
+                                ConnectionButtonAction::Test,
+                                cx,
+                            ))
+                        })
                         .child(self.render_connection_button(
-                            self.i18n.t("ssh.form.test"),
-                            false,
-                            ConnectionButtonAction::Test,
-                            cx,
-                        ))
-                        .child(self.render_connection_button(
-                            self.i18n.t("ssh.form.connect"),
+                            if self.editing_saved_connection_id.is_some() {
+                                self.i18n.t("sessionManager.edit_properties.save")
+                            } else {
+                                self.i18n.t("ssh.form.connect")
+                            },
                             true,
-                            ConnectionButtonAction::Connect,
+                            if self.editing_saved_connection_id.is_some() {
+                                ConnectionButtonAction::Save
+                            } else {
+                                ConnectionButtonAction::Connect
+                            },
                             cx,
                         )),
                 ),
@@ -533,6 +552,9 @@ impl WorkspaceApp {
                     this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
                 }
                 ConnectionButtonAction::Connect => {
+                    this.submit_new_connection_form(window, cx);
+                }
+                ConnectionButtonAction::Save => {
                     this.submit_new_connection_form(window, cx);
                 }
             }),

@@ -22,6 +22,7 @@ pub enum SplitDirection {
 pub enum TabKind {
     LocalTerminal,
     SshTerminal,
+    SessionManager,
     Settings,
 }
 

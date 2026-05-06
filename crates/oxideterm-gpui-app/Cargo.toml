@@ -10,7 +10,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 gpui.workspace = true
+oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
