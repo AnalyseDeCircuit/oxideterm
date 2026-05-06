@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "活动会话",
+      "saved_connections": "保存的连接",
       "session_manager": "会话管理器",
       "files": "文件管理器",
       "connection_pool": "连接池",

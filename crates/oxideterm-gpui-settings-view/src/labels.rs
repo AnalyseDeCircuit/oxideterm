@@ -25,9 +25,9 @@ pub fn ide_agent_label(mode: IdeAgentMode, i18n: &I18n) -> String {
 
 pub fn font_family_label(family: FontFamily) -> String {
     match family {
-        FontFamily::Jetbrains => "JetBrains Mono NF (Subset) ✓".to_string(),
-        FontFamily::Meslo => "MesloLGS NF (Subset) ✓".to_string(),
-        FontFamily::Maple => "Maple Mono NF CN (Subset) ✓".to_string(),
+        FontFamily::Jetbrains => "JetBrains Mono NF".to_string(),
+        FontFamily::Meslo => "MesloLGS NF".to_string(),
+        FontFamily::Maple => "Maple Mono NF CN".to_string(),
         FontFamily::Cascadia => "Cascadia Code".to_string(),
         FontFamily::Consolas => "Consolas".to_string(),
         FontFamily::Menlo => "Menlo".to_string(),

@@ -427,6 +427,11 @@ impl WorkspaceApp {
                 .oh_my_posh_theme
                 .clone()
                 .unwrap_or_default(),
+            SettingsInput::ConnectionDefaultUsername => {
+                settings.connection_defaults.username.clone()
+            }
+            SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
+            SettingsInput::ConnectionNewGroup => self.settings_connection_new_group.clone(),
             SettingsInput::HighlightLabel(index) => settings
                 .terminal
                 .highlight_rules
@@ -503,6 +508,24 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
+            }
+            SettingsInput::ConnectionDefaultUsername => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(|settings| settings.connection_defaults.username = value, cx);
+            }
+            SettingsInput::ConnectionDefaultPort => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| settings.connection_defaults.port = value.clamp(1, 65535),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::ConnectionNewGroup => {
+                self.settings_connection_new_group = self.settings_input_draft.clone();
+                cx.notify();
             }
             SettingsInput::HighlightLabel(index) => {
                 let value = self.settings_input_draft.trim().to_string();

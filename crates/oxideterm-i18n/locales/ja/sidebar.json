@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "アクティブなセッション",
+      "saved_connections": "保存済み接続",
       "session_manager": "セッションマネージャー",
       "files": "ファイルマネージャー",
       "connection_pool": "接続プール",

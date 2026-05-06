@@ -100,21 +100,33 @@ impl Default for SessionManagerState {
 impl WorkspaceApp {
     pub(super) fn render_session_manager_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self
+            .terminal_background_preferences("session_manager")
+            .is_some();
+        let panel_bg = if has_background {
+            rgba((theme.bg_panel << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
+        } else {
+            rgb(theme.bg_panel)
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .text_color(rgb(theme.text))
-            .child(self.render_session_manager_toolbar(cx))
+            .child(self.render_session_manager_toolbar(panel_bg, cx))
             .child(
                 div()
                     .flex_1()
                     .min_h(px(0.0))
                     .flex()
                     .flex_row()
-                    .child(self.render_session_manager_folder_tree(cx))
-                    .child(self.render_session_manager_table(cx)),
+                    .child(self.render_session_manager_folder_tree(panel_bg, cx))
+                    .child(self.render_session_manager_table(panel_bg, has_background, cx)),
             )
             .when_some(self.session_manager.status.clone(), |surface, status| {
                 surface.child(
@@ -125,7 +137,7 @@ impl WorkspaceApp {
                         .px_4()
                         .border_t_1()
                         .border_color(rgb(theme.border))
-                        .bg(rgb(theme.bg_panel))
+                        .bg(panel_bg)
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .text_color(rgb(theme.accent))
                         .child(status),
@@ -199,13 +211,16 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.active_sidebar_section = SidebarSection::Connections;
         self.needs_active_pane_focus = false;
+        if self.sidebar_collapsed {
+            self.sidebar_collapsed = false;
+        }
         window.focus(&self.focus_handle);
         self.reveal_active_tab(window);
         self.persist_sidebar_settings();
         cx.notify();
     }
 
-    fn render_session_manager_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_session_manager_toolbar(&self, panel_bg: Rgba, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let selected_count = self.session_manager.selected_ids.len();
         div()
@@ -216,7 +231,7 @@ impl WorkspaceApp {
             .px_4()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
+            .bg(panel_bg)
             .child(div().w(px(280.0)).child(self.render_session_text_input(
                 SessionManagerInput::Search,
                 &self.session_manager.search_query,
@@ -239,34 +254,13 @@ impl WorkspaceApp {
             )
             .child(
                 self.render_session_manager_button(
-                    LucideIcon::Folder,
-                    self.i18n.t("sessionManager.folder_tree.new_group"),
+                    LucideIcon::Network,
+                    self.i18n.t("sessionManager.toolbar.auto_route"),
                     ButtonVariant::Secondary,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.session_manager.show_new_group = true;
-                        this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                        this.session_manager.new_group_name.clear();
-                        this.needs_active_pane_focus = false;
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                self.render_session_manager_button(
-                    LucideIcon::FolderInput,
-                    self.i18n.t("sessionManager.toolbar.import"),
-                    ButtonVariant::Secondary,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.open_ssh_config_import(cx);
-                        cx.stop_propagation();
-                    }),
+                    cx.listener(|_this, _event, _window, cx| cx.stop_propagation()),
                 ),
             )
             .child(
@@ -321,10 +315,32 @@ impl WorkspaceApp {
                 selected_count > 0 && self.session_manager.show_batch_move,
                 |toolbar| toolbar.child(self.render_batch_move_popover(cx)),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(22.0))
+                    .child(self.render_toolbar_link_icon(
+                        LucideIcon::FolderInput,
+                        "sessionManager.toolbar.import",
+                        true,
+                        cx,
+                    ))
+                    .child(self.render_toolbar_link_icon(
+                        LucideIcon::Upload,
+                        "sessionManager.toolbar.export",
+                        false,
+                        cx,
+                    )),
+            )
             .into_any_element()
     }
 
-    fn render_session_manager_folder_tree(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_session_manager_folder_tree(
+        &self,
+        panel_bg: Rgba,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let all_count = self.connection_store.connections().len();
         let ungrouped_count = self
@@ -349,7 +365,7 @@ impl WorkspaceApp {
             .flex_col()
             .border_r_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
+            .bg(panel_bg)
             .overflow_y_scroll()
             .py_2()
             .child(self.render_group_tree_item(
@@ -359,7 +375,8 @@ impl WorkspaceApp {
                 all_count,
                 0,
                 cx,
-            ));
+            ))
+            .child(self.render_new_group_tree_item(cx));
 
         for group in self.connection_store.groups() {
             tree = tree.child(self.render_group_tree_item(
@@ -479,7 +496,54 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_session_manager_table(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_new_group_tree_item(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(34.0))
+            .mx_2()
+            .pl(px(10.0))
+            .pr_2()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.accent << 8) | 0x33))
+            .text_color(rgb(theme.accent))
+            .cursor_pointer()
+            .hover(|item| item.bg(rgba((self.tokens.ui.accent << 8) | 0x12)))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Plus,
+                15.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .child(self.i18n.t("sessionManager.folder_tree.new_group")),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.show_new_group = true;
+                    this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    this.session_manager.new_group_name.clear();
+                    this.needs_active_pane_focus = false;
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_session_manager_table(
+        &self,
+        panel_bg: Rgba,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let rows = self.filtered_session_connections();
         let all_selected = !rows.is_empty()
@@ -497,8 +561,12 @@ impl WorkspaceApp {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
-            .child(self.render_connection_table_header(all_selected, cx))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
+            .child(self.render_connection_table_header(panel_bg, all_selected, cx))
             .child(
                 div()
                     .id("session-manager-table-scroll")
@@ -531,7 +599,7 @@ impl WorkspaceApp {
                     })
                     .children(
                         rows.into_iter()
-                            .map(|conn| self.render_connection_table_row(conn, cx)),
+                            .map(|conn| self.render_connection_table_row(conn, has_background, cx)),
                     ),
             )
             .into_any_element()
@@ -539,6 +607,7 @@ impl WorkspaceApp {
 
     fn render_connection_table_header(
         &self,
+        panel_bg: Rgba,
         all_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -549,7 +618,7 @@ impl WorkspaceApp {
             .items_center()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
+            .bg(panel_bg)
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(rgb(theme.text_muted))
@@ -611,12 +680,6 @@ impl WorkspaceApp {
                 120.0,
                 cx,
             ))
-            .child(
-                div()
-                    .w(px(210.0))
-                    .px_2()
-                    .child(self.i18n.t("sessionManager.table.actions")),
-            )
             .into_any_element()
     }
 
@@ -660,6 +723,7 @@ impl WorkspaceApp {
     fn render_connection_table_row(
         &self,
         conn: ConnectionInfo,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -673,10 +737,12 @@ impl WorkspaceApp {
             .border_color(rgba((theme.border << 8) | 0x80))
             .bg(if selected {
                 rgba((theme.bg_active << 8) | 0xcc)
+            } else if has_background {
+                rgba(0x00000000)
             } else {
                 rgb(theme.bg)
             })
-            .hover(move |row| row.bg(rgb(theme.bg_hover)))
+            .hover(move |row| row.bg(rgba((theme.bg_hover << 8) | 0xcc)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
@@ -723,7 +789,6 @@ impl WorkspaceApp {
                     false,
                 ),
             )
-            .child(self.render_row_actions(conn, cx))
             .into_any_element()
     }
 
@@ -742,6 +807,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    #[allow(dead_code)]
     fn render_row_actions(&self, conn: ConnectionInfo, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w(px(210.0))
@@ -815,6 +881,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    #[allow(dead_code)]
     fn render_row_action_button(&self, label: String, variant: ButtonVariant) -> gpui::Div {
         button_with(
             &self.tokens,
@@ -849,7 +916,42 @@ impl WorkspaceApp {
         .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text)))
     }
 
-    fn render_session_text_input(
+    fn render_toolbar_link_icon(
+        &self,
+        icon: LucideIcon,
+        label_key: &str,
+        opens_import: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key);
+        div()
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(self.tokens.ui.text))
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                icon,
+                16.0,
+                rgb(self.tokens.ui.text),
+            ))
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if opens_import {
+                        this.open_ssh_config_import(cx);
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_session_text_input(
         &self,
         target: SessionManagerInput,
         value: &str,
@@ -1371,6 +1473,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn delete_connection(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Err(error) = self.connection_store.delete(id) {
             self.session_manager.status = Some(error.to_string());
@@ -1401,6 +1504,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn duplicate_connection(&mut self, id: &str, cx: &mut Context<Self>) {
         match self.connection_store.duplicate(id) {
             Ok(Some(_)) => {
@@ -1535,7 +1639,9 @@ fn current_username() -> String {
         .unwrap_or_else(|_| "root".to_string())
 }
 
-fn saved_connection_from_ssh_host(host: SshConfigHost) -> anyhow::Result<SavedConnection> {
+pub(super) fn saved_connection_from_ssh_host(
+    host: SshConfigHost,
+) -> anyhow::Result<SavedConnection> {
     let now = chrono::Utc::now();
     let auth = match (host.identity_file, host.certificate_file) {
         (Some(key_path), Some(cert_path)) => SavedAuth::Certificate {

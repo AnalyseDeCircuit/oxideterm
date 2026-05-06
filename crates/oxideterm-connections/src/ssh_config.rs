@@ -80,7 +80,6 @@ pub fn list_ssh_config_hosts(existing_names: &HashSet<String>) -> Result<Vec<Ssh
             });
         }
     }
-    hosts.sort_by(|left, right| left.alias.to_lowercase().cmp(&right.alias.to_lowercase()));
     Ok(hosts)
 }
 

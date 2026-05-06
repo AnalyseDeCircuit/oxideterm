@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "Active Sessions",
+      "saved_connections": "Saved Connections",
       "session_manager": "Session Manager",
       "files": "File Manager",
       "connection_pool": "Connection Pool",

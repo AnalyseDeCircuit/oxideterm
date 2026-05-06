@@ -395,6 +395,32 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Connections, SettingsSelect::ConnectionIdleTimeout) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for (seconds, label) in connection_idle_timeout_options(&self.i18n) {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            label,
+                            seconds == settings.connection_pool.idle_timeout_secs,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| {
+                                        settings.connection_pool.idle_timeout_secs = seconds
+                                    },
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             _ => None,
         }?;
 

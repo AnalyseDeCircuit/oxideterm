@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "Phiên hoạt động",
+      "saved_connections": "Kết nối đã lưu",
       "session_manager": "Quản lý phiên",
       "files": "Quản lý tệp",
       "connection_pool": "Nhóm kết nối",

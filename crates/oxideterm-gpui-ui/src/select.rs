@@ -24,6 +24,7 @@ pub enum SelectAnchorId {
     SettingsTerminalAdaptiveRenderer,
     SettingsTerminalCursorStyle,
     SettingsLocalShell,
+    SettingsConnectionIdleTimeout,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
 }

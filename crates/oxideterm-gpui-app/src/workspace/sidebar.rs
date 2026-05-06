@@ -1,3 +1,4 @@
+use super::session_manager::SessionManagerInput;
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -406,14 +407,17 @@ impl WorkspaceApp {
             .border_r_1()
             .border_color(rgb(theme.border))
             .child(self.render_sidebar_header(cx))
-            .child(self.render_sidebar_content())
+            .child(self.render_sidebar_content(cx))
             .into_any_element()
     }
 
     pub(super) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let title = self.i18n.t("sidebar.panels.sessions").to_uppercase();
-        div()
+        let title_key = match self.active_sidebar_section {
+            SidebarSection::Connections => "sidebar.panels.saved_connections",
+            _ => "sidebar.panels.sessions",
+        };
+        let mut header = div()
             .h(px(self.tokens.metrics.sidebar_header_height))
             .flex()
             .flex_row()
@@ -426,12 +430,15 @@ impl WorkspaceApp {
                     .text_size(px(self.tokens.metrics.sidebar_title_font_size))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(title),
-            )
-            .child(self.render_sidebar_action(LucideIcon::Folder, false, cx))
-            .child(self.render_sidebar_action(LucideIcon::Network, false, cx))
-            .child(self.render_sidebar_action(LucideIcon::Plus, true, cx))
-            .into_any_element()
+                    .child(self.i18n.t(title_key).to_uppercase()),
+            );
+        if self.active_sidebar_section != SidebarSection::Connections {
+            header = header
+                .child(self.render_sidebar_action(LucideIcon::Folder, false, cx))
+                .child(self.render_sidebar_action(LucideIcon::Network, false, cx))
+                .child(self.render_sidebar_action(LucideIcon::Plus, true, cx));
+        }
+        header.into_any_element()
     }
 
     pub(super) fn render_sidebar_action(
@@ -468,7 +475,10 @@ impl WorkspaceApp {
         button.into_any_element()
     }
 
-    pub(super) fn render_sidebar_content(&self) -> AnyElement {
+    pub(super) fn render_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.active_sidebar_section == SidebarSection::Connections {
+            return self.render_saved_connections_sidebar_content(cx);
+        }
         let theme = self.tokens.ui;
         div()
             .flex_1()
@@ -508,6 +518,133 @@ impl WorkspaceApp {
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("sessions.tree.click_to_add")),
                     ),
+            )
+            .into_any_element()
+    }
+
+    fn render_saved_connections_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let query = self.session_manager.search_query.trim().to_lowercase();
+        let mut connections = self.connection_store.connection_infos();
+        connections.sort_by(|left, right| {
+            right
+                .last_used_at
+                .cmp(&left.last_used_at)
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        if !query.is_empty() {
+            connections.retain(|conn| {
+                conn.name.to_lowercase().contains(&query)
+                    || conn.host.to_lowercase().contains(&query)
+                    || conn.username.to_lowercase().contains(&query)
+            });
+        }
+
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .px(px(12.0))
+            .pb(px(10.0))
+            .gap(px(10.0))
+            .child(self.render_session_text_input(
+                SessionManagerInput::Search,
+                &self.session_manager.search_query,
+                self.i18n.t("sessionManager.toolbar.search_placeholder"),
+                cx,
+            ))
+            .child(
+                div()
+                    .id("saved-connections-sidebar-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_y_scroll()
+                    .children(
+                        connections
+                            .into_iter()
+                            .map(|conn| self.render_saved_connection_sidebar_row(conn, cx)),
+                    ),
+            )
+            .when(self.connection_store.connections().is_empty(), |content| {
+                content.child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(8.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Server,
+                            self.tokens.metrics.empty_sidebar_icon_size,
+                            rgba((theme.text_muted << 8) | 0x4d),
+                        ))
+                        .child(
+                            div()
+                                .text_center()
+                                .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
+                                .child(self.i18n.t("sessionManager.table.no_connections")),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_saved_connection_sidebar_row(
+        &self,
+        conn: oxideterm_connections::ConnectionInfo,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let id = conn.id.clone();
+        let detail = format!("{}@{}:{}", conn.username, conn.host, conn.port);
+        div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .px(px(8.0))
+            .py(px(7.0))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Server,
+                15.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(theme.text))
+                            .child(conn.name),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.accent))
+                            .child(detail),
+                    ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    this.open_saved_connection(&id, window, cx);
+                    cx.stop_propagation();
+                }),
             )
             .into_any_element()
     }

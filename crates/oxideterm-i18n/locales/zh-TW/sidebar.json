@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "使用中的工作階段",
+      "saved_connections": "已儲存的連線",
       "session_manager": "工作階段管理員",
       "files": "檔案管理員",
       "connection_pool": "連線集區",

@@ -9,7 +9,11 @@ use oxideterm_settings::{
 use oxideterm_theme::BUILT_IN_THEMES;
 
 use super::ime::WorkspaceImeTarget;
+use super::session_manager::saved_connection_from_ssh_host;
 use super::*;
+use oxideterm_connections::{
+    SshConfigHost, list_available_ssh_keys, list_ssh_config_hosts, resolve_ssh_config_alias,
+};
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
     button,

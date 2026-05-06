@@ -8,6 +8,7 @@
     },
     "panels": {
       "sessions": "활성 세션",
+      "saved_connections": "저장된 연결",
       "session_manager": "세션 관리자",
       "files": "파일 관리자",
       "connection_pool": "연결 풀",

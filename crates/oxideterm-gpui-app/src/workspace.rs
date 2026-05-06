@@ -7,7 +7,12 @@ mod settings;
 mod sidebar;
 mod tabs;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::Result;
 use gpui::{
@@ -121,6 +126,9 @@ pub(crate) struct WorkspaceApp {
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
     session_manager: SessionManagerState,
+    settings_connection_new_group: String,
+    settings_selected_ssh_hosts: HashSet<String>,
+    settings_connection_status: Option<String>,
     local_shells: Vec<ShellInfo>,
 }
 
@@ -200,6 +208,9 @@ impl WorkspaceApp {
             settings_store,
             connection_store,
             session_manager: SessionManagerState::default(),
+            settings_connection_new_group: String::new(),
+            settings_selected_ssh_hosts: HashSet::new(),
+            settings_connection_status: None,
             local_shells,
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
