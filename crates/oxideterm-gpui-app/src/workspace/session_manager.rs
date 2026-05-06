@@ -2484,7 +2484,14 @@ impl WorkspaceApp {
             } => self.connection_store.get_connection_password(id).ok(),
             _ => None,
         };
-        let Some(config) = ssh_config_from_saved_connection(&conn, loaded_password) else {
+        let loaded_passphrase = self
+            .connection_store
+            .get_connection_passphrase(id)
+            .ok()
+            .flatten();
+        let Some(config) =
+            ssh_config_from_saved_connection(&conn, loaded_password, loaded_passphrase)
+        else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Test,
@@ -2789,11 +2796,15 @@ pub(super) fn saved_connection_from_ssh_host(
         (Some(key_path), Some(cert_path)) => SavedAuth::Certificate {
             key_path,
             cert_path,
-            passphrase: None,
+            has_passphrase: false,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
         },
         (Some(key_path), None) => SavedAuth::Key {
             key_path,
-            passphrase: None,
+            has_passphrase: false,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
         },
         _ => SavedAuth::Agent,
     };
@@ -2822,16 +2833,22 @@ pub(super) fn saved_auth_from_form(form: &NewConnectionForm) -> SavedAuth {
         },
         SshAuthTab::DefaultKey => SavedAuth::Key {
             key_path: String::new(),
-            passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
         },
         SshAuthTab::SshKey => SavedAuth::Key {
             key_path: form.key_path.trim().to_string(),
-            passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
         },
         SshAuthTab::Certificate => SavedAuth::Certificate {
             key_path: form.key_path.trim().to_string(),
             cert_path: form.cert_path.trim().to_string(),
-            passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
+            has_passphrase: !form.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
         },
         SshAuthTab::Agent | SshAuthTab::TwoFactor => SavedAuth::Agent,
     }
@@ -2886,37 +2903,43 @@ pub(super) fn form_from_saved_connection(
         ),
         SavedAuth::Key {
             key_path,
-            passphrase,
+            has_passphrase,
+            passphrase_keychain_id,
+            plaintext_passphrase,
         } if key_path.is_empty() => (
             SshAuthTab::DefaultKey,
             String::new(),
             key_path.clone(),
             String::new(),
-            passphrase.clone().unwrap_or_default(),
-            false,
+            String::new(),
+            *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
         SavedAuth::Key {
             key_path,
-            passphrase,
+            has_passphrase,
+            passphrase_keychain_id,
+            plaintext_passphrase,
         } => (
             SshAuthTab::SshKey,
             String::new(),
             key_path.clone(),
             String::new(),
-            passphrase.clone().unwrap_or_default(),
-            false,
+            String::new(),
+            *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
         SavedAuth::Certificate {
             key_path,
             cert_path,
-            passphrase,
+            has_passphrase,
+            passphrase_keychain_id,
+            plaintext_passphrase,
         } => (
             SshAuthTab::Certificate,
             String::new(),
             key_path.clone(),
             cert_path.clone(),
-            passphrase.clone().unwrap_or_default(),
-            false,
+            String::new(),
+            *has_passphrase || passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
         ),
         SavedAuth::Agent => (
             SshAuthTab::Agent,
@@ -2990,6 +3013,7 @@ pub(super) fn save_request_from_form_with_existing_auth(
 pub(super) fn ssh_config_from_saved_connection(
     conn: &SavedConnection,
     loaded_password: Option<String>,
+    loaded_passphrase: Option<String>,
 ) -> Option<SshConfig> {
     let auth = match &conn.auth {
         SavedAuth::Password {
@@ -3006,13 +3030,26 @@ pub(super) fn ssh_config_from_saved_connection(
         } => return None,
         SavedAuth::Key {
             key_path,
-            passphrase,
-        } => AuthMethod::key(key_path.clone(), passphrase.clone()),
+            plaintext_passphrase,
+            ..
+        } => AuthMethod::key(
+            key_path.clone(),
+            plaintext_passphrase
+                .clone()
+                .or_else(|| loaded_passphrase.clone()),
+        ),
         SavedAuth::Certificate {
             key_path,
             cert_path,
-            passphrase,
-        } => AuthMethod::certificate(key_path.clone(), cert_path.clone(), passphrase.clone()),
+            plaintext_passphrase,
+            ..
+        } => AuthMethod::certificate(
+            key_path.clone(),
+            cert_path.clone(),
+            plaintext_passphrase
+                .clone()
+                .or_else(|| loaded_passphrase.clone()),
+        ),
         SavedAuth::Agent => AuthMethod::Agent,
     };
     Some(SshConfig {

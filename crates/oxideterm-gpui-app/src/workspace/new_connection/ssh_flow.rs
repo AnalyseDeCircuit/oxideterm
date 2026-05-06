@@ -177,7 +177,14 @@ impl WorkspaceApp {
             } => self.connection_store.get_connection_password(id).ok(),
             _ => None,
         };
-        let Some(config) = ssh_config_from_saved_connection(&conn, loaded_password) else {
+        let loaded_passphrase = self
+            .connection_store
+            .get_connection_passphrase(id)
+            .ok()
+            .flatten();
+        let Some(config) =
+            ssh_config_from_saved_connection(&conn, loaded_password, loaded_passphrase)
+        else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Connect,
