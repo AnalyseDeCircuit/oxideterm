@@ -13,6 +13,7 @@
       "save_password": "Enregistrer le mot de passe dans le trousseau",
       "group": "Groupe",
       "ungrouped": "Sans groupe",
+      "create_groups_hint": "Créer des groupes dans les réglages",
       "agent_forwarding": "Activer le transfert d'agent SSH",
       "save_connection": "Enregistrer la connexion pour une utilisation ultérieure",
       "cancel": "Annuler",

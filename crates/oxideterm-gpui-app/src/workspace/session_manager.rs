@@ -2898,6 +2898,8 @@ pub(super) fn form_from_saved_connection(
         passphrase,
         save_password,
         group: group_label_for_form(conn.group.as_deref()),
+        color: conn.color.clone().unwrap_or_default(),
+        tags: conn.tags.clone(),
         agent_forwarding: conn.options.agent_forwarding,
         save_connection: true,
         error,
@@ -2918,8 +2920,8 @@ pub(super) fn save_request_from_form(
         port,
         username: form.username.trim().to_string(),
         auth: saved_auth_from_form(form),
-        color: None,
-        tags: Vec::new(),
+        color: (!form.color.trim().is_empty()).then(|| form.color.trim().to_string()),
+        tags: form.tags.clone(),
         agent_forwarding: form.agent_forwarding,
     })
 }

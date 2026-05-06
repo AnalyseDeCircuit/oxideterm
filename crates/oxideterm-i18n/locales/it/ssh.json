@@ -13,6 +13,7 @@
       "save_password": "Salva password nel portachiavi",
       "group": "Gruppo",
       "ungrouped": "Senza gruppo",
+      "create_groups_hint": "Crea gruppi nelle impostazioni",
       "agent_forwarding": "Abilita inoltro agente SSH",
       "save_connection": "Salva connessione per uso futuro",
       "cancel": "Annulla",

@@ -13,6 +13,7 @@
       "save_password": "비밀번호를 키체인에 저장",
       "group": "그룹",
       "ungrouped": "그룹 없음",
+      "create_groups_hint": "설정에서 그룹 만들기",
       "agent_forwarding": "SSH 에이전트 전달 활성화",
       "save_connection": "나중에 사용할 수 있도록 연결 저장",
       "cancel": "취소",

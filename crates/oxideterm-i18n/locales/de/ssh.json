@@ -13,6 +13,7 @@
       "save_password": "Passwort im Schlüsselbund speichern",
       "group": "Gruppe",
       "ungrouped": "Ohne Gruppe",
+      "create_groups_hint": "Gruppen in den Einstellungen erstellen",
       "agent_forwarding": "SSH-Agent-Weiterleitung aktivieren",
       "save_connection": "Verbindung für zukünftige Nutzung speichern",
       "cancel": "Abbrechen",

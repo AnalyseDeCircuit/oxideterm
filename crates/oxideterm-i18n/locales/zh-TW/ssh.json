@@ -13,6 +13,7 @@
       "save_password": "將密碼儲存至鑰匙圈",
       "group": "群組",
       "ungrouped": "未分組",
+      "create_groups_hint": "在設定中建立群組",
       "agent_forwarding": "啟用 SSH 代理轉發",
       "save_connection": "儲存連線以供日後使用",
       "cancel": "取消",

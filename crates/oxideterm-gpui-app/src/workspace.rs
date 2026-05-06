@@ -57,7 +57,7 @@ use self::actions::SearchBarState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
-    SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
+    NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
 use self::session_manager::SessionManagerState;
@@ -109,6 +109,7 @@ pub(crate) struct WorkspaceApp {
     new_connection_form: Option<NewConnectionForm>,
     editing_saved_connection_id: Option<String>,
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
+    open_new_connection_select: Option<NewConnectionSelect>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
@@ -192,6 +193,7 @@ impl WorkspaceApp {
             new_connection_form: None,
             editing_saved_connection_id: None,
             saved_connection_prompt_action: None,
+            open_new_connection_select: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
             keyboard_interactive_challenge: None,
@@ -785,6 +787,10 @@ impl Render for WorkspaceApp {
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
+            .when_some(
+                self.render_new_connection_select_overlay(window, cx),
+                |root, overlay| root.child(overlay),
+            )
             .when(self.host_key_challenge.is_some(), |root| {
                 root.child(self.render_host_key_dialog(cx))
             })

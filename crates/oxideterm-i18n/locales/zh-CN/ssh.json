@@ -13,6 +13,7 @@
       "save_password": "保存密码到钥匙串",
       "group": "分组",
       "ungrouped": "未分组",
+      "create_groups_hint": "在设置中创建分组",
       "agent_forwarding": "启用 SSH Agent 转发",
       "save_connection": "保存连接以便将来使用",
       "cancel": "取消",
