@@ -80,7 +80,7 @@ impl WorkspaceApp {
         .map(|_| ())
     }
 
-    fn create_ssh_terminal_tab_for_node(
+    pub(super) fn create_ssh_terminal_tab_for_node(
         &mut self,
         config: SshConfig,
         title: String,
@@ -130,6 +130,11 @@ impl WorkspaceApp {
         });
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
+        self.active_sidebar_section = SidebarSection::Sessions;
+        if self.sidebar_collapsed {
+            self.sidebar_collapsed = false;
+        }
+        self.persist_sidebar_settings();
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
         self.reveal_active_tab(window);
@@ -214,6 +219,14 @@ impl WorkspaceApp {
         })
     }
 
+    pub(super) fn active_terminal_session_id(&self) -> Option<TerminalSessionId> {
+        let tab = self.active_tab()?;
+        let pane_id = tab.active_pane_id?;
+        tab.root_pane
+            .as_ref()
+            .and_then(|root| root.session_id_for_pane(pane_id))
+    }
+
     pub(super) fn sync_ssh_node_lifecycle(&mut self, cx: &mut Context<Self>) {
         let terminal_nodes = self.terminal_ssh_nodes.clone();
         let mut changed = false;
@@ -275,6 +288,12 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
             }
         }
+        if let Some(session_id) = self.active_terminal_session_id()
+            && let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+        {
+            self.active_ssh_node_id = Some(node_id.clone());
+            self.expanded_ssh_nodes.insert(node_id.clone());
+        }
     }
 
     pub(super) fn focus_active_pane(&self, window: &mut Window, cx: &App) {
@@ -294,6 +313,8 @@ impl WorkspaceApp {
         session_id: TerminalSessionId,
     ) {
         self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        self.expanded_ssh_nodes.insert(node_id.clone());
+        self.active_ssh_node_id = Some(node_id.clone());
         if let Some(saved_connection_id) = saved_connection_id.as_ref() {
             self.saved_ssh_nodes
                 .insert(saved_connection_id.clone(), node_id.clone());
@@ -334,7 +355,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn focus_terminal_session(
+    pub(super) fn focus_terminal_session(
         &mut self,
         session_id: TerminalSessionId,
         window: &mut Window,
@@ -356,6 +377,8 @@ impl WorkspaceApp {
             && let Some(node) = self.ssh_nodes.get_mut(node_id)
         {
             node.readiness = NodeReadiness::Ready;
+            self.active_ssh_node_id = Some(node_id.clone());
+            self.expanded_ssh_nodes.insert(node_id.clone());
         }
         self.sync_active_tab_surface();
         self.needs_active_pane_focus = true;
@@ -363,6 +386,49 @@ impl WorkspaceApp {
         self.reveal_active_tab(window);
         cx.notify();
         true
+    }
+
+    pub(super) fn close_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.focus_terminal_session(session_id, window, cx) {
+            return;
+        }
+        let single_pane_tab = self
+            .active_tab()
+            .and_then(|tab| tab.root_pane.as_ref())
+            .is_none_or(|root| root.pane_count() <= 1);
+        if single_pane_tab {
+            self.close_active_tab(window, cx);
+        } else {
+            self.close_active_pane(window, cx);
+        }
+    }
+
+    pub(super) fn disconnect_ssh_node(
+        &mut self,
+        node_id: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_ids) = self
+            .ssh_nodes
+            .get(node_id)
+            .map(|node| node.terminal_ids.clone())
+        else {
+            return;
+        };
+
+        for session_id in session_ids {
+            self.close_terminal_session(session_id, window, cx);
+        }
+        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+            node.readiness = NodeReadiness::Disconnected;
+        }
+        cx.notify();
     }
 
     pub(super) fn close_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {

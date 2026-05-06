@@ -22,7 +22,15 @@
   "sessions": {
     "tree": {
       "no_sessions": "Aucune session",
-      "click_to_add": "Cliquez sur + pour ajouter une connexion"
+      "click_to_add": "Cliquez sur + pour ajouter une connexion",
+      "actions": {
+        "new_terminal": "Nouveau terminal",
+        "disconnect": "Déconnecter",
+        "reconnect": "Reconnecter"
+      }
+    },
+    "focused_list": {
+      "terminal": "Terminal #{{number}}"
     }
   }
 }
