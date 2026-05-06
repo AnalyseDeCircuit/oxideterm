@@ -2477,7 +2477,14 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(&conn) else {
+        let loaded_password = match &conn.auth {
+            SavedAuth::Password {
+                keychain_id: Some(_),
+                ..
+            } => self.connection_store.get_connection_password(id).ok(),
+            _ => None,
+        };
+        let Some(config) = ssh_config_from_saved_connection(&conn, loaded_password) else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Test,
@@ -2810,8 +2817,8 @@ pub(super) fn saved_connection_from_ssh_host(
 pub(super) fn saved_auth_from_form(form: &NewConnectionForm) -> SavedAuth {
     match form.auth_tab {
         SshAuthTab::Password => SavedAuth::Password {
-            password: (form.save_password && !form.password.is_empty())
-                .then(|| form.password.clone()),
+            keychain_id: None,
+            plaintext_password: form.save_password.then(|| form.password.clone()),
         },
         SshAuthTab::DefaultKey => SavedAuth::Key {
             key_path: String::new(),
@@ -2830,18 +2837,52 @@ pub(super) fn saved_auth_from_form(form: &NewConnectionForm) -> SavedAuth {
     }
 }
 
+fn saved_auth_from_form_for_update(
+    form: &NewConnectionForm,
+    existing_auth: Option<&SavedAuth>,
+) -> SavedAuth {
+    if form.auth_tab == SshAuthTab::Password && !form.password_loaded {
+        if let Some(SavedAuth::Password {
+            keychain_id,
+            plaintext_password,
+        }) = existing_auth
+        {
+            return SavedAuth::Password {
+                keychain_id: keychain_id.clone(),
+                plaintext_password: plaintext_password.clone(),
+            };
+        }
+        return SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: None,
+        };
+    }
+
+    if form.auth_tab == SshAuthTab::Password {
+        return SavedAuth::Password {
+            keychain_id: form.saved_password_keychain_id.clone(),
+            plaintext_password: Some(form.password.clone()),
+        };
+    }
+
+    saved_auth_from_form(form)
+}
+
 pub(super) fn form_from_saved_connection(
     conn: &SavedConnection,
     error: Option<String>,
 ) -> NewConnectionForm {
     let (auth_tab, password, key_path, cert_path, passphrase, save_password) = match &conn.auth {
-        SavedAuth::Password { password } => (
+        SavedAuth::Password {
+            keychain_id,
+            plaintext_password,
+        } => (
             SshAuthTab::Password,
-            password.clone().unwrap_or_default(),
+            plaintext_password.clone().unwrap_or_default(),
             String::new(),
             String::new(),
             String::new(),
-            password.is_some(),
+            keychain_id.is_some() || plaintext_password.is_some(),
         ),
         SavedAuth::Key {
             key_path,
@@ -2893,6 +2934,14 @@ pub(super) fn form_from_saved_connection(
         username: conn.username.clone(),
         auth_tab,
         password,
+        saved_password_keychain_id: match &conn.auth {
+            SavedAuth::Password { keychain_id, .. } => keychain_id.clone(),
+            _ => None,
+        },
+        password_loaded: false,
+        password_visible: false,
+        password_loading: false,
+        password_error: None,
         key_path,
         cert_path,
         passphrase,
@@ -2911,6 +2960,14 @@ pub(super) fn save_request_from_form(
     form: &NewConnectionForm,
     id: Option<String>,
 ) -> anyhow::Result<SaveConnectionRequest> {
+    save_request_from_form_with_existing_auth(form, id, None)
+}
+
+pub(super) fn save_request_from_form_with_existing_auth(
+    form: &NewConnectionForm,
+    id: Option<String>,
+    existing_auth: Option<&SavedAuth>,
+) -> anyhow::Result<SaveConnectionRequest> {
     let port = form.port.trim().parse::<u16>().unwrap_or(22);
     Ok(SaveConnectionRequest {
         id,
@@ -2919,16 +2976,34 @@ pub(super) fn save_request_from_form(
         host: form.host.trim().to_string(),
         port,
         username: form.username.trim().to_string(),
-        auth: saved_auth_from_form(form),
+        auth: if existing_auth.is_some() {
+            saved_auth_from_form_for_update(form, existing_auth)
+        } else {
+            saved_auth_from_form(form)
+        },
         color: (!form.color.trim().is_empty()).then(|| form.color.trim().to_string()),
         tags: form.tags.clone(),
         agent_forwarding: form.agent_forwarding,
     })
 }
 
-pub(super) fn ssh_config_from_saved_connection(conn: &SavedConnection) -> Option<SshConfig> {
+pub(super) fn ssh_config_from_saved_connection(
+    conn: &SavedConnection,
+    loaded_password: Option<String>,
+) -> Option<SshConfig> {
     let auth = match &conn.auth {
-        SavedAuth::Password { password } => AuthMethod::password(password.clone()?),
+        SavedAuth::Password {
+            plaintext_password: Some(password),
+            ..
+        } => AuthMethod::password(password.clone()),
+        SavedAuth::Password {
+            keychain_id: Some(_),
+            ..
+        } => AuthMethod::password(loaded_password?),
+        SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: None,
+        } => return None,
         SavedAuth::Key {
             key_path,
             passphrase,

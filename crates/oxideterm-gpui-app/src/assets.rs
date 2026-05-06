@@ -19,6 +19,8 @@ pub(crate) enum LucideIcon {
     Code2,
     Copy,
     Download,
+    Eye,
+    EyeOff,
     FolderInput,
     Folder,
     FolderOpen,
@@ -31,6 +33,7 @@ pub(crate) enum LucideIcon {
     LayoutList,
     ListTree,
     Link2,
+    LoaderCircle,
     Lock,
     MoreHorizontal,
     Monitor,
@@ -74,6 +77,8 @@ impl LucideIcon {
             Self::Code2 => "lucide/code-2.svg",
             Self::Copy => "lucide/copy.svg",
             Self::Download => "lucide/download.svg",
+            Self::Eye => "lucide/eye.svg",
+            Self::EyeOff => "lucide/eye-off.svg",
             Self::FolderInput => "lucide/folder-input.svg",
             Self::Folder => "lucide/folder.svg",
             Self::FolderOpen => "lucide/folder-open.svg",
@@ -86,6 +91,7 @@ impl LucideIcon {
             Self::LayoutList => "lucide/layout-list.svg",
             Self::ListTree => "lucide/list-tree.svg",
             Self::Link2 => "lucide/link-2.svg",
+            Self::LoaderCircle => "lucide/loader-circle.svg",
             Self::Lock => "lucide/lock.svg",
             Self::MoreHorizontal => "lucide/more-horizontal.svg",
             Self::Monitor => "lucide/monitor.svg",
@@ -133,6 +139,8 @@ impl AssetSource for NativeAssets {
             "lucide/code-2.svg" => CODE_2,
             "lucide/copy.svg" => COPY,
             "lucide/download.svg" => DOWNLOAD,
+            "lucide/eye.svg" => EYE,
+            "lucide/eye-off.svg" => EYE_OFF,
             "lucide/folder-input.svg" => FOLDER_INPUT,
             "lucide/folder.svg" => FOLDER,
             "lucide/folder-open.svg" => FOLDER_OPEN,
@@ -145,6 +153,7 @@ impl AssetSource for NativeAssets {
             "lucide/layout-list.svg" => LAYOUT_LIST,
             "lucide/link.svg" => LINK,
             "lucide/link-2.svg" => LINK_2,
+            "lucide/loader-circle.svg" => LOADER_CIRCLE,
             "lucide/lock.svg" => LOCK,
             "lucide/list-tree.svg" => LIST_TREE,
             "lucide/list-checks.svg" => LIST_CHECKS,
@@ -193,6 +202,8 @@ impl AssetSource for NativeAssets {
                 "code-2.svg",
                 "copy.svg",
                 "download.svg",
+                "eye.svg",
+                "eye-off.svg",
                 "folder-input.svg",
                 "folder.svg",
                 "folder-open.svg",
@@ -205,6 +216,7 @@ impl AssetSource for NativeAssets {
                 "layout-list.svg",
                 "link.svg",
                 "link-2.svg",
+                "loader-circle.svg",
                 "lock.svg",
                 "list-tree.svg",
                 "list-checks.svg",
@@ -256,6 +268,8 @@ const CLOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height
 const CODE_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>"#;
 const COPY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"#;
 const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>"#;
+const EYE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>"#;
+const EYE_OFF: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>"#;
 const FOLDER_INPUT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2A2 2 0 0 0 12.07 6H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/></svg>"#;
 const FOLDER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
 const FOLDER_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>"#;
@@ -268,6 +282,7 @@ const KEYBOARD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const LAYOUT_LIST: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/></svg>"#;
 const LINK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>"#;
 const LINK_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>"#;
+const LOADER_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>"#;
 const LOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>"#;
 const LIST_TREE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>"#;
 const LIST_CHECKS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>"#;

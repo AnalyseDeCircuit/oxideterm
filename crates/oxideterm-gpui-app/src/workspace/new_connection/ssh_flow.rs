@@ -14,7 +14,8 @@ use super::{
 use crate::workspace::{
     WorkspaceApp,
     session_manager::{
-        form_from_saved_connection, save_request_from_form, ssh_config_from_saved_connection,
+        form_from_saved_connection, save_request_from_form,
+        save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
     },
 };
 
@@ -169,7 +170,14 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(&conn) else {
+        let loaded_password = match &conn.auth {
+            oxideterm_connections::SavedAuth::Password {
+                keychain_id: Some(_),
+                ..
+            } => self.connection_store.get_connection_password(id).ok(),
+            _ => None,
+        };
+        let Some(config) = ssh_config_from_saved_connection(&conn, loaded_password) else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Connect,
@@ -259,7 +267,11 @@ impl WorkspaceApp {
         let Some(form) = self.new_connection_form.as_ref() else {
             return;
         };
-        match save_request_from_form(form, Some(id)) {
+        let existing_auth = self
+            .connection_store
+            .get(&id)
+            .map(|connection| connection.auth.clone());
+        match save_request_from_form_with_existing_auth(form, Some(id), existing_auth.as_ref()) {
             Ok(request) => match self.connection_store.upsert(request) {
                 Ok(_) => {
                     self.new_connection_form = None;

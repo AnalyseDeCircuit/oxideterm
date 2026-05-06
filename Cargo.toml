@@ -40,6 +40,7 @@ gpui = "=0.2.2"
 gpui-component = { version = "=0.5.1", default-features = false }
 icy_sixel = "0.5.0"
 image = "0.25.10"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 libc = "0.2"
 parking_lot = "0.12"
 polling = "3.11"
@@ -56,6 +57,7 @@ unicode-bidi = "0.3"
 unicode-segmentation = "1.12"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 windows = "0.61"
+whoami = "1.6"
 zeroize = { version = "1.8", features = ["serde"] }
 
 [profile.release]

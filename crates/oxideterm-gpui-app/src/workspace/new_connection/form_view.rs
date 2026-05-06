@@ -14,6 +14,7 @@ use super::{
     },
     ssh_flow::SshConnectionIntent,
 };
+use crate::assets::LucideIcon;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
@@ -34,6 +35,9 @@ const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
 const TAURI_EDIT_COLOR_FALLBACK_TEXT: &str = "#22d3ee";
 const TAURI_PROMPT_ERROR_ALPHA: u32 = 0x1a; // Tailwind red-500/10
 const TAURI_PROMPT_ERROR_BORDER_ALPHA: u32 = 0x80; // Tailwind red-500/50
+const TAURI_PASSWORD_ICON_BUTTON_SIZE: f32 = 28.0; // Tauri h-7 w-7
+const TAURI_PASSWORD_ICON_BUTTON_OFFSET: f32 = 4.0; // Tauri right-1 top-1
+const TAURI_PASSWORD_ICON_SIZE: f32 = 16.0; // Tauri h-4 w-4
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {
@@ -85,6 +89,15 @@ impl WorkspaceApp {
                 _ => return true,
             }
         }
+
+        let password_locked = self.editing_saved_connection_id.is_some()
+            && self.saved_connection_prompt_action.is_none()
+            && form.focused_field == NewConnectionField::Password
+            && !form.password_loaded;
+        if password_locked && !matches!(key, "escape" | "enter" | "tab") {
+            return true;
+        }
+
         let focused_field_accepts_ime = matches!(
             form.focused_field,
             NewConnectionField::Name
@@ -185,6 +198,13 @@ impl WorkspaceApp {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
+        if self.editing_saved_connection_id.is_some()
+            && self.saved_connection_prompt_action.is_none()
+            && form.focused_field == NewConnectionField::Password
+            && !form.password_loaded
+        {
+            return;
+        }
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
         insert_text_into_current_connection_field(form, &single_line);
@@ -312,44 +332,53 @@ impl WorkspaceApp {
                                     self.render_auth_tabs(form.auth_tab, edit_properties_mode, cx)
                                 })
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
-                                    let password_label = if edit_properties_mode {
-                                        self.i18n.t("sessionManager.edit_properties.saved_password")
-                                    } else {
-                                        self.i18n.t("ssh.form.password")
-                                    };
-                                    let password_placeholder =
-                                        if edit_properties_mode && form.password.is_empty() {
-                                            self.i18n.t(
-                                            "sessionManager.edit_properties.password_placeholder",
-                                        )
-                                        } else {
-                                            String::new()
-                                        };
-                                    let content = content.child(self.render_connection_field(
-                                        password_label,
-                                        &form.password,
-                                        password_placeholder,
-                                        NewConnectionField::Password,
-                                        true,
-                                        cx,
-                                    ));
                                     if edit_properties_mode {
-                                        content.child(
-                                            self.render_connection_hint(
+                                        content
+                                            .child(self.render_edit_saved_password_field(form, cx))
+                                            .child(self.render_connection_hint(
                                                 self.i18n.t(
                                                     "sessionManager.edit_properties.password_hint",
                                                 ),
-                                            ),
-                                        )
+                                            ))
+                                            .when_some(
+                                                form.password_error.clone(),
+                                                |content, error| {
+                                                    content.child(
+                                                        div()
+                                                            .text_size(px(self
+                                                                .tokens
+                                                                .metrics
+                                                                .ui_text_xs))
+                                                            .text_color(rgb(self.tokens.ui.error))
+                                                            .child(error),
+                                                    )
+                                                },
+                                            )
                                     } else if prompt_mode {
-                                        content
-                                    } else {
-                                        content.child(self.render_connection_checkbox(
-                                            self.i18n.t("ssh.form.save_password"),
-                                            form.save_password,
-                                            |form| form.save_password = !form.save_password,
+                                        content.child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.password"),
+                                            &form.password,
+                                            String::new(),
+                                            NewConnectionField::Password,
+                                            true,
                                             cx,
                                         ))
+                                    } else {
+                                        content
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.password"),
+                                                &form.password,
+                                                String::new(),
+                                                NewConnectionField::Password,
+                                                true,
+                                                cx,
+                                            ))
+                                            .child(self.render_connection_checkbox(
+                                                self.i18n.t("ssh.form.save_password"),
+                                                form.save_password,
+                                                |form| form.save_password = !form.save_password,
+                                                cx,
+                                            ))
                                     }
                                 })
                                 .when(
@@ -718,6 +747,71 @@ impl WorkspaceApp {
         )
     }
 
+    fn render_edit_saved_password_field(
+        &self,
+        form: &NewConnectionForm,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = if form.password_loaded {
+            form.password.as_str()
+        } else {
+            ""
+        };
+        let icon = if form.password_loading {
+            LucideIcon::LoaderCircle
+        } else if form.password_visible {
+            LucideIcon::EyeOff
+        } else {
+            LucideIcon::Eye
+        };
+        let secret = form.password_loaded && !form.password_visible;
+        form_field(
+            &self.tokens,
+            self.i18n.t("sessionManager.edit_properties.saved_password"),
+            div()
+                .relative()
+                .child(
+                    self.render_connection_input(
+                        value,
+                        self.i18n
+                            .t("sessionManager.edit_properties.password_placeholder"),
+                        NewConnectionField::Password,
+                        secret,
+                        cx,
+                    ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
+                        .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
+                        .size(px(TAURI_PASSWORD_ICON_BUTTON_SIZE))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(self.tokens.radii.sm))
+                        .opacity(if form.password_loading { 0.5 } else { 1.0 })
+                        .cursor_pointer()
+                        .hover({
+                            let bg = rgba((self.tokens.ui.bg_hover << 8) | 0x99);
+                            move |button| button.bg(bg)
+                        })
+                        .child(Self::render_lucide_icon(
+                            icon,
+                            TAURI_PASSWORD_ICON_SIZE,
+                            rgb(self.tokens.ui.text_muted),
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.toggle_edit_saved_password_visibility(cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                ),
+        )
+    }
+
     fn render_connection_field_with_browse(
         &self,
         label: String,
@@ -881,6 +975,55 @@ impl WorkspaceApp {
                     clear_connection_selection(form);
                 }
                 this.new_connection_caret_visible = true;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_edit_saved_password_visibility(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        if form.password_loading {
+            return;
+        }
+        if form.password_loaded {
+            form.password_visible = !form.password_visible;
+            form.password_error = None;
+            cx.notify();
+            return;
+        }
+
+        let Some(connection_id) = self.editing_saved_connection_id.clone() else {
+            return;
+        };
+        form.password_loading = true;
+        form.password_error = None;
+        cx.notify();
+
+        let store = self.connection_store.clone();
+        cx.spawn(async move |weak, cx| {
+            let result = store.get_connection_password(&connection_id);
+            let _ = weak.update(cx, |this, cx| {
+                if let Some(form) = this.new_connection_form.as_mut() {
+                    form.password_loading = false;
+                    match result {
+                        Ok(password) => {
+                            form.password = password;
+                            form.password_loaded = true;
+                            form.password_visible = true;
+                            form.password_error = None;
+                            form.focused_field = NewConnectionField::Password;
+                            form.field_focused = true;
+                            clear_connection_selection(form);
+                            this.new_connection_caret_visible = true;
+                        }
+                        Err(error) => {
+                            form.password_error = Some(error.to_string());
+                        }
+                    }
+                }
                 cx.notify();
             });
         })

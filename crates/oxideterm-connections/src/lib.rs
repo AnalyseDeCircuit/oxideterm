@@ -1,3 +1,4 @@
+mod keychain;
 mod ssh_config;
 mod ssh_keys;
 mod store;

@@ -9,6 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::keychain::ConnectionKeychain;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthType {
@@ -33,7 +35,10 @@ impl AuthType {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SavedAuth {
     Password {
-        password: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keychain_id: Option<String>,
+        #[serde(default, rename = "password", skip_serializing)]
+        plaintext_password: Option<String>,
     },
     Key {
         key_path: String,
@@ -179,6 +184,7 @@ pub struct ConnectionStoreData {
 pub struct ConnectionStore {
     path: PathBuf,
     data: ConnectionStoreData,
+    keychain: ConnectionKeychain,
 }
 
 impl ConnectionStore {
@@ -192,8 +198,15 @@ impl ConnectionStore {
         } else {
             ConnectionStoreData::default()
         };
-        let mut store = Self { path, data };
+        let mut store = Self {
+            path,
+            data,
+            keychain: ConnectionKeychain::default(),
+        };
         store.normalize();
+        if store.migrate_legacy_passwords()? {
+            store.save()?;
+        }
         Ok(store)
     }
 
@@ -235,6 +248,8 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let existing_auth = self.get(&id).map(|conn| conn.auth.clone());
+        let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
         let connection = SavedConnection {
             id: id.clone(),
             name: non_empty(request.name.trim(), "Connection name")?.to_string(),
@@ -242,7 +257,7 @@ impl ConnectionStore {
             host: non_empty(request.host.trim(), "Host")?.to_string(),
             port: request.port.max(1),
             username: non_empty(request.username.trim(), "Username")?.to_string(),
-            auth: request.auth,
+            auth,
             options: ConnectionOptions {
                 agent_forwarding: request.agent_forwarding,
             },
@@ -268,11 +283,18 @@ impl ConnectionStore {
     }
 
     pub fn delete(&mut self, id: &str) -> Result<bool> {
+        let keychain_ids = self
+            .get(id)
+            .map(collect_auth_keychain_ids)
+            .unwrap_or_default();
         let before = self.data.connections.len();
         self.data.connections.retain(|conn| conn.id != id);
         let deleted = self.data.connections.len() != before;
         if deleted {
             self.save()?;
+            for keychain_id in keychain_ids {
+                let _ = self.keychain.delete(&keychain_id);
+            }
         }
         Ok(deleted)
     }
@@ -329,6 +351,7 @@ impl ConnectionStore {
         duplicate.created_at = Utc::now();
         duplicate.updated_at = Some(Utc::now());
         duplicate.last_used_at = None;
+        duplicate.auth = self.clone_auth_secret(&duplicate.auth)?;
         let duplicate_id = duplicate.id.clone();
         self.data.connections.push(duplicate);
         self.normalize();
@@ -352,6 +375,7 @@ impl ConnectionStore {
         connection.id = Uuid::new_v4().to_string();
         connection.created_at = Utc::now();
         connection.updated_at = Some(Utc::now());
+        connection.auth = self.materialize_auth(connection.auth, None)?;
         if let Some(group) = connection.group.clone() {
             self.ensure_group(group)?;
         }
@@ -360,6 +384,98 @@ impl ConnectionStore {
         self.normalize();
         self.save()?;
         Ok(self.get(&id).map(ConnectionInfo::from).expect("imported"))
+    }
+
+    pub fn get_connection_password(&self, id: &str) -> Result<String> {
+        let conn = self
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
+        match &conn.auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => self.keychain.get(keychain_id),
+            SavedAuth::Password {
+                plaintext_password: Some(password),
+                ..
+            } => Ok(password.clone()),
+            SavedAuth::Password {
+                keychain_id: None, ..
+            } => bail!("Password not saved for this connection"),
+            _ => bail!("Connection does not use password auth"),
+        }
+    }
+
+    fn materialize_auth(
+        &self,
+        auth: SavedAuth,
+        existing_auth: Option<&SavedAuth>,
+    ) -> Result<SavedAuth> {
+        match auth {
+            SavedAuth::Password {
+                keychain_id,
+                plaintext_password,
+            } => {
+                if let Some(password) = plaintext_password {
+                    let keychain_id = existing_password_keychain_id(existing_auth)
+                        .or(keychain_id)
+                        .unwrap_or_else(new_password_keychain_id);
+                    self.keychain.store(&keychain_id, &password)?;
+                    Ok(SavedAuth::Password {
+                        keychain_id: Some(keychain_id),
+                        plaintext_password: None,
+                    })
+                } else {
+                    Ok(SavedAuth::Password {
+                        keychain_id,
+                        plaintext_password: None,
+                    })
+                }
+            }
+            auth => Ok(auth),
+        }
+    }
+
+    fn clone_auth_secret(&self, auth: &SavedAuth) -> Result<SavedAuth> {
+        match auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => {
+                let password = self.keychain.get(keychain_id)?;
+                let next_keychain_id = new_password_keychain_id();
+                self.keychain.store(&next_keychain_id, &password)?;
+                Ok(SavedAuth::Password {
+                    keychain_id: Some(next_keychain_id),
+                    plaintext_password: None,
+                })
+            }
+            SavedAuth::Password {
+                keychain_id: None, ..
+            } => Ok(SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+            }),
+            auth => Ok(auth.clone()),
+        }
+    }
+
+    fn migrate_legacy_passwords(&mut self) -> Result<bool> {
+        let mut migrated = false;
+        for conn in &mut self.data.connections {
+            if let SavedAuth::Password {
+                keychain_id,
+                plaintext_password,
+            } = &mut conn.auth
+                && let Some(password) = plaintext_password.take()
+            {
+                let next_keychain_id = keychain_id.clone().unwrap_or_else(new_password_keychain_id);
+                self.keychain.store(&next_keychain_id, &password)?;
+                *keychain_id = Some(next_keychain_id);
+                migrated = true;
+            }
+        }
+        Ok(migrated)
     }
 
     fn normalize(&mut self) {
@@ -410,4 +526,28 @@ fn non_empty<'a>(value: &'a str, label: &str) -> Result<&'a str> {
         bail!("{label} is required");
     }
     Ok(value)
+}
+
+fn existing_password_keychain_id(auth: Option<&SavedAuth>) -> Option<String> {
+    match auth {
+        Some(SavedAuth::Password {
+            keychain_id: Some(keychain_id),
+            ..
+        }) => Some(keychain_id.clone()),
+        _ => None,
+    }
+}
+
+fn collect_auth_keychain_ids(connection: &SavedConnection) -> Vec<String> {
+    match &connection.auth {
+        SavedAuth::Password {
+            keychain_id: Some(keychain_id),
+            ..
+        } => vec![keychain_id.clone()],
+        _ => Vec::new(),
+    }
+}
+
+fn new_password_keychain_id() -> String {
+    format!("oxide_conn_{}", Uuid::new_v4())
 }

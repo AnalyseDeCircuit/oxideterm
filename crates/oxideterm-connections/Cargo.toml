@@ -9,4 +9,6 @@ anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+keyring.workspace = true
 uuid.workspace = true
+whoami.workspace = true
