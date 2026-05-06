@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "Dieser Jump-Host verwendet einen nicht unterstützten Auth-Typ",
       "test_host_key_changed": "Host-Schlüssel wurde geändert. Erwartet: {{expected}}. Tatsächlich: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Verbinden mit {{name}}"
+    },
     "edit_properties": {
       "title": "Verbindung bearbeiten",
       "description": "Verbindungseigenschaften ändern.",

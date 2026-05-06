@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "Questo jump host usa un tipo di autenticazione non supportato",
       "test_host_key_changed": "La chiave host è cambiata. Prevista: {{expected}}. Attuale: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Connetti a {{name}}"
+    },
     "edit_properties": {
       "title": "Modifica connessione",
       "description": "Modifica le proprietà della connessione.",

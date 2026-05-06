@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "此跳板主機使用了不支援的驗證類型",
       "test_host_key_changed": "主機金鑰已變更。預期值：{{expected}}。實際值：{{actual}}。"
     },
+    "connect_prompt": {
+      "title": "連線至 {{name}}"
+    },
     "edit_properties": {
       "title": "編輯連線",
       "description": "修改連線屬性。",

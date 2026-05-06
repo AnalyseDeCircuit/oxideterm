@@ -338,7 +338,7 @@ impl WorkspaceApp {
     }
 
     fn connection_add_group_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let disabled = self.settings_connection_new_group.trim().is_empty();
+        let disabled = self.connection_new_group_text().trim().is_empty();
         button_with(
             &self.tokens,
             self.i18n.t("settings_view.connections.groups.add"),
@@ -359,6 +359,14 @@ impl WorkspaceApp {
             )
         })
         .into_any_element()
+    }
+
+    fn connection_new_group_text(&self) -> &str {
+        if self.focused_settings_input == Some(SettingsInput::ConnectionNewGroup) {
+            &self.settings_input_draft
+        } else {
+            &self.settings_connection_new_group
+        }
     }
 
     fn connection_group_row(&self, group: String, cx: &mut Context<Self>) -> AnyElement {
@@ -864,16 +872,21 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn create_settings_connection_group(&mut self, cx: &mut Context<Self>) {
-        let group = self.settings_connection_new_group.trim().to_string();
+    fn create_settings_connection_group(&mut self, cx: &mut Context<Self>) -> bool {
+        let group = if self.focused_settings_input == Some(SettingsInput::ConnectionNewGroup) {
+            self.settings_input_draft.trim().to_string()
+        } else {
+            self.settings_connection_new_group.trim().to_string()
+        };
         if group.is_empty() {
-            return;
+            return false;
         }
-        match self.connection_store.create_group(group.clone()) {
+        let created = match self.connection_store.create_group(group.clone()) {
             Ok(()) => {
                 self.settings_connection_new_group.clear();
                 self.settings_input_draft.clear();
                 self.settings_connection_status = None;
+                true
             }
             Err(error) => {
                 self.settings_connection_status = Some(
@@ -881,9 +894,11 @@ impl WorkspaceApp {
                         .t("settings_view.errors.create_group_failed")
                         .replace("{{error}}", &error.to_string()),
                 );
+                false
             }
-        }
+        };
         cx.notify();
+        created
     }
 
     fn delete_settings_connection_group(&mut self, group: String, cx: &mut Context<Self>) {

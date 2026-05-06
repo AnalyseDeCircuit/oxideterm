@@ -57,7 +57,7 @@ use self::actions::SearchBarState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
-    SshAuthTab, SshConnectionWorkerResult,
+    SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
 use self::session_manager::SessionManagerState;
@@ -108,6 +108,7 @@ pub(crate) struct WorkspaceApp {
     background_cache_poll_scheduled: bool,
     new_connection_form: Option<NewConnectionForm>,
     editing_saved_connection_id: Option<String>,
+    saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
@@ -190,6 +191,7 @@ impl WorkspaceApp {
             background_cache_poll_scheduled: false,
             new_connection_form: None,
             editing_saved_connection_id: None,
+            saved_connection_prompt_action: None,
             new_connection_caret_visible: true,
             host_key_challenge: None,
             keyboard_interactive_challenge: None,
@@ -227,6 +229,7 @@ impl WorkspaceApp {
                         if workspace.new_connection_form.is_some()
                             || workspace.keyboard_interactive_challenge.is_some()
                             || workspace.focused_settings_input.is_some()
+                            || workspace.session_manager.focused_input.is_some()
                         {
                             workspace.new_connection_caret_visible =
                                 !workspace.new_connection_caret_visible;
@@ -486,8 +489,13 @@ fn settings_ui_font_family(configured_family: &str) -> SharedString {
     css_font_family_head(configured_family).unwrap_or_else(|| SharedString::from("Inter"))
 }
 
-fn settings_mono_font_family() -> SharedString {
-    SharedString::from("JetBrains Mono")
+fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
+    SharedString::from(
+        settings
+            .terminal
+            .font_family
+            .terminal_family_name(&settings.terminal.custom_font_family),
+    )
 }
 
 fn css_font_family_head(configured_family: &str) -> Option<SharedString> {
@@ -535,7 +543,7 @@ impl Render for WorkspaceApp {
         let content = if let Some(tab) = self.active_tab() {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
-                (TabKind::SessionManager, _) => self.render_session_manager_surface(cx),
+                (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }

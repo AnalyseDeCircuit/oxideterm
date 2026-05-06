@@ -8,6 +8,12 @@ pub(in crate::workspace) enum SshAuthTab {
     TwoFactor,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SavedConnectionPromptAction {
+    Connect,
+    Test,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(in crate::workspace) enum NewConnectionField {
     Name,

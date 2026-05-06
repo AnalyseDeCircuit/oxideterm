@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "이 점프 호스트는 지원되지 않는 인증 유형을 사용합니다",
       "test_host_key_changed": "호스트 키가 변경되었습니다. 예상값: {{expected}}. 실제값: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "{{name}}에 연결"
+    },
     "edit_properties": {
       "title": "연결 편집",
       "description": "연결 속성을 수정합니다.",

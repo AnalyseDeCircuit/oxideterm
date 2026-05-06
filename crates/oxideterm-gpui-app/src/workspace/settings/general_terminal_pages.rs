@@ -57,7 +57,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .text_size(px(self.tokens.metrics.ui_text_base))
                             .text_color(rgb(self.tokens.ui.text))
-                            .font_family(settings_mono_font_family())
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
                             .truncate()
                             .child(data_dir),
                     )
@@ -113,20 +113,22 @@ impl WorkspaceApp {
                                 div()
                                     .flex()
                                     .flex_row()
-                                    .items_center()
-                                    .gap(px(10.0))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Terminal,
-                                        16.0,
+                                            .items_center()
+                                            .gap(px(10.0))
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::Terminal,
+                                                16.0,
                                         rgb(self.tokens.ui.text_muted),
                                     ))
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_family(settings_mono_font_family())
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child("oxide"),
-                                    )
+                                            .child(
+                                                div()
+                                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                    .font_family(settings_mono_font_family(
+                                                        self.settings_store.settings(),
+                                                    ))
+                                                    .text_color(rgb(self.tokens.ui.text))
+                                                    .child("oxide"),
+                                            )
                                     .child(self.text_badge(
                                         self.i18n.t("settings_view.general.cli_installed"),
                                         self.tokens.ui.success,
@@ -137,7 +139,9 @@ impl WorkspaceApp {
                                     .w_full()
                                     .min_w(px(0.0))
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .font_family(settings_mono_font_family())
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
                                     .text_color(rgb(self.tokens.ui.text_muted))
                                     .truncate()
                                     .child(cli_path),

@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "Este host intermedio usa un tipo de autenticación no compatible",
       "test_host_key_changed": "La clave de host ha cambiado. Esperado: {{expected}}. Actual: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Conectar a {{name}}"
+    },
     "edit_properties": {
       "title": "Editar conexión",
       "description": "Modificar las propiedades de la conexión.",
