@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "该跳板机使用了不支持的认证类型",
       "test_host_key_changed": "主机密钥已更改。预期值：{{expected}}。实际值：{{actual}}。"
     },
+    "connect_prompt": {
+      "title": "连接到 {{name}}"
+    },
     "edit_properties": {
       "title": "编辑连接",
       "description": "修改连接属性。",

@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "Cet hôte relais utilise un type d'authentification non pris en charge",
       "test_host_key_changed": "La clé d'hôte a changé. Attendu : {{expected}}. Actuel : {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Connecter à {{name}}"
+    },
     "edit_properties": {
       "title": "Modifier la connexion",
       "description": "Modifier les propriétés de la connexion.",

@@ -8,7 +8,7 @@ use oxideterm_ssh::{
 use tokio::sync::oneshot;
 
 use super::{
-    form_state::{NewConnectionForm, SshAuthTab},
+    form_state::{NewConnectionForm, SavedConnectionPromptAction, SshAuthTab},
     host_key_dialog::HostKeyChallenge,
 };
 use crate::workspace::{
@@ -85,6 +85,7 @@ impl WorkspaceApp {
             ..NewConnectionForm::default()
         });
         self.editing_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -98,6 +99,7 @@ impl WorkspaceApp {
     ) {
         self.new_connection_form = None;
         self.editing_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
         self.host_key_challenge = None;
         self.cancel_keyboard_interactive_challenge(cx);
         self.focus_active_pane(window, cx);
@@ -109,6 +111,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.saved_connection_prompt_action.is_some() {
+            self.submit_saved_connection_prompt(window, cx);
+            return;
+        }
         if self.editing_saved_connection_id.is_some() {
             self.save_editing_connection(window, cx);
             return;
@@ -162,8 +168,9 @@ impl WorkspaceApp {
             return;
         };
         let Some(config) = ssh_config_from_saved_connection(&conn) else {
-            self.open_saved_connection_editor(
+            self.open_saved_connection_prompt(
                 id,
+                SavedConnectionPromptAction::Connect,
                 Some(
                     self.i18n
                         .t("sessionManager.edit_properties.password_placeholder"),
@@ -175,6 +182,26 @@ impl WorkspaceApp {
         };
         let title = conn.name.clone();
         self.start_saved_connection_flow(id.to_string(), config, title, cx);
+    }
+
+    pub(in crate::workspace) fn open_saved_connection_prompt(
+        &mut self,
+        id: &str,
+        action: SavedConnectionPromptAction,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.connection_store.get(id).cloned() else {
+            return;
+        };
+        self.new_connection_form = Some(form_from_saved_connection(&conn, error));
+        self.editing_saved_connection_id = Some(id.to_string());
+        self.saved_connection_prompt_action = Some(action);
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
     }
 
     pub(in crate::workspace) fn open_saved_connection_editor(
@@ -189,10 +216,36 @@ impl WorkspaceApp {
         };
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.saved_connection_prompt_action = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
         cx.notify();
+    }
+
+    fn submit_saved_connection_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(action) = self.saved_connection_prompt_action else {
+            return;
+        };
+        let Some(id) = self.editing_saved_connection_id.clone() else {
+            return;
+        };
+        let Some((config, title)) = self.build_new_connection_config(cx) else {
+            return;
+        };
+
+        match action {
+            SavedConnectionPromptAction::Connect => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = true;
+                    form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+                }
+                self.start_saved_connection_flow(id, config, title, cx);
+            }
+            SavedConnectionPromptAction::Test => {
+                self.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
+            }
+        }
     }
 
     fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -352,6 +405,14 @@ impl WorkspaceApp {
                             Ok(()) => self.i18n.t("ssh.form.test_success"),
                             Err(error) => error,
                         });
+                    } else {
+                        self.session_manager.status = Some(match result {
+                            Ok(()) => self.i18n.t("sessionManager.toast.test_success"),
+                            Err(error) => format!(
+                                "{}: {error}",
+                                self.i18n.t("sessionManager.toast.test_failed")
+                            ),
+                        });
                     }
                     cx.notify();
                 }
@@ -433,6 +494,11 @@ impl WorkspaceApp {
             }
             SshConnectionIntent::ConnectSaved(id) => {
                 self.host_key_challenge = None;
+                if self.saved_connection_prompt_action.is_some() {
+                    self.new_connection_form = None;
+                    self.editing_saved_connection_id = None;
+                    self.saved_connection_prompt_action = None;
+                }
                 let _ = self.connection_store.mark_used(&id);
                 self.session_manager.status = None;
                 let _ = self.create_ssh_terminal_tab(config, title, window, cx);
@@ -441,7 +507,11 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_ssh_test(&mut self, config: SshConfig, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn start_ssh_test(
+        &mut self,
+        config: SshConfig,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.pending = true;
             form.error = Some(self.i18n.t("ssh.form.test_running"));

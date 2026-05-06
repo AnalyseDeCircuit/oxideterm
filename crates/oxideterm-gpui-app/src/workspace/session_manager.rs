@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionInfo, SaveConnectionRequest, SavedAuth, SavedConnection, SshConfigHost,
@@ -7,7 +8,8 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
-    checkbox, text_input_anchor_probe,
+    checkbox,
+    text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_ssh::AuthMethod;
 
@@ -18,10 +20,44 @@ const UNGROUPED_FILTER: &str = "__ungrouped__";
 const RECENT_FILTER: &str = "__recent__";
 const IMPORTED_GROUP: &str = "Imported";
 const SSH_CONFIG_TAG: &str = "ssh-config";
+const BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
+const BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri bg-hover 50%
+const BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri border 75%
+const BG_ACTIVE_BORDER_HALF_ALPHA: u32 = 0x60; // Tauri border/50 after active border mix
+const BG_ACTIVE_ROW_SELECTED_ALPHA: u32 = 0x1a; // Tauri blue-500/10
+const MANAGER_FOLDER_TREE_WIDTH: f32 = 180.0; // Tauri w-[180px]
+const MANAGER_TOOLBAR_SEARCH_WIDTH: f32 = 384.0; // Tauri max-w-sm
+const MANAGER_COL_CHECKBOX: f32 = 32.0;
+const MANAGER_COL_NAME_BASIS: f32 = 140.0;
+const MANAGER_COL_NAME_MIN: f32 = 100.0;
+const MANAGER_COL_HOST: f32 = 130.0;
+const MANAGER_COL_PORT: f32 = 50.0;
+const MANAGER_COL_USERNAME: f32 = 90.0;
+const MANAGER_COL_AUTH: f32 = 72.0;
+const MANAGER_COL_GROUP: f32 = 100.0;
+const MANAGER_COL_LAST_USED: f32 = 90.0;
+const MANAGER_COL_ACTIONS: f32 = 84.0;
+const MANAGER_COLOR_INDICATOR_WIDTH: f32 = 4.0;
+const MANAGER_ROW_TEXT_SIZE: f32 = 14.0;
+const MANAGER_ROW_META_TEXT_SIZE: f32 = 12.0;
+const MANAGER_TABLE_HEADER_TEXT_SIZE: f32 = 12.0;
+const MANAGER_AUTH_BADGE_TEXT_SIZE: f32 = 10.0;
+const MANAGER_AUTH_BADGE_ICON_SIZE: f32 = 12.0; // Tauri h-3 w-3
+const MANAGER_AUTH_BADGE_GAP: f32 = 4.0; // Tauri gap-1
+const MANAGER_AUTH_BADGE_PADDING_X: f32 = 6.0; // Tauri px-1.5
+const MANAGER_AUTH_BADGE_CHAR_WIDTH: f32 = 6.0; // Approx text-[10px] inline span width
+const MANAGER_ROW_ACTION_BUTTON: f32 = 24.0; // Tauri h-6 w-6
+const MANAGER_ROW_MORE_BUTTON: f32 = 28.0; // Tauri h-7 w-7
+const MANAGER_ROW_MENU_WIDTH: f32 = 184.0;
+const MANAGER_ROW_MENU_HEIGHT: f32 = 112.0;
+const MANAGER_ROW_CONTEXT_MENU_HEIGHT: f32 = 180.0;
+const MANAGER_RESPONSIVE_SM: f32 = 640.0;
+const MANAGER_RESPONSIVE_MD: f32 = 768.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SessionManagerInput {
     Search,
+    SavedSearch,
     NewGroup,
 }
 
@@ -29,7 +65,8 @@ impl SessionManagerInput {
     pub(super) fn anchor_key(self) -> u64 {
         match self {
             Self::Search => 1,
-            Self::NewGroup => 2,
+            Self::SavedSearch => 2,
+            Self::NewGroup => 3,
         }
     }
 }
@@ -60,13 +97,28 @@ impl SortDirection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TableCellStyle {
+    Primary,
+    Meta,
+    MetaMono,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SessionManagerState {
     pub(super) selected_group: Option<String>,
     pub(super) search_query: String,
+    pub(super) saved_search_query: String,
     pub(super) sort_field: SessionSortField,
     pub(super) sort_direction: SortDirection,
     pub(super) selected_ids: HashSet<String>,
+    pub(super) hovered_connection_id: Option<String>,
+    pub(super) row_menu_connection_id: Option<String>,
+    pub(super) row_menu_opens_above: bool,
+    pub(super) row_context_menu_connection_id: Option<String>,
+    pub(super) row_context_menu_x: f32,
+    pub(super) row_context_menu_y: f32,
+    pub(super) expanded_groups: HashSet<String>,
     pub(super) focused_input: Option<SessionManagerInput>,
     pub(super) show_new_group: bool,
     pub(super) new_group_name: String,
@@ -82,9 +134,17 @@ impl Default for SessionManagerState {
         Self {
             selected_group: None,
             search_query: String::new(),
+            saved_search_query: String::new(),
             sort_field: SessionSortField::LastUsed,
             sort_direction: SortDirection::Desc,
             selected_ids: HashSet::new(),
+            hovered_connection_id: None,
+            row_menu_connection_id: None,
+            row_menu_opens_above: false,
+            row_context_menu_connection_id: None,
+            row_context_menu_x: 0.0,
+            row_context_menu_y: 0.0,
+            expanded_groups: HashSet::new(),
             focused_input: None,
             show_new_group: false,
             new_group_name: String::new(),
@@ -98,16 +158,15 @@ impl Default for SessionManagerState {
 }
 
 impl WorkspaceApp {
-    pub(super) fn render_session_manager_surface(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_session_manager_surface(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self
             .terminal_background_preferences("session_manager")
             .is_some();
-        let panel_bg = if has_background {
-            rgba((theme.bg_panel << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
-        } else {
-            rgb(theme.bg_panel)
-        };
         div()
             .size_full()
             .flex()
@@ -118,15 +177,15 @@ impl WorkspaceApp {
                 rgb(theme.bg)
             })
             .text_color(rgb(theme.text))
-            .child(self.render_session_manager_toolbar(panel_bg, cx))
+            .child(self.render_session_manager_toolbar(window, has_background, cx))
             .child(
                 div()
                     .flex_1()
                     .min_h(px(0.0))
                     .flex()
                     .flex_row()
-                    .child(self.render_session_manager_folder_tree(panel_bg, cx))
-                    .child(self.render_session_manager_table(panel_bg, has_background, cx)),
+                    .child(self.render_session_manager_folder_tree(has_background, cx))
+                    .child(self.render_session_manager_table(has_background, cx)),
             )
             .when_some(self.session_manager.status.clone(), |surface, status| {
                 surface.child(
@@ -136,8 +195,8 @@ impl WorkspaceApp {
                         .items_center()
                         .px_4()
                         .border_t_1()
-                        .border_color(rgb(theme.border))
-                        .bg(panel_bg)
+                        .border_color(theme_border(theme.border, has_background))
+                        .bg(theme_bg(theme.bg, has_background))
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .text_color(rgb(theme.accent))
                         .child(status),
@@ -149,6 +208,15 @@ impl WorkspaceApp {
             .when(self.session_manager.show_import, |surface| {
                 surface.child(self.render_ssh_config_import_dialog(cx))
             })
+            .when_some(
+                self.session_manager
+                    .row_context_menu_connection_id
+                    .as_deref()
+                    .and_then(|id| self.connection_info_by_id(id)),
+                |surface, conn| {
+                    surface.child(self.render_row_context_menu(conn, window, has_background, cx))
+                },
+            )
             .into_any_element()
     }
 
@@ -178,9 +246,14 @@ impl WorkspaceApp {
             "backspace" => {
                 match input {
                     SessionManagerInput::Search => self.session_manager.search_query.pop(),
+                    SessionManagerInput::SavedSearch => {
+                        self.session_manager.saved_search_query.pop()
+                    }
                     SessionManagerInput::NewGroup => self.session_manager.new_group_name.pop(),
                 };
-                self.clear_session_selection_for_invisible_rows();
+                if input == SessionManagerInput::Search {
+                    self.clear_session_selection_for_invisible_rows();
+                }
                 cx.notify();
                 true
             }
@@ -220,29 +293,47 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn render_session_manager_toolbar(&self, panel_bg: Rgba, cx: &mut Context<Self>) -> AnyElement {
+    fn render_session_manager_toolbar(
+        &self,
+        window: &Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let selected_count = self.session_manager.selected_ids.len();
+        let viewport_width = f32::from(window.viewport_size().width);
+        let show_primary_labels = viewport_width >= MANAGER_RESPONSIVE_SM;
+        let show_transfer_labels = viewport_width >= MANAGER_RESPONSIVE_MD;
         div()
-            .h(px(50.0))
+            .min_h(px(48.0))
             .flex()
+            .flex_wrap()
             .items_center()
-            .gap(px(10.0))
-            .px_4()
+            .gap(px(8.0))
+            .px_3()
+            .py_2()
             .border_b_1()
-            .border_color(rgb(theme.border))
-            .bg(panel_bg)
-            .child(div().w(px(280.0)).child(self.render_session_text_input(
-                SessionManagerInput::Search,
-                &self.session_manager.search_query,
-                self.i18n.t("sessionManager.toolbar.search_placeholder"),
-                cx,
-            )))
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_bg(theme.bg, has_background))
             .child(
-                self.render_session_manager_button(
+                div()
+                    .flex_1()
+                    .min_w(px(160.0))
+                    .max_w(px(MANAGER_TOOLBAR_SEARCH_WIDTH))
+                    .child(self.render_session_text_input(
+                        SessionManagerInput::Search,
+                        &self.session_manager.search_query,
+                        self.i18n.t("sessionManager.toolbar.search_placeholder"),
+                        cx,
+                    )),
+            )
+            .child(
+                self.render_toolbar_button(
                     LucideIcon::Plus,
                     self.i18n.t("sessionManager.toolbar.new_connection"),
                     ButtonVariant::Default,
+                    has_background,
+                    show_primary_labels,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -253,10 +344,12 @@ impl WorkspaceApp {
                 ),
             )
             .child(
-                self.render_session_manager_button(
+                self.render_toolbar_button(
                     LucideIcon::Network,
                     self.i18n.t("sessionManager.toolbar.auto_route"),
-                    ButtonVariant::Secondary,
+                    ButtonVariant::Outline,
+                    has_background,
+                    show_primary_labels,
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -275,15 +368,16 @@ impl WorkspaceApp {
                             .gap(px(8.0))
                             .child(
                                 div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .px_1()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
                                     .child(selected_count_label(&self.i18n, selected_count)),
                             )
                             .child(
                                 self.render_session_manager_button(
-                                    LucideIcon::FolderOpen,
+                                    LucideIcon::FolderInput,
                                     self.i18n.t("sessionManager.batch.move_to_group"),
-                                    ButtonVariant::Secondary,
+                                    ButtonVariant::Outline,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -299,7 +393,7 @@ impl WorkspaceApp {
                                 self.render_session_manager_button(
                                     LucideIcon::Trash2,
                                     self.i18n.t("sessionManager.batch.delete"),
-                                    ButtonVariant::Destructive,
+                                    ButtonVariant::Outline,
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -321,15 +415,17 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(22.0))
                     .child(self.render_toolbar_link_icon(
-                        LucideIcon::FolderInput,
+                        LucideIcon::Download,
                         "sessionManager.toolbar.import",
                         true,
+                        show_transfer_labels,
                         cx,
                     ))
                     .child(self.render_toolbar_link_icon(
                         LucideIcon::Upload,
                         "sessionManager.toolbar.export",
                         false,
+                        show_transfer_labels,
                         cx,
                     )),
             )
@@ -338,7 +434,7 @@ impl WorkspaceApp {
 
     fn render_session_manager_folder_tree(
         &self,
-        panel_bg: Rgba,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -349,73 +445,88 @@ impl WorkspaceApp {
             .iter()
             .filter(|conn| conn.group.is_none())
             .count();
-        let recent_count = self
-            .connection_store
-            .connections()
-            .iter()
-            .filter(|conn| conn.last_used_at.is_some())
-            .count()
-            .min(20);
-        let mut tree = div()
-            .id("session-manager-folder-tree")
-            .w(px(220.0))
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .border_r_1()
-            .border_color(rgb(theme.border))
-            .bg(panel_bg)
+        let (root_groups, child_groups) = self.session_group_tree();
+        let mut groups = div()
+            .id("session-manager-folder-tree-scroll")
+            .flex_1()
+            .min_h(px(0.0))
+            .min_w(px(0.0))
             .overflow_y_scroll()
-            .py_2()
-            .child(self.render_group_tree_item(
-                None,
-                LucideIcon::LayoutList,
-                self.i18n.t("sessionManager.folder_tree.all_connections"),
-                all_count,
-                0,
-                cx,
-            ))
-            .child(self.render_new_group_tree_item(cx));
+            .px_1()
+            .py_1();
 
-        for group in self.connection_store.groups() {
-            tree = tree.child(self.render_group_tree_item(
-                Some(group.clone()),
-                LucideIcon::Folder,
-                group.rsplit('/').next().unwrap_or(group).to_string(),
-                self.connection_count_for_group(group),
-                group.matches('/').count(),
+        for group in root_groups {
+            groups = groups.child(self.render_group_tree_node(
+                group,
+                0,
+                &child_groups,
+                has_background,
                 cx,
             ));
         }
 
         if ungrouped_count > 0 {
-            tree = tree.child(self.render_group_tree_item(
+            groups = groups.child(self.render_group_tree_item(
                 Some(UNGROUPED_FILTER.to_string()),
-                LucideIcon::Server,
+                LucideIcon::Folder,
                 self.i18n.t("sessionManager.folder_tree.ungrouped"),
-                ungrouped_count,
+                Some(ungrouped_count),
                 0,
+                has_background,
                 cx,
             ));
         }
 
-        tree.child(
-            div()
-                .mt_2()
-                .pt_2()
-                .border_t_1()
-                .border_color(rgb(theme.border))
-                .child(self.render_group_tree_item(
-                    Some(RECENT_FILTER.to_string()),
-                    LucideIcon::Activity,
-                    self.i18n.t("sessionManager.folder_tree.recent"),
-                    recent_count,
-                    0,
-                    cx,
-                )),
-        )
-        .into_any_element()
+        div()
+            .id("session-manager-folder-tree")
+            .w(px(MANAGER_FOLDER_TREE_WIDTH))
+            .min_w(px(140.0))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .border_r_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .pt_2()
+                    .px_1()
+                    .child(self.render_group_tree_item(
+                        None,
+                        LucideIcon::Inbox,
+                        self.i18n.t("sessionManager.folder_tree.all_connections"),
+                        Some(all_count),
+                        0,
+                        has_background,
+                        cx,
+                    ))
+                    .child(self.render_new_group_tree_item(has_background, cx)),
+            )
+            .child(groups)
+            .child(
+                div()
+                    .flex_none()
+                    .border_t_1()
+                    .border_color(theme_border(theme.border, has_background))
+                    .px_1()
+                    .py(px(6.0))
+                    .child(self.render_group_tree_item(
+                        Some(RECENT_FILTER.to_string()),
+                        LucideIcon::Clock,
+                        self.i18n.t("sessionManager.folder_tree.recent"),
+                        None,
+                        0,
+                        has_background,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn render_group_tree_item(
@@ -423,29 +534,29 @@ impl WorkspaceApp {
         group: Option<String>,
         icon: LucideIcon,
         label: String,
-        count: usize,
+        count: Option<usize>,
         depth: usize,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.session_manager.selected_group == group;
         div()
-            .h(px(34.0))
-            .mx_2()
-            .pl(px(10.0 + depth as f32 * 14.0))
+            .min_h(px(32.0))
+            .pl(px(12.0 + depth as f32 * 16.0))
             .pr_2()
             .flex()
             .items_center()
-            .gap(px(8.0))
+            .gap(px(6.0))
             .rounded(px(self.tokens.radii.md))
             .cursor_pointer()
             .bg(if active {
-                rgb(theme.bg_active)
+                theme_active_bg(theme.bg_active, has_background)
             } else {
-                rgb(theme.bg_panel)
+                rgba(0x00000000)
             })
             .text_color(if active {
-                rgb(theme.accent)
+                rgb(theme.text)
             } else {
                 rgb(theme.text)
             })
@@ -453,16 +564,17 @@ impl WorkspaceApp {
                 if active {
                     item
                 } else {
-                    item.bg(rgb(theme.bg_hover))
+                    item.bg(theme_hover_bg(theme.bg_hover, has_background))
                 }
             })
             .child(Self::render_lucide_icon(
                 icon,
-                15.0,
-                if active {
-                    rgb(theme.accent)
-                } else {
-                    rgb(theme.text_muted)
+                16.0,
+                match icon {
+                    LucideIcon::Inbox => rgb(0x60a5fa),
+                    LucideIcon::Folder | LucideIcon::FolderOpen => rgb(0xeab308),
+                    _ if active => rgb(theme.text),
+                    _ => rgb(theme.text_muted),
                 },
             ))
             .child(
@@ -471,18 +583,20 @@ impl WorkspaceApp {
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(if active {
-                        gpui::FontWeight::SEMIBOLD
+                        gpui::FontWeight::MEDIUM
                     } else {
                         gpui::FontWeight::NORMAL
                     })
                     .child(label),
             )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(theme.text_muted))
-                    .child(count.to_string()),
-            )
+            .when_some(count, |item, count| {
+                item.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(count.to_string()),
+                )
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -496,26 +610,161 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_new_group_tree_item(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_group_tree_node(
+        &self,
+        group: String,
+        depth: usize,
+        child_groups: &HashMap<String, Vec<String>>,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let children = child_groups.get(&group).cloned().unwrap_or_default();
+        let has_children = !children.is_empty();
+        let expanded = self.session_manager.expanded_groups.contains(&group);
+        let active = self.session_manager.selected_group.as_deref() == Some(group.as_str());
+        let label = group
+            .rsplit('/')
+            .next()
+            .unwrap_or(group.as_str())
+            .to_string();
+        let selected_group = group.clone();
+        let mut node = div().child(
+            div()
+                .min_h(px(28.0))
+                .pl(px((depth.min(5) as f32 * 16.0) + 8.0))
+                .pr_2()
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .rounded(px(self.tokens.radii.md))
+                .cursor_pointer()
+                .bg(if active {
+                    theme_active_bg(theme.bg_active, has_background)
+                } else {
+                    rgba(0x00000000)
+                })
+                .hover(move |item| {
+                    if active {
+                        item
+                    } else {
+                        item.bg(theme_hover_bg(theme.bg_hover, has_background))
+                    }
+                })
+                .child(if has_children {
+                    div()
+                        .size(px(18.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(self.tokens.radii.md))
+                        .hover(move |button| {
+                            button.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background))
+                        })
+                        .child(Self::render_lucide_icon(
+                            if expanded {
+                                LucideIcon::ChevronDown
+                            } else {
+                                LucideIcon::ChevronRight
+                            },
+                            14.0,
+                            rgb(theme.text_muted),
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener({
+                                let group = group.clone();
+                                move |this, _event, _window, cx| {
+                                    this.toggle_session_group_expanded(&group);
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }
+                            }),
+                        )
+                        .into_any_element()
+                } else {
+                    div().w(px(18.0)).flex_none().into_any_element()
+                })
+                .child(Self::render_lucide_icon(
+                    if expanded && has_children {
+                        LucideIcon::FolderOpen
+                    } else {
+                        LucideIcon::Folder
+                    },
+                    16.0,
+                    rgb(0xeab308),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(if active {
+                            gpui::FontWeight::MEDIUM
+                        } else {
+                            gpui::FontWeight::NORMAL
+                        })
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.connection_count_for_group(&group).to_string()),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.session_manager.selected_group = Some(selected_group.clone());
+                        this.clear_session_selection_for_invisible_rows();
+                        this.session_manager.show_batch_move = false;
+                        this.session_manager.focused_input = None;
+                        cx.notify();
+                    }),
+                ),
+        );
+
+        if expanded && has_children {
+            for child in children {
+                node = node.child(self.render_group_tree_node(
+                    child,
+                    depth + 1,
+                    child_groups,
+                    has_background,
+                    cx,
+                ));
+            }
+        }
+
+        node.into_any_element()
+    }
+
+    fn render_new_group_tree_item(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .h(px(34.0))
-            .mx_2()
-            .pl(px(10.0))
-            .pr_2()
+            .h(px(32.0))
+            .w_full()
+            .px_3()
             .flex()
             .items_center()
             .gap(px(8.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(rgba((theme.accent << 8) | 0x33))
-            .text_color(rgb(theme.accent))
+            .border_color(theme_border(theme.border, has_background))
+            .text_color(rgb(theme.text_muted))
             .cursor_pointer()
-            .hover(|item| item.bg(rgba((self.tokens.ui.accent << 8) | 0x12)))
+            .hover(move |item| {
+                item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background))
+                    .text_color(rgb(self.tokens.ui.text))
+            })
             .child(Self::render_lucide_icon(
                 LucideIcon::Plus,
-                15.0,
-                rgb(theme.accent),
+                16.0,
+                rgb(theme.text_muted),
             ))
             .child(
                 div()
@@ -540,7 +789,6 @@ impl WorkspaceApp {
 
     fn render_session_manager_table(
         &self,
-        panel_bg: Rgba,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -566,7 +814,7 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
-            .child(self.render_connection_table_header(panel_bg, all_selected, cx))
+            .child(self.render_connection_table_header(has_background, all_selected, cx))
             .child(
                 div()
                     .id("session-manager-table-scroll")
@@ -579,22 +827,52 @@ impl WorkspaceApp {
                                 .flex()
                                 .flex_col()
                                 .items_center()
-                                .gap(px(8.0))
+                                .gap(px(16.0))
+                                .py(px(64.0))
                                 .text_color(rgb(theme.text_muted))
                                 .child(Self::render_lucide_icon(
                                     LucideIcon::Server,
-                                    42.0,
-                                    rgba((theme.text_muted << 8) | 0x66),
+                                    48.0,
+                                    rgba((theme.text_muted << 8) | 0x4d),
                                 ))
                                 .child(
                                     div()
-                                        .text_size(px(15.0))
-                                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .child(empty_message),
+                                        .flex()
+                                        .flex_col()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child(empty_message),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt_1()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .child(
+                                                    self.i18n.t(
+                                                        "sessionManager.table.no_connections_hint",
+                                                    ),
+                                                ),
+                                        ),
                                 )
-                                .child(div().text_size(px(self.tokens.metrics.ui_text_sm)).child(
-                                    self.i18n.t("sessionManager.table.no_connections_hint"),
-                                )),
+                                .child(
+                                    self.render_toolbar_button(
+                                        LucideIcon::Plus,
+                                        self.i18n.t("sessionManager.toolbar.new_connection"),
+                                        ButtonVariant::Default,
+                                        has_background,
+                                        true,
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, window, cx| {
+                                            this.open_new_connection_form(window, cx);
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                                ),
                         )
                     })
                     .children(
@@ -607,24 +885,26 @@ impl WorkspaceApp {
 
     fn render_connection_table_header(
         &self,
-        panel_bg: Rgba,
+        has_background: bool,
         all_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .h(px(38.0))
+            .min_h(px(35.0))
             .flex()
             .items_center()
+            .px_2()
+            .py(px(6.0))
             .border_b_1()
-            .border_color(rgb(theme.border))
-            .bg(panel_bg)
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_secondary_bg(theme.bg_secondary, has_background))
+            .text_size(px(MANAGER_TABLE_HEADER_TEXT_SIZE))
+            .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(theme.text_muted))
             .child(
                 div()
-                    .w(px(44.0))
+                    .w(px(MANAGER_COL_CHECKBOX))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -641,45 +921,53 @@ impl WorkspaceApp {
             .child(self.render_sort_header(
                 "sessionManager.table.name",
                 SessionSortField::Name,
-                190.0,
+                MANAGER_COL_NAME_BASIS,
+                true,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.host",
                 SessionSortField::Host,
-                180.0,
+                MANAGER_COL_HOST,
+                false,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.port",
                 SessionSortField::Port,
-                70.0,
+                MANAGER_COL_PORT,
+                false,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.username",
                 SessionSortField::Username,
-                130.0,
+                MANAGER_COL_USERNAME,
+                false,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.auth_type",
                 SessionSortField::AuthType,
-                100.0,
+                MANAGER_COL_AUTH,
+                false,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.group",
                 SessionSortField::Group,
-                140.0,
+                MANAGER_COL_GROUP,
+                false,
                 cx,
             ))
             .child(self.render_sort_header(
                 "sessionManager.table.last_used",
                 SessionSortField::LastUsed,
-                120.0,
+                MANAGER_COL_LAST_USED,
+                false,
                 cx,
             ))
+            .child(div().w(px(MANAGER_COL_ACTIONS)).flex_none())
             .into_any_element()
     }
 
@@ -688,22 +976,36 @@ impl WorkspaceApp {
         label_key: &'static str,
         field: SessionSortField,
         width: f32,
+        flexible: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = self.tokens.ui;
         let active = self.session_manager.sort_field == field;
-        let suffix = if active {
-            match self.session_manager.sort_direction {
-                SortDirection::Asc => " ↑",
-                SortDirection::Desc => " ↓",
-            }
+        let (icon, icon_color) = if active {
+            let icon = match self.session_manager.sort_direction {
+                SortDirection::Asc => LucideIcon::ArrowUp,
+                SortDirection::Desc => LucideIcon::ArrowDown,
+            };
+            (icon, rgb(0x60a5fa))
         } else {
-            ""
+            (
+                LucideIcon::ArrowUpDown,
+                rgba((theme.text_muted << 8) | 0x66),
+            )
         };
         div()
-            .w(px(width))
-            .px_2()
+            .when(flexible, |cell| {
+                cell.flex_1().min_w(px(MANAGER_COL_NAME_MIN))
+            })
+            .when(!flexible, |cell| cell.w(px(width)).flex_none())
+            .pl(if flexible { px(4.0) } else { px(0.0) })
+            .flex()
+            .items_center()
+            .gap(px(4.0))
             .cursor_pointer()
-            .child(format!("{}{}", self.i18n.t(label_key), suffix))
+            .hover(move |cell| cell.text_color(rgb(theme.text)))
+            .child(div().truncate().child(self.i18n.t(label_key)))
+            .child(Self::render_lucide_icon(icon, 14.0, icon_color))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -728,31 +1030,84 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let selected = self.session_manager.selected_ids.contains(&conn.id);
+        let hovered =
+            self.session_manager.hovered_connection_id.as_deref() == Some(conn.id.as_str());
         let id = conn.id.clone();
+        let color = conn.color.as_deref().and_then(parse_hex_color);
         div()
-            .h(px(46.0))
+            .id((
+                gpui::ElementId::from("session-manager-table-row"),
+                conn.id.clone(),
+            ))
+            .relative()
+            .min_h(px(36.0))
             .flex()
             .items_center()
+            .px_2()
+            .py(px(6.0))
             .border_b_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
+            .border_color(theme_border_half(theme.border, has_background))
             .bg(if selected {
-                rgba((theme.bg_active << 8) | 0xcc)
+                rgba((theme.info << 8) | BG_ACTIVE_ROW_SELECTED_ALPHA)
             } else if has_background {
                 rgba(0x00000000)
             } else {
-                rgb(theme.bg)
+                rgba(0x00000000)
             })
-            .hover(move |row| row.bg(rgba((theme.bg_hover << 8) | 0xcc)))
+            .hover(move |row| row.bg(theme_hover_bg(theme.bg_hover, has_background)))
+            .on_hover(cx.listener({
+                let id = conn.id.clone();
+                move |this, is_hovered: &bool, _window, cx| {
+                    if *is_hovered {
+                        this.session_manager.hovered_connection_id = Some(id.clone());
+                    } else if this.session_manager.hovered_connection_id.as_deref()
+                        == Some(id.as_str())
+                    {
+                        this.session_manager.hovered_connection_id = None;
+                    }
+                    cx.notify();
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.open_saved_connection(&id, window, cx);
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.session_manager.row_context_menu_connection_id = None;
+                    if event.click_count == 2 {
+                        this.open_saved_connection(&id, window, cx);
+                    }
                     cx.stop_propagation();
                 }),
             )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, event: &MouseDownEvent, _window, cx| {
+                        this.session_manager.row_context_menu_connection_id = Some(id.clone());
+                        this.session_manager.row_context_menu_x = f32::from(event.position.x);
+                        this.session_manager.row_context_menu_y = f32::from(event.position.y);
+                        this.session_manager.row_menu_connection_id = None;
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .when_some(color, |row, color| {
+                row.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(MANAGER_COLOR_INDICATOR_WIDTH))
+                        .rounded_l(px(self.tokens.radii.sm))
+                        .bg(rgb(color)),
+                )
+            })
             .child(
                 div()
-                    .w(px(44.0))
+                    .w(px(MANAGER_COL_CHECKBOX))
+                    .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -770,41 +1125,513 @@ impl WorkspaceApp {
                         ),
                     ),
             )
-            .child(self.render_table_cell(conn.name.clone(), 190.0, true))
-            .child(self.render_table_cell(conn.host.clone(), 180.0, false))
-            .child(self.render_table_cell(conn.port.to_string(), 70.0, false))
-            .child(self.render_table_cell(conn.username.clone(), 130.0, false))
-            .child(self.render_table_cell(auth_label(conn.auth_type), 100.0, false))
             .child(self.render_table_cell(
-                group_label(&self.i18n, conn.group.as_deref()),
-                140.0,
+                conn.name.clone(),
+                MANAGER_COL_NAME_BASIS,
+                TableCellStyle::Primary,
+                true,
+            ))
+            .child(self.render_table_cell(
+                conn.host.clone(),
+                MANAGER_COL_HOST,
+                TableCellStyle::MetaMono,
                 false,
             ))
+            .child(self.render_table_cell(
+                conn.port.to_string(),
+                MANAGER_COL_PORT,
+                TableCellStyle::MetaMono,
+                false,
+            ))
+            .child(self.render_table_cell(
+                conn.username.clone(),
+                MANAGER_COL_USERNAME,
+                TableCellStyle::Meta,
+                false,
+            ))
+            .child(self.render_auth_badge_cell(conn.auth_type))
+            .child(self.render_table_cell(
+                conn.group.clone().unwrap_or_else(|| "—".to_string()),
+                MANAGER_COL_GROUP,
+                TableCellStyle::Meta,
+                false,
+            ))
+            .child(self.render_table_cell(
+                format_last_used(conn.last_used_at.as_deref(), &self.i18n),
+                MANAGER_COL_LAST_USED,
+                TableCellStyle::Meta,
+                false,
+            ))
+            .child(div().w(px(MANAGER_COL_ACTIONS)).flex_none())
+            .child(self.render_inline_row_actions(conn, hovered, has_background, cx))
+            .into_any_element()
+    }
+
+    fn render_table_cell(
+        &self,
+        text: String,
+        width: f32,
+        style: TableCellStyle,
+        flexible: bool,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let strong = style == TableCellStyle::Primary;
+        let cell = div()
+            .when(flexible, |cell| {
+                cell.flex_1().min_w(px(MANAGER_COL_NAME_MIN))
+            })
+            .when(!flexible, |cell| cell.w(px(width)).flex_none())
+            .pl(if flexible { px(4.0) } else { px(0.0) })
+            .truncate()
+            .text_size(px(match style {
+                TableCellStyle::Primary => MANAGER_ROW_TEXT_SIZE,
+                TableCellStyle::Meta | TableCellStyle::MetaMono => MANAGER_ROW_META_TEXT_SIZE,
+            }))
+            .font_weight(if strong {
+                gpui::FontWeight::MEDIUM
+            } else {
+                gpui::FontWeight::NORMAL
+            })
+            .text_color(if strong {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .when(style == TableCellStyle::MetaMono, |cell| {
+                cell.font_family(settings_mono_font_family(self.settings_store.settings()))
+            });
+        cell.child(text).into_any_element()
+    }
+
+    fn render_auth_badge_cell(&self, auth_type: AuthType) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (icon, label, bg, fg) = auth_badge_style(auth_type, theme.text_muted, theme.text);
+        div()
+            .w(px(MANAGER_COL_AUTH))
+            .flex_none()
+            .flex()
+            .items_center()
             .child(
-                self.render_table_cell(
-                    conn.last_used_at
-                        .clone()
-                        .unwrap_or_else(|| self.i18n.t("sessionManager.table.never_used")),
-                    120.0,
-                    false,
+                div()
+                    .w(px(auth_badge_width(label)))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(MANAGER_AUTH_BADGE_GAP))
+                    .px(px(MANAGER_AUTH_BADGE_PADDING_X))
+                    .py(px(2.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .bg(bg)
+                    .text_color(fg)
+                    .text_size(px(MANAGER_AUTH_BADGE_TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        MANAGER_AUTH_BADGE_ICON_SIZE,
+                        fg,
+                    ))
+                    .child(label),
+            )
+            .into_any_element()
+    }
+
+    fn render_inline_row_actions(
+        &self,
+        conn: ConnectionInfo,
+        visible: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let menu_open =
+            self.session_manager.row_menu_connection_id.as_deref() == Some(conn.id.as_str());
+        let actions_visible = visible || menu_open;
+        div()
+            .absolute()
+            .right_0()
+            .top_0()
+            .bottom_0()
+            .w(px(MANAGER_COL_ACTIONS))
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(2.0))
+            .opacity(if actions_visible { 1.0 } else { 0.0 })
+            .bg(if actions_visible {
+                theme_hover_bg(theme.bg_hover, has_background)
+            } else {
+                theme_bg(theme.bg, has_background)
+            })
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::Play,
+                    MANAGER_ROW_ACTION_BUTTON,
+                    12.0,
+                    rgb(0x4ade80),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.open_saved_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::Pencil,
+                    MANAGER_ROW_ACTION_BUTTON,
+                    12.0,
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.open_saved_connection_editor(&id, None, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::MoreHorizontal,
+                    MANAGER_ROW_MORE_BUTTON,
+                    14.0,
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, event: &MouseDownEvent, window, cx| {
+                            this.session_manager.row_menu_connection_id =
+                                if this.session_manager.row_menu_connection_id.as_deref()
+                                    == Some(id.as_str())
+                                {
+                                    None
+                                } else {
+                                    Some(id.clone())
+                                };
+                            let viewport_height = f32::from(window.viewport_size().height);
+                            this.session_manager.row_menu_opens_above = f32::from(event.position.y)
+                                + MANAGER_ROW_MENU_HEIGHT
+                                > viewport_height;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .when(menu_open, |actions| {
+                actions.child(self.render_row_more_menu(
+                    conn,
+                    has_background,
+                    self.session_manager.row_menu_opens_above,
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_row_more_menu(
+        &self,
+        conn: ConnectionInfo,
+        has_background: bool,
+        opens_above: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .absolute()
+            .when(!opens_above, |menu| menu.top(px(30.0)))
+            .when(opens_above, |menu| menu.bottom(px(30.0)))
+            .right(px(0.0))
+            .w(px(MANAGER_ROW_MENU_WIDTH))
+            .p(px(4.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_panel_bg(theme.bg_panel, has_background))
+            .shadow_lg()
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Zap,
+                    self.i18n.t("sessionManager.actions.test_connection"),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.test_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Copy,
+                    self.i18n.t("sessionManager.actions.duplicate"),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.duplicate_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .h(px(1.0))
+                    .my(px(4.0))
+                    .bg(theme_border_half(theme.border, has_background)),
+            )
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessionManager.actions.delete"),
+                    rgb(0xf87171),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.delete_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
                 ),
             )
             .into_any_element()
     }
 
-    fn render_table_cell(&self, text: String, width: f32, strong: bool) -> AnyElement {
+    fn render_row_context_menu(
+        &self,
+        conn: ConnectionInfo,
+        window: &Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let x = self
+            .session_manager
+            .row_context_menu_x
+            .min(f32::from(viewport.width) - MANAGER_ROW_MENU_WIDTH - 8.0)
+            .max(8.0);
+        let y = self
+            .session_manager
+            .row_context_menu_y
+            .min(f32::from(viewport.height) - MANAGER_ROW_CONTEXT_MENU_HEIGHT - 8.0)
+            .max(8.0);
+        let theme = self.tokens.ui;
         div()
-            .w(px(width))
-            .px_2()
-            .truncate()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(if strong {
-                gpui::FontWeight::SEMIBOLD
-            } else {
-                gpui::FontWeight::NORMAL
-            })
-            .child(text)
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(MANAGER_ROW_MENU_WIDTH))
+            .p(px(4.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_panel_bg(theme.bg_panel, has_background))
+            .shadow_lg()
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Play,
+                    self.i18n.t("sessionManager.actions.connect"),
+                    rgb(theme.text),
+                    rgb(0x4ade80),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.open_saved_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Zap,
+                    self.i18n.t("sessionManager.actions.test_connection"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.test_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Pencil,
+                    self.i18n.t("sessionManager.actions.edit"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.open_saved_connection_editor(&id, None, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Copy,
+                    self.i18n.t("sessionManager.actions.duplicate"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.close_session_row_menus();
+                            this.duplicate_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .h(px(1.0))
+                    .my(px(4.0))
+                    .bg(theme_border_half(theme.border, has_background)),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessionManager.actions.delete"),
+                    rgb(0xf87171),
+                    rgb(0xf87171),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.close_session_row_menus();
+                            this.delete_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
             .into_any_element()
+    }
+
+    fn render_row_menu_item(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .h(px(30.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px_2()
+            .rounded(px(self.tokens.radii.sm))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, 16.0, color))
+            .child(label)
+    }
+
+    fn render_row_menu_item_with_icon_color(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        text_color: Rgba,
+        icon_color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .h(px(30.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px_2()
+            .rounded(px(self.tokens.radii.sm))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(text_color)
+            .cursor_pointer()
+            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, 16.0, icon_color))
+            .child(label)
+    }
+
+    fn render_row_icon_button(
+        &self,
+        icon: LucideIcon,
+        size: f32,
+        icon_size: f32,
+        icon_color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .size(px(size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.sm))
+            .cursor_pointer()
+            .hover(move |button| button.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, icon_size, icon_color))
     }
 
     #[allow(dead_code)]
@@ -916,11 +1743,53 @@ impl WorkspaceApp {
         .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text)))
     }
 
+    fn render_toolbar_button(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        variant: ButtonVariant,
+        has_background: bool,
+        show_label: bool,
+    ) -> gpui::Div {
+        let theme = self.tokens.ui;
+        let (bg, border, text) = match variant {
+            ButtonVariant::Default => (rgb(theme.text), rgba(0x00000000), rgb(theme.bg)),
+            ButtonVariant::Outline => (
+                rgba(0x00000000),
+                theme_border(theme.border, has_background),
+                rgb(theme.text),
+            ),
+            _ => (
+                theme_panel_bg(theme.bg_panel, has_background),
+                theme_border(theme.border, has_background),
+                rgb(theme.text),
+            ),
+        };
+        div()
+            .h(px(32.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(border)
+            .bg(bg)
+            .text_color(text)
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(icon, 16.0, text))
+            .when(show_label, |button| button.child(label))
+    }
+
     fn render_toolbar_link_icon(
         &self,
         icon: LucideIcon,
         label_key: &str,
         opens_import: bool,
+        show_label: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = self.i18n.t(label_key);
@@ -938,7 +1807,7 @@ impl WorkspaceApp {
                 16.0,
                 rgb(self.tokens.ui.text),
             ))
-            .child(label)
+            .when(show_label, |button| button.child(label))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -961,6 +1830,9 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let workspace = cx.entity();
         let active = self.session_manager.focused_input == Some(target);
+        let has_background = self
+            .terminal_background_preferences("session_manager")
+            .is_some();
         let text = if value.is_empty() {
             placeholder
         } else {
@@ -972,34 +1844,62 @@ impl WorkspaceApp {
             div()
                 .h(px(32.0))
                 .w_full()
-                .px_2()
+                .px_3()
                 .flex()
                 .items_center()
+                .gap(px(8.0))
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(if active {
                     rgb(theme.accent)
                 } else {
-                    rgb(theme.border)
+                    theme_border_half(theme.border, has_background)
                 })
-                .bg(rgb(theme.bg))
+                .bg(theme_input_bg(theme.bg, has_background))
                 .text_size(px(self.tokens.metrics.ui_text_sm))
                 .text_color(if value.is_empty() {
                     rgb(theme.text_muted)
                 } else {
                     rgb(theme.text)
                 })
-                .child(text)
-                .when_some(
-                    self.marked_text_for_target(input_target),
-                    |input, marked| {
-                        input.child(
-                            div()
-                                .underline()
-                                .text_color(rgb(theme.text))
-                                .child(marked.to_string()),
-                        )
+                .when(
+                    matches!(
+                        target,
+                        SessionManagerInput::Search | SessionManagerInput::SavedSearch
+                    ),
+                    |input| {
+                        input.child(Self::render_lucide_icon(
+                            LucideIcon::Search,
+                            16.0,
+                            rgb(theme.text_muted),
+                        ))
                     },
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .flex()
+                        .items_center()
+                        .overflow_hidden()
+                        .when(active && value.is_empty(), |input| {
+                            input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        })
+                        .child(div().truncate().child(text))
+                        .when_some(
+                            self.marked_text_for_target(input_target),
+                            |input, marked| {
+                                input.child(
+                                    div()
+                                        .underline()
+                                        .text_color(rgb(theme.text))
+                                        .child(marked.to_string()),
+                                )
+                            },
+                        )
+                        .when(active && !value.is_empty(), |input| {
+                            input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        }),
                 )
                 .on_mouse_down(
                     MouseButton::Left,
@@ -1416,6 +2316,53 @@ impl WorkspaceApp {
             .count()
     }
 
+    fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
+        let mut paths = HashSet::new();
+        for group in self.connection_store.groups() {
+            add_group_path_segments(group, &mut paths);
+        }
+        for conn in self.connection_store.connections() {
+            if let Some(group) = conn.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+
+        let mut sorted = paths.into_iter().collect::<Vec<_>>();
+        sorted.sort();
+        let mut roots = Vec::new();
+        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+        for path in sorted {
+            if let Some((parent, _name)) = path.rsplit_once('/') {
+                children.entry(parent.to_string()).or_default().push(path);
+            } else {
+                roots.push(path);
+            }
+        }
+        (roots, children)
+    }
+
+    fn toggle_session_group_expanded(&mut self, group: &str) {
+        if self.session_manager.expanded_groups.contains(group) {
+            self.session_manager.expanded_groups.remove(group);
+        } else {
+            self.session_manager
+                .expanded_groups
+                .insert(group.to_string());
+        }
+    }
+
+    fn connection_info_by_id(&self, id: &str) -> Option<ConnectionInfo> {
+        self.connection_store
+            .connection_infos()
+            .into_iter()
+            .find(|conn| conn.id == id)
+    }
+
+    fn close_session_row_menus(&mut self) {
+        self.session_manager.row_menu_connection_id = None;
+        self.session_manager.row_context_menu_connection_id = None;
+    }
+
     fn toggle_connection_selection(&mut self, id: &str) {
         if self.session_manager.selected_ids.contains(id) {
             self.session_manager.selected_ids.remove(id);
@@ -1458,6 +2405,13 @@ impl WorkspaceApp {
         match self.connection_store.create_group(name.clone()) {
             Ok(()) => {
                 self.session_manager.selected_group = Some(name);
+                expand_group_path(
+                    self.session_manager
+                        .selected_group
+                        .as_deref()
+                        .unwrap_or_default(),
+                    &mut self.session_manager.expanded_groups,
+                );
                 self.session_manager.show_new_group = false;
                 self.session_manager.focused_input = None;
                 self.session_manager.status =
@@ -1515,6 +2469,29 @@ impl WorkspaceApp {
             Err(error) => self.session_manager.status = Some(error.to_string()),
         }
         cx.notify();
+    }
+
+    fn test_connection(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(conn) = self.connection_store.get(id).cloned() else {
+            self.session_manager.status = Some(self.i18n.t("sessionManager.toast.test_failed"));
+            cx.notify();
+            return;
+        };
+        let Some(config) = ssh_config_from_saved_connection(&conn) else {
+            self.open_saved_connection_prompt(
+                id,
+                SavedConnectionPromptAction::Test,
+                Some(
+                    self.i18n
+                        .t("sessionManager.edit_properties.password_placeholder"),
+                ),
+                window,
+                cx,
+            );
+            return;
+        };
+        self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
+        self.start_ssh_test(config, cx);
     }
 
     fn move_selected_connections(&mut self, group: Option<&str>, cx: &mut Context<Self>) {
@@ -1608,6 +2585,164 @@ fn auth_label(auth_type: AuthType) -> String {
         AuthType::Agent => "Agent",
     }
     .to_string()
+}
+
+fn add_group_path_segments(group: &str, paths: &mut HashSet<String>) {
+    if group.trim().is_empty() {
+        return;
+    }
+    let parts = group
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    for index in 1..=parts.len() {
+        paths.insert(parts[..index].join("/"));
+    }
+}
+
+fn expand_group_path(group: &str, expanded_groups: &mut HashSet<String>) {
+    let parts = group
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() <= 1 {
+        return;
+    }
+    for index in 1..parts.len() {
+        expanded_groups.insert(parts[..index].join("/"));
+    }
+}
+
+fn auth_badge_style(
+    auth_type: AuthType,
+    text_muted: u32,
+    text: u32,
+) -> (LucideIcon, &'static str, Rgba, Rgba) {
+    match auth_type {
+        AuthType::Key => (LucideIcon::Key, "Key", rgba(0x10b98133), rgb(0x6ee7b7)),
+        AuthType::Password => (LucideIcon::Lock, "Pwd", rgba(0xf59e0b33), rgb(0xfcd34d)),
+        AuthType::Agent => (LucideIcon::Bot, "Agent", rgba(0x3b82f633), rgb(0x93c5fd)),
+        AuthType::Certificate => (
+            LucideIcon::ShieldQuestion,
+            "certificate",
+            rgba((text_muted << 8) | 0x33),
+            rgb(text),
+        ),
+    }
+}
+
+fn auth_badge_width(label: &str) -> f32 {
+    MANAGER_AUTH_BADGE_PADDING_X * 2.0
+        + MANAGER_AUTH_BADGE_ICON_SIZE
+        + MANAGER_AUTH_BADGE_GAP
+        + label.chars().count() as f32 * MANAGER_AUTH_BADGE_CHAR_WIDTH
+}
+
+fn format_last_used(last_used: Option<&str>, i18n: &I18n) -> String {
+    let Some(last_used) = last_used else {
+        return i18n.t("sessionManager.table.never_used");
+    };
+    let Ok(date) = DateTime::parse_from_rfc3339(last_used) else {
+        return last_used.to_string();
+    };
+    let date = date.with_timezone(&Utc);
+    let now = Utc::now();
+    let diff = now.signed_duration_since(date);
+    let diff_mins = diff.num_minutes();
+    let diff_hours = diff.num_hours();
+    let diff_days = diff.num_days();
+
+    if diff_mins < 1 {
+        return i18n.t("sessionManager.time.just_now");
+    }
+    if diff_mins < 60 {
+        return i18n
+            .t("sessionManager.time.minutes_ago")
+            .replace("{{count}}", &diff_mins.to_string());
+    }
+    if diff_hours < 24 {
+        return i18n
+            .t("sessionManager.time.hours_ago")
+            .replace("{{count}}", &diff_hours.to_string());
+    }
+    if diff_days < 7 {
+        return i18n
+            .t("sessionManager.time.days_ago")
+            .replace("{{count}}", &diff_days.to_string());
+    }
+
+    let local = date.with_timezone(&Local);
+    format!("{}/{}/{}", local.year(), local.month(), local.day())
+}
+
+fn theme_bg(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | BG_ACTIVE_THEME_ALPHA)
+    } else {
+        rgb(color)
+    }
+}
+
+fn theme_panel_bg(color: u32, has_background: bool) -> Rgba {
+    theme_bg(color, has_background)
+}
+
+fn theme_secondary_bg(color: u32, has_background: bool) -> Rgba {
+    theme_bg(color, has_background)
+}
+
+fn theme_active_bg(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | BG_ACTIVE_THEME_ALPHA)
+    } else {
+        rgb(color)
+    }
+}
+
+fn theme_hover_bg(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | BG_ACTIVE_HOVER_ALPHA)
+    } else {
+        rgb(color)
+    }
+}
+
+fn theme_input_bg(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | (BG_ACTIVE_THEME_ALPHA / 2))
+    } else {
+        rgba((color << 8) | 0x80)
+    }
+}
+
+fn theme_border(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | BG_ACTIVE_BORDER_ALPHA)
+    } else {
+        rgb(color)
+    }
+}
+
+fn theme_border_half(color: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba((color << 8) | BG_ACTIVE_BORDER_HALF_ALPHA)
+    } else {
+        rgba((color << 8) | 0x80)
+    }
+}
+
+fn parse_hex_color(value: &str) -> Option<u32> {
+    let hex = value.trim().strip_prefix('#')?;
+    let expanded;
+    let hex = match hex.len() {
+        3 => {
+            expanded = hex.chars().flat_map(|ch| [ch, ch]).collect::<String>();
+            expanded.as_str()
+        }
+        6 | 8 => hex,
+        _ => return None,
+    };
+    u32::from_str_radix(&hex[..6], 16).ok()
 }
 
 fn group_label(i18n: &I18n, group: Option<&str>) -> String {

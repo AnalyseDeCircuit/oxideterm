@@ -650,11 +650,7 @@ impl Default for TerminalSettings {
             background_opacity: 0.15,
             background_blur: 0,
             background_fit: BackgroundFit::Cover,
-            background_enabled_tabs: vec![
-                "terminal".to_string(),
-                "local_terminal".to_string(),
-                "session_manager".to_string(),
-            ],
+            background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             highlight_rules: Vec::new(),
             in_band_transfer: InBandTransferSettings::default(),
             graphics: TerminalGraphicsSettings::default(),

@@ -78,6 +78,9 @@
       "proxy_hop_auth_unsupported": "Jump host này dùng kiểu xác thực không được hỗ trợ",
       "test_host_key_changed": "Khóa máy chủ đã thay đổi. Dự kiến: {{expected}}. Thực tế: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Kết nối đến {{name}}"
+    },
     "edit_properties": {
       "title": "Sửa kết nối",
       "description": "Thay đổi thuộc tính kết nối.",

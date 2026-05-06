@@ -177,27 +177,32 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
+        let prompt_mode = self.saved_connection_prompt_action.is_some();
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let title = if prompt_mode {
+            self.i18n
+                .t("sessionManager.connect_prompt.title")
+                .replace("{{name}}", &form.name)
+        } else if self.editing_saved_connection_id.is_some() {
+            self.i18n.t("sessionManager.edit_properties.title")
+        } else {
+            self.i18n.t("ssh.form.title")
+        };
+        let description = if prompt_mode {
+            format!("{}@{}:{}", form.username, form.host, form.port)
+        } else if self.editing_saved_connection_id.is_some() {
+            self.i18n.t("sessionManager.edit_properties.description")
+        } else {
+            self.i18n.t("ssh.form.subtitle")
+        };
         modal_overlay(
             &self.tokens,
             modal_container(&self.tokens)
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()
-                .child(modal_header(
-                    &self.tokens,
-                    if self.editing_saved_connection_id.is_some() {
-                        self.i18n.t("sessionManager.edit_properties.title")
-                    } else {
-                        self.i18n.t("ssh.form.title")
-                    },
-                    if self.editing_saved_connection_id.is_some() {
-                        self.i18n.t("sessionManager.edit_properties.description")
-                    } else {
-                        self.i18n.t("ssh.form.subtitle")
-                    },
-                ))
+                .child(modal_header(&self.tokens, title, description))
                 .child(
                     modal_body(&self.tokens)
                         .id("new-connection-modal-body-scroll")
@@ -209,65 +214,73 @@ impl WorkspaceApp {
                                 .flex()
                                 .flex_col()
                                 .gap(px(self.tokens.metrics.modal_section_gap))
-                                .child(self.render_connection_field(
-                                    self.i18n.t("ssh.form.name"),
-                                    &form.name,
-                                    self.i18n.t("ssh.form.name_placeholder"),
-                                    NewConnectionField::Name,
-                                    false,
-                                    cx,
-                                ))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_row()
-                                        .gap(px(self.tokens.metrics.form_host_port_gap))
-                                        .child(div().flex_1().child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.host"),
-                                            &form.host,
-                                            self.i18n.t("ssh.form.host_placeholder"),
-                                            NewConnectionField::Host,
-                                            false,
-                                            cx,
-                                        )))
-                                        .child(
-                                            div().w(px(self.tokens.metrics.form_port_width)).child(
-                                                self.render_connection_field(
-                                                    self.i18n.t("ssh.form.port"),
-                                                    &form.port,
-                                                    "22".to_string(),
-                                                    NewConnectionField::Port,
-                                                    false,
-                                                    cx,
-                                                ),
-                                            ),
-                                        ),
-                                )
-                                .child(self.render_connection_field(
-                                    self.i18n.t("ssh.form.username"),
-                                    &form.username,
-                                    "root".to_string(),
-                                    NewConnectionField::Username,
-                                    false,
-                                    cx,
-                                ))
-                                .child(self.render_auth_tabs(form.auth_tab, cx))
-                                .when(form.auth_tab == SshAuthTab::Password, |content| {
+                                .when(!prompt_mode, |content| {
                                     content
                                         .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.password"),
-                                            &form.password,
-                                            String::new(),
-                                            NewConnectionField::Password,
-                                            true,
+                                            self.i18n.t("ssh.form.name"),
+                                            &form.name,
+                                            self.i18n.t("ssh.form.name_placeholder"),
+                                            NewConnectionField::Name,
+                                            false,
                                             cx,
                                         ))
-                                        .child(self.render_connection_checkbox(
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .gap(px(self.tokens.metrics.form_host_port_gap))
+                                                .child(div().flex_1().child(
+                                                    self.render_connection_field(
+                                                        self.i18n.t("ssh.form.host"),
+                                                        &form.host,
+                                                        self.i18n.t("ssh.form.host_placeholder"),
+                                                        NewConnectionField::Host,
+                                                        false,
+                                                        cx,
+                                                    ),
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .w(px(self.tokens.metrics.form_port_width))
+                                                        .child(self.render_connection_field(
+                                                            self.i18n.t("ssh.form.port"),
+                                                            &form.port,
+                                                            "22".to_string(),
+                                                            NewConnectionField::Port,
+                                                            false,
+                                                            cx,
+                                                        )),
+                                                ),
+                                        )
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.username"),
+                                            &form.username,
+                                            "root".to_string(),
+                                            NewConnectionField::Username,
+                                            false,
+                                            cx,
+                                        ))
+                                })
+                                .child(self.render_auth_tabs(form.auth_tab, cx))
+                                .when(form.auth_tab == SshAuthTab::Password, |content| {
+                                    let content = content.child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.password"),
+                                        &form.password,
+                                        String::new(),
+                                        NewConnectionField::Password,
+                                        true,
+                                        cx,
+                                    ));
+                                    if prompt_mode {
+                                        content
+                                    } else {
+                                        content.child(self.render_connection_checkbox(
                                             self.i18n.t("ssh.form.save_password"),
                                             form.save_password,
                                             |form| form.save_password = !form.save_password,
                                             cx,
                                         ))
+                                    }
                                 })
                                 .when(form.auth_tab == SshAuthTab::DefaultKey, |content| {
                                     content
@@ -352,18 +365,21 @@ impl WorkspaceApp {
                                     false,
                                     cx,
                                 ))
-                                .child(self.render_connection_checkbox(
-                                    self.i18n.t("ssh.form.agent_forwarding"),
-                                    form.agent_forwarding,
-                                    |form| form.agent_forwarding = !form.agent_forwarding,
-                                    cx,
-                                ))
-                                .child(self.render_connection_checkbox(
-                                    self.i18n.t("ssh.form.save_connection"),
-                                    form.save_connection,
-                                    |form| form.save_connection = !form.save_connection,
-                                    cx,
-                                )),
+                                .when(!prompt_mode, |content| {
+                                    content
+                                        .child(self.render_connection_checkbox(
+                                            self.i18n.t("ssh.form.agent_forwarding"),
+                                            form.agent_forwarding,
+                                            |form| form.agent_forwarding = !form.agent_forwarding,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_checkbox(
+                                            self.i18n.t("ssh.form.save_connection"),
+                                            form.save_connection,
+                                            |form| form.save_connection = !form.save_connection,
+                                            cx,
+                                        ))
+                                }),
                         )
                         .when_some(form.error.clone(), |content, error| {
                             content.child(
@@ -383,22 +399,36 @@ impl WorkspaceApp {
                             ConnectionButtonAction::Cancel,
                             cx,
                         ))
-                        .when(self.editing_saved_connection_id.is_none(), |footer| {
-                            footer.child(self.render_connection_button(
-                                self.i18n.t("ssh.form.test"),
-                                false,
-                                ConnectionButtonAction::Test,
-                                cx,
-                            ))
-                        })
+                        .when(
+                            self.editing_saved_connection_id.is_none()
+                                && self.saved_connection_prompt_action.is_none(),
+                            |footer| {
+                                footer.child(self.render_connection_button(
+                                    self.i18n.t("ssh.form.test"),
+                                    false,
+                                    ConnectionButtonAction::Test,
+                                    cx,
+                                ))
+                            },
+                        )
                         .child(self.render_connection_button(
-                            if self.editing_saved_connection_id.is_some() {
+                            if self.saved_connection_prompt_action
+                                == Some(super::form_state::SavedConnectionPromptAction::Test)
+                            {
+                                self.i18n.t("ssh.form.test")
+                            } else if self.saved_connection_prompt_action
+                                == Some(super::form_state::SavedConnectionPromptAction::Connect)
+                            {
+                                self.i18n.t("ssh.form.connect")
+                            } else if self.editing_saved_connection_id.is_some() {
                                 self.i18n.t("sessionManager.edit_properties.save")
                             } else {
                                 self.i18n.t("ssh.form.connect")
                             },
                             true,
-                            if self.editing_saved_connection_id.is_some() {
+                            if self.editing_saved_connection_id.is_some()
+                                && self.saved_connection_prompt_action.is_none()
+                            {
                                 ConnectionButtonAction::Save
                             } else {
                                 ConnectionButtonAction::Connect

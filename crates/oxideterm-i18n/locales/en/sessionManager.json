@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "Jump host uses an unsupported auth type",
       "test_host_key_changed": "Host key changed. Expected: {{expected}}. Actual: {{actual}}."
     },
+    "connect_prompt": {
+      "title": "Connect to {{name}}"
+    },
     "edit_properties": {
       "title": "Edit Connection",
       "description": "Modify the connection properties.",

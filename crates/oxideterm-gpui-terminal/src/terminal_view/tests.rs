@@ -980,6 +980,60 @@ fn terminal_element_lays_out_search_highlights() {
 }
 
 #[test]
+fn terminal_element_keeps_highlights_across_output_rescans() {
+    let rules = vec![TerminalHighlightRule {
+        id: "error".to_string(),
+        pattern: "ERROR".to_string(),
+        is_regex: false,
+        case_sensitive: true,
+        foreground: None,
+        background: Some("#ff0000".to_string()),
+        render_mode: TerminalHighlightRenderMode::Background,
+        enabled: true,
+        priority: 0,
+    }];
+
+    let before_output = selection_snapshot("ERROR first pass");
+    let before_layout = TerminalElement::new(
+        before_output,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .highlight_rules(rules.clone())
+    .layout();
+
+    let mut after_output = multirow_snapshot(&["ERROR first pass", "command output"]);
+    after_output.rows = 2;
+    let after_layout = TerminalElement::new(
+        after_output,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .highlight_rules(rules)
+    .layout();
+
+    assert_eq!(before_layout.highlight_backgrounds.len(), 1);
+    assert_eq!(after_layout.highlight_backgrounds.len(), 1);
+    assert_eq!(after_layout.highlight_backgrounds[0].row, 0);
+    assert_eq!(after_layout.highlight_backgrounds[0].col, 0);
+    assert_eq!(after_layout.highlight_backgrounds[0].cells, 5);
+}
+
+#[test]
 fn terminal_element_maps_scrollback_search_matches_into_visible_rows() {
     let mut snapshot = multirow_snapshot(&["history cargo", "visible cargo"]);
     snapshot.display_offset = 3;

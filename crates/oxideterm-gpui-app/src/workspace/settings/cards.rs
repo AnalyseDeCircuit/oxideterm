@@ -299,7 +299,22 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
-            "escape" | "enter" => {
+            "escape" => {
+                self.focused_settings_input = None;
+                self.settings_input_draft.clear();
+                self.new_connection_caret_visible = true;
+                cx.notify();
+                true
+            }
+            "enter" => {
+                if input == SettingsInput::ConnectionNewGroup {
+                    if self.create_settings_connection_group(cx) {
+                        self.focused_settings_input = None;
+                    }
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                    return true;
+                }
                 self.focused_settings_input = None;
                 self.settings_input_draft.clear();
                 self.new_connection_caret_visible = true;

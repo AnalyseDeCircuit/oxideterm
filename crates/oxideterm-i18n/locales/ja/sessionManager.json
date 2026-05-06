@@ -80,6 +80,9 @@
       "proxy_hop_auth_unsupported": "このジャンプホストは未対応の認証方式を使用しています",
       "test_host_key_changed": "ホストキーが変更されました。想定値: {{expected}}。実際値: {{actual}}。"
     },
+    "connect_prompt": {
+      "title": "{{name}}に接続"
+    },
     "edit_properties": {
       "title": "接続を編集",
       "description": "接続のプロパティを変更します。",

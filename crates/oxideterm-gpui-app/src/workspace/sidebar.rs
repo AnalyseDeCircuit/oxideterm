@@ -524,14 +524,12 @@ impl WorkspaceApp {
 
     fn render_saved_connections_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let query = self.session_manager.search_query.trim().to_lowercase();
+        let query = self
+            .session_manager
+            .saved_search_query
+            .trim()
+            .to_lowercase();
         let mut connections = self.connection_store.connection_infos();
-        connections.sort_by(|left, right| {
-            right
-                .last_used_at
-                .cmp(&left.last_used_at)
-                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-        });
         if !query.is_empty() {
             connections.retain(|conn| {
                 conn.name.to_lowercase().contains(&query)
@@ -546,21 +544,20 @@ impl WorkspaceApp {
             .w_full()
             .flex()
             .flex_col()
-            .px(px(12.0))
-            .pb(px(10.0))
-            .gap(px(10.0))
-            .child(self.render_session_text_input(
-                SessionManagerInput::Search,
-                &self.session_manager.search_query,
+            .gap(px(8.0))
+            .child(div().px_2().child(self.render_session_text_input(
+                SessionManagerInput::SavedSearch,
+                &self.session_manager.saved_search_query,
                 self.i18n.t("sessionManager.toolbar.search_placeholder"),
                 cx,
-            ))
+            )))
             .child(
                 div()
                     .id("saved-connections-sidebar-scroll")
                     .flex_1()
                     .min_h(px(0.0))
                     .overflow_y_scroll()
+                    .px_1()
                     .children(
                         connections
                             .into_iter()
@@ -605,17 +602,17 @@ impl WorkspaceApp {
             .w_full()
             .flex()
             .flex_row()
-            .items_start()
+            .items_center()
             .gap(px(8.0))
             .rounded(px(self.tokens.radii.md))
             .px(px(8.0))
-            .py(px(7.0))
+            .py(px(6.0))
             .cursor_pointer()
             .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
             .child(Self::render_lucide_icon(
                 LucideIcon::Server,
-                15.0,
-                rgb(theme.accent),
+                12.0,
+                rgb(theme.text_muted),
             ))
             .child(
                 div()
@@ -627,15 +624,16 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
                             .child(conn.name),
                     )
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.accent))
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
                             .child(detail),
                     ),
             )

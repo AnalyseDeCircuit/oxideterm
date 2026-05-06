@@ -325,6 +325,9 @@ impl WorkspaceApp {
                 if self.session_manager.focused_input == Some(input) {
                     Some(match input {
                         SessionManagerInput::Search => self.session_manager.search_query.clone(),
+                        SessionManagerInput::SavedSearch => {
+                            self.session_manager.saved_search_query.clone()
+                        }
                         SessionManagerInput::NewGroup => {
                             self.session_manager.new_group_name.clone()
                         }
@@ -395,6 +398,13 @@ impl WorkspaceApp {
                                 text,
                             );
                             self.clear_session_selection_for_invisible_rows();
+                        }
+                        SessionManagerInput::SavedSearch => {
+                            replace_utf16(
+                                &mut self.session_manager.saved_search_query,
+                                replacement_range,
+                                text,
+                            );
                         }
                         SessionManagerInput::NewGroup => {
                             replace_utf16(
