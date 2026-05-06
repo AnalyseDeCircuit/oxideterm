@@ -3,12 +3,17 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, ConnectionStore, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedProxyHop, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
+    AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
+    ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
+    SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias, save_request_from_draft,
+    saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_ui::{
+    IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
+    TauriTableMetrics,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
-    checkbox,
+    checkbox, icon_badge, tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header,
+    tauri_table_row, tauri_table_sort_header, tauri_table_spacer_cell,
     text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
@@ -16,10 +21,11 @@ use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
 use super::{new_connection::SshConnectionIntent, *};
 use crate::workspace::ime::WorkspaceImeTarget;
 
+#[cfg(test)]
+use oxideterm_connections::SavedProxyHop;
+
 const UNGROUPED_FILTER: &str = "__ungrouped__";
 const RECENT_FILTER: &str = "__recent__";
-const IMPORTED_GROUP: &str = "Imported";
-const SSH_CONFIG_TAG: &str = "ssh-config";
 const BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
 const BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri bg-hover 50%
 const BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri border 75%
@@ -95,13 +101,6 @@ impl SortDirection {
             Self::Desc => Self::Asc,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TableCellStyle {
-    Primary,
-    Meta,
-    MetaMono,
 }
 
 #[derive(Clone, Debug)]
@@ -889,86 +888,72 @@ impl WorkspaceApp {
         all_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .min_h(px(35.0))
-            .flex()
-            .items_center()
-            .px_2()
-            .py(px(6.0))
-            .border_b_1()
-            .border_color(theme_border(theme.border, has_background))
-            .bg(theme_secondary_bg(theme.bg_secondary, has_background))
-            .text_size(px(MANAGER_TABLE_HEADER_TEXT_SIZE))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(theme.text_muted))
-            .child(
-                div()
-                    .w(px(MANAGER_COL_CHECKBOX))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        checkbox(&self.tokens, String::new(), all_selected).on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.toggle_all_visible_connections(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    ),
-            )
-            .child(self.render_sort_header(
-                "sessionManager.table.name",
-                SessionSortField::Name,
-                MANAGER_COL_NAME_BASIS,
-                true,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.host",
-                SessionSortField::Host,
-                MANAGER_COL_HOST,
-                false,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.port",
-                SessionSortField::Port,
-                MANAGER_COL_PORT,
-                false,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.username",
-                SessionSortField::Username,
-                MANAGER_COL_USERNAME,
-                false,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.auth_type",
-                SessionSortField::AuthType,
-                MANAGER_COL_AUTH,
-                false,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.group",
-                SessionSortField::Group,
-                MANAGER_COL_GROUP,
-                false,
-                cx,
-            ))
-            .child(self.render_sort_header(
-                "sessionManager.table.last_used",
-                SessionSortField::LastUsed,
-                MANAGER_COL_LAST_USED,
-                false,
-                cx,
-            ))
-            .child(div().w(px(MANAGER_COL_ACTIONS)).flex_none())
-            .into_any_element()
+        tauri_table_header(
+            &self.tokens,
+            self.manager_table_colors(has_background),
+            self.manager_table_metrics(),
+        )
+        .child(tauri_table_checkbox_cell(
+            MANAGER_COL_CHECKBOX,
+            checkbox(&self.tokens, String::new(), all_selected).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.toggle_all_visible_connections(cx);
+                    cx.stop_propagation();
+                }),
+            ),
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.name",
+            SessionSortField::Name,
+            MANAGER_COL_NAME_BASIS,
+            true,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.host",
+            SessionSortField::Host,
+            MANAGER_COL_HOST,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.port",
+            SessionSortField::Port,
+            MANAGER_COL_PORT,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.username",
+            SessionSortField::Username,
+            MANAGER_COL_USERNAME,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.auth_type",
+            SessionSortField::AuthType,
+            MANAGER_COL_AUTH,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.group",
+            SessionSortField::Group,
+            MANAGER_COL_GROUP,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.last_used",
+            SessionSortField::LastUsed,
+            MANAGER_COL_LAST_USED,
+            false,
+            cx,
+        ))
+        .child(tauri_table_spacer_cell(MANAGER_COL_ACTIONS))
+        .into_any_element()
     }
 
     fn render_sort_header(
@@ -993,33 +978,26 @@ impl WorkspaceApp {
                 rgba((theme.text_muted << 8) | 0x66),
             )
         };
-        div()
-            .when(flexible, |cell| {
-                cell.flex_1().min_w(px(MANAGER_COL_NAME_MIN))
-            })
-            .when(!flexible, |cell| cell.w(px(width)).flex_none())
-            .pl(if flexible { px(4.0) } else { px(0.0) })
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .cursor_pointer()
-            .hover(move |cell| cell.text_color(rgb(theme.text)))
-            .child(div().truncate().child(self.i18n.t(label_key)))
-            .child(Self::render_lucide_icon(icon, 14.0, icon_color))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if this.session_manager.sort_field == field {
-                        this.session_manager.sort_direction =
-                            this.session_manager.sort_direction.toggled();
-                    } else {
-                        this.session_manager.sort_field = field;
-                        this.session_manager.sort_direction = SortDirection::Asc;
-                    }
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
+        tauri_table_sort_header(
+            &self.tokens,
+            &self.manager_table_cell_options(width, flexible),
+            self.i18n.t(label_key),
+            Self::render_lucide_icon(icon, 14.0, icon_color),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                if this.session_manager.sort_field == field {
+                    this.session_manager.sort_direction =
+                        this.session_manager.sort_direction.toggled();
+                } else {
+                    this.session_manager.sort_field = field;
+                    this.session_manager.sort_direction = SortDirection::Asc;
+                }
+                cx.notify();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_connection_table_row(
@@ -1028,179 +1006,167 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let selected = self.session_manager.selected_ids.contains(&conn.id);
         let hovered =
             self.session_manager.hovered_connection_id.as_deref() == Some(conn.id.as_str());
         let id = conn.id.clone();
         let color = conn.color.as_deref().and_then(parse_hex_color);
-        div()
-            .id((
-                gpui::ElementId::from("session-manager-table-row"),
-                conn.id.clone(),
-            ))
-            .relative()
-            .min_h(px(36.0))
-            .flex()
-            .items_center()
-            .px_2()
-            .py(px(6.0))
-            .border_b_1()
-            .border_color(theme_border_half(theme.border, has_background))
-            .bg(if selected {
-                rgba((theme.info << 8) | BG_ACTIVE_ROW_SELECTED_ALPHA)
-            } else if has_background {
-                rgba(0x00000000)
-            } else {
-                rgba(0x00000000)
-            })
-            .hover(move |row| row.bg(theme_hover_bg(theme.bg_hover, has_background)))
-            .on_hover(cx.listener({
-                let id = conn.id.clone();
-                move |this, is_hovered: &bool, _window, cx| {
-                    if *is_hovered {
-                        this.session_manager.hovered_connection_id = Some(id.clone());
-                    } else if this.session_manager.hovered_connection_id.as_deref()
-                        == Some(id.as_str())
-                    {
-                        this.session_manager.hovered_connection_id = None;
-                    }
-                    cx.notify();
+        tauri_table_row(
+            self.manager_table_colors(has_background),
+            self.manager_table_metrics(),
+            selected,
+        )
+        .id((
+            gpui::ElementId::from("session-manager-table-row"),
+            conn.id.clone(),
+        ))
+        .on_hover(cx.listener({
+            let id = conn.id.clone();
+            move |this, is_hovered: &bool, _window, cx| {
+                if *is_hovered {
+                    this.session_manager.hovered_connection_id = Some(id.clone());
+                } else if this.session_manager.hovered_connection_id.as_deref() == Some(id.as_str())
+                {
+                    this.session_manager.hovered_connection_id = None;
                 }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.session_manager.row_context_menu_connection_id = None;
-                    if event.click_count == 2 {
-                        this.open_saved_connection(&id, window, cx);
-                    }
+                cx.notify();
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                this.session_manager.row_context_menu_connection_id = None;
+                if event.click_count == 2 {
+                    this.open_saved_connection(&id, window, cx);
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener({
+                let id = conn.id.clone();
+                move |this, event: &MouseDownEvent, _window, cx| {
+                    this.session_manager.row_context_menu_connection_id = Some(id.clone());
+                    this.session_manager.row_context_menu_x = f32::from(event.position.x);
+                    this.session_manager.row_context_menu_y = f32::from(event.position.y);
+                    this.session_manager.row_menu_connection_id = None;
+                    cx.notify();
                     cx.stop_propagation();
-                }),
+                }
+            }),
+        )
+        .when_some(color, |row, color| {
+            row.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(MANAGER_COLOR_INDICATOR_WIDTH))
+                    .rounded_l(px(self.tokens.radii.sm))
+                    .bg(rgb(color)),
             )
-            .on_mouse_down(
-                MouseButton::Right,
+        })
+        .child(tauri_table_checkbox_cell(
+            MANAGER_COL_CHECKBOX,
+            checkbox(&self.tokens, String::new(), selected).on_mouse_down(
+                MouseButton::Left,
                 cx.listener({
                     let id = conn.id.clone();
-                    move |this, event: &MouseDownEvent, _window, cx| {
-                        this.session_manager.row_context_menu_connection_id = Some(id.clone());
-                        this.session_manager.row_context_menu_x = f32::from(event.position.x);
-                        this.session_manager.row_context_menu_y = f32::from(event.position.y);
-                        this.session_manager.row_menu_connection_id = None;
+                    move |this, _event, _window, cx| {
+                        this.toggle_connection_selection(&id);
                         cx.notify();
                         cx.stop_propagation();
                     }
                 }),
-            )
-            .when_some(color, |row, color| {
-                row.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(MANAGER_COLOR_INDICATOR_WIDTH))
-                        .rounded_l(px(self.tokens.radii.sm))
-                        .bg(rgb(color)),
-                )
-            })
-            .child(
-                div()
-                    .w(px(MANAGER_COL_CHECKBOX))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        checkbox(&self.tokens, String::new(), selected).on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener({
-                                let id = conn.id.clone();
-                                move |this, _event, _window, cx| {
-                                    this.toggle_connection_selection(&id);
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                }
-                            }),
-                        ),
-                    ),
-            )
-            .child(self.render_table_cell(
-                conn.name.clone(),
-                MANAGER_COL_NAME_BASIS,
-                TableCellStyle::Primary,
-                true,
-            ))
-            .child(self.render_table_cell(
-                conn.host.clone(),
-                MANAGER_COL_HOST,
-                TableCellStyle::MetaMono,
-                false,
-            ))
-            .child(self.render_table_cell(
-                conn.port.to_string(),
-                MANAGER_COL_PORT,
-                TableCellStyle::MetaMono,
-                false,
-            ))
-            .child(self.render_table_cell(
-                conn.username.clone(),
-                MANAGER_COL_USERNAME,
-                TableCellStyle::Meta,
-                false,
-            ))
-            .child(self.render_auth_badge_cell(conn.auth_type))
-            .child(self.render_table_cell(
-                conn.group.clone().unwrap_or_else(|| "—".to_string()),
-                MANAGER_COL_GROUP,
-                TableCellStyle::Meta,
-                false,
-            ))
-            .child(self.render_table_cell(
-                format_last_used(conn.last_used_at.as_deref(), &self.i18n),
-                MANAGER_COL_LAST_USED,
-                TableCellStyle::Meta,
-                false,
-            ))
-            .child(div().w(px(MANAGER_COL_ACTIONS)).flex_none())
-            .child(self.render_inline_row_actions(conn, hovered, has_background, cx))
-            .into_any_element()
+            ),
+        ))
+        .child(self.render_table_cell(
+            conn.name.clone(),
+            MANAGER_COL_NAME_BASIS,
+            TauriTableCellStyle::Primary,
+            true,
+        ))
+        .child(self.render_table_cell(
+            conn.host.clone(),
+            MANAGER_COL_HOST,
+            TauriTableCellStyle::MetaMono,
+            false,
+        ))
+        .child(self.render_table_cell(
+            conn.port.to_string(),
+            MANAGER_COL_PORT,
+            TauriTableCellStyle::MetaMono,
+            false,
+        ))
+        .child(self.render_table_cell(
+            conn.username.clone(),
+            MANAGER_COL_USERNAME,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(self.render_auth_badge_cell(conn.auth_type))
+        .child(self.render_table_cell(
+            conn.group.clone().unwrap_or_else(|| "—".to_string()),
+            MANAGER_COL_GROUP,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(self.render_table_cell(
+            format_last_used(conn.last_used_at.as_deref(), &self.i18n),
+            MANAGER_COL_LAST_USED,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(tauri_table_spacer_cell(MANAGER_COL_ACTIONS))
+        .child(self.render_inline_row_actions(conn, hovered, has_background, cx))
+        .into_any_element()
     }
 
     fn render_table_cell(
         &self,
         text: String,
         width: f32,
-        style: TableCellStyle,
+        style: TauriTableCellStyle,
         flexible: bool,
     ) -> AnyElement {
+        tauri_table_cell(
+            &self.tokens,
+            &self.manager_table_cell_options(width, flexible),
+            style,
+            text,
+        )
+    }
+
+    fn manager_table_colors(&self, has_background: bool) -> TauriTableColors {
         let theme = self.tokens.ui;
-        let strong = style == TableCellStyle::Primary;
-        let cell = div()
-            .when(flexible, |cell| {
-                cell.flex_1().min_w(px(MANAGER_COL_NAME_MIN))
-            })
-            .when(!flexible, |cell| cell.w(px(width)).flex_none())
-            .pl(if flexible { px(4.0) } else { px(0.0) })
-            .truncate()
-            .text_size(px(match style {
-                TableCellStyle::Primary => MANAGER_ROW_TEXT_SIZE,
-                TableCellStyle::Meta | TableCellStyle::MetaMono => MANAGER_ROW_META_TEXT_SIZE,
-            }))
-            .font_weight(if strong {
-                gpui::FontWeight::MEDIUM
-            } else {
-                gpui::FontWeight::NORMAL
-            })
-            .text_color(if strong {
-                rgb(theme.text)
-            } else {
-                rgb(theme.text_muted)
-            })
-            .when(style == TableCellStyle::MetaMono, |cell| {
-                cell.font_family(settings_mono_font_family(self.settings_store.settings()))
-            });
-        cell.child(text).into_any_element()
+        TauriTableColors {
+            header_border: theme_border(theme.border, has_background),
+            header_bg: theme_secondary_bg(theme.bg_secondary, has_background),
+            row_border: theme_border_half(theme.border, has_background),
+            row_hover_bg: theme_hover_bg(theme.bg_hover, has_background),
+            row_selected_bg: rgba((theme.info << 8) | BG_ACTIVE_ROW_SELECTED_ALPHA),
+        }
+    }
+
+    fn manager_table_metrics(&self) -> TauriTableMetrics {
+        TauriTableMetrics {
+            header_text_size: MANAGER_TABLE_HEADER_TEXT_SIZE,
+            ..TauriTableMetrics::default()
+        }
+    }
+
+    fn manager_table_cell_options(&self, width: f32, flexible: bool) -> TauriTableCellOptions {
+        TauriTableCellOptions {
+            width,
+            min_width: MANAGER_COL_NAME_MIN,
+            flexible,
+            padding_left: if flexible { 4.0 } else { 0.0 },
+            primary_text_size: MANAGER_ROW_TEXT_SIZE,
+            meta_text_size: MANAGER_ROW_META_TEXT_SIZE,
+            mono_font: Some(settings_mono_font_family(self.settings_store.settings())),
+        }
     }
 
     fn render_auth_badge_cell(&self, auth_type: AuthType) -> AnyElement {
@@ -1211,28 +1177,20 @@ impl WorkspaceApp {
             .flex_none()
             .flex()
             .items_center()
-            .child(
-                div()
-                    .w(px(auth_badge_width(label)))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(MANAGER_AUTH_BADGE_GAP))
-                    .px(px(MANAGER_AUTH_BADGE_PADDING_X))
-                    .py(px(2.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .bg(bg)
-                    .text_color(fg)
-                    .text_size(px(MANAGER_AUTH_BADGE_TEXT_SIZE))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(Self::render_lucide_icon(
-                        icon,
-                        MANAGER_AUTH_BADGE_ICON_SIZE,
-                        fg,
-                    ))
-                    .child(label),
-            )
+            .child(icon_badge(
+                IconBadgeMetrics {
+                    width: auth_badge_width(label),
+                    gap: MANAGER_AUTH_BADGE_GAP,
+                    padding_x: MANAGER_AUTH_BADGE_PADDING_X,
+                    padding_y: 2.0,
+                    text_size: MANAGER_AUTH_BADGE_TEXT_SIZE,
+                    radius: self.tokens.radii.md,
+                },
+                label,
+                Self::render_lucide_icon(icon, MANAGER_AUTH_BADGE_ICON_SIZE, fg),
+                bg,
+                fg,
+            ))
             .into_any_element()
     }
 
@@ -2775,104 +2733,6 @@ fn current_username() -> String {
         .unwrap_or_else(|_| "root".to_string())
 }
 
-pub(super) fn saved_connection_from_ssh_host(
-    host: SshConfigHost,
-) -> anyhow::Result<SavedConnection> {
-    let now = chrono::Utc::now();
-    let auth = match (host.identity_file, host.certificate_file) {
-        (Some(key_path), Some(cert_path)) => SavedAuth::Certificate {
-            key_path,
-            cert_path,
-            has_passphrase: false,
-            passphrase_keychain_id: None,
-            plaintext_passphrase: None,
-        },
-        (Some(key_path), None) => SavedAuth::Key {
-            key_path,
-            has_passphrase: false,
-            passphrase_keychain_id: None,
-            plaintext_passphrase: None,
-        },
-        _ => SavedAuth::Agent,
-    };
-    Ok(SavedConnection {
-        id: String::new(),
-        name: host.alias.clone(),
-        group: Some(IMPORTED_GROUP.to_string()),
-        host: host.hostname.unwrap_or(host.alias),
-        port: host.port.unwrap_or(22),
-        username: host.user.unwrap_or_else(current_username),
-        auth,
-        proxy_chain: Vec::new(),
-        options: oxideterm_connections::ConnectionOptions::default(),
-        created_at: now,
-        last_used_at: None,
-        updated_at: Some(now),
-        color: None,
-        tags: vec![SSH_CONFIG_TAG.to_string()],
-    })
-}
-
-pub(super) fn saved_auth_from_form(form: &NewConnectionForm) -> SavedAuth {
-    match form.auth_tab {
-        SshAuthTab::Password => SavedAuth::Password {
-            keychain_id: None,
-            plaintext_password: form.save_password.then(|| form.password.clone()),
-        },
-        SshAuthTab::DefaultKey => SavedAuth::Key {
-            key_path: String::new(),
-            has_passphrase: !form.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
-        },
-        SshAuthTab::SshKey => SavedAuth::Key {
-            key_path: form.key_path.trim().to_string(),
-            has_passphrase: !form.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
-        },
-        SshAuthTab::Certificate => SavedAuth::Certificate {
-            key_path: form.key_path.trim().to_string(),
-            cert_path: form.cert_path.trim().to_string(),
-            has_passphrase: !form.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!form.passphrase.is_empty()).then(|| form.passphrase.clone()),
-        },
-        SshAuthTab::Agent | SshAuthTab::TwoFactor => SavedAuth::Agent,
-    }
-}
-
-fn saved_auth_from_form_for_update(
-    form: &NewConnectionForm,
-    existing_auth: Option<&SavedAuth>,
-) -> SavedAuth {
-    if form.auth_tab == SshAuthTab::Password && !form.password_loaded {
-        if let Some(SavedAuth::Password {
-            keychain_id,
-            plaintext_password,
-        }) = existing_auth
-        {
-            return SavedAuth::Password {
-                keychain_id: keychain_id.clone(),
-                plaintext_password: plaintext_password.clone(),
-            };
-        }
-        return SavedAuth::Password {
-            keychain_id: None,
-            plaintext_password: None,
-        };
-    }
-
-    if form.auth_tab == SshAuthTab::Password {
-        return SavedAuth::Password {
-            keychain_id: form.saved_password_keychain_id.clone(),
-            plaintext_password: Some(form.password.clone()),
-        };
-    }
-
-    saved_auth_from_form(form)
-}
-
 pub(super) fn form_from_saved_connection(
     conn: &SavedConnection,
     error: Option<String>,
@@ -2979,65 +2839,67 @@ pub(super) fn save_request_from_form_with_existing_auth(
     id: Option<String>,
     existing_auth: Option<&SavedAuth>,
 ) -> anyhow::Result<SaveConnectionRequest> {
-    let port = form.port.trim().parse::<u16>().unwrap_or(22);
-    Ok(SaveConnectionRequest {
-        id,
-        name: form.name.trim().to_string(),
-        group: Some(form.group.trim().to_string()),
-        host: form.host.trim().to_string(),
-        port,
-        username: form.username.trim().to_string(),
-        auth: if existing_auth.is_some() {
-            saved_auth_from_form_for_update(form, existing_auth)
-        } else {
-            saved_auth_from_form(form)
-        },
-        proxy_chain: saved_proxy_chain_from_form(form),
-        color: (!form.color.trim().is_empty()).then(|| form.color.trim().to_string()),
+    save_request_from_draft(connection_draft_from_form(form), id, existing_auth)
+}
+
+fn connection_draft_from_form(form: &NewConnectionForm) -> ConnectionDraft {
+    ConnectionDraft {
+        name: form.name.clone(),
+        host: form.host.clone(),
+        port: form.port.clone(),
+        username: form.username.clone(),
+        auth: auth_draft_from_form(form),
+        group: form.group.clone(),
+        color: form.color.clone(),
         tags: form.tags.clone(),
+        proxy_hops: form
+            .proxy_hops
+            .iter()
+            .map(proxy_hop_draft_from_form)
+            .collect(),
         agent_forwarding: form.agent_forwarding,
-    })
+    }
 }
 
-pub(super) fn saved_proxy_chain_from_form(form: &NewConnectionForm) -> Vec<SavedProxyHop> {
-    form.proxy_hops
-        .iter()
-        .map(|hop| SavedProxyHop {
-            host: hop.host.trim().to_string(),
-            port: hop.port.trim().parse::<u16>().unwrap_or(22),
-            username: hop.username.trim().to_string(),
-            auth: saved_auth_from_proxy_hop(hop),
-            agent_forwarding: hop.agent_forwarding,
-        })
-        .collect()
+fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop) -> ProxyHopDraft {
+    ProxyHopDraft {
+        host: hop.host.clone(),
+        port: hop.port.clone(),
+        username: hop.username.clone(),
+        auth: ConnectionAuthDraft {
+            kind: auth_draft_kind(hop.auth_tab),
+            password: hop.password.clone(),
+            key_path: hop.key_path.clone(),
+            cert_path: hop.cert_path.clone(),
+            passphrase: hop.passphrase.clone(),
+            save_password: true,
+            ..ConnectionAuthDraft::default()
+        },
+        agent_forwarding: hop.agent_forwarding,
+    }
 }
 
-fn saved_auth_from_proxy_hop(hop: &super::new_connection::NewConnectionProxyHop) -> SavedAuth {
-    match hop.auth_tab {
-        SshAuthTab::Password => SavedAuth::Password {
-            keychain_id: None,
-            plaintext_password: Some(hop.password.clone()),
-        },
-        SshAuthTab::DefaultKey => SavedAuth::Key {
-            key_path: String::new(),
-            has_passphrase: !hop.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
-        },
-        SshAuthTab::SshKey => SavedAuth::Key {
-            key_path: hop.key_path.trim().to_string(),
-            has_passphrase: !hop.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
-        },
-        SshAuthTab::Certificate => SavedAuth::Certificate {
-            key_path: hop.key_path.trim().to_string(),
-            cert_path: hop.cert_path.trim().to_string(),
-            has_passphrase: !hop.passphrase.is_empty(),
-            passphrase_keychain_id: None,
-            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
-        },
-        SshAuthTab::Agent | SshAuthTab::TwoFactor => SavedAuth::Agent,
+fn auth_draft_from_form(form: &NewConnectionForm) -> ConnectionAuthDraft {
+    ConnectionAuthDraft {
+        kind: auth_draft_kind(form.auth_tab),
+        password: form.password.clone(),
+        password_keychain_id: form.saved_password_keychain_id.clone(),
+        password_loaded: form.password_loaded,
+        save_password: form.save_password,
+        key_path: form.key_path.clone(),
+        cert_path: form.cert_path.clone(),
+        passphrase: form.passphrase.clone(),
+    }
+}
+
+fn auth_draft_kind(tab: SshAuthTab) -> ConnectionAuthDraftKind {
+    match tab {
+        SshAuthTab::Password => ConnectionAuthDraftKind::Password,
+        SshAuthTab::DefaultKey => ConnectionAuthDraftKind::DefaultKey,
+        SshAuthTab::SshKey => ConnectionAuthDraftKind::SshKey,
+        SshAuthTab::Certificate => ConnectionAuthDraftKind::Certificate,
+        SshAuthTab::Agent => ConnectionAuthDraftKind::Agent,
+        SshAuthTab::TwoFactor => ConnectionAuthDraftKind::TwoFactor,
     }
 }
 

@@ -22,7 +22,15 @@
   "sessions": {
     "tree": {
       "no_sessions": "暂无会话",
-      "click_to_add": "点击 + 添加新连接"
+      "click_to_add": "点击 + 添加新连接",
+      "actions": {
+        "new_terminal": "新建终端",
+        "disconnect": "断开",
+        "reconnect": "重新连接"
+      }
+    },
+    "focused_list": {
+      "terminal": "终端 #{{number}}"
     }
   }
 }

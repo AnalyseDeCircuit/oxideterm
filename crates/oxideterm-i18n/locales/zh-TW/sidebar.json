@@ -22,7 +22,15 @@
   "sessions": {
     "tree": {
       "no_sessions": "無工作階段",
-      "click_to_add": "按 + 新增連線"
+      "click_to_add": "按 + 新增連線",
+      "actions": {
+        "new_terminal": "新終端機",
+        "disconnect": "斷開",
+        "reconnect": "重新連線"
+      }
+    },
+    "focused_list": {
+      "terminal": "終端機 #{{number}}"
     }
   }
 }

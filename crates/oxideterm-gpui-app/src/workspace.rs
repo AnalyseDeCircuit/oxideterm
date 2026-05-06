@@ -50,8 +50,9 @@ use oxideterm_terminal::{
 };
 use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
 use oxideterm_workspace::{
-    MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource,
-    TerminalSessionId, adjusted_split_sizes, balanced_sizes,
+    ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
+    PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
+    adjusted_split_sizes, balanced_sizes, sort_active_session_nodes,
 };
 
 use self::actions::SearchBarState;
@@ -121,6 +122,8 @@ pub(crate) struct WorkspaceApp {
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
+    expanded_ssh_nodes: HashSet<NodeId>,
+    active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
     i18n: I18n,
     tokens: ThemeTokens,
@@ -217,6 +220,8 @@ impl WorkspaceApp {
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
+            expanded_ssh_nodes: HashSet::new(),
+            active_ssh_node_id: None,
             next_ssh_node_id: 1,
             i18n: I18n::new(locale_from_settings(settings.general.language)),
             tokens,

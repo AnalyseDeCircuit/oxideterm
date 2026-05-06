@@ -32,6 +32,56 @@ pub enum TabTitleSource {
     I18nKey(&'static str),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ActiveSessionReadiness {
+    Ready,
+    Connecting,
+    Error,
+    Disconnected,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActiveSessionNode {
+    pub id: String,
+    pub title: String,
+    pub port: u16,
+    pub terminal_ids: Vec<TerminalSessionId>,
+    pub readiness: ActiveSessionReadiness,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActiveSessionStatus {
+    Idle,
+    Connecting,
+    Connected,
+    Active,
+    Error,
+}
+
+impl ActiveSessionNode {
+    pub fn has_terminals(&self) -> bool {
+        !self.terminal_ids.is_empty()
+    }
+
+    pub fn status(&self) -> ActiveSessionStatus {
+        match self.readiness {
+            ActiveSessionReadiness::Connecting => ActiveSessionStatus::Connecting,
+            ActiveSessionReadiness::Ready if self.has_terminals() => ActiveSessionStatus::Active,
+            ActiveSessionReadiness::Ready => ActiveSessionStatus::Connected,
+            ActiveSessionReadiness::Error => ActiveSessionStatus::Error,
+            ActiveSessionReadiness::Disconnected => ActiveSessionStatus::Idle,
+        }
+    }
+}
+
+pub fn sort_active_session_nodes(nodes: &mut [ActiveSessionNode]) {
+    nodes.sort_by(|left, right| {
+        left.title
+            .cmp(&right.title)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
 #[derive(Clone, Debug)]
 pub struct Tab {
     pub id: TabId,

@@ -22,7 +22,15 @@
   "sessions": {
     "tree": {
       "no_sessions": "Không có phiên",
-      "click_to_add": "Nhấn + để thêm kết nối"
+      "click_to_add": "Nhấn + để thêm kết nối",
+      "actions": {
+        "new_terminal": "Terminal mới",
+        "disconnect": "Ngắt kết nối",
+        "reconnect": "Kết nối lại"
+      }
+    },
+    "focused_list": {
+      "terminal": "Terminal #{{number}}"
     }
   }
 }

@@ -22,7 +22,15 @@
   "sessions": {
     "tree": {
       "no_sessions": "セッションなし",
-      "click_to_add": "+ をクリックして新しい接続を追加"
+      "click_to_add": "+ をクリックして新しい接続を追加",
+      "actions": {
+        "new_terminal": "新しいターミナル",
+        "disconnect": "切断",
+        "reconnect": "再接続"
+      }
+    },
+    "focused_list": {
+      "terminal": "ターミナル #{{number}}"
     }
   }
 }
