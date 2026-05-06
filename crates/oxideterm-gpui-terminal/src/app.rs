@@ -11,7 +11,7 @@ use gpui::{
 };
 use oxideterm_terminal::{
     GraphicsOptions, LocalPtyConfig, SshSessionConfig, TermMode, TerminalDrainBudget,
-    TerminalEvent, TerminalSession, TerminalSnapshot,
+    TerminalEvent, TerminalLifecycle, TerminalSession, TerminalSnapshot,
 };
 use parking_lot::Mutex;
 
@@ -241,6 +241,10 @@ impl TerminalPane {
 
     pub fn shutdown(&mut self) {
         self.terminal.lock().shutdown();
+    }
+
+    pub fn lifecycle(&self) -> TerminalLifecycle {
+        self.terminal.lock().lifecycle()
     }
 
     pub fn set_search_query(

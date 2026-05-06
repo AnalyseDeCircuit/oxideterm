@@ -277,6 +277,45 @@ pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKey
     }
 }
 
+pub async fn check_host_key_via_stream(
+    host: &str,
+    port: u16,
+    stream: russh::ChannelStream<client::Msg>,
+    timeout_secs: u64,
+) -> HostKeyStatus {
+    let handler = PreflightHandler::new(host.to_string(), port);
+    let status = Arc::clone(&handler.status);
+    let config = client::Config {
+        inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
+        ..client::Config::default()
+    };
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        client::connect_stream(Arc::new(config), stream, handler),
+    )
+    .await;
+
+    if let Some(status) = status.lock().await.take() {
+        return status;
+    }
+
+    match result {
+        Ok(Ok(_)) => HostKeyStatus::Error {
+            message: "Unexpectedly completed tunneled SSH preflight".to_string(),
+        },
+        Ok(Err(SshTransportError::PreflightComplete)) => HostKeyStatus::Error {
+            message: "Tunneled SSH preflight completed without a captured host key".to_string(),
+        },
+        Ok(Err(error)) => HostKeyStatus::Error {
+            message: error.to_string(),
+        },
+        Err(_) => HostKeyStatus::Error {
+            message: format!("Connection timeout after {timeout_secs}s"),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

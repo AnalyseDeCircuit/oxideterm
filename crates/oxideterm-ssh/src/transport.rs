@@ -1,7 +1,14 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{future::Future, net::ToSocketAddrs, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    net::{SocketAddr, ToSocketAddrs},
+    path::PathBuf,
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
@@ -25,8 +32,12 @@ use tokio::{
 use zeroize::Zeroizing;
 
 use crate::{
-    AuthMethod, ConnectionConsumer, ConnectionState, SshConfig, SshConnectionRegistry,
-    host_key::{HostKeyVerification, learn_host_key, public_key_fingerprint, verify_host_key},
+    AuthMethod, ConnectionConsumer, ConnectionState, ProxyHopConfig, SshConfig,
+    SshConnectionRegistry,
+    host_key::{
+        HostKeyStatus, HostKeyVerification, check_host_key, check_host_key_via_stream,
+        learn_host_key, public_key_fingerprint, verify_host_key,
+    },
 };
 
 pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
@@ -126,6 +137,14 @@ pub enum SshTransportCommand {
     Close,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProxyChainPreflightChallenge {
+    pub step_index: usize,
+    pub host: String,
+    pub port: u16,
+    pub status: HostKeyStatus,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyboardInteractivePrompt {
     pub prompt: String,
@@ -179,7 +198,34 @@ pub struct SshTransportClient {
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
 }
 
-type PooledSshHandle = Mutex<client::Handle<NativeClientHandler>>;
+struct PooledSshConnection {
+    target: Mutex<client::Handle<NativeClientHandler>>,
+    _jump_handles: Vec<client::Handle<NativeClientHandler>>,
+}
+
+impl PooledSshConnection {
+    fn direct(handle: client::Handle<NativeClientHandler>) -> Self {
+        Self {
+            target: Mutex::new(handle),
+            _jump_handles: Vec::new(),
+        }
+    }
+
+    fn tunneled(
+        target: client::Handle<NativeClientHandler>,
+        jump_handles: Vec<client::Handle<NativeClientHandler>>,
+    ) -> Self {
+        Self {
+            target: Mutex::new(target),
+            _jump_handles: jump_handles,
+        }
+    }
+
+    async fn is_closed(&self) -> bool {
+        self.target.lock().await.is_closed()
+    }
+}
+
 type NativeAgentClient = AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>;
 
 struct AgentSigner<'a> {
@@ -446,13 +492,11 @@ impl SshTransportClient {
         let connection = registry.acquire(self.config.clone(), consumer.clone());
         let connection_id = connection.connection_id().to_string();
 
-        let pooled = if let Some(existing) = connection.physical::<PooledSshHandle>() {
-            let closed = existing.lock().await.is_closed();
-            if closed {
+        let pooled = if let Some(existing) = connection.physical::<PooledSshConnection>() {
+            if existing.is_closed().await {
                 connection.clear_physical();
-                match self.connect_authenticated_handle().await {
-                    Ok(handle) => {
-                        let pooled = Arc::new(Mutex::new(handle));
+                match self.connect_authenticated_connection().await {
+                    Ok(pooled) => {
                         connection.set_physical(pooled.clone());
                         pooled
                     }
@@ -467,9 +511,8 @@ impl SshTransportClient {
                 existing
             }
         } else {
-            match self.connect_authenticated_handle().await {
-                Ok(handle) => {
-                    let pooled = Arc::new(Mutex::new(handle));
+            match self.connect_authenticated_connection().await {
+                Ok(pooled) => {
                     connection.set_physical(pooled.clone());
                     pooled
                 }
@@ -508,33 +551,158 @@ impl SshTransportClient {
         self,
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
     ) -> Result<SshPtyHandle, SshTransportError> {
-        let handle = self.connect_authenticated_handle().await?;
-        self.open_shell_from_pooled(Arc::new(Mutex::new(handle)), registry_release)
-            .await
+        let pooled = self.connect_authenticated_connection().await?;
+        self.open_shell_from_pooled(pooled, registry_release).await
     }
 
-    async fn connect_authenticated_handle(
+    async fn connect_authenticated_connection(
         &self,
-    ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        let socket_addr = addr
-            .to_socket_addrs()
-            .map_err(|error| SshTransportError::DnsResolution {
-                address: addr.clone(),
-                message: error.to_string(),
-            })?
-            .next()
-            .ok_or_else(|| SshTransportError::DnsResolution {
-                address: addr.clone(),
-                message: "no address found".to_string(),
-            })?;
+    ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
+        if self
+            .config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
+            return self.connect_authenticated_proxy_connection().await;
+        }
 
-        let client_config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(30)),
-            keepalive_interval: Some(Duration::from_secs(15)),
-            keepalive_max: 3,
-            ..client::Config::default()
-        };
+        self.connect_direct_authenticated_handle(&self.config)
+            .await
+            .map(PooledSshConnection::direct)
+            .map(Arc::new)
+    }
+
+    async fn connect_direct_authenticated_handle(
+        &self,
+        config: &SshConfig,
+    ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        let socket_addr = resolve_socket_addr(&config.host, config.port)?;
+
+        let client_config = ssh_client_config();
+        let handler = NativeClientHandler::new(
+            config.host.clone(),
+            config.port,
+            config.strict_host_key_checking,
+            config.trust_host_key,
+            config.expected_host_key_fingerprint.clone(),
+            config.agent_forwarding,
+        );
+        let mut handle = tokio::time::timeout(
+            Duration::from_secs(config.timeout_secs),
+            client::connect(Arc::new(client_config), socket_addr, handler),
+        )
+        .await
+        .map_err(|_| SshTransportError::Timeout)?
+        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+
+        authenticate(&mut handle, config, self.prompt_handler.as_deref()).await?;
+        Ok(handle)
+    }
+
+    async fn connect_authenticated_proxy_connection(
+        &self,
+    ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
+        let chain = self.config.proxy_chain.as_deref().unwrap_or_default();
+        if chain.is_empty() {
+            return Err(SshTransportError::ConnectionFailed(
+                "proxy chain is empty".to_string(),
+            ));
+        }
+
+        let mut current_stream: Option<russh::ChannelStream<client::Msg>> = None;
+        let mut jump_handles = Vec::with_capacity(chain.len());
+
+        for (index, hop) in chain.iter().enumerate() {
+            let handle = if let Some(stream) = current_stream.take() {
+                self.connect_proxy_hop_via_stream(hop, stream).await?
+            } else {
+                self.connect_proxy_hop_direct(hop).await?
+            };
+
+            let (next_host, next_port) = if let Some(next_hop) = chain.get(index + 1) {
+                (next_hop.host.as_str(), next_hop.port)
+            } else {
+                (self.config.host.as_str(), self.config.port)
+            };
+            let channel = handle
+                .channel_open_direct_tcpip(next_host, next_port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|error| {
+                    SshTransportError::ConnectionFailed(format!(
+                        "failed to open proxy tunnel to {next_host}:{next_port}: {error}"
+                    ))
+                })?;
+            current_stream = Some(channel.into_stream());
+            jump_handles.push(handle);
+        }
+
+        let stream = current_stream.ok_or_else(|| {
+            SshTransportError::ConnectionFailed(
+                "no proxy stream available for target connection".to_string(),
+            )
+        })?;
+        let target = self
+            .connect_target_via_proxy_stream(stream, self.config.timeout_secs)
+            .await?;
+        Ok(Arc::new(PooledSshConnection::tunneled(
+            target,
+            jump_handles,
+        )))
+    }
+
+    async fn connect_proxy_hop_direct(
+        &self,
+        hop: &ProxyHopConfig,
+    ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        let socket_addr = resolve_socket_addr(&hop.host, hop.port)?;
+        let mut handle = tokio::time::timeout(
+            Duration::from_secs(self.config.timeout_secs),
+            client::connect(
+                Arc::new(ssh_client_config()),
+                socket_addr,
+                proxy_hop_handler(hop),
+            ),
+        )
+        .await
+        .map_err(|_| SshTransportError::Timeout)?
+        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+
+        authenticate_proxy_hop(&mut handle, hop).await?;
+        Ok(handle)
+    }
+
+    async fn connect_proxy_hop_via_stream(
+        &self,
+        hop: &ProxyHopConfig,
+        stream: russh::ChannelStream<client::Msg>,
+    ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        let mut handle = tokio::time::timeout(
+            Duration::from_secs(self.config.timeout_secs),
+            client::connect_stream(
+                Arc::new(ssh_client_config()),
+                stream,
+                proxy_hop_handler(hop),
+            ),
+        )
+        .await
+        .map_err(|_| SshTransportError::Timeout)?
+        .map_err(|error| {
+            SshTransportError::ConnectionFailed(format!(
+                "failed to connect via proxy stream to {}:{}: {error}",
+                hop.host, hop.port
+            ))
+        })?;
+
+        authenticate_proxy_hop(&mut handle, hop).await?;
+        Ok(handle)
+    }
+
+    async fn connect_target_via_proxy_stream(
+        &self,
+        stream: russh::ChannelStream<client::Msg>,
+        timeout_secs: u64,
+    ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
         let handler = NativeClientHandler::new(
             self.config.host.clone(),
             self.config.port,
@@ -544,12 +712,16 @@ impl SshTransportClient {
             self.config.agent_forwarding,
         );
         let mut handle = tokio::time::timeout(
-            Duration::from_secs(self.config.timeout_secs),
-            client::connect(Arc::new(client_config), socket_addr, handler),
+            Duration::from_secs(timeout_secs),
+            client::connect_stream(Arc::new(ssh_client_config()), stream, handler),
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
-        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+        .map_err(|error| {
+            SshTransportError::ConnectionFailed(format!(
+                "failed to connect to target via proxy stream: {error}"
+            ))
+        })?;
 
         authenticate(&mut handle, &self.config, self.prompt_handler.as_deref()).await?;
         Ok(handle)
@@ -557,11 +729,11 @@ impl SshTransportClient {
 
     async fn open_shell_from_pooled(
         self,
-        pooled: Arc<PooledSshHandle>,
+        pooled: Arc<PooledSshConnection>,
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
     ) -> Result<SshPtyHandle, SshTransportError> {
         let mut channel = {
-            let handle = pooled.lock().await;
+            let handle = pooled.target.lock().await;
             handle
                 .channel_open_session()
                 .await
@@ -680,8 +852,167 @@ impl SshTransportClient {
     }
 
     pub async fn test_connection(self) -> Result<(), SshTransportError> {
-        self.connect_authenticated_handle().await.map(|_| ())
+        self.connect_authenticated_connection().await.map(|_| ())
     }
+
+    pub async fn preflight_proxy_chain(
+        self,
+    ) -> Result<Option<ProxyChainPreflightChallenge>, SshTransportError> {
+        let chain = self.config.proxy_chain.as_deref().unwrap_or_default();
+        if chain.is_empty() {
+            return Ok(None);
+        }
+
+        let mut current_handle: Option<client::Handle<NativeClientHandler>> = None;
+        let mut jump_handles = Vec::with_capacity(chain.len());
+
+        for (index, hop) in chain.iter().enumerate() {
+            if !proxy_step_has_accepted_fingerprint(hop) {
+                let status = if let Some(parent) = current_handle.as_ref() {
+                    let stream = open_direct_tcpip_stream(parent, &hop.host, hop.port).await?;
+                    check_host_key_via_stream(&hop.host, hop.port, stream, self.config.timeout_secs)
+                        .await
+                } else {
+                    check_host_key(&hop.host, hop.port, self.config.timeout_secs).await
+                };
+                if status != HostKeyStatus::Verified {
+                    return Ok(Some(ProxyChainPreflightChallenge {
+                        step_index: index,
+                        host: hop.host.clone(),
+                        port: hop.port,
+                        status,
+                    }));
+                }
+            }
+
+            let handle = if let Some(parent) = current_handle.take() {
+                let stream = open_direct_tcpip_stream(&parent, &hop.host, hop.port).await?;
+                jump_handles.push(parent);
+                self.connect_proxy_hop_via_stream(hop, stream).await?
+            } else {
+                self.connect_proxy_hop_direct(hop).await?
+            };
+            current_handle = Some(handle);
+        }
+
+        let target_index = chain.len();
+        if !target_step_has_accepted_fingerprint(&self.config) {
+            let status = if let Some(parent) = current_handle.as_ref() {
+                let stream =
+                    open_direct_tcpip_stream(parent, &self.config.host, self.config.port).await?;
+                check_host_key_via_stream(
+                    &self.config.host,
+                    self.config.port,
+                    stream,
+                    self.config.timeout_secs,
+                )
+                .await
+            } else {
+                check_host_key(
+                    &self.config.host,
+                    self.config.port,
+                    self.config.timeout_secs,
+                )
+                .await
+            };
+            if status != HostKeyStatus::Verified {
+                return Ok(Some(ProxyChainPreflightChallenge {
+                    step_index: target_index,
+                    host: self.config.host.clone(),
+                    port: self.config.port,
+                    status,
+                }));
+            }
+        }
+
+        if let Some(handle) = current_handle {
+            jump_handles.push(handle);
+        }
+        drop(jump_handles);
+        Ok(None)
+    }
+}
+
+fn ssh_client_config() -> client::Config {
+    client::Config {
+        inactivity_timeout: Some(Duration::from_secs(30)),
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
+        ..client::Config::default()
+    }
+}
+
+async fn open_direct_tcpip_stream(
+    handle: &client::Handle<NativeClientHandler>,
+    host: &str,
+    port: u16,
+) -> Result<russh::ChannelStream<client::Msg>, SshTransportError> {
+    handle
+        .channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 0)
+        .await
+        .map(|channel| channel.into_stream())
+        .map_err(|error| {
+            SshTransportError::ConnectionFailed(format!(
+                "failed to open proxy tunnel to {host}:{port}: {error}"
+            ))
+        })
+}
+
+fn proxy_step_has_accepted_fingerprint(hop: &ProxyHopConfig) -> bool {
+    hop.trust_host_key.is_some() && hop.expected_host_key_fingerprint.is_some()
+}
+
+fn target_step_has_accepted_fingerprint(config: &SshConfig) -> bool {
+    config.trust_host_key.is_some() && config.expected_host_key_fingerprint.is_some()
+}
+
+fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, SshTransportError> {
+    let addr = format!("{host}:{port}");
+    addr.to_socket_addrs()
+        .map_err(|error| SshTransportError::DnsResolution {
+            address: addr.clone(),
+            message: error.to_string(),
+        })?
+        .next()
+        .ok_or_else(|| SshTransportError::DnsResolution {
+            address: addr,
+            message: "no address found".to_string(),
+        })
+}
+
+fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
+    NativeClientHandler::new(
+        hop.host.clone(),
+        hop.port,
+        hop.strict_host_key_checking,
+        hop.trust_host_key,
+        hop.expected_host_key_fingerprint.clone(),
+        hop.agent_forwarding,
+    )
+}
+
+async fn authenticate_proxy_hop(
+    handle: &mut client::Handle<NativeClientHandler>,
+    hop: &ProxyHopConfig,
+) -> Result<(), SshTransportError> {
+    if matches!(hop.auth, AuthMethod::KeyboardInteractive) {
+        return Err(SshTransportError::UnsupportedAuth(
+            "keyboard-interactive authentication is not supported for proxy chain hops",
+        ));
+    }
+
+    let config = SshConfig {
+        host: hop.host.clone(),
+        port: hop.port,
+        username: hop.username.clone(),
+        auth: hop.auth.clone(),
+        strict_host_key_checking: hop.strict_host_key_checking,
+        trust_host_key: hop.trust_host_key,
+        expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
+        agent_forwarding: hop.agent_forwarding,
+        ..SshConfig::default()
+    };
+    authenticate(handle, &config, None).await
 }
 
 #[derive(Clone)]
@@ -752,11 +1083,8 @@ impl client::Handler for NativeClientHandler {
                         fingerprint,
                     })
                 } else {
-                    Err(SshTransportError::HostKeyUnknown {
-                        host: self.host.clone(),
-                        port: self.port,
-                        fingerprint,
-                    })
+                    learn_host_key(&self.host, self.port, server_public_key)?;
+                    Ok(true)
                 }
             }
             HostKeyVerification::Changed {

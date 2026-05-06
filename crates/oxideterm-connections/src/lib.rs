@@ -10,5 +10,5 @@ pub use ssh_config::{
 pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{
     AuthType, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
-    SaveConnectionRequest, SavedAuth, SavedConnection, validate_group_name,
+    SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop, validate_group_name,
 };

@@ -3,15 +3,15 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, SaveConnectionRequest, SavedAuth, SavedConnection, SshConfigHost,
-    list_ssh_config_hosts, resolve_ssh_config_alias,
+    AuthType, ConnectionInfo, ConnectionStore, SaveConnectionRequest, SavedAuth, SavedConnection,
+    SavedProxyHop, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
 };
 use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox,
     text_input::{text_caret, text_input_anchor_probe},
 };
-use oxideterm_ssh::AuthMethod;
+use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
 
 use super::{new_connection::SshConnectionIntent, *};
 use crate::workspace::ime::WorkspaceImeTarget;
@@ -2477,21 +2477,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let loaded_password = match &conn.auth {
-            SavedAuth::Password {
-                keychain_id: Some(_),
-                ..
-            } => self.connection_store.get_connection_password(id).ok(),
-            _ => None,
-        };
-        let loaded_passphrase = self
-            .connection_store
-            .get_connection_passphrase(id)
-            .ok()
-            .flatten();
-        let Some(config) =
-            ssh_config_from_saved_connection(&conn, loaded_password, loaded_passphrase)
-        else {
+        let Some(config) = ssh_config_from_saved_connection(&self.connection_store, &conn) else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Test,
@@ -2817,6 +2803,7 @@ pub(super) fn saved_connection_from_ssh_host(
         port: host.port.unwrap_or(22),
         username: host.user.unwrap_or_else(current_username),
         auth,
+        proxy_chain: Vec::new(),
         options: oxideterm_connections::ConnectionOptions::default(),
         created_at: now,
         last_used_at: None,
@@ -3005,18 +2992,96 @@ pub(super) fn save_request_from_form_with_existing_auth(
         } else {
             saved_auth_from_form(form)
         },
+        proxy_chain: saved_proxy_chain_from_form(form),
         color: (!form.color.trim().is_empty()).then(|| form.color.trim().to_string()),
         tags: form.tags.clone(),
         agent_forwarding: form.agent_forwarding,
     })
 }
 
+pub(super) fn saved_proxy_chain_from_form(form: &NewConnectionForm) -> Vec<SavedProxyHop> {
+    form.proxy_hops
+        .iter()
+        .map(|hop| SavedProxyHop {
+            host: hop.host.trim().to_string(),
+            port: hop.port.trim().parse::<u16>().unwrap_or(22),
+            username: hop.username.trim().to_string(),
+            auth: saved_auth_from_proxy_hop(hop),
+            agent_forwarding: hop.agent_forwarding,
+        })
+        .collect()
+}
+
+fn saved_auth_from_proxy_hop(hop: &super::new_connection::NewConnectionProxyHop) -> SavedAuth {
+    match hop.auth_tab {
+        SshAuthTab::Password => SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(hop.password.clone()),
+        },
+        SshAuthTab::DefaultKey => SavedAuth::Key {
+            key_path: String::new(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        },
+        SshAuthTab::SshKey => SavedAuth::Key {
+            key_path: hop.key_path.trim().to_string(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        },
+        SshAuthTab::Certificate => SavedAuth::Certificate {
+            key_path: hop.key_path.trim().to_string(),
+            cert_path: hop.cert_path.trim().to_string(),
+            has_passphrase: !hop.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        },
+        SshAuthTab::Agent | SshAuthTab::TwoFactor => SavedAuth::Agent,
+    }
+}
+
 pub(super) fn ssh_config_from_saved_connection(
+    store: &ConnectionStore,
     conn: &SavedConnection,
-    loaded_password: Option<String>,
-    loaded_passphrase: Option<String>,
 ) -> Option<SshConfig> {
-    let auth = match &conn.auth {
+    let auth = auth_method_from_saved_auth(store, &conn.auth)?;
+    let proxy_chain = proxy_chain_config_from_saved_connection(store, conn)?;
+    Some(SshConfig {
+        host: conn.host.clone(),
+        port: conn.port,
+        username: conn.username.clone(),
+        auth,
+        proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
+        agent_forwarding: conn.options.agent_forwarding,
+        strict_host_key_checking: true,
+        ..SshConfig::default()
+    })
+}
+
+pub(super) fn proxy_chain_config_from_saved_connection(
+    store: &ConnectionStore,
+    conn: &SavedConnection,
+) -> Option<Vec<ProxyHopConfig>> {
+    conn.proxy_chain
+        .iter()
+        .map(|hop| {
+            Some(ProxyHopConfig {
+                host: hop.host.clone(),
+                port: hop.port,
+                username: hop.username.clone(),
+                auth: auth_method_from_saved_auth(store, &hop.auth)?,
+                agent_forwarding: hop.agent_forwarding,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            })
+        })
+        .collect()
+}
+
+fn auth_method_from_saved_auth(store: &ConnectionStore, auth: &SavedAuth) -> Option<AuthMethod> {
+    Some(match auth {
         SavedAuth::Password {
             plaintext_password: Some(password),
             ..
@@ -3024,7 +3089,7 @@ pub(super) fn ssh_config_from_saved_connection(
         SavedAuth::Password {
             keychain_id: Some(_),
             ..
-        } => AuthMethod::password(loaded_password?),
+        } => AuthMethod::password(store.get_saved_auth_password(auth).ok()?),
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
@@ -3037,7 +3102,7 @@ pub(super) fn ssh_config_from_saved_connection(
             key_path.clone(),
             plaintext_passphrase
                 .clone()
-                .or_else(|| loaded_passphrase.clone()),
+                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten()),
         ),
         SavedAuth::Certificate {
             key_path,
@@ -3049,18 +3114,9 @@ pub(super) fn ssh_config_from_saved_connection(
             cert_path.clone(),
             plaintext_passphrase
                 .clone()
-                .or_else(|| loaded_passphrase.clone()),
+                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten()),
         ),
         SavedAuth::Agent => AuthMethod::Agent,
-    };
-    Some(SshConfig {
-        host: conn.host.clone(),
-        port: conn.port,
-        username: conn.username.clone(),
-        auth,
-        agent_forwarding: conn.options.agent_forwarding,
-        strict_host_key_checking: true,
-        ..SshConfig::default()
     })
 }
 
@@ -3184,5 +3240,87 @@ mod tests {
             }
             other => panic!("unexpected auth: {other:?}"),
         }
+    }
+
+    #[test]
+    fn new_connection_request_carries_proxy_chain() {
+        let mut form = NewConnectionForm {
+            auth_tab: SshAuthTab::Agent,
+            ..base_form()
+        };
+        form.proxy_hops
+            .push(crate::workspace::new_connection::NewConnectionProxyHop {
+                host: "jump.example.com".to_string(),
+                port: "2222".to_string(),
+                username: "ops".to_string(),
+                auth_tab: SshAuthTab::Password,
+                password: "jump-secret".to_string(),
+                key_path: String::new(),
+                cert_path: String::new(),
+                passphrase: String::new(),
+                agent_forwarding: true,
+            });
+
+        let request = save_request_from_form(&form, None).unwrap();
+
+        assert_eq!(request.proxy_chain.len(), 1);
+        let hop = &request.proxy_chain[0];
+        assert_eq!(hop.host, "jump.example.com");
+        assert_eq!(hop.port, 2222);
+        assert_eq!(hop.username, "ops");
+        assert!(hop.agent_forwarding);
+        match &hop.auth {
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(password),
+            } => assert_eq!(password, "jump-secret"),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn saved_proxy_chain_becomes_ssh_config_chain() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-gpui-session-manager-test-{}-connections.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = ConnectionStore::load(&path).unwrap();
+        let now = Utc::now();
+        let conn = SavedConnection {
+            id: "conn-1".to_string(),
+            name: "Home".to_string(),
+            group: None,
+            host: "target.example.com".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth: SavedAuth::Agent,
+            proxy_chain: vec![SavedProxyHop {
+                host: "jump.example.com".to_string(),
+                port: 2222,
+                username: "ops".to_string(),
+                auth: SavedAuth::Agent,
+                agent_forwarding: true,
+            }],
+            options: oxideterm_connections::ConnectionOptions {
+                agent_forwarding: false,
+            },
+            created_at: now,
+            last_used_at: None,
+            updated_at: Some(now),
+            color: None,
+            tags: Vec::new(),
+        };
+
+        let config = ssh_config_from_saved_connection(&store, &conn).unwrap();
+
+        assert!(config.strict_host_key_checking);
+        let chain = config.proxy_chain.unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].host, "jump.example.com");
+        assert_eq!(chain[0].port, 2222);
+        assert_eq!(chain[0].username, "ops");
+        assert!(chain[0].agent_forwarding);
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -61,6 +61,46 @@ pub(in crate::workspace) enum NewConnectionField {
     Passphrase,
     Group,
     Color,
+    JumpHost,
+    JumpPort,
+    JumpUsername,
+    JumpPassword,
+    JumpKeyPath,
+    JumpCertPath,
+    JumpPassphrase,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::workspace) struct NewConnectionProxyHop {
+    pub(in crate::workspace) host: String,
+    pub(in crate::workspace) port: String,
+    pub(in crate::workspace) username: String,
+    pub(in crate::workspace) auth_tab: SshAuthTab,
+    pub(in crate::workspace) password: String,
+    pub(in crate::workspace) key_path: String,
+    pub(in crate::workspace) cert_path: String,
+    pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) agent_forwarding: bool,
+}
+
+impl NewConnectionProxyHop {
+    pub(in crate::workspace) fn new() -> Self {
+        Self {
+            host: String::new(),
+            port: "22".to_string(),
+            username: String::new(),
+            auth_tab: SshAuthTab::SshKey,
+            password: String::new(),
+            key_path: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            agent_forwarding: false,
+        }
+    }
+
+    pub(in crate::workspace) fn complete(&self) -> bool {
+        !self.host.trim().is_empty() && !self.username.trim().is_empty()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +123,9 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) color: String,
     pub(in crate::workspace) tags: Vec<String>,
+    pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
+    pub(in crate::workspace) proxy_chain_expanded: bool,
+    pub(in crate::workspace) jump_server_form: Option<NewConnectionProxyHop>,
     pub(in crate::workspace) agent_forwarding: bool,
     pub(in crate::workspace) save_connection: bool,
     pub(in crate::workspace) field_focused: bool,
@@ -113,6 +156,9 @@ impl Default for NewConnectionForm {
             group: String::new(),
             color: String::new(),
             tags: Vec::new(),
+            proxy_hops: Vec::new(),
+            proxy_chain_expanded: false,
+            jump_server_form: None,
             agent_forwarding: false,
             save_connection: true,
             field_focused: true,
@@ -187,6 +233,58 @@ pub(in crate::workspace) fn next_connection_field(
     fields[next]
 }
 
+pub(in crate::workspace) fn next_jump_connection_field(
+    field: NewConnectionField,
+    auth_tab: SshAuthTab,
+    forward: bool,
+) -> NewConnectionField {
+    let fields: Vec<NewConnectionField> = match auth_tab {
+        SshAuthTab::Password => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpPassword,
+        ],
+        SshAuthTab::DefaultKey | SshAuthTab::Agent => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+        ],
+        SshAuthTab::SshKey => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpKeyPath,
+            NewConnectionField::JumpPassphrase,
+        ],
+        SshAuthTab::Certificate => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpKeyPath,
+            NewConnectionField::JumpCertPath,
+            NewConnectionField::JumpPassphrase,
+        ],
+        SshAuthTab::TwoFactor => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+        ],
+    };
+    let index = fields
+        .iter()
+        .position(|candidate| *candidate == field)
+        .unwrap_or(0);
+    let next = if forward {
+        (index + 1) % fields.len()
+    } else if index == 0 {
+        fields.len() - 1
+    } else {
+        index - 1
+    };
+    fields[next]
+}
+
 pub(in crate::workspace) fn current_connection_field_mut(
     form: &mut NewConnectionForm,
 ) -> &mut String {
@@ -201,6 +299,55 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Color => &mut form.color,
+        NewConnectionField::JumpHost => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump host field without jump form")
+                .host
+        }
+        NewConnectionField::JumpPort => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump port field without jump form")
+                .port
+        }
+        NewConnectionField::JumpUsername => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump username field without jump form")
+                .username
+        }
+        NewConnectionField::JumpPassword => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump password field without jump form")
+                .password
+        }
+        NewConnectionField::JumpKeyPath => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump key path field without jump form")
+                .key_path
+        }
+        NewConnectionField::JumpCertPath => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump cert path field without jump form")
+                .cert_path
+        }
+        NewConnectionField::JumpPassphrase => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump passphrase field without jump form")
+                .passphrase
+        }
     }
 }
 
@@ -216,6 +363,55 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
         NewConnectionField::Color => &form.color,
+        NewConnectionField::JumpHost => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump host field without jump form")
+                .host
+        }
+        NewConnectionField::JumpPort => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump port field without jump form")
+                .port
+        }
+        NewConnectionField::JumpUsername => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump username field without jump form")
+                .username
+        }
+        NewConnectionField::JumpPassword => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump password field without jump form")
+                .password
+        }
+        NewConnectionField::JumpKeyPath => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump key path field without jump form")
+                .key_path
+        }
+        NewConnectionField::JumpCertPath => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump cert path field without jump form")
+                .cert_path
+        }
+        NewConnectionField::JumpPassphrase => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump passphrase field without jump form")
+                .passphrase
+        }
     }
 }
 

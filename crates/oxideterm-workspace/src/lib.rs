@@ -87,12 +87,49 @@ impl PaneNode {
         }
     }
 
+    pub fn pane_id_for_session(&self, target: TerminalSessionId) -> Option<PaneId> {
+        match self {
+            Self::Leaf {
+                pane_id,
+                session_id,
+            } if *session_id == target => Some(*pane_id),
+            Self::Leaf { .. } => None,
+            Self::Group { children, .. } => children
+                .iter()
+                .find_map(|child| child.pane_id_for_session(target)),
+        }
+    }
+
+    pub fn session_id_for_pane(&self, target: PaneId) -> Option<TerminalSessionId> {
+        match self {
+            Self::Leaf {
+                pane_id,
+                session_id,
+            } if *pane_id == target => Some(*session_id),
+            Self::Leaf { .. } => None,
+            Self::Group { children, .. } => children
+                .iter()
+                .find_map(|child| child.session_id_for_pane(target)),
+        }
+    }
+
     pub fn collect_pane_ids(&self, panes: &mut Vec<PaneId>) {
         match self {
             Self::Leaf { pane_id, .. } => panes.push(*pane_id),
             Self::Group { children, .. } => {
                 for child in children {
                     child.collect_pane_ids(panes);
+                }
+            }
+        }
+    }
+
+    pub fn collect_session_ids(&self, sessions: &mut Vec<TerminalSessionId>) {
+        match self {
+            Self::Leaf { session_id, .. } => sessions.push(*session_id),
+            Self::Group { children, .. } => {
+                for child in children {
+                    child.collect_session_ids(sessions);
                 }
             }
         }
@@ -296,6 +333,59 @@ mod tests {
             node = replacement;
         }
         assert_eq!(node, PaneNode::leaf(pane_a, session_a));
+    }
+
+    #[test]
+    fn locates_pane_by_terminal_session() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let node = PaneNode::Group {
+            id: group,
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                PaneNode::leaf(pane_a, session_a),
+                PaneNode::leaf(pane_b, session_b),
+            ],
+            sizes: vec![50.0, 50.0],
+        };
+
+        assert_eq!(node.pane_id_for_session(session_b), Some(pane_b));
+        assert_eq!(node.pane_id_for_session(TerminalSessionId(99)), None);
+    }
+
+    #[test]
+    fn locates_terminal_session_by_pane() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let node = PaneNode::Group {
+            id: group,
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                PaneNode::leaf(pane_a, session_a),
+                PaneNode::leaf(pane_b, session_b),
+            ],
+            sizes: vec![50.0, 50.0],
+        };
+
+        assert_eq!(node.session_id_for_pane(pane_a), Some(session_a));
+        assert_eq!(node.session_id_for_pane(PaneId(99)), None);
+    }
+
+    #[test]
+    fn collects_terminal_sessions_from_tree() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let node = PaneNode::Group {
+            id: group,
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                PaneNode::leaf(pane_a, session_a),
+                PaneNode::leaf(pane_b, session_b),
+            ],
+            sizes: vec![50.0, 50.0],
+        };
+        let mut sessions = Vec::new();
+
+        node.collect_session_ids(&mut sessions);
+
+        assert_eq!(sessions, vec![session_a, session_b]);
     }
 
     #[test]

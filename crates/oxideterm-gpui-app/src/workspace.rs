@@ -41,11 +41,12 @@ use oxideterm_settings::{
     default_settings_path,
 };
 use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeRouter, SshConfig, SshConnectionRegistry,
+    ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeReadiness, NodeRouter, SshConfig,
+    SshConnectionRegistry,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
-    TerminalEncoding as SessionTerminalEncoding, scan_shells,
+    TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
 use oxideterm_workspace::{
@@ -117,6 +118,9 @@ pub(crate) struct WorkspaceApp {
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_registry: SshConnectionRegistry,
     node_router: NodeRouter,
+    ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
+    saved_ssh_nodes: HashMap<String, NodeId>,
+    terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
     next_ssh_node_id: u64,
     i18n: I18n,
     tokens: ThemeTokens,
@@ -132,6 +136,15 @@ pub(crate) struct WorkspaceApp {
     settings_selected_ssh_hosts: HashSet<String>,
     settings_connection_status: Option<String>,
     local_shells: Vec<ShellInfo>,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceSshNode {
+    saved_connection_id: Option<String>,
+    config: SshConfig,
+    title: String,
+    terminal_ids: Vec<TerminalSessionId>,
+    readiness: NodeReadiness,
 }
 
 impl WorkspaceApp {
@@ -201,6 +214,9 @@ impl WorkspaceApp {
             ssh_worker_rx,
             ssh_registry,
             node_router,
+            ssh_nodes: HashMap::new(),
+            saved_ssh_nodes: HashMap::new(),
+            terminal_ssh_nodes: HashMap::new(),
             next_ssh_node_id: 1,
             i18n: I18n::new(locale_from_settings(settings.general.language)),
             tokens,
@@ -228,6 +244,7 @@ impl WorkspaceApp {
                 if window_handle
                     .update(cx, |workspace, window, cx| {
                         workspace.poll_ssh_worker_results(window, cx);
+                        workspace.sync_ssh_node_lifecycle(cx);
                         if workspace.new_connection_form.is_some()
                             || workspace.keyboard_interactive_challenge.is_some()
                             || workspace.focused_settings_input.is_some()
@@ -787,6 +804,12 @@ impl Render for WorkspaceApp {
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
+            .when(
+                self.new_connection_form
+                    .as_ref()
+                    .is_some_and(|form| form.jump_server_form.is_some()),
+                |root| root.child(self.render_add_jump_server_modal(cx)),
+            )
             .when_some(
                 self.render_new_connection_select_overlay(window, cx),
                 |root, overlay| root.child(overlay),

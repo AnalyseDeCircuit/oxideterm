@@ -21,6 +21,17 @@ pub(in crate::workspace) struct HostKeyChallenge {
     pub(in crate::workspace) title: String,
     pub(in crate::workspace) status: HostKeyStatus,
     pub(in crate::workspace) intent: SshConnectionIntent,
+    pub(in crate::workspace) proxy_plan: Option<SshProxyPreflightPlan>,
+    pub(in crate::workspace) host: String,
+    pub(in crate::workspace) port: u16,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::workspace) struct SshProxyPreflightPlan {
+    pub(in crate::workspace) config: SshConfig,
+    pub(in crate::workspace) title: String,
+    pub(in crate::workspace) intent: SshConnectionIntent,
+    pub(in crate::workspace) current_index: usize,
 }
 
 impl WorkspaceApp {
@@ -44,6 +55,24 @@ impl WorkspaceApp {
             }
             HostKeyStatus::Verified | HostKeyStatus::Error { .. } => return,
         };
+
+        if let Some(mut plan) = challenge.proxy_plan.take() {
+            apply_proxy_host_key_acceptance(
+                &mut plan.config,
+                plan.current_index,
+                persist,
+                fingerprint,
+            );
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.pending = true;
+                form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+            } else {
+                self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+            }
+            self.start_proxy_chain_preflight(plan);
+            cx.notify();
+            return;
+        }
 
         challenge.config.strict_host_key_checking = true;
         challenge.config.trust_host_key = Some(persist);
@@ -83,8 +112,8 @@ impl WorkspaceApp {
         };
 
         match remove_host_key(
-            &challenge.config.host,
-            challenge.config.port,
+            &challenge.host,
+            challenge.port,
             key_type,
             expected_fingerprint,
         ) {
@@ -95,7 +124,11 @@ impl WorkspaceApp {
                 } else {
                     self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
                 }
-                self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent);
+                if let Some(plan) = challenge.proxy_plan {
+                    self.start_proxy_chain_preflight(plan);
+                } else {
+                    self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent);
+                }
             }
             Err(error) => {
                 if let Some(form) = self.new_connection_form.as_mut() {
@@ -199,10 +232,7 @@ impl WorkspaceApp {
                                     .mt(px(8.0))
                                     .text_size(px(self.tokens.metrics.form_text_font_size))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(format!(
-                                        "{}:{}",
-                                        challenge.config.host, challenge.config.port
-                                    )),
+                                    .child(format!("{}:{}", challenge.host, challenge.port)),
                             ),
                     )
                     .child(
@@ -355,5 +385,85 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element()
+    }
+}
+
+fn apply_proxy_host_key_acceptance(
+    config: &mut SshConfig,
+    step_index: usize,
+    persist: bool,
+    fingerprint: String,
+) {
+    if let Some(chain) = config.proxy_chain.as_mut()
+        && let Some(hop) = chain.get_mut(step_index)
+    {
+        hop.strict_host_key_checking = true;
+        hop.trust_host_key = Some(persist);
+        hop.expected_host_key_fingerprint = Some(fingerprint);
+        return;
+    }
+
+    config.strict_host_key_checking = true;
+    config.trust_host_key = Some(persist);
+    config.expected_host_key_fingerprint = Some(fingerprint);
+}
+
+#[cfg(test)]
+mod tests {
+    use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
+
+    use super::*;
+
+    fn proxy_config() -> SshConfig {
+        SshConfig {
+            host: "target.internal".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth: AuthMethod::Agent,
+            proxy_chain: Some(vec![ProxyHopConfig {
+                host: "jump.example.com".to_string(),
+                port: 2222,
+                username: "bob".to_string(),
+                auth: AuthMethod::Agent,
+                agent_forwarding: false,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            }]),
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        }
+    }
+
+    #[test]
+    fn proxy_host_key_acceptance_updates_current_hop() {
+        let mut config = proxy_config();
+
+        apply_proxy_host_key_acceptance(&mut config, 0, true, "SHA256:jump".to_string());
+
+        let hop = &config.proxy_chain.as_ref().unwrap()[0];
+        assert_eq!(hop.trust_host_key, Some(true));
+        assert_eq!(
+            hop.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:jump")
+        );
+        assert_eq!(config.trust_host_key, None);
+        assert_eq!(config.expected_host_key_fingerprint, None);
+    }
+
+    #[test]
+    fn proxy_host_key_acceptance_updates_target_after_hops() {
+        let mut config = proxy_config();
+
+        apply_proxy_host_key_acceptance(&mut config, 1, false, "SHA256:target".to_string());
+
+        let hop = &config.proxy_chain.as_ref().unwrap()[0];
+        assert_eq!(hop.trust_host_key, None);
+        assert_eq!(hop.expected_host_key_fingerprint, None);
+        assert_eq!(config.trust_host_key, Some(false));
+        assert_eq!(
+            config.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:target")
+        );
     }
 }
