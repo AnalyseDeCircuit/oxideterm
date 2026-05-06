@@ -13,6 +13,7 @@
       "save_password": "Save password to keychain",
       "group": "Group",
       "ungrouped": "Ungrouped",
+      "create_groups_hint": "Create groups in Settings",
       "agent_forwarding": "Enable SSH Agent forwarding",
       "save_connection": "Save connection for future use",
       "cancel": "Cancel",

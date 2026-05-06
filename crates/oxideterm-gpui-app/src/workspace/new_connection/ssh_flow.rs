@@ -86,6 +86,7 @@ impl WorkspaceApp {
         });
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
+        self.open_new_connection_select = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -100,6 +101,7 @@ impl WorkspaceApp {
         self.new_connection_form = None;
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
+        self.open_new_connection_select = None;
         self.host_key_challenge = None;
         self.cancel_keyboard_interactive_challenge(cx);
         self.focus_active_pane(window, cx);
@@ -198,6 +200,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = Some(action);
+        self.open_new_connection_select = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -217,6 +220,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = None;
+        self.open_new_connection_select = None;
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -260,6 +264,7 @@ impl WorkspaceApp {
                 Ok(_) => {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
+                    self.open_new_connection_select = None;
                     self.session_manager.status =
                         Some(self.i18n.t("sessionManager.edit_properties.save"));
                     self.focus_active_pane(window, cx);
@@ -490,6 +495,7 @@ impl WorkspaceApp {
                 }
                 self.new_connection_form = None;
                 self.host_key_challenge = None;
+                self.open_new_connection_select = None;
                 let _ = self.create_ssh_terminal_tab(config, title, window, cx);
             }
             SshConnectionIntent::ConnectSaved(id) => {
@@ -498,6 +504,7 @@ impl WorkspaceApp {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
+                    self.open_new_connection_select = None;
                 }
                 let _ = self.connection_store.mark_used(&id);
                 self.session_manager.status = None;

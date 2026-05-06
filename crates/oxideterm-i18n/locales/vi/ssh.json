@@ -13,6 +13,7 @@
       "save_password": "Lưu mật khẩu vào keychain",
       "group": "Nhóm",
       "ungrouped": "Không nhóm",
+      "create_groups_hint": "Tạo nhóm trong Cài đặt",
       "agent_forwarding": "Bật chuyển tiếp SSH Agent",
       "save_connection": "Lưu kết nối để dùng sau",
       "cancel": "Hủy",

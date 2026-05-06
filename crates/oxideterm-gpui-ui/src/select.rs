@@ -27,6 +27,7 @@ pub enum SelectAnchorId {
     SettingsConnectionIdleTimeout,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
+    NewConnectionGroup,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

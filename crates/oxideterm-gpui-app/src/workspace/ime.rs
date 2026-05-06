@@ -343,6 +343,7 @@ impl WorkspaceApp {
                     NewConnectionField::Host => form.host.clone(),
                     NewConnectionField::Username => form.username.clone(),
                     NewConnectionField::Group => form.group.clone(),
+                    NewConnectionField::Color => form.color.clone(),
                     NewConnectionField::Port
                     | NewConnectionField::Password
                     | NewConnectionField::KeyPath
@@ -453,6 +454,7 @@ fn connection_field_accepts_ime(field: NewConnectionField) -> bool {
             | NewConnectionField::Host
             | NewConnectionField::Username
             | NewConnectionField::Group
+            | NewConnectionField::Color
     )
 }
 
@@ -470,6 +472,7 @@ fn connection_field_value_mut(
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::Color => &mut form.color,
     }
 }
 

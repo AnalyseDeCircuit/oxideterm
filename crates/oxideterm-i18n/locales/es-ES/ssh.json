@@ -13,6 +13,7 @@
       "save_password": "Guardar contraseña en el llavero",
       "group": "Grupo",
       "ungrouped": "Sin grupo",
+      "create_groups_hint": "Crea grupos en Ajustes",
       "agent_forwarding": "Activar reenvío de agente SSH",
       "save_connection": "Guardar conexión para uso futuro",
       "cancel": "Cancelar",

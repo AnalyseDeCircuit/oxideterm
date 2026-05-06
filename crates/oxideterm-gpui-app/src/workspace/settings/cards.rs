@@ -272,11 +272,17 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn update_select_anchor(&mut self, anchor: OverlayAnchor, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn update_select_anchor(
+        &mut self,
+        anchor: OverlayAnchor,
+        cx: &mut Context<Self>,
+    ) {
         if self.select_anchors.get(&anchor.id) != Some(&anchor) {
             let should_notify = self
                 .open_settings_select
                 .is_some_and(|select| select.anchor_id() == anchor.id)
+                || (self.open_new_connection_select == Some(NewConnectionSelect::Group)
+                    && anchor.id == SelectAnchorId::NewConnectionGroup)
                 || self
                     .settings_slider_drag
                     .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -338,6 +344,10 @@ impl WorkspaceApp {
             changed = true;
         }
         if self.open_settings_select.take().is_some() {
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.open_new_connection_select.take().is_some() {
             self.ime_marked_text = None;
             changed = true;
         }

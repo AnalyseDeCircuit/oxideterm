@@ -13,6 +13,7 @@
       "save_password": "パスワードをキーチェーンに保存",
       "group": "グループ",
       "ungrouped": "グループなし",
+      "create_groups_hint": "設定でグループを作成",
       "agent_forwarding": "SSHエージェント転送を有効にする",
       "save_connection": "後で使用するために接続を保存",
       "cancel": "キャンセル",

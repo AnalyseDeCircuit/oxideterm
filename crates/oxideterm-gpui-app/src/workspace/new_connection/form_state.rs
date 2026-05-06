@@ -14,6 +14,11 @@ pub(in crate::workspace) enum SavedConnectionPromptAction {
     Test,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionSelect {
+    Group,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(in crate::workspace) enum NewConnectionField {
     Name,
@@ -25,6 +30,7 @@ pub(in crate::workspace) enum NewConnectionField {
     CertPath,
     Passphrase,
     Group,
+    Color,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +46,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
+    pub(in crate::workspace) color: String,
+    pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) agent_forwarding: bool,
     pub(in crate::workspace) save_connection: bool,
     pub(in crate::workspace) field_focused: bool,
@@ -63,6 +71,8 @@ impl Default for NewConnectionForm {
             passphrase: String::new(),
             save_password: false,
             group: String::new(),
+            color: String::new(),
+            tags: Vec::new(),
             agent_forwarding: false,
             save_connection: true,
             field_focused: true,
@@ -150,6 +160,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
+        NewConnectionField::Color => &mut form.color,
     }
 }
 
@@ -164,6 +175,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
+        NewConnectionField::Color => &form.color,
     }
 }
 
