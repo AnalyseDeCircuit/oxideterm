@@ -3066,3 +3066,122 @@ pub(super) fn ssh_config_from_saved_connection(
 fn group_label_for_form(group: Option<&str>) -> String {
     group.unwrap_or_default().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_form() -> NewConnectionForm {
+        NewConnectionForm {
+            name: "Home".to_string(),
+            host: "192.168.1.2".to_string(),
+            port: "22".to_string(),
+            username: "me".to_string(),
+            group: "Ungrouped".to_string(),
+            ..NewConnectionForm::default()
+        }
+    }
+
+    #[test]
+    fn new_connection_save_password_false_does_not_request_keychain_storage() {
+        let form = NewConnectionForm {
+            password: "secret".to_string(),
+            save_password: false,
+            ..base_form()
+        };
+
+        let request = save_request_from_form(&form, None).unwrap();
+
+        match request.auth {
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+            } => {}
+            other => panic!("unexpected auth: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_connection_save_password_true_keeps_empty_password_as_submitted_secret() {
+        let form = NewConnectionForm {
+            password: String::new(),
+            save_password: true,
+            ..base_form()
+        };
+
+        let request = save_request_from_form(&form, None).unwrap();
+
+        match request.auth {
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(password),
+            } => assert_eq!(password, ""),
+            other => panic!("unexpected auth: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_properties_unloaded_password_preserves_saved_keychain_id() {
+        let existing = SavedAuth::Password {
+            keychain_id: Some("kc-password".to_string()),
+            plaintext_password: None,
+        };
+        let form = NewConnectionForm {
+            password: String::new(),
+            password_loaded: false,
+            save_password: true,
+            ..base_form()
+        };
+
+        let request = save_request_from_form_with_existing_auth(
+            &form,
+            Some("conn-1".to_string()),
+            Some(&existing),
+        )
+        .unwrap();
+
+        match request.auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } => assert_eq!(keychain_id, "kc-password"),
+            other => panic!("unexpected auth: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() {
+        let existing = SavedAuth::Key {
+            key_path: "/tmp/id_ed25519".to_string(),
+            has_passphrase: true,
+            passphrase_keychain_id: Some("kc-passphrase".to_string()),
+            plaintext_passphrase: None,
+        };
+        let form = NewConnectionForm {
+            auth_tab: SshAuthTab::SshKey,
+            key_path: "/tmp/id_ed25519".to_string(),
+            passphrase: String::new(),
+            ..base_form()
+        };
+
+        let request = save_request_from_form_with_existing_auth(
+            &form,
+            Some("conn-1".to_string()),
+            Some(&existing),
+        )
+        .unwrap();
+
+        match request.auth {
+            SavedAuth::Key {
+                key_path,
+                has_passphrase,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            } => {
+                assert_eq!(key_path, "/tmp/id_ed25519");
+                assert!(!has_passphrase);
+            }
+            other => panic!("unexpected auth: {other:?}"),
+        }
+    }
+}

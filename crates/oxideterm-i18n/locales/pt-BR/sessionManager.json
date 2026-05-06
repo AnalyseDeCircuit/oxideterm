@@ -108,7 +108,8 @@
       "clear_color": "Limpar",
       "cancel": "Cancelar",
       "save": "Salvar",
-      "saving": "Salvando..."
+      "saving": "Salvando...",
+      "passphrase_hint": "Deixe em branco para manter a frase secreta salva quando o caminho da chave não mudar."
     }
   }
 }

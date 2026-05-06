@@ -108,7 +108,8 @@
       "clear_color": "Borrar",
       "cancel": "Cancelar",
       "save": "Guardar",
-      "saving": "Guardando..."
+      "saving": "Guardando...",
+      "passphrase_hint": "Déjalo vacío para conservar la frase de paso guardada si la ruta de la clave no cambia."
     }
   }
 }

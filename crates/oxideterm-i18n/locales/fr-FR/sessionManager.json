@@ -108,7 +108,8 @@
       "clear_color": "Effacer",
       "cancel": "Annuler",
       "save": "Enregistrer",
-      "saving": "Enregistrement..."
+      "saving": "Enregistrement...",
+      "passphrase_hint": "Laissez vide pour conserver la phrase secrète enregistrée lorsque le chemin de la clé ne change pas."
     }
   }
 }

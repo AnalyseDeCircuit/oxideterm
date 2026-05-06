@@ -36,12 +36,14 @@
       "select_all": "Chọn tất cả",
       "selected_count": "Đã chọn {{count}}",
       "never_used": "Chưa dùng"
-    },    "time": {
+    },
+    "time": {
       "just_now": "Vừa xong",
       "minutes_ago": "{{count}} phút trước",
       "hours_ago": "{{count}} giờ trước",
       "days_ago": "{{count}} ngày trước"
-    },    "actions": {
+    },
+    "actions": {
       "connect": "Kết nối",
       "edit": "Sửa",
       "duplicate": "Nhân bản",
@@ -106,7 +108,8 @@
       "clear_color": "Xóa",
       "cancel": "Hủy",
       "save": "Lưu",
-      "saving": "Đang lưu..."
+      "saving": "Đang lưu...",
+      "passphrase_hint": "Để trống để giữ passphrase đã lưu khi đường dẫn key không đổi."
     }
   }
 }

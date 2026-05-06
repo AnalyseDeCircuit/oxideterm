@@ -108,7 +108,8 @@
       "clear_color": "Cancella",
       "cancel": "Annulla",
       "save": "Salva",
-      "saving": "Salvataggio..."
+      "saving": "Salvataggio...",
+      "passphrase_hint": "Lascia vuoto per mantenere la passphrase salvata se il percorso della chiave non cambia."
     }
   }
 }

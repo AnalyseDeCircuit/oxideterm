@@ -108,7 +108,8 @@
       "clear_color": "Clear",
       "cancel": "Cancel",
       "save": "Save",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "passphrase_hint": "Leave blank to keep the saved passphrase when the key path is unchanged."
     }
   }
 }

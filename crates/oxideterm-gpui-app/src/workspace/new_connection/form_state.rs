@@ -15,6 +15,36 @@ pub(in crate::workspace) enum SavedConnectionPromptAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionFormMode {
+    NewConnection,
+    SavedConnectionPrompt,
+    EditProperties,
+}
+
+impl NewConnectionFormMode {
+    pub(in crate::workspace) fn submits_saved_connection_properties(self) -> bool {
+        self == Self::EditProperties
+    }
+
+    pub(in crate::workspace) fn stores_connection_on_connect(self) -> bool {
+        self == Self::NewConnection
+    }
+}
+
+pub(in crate::workspace) fn new_connection_form_mode(
+    editing_saved_connection_id: Option<&str>,
+    prompt_action: Option<SavedConnectionPromptAction>,
+) -> NewConnectionFormMode {
+    if prompt_action.is_some() {
+        NewConnectionFormMode::SavedConnectionPrompt
+    } else if editing_saved_connection_id.is_some() {
+        NewConnectionFormMode::EditProperties
+    } else {
+        NewConnectionFormMode::NewConnection
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionSelect {
     Group,
 }
@@ -250,9 +280,9 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        NewConnectionField, NewConnectionForm, backspace_current_connection_field,
-        insert_text_into_current_connection_field, select_current_connection_field,
-        text_from_keystroke,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, SavedConnectionPromptAction,
+        backspace_current_connection_field, insert_text_into_current_connection_field,
+        new_connection_form_mode, select_current_connection_field, text_from_keystroke,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -333,5 +363,28 @@ mod tests {
         backspace_current_connection_field(&mut form);
         assert!(form.username.is_empty());
         assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn form_mode_keeps_prompt_edit_and_new_submission_paths_distinct() {
+        assert_eq!(
+            new_connection_form_mode(None, None),
+            NewConnectionFormMode::NewConnection
+        );
+        assert_eq!(
+            new_connection_form_mode(Some("conn-1"), None),
+            NewConnectionFormMode::EditProperties
+        );
+        assert_eq!(
+            new_connection_form_mode(Some("conn-1"), Some(SavedConnectionPromptAction::Connect)),
+            NewConnectionFormMode::SavedConnectionPrompt
+        );
+
+        assert!(NewConnectionFormMode::NewConnection.stores_connection_on_connect());
+        assert!(!NewConnectionFormMode::SavedConnectionPrompt.stores_connection_on_connect());
+        assert!(NewConnectionFormMode::EditProperties.submits_saved_connection_properties());
+        assert!(
+            !NewConnectionFormMode::SavedConnectionPrompt.submits_saved_connection_properties()
+        );
     }
 }

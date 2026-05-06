@@ -870,6 +870,54 @@ mod tests {
     }
 
     #[test]
+    fn empty_password_is_saved_to_keychain_reference() {
+        let mut store = load_empty_store("password-save-empty");
+
+        store
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(String::new()),
+                },
+            ))
+            .unwrap();
+
+        match &store.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(_),
+                plaintext_password: None,
+            } => {}
+            other => panic!("unexpected auth: {other:?}"),
+        }
+        assert_eq!(store.get_connection_password("conn-1").unwrap(), "");
+    }
+
+    #[test]
+    fn password_auth_without_secret_keeps_no_keychain_reference() {
+        let mut store = load_empty_store("password-no-save");
+
+        store
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: None,
+                },
+            ))
+            .unwrap();
+
+        match &store.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: None,
+            } => {}
+            other => panic!("unexpected auth: {other:?}"),
+        }
+        assert!(store.get_connection_password("conn-1").is_err());
+    }
+
+    #[test]
     fn loaded_empty_password_updates_existing_keychain_entry() {
         let mut store = load_empty_store("password-clear");
         store

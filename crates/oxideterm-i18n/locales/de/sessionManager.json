@@ -108,7 +108,8 @@
       "clear_color": "Löschen",
       "cancel": "Abbrechen",
       "save": "Speichern",
-      "saving": "Speichern..."
+      "saving": "Speichern...",
+      "passphrase_hint": "Leer lassen, um die gespeicherte Passphrase beizubehalten, wenn der Schlüsselpfad unverändert ist."
     }
   }
 }

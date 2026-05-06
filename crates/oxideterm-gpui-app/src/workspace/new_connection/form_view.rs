@@ -9,7 +9,7 @@ use super::{
         NewConnectionField, NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction,
         SshAuthTab, backspace_current_connection_field, clear_connection_selection,
         clear_current_connection_field, connection_field_is_selected, current_connection_field,
-        insert_text_into_current_connection_field, next_connection_field,
+        insert_text_into_current_connection_field, new_connection_form_mode, next_connection_field,
         select_current_connection_field, text_from_keystroke,
     },
     ssh_flow::SshConnectionIntent,
@@ -222,8 +222,12 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
-        let prompt_mode = self.saved_connection_prompt_action.is_some();
-        let edit_properties_mode = self.editing_saved_connection_id.is_some() && !prompt_mode;
+        let mode = new_connection_form_mode(
+            self.editing_saved_connection_id.as_deref(),
+            self.saved_connection_prompt_action,
+        );
+        let prompt_mode = mode == super::form_state::NewConnectionFormMode::SavedConnectionPrompt;
+        let edit_properties_mode = mode.submits_saved_connection_properties();
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
         let title = if prompt_mode {
@@ -428,16 +432,23 @@ impl WorkspaceApp {
                                                 cx,
                                             )
                                         };
-                                        content.child(key_field).child(
-                                            self.render_connection_field(
+                                        content
+                                            .child(key_field)
+                                            .child(self.render_connection_field(
                                                 self.i18n.t("ssh.form.passphrase"),
                                                 &form.passphrase,
                                                 self.i18n.t("ssh.form.passphrase_placeholder"),
                                                 NewConnectionField::Passphrase,
                                                 true,
                                                 cx,
-                                            ),
-                                        )
+                                            ))
+                                            .when(edit_properties_mode, |content| {
+                                                content.child(self.render_connection_hint(
+                                                    self.i18n.t(
+                                                        "sessionManager.edit_properties.passphrase_hint",
+                                                    ),
+                                                ))
+                                            })
                                     },
                                 )
                                 .when(form.auth_tab == SshAuthTab::Certificate, |content| {
@@ -493,6 +504,13 @@ impl WorkspaceApp {
                                             true,
                                             cx,
                                         ))
+                                        .when(edit_properties_mode, |content| {
+                                            content.child(self.render_connection_hint(
+                                                self.i18n.t(
+                                                    "sessionManager.edit_properties.passphrase_hint",
+                                                ),
+                                            ))
+                                        })
                                 })
                                 .when(form.auth_tab == SshAuthTab::Agent, |content| {
                                     content.child(

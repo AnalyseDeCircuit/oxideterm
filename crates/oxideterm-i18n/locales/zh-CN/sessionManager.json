@@ -108,7 +108,8 @@
       "clear_color": "清除",
       "cancel": "取消",
       "save": "保存",
-      "saving": "保存中..."
+      "saving": "保存中...",
+      "passphrase_hint": "密钥路径未变时，留空会保留已保存的口令。"
     }
   }
 }

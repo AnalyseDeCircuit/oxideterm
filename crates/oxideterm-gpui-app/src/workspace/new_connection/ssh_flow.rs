@@ -8,7 +8,10 @@ use oxideterm_ssh::{
 use tokio::sync::oneshot;
 
 use super::{
-    form_state::{NewConnectionForm, SavedConnectionPromptAction, SshAuthTab},
+    form_state::{
+        NewConnectionForm, NewConnectionFormMode, SavedConnectionPromptAction, SshAuthTab,
+        new_connection_form_mode,
+    },
     host_key_dialog::HostKeyChallenge,
 };
 use crate::workspace::{
@@ -114,15 +117,20 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.saved_connection_prompt_action.is_some() {
-            self.submit_saved_connection_prompt(window, cx);
-            return;
+        match new_connection_form_mode(
+            self.editing_saved_connection_id.as_deref(),
+            self.saved_connection_prompt_action,
+        ) {
+            NewConnectionFormMode::SavedConnectionPrompt => {
+                self.submit_saved_connection_prompt(window, cx);
+            }
+            NewConnectionFormMode::EditProperties => {
+                self.save_editing_connection(window, cx);
+            }
+            NewConnectionFormMode::NewConnection => {
+                self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+            }
         }
-        if self.editing_saved_connection_id.is_some() {
-            self.save_editing_connection(window, cx);
-            return;
-        }
-        self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
     }
 
     pub(in crate::workspace) fn start_new_connection_flow(
@@ -499,10 +507,15 @@ impl WorkspaceApp {
     ) {
         match intent {
             SshConnectionIntent::Connect => {
-                if self
-                    .new_connection_form
-                    .as_ref()
-                    .is_some_and(|form| form.save_connection)
+                let mode = new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                );
+                if mode.stores_connection_on_connect()
+                    && self
+                        .new_connection_form
+                        .as_ref()
+                        .is_some_and(|form| form.save_connection)
                     && let Some(form) = self.new_connection_form.as_ref()
                     && let Ok(request) = save_request_from_form(form, None)
                     && let Err(error) = self.connection_store.upsert(request)

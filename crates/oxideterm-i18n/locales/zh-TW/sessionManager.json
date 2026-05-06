@@ -108,7 +108,8 @@
       "clear_color": "清除",
       "cancel": "取消",
       "save": "儲存",
-      "saving": "儲存中..."
+      "saving": "儲存中...",
+      "passphrase_hint": "金鑰路徑未變時，留空會保留已儲存的密碼短語。"
     }
   }
 }
