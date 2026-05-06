@@ -7,6 +7,7 @@ members = [
   "crates/oxideterm-gpui-ui",
   "crates/oxideterm-code-editor",
   "crates/oxideterm-connections",
+  "crates/oxideterm-forwarding",
   "crates/oxideterm-i18n",
   "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",

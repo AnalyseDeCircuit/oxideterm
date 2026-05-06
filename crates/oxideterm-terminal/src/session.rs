@@ -10,8 +10,8 @@ use alacritty_terminal::{
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
 use oxideterm_ssh::{
-    ConnectionConsumer, SshConfig, SshConnectionRegistry, SshPromptHandler, SshPtyHandle,
-    SshTransportClient, SshTransportCommand,
+    ConnectionConsumer, SshConfig, SshConnectionHandle, SshConnectionRegistry, SshPromptHandler,
+    SshPtyHandle, SshTransportClient, SshTransportCommand,
 };
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalInputEncoder, TerminalOutputDecoder,
@@ -91,6 +91,9 @@ pub trait TerminalSessionBackend: Send {
     fn terminate_active_task(&mut self) -> Result<()>;
     fn kill_active_task(&mut self) -> Result<()>;
     fn shutdown(&mut self);
+    fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
+        None
+    }
 
     fn status(&self) -> TerminalSessionStatus {
         TerminalSessionStatus {
@@ -307,6 +310,10 @@ impl TerminalSession {
 
     pub fn shutdown(&mut self) {
         self.backend.shutdown();
+    }
+
+    pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
+        self.backend.ssh_connection_handle()
     }
 }
 
@@ -1022,5 +1029,11 @@ impl TerminalSessionBackend for SshPtySession {
         self.handle = None;
         self.runtime = None;
         self.lifecycle = TerminalLifecycle::Closed;
+    }
+
+    fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
+        self.handle
+            .as_ref()
+            .and_then(SshPtyHandle::ssh_connection_handle)
     }
 }

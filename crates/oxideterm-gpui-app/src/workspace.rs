@@ -22,6 +22,7 @@ use gpui::{
     div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
+use oxideterm_forwarding::ForwardingRegistry;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
@@ -118,6 +119,7 @@ pub(crate) struct WorkspaceApp {
     ssh_worker_tx: std::sync::mpsc::Sender<SshConnectionWorkerResult>,
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_registry: SshConnectionRegistry,
+    forwarding_registry: ForwardingRegistry,
     node_router: NodeRouter,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
@@ -170,6 +172,7 @@ impl WorkspaceApp {
             )),
             ..ConnectionPoolConfig::default()
         });
+        let forwarding_registry = ForwardingRegistry::new();
         let node_router = NodeRouter::new(ssh_registry.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
@@ -216,6 +219,7 @@ impl WorkspaceApp {
             ssh_worker_tx,
             ssh_worker_rx,
             ssh_registry,
+            forwarding_registry,
             node_router,
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
