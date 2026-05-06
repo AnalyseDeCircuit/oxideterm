@@ -24,6 +24,7 @@
       "checking_host_key": "SSH 호스트 키를 확인하는 중...",
       "test_running": "SSH 연결을 테스트하는 중...",
       "test_success": "SSH 연결 테스트에 성공했습니다.",
+      "test_not_supported_kbi": "2단계 인증에서는 연결 테스트를 지원하지 않습니다",
       "key_path_not_ready": "SSH 키 인증에는 먼저 키 경로 선택기가 필요합니다.",
       "certificate_not_ready": "인증서 인증에는 먼저 키 및 인증서 경로 선택기가 필요합니다.",
       "keyboard_interactive_not_ready": "Keyboard-interactive 인증에는 먼저 네이티브 프롬프트 흐름이 필요합니다.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "취소",
         "trust_once": "이번만 신뢰",
-        "trust_save": "신뢰하고 저장"
+        "trust_save": "신뢰하고 저장",
+        "remove_saved": "저장된 키 제거"
       }
     },
     "kbi": {

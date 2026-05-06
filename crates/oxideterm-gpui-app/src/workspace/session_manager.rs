@@ -13,7 +13,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ssh::AuthMethod;
 
-use super::*;
+use super::{new_connection::SshConnectionIntent, *};
 use crate::workspace::ime::WorkspaceImeTarget;
 
 const UNGROUPED_FILTER: &str = "__ungrouped__";
@@ -2504,8 +2504,9 @@ impl WorkspaceApp {
             );
             return;
         };
-        self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
-        self.start_ssh_test(config, cx);
+        self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        self.start_ssh_preflight(config, conn.name.clone(), SshConnectionIntent::Test);
+        cx.notify();
     }
 
     fn move_selected_connections(&mut self, group: Option<&str>, cx: &mut Context<Self>) {

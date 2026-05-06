@@ -24,6 +24,7 @@
       "checking_host_key": "SSH-Hostschlüssel wird geprüft...",
       "test_running": "SSH-Verbindung wird getestet...",
       "test_success": "SSH-Verbindungstest erfolgreich.",
+      "test_not_supported_kbi": "Verbindungstest wird bei Zwei-Faktor-Authentifizierung nicht unterstützt",
       "key_path_not_ready": "SSH-Schlüsselauthentifizierung benötigt zuerst die Schlüsselauswahl.",
       "certificate_not_ready": "Zertifikatauthentifizierung benötigt zuerst Schlüssel- und Zertifikatpfad-Auswahl.",
       "keyboard_interactive_not_ready": "Keyboard-interactive-Authentifizierung benötigt zuerst den nativen Eingabefluss.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "Abbrechen",
         "trust_once": "Einmal vertrauen",
-        "trust_save": "Vertrauen und speichern"
+        "trust_save": "Vertrauen und speichern",
+        "remove_saved": "Gespeicherten Schlüssel entfernen"
       }
     },
     "kbi": {

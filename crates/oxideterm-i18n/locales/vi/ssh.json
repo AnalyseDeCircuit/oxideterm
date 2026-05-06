@@ -24,6 +24,7 @@
       "checking_host_key": "Đang kiểm tra khóa máy chủ SSH...",
       "test_running": "Đang kiểm tra kết nối SSH...",
       "test_success": "Kiểm tra kết nối SSH thành công.",
+      "test_not_supported_kbi": "Thử kết nối không được hỗ trợ cho xác thực 2FA",
       "key_path_not_ready": "Xác thực khóa SSH cần bộ chọn đường dẫn khóa trước.",
       "certificate_not_ready": "Xác thực chứng chỉ cần bộ chọn đường dẫn khóa và chứng chỉ trước.",
       "keyboard_interactive_not_ready": "Xác thực keyboard-interactive cần luồng nhắc native trước.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "Hủy",
         "trust_once": "Tin cậy một lần",
-        "trust_save": "Tin cậy và lưu"
+        "trust_save": "Tin cậy và lưu",
+        "remove_saved": "Xóa khóa đã lưu"
       }
     },
     "kbi": {

@@ -24,6 +24,7 @@
       "checking_host_key": "Comprobando la clave de host SSH...",
       "test_running": "Probando la conexión SSH...",
       "test_success": "La prueba de conexión SSH se completó correctamente.",
+      "test_not_supported_kbi": "La prueba de conexión no es compatible con la autenticación 2FA",
       "key_path_not_ready": "La autenticación con clave SSH necesita primero el selector de ruta de clave.",
       "certificate_not_ready": "La autenticación con certificado necesita primero los selectores de clave y certificado.",
       "keyboard_interactive_not_ready": "La autenticación keyboard-interactive necesita primero el flujo nativo de avisos.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "Cancelar",
         "trust_once": "Confiar una vez",
-        "trust_save": "Confiar y guardar"
+        "trust_save": "Confiar y guardar",
+        "remove_saved": "Eliminar clave guardada"
       }
     },
     "kbi": {

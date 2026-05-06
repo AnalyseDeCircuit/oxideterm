@@ -139,6 +139,18 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if intent == SshConnectionIntent::Test
+            && self
+                .new_connection_form
+                .as_ref()
+                .is_some_and(|form| form.auth_tab == SshAuthTab::TwoFactor)
+        {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.error = Some(self.i18n.t("ssh.form.test_not_supported_kbi"));
+            }
+            cx.notify();
+            return;
+        }
         let Some((config, title)) = self.build_new_connection_config(cx) else {
             return;
         };
@@ -147,25 +159,7 @@ impl WorkspaceApp {
             form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
         }
 
-        let tx = self.ssh_worker_tx.clone();
-        let host = config.host.clone();
-        let port = config.port;
-        let worker_config = config.clone();
-        let worker_title = title.clone();
-        std::thread::spawn(move || {
-            let status = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime.block_on(check_host_key(&host, port, 10)),
-                Err(error) => HostKeyStatus::Error {
-                    message: format!("failed to initialize SSH runtime: {error}"),
-                },
-            };
-            let _ = tx.send(SshConnectionWorkerResult::Preflight {
-                config: worker_config,
-                title: worker_title,
-                intent,
-                status,
-            });
-        });
+        self.start_ssh_preflight(config, title, intent);
         cx.notify();
     }
 
@@ -319,6 +313,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectSaved(id));
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_ssh_preflight(
+        &self,
+        config: SshConfig,
+        title: String,
+        intent: SshConnectionIntent,
+    ) {
         let tx = self.ssh_worker_tx.clone();
         let host = config.host.clone();
         let port = config.port;
@@ -334,11 +338,10 @@ impl WorkspaceApp {
             let _ = tx.send(SshConnectionWorkerResult::Preflight {
                 config: worker_config,
                 title: worker_title,
-                intent: SshConnectionIntent::ConnectSaved(id),
+                intent,
                 status,
             });
         });
-        cx.notify();
     }
 
     fn build_new_connection_config(

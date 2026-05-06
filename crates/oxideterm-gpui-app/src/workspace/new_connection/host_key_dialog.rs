@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
     px, rgb, rgba,
 };
-use oxideterm_ssh::{HostKeyStatus, SshConfig};
+use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
 use super::ssh_flow::SshConnectionIntent;
 use crate::workspace::WorkspaceApp;
@@ -12,6 +12,7 @@ enum HostKeyButtonAction {
     Cancel,
     TrustOnce,
     TrustSave,
+    RemoveSaved,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,47 @@ impl WorkspaceApp {
             form.error = Some(self.i18n.t("ssh.host_key.cancelled"));
         } else {
             self.session_manager.status = Some(self.i18n.t("ssh.host_key.cancelled"));
+        }
+        cx.notify();
+    }
+
+    fn remove_changed_host_key_challenge(&mut self, cx: &mut Context<Self>) {
+        let Some(challenge) = self.host_key_challenge.take() else {
+            return;
+        };
+        let HostKeyStatus::Changed {
+            expected_fingerprint,
+            key_type,
+            ..
+        } = &challenge.status
+        else {
+            self.host_key_challenge = Some(challenge);
+            return;
+        };
+
+        match remove_host_key(
+            &challenge.config.host,
+            challenge.config.port,
+            key_type,
+            expected_fingerprint,
+        ) {
+            Ok(()) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = true;
+                    form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+                } else {
+                    self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+                }
+                self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent);
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(error.to_string());
+                } else {
+                    self.session_manager.status = Some(error.to_string());
+                }
+                self.host_key_challenge = Some(challenge);
+            }
         }
         cx.notify();
     }
@@ -216,6 +258,14 @@ impl WorkspaceApp {
                                 HostKeyButtonAction::Cancel,
                                 cx,
                             ))
+                            .when(changed, |footer| {
+                                footer.child(self.render_host_key_button(
+                                    self.i18n.t("ssh.host_key.actions.remove_saved"),
+                                    true,
+                                    HostKeyButtonAction::RemoveSaved,
+                                    cx,
+                                ))
+                            })
                             .when(!changed, |footer| {
                                 footer
                                     .child(self.render_host_key_button(
@@ -301,6 +351,7 @@ impl WorkspaceApp {
                     HostKeyButtonAction::TrustSave => {
                         this.accept_host_key_challenge(true, window, cx)
                     }
+                    HostKeyButtonAction::RemoveSaved => this.remove_changed_host_key_challenge(cx),
                 }),
             )
             .into_any_element()

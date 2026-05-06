@@ -24,6 +24,7 @@
       "checking_host_key": "SSHホストキーを確認しています...",
       "test_running": "SSH接続をテストしています...",
       "test_success": "SSH接続テストに成功しました。",
+      "test_not_supported_kbi": "二要素認証ではテスト接続はサポートされていません",
       "key_path_not_ready": "SSHキー認証には、先にキーパス選択が必要です。",
       "certificate_not_ready": "証明書認証には、先にキーと証明書パスの選択が必要です。",
       "keyboard_interactive_not_ready": "Keyboard-interactive認証には、先にネイティブのプロンプトフローが必要です。",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "キャンセル",
         "trust_once": "今回だけ信頼",
-        "trust_save": "信頼して保存"
+        "trust_save": "信頼して保存",
+        "remove_saved": "保存済みキーを削除"
       }
     },
     "kbi": {

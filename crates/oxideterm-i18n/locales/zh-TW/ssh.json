@@ -24,6 +24,7 @@
       "checking_host_key": "正在檢查 SSH 主機金鑰...",
       "test_running": "正在測試 SSH 連線...",
       "test_success": "SSH 連線測試成功。",
+      "test_not_supported_kbi": "雙因素驗證不支援測試連線",
       "key_path_not_ready": "SSH 金鑰驗證需要先接入金鑰路徑選擇器。",
       "certificate_not_ready": "憑證驗證需要先接入金鑰與憑證路徑選擇器。",
       "keyboard_interactive_not_ready": "Keyboard-interactive 驗證需要先接入原生提示流程。",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "取消",
         "trust_once": "僅信任本次",
-        "trust_save": "信任並儲存"
+        "trust_save": "信任並儲存",
+        "remove_saved": "刪除已儲存金鑰"
       }
     },
     "kbi": {

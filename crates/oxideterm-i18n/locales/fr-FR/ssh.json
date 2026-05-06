@@ -24,6 +24,7 @@
       "checking_host_key": "Vérification de la clé d’hôte SSH...",
       "test_running": "Test de la connexion SSH...",
       "test_success": "Test de connexion SSH réussi.",
+      "test_not_supported_kbi": "Le test de connexion n'est pas pris en charge pour l'authentification 2FA",
       "key_path_not_ready": "L’authentification par clé SSH nécessite d’abord le sélecteur de chemin de clé.",
       "certificate_not_ready": "L’authentification par certificat nécessite d’abord les sélecteurs de clé et de certificat.",
       "keyboard_interactive_not_ready": "L’authentification keyboard-interactive nécessite d’abord le flux natif de saisie.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "Annuler",
         "trust_once": "Faire confiance une fois",
-        "trust_save": "Faire confiance et enregistrer"
+        "trust_save": "Faire confiance et enregistrer",
+        "remove_saved": "Supprimer la clé enregistrée"
       }
     },
     "kbi": {

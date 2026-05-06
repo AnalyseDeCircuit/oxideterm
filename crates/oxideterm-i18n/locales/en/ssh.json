@@ -24,6 +24,7 @@
       "checking_host_key": "Checking SSH host key...",
       "test_running": "Testing SSH connection...",
       "test_success": "SSH connection test succeeded.",
+      "test_not_supported_kbi": "Test connection is not supported for 2FA authentication",
       "key_path_not_ready": "SSH key authentication needs the key path picker before it can connect.",
       "certificate_not_ready": "Certificate authentication needs key and certificate path pickers before it can connect.",
       "keyboard_interactive_not_ready": "Keyboard-interactive authentication needs the native prompt flow before it can connect.",
@@ -62,7 +63,8 @@
       "actions": {
         "cancel": "Cancel",
         "trust_once": "Trust Once",
-        "trust_save": "Trust and Save"
+        "trust_save": "Trust and Save",
+        "remove_saved": "Remove Saved Key"
       }
     },
     "kbi": {

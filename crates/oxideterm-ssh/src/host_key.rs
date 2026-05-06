@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
+use std::{collections::HashSet, fs, net::ToSocketAddrs, path::PathBuf, sync::Arc, time::Duration};
 
 use russh::{
     client,
@@ -100,6 +100,85 @@ pub fn learn_host_key(
         .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))
 }
 
+pub fn remove_host_key(
+    host: &str,
+    port: u16,
+    key_type: &str,
+    expected_fingerprint: &str,
+) -> Result<(), SshTransportError> {
+    let matching_lines = known_host_keys(host, port)
+        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?
+        .into_iter()
+        .filter_map(|(line, key)| {
+            (public_key_type(&key) == key_type
+                && public_key_fingerprint(&key) == expected_fingerprint)
+                .then_some(line)
+        })
+        .collect::<HashSet<_>>();
+
+    if matching_lines.is_empty() {
+        return Err(SshTransportError::HostKeyCheckFailed(format!(
+            "No saved host key matched {host}:{port} {key_type} {expected_fingerprint}"
+        )));
+    }
+
+    let path = default_known_hosts_path()?;
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?;
+    let had_trailing_newline = contents.ends_with('\n');
+    let host_pattern = known_hosts_host_pattern(host, port);
+    let retained = contents
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if !matching_lines.contains(&(index + 1)) {
+                return Some(line.to_string());
+            }
+            retain_known_hosts_aliases(line, &host_pattern)
+        })
+        .collect::<Vec<_>>();
+
+    let mut rewritten = retained.join("\n");
+    if had_trailing_newline && !rewritten.is_empty() {
+        rewritten.push('\n');
+    }
+    fs::write(path, rewritten)
+        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))
+}
+
+fn default_known_hosts_path() -> Result<PathBuf, SshTransportError> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Err(SshTransportError::HostKeyCheckFailed(
+            "Could not locate home directory for known_hosts".to_string(),
+        ));
+    };
+    Ok(PathBuf::from(home).join(".ssh").join("known_hosts"))
+}
+
+fn known_hosts_host_pattern(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+fn retain_known_hosts_aliases(line: &str, host_pattern: &str) -> Option<String> {
+    let split = line.find(char::is_whitespace)?;
+    let hosts = &line[..split];
+    let rest = &line[split..];
+    let remaining = hosts
+        .split(',')
+        .filter(|pattern| *pattern != host_pattern)
+        .collect::<Vec<_>>();
+
+    if remaining.len() == hosts.split(',').count() || remaining.is_empty() {
+        return None;
+    }
+
+    Some(format!("{}{}", remaining.join(","), rest))
+}
+
 struct PreflightHandler {
     host: String,
     port: u16,
@@ -195,5 +274,27 @@ pub async fn check_host_key(host: &str, port: u16, timeout_secs: u64) -> HostKey
         Err(_) => HostKeyStatus::Error {
             message: format!("Connection timeout after {timeout_secs}s"),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_key_removal_preserves_other_aliases_on_same_line() {
+        let line = "example.com,alias.example.com ssh-ed25519 AAAAC3Nza comment";
+
+        assert_eq!(
+            retain_known_hosts_aliases(line, "example.com").as_deref(),
+            Some("alias.example.com ssh-ed25519 AAAAC3Nza comment")
+        );
+    }
+
+    #[test]
+    fn host_key_removal_drops_single_host_line() {
+        let line = "[example.com]:2222 ssh-ed25519 AAAAC3Nza";
+
+        assert_eq!(retain_known_hosts_aliases(line, "[example.com]:2222"), None);
     }
 }

@@ -10,4 +10,5 @@ pub(super) use form_state::{
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;
+pub(in crate::workspace) use ssh_flow::SshConnectionIntent;
 pub(super) use ssh_flow::{NativeSshPromptHandler, SshConnectionWorkerResult};
