@@ -67,6 +67,14 @@ pub struct ProxyHopConfig {
     pub port: u16,
     pub username: String,
     pub auth: AuthMethod,
+    #[serde(default)]
+    pub agent_forwarding: bool,
+    #[serde(default = "default_proxy_strict_host_key_checking")]
+    pub strict_host_key_checking: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_host_key: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_host_key_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +158,10 @@ const fn default_rows() -> u32 {
     24
 }
 
+const fn default_proxy_strict_host_key_checking() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +170,37 @@ mod tests {
     fn builds_stable_connection_key() {
         let config = SshConfig::password("192.168.1.10", 22, "root", "pw");
         assert_eq!(config.connection_key(), "root@192.168.1.10:22|");
+    }
+
+    #[test]
+    fn connection_key_includes_proxy_chain_order() {
+        let mut config = SshConfig::password("target", 22, "app", "pw");
+        config.proxy_chain = Some(vec![
+            ProxyHopConfig {
+                host: "jump-a".to_string(),
+                port: 2222,
+                username: "ops".to_string(),
+                auth: AuthMethod::Agent,
+                agent_forwarding: false,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            },
+            ProxyHopConfig {
+                host: "jump-b".to_string(),
+                port: 22,
+                username: "root".to_string(),
+                auth: AuthMethod::Agent,
+                agent_forwarding: true,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            },
+        ]);
+
+        assert_eq!(
+            config.connection_key(),
+            "app@target:22|ops@jump-a:2222>root@jump-b:22"
+        );
     }
 }

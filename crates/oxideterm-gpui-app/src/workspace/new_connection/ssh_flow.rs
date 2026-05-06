@@ -2,23 +2,25 @@ use std::{future::Future, pin::Pin, result::Result as StdResult, sync::Arc, sync
 
 use gpui::{Context, Window};
 use oxideterm_ssh::{
-    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, SshConfig, SshPromptError,
-    SshPromptHandler, SshTransportClient, check_host_key,
+    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, ProxyChainPreflightChallenge,
+    ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler, SshTransportClient,
+    check_host_key,
 };
 use tokio::sync::oneshot;
 
 use super::{
     form_state::{
-        NewConnectionForm, NewConnectionFormMode, SavedConnectionPromptAction, SshAuthTab,
-        new_connection_form_mode,
+        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
+        SavedConnectionPromptAction, SshAuthTab, new_connection_form_mode,
     },
-    host_key_dialog::HostKeyChallenge,
+    host_key_dialog::{HostKeyChallenge, SshProxyPreflightPlan},
 };
 use crate::workspace::{
     WorkspaceApp,
     session_manager::{
-        form_from_saved_connection, save_request_from_form,
-        save_request_from_form_with_existing_auth, ssh_config_from_saved_connection,
+        form_from_saved_connection, proxy_chain_config_from_saved_connection,
+        save_request_from_form, save_request_from_form_with_existing_auth,
+        ssh_config_from_saved_connection,
     },
 };
 
@@ -35,6 +37,11 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
         title: String,
         intent: SshConnectionIntent,
         status: HostKeyStatus,
+    },
+    ProxyPreflight {
+        plan: SshProxyPreflightPlan,
+        challenge: Option<ProxyChainPreflightChallenge>,
+        error: Option<String>,
     },
     Test {
         result: StdResult<(), String>,
@@ -159,6 +166,16 @@ impl WorkspaceApp {
             form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
         }
 
+        if config.proxy_chain.is_some() {
+            self.start_proxy_chain_preflight(SshProxyPreflightPlan {
+                config,
+                title,
+                intent,
+                current_index: 0,
+            });
+            cx.notify();
+            return;
+        }
         self.start_ssh_preflight(config, title, intent);
         cx.notify();
     }
@@ -172,21 +189,7 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
-        let loaded_password = match &conn.auth {
-            oxideterm_connections::SavedAuth::Password {
-                keychain_id: Some(_),
-                ..
-            } => self.connection_store.get_connection_password(id).ok(),
-            _ => None,
-        };
-        let loaded_passphrase = self
-            .connection_store
-            .get_connection_passphrase(id)
-            .ok()
-            .flatten();
-        let Some(config) =
-            ssh_config_from_saved_connection(&conn, loaded_password, loaded_passphrase)
-        else {
+        let Some(config) = ssh_config_from_saved_connection(&self.connection_store, &conn) else {
             self.open_saved_connection_prompt(
                 id,
                 SavedConnectionPromptAction::Connect,
@@ -200,7 +203,7 @@ impl WorkspaceApp {
             return;
         };
         let title = conn.name.clone();
-        self.start_saved_connection_flow(id.to_string(), config, title, cx);
+        self.start_saved_connection_flow(id.to_string(), config, title, window, cx);
     }
 
     pub(in crate::workspace) fn open_saved_connection_prompt(
@@ -251,9 +254,18 @@ impl WorkspaceApp {
         let Some(id) = self.editing_saved_connection_id.clone() else {
             return;
         };
-        let Some((config, title)) = self.build_new_connection_config(cx) else {
+        let Some((mut config, title)) = self.build_new_connection_config(cx) else {
             return;
         };
+        if config.proxy_chain.is_none()
+            && let Some(conn) = self.connection_store.get(&id)
+            && let Some(proxy_chain) =
+                proxy_chain_config_from_saved_connection(&self.connection_store, conn)
+            && !proxy_chain.is_empty()
+        {
+            config.proxy_chain = Some(proxy_chain);
+            config.strict_host_key_checking = true;
+        }
 
         match action {
             SavedConnectionPromptAction::Connect => {
@@ -261,7 +273,7 @@ impl WorkspaceApp {
                     form.pending = true;
                     form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
                 }
-                self.start_saved_connection_flow(id, config, title, cx);
+                self.start_saved_connection_flow(id, config, title, window, cx);
             }
             SavedConnectionPromptAction::Test => {
                 self.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
@@ -276,26 +288,33 @@ impl WorkspaceApp {
         let Some(form) = self.new_connection_form.as_ref() else {
             return;
         };
-        let existing_auth = self
-            .connection_store
-            .get(&id)
+        let existing_connection = self.connection_store.get(&id).cloned();
+        let existing_auth = existing_connection
+            .as_ref()
             .map(|connection| connection.auth.clone());
         match save_request_from_form_with_existing_auth(form, Some(id), existing_auth.as_ref()) {
-            Ok(request) => match self.connection_store.upsert(request) {
-                Ok(_) => {
-                    self.new_connection_form = None;
-                    self.editing_saved_connection_id = None;
-                    self.open_new_connection_select = None;
-                    self.session_manager.status =
-                        Some(self.i18n.t("sessionManager.edit_properties.save"));
-                    self.focus_active_pane(window, cx);
+            Ok(mut request) => {
+                if form.proxy_hops.is_empty()
+                    && let Some(connection) = existing_connection.as_ref()
+                {
+                    request.proxy_chain = connection.proxy_chain.clone();
                 }
-                Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.error = Some(error.to_string());
+                match self.connection_store.upsert(request) {
+                    Ok(_) => {
+                        self.new_connection_form = None;
+                        self.editing_saved_connection_id = None;
+                        self.open_new_connection_select = None;
+                        self.session_manager.status =
+                            Some(self.i18n.t("sessionManager.edit_properties.save"));
+                        self.focus_active_pane(window, cx);
+                    }
+                    Err(error) => {
+                        if let Some(form) = self.new_connection_form.as_mut() {
+                            form.error = Some(error.to_string());
+                        }
                     }
                 }
-            },
+            }
             Err(error) => {
                 if let Some(form) = self.new_connection_form.as_mut() {
                     form.error = Some(error.to_string());
@@ -310,9 +329,20 @@ impl WorkspaceApp {
         id: String,
         config: SshConfig,
         title: String,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        if config.proxy_chain.is_some() {
+            self.start_proxy_chain_preflight(SshProxyPreflightPlan {
+                config,
+                title,
+                intent: SshConnectionIntent::ConnectSaved(id),
+                current_index: 0,
+            });
+            cx.notify();
+            return;
+        }
         self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectSaved(id));
         cx.notify();
     }
@@ -359,6 +389,11 @@ impl WorkspaceApp {
             cx.notify();
             return None;
         }
+        if !form.proxy_hops.is_empty() && form.auth_tab == SshAuthTab::TwoFactor {
+            form.error = Some(self.i18n.t("ssh.form.proxy_chain_kbi_unsupported"));
+            cx.notify();
+            return None;
+        }
 
         let auth = match form.auth_tab {
             SshAuthTab::Password => AuthMethod::password(form.password.clone()),
@@ -392,12 +427,14 @@ impl WorkspaceApp {
             }
             SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
         };
+        let proxy_chain = proxy_chain_from_form(form);
         let config = SshConfig {
             host: host.clone(),
             port: port.unwrap_or(22),
             username: username.clone(),
             auth,
             agent_forwarding: form.agent_forwarding,
+            proxy_chain,
             strict_host_key_checking: true,
             ..SshConfig::default()
         };
@@ -433,6 +470,11 @@ impl WorkspaceApp {
                     intent,
                     status,
                 } => self.handle_ssh_preflight_result(config, title, intent, status, window, cx),
+                SshConnectionWorkerResult::ProxyPreflight {
+                    plan,
+                    challenge,
+                    error,
+                } => self.handle_proxy_chain_preflight_result(plan, challenge, error, window, cx),
                 SshConnectionWorkerResult::Test { result } => {
                     if let Some(form) = self.new_connection_form.as_mut() {
                         form.pending = false;
@@ -480,11 +522,94 @@ impl WorkspaceApp {
                 self.continue_verified_ssh_flow(config, title, intent, window, cx)
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
+                let host = config.host.clone();
+                let port = config.port;
                 self.host_key_challenge = Some(HostKeyChallenge {
                     config,
                     title,
                     status,
                     intent,
+                    proxy_plan: None,
+                    host,
+                    port,
+                });
+                self.needs_active_pane_focus = false;
+                cx.notify();
+            }
+            HostKeyStatus::Error { message } => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(message);
+                } else {
+                    self.session_manager.status = Some(message);
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn start_proxy_chain_preflight(&self, plan: SshProxyPreflightPlan) {
+        let tx = self.ssh_worker_tx.clone();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(runtime) => runtime
+                    .block_on(SshTransportClient::new(plan.config.clone()).preflight_proxy_chain())
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(format!("failed to initialize SSH runtime: {error}")),
+            };
+            let (challenge, error) = match result {
+                Ok(challenge) => (challenge, None),
+                Err(error) => (None, Some(error)),
+            };
+            let _ = tx.send(SshConnectionWorkerResult::ProxyPreflight {
+                plan,
+                challenge,
+                error,
+            });
+        });
+    }
+
+    fn handle_proxy_chain_preflight_result(
+        &mut self,
+        mut plan: SshProxyPreflightPlan,
+        challenge: Option<ProxyChainPreflightChallenge>,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.pending = false;
+            form.error = None;
+        }
+
+        if let Some(error) = error {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.error = Some(error);
+            } else {
+                self.session_manager.status = Some(error);
+            }
+            cx.notify();
+            return;
+        }
+
+        let Some(challenge) = challenge else {
+            self.continue_verified_ssh_flow(plan.config, plan.title, plan.intent, window, cx);
+            return;
+        };
+
+        match challenge.status {
+            HostKeyStatus::Verified => {
+                self.continue_verified_ssh_flow(plan.config, plan.title, plan.intent, window, cx)
+            }
+            HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
+                plan.current_index = challenge.step_index;
+                self.host_key_challenge = Some(HostKeyChallenge {
+                    config: plan.config.clone(),
+                    title: plan.title.clone(),
+                    status: challenge.status,
+                    intent: plan.intent.clone(),
+                    proxy_plan: Some(plan),
+                    host: challenge.host,
+                    port: challenge.port,
                 });
                 self.needs_active_pane_focus = false;
                 cx.notify();
@@ -543,7 +668,7 @@ impl WorkspaceApp {
                 }
                 let _ = self.connection_store.mark_used(&id);
                 self.session_manager.status = None;
-                let _ = self.create_ssh_terminal_tab(config, title, window, cx);
+                let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
             }
             SshConnectionIntent::Test => self.start_ssh_test(config, cx),
         }
@@ -576,5 +701,47 @@ impl WorkspaceApp {
             let _ = tx.send(SshConnectionWorkerResult::Test { result });
         });
         cx.notify();
+    }
+}
+
+fn proxy_chain_from_form(form: &mut NewConnectionForm) -> Option<Vec<ProxyHopConfig>> {
+    if form.proxy_hops.is_empty() {
+        return None;
+    }
+    Some(
+        form.proxy_hops
+            .iter()
+            .filter(|hop| hop.complete())
+            .map(|hop| ProxyHopConfig {
+                host: hop.host.trim().to_string(),
+                port: hop.port.trim().parse::<u16>().unwrap_or(22),
+                username: hop.username.trim().to_string(),
+                auth: auth_method_from_proxy_hop(hop),
+                agent_forwarding: hop.agent_forwarding,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            })
+            .collect(),
+    )
+}
+
+fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
+    match hop.auth_tab {
+        SshAuthTab::Password => AuthMethod::password(hop.password.clone()),
+        SshAuthTab::DefaultKey => AuthMethod::key(
+            "",
+            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        ),
+        SshAuthTab::SshKey => AuthMethod::key(
+            hop.key_path.trim().to_string(),
+            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        ),
+        SshAuthTab::Certificate => AuthMethod::certificate(
+            hop.key_path.trim().to_string(),
+            hop.cert_path.trim().to_string(),
+            (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
+        ),
+        SshAuthTab::Agent | SshAuthTab::TwoFactor => AuthMethod::Agent,
     }
 }

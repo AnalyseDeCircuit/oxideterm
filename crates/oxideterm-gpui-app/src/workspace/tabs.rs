@@ -46,14 +46,67 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.create_ssh_terminal_tab_for_node(config, title, None, None, window, cx)
+            .map(|_| ())
+    }
+
+    pub(super) fn open_or_create_saved_ssh_terminal_tab(
+        &mut self,
+        saved_connection_id: String,
+        config: SshConfig,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
+            && let Some(session_id) = self
+                .ssh_nodes
+                .get(&node_id)
+                .and_then(|node| node.terminal_ids.first().copied())
+            && self.focus_terminal_session(session_id, window, cx)
+        {
+            return Ok(());
+        }
+
+        let node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
+        self.create_ssh_terminal_tab_for_node(
+            config,
+            title,
+            Some(saved_connection_id),
+            node_id,
+            window,
+            cx,
+        )
+        .map(|_| ())
+    }
+
+    fn create_ssh_terminal_tab_for_node(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        saved_connection_id: Option<String>,
+        node_id: Option<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id();
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
-        let node_id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
-        self.next_ssh_node_id += 1;
+        let node_id = node_id.unwrap_or_else(|| {
+            let id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
+            self.next_ssh_node_id += 1;
+            id
+        });
 
         self.node_router
             .upsert_node(node_id.clone(), config.clone());
+        self.register_ssh_terminal_session(
+            node_id.clone(),
+            saved_connection_id,
+            config.clone(),
+            title.clone(),
+            session_id,
+        );
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
@@ -81,7 +134,7 @@ impl WorkspaceApp {
         pane.read(cx).focus(window);
         self.reveal_active_tab(window);
         cx.notify();
-        Ok(())
+        Ok(session_id)
     }
 
     pub(super) fn open_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -153,6 +206,43 @@ impl WorkspaceApp {
             .and_then(|pane_id| self.panes.get(&pane_id).cloned())
     }
 
+    fn pane_id_for_session(&self, session_id: TerminalSessionId) -> Option<PaneId> {
+        self.tabs.iter().find_map(|tab| {
+            tab.root_pane
+                .as_ref()
+                .and_then(|root| root.pane_id_for_session(session_id))
+        })
+    }
+
+    pub(super) fn sync_ssh_node_lifecycle(&mut self, cx: &mut Context<Self>) {
+        let terminal_nodes = self.terminal_ssh_nodes.clone();
+        let mut changed = false;
+        for (session_id, node_id) in terminal_nodes {
+            let readiness = self
+                .pane_id_for_session(session_id)
+                .and_then(|pane_id| self.panes.get(&pane_id))
+                .map(|pane| match pane.read(cx).lifecycle() {
+                    TerminalLifecycle::Running => NodeReadiness::Ready,
+                    TerminalLifecycle::Exited(_) => NodeReadiness::Error,
+                    TerminalLifecycle::Closed => NodeReadiness::Disconnected,
+                });
+            let Some(readiness) = readiness else {
+                self.unregister_ssh_terminal_session(session_id);
+                changed = true;
+                continue;
+            };
+            if let Some(node) = self.ssh_nodes.get_mut(&node_id)
+                && node.readiness != readiness
+            {
+                node.readiness = readiness;
+                changed = true;
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
     pub(super) fn set_active_tab(
         &mut self,
         tab_id: TabId,
@@ -195,14 +285,99 @@ impl WorkspaceApp {
         }
     }
 
+    fn register_ssh_terminal_session(
+        &mut self,
+        node_id: NodeId,
+        saved_connection_id: Option<String>,
+        config: SshConfig,
+        title: String,
+        session_id: TerminalSessionId,
+    ) {
+        self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        if let Some(saved_connection_id) = saved_connection_id.as_ref() {
+            self.saved_ssh_nodes
+                .insert(saved_connection_id.clone(), node_id.clone());
+        }
+
+        self.ssh_nodes
+            .entry(node_id.clone())
+            .and_modify(|node| {
+                node.config = config.clone();
+                node.title = title.clone();
+                node.readiness = NodeReadiness::Connecting;
+                if !node.terminal_ids.contains(&session_id) {
+                    node.terminal_ids.push(session_id);
+                }
+                if node.saved_connection_id.is_none() {
+                    node.saved_connection_id = saved_connection_id.clone();
+                }
+            })
+            .or_insert_with(|| WorkspaceSshNode {
+                saved_connection_id,
+                config,
+                title,
+                terminal_ids: vec![session_id],
+                readiness: NodeReadiness::Connecting,
+            });
+    }
+
+    pub(super) fn unregister_ssh_terminal_session(&mut self, session_id: TerminalSessionId) {
+        let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
+            return;
+        };
+        let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
+            return;
+        };
+        node.terminal_ids.retain(|id| *id != session_id);
+        if node.terminal_ids.is_empty() {
+            node.readiness = NodeReadiness::Disconnected;
+        }
+    }
+
+    fn focus_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((tab_id, pane_id)) = self.tabs.iter().find_map(|tab| {
+            tab.root_pane
+                .as_ref()
+                .and_then(|root| root.pane_id_for_session(session_id))
+                .map(|pane_id| (tab.id, pane_id))
+        }) else {
+            return false;
+        };
+        self.active_tab_id = Some(tab_id);
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+            tab.active_pane_id = Some(pane_id);
+        }
+        if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+            && let Some(node) = self.ssh_nodes.get_mut(node_id)
+        {
+            node.readiness = NodeReadiness::Ready;
+        }
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
+        true
+    }
+
     pub(super) fn close_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.active_tab_index() else {
             return;
         };
         let tab = self.tabs.remove(index);
         let mut pane_ids = Vec::new();
+        let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
             root_pane.collect_pane_ids(&mut pane_ids);
+            root_pane.collect_session_ids(&mut session_ids);
+        }
+        for session_id in session_ids {
+            self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids {
             if let Some(pane) = self.panes.remove(&pane_id) {

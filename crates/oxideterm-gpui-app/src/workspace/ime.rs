@@ -344,11 +344,24 @@ impl WorkspaceApp {
                     NewConnectionField::Username => form.username.clone(),
                     NewConnectionField::Group => form.group.clone(),
                     NewConnectionField::Color => form.color.clone(),
+                    NewConnectionField::JumpHost => form
+                        .jump_server_form
+                        .as_ref()
+                        .map(|jump_form| jump_form.host.clone())?,
+                    NewConnectionField::JumpUsername => form
+                        .jump_server_form
+                        .as_ref()
+                        .map(|jump_form| jump_form.username.clone())?,
                     NewConnectionField::Port
                     | NewConnectionField::Password
                     | NewConnectionField::KeyPath
                     | NewConnectionField::CertPath
-                    | NewConnectionField::Passphrase => return None,
+                    | NewConnectionField::Passphrase
+                    | NewConnectionField::JumpPort
+                    | NewConnectionField::JumpPassword
+                    | NewConnectionField::JumpKeyPath
+                    | NewConnectionField::JumpCertPath
+                    | NewConnectionField::JumpPassphrase => return None,
                 })
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => self
@@ -455,6 +468,8 @@ fn connection_field_accepts_ime(field: NewConnectionField) -> bool {
             | NewConnectionField::Username
             | NewConnectionField::Group
             | NewConnectionField::Color
+            | NewConnectionField::JumpHost
+            | NewConnectionField::JumpUsername
     )
 }
 
@@ -473,6 +488,55 @@ fn connection_field_value_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::Color => &mut form.color,
+        NewConnectionField::JumpHost => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump host field without jump form")
+                .host
+        }
+        NewConnectionField::JumpPort => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump port field without jump form")
+                .port
+        }
+        NewConnectionField::JumpUsername => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump username field without jump form")
+                .username
+        }
+        NewConnectionField::JumpPassword => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump password field without jump form")
+                .password
+        }
+        NewConnectionField::JumpKeyPath => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump key path field without jump form")
+                .key_path
+        }
+        NewConnectionField::JumpCertPath => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump cert path field without jump form")
+                .cert_path
+        }
+        NewConnectionField::JumpPassphrase => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump passphrase field without jump form")
+                .passphrase
+        }
     }
 }
 

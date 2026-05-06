@@ -94,6 +94,17 @@ pub struct ConnectionOptions {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedProxyHop {
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    pub username: String,
+    pub auth: SavedAuth,
+    #[serde(default)]
+    pub agent_forwarding: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedConnection {
     pub id: String,
     pub name: String,
@@ -104,6 +115,8 @@ pub struct SavedConnection {
     pub port: u16,
     pub username: String,
     pub auth: SavedAuth,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxy_chain: Vec<SavedProxyHop>,
     #[serde(default)]
     pub options: ConnectionOptions,
     pub created_at: DateTime<Utc>,
@@ -140,6 +153,7 @@ pub struct ConnectionInfo {
     pub auth_type: AuthType,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
+    pub proxy_chain: Vec<SavedProxyHop>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub color: Option<String>,
@@ -159,6 +173,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             auth_type: conn.auth.auth_type(),
             key_path: conn.auth.key_path().map(ToOwned::to_owned),
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
+            proxy_chain: conn.proxy_chain.clone(),
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
             color: conn.color.clone(),
@@ -177,6 +192,7 @@ pub struct SaveConnectionRequest {
     pub port: u16,
     pub username: String,
     pub auth: SavedAuth,
+    pub proxy_chain: Vec<SavedProxyHop>,
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
@@ -260,11 +276,18 @@ impl ConnectionStore {
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let old_keychain_ids = self
             .get(&id)
-            .map(collect_auth_keychain_ids)
+            .map(collect_connection_keychain_ids)
             .unwrap_or_default();
-        let existing_auth = self.get(&id).map(|conn| conn.auth.clone());
+        let existing = self.get(&id).cloned();
+        let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
         let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
-        let next_keychain_ids = collect_keychain_ids_for_auth(&auth);
+        let proxy_chain = self.materialize_proxy_chain(
+            request.proxy_chain,
+            existing
+                .as_ref()
+                .map(|connection| connection.proxy_chain.as_slice()),
+        )?;
+        let next_keychain_ids = collect_keychain_ids_for_parts(&auth, &proxy_chain);
         let connection = SavedConnection {
             id: id.clone(),
             name: non_empty(request.name.trim(), "Connection name")?.to_string(),
@@ -273,6 +296,7 @@ impl ConnectionStore {
             port: request.port.max(1),
             username: non_empty(request.username.trim(), "Username")?.to_string(),
             auth,
+            proxy_chain,
             options: ConnectionOptions {
                 agent_forwarding: request.agent_forwarding,
             },
@@ -306,7 +330,7 @@ impl ConnectionStore {
     pub fn delete(&mut self, id: &str) -> Result<bool> {
         let keychain_ids = self
             .get(id)
-            .map(collect_auth_keychain_ids)
+            .map(collect_connection_keychain_ids)
             .unwrap_or_default();
         let before = self.data.connections.len();
         self.data.connections.retain(|conn| conn.id != id);
@@ -373,6 +397,9 @@ impl ConnectionStore {
         duplicate.updated_at = Some(Utc::now());
         duplicate.last_used_at = None;
         duplicate.auth = self.clone_auth_secret(&duplicate.auth)?;
+        for hop in &mut duplicate.proxy_chain {
+            hop.auth = self.clone_auth_secret(&hop.auth)?;
+        }
         let duplicate_id = duplicate.id.clone();
         self.data.connections.push(duplicate);
         self.normalize();
@@ -397,6 +424,7 @@ impl ConnectionStore {
         connection.created_at = Utc::now();
         connection.updated_at = Some(Utc::now());
         connection.auth = self.materialize_auth(connection.auth, None)?;
+        connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain, None)?;
         if let Some(group) = connection.group.clone() {
             self.ensure_group(group)?;
         }
@@ -411,7 +439,11 @@ impl ConnectionStore {
         let conn = self
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        match &conn.auth {
+        self.get_saved_auth_password(&conn.auth)
+    }
+
+    pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<String> {
+        match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
                 ..
@@ -431,7 +463,11 @@ impl ConnectionStore {
         let conn = self
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
-        match &conn.auth {
+        self.get_saved_auth_passphrase(&conn.auth)
+    }
+
+    pub fn get_saved_auth_passphrase(&self, auth: &SavedAuth) -> Result<Option<String>> {
+        match auth {
             SavedAuth::Key {
                 passphrase_keychain_id: Some(keychain_id),
                 ..
@@ -562,6 +598,34 @@ impl ConnectionStore {
         }
     }
 
+    fn materialize_proxy_chain(
+        &self,
+        proxy_chain: Vec<SavedProxyHop>,
+        existing_proxy_chain: Option<&[SavedProxyHop]>,
+    ) -> Result<Vec<SavedProxyHop>> {
+        proxy_chain
+            .into_iter()
+            .enumerate()
+            .map(|(index, hop)| {
+                let existing_auth = existing_proxy_chain
+                    .and_then(|chain| chain.get(index))
+                    .filter(|existing| {
+                        existing.host == hop.host
+                            && existing.port == hop.port
+                            && existing.username == hop.username
+                    })
+                    .map(|existing| &existing.auth);
+                Ok(SavedProxyHop {
+                    host: non_empty(hop.host.trim(), "Proxy host")?.to_string(),
+                    port: hop.port.max(1),
+                    username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
+                    auth: self.materialize_auth(hop.auth, existing_auth)?,
+                    agent_forwarding: hop.agent_forwarding,
+                })
+            })
+            .collect()
+    }
+
     fn clone_auth_secret(&self, auth: &SavedAuth) -> Result<SavedAuth> {
         match auth {
             SavedAuth::Password {
@@ -623,52 +687,9 @@ impl ConnectionStore {
     fn migrate_legacy_credentials(&mut self) -> Result<bool> {
         let mut migrated = false;
         for conn in &mut self.data.connections {
-            match &mut conn.auth {
-                SavedAuth::Password {
-                    keychain_id,
-                    plaintext_password,
-                } => {
-                    if let Some(password) = plaintext_password.take() {
-                        let next_keychain_id =
-                            keychain_id.clone().unwrap_or_else(new_password_keychain_id);
-                        self.keychain.store(&next_keychain_id, &password)?;
-                        *keychain_id = Some(next_keychain_id);
-                        migrated = true;
-                    }
-                }
-                SavedAuth::Key {
-                    has_passphrase,
-                    passphrase_keychain_id,
-                    plaintext_passphrase,
-                    ..
-                } => {
-                    if let Some(passphrase) = plaintext_passphrase.take() {
-                        let next_keychain_id = passphrase_keychain_id
-                            .clone()
-                            .unwrap_or_else(new_key_passphrase_keychain_id);
-                        self.keychain.store(&next_keychain_id, &passphrase)?;
-                        *has_passphrase = true;
-                        *passphrase_keychain_id = Some(next_keychain_id);
-                        migrated = true;
-                    }
-                }
-                SavedAuth::Certificate {
-                    has_passphrase,
-                    passphrase_keychain_id,
-                    plaintext_passphrase,
-                    ..
-                } => {
-                    if let Some(passphrase) = plaintext_passphrase.take() {
-                        let next_keychain_id = passphrase_keychain_id
-                            .clone()
-                            .unwrap_or_else(new_key_passphrase_keychain_id);
-                        self.keychain.store(&next_keychain_id, &passphrase)?;
-                        *has_passphrase = true;
-                        *passphrase_keychain_id = Some(next_keychain_id);
-                        migrated = true;
-                    }
-                }
-                SavedAuth::Agent => {}
+            migrated |= migrate_legacy_auth_credentials(&mut conn.auth, &self.keychain)?;
+            for hop in &mut conn.proxy_chain {
+                migrated |= migrate_legacy_auth_credentials(&mut hop.auth, &self.keychain)?;
             }
         }
         Ok(migrated)
@@ -693,6 +714,64 @@ impl ConnectionStore {
         self.data
             .connections
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    }
+}
+
+fn migrate_legacy_auth_credentials(
+    auth: &mut SavedAuth,
+    keychain: &ConnectionKeychain,
+) -> Result<bool> {
+    match auth {
+        SavedAuth::Password {
+            keychain_id,
+            plaintext_password,
+        } => {
+            if let Some(password) = plaintext_password.take() {
+                let next_keychain_id = keychain_id.clone().unwrap_or_else(new_password_keychain_id);
+                keychain.store(&next_keychain_id, &password)?;
+                *keychain_id = Some(next_keychain_id);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        SavedAuth::Key {
+            has_passphrase,
+            passphrase_keychain_id,
+            plaintext_passphrase,
+            ..
+        } => {
+            if let Some(passphrase) = plaintext_passphrase.take() {
+                let next_keychain_id = passphrase_keychain_id
+                    .clone()
+                    .unwrap_or_else(new_key_passphrase_keychain_id);
+                keychain.store(&next_keychain_id, &passphrase)?;
+                *has_passphrase = true;
+                *passphrase_keychain_id = Some(next_keychain_id);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        SavedAuth::Certificate {
+            has_passphrase,
+            passphrase_keychain_id,
+            plaintext_passphrase,
+            ..
+        } => {
+            if let Some(passphrase) = plaintext_passphrase.take() {
+                let next_keychain_id = passphrase_keychain_id
+                    .clone()
+                    .unwrap_or_else(new_key_passphrase_keychain_id);
+                keychain.store(&next_keychain_id, &passphrase)?;
+                *has_passphrase = true;
+                *passphrase_keychain_id = Some(next_keychain_id);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        SavedAuth::Agent => Ok(false),
     }
 }
 
@@ -734,8 +813,16 @@ fn existing_password_keychain_id(auth: Option<&SavedAuth>) -> Option<String> {
     }
 }
 
-fn collect_auth_keychain_ids(connection: &SavedConnection) -> Vec<String> {
-    collect_keychain_ids_for_auth(&connection.auth)
+fn collect_connection_keychain_ids(connection: &SavedConnection) -> Vec<String> {
+    collect_keychain_ids_for_parts(&connection.auth, &connection.proxy_chain)
+}
+
+fn collect_keychain_ids_for_parts(auth: &SavedAuth, proxy_chain: &[SavedProxyHop]) -> Vec<String> {
+    let mut ids = collect_keychain_ids_for_auth(auth);
+    for hop in proxy_chain {
+        ids.extend(collect_keychain_ids_for_auth(&hop.auth));
+    }
+    ids
 }
 
 fn collect_keychain_ids_for_auth(auth: &SavedAuth) -> Vec<String> {
@@ -834,6 +921,7 @@ mod tests {
             port: 22,
             username: "me".to_string(),
             auth,
+            proxy_chain: Vec::new(),
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,
@@ -1165,5 +1253,87 @@ mod tests {
             store.get_connection_passphrase("conn-1").unwrap(),
             Some("cert-secret".to_string())
         );
+    }
+
+    #[test]
+    fn proxy_hop_password_is_saved_to_keychain_reference() {
+        let mut store = load_empty_store("proxy-hop-password");
+        let mut req = request("conn-1", SavedAuth::Agent);
+        req.proxy_chain = vec![SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 2222,
+            username: "ops".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some("jump-secret".to_string()),
+            },
+            agent_forwarding: true,
+        }];
+
+        store.upsert(req).unwrap();
+
+        let hop = &store.get("conn-1").unwrap().proxy_chain[0];
+        assert!(hop.agent_forwarding);
+        match &hop.auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } => assert_eq!(store.keychain.get(keychain_id).unwrap(), "jump-secret"),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unchanged_proxy_hop_key_path_preserves_passphrase_keychain_entry() {
+        let mut store = load_empty_store("proxy-hop-passphrase");
+        let mut req = request("conn-1", SavedAuth::Agent);
+        req.proxy_chain = vec![SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Key {
+                key_path: "/tmp/jump-key".to_string(),
+                has_passphrase: true,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: Some("jump-key-secret".to_string()),
+            },
+            agent_forwarding: false,
+        }];
+        store.upsert(req).unwrap();
+        let previous_keychain_id = match &store.get("conn-1").unwrap().proxy_chain[0].auth {
+            SavedAuth::Key {
+                passphrase_keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        };
+
+        let mut update = request("conn-1", SavedAuth::Agent);
+        update.proxy_chain = vec![SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Key {
+                key_path: "/tmp/jump-key".to_string(),
+                has_passphrase: false,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            agent_forwarding: false,
+        }];
+        store.upsert(update).unwrap();
+
+        match &store.get("conn-1").unwrap().proxy_chain[0].auth {
+            SavedAuth::Key {
+                has_passphrase,
+                passphrase_keychain_id: Some(keychain_id),
+                plaintext_passphrase: None,
+                ..
+            } => {
+                assert!(*has_passphrase);
+                assert_eq!(keychain_id, &previous_keychain_id);
+            }
+            other => panic!("unexpected proxy auth: {other:?}"),
+        }
     }
 }

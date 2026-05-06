@@ -30,6 +30,10 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.tabs[active_index].kind == TabKind::SshTerminal {
+            return;
+        }
+
         let group_id = self.alloc_pane_id();
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
@@ -74,6 +78,14 @@ impl WorkspaceApp {
             .is_none_or(|root_pane| root_pane.pane_count() <= 1)
         {
             return;
+        }
+
+        if let Some(session_id) = self.tabs[active_index]
+            .root_pane
+            .as_ref()
+            .and_then(|root_pane| root_pane.session_id_for_pane(active_pane_id))
+        {
+            self.unregister_ssh_terminal_session(session_id);
         }
 
         if let Some(pane) = self.panes.remove(&active_pane_id) {
