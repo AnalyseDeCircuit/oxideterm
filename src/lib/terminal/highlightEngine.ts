@@ -54,6 +54,11 @@ type MatchCandidate = {
   length: number;
 };
 
+type AppliedDecorationKeys = {
+  desiredKeys: Set<string>;
+  createdKeys: Set<string>;
+};
+
 class RegexWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
@@ -320,19 +325,10 @@ export class HighlightEngine {
     }
   }
 
-  private clearScannedWindow(windowKey: string): void {
-    const keys = Array.from(this.decorationIndex.keys())
-      .filter((key) => key.startsWith(`${windowKey}:`));
-    keys.forEach((key) => this.disposeDecorationKey(key));
-    this.scannedWindows.delete(windowKey);
-  }
-
-  private clearOverlappingScannedWindows(startRow: number, endRow: number): void {
-    const staleWindowKeys = Array.from(this.scannedWindows.values())
+  private getOverlappingScannedWindowKeys(startRow: number, endRow: number): string[] {
+    return Array.from(this.scannedWindows.values())
       .filter((windowMeta) => rowsOverlap(windowMeta.startRow, windowMeta.endRow, startRow, endRow))
       .map((windowMeta) => windowMeta.key);
-
-    staleWindowKeys.forEach((windowKey) => this.clearScannedWindow(windowKey));
   }
 
   private scheduleViewportScan(debounce = false): void {
@@ -385,21 +381,30 @@ export class HighlightEngine {
 
   private async scanViewport(): Promise<void> {
     this.scanInFlight = true;
+    const createdDecorationKeys = new Set<string>();
+    let completed = false;
 
     const buffer = this.term.buffer.active;
     const viewportStart = buffer.viewportY;
     const viewportEnd = Math.min(buffer.length - 1, viewportStart + this.term.rows - 1);
     const signature = `${this.bufferGeneration}:${buffer.type}:${viewportStart}:${viewportEnd}:${this.term.cols}:${this.term.rows}:${this.compiledRules.map((rule) => `${rule.id}:${rule.enabled}:${rule.priority}:${rule.pattern}:${rule.renderMode ?? 'background'}`).join('|')}`;
+    const windowKey = `${buffer.type}:${this.bufferGeneration}:${viewportStart}:${viewportEnd}`;
     try {
       if (signature === this.viewportSignature) {
+        completed = true;
         return;
       }
       this.viewportSignature = signature;
 
-      const windowKey = `${buffer.type}:${this.bufferGeneration}:${viewportStart}:${viewportEnd}`;
       const scanToken = this.activeScanToken + 1;
       this.activeScanToken = scanToken;
 
+      const staleWindowKeys = this.getOverlappingScannedWindowKeys(viewportStart, viewportEnd);
+      const staleDecorationKeys = new Set(
+        Array.from(this.decorationIndex.keys())
+          .filter((key) => staleWindowKeys.some((window) => key.startsWith(`${window}:`))),
+      );
+      const desiredDecorationKeys = new Set<string>();
       const lines = collectViewportLogicalLines(this.term, this.bufferGeneration, viewportStart, viewportEnd);
       const windowMeta: ScannedWindowMeta = {
         key: windowKey,
@@ -409,25 +414,40 @@ export class HighlightEngine {
         lastAccessAt: Date.now(),
         logicalLineIds: new Set(lines.map((line) => line.id)),
       };
-      this.clearOverlappingScannedWindows(viewportStart, viewportEnd);
-      this.scannedWindows.set(windowKey, windowMeta);
 
       for (const line of lines) {
         if (scanToken !== this.activeScanToken) {
           return;
         }
         this.lineCache.set(line.id, line);
-        this.clearLogicalLineDecorations(line.id);
         const acceptedMatches = await this.resolveAcceptedMatches(line);
         if (scanToken !== this.activeScanToken) {
           return;
         }
-        this.applyMatches(line, acceptedMatches, windowKey);
+        const appliedKeys = this.applyMatches(line, acceptedMatches, windowKey);
+        appliedKeys.desiredKeys.forEach((key) => desiredDecorationKeys.add(key));
+        appliedKeys.createdKeys.forEach((key) => createdDecorationKeys.add(key));
       }
+
+      staleWindowKeys.forEach((key) => {
+        if (key !== windowKey) {
+          this.scannedWindows.delete(key);
+        }
+      });
+      this.scannedWindows.set(windowKey, windowMeta);
+      staleDecorationKeys.forEach((key) => {
+        if (!desiredDecorationKeys.has(key)) {
+          this.disposeDecorationKey(key);
+        }
+      });
 
       this.purgeFarWindows(Math.floor((viewportStart + viewportEnd) / 2));
       this.lastSnapshot = this.captureSnapshot();
+      completed = true;
     } finally {
+      if (!completed) {
+        createdDecorationKeys.forEach((key) => this.disposeDecorationKey(key));
+      }
       this.scanInFlight = false;
       if (this.rescanRequested) {
         const debounceRescan = this.rescanWaitForIdle;
@@ -525,10 +545,18 @@ export class HighlightEngine {
     this.rescanRequested = true;
   }
 
-  private applyMatches(line: CachedLogicalLine, matches: MatchCandidate[], windowKey: string): void {
+  private applyMatches(line: CachedLogicalLine, matches: MatchCandidate[], windowKey: string): AppliedDecorationKeys {
+    const desiredKeys = new Set<string>();
+    const createdKeys = new Set<string>();
+
     for (const match of matches) {
       const slices = mapMatchToLogicalLineSlices(line, match.index, match.length);
       const decorationKey = `${windowKey}:${line.id}:${match.rule.id}:${match.index}:${match.length}`;
+      desiredKeys.add(decorationKey);
+      if (this.decorationIndex.has(decorationKey)) {
+        continue;
+      }
+
       const records: DecorationRecord[] = [];
 
       for (const slice of slices) {
@@ -561,10 +589,13 @@ export class HighlightEngine {
       }
 
       this.decorationIndex.set(decorationKey, records);
+      createdKeys.add(decorationKey);
       const keys = this.logicalLineIndex.get(line.id) ?? new Set<string>();
       keys.add(decorationKey);
       this.logicalLineIndex.set(line.id, keys);
     }
+
+    return { desiredKeys, createdKeys };
   }
 
   private createMarkerForRow(row: number): IMarker | undefined {
