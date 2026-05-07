@@ -39,6 +39,11 @@ async fn local_forward_moves_bytes_through_real_ssh_server() {
         roundtrip(("127.0.0.1", rule.bind_port), b"local").await,
         b"local".to_vec()
     );
+
+    let opens = ssh.direct_tcpip_opens.lock().await;
+    assert_eq!(opens.len(), 1);
+    assert_eq!(opens[0].originator_address, "127.0.0.1");
+    assert_eq!(opens[0].originator_port, 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -136,6 +141,13 @@ async fn start_echo_service() -> SocketAddr {
 
 struct TestSshServer {
     port: u16,
+    direct_tcpip_opens: Arc<Mutex<Vec<DirectTcpipOpen>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DirectTcpipOpen {
+    originator_address: String,
+    originator_port: u32,
 }
 
 async fn start_forwarding_ssh_server() -> TestSshServer {
@@ -148,6 +160,8 @@ async fn start_forwarding_ssh_server() -> TestSshServer {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let forwards = Arc::new(Mutex::new(HashMap::new()));
+    let direct_tcpip_opens = Arc::new(Mutex::new(Vec::new()));
+    let server_direct_tcpip_opens = direct_tcpip_opens.clone();
 
     tokio::spawn(async move {
         loop {
@@ -156,6 +170,7 @@ async fn start_forwarding_ssh_server() -> TestSshServer {
             };
             let handler = ForwardingServer {
                 forwards: forwards.clone(),
+                direct_tcpip_opens: server_direct_tcpip_opens.clone(),
             };
             let config = config.clone();
             tokio::spawn(async move {
@@ -164,12 +179,16 @@ async fn start_forwarding_ssh_server() -> TestSshServer {
         }
     });
 
-    TestSshServer { port }
+    TestSshServer {
+        port,
+        direct_tcpip_opens,
+    }
 }
 
 #[derive(Clone)]
 struct ForwardingServer {
     forwards: Arc<Mutex<HashMap<(String, u32), tokio::task::JoinHandle<()>>>>,
+    direct_tcpip_opens: Arc<Mutex<Vec<DirectTcpipOpen>>>,
 }
 
 impl server::Handler for ForwardingServer {
@@ -220,10 +239,14 @@ impl server::Handler for ForwardingServer {
         channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
-        _originator_address: &str,
-        _originator_port: u32,
+        originator_address: &str,
+        originator_port: u32,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        self.direct_tcpip_opens.lock().await.push(DirectTcpipOpen {
+            originator_address: originator_address.to_string(),
+            originator_port,
+        });
         let target = format!("{host_to_connect}:{port_to_connect}");
         tokio::spawn(async move {
             let Ok(mut target) = TcpStream::connect(target).await else {

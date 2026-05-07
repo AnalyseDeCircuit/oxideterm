@@ -90,6 +90,7 @@ const SSH_OUTPUT_FLUSH_MS: u64 = 4;
 const SSH_OUTPUT_INTERACTIVE_FLUSH_MS: u64 = 1;
 const SSH_OUTPUT_INTERACTIVE_WINDOW_MS: u64 = 120;
 const UTF8_RESIDUAL_MAX_BYTES: usize = 4;
+const MAX_PROXY_CHAIN_DEPTH: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SshTransportError {
@@ -670,6 +671,43 @@ mod tests {
         assert!(!batcher.push(b"abc"));
         assert_eq!(batcher.take_flush(), Some(b"abc".to_vec()));
     }
+
+    #[test]
+    fn ssh_client_config_matches_tauri_transport_defaults() {
+        let config = ssh_client_config();
+
+        assert_eq!(config.inactivity_timeout, None);
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(30)));
+        assert_eq!(config.keepalive_max, 3);
+        assert_eq!(config.window_size, 32 * 1024 * 1024);
+        assert_eq!(config.maximum_packet_size, 256 * 1024);
+    }
+
+    #[test]
+    fn validates_proxy_chain_depth_like_tauri() {
+        let chain = (0..=MAX_PROXY_CHAIN_DEPTH)
+            .map(|index| ProxyHopConfig {
+                host: format!("jump-{index}.example.com"),
+                port: 22,
+                username: "root".to_string(),
+                auth: AuthMethod::Agent,
+                agent_forwarding: false,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            })
+            .collect::<Vec<_>>();
+        let error = validate_proxy_chain_depth(&chain).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "SSH connection failed: proxy chain too long: {} hops (max {})",
+                MAX_PROXY_CHAIN_DEPTH + 1,
+                MAX_PROXY_CHAIN_DEPTH
+            )
+        );
+    }
 }
 
 impl SshTransportClient {
@@ -822,6 +860,7 @@ impl SshTransportClient {
                 "proxy chain is empty".to_string(),
             ));
         }
+        validate_proxy_chain_depth(chain)?;
 
         let mut current_stream: Option<russh::ChannelStream<client::Msg>> = None;
         let mut jump_handles = Vec::with_capacity(chain.len());
@@ -1084,6 +1123,7 @@ impl SshTransportClient {
         if chain.is_empty() {
             return Ok(None);
         }
+        validate_proxy_chain_depth(chain)?;
 
         let mut current_handle: Option<client::Handle<NativeClientHandler>> = None;
         let mut jump_handles = Vec::with_capacity(chain.len());
@@ -1157,9 +1197,11 @@ impl SshTransportClient {
 
 fn ssh_client_config() -> client::Config {
     client::Config {
-        inactivity_timeout: Some(Duration::from_secs(30)),
-        keepalive_interval: Some(Duration::from_secs(15)),
+        inactivity_timeout: None,
+        keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
+        window_size: 32 * 1024 * 1024,
+        maximum_packet_size: 256 * 1024,
         ..client::Config::default()
     }
 }
@@ -1196,6 +1238,17 @@ fn proxy_step_has_accepted_fingerprint(hop: &ProxyHopConfig) -> bool {
 
 fn target_step_has_accepted_fingerprint(config: &SshConfig) -> bool {
     config.trust_host_key.is_some() && config.expected_host_key_fingerprint.is_some()
+}
+
+fn validate_proxy_chain_depth(chain: &[ProxyHopConfig]) -> Result<(), SshTransportError> {
+    if chain.len() > MAX_PROXY_CHAIN_DEPTH {
+        return Err(SshTransportError::ConnectionFailed(format!(
+            "proxy chain too long: {} hops (max {})",
+            chain.len(),
+            MAX_PROXY_CHAIN_DEPTH
+        )));
+    }
+    Ok(())
 }
 
 fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, SshTransportError> {

@@ -18,7 +18,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
 
-use super::{new_connection::SshConnectionIntent, *};
+use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
 
 #[cfg(test)]
@@ -2448,8 +2448,7 @@ impl WorkspaceApp {
             );
             return;
         };
-        self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
-        self.start_ssh_preflight(config, conn.name.clone(), SshConnectionIntent::Test);
+        self.start_ssh_test_flow(config, conn.name.clone(), cx);
         cx.notify();
     }
 

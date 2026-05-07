@@ -18,10 +18,10 @@ use std::{
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, Context, CursorStyle, FocusHandle, Focusable, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Pixels,
-    Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled, StyledImage, Timer, Window,
-    div, prelude::*, px, relative, rgb, rgba, svg,
+    AnyElement, App, ClipboardItem, Context, CursorStyle, FocusHandle, Focusable, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    ParentElement, Pixels, Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled,
+    StyledImage, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{ForwardEvent, ForwardingRegistry, SavedForwardStore};
@@ -679,7 +679,6 @@ impl Render for WorkspaceApp {
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
-                    && this.sftp_view.focused_input.is_some()
                 {
                     if keystroke_commits_platform_text(&event.keystroke) {
                         return;

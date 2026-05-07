@@ -40,6 +40,8 @@ const FORWARDS_TW_ALPHA_30: u32 = 0x4d; // Tauri /30
 const FORWARDS_TW_ALPHA_40: u32 = 0x66; // Tauri /40
 const FORWARDS_TW_ALPHA_50: u32 = 0x80; // Tauri /50
 const FORWARDS_ALPHA_TRANSPARENT: u32 = 0x00; // Tauri transparent root when tab background is active
+const FORWARDS_DEFAULT_BIND_ADDRESS: &str = "localhost"; // Tauri create form default bindAddress
+const FORWARDS_DEFAULT_TARGET_HOST: &str = "localhost"; // Tauri create form default targetHost
 
 // Tailwind palette literals used by the Tauri ForwardsView source.
 const TW_BLACK: u32 = 0x000000;
@@ -94,6 +96,8 @@ impl ForwardInput {
 pub(super) struct ForwardsViewState {
     show_new_form: bool,
     editing_forward: Option<ForwardRule>,
+    pending_delete_forward: Option<ForwardRule>,
+    copied_forward_id: Option<String>,
     forward_type: ForwardType,
     bind_address: String,
     bind_port: String,
@@ -120,15 +124,17 @@ impl Default for ForwardsViewState {
         Self {
             show_new_form: false,
             editing_forward: None,
+            pending_delete_forward: None,
+            copied_forward_id: None,
             forward_type: ForwardType::Local,
-            bind_address: "localhost".to_string(),
+            bind_address: FORWARDS_DEFAULT_BIND_ADDRESS.to_string(),
             bind_port: String::new(),
-            target_host: "localhost".to_string(),
+            target_host: FORWARDS_DEFAULT_TARGET_HOST.to_string(),
             target_port: String::new(),
             skip_health_check: false,
-            edit_bind_address: "localhost".to_string(),
+            edit_bind_address: FORWARDS_DEFAULT_BIND_ADDRESS.to_string(),
             edit_bind_port: String::new(),
-            edit_target_host: "localhost".to_string(),
+            edit_target_host: FORWARDS_DEFAULT_TARGET_HOST.to_string(),
             edit_target_port: String::new(),
             focused_input: None,
             error: None,
@@ -286,8 +292,20 @@ impl WorkspaceApp {
                     )),
             );
         if self.forwarding_view.editing_forward.is_some() {
-            surface =
-                surface.child(self.render_forward_edit_modal(node_id, tab_id, has_background, cx));
+            surface = surface.child(self.render_forward_edit_modal(
+                node_id.clone(),
+                tab_id,
+                has_background,
+                cx,
+            ));
+        }
+        if self.forwarding_view.pending_delete_forward.is_some() {
+            surface = surface.child(self.render_forward_delete_confirm(
+                node_id,
+                tab_id,
+                has_background,
+                cx,
+            ));
         }
         surface.into_any_element()
     }
@@ -362,7 +380,6 @@ impl WorkspaceApp {
             enabled,
             has_background,
             cx.listener(move |this, _event, _window, cx| {
-                let rule = ForwardRule::local("localhost", port, "localhost", port);
                 let persist = this.forward_persist_context_for_node(&node_id);
                 let registry = this.forwarding_registry.clone();
                 this.start_forward_operation(
@@ -371,7 +388,18 @@ impl WorkspaceApp {
                     "forwards.messages.created",
                     move |manager| {
                         Box::pin(async move {
-                            let created = manager.create_forward(rule).await?;
+                            let created = match label_key {
+                                "forwards.quick.jupyter" => {
+                                    manager.forward_jupyter(port, port).await?
+                                }
+                                "forwards.quick.tensorboard" => {
+                                    manager.forward_tensorboard(port, port).await?
+                                }
+                                "forwards.quick.vscode" => {
+                                    manager.forward_vscode(port, port).await?
+                                }
+                                _ => unreachable!("unknown forward quick action"),
+                            };
                             if let Some((session_id, owner_connection_id)) = persist {
                                 let forward_id = created.id.clone();
                                 let _ = registry.sync_persisted_forward_rule(
@@ -421,24 +449,38 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .child(self.render_forwards_section_title(self.i18n.t("forwards.table.title")))
-                    .child(div().flex().gap(px(8.0)).child(self.render_forward_button(
-                        self.i18n.t("forwards.actions.new_forward"),
-                        Some(LucideIcon::Plus),
-                        if self.forwarding_view.show_new_form {
-                            ForwardButtonVariant::Secondary
-                        } else {
-                            ForwardButtonVariant::Primary
-                        },
-                        true,
-                        has_background,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.forwarding_view.show_new_form =
-                                !this.forwarding_view.show_new_form;
-                            this.forwarding_view.error = None;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    ))),
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.0))
+                            .child(self.render_forward_icon_button(
+                                LucideIcon::RefreshCcw,
+                                theme.text_muted,
+                                has_background,
+                                cx.listener(|_this, _event, _window, cx| {
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .child(self.render_forward_button(
+                                self.i18n.t("forwards.actions.new_forward"),
+                                Some(LucideIcon::Plus),
+                                if self.forwarding_view.show_new_form {
+                                    ForwardButtonVariant::Secondary
+                                } else {
+                                    ForwardButtonVariant::Primary
+                                },
+                                true,
+                                has_background,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.forwarding_view.show_new_form =
+                                        !this.forwarding_view.show_new_form;
+                                    this.forwarding_view.error = None;
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    ),
             )
             .child(
                 div()
@@ -474,9 +516,13 @@ impl WorkspaceApp {
                         )
                     })
                     .children(forwards.into_iter().enumerate().map(|(index, rule)| {
-                        let stats = manager
-                            .as_ref()
-                            .and_then(|manager| manager.get_stats(&rule.id).ok());
+                        let stats = matches!(rule.status, ForwardStatus::Active)
+                            .then(|| {
+                                manager
+                                    .as_ref()
+                                    .and_then(|manager| manager.get_stats(&rule.id).ok())
+                            })
+                            .flatten();
                         self.render_forward_row(
                             node_id.clone(),
                             tab_id,
@@ -549,7 +595,7 @@ impl WorkspaceApp {
         .hover(move |row| row.bg(forwards_theme_hover_bg(theme.bg_hover, has_background)))
         .text_size(px(FORWARDS_TEXT_SM))
         .child(self.forward_cell_element(0.9, self.render_forward_type_badge(rule.forward_type)))
-        .child(self.forward_cell(1.35, local))
+        .child(self.render_forward_address_cell(&rule, local, tab_id, cx))
         .child(self.forward_cell(1.35, remote))
         .child(self.forward_cell_element(1.6, self.render_forward_status(&rule.status, stats)))
         .child(
@@ -634,31 +680,99 @@ impl WorkspaceApp {
                             }),
                         ))
                 })
+                .when(matches!(rule.status, ForwardStatus::Suspended), |actions| {
+                    actions.child(
+                        div()
+                            .px_2()
+                            .text_size(px(FORWARDS_TEXT_XS))
+                            .text_color(forwards_palette_alpha(TW_ORANGE_400, FORWARDS_TW_ALPHA_50))
+                            .child(self.i18n.t("forwards.actions.will_recover")),
+                    )
+                })
                 .child(self.render_forward_icon_button(
                     LucideIcon::Trash2,
                     TW_RED_400,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
-                        let forward_id = rule_for_delete.id.clone();
-                        let registry = this.forwarding_registry.clone();
-                        this.start_forward_operation(
-                            tab_id,
-                            node_id.clone(),
-                            "forwards.messages.deleted",
-                            move |manager| {
-                                Box::pin(async move {
-                                    manager.delete_forward(&forward_id).await?;
-                                    let _ = registry.delete_persisted_forward(&forward_id);
-                                    Ok(())
-                                })
-                            },
-                            cx,
-                        );
+                        this.forwarding_view.pending_delete_forward = Some(rule_for_delete.clone());
+                        this.forwarding_view.error = None;
+                        cx.notify();
                         cx.stop_propagation();
                     }),
                 )),
         )
         .into_any_element()
+    }
+
+    fn render_forward_address_cell(
+        &self,
+        rule: &ForwardRule,
+        address: String,
+        tab_id: TabId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let should_copy = rule.forward_type != ForwardType::Remote
+            && matches!(rule.status, ForwardStatus::Active);
+        if !should_copy {
+            return self.forward_cell(1.35, address);
+        }
+
+        let forward_id = rule.id.clone();
+        let copied = self.forwarding_view.copied_forward_id.as_deref() == Some(&forward_id);
+        self.forward_cell_element(
+            1.35,
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .truncate()
+                .font_family(SharedString::from("monospace"))
+                .text_color(rgb(self.tokens.ui.text))
+                .hover({
+                    let accent = self.tokens.ui.accent;
+                    move |cell| cell.text_color(rgb(accent))
+                })
+                .cursor_pointer()
+                .child(address.clone())
+                .child(Self::render_lucide_icon(
+                    if copied {
+                        LucideIcon::Check
+                    } else {
+                        LucideIcon::Copy
+                    },
+                    12.0,
+                    if copied {
+                        forwards_palette_color(TW_GREEN_400)
+                    } else {
+                        rgb(self.tokens.ui.text_muted)
+                    },
+                ))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
+                        this.forwarding_view.copied_forward_id = Some(forward_id.clone());
+                        cx.notify();
+
+                        let copied_forward_id = forward_id.clone();
+                        cx.spawn(async move |weak, cx| {
+                            Timer::after(Duration::from_secs(2)).await;
+                            let _ = weak.update(cx, |this, cx| {
+                                if this.forwarding_view.copied_forward_id.as_deref()
+                                    == Some(copied_forward_id.as_str())
+                                {
+                                    this.forwarding_view.copied_forward_id = None;
+                                    cx.notify();
+                                }
+                            });
+                        })
+                        .detach();
+                        let _ = tab_id;
+                        cx.stop_propagation();
+                    }),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_forward_create_form(
@@ -714,6 +828,9 @@ impl WorkspaceApp {
                 self.forwarding_view.forward_type != ForwardType::Dynamic,
                 |form| form.child(self.render_forward_skip_health_check(has_background, cx)),
             )
+            .when_some(self.forwarding_view.error.as_ref(), |form, error| {
+                form.child(self.render_forwards_error(error))
+            })
             .child(div().flex().justify_end().child(self.render_forward_button(
                 if self.forwarding_view.pending {
                     if self.forwarding_view.skip_health_check {
@@ -805,6 +922,9 @@ impl WorkspaceApp {
                             )),
                     )
                     .child(self.render_forward_address_form(true, has_background, cx))
+                    .when_some(self.forwarding_view.error.as_ref(), |modal, error| {
+                        modal.child(self.render_forwards_error(error))
+                    })
                     .child(
                         div()
                             .flex()
@@ -831,6 +951,102 @@ impl WorkspaceApp {
                                 has_background,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.submit_forward_edit(tab_id, node_id.clone(), cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_forward_delete_confirm(
+        &self,
+        node_id: NodeId,
+        tab_id: TabId,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let Some(rule) = self.forwarding_view.pending_delete_forward.as_ref() else {
+            return div().into_any_element();
+        };
+        let forward_id = rule.id.clone();
+        let confirm_id = forward_id.clone();
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(forwards_palette_alpha(TW_BLACK, FORWARDS_TW_ALPHA_50))
+            .child(
+                div()
+                    .w(px(420.0))
+                    .rounded(px(FORWARDS_CARD_RADIUS))
+                    .border_1()
+                    .border_color(forwards_theme_border(theme.border, has_background))
+                    .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
+                    .p(px(20.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(14.0))
+                    .child(
+                        div()
+                            .text_size(px(FORWARDS_TEXT_SM))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("forwards.actions.confirm_delete_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(FORWARDS_TEXT_XS))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("forwards.actions.confirm_delete_desc")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(self.render_forward_button(
+                                self.i18n.t("forwards.form.cancel"),
+                                None,
+                                ForwardButtonVariant::Ghost,
+                                true,
+                                has_background,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.forwarding_view.pending_delete_forward = None;
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .child(self.render_forward_button(
+                                self.i18n.t("forwards.actions.delete"),
+                                Some(LucideIcon::Trash2),
+                                ForwardButtonVariant::Danger,
+                                true,
+                                has_background,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.forwarding_view.pending_delete_forward = None;
+                                    let registry = this.forwarding_registry.clone();
+                                    let delete_id = confirm_id.clone();
+                                    this.start_forward_operation(
+                                        tab_id,
+                                        node_id.clone(),
+                                        "forwards.messages.deleted",
+                                        move |manager| {
+                                            Box::pin(async move {
+                                                manager.delete_forward(&delete_id).await?;
+                                                let _ =
+                                                    registry.delete_persisted_forward(&delete_id);
+                                                Ok(())
+                                            })
+                                        },
+                                        cx,
+                                    );
                                     cx.stop_propagation();
                                 }),
                             )),
@@ -1240,6 +1456,12 @@ impl WorkspaceApp {
                 theme.text_muted,
                 forwards_theme_hover_bg(theme.bg_hover, has_background),
             ),
+            ForwardButtonVariant::Danger => (
+                forwards_palette_color(TW_RED_500),
+                forwards_palette_color(TW_RED_500),
+                theme.accent_text,
+                forwards_palette_color(TW_RED_400),
+            ),
         };
         div()
             .h(px(32.0))
@@ -1454,7 +1676,7 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(8.0))
                     .child(Self::render_lucide_icon(
-                        LucideIcon::Activity,
+                        LucideIcon::Radio,
                         16.0,
                         forwards_palette_color(TW_EMERALD_400),
                     ))
@@ -1758,7 +1980,12 @@ impl WorkspaceApp {
         port: DetectedPort,
         cx: &mut Context<Self>,
     ) {
-        let mut rule = ForwardRule::local("localhost", port.port, "localhost", port.port);
+        let mut rule = ForwardRule::local(
+            FORWARDS_DEFAULT_BIND_ADDRESS,
+            port.port,
+            FORWARDS_DEFAULT_TARGET_HOST,
+            port.port,
+        );
         rule.description = port
             .process_name
             .as_ref()
@@ -1780,7 +2007,7 @@ impl WorkspaceApp {
             "forwards.messages.created",
             move |manager| {
                 Box::pin(async move {
-                    let created = manager.create_forward(rule).await?;
+                    let created = manager.create_forward_with_health_check(rule, true).await?;
                     if let Some((session_id, owner_connection_id)) = persist {
                         let forward_id = created.id.clone();
                         let _ = registry.sync_persisted_forward_rule(
@@ -2008,7 +2235,8 @@ impl WorkspaceApp {
                         self.forwarding_view.pending = false;
                         match result {
                             Ok(()) => {
-                                self.forwarding_view.error = Some(self.i18n.t(message_key));
+                                let _ = message_key;
+                                self.forwarding_view.error = None;
                                 self.forwarding_view.show_new_form = false;
                                 self.forwarding_view.skip_health_check = false;
                                 self.forwarding_view.editing_forward = None;
@@ -2296,6 +2524,7 @@ enum ForwardButtonVariant {
     Primary,
     Secondary,
     Ghost,
+    Danger,
 }
 
 #[derive(Clone, Copy)]

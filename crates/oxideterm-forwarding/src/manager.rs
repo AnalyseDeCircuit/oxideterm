@@ -306,6 +306,36 @@ impl ForwardingManager {
         }
     }
 
+    pub async fn forward_jupyter(
+        &self,
+        local_port: u16,
+        remote_port: u16,
+    ) -> Result<ForwardRule, ForwardingError> {
+        let mut rule = ForwardRule::local("127.0.0.1", local_port, "localhost", remote_port);
+        rule.description = format!("Jupyter Notebook ({remote_port})");
+        self.create_forward(rule).await
+    }
+
+    pub async fn forward_tensorboard(
+        &self,
+        local_port: u16,
+        remote_port: u16,
+    ) -> Result<ForwardRule, ForwardingError> {
+        let mut rule = ForwardRule::local("127.0.0.1", local_port, "localhost", remote_port);
+        rule.description = format!("TensorBoard ({remote_port})");
+        self.create_forward(rule).await
+    }
+
+    pub async fn forward_vscode(
+        &self,
+        local_port: u16,
+        remote_port: u16,
+    ) -> Result<ForwardRule, ForwardingError> {
+        let mut rule = ForwardRule::local("127.0.0.1", local_port, "localhost", remote_port);
+        rule.description = format!("VS Code Server ({remote_port})");
+        self.create_forward(rule).await
+    }
+
     pub async fn scan_remote_ports(&self) -> Result<PortDetectionSnapshot, ForwardingError> {
         let platform = self.detect_remote_port_scan_platform().await;
         let output = self

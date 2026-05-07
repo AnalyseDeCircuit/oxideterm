@@ -161,6 +161,10 @@ impl WorkspaceApp {
         let Some((config, title)) = self.build_new_connection_config(cx) else {
             return;
         };
+        if intent == SshConnectionIntent::Test {
+            self.start_ssh_test_flow(config, title, cx);
+            return;
+        }
         if let Some(form) = self.new_connection_form.as_mut() {
             form.pending = true;
             form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
@@ -276,7 +280,7 @@ impl WorkspaceApp {
                 self.start_saved_connection_flow(id, config, title, window, cx);
             }
             SavedConnectionPromptAction::Test => {
-                self.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
+                self.start_ssh_test_flow(config, title, cx);
             }
         }
     }
@@ -625,6 +629,32 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn start_ssh_test_flow(
+        &mut self,
+        mut config: SshConfig,
+        title: String,
+        cx: &mut Context<Self>,
+    ) {
+        if config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
+            prepare_proxy_chain_test_config(&mut config);
+            self.start_ssh_test(config, cx);
+            return;
+        }
+
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.pending = true;
+            form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+        } else {
+            self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        }
+        self.start_ssh_preflight(config, title, SshConnectionIntent::Test);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn continue_verified_ssh_flow(
         &mut self,
         config: SshConfig,
@@ -682,6 +712,8 @@ impl WorkspaceApp {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.pending = true;
             form.error = Some(self.i18n.t("ssh.form.test_running"));
+        } else {
+            self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
         }
         let tx = self.ssh_worker_tx.clone();
         std::thread::spawn(move || {
@@ -724,6 +756,20 @@ fn proxy_chain_from_form(form: &mut NewConnectionForm) -> Option<Vec<ProxyHopCon
             })
             .collect(),
     )
+}
+
+fn prepare_proxy_chain_test_config(config: &mut SshConfig) {
+    config.strict_host_key_checking = true;
+    config.trust_host_key = Some(false);
+    config.expected_host_key_fingerprint = None;
+
+    if let Some(chain) = config.proxy_chain.as_mut() {
+        for hop in chain {
+            hop.strict_host_key_checking = true;
+            hop.trust_host_key = Some(false);
+            hop.expected_host_key_fingerprint = None;
+        }
+    }
 }
 
 fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {

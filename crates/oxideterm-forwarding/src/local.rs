@@ -130,16 +130,11 @@ async fn bridge_local_connection(
     rule: ForwardRule,
     stats: BridgeStatsRecorder,
     shutdown_rx: watch::Receiver<bool>,
-    origin_host: String,
-    origin_port: u16,
+    _origin_host: String,
+    _origin_port: u16,
 ) -> Result<(), ForwardingError> {
     let ssh_stream = ssh_connection
-        .open_direct_tcpip(
-            &rule.target_host,
-            rule.target_port,
-            &origin_host,
-            origin_port,
-        )
+        .open_direct_tcpip(&rule.target_host, rule.target_port, "127.0.0.1", 0)
         .await?;
 
     bridge_tcp_to_ssh_stream(

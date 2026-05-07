@@ -40,8 +40,13 @@ const TAURI_PASSWORD_ICON_BUTTON_OFFSET: f32 = 4.0; // Tauri right-1 top-1
 const TAURI_PASSWORD_ICON_SIZE: f32 = 16.0; // Tauri h-4 w-4
 const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
 const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]
+const TAURI_PROXY_CHAIN_SECTION_PADDING: f32 = 16.0; // Tauri p-4
+const TAURI_PROXY_CHAIN_HEADER_MARGIN: f32 = 16.0; // Tauri mb-4
+const TAURI_PROXY_CHAIN_RADIUS_LG: f32 = 8.0; // Tauri rounded-lg
 const TAURI_PROXY_CHAIN_NODE_SIZE: f32 = 32.0; // Tauri w-8 h-8
 const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
+const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
+const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {
@@ -938,12 +943,16 @@ impl WorkspaceApp {
         div()
             .flex()
             .flex_col()
-            .gap_3()
+            .rounded(px(TAURI_PROXY_CHAIN_RADIUS_LG))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .p(px(TAURI_PROXY_CHAIN_SECTION_PADDING))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
+                    .mb(px(TAURI_PROXY_CHAIN_HEADER_MARGIN))
                     .child(
                         div()
                             .text_size(px(18.0))
@@ -983,14 +992,15 @@ impl WorkspaceApp {
 
     fn render_proxy_chain_toggle(&self, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
         div()
-            .size(px(self.tokens.metrics.ui_button_icon_size))
+            .h(px(self.tokens.metrics.ui_button_sm_height))
+            .w(px(self.tokens.metrics.ui_button_sm_height))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(self.tokens.radii.sm))
+            .rounded(px(self.tokens.radii.md))
             .cursor_pointer()
             .hover({
-                let bg = rgba((self.tokens.ui.bg_hover << 8) | 0xaa);
+                let bg = rgb(self.tokens.ui.bg_hover);
                 move |button| button.bg(bg)
             })
             .child(Self::render_lucide_icon(
@@ -1017,37 +1027,45 @@ impl WorkspaceApp {
     }
 
     fn render_add_jump_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        button_with(
-            &self.tokens,
-            self.i18n.t("ssh.form.proxy_chain_add_jump"),
-            ButtonOptions {
-                variant: ButtonVariant::Outline,
-                size: ButtonSize::Sm,
-                ..ButtonOptions::default()
-            },
-        )
-        .child(Self::render_lucide_icon(
-            LucideIcon::Plus,
-            16.0,
-            rgb(self.tokens.ui.text),
-        ))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, window, cx| {
-                if let Some(form) = this.new_connection_form.as_mut() {
-                    form.jump_server_form = Some(super::form_state::NewConnectionProxyHop::new());
-                    form.field_focused = true;
-                    form.focused_field = NewConnectionField::JumpHost;
-                    form.selected_field = None;
-                }
-                this.open_new_connection_select = None;
-                this.new_connection_caret_visible = true;
-                window.focus(&this.focus_handle);
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
-        .into_any_element()
+        div()
+            .h(px(self.tokens.metrics.ui_button_sm_height))
+            .px(px(self.tokens.metrics.ui_button_sm_padding_x))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgba(0x00000000))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(self.tokens.ui.text))
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                LucideIcon::Plus,
+                16.0,
+                rgb(self.tokens.ui.text),
+            ))
+            .child(self.i18n.t("ssh.form.proxy_chain_add_jump"))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.jump_server_form =
+                            Some(super::form_state::NewConnectionProxyHop::new());
+                        form.field_focused = true;
+                        form.focused_field = NewConnectionField::JumpHost;
+                        form.selected_field = None;
+                    }
+                    this.open_new_connection_select = None;
+                    this.new_connection_caret_visible = true;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
     }
 
     fn render_jump_add_button(&self, disabled: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -1126,14 +1144,14 @@ impl WorkspaceApp {
                     .left(px(TAURI_PROXY_CHAIN_NODE_SIZE / 2.0))
                     .top_0()
                     .bottom_0()
-                    .w(px(1.0))
+                    .w(px(TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS))
                     .when(index > 0, |line| {
                         line.child(
                             div()
                                 .absolute()
                                 .top(px(TAURI_PROXY_CHAIN_NODE_SIZE / 2.0))
                                 .w(px(TAURI_PROXY_CHAIN_LINE_WIDTH))
-                                .h(px(1.0))
+                                .h(px(TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS))
                                 .bg(rgb(self.tokens.ui.text_muted)),
                         )
                     })
@@ -1144,7 +1162,7 @@ impl WorkspaceApp {
                             .size(px(TAURI_PROXY_CHAIN_NODE_SIZE))
                             .rounded_full()
                             .border_2()
-                            .border_color(rgb(self.tokens.ui.border))
+                            .border_color(rgb(self.tokens.ui.border_strong))
                             .bg(rgb(self.tokens.ui.bg))
                             .flex()
                             .items_center()
@@ -1162,8 +1180,8 @@ impl WorkspaceApp {
                         .flex_1()
                         .border_1()
                         .border_color(rgb(self.tokens.ui.border))
-                        .rounded(px(self.tokens.radii.lg))
-                        .p(px(self.tokens.spacing.three))
+                        .rounded(px(TAURI_PROXY_CHAIN_RADIUS_LG))
+                        .p(px(TAURI_PROXY_CHAIN_CARD_PADDING))
                         .flex()
                         .flex_col()
                         .gap_2()
