@@ -417,6 +417,8 @@ impl WorkspaceApp {
         } else {
             self.sftp_view.preview_path = Some(file.path.clone());
             self.sftp_view.preview_content = None;
+            self.sftp_view.preview_asset_owner = None;
+            self.sftp_view.preview_session = PreviewSession::loading();
             self.sftp_view.preview_error = None;
             self.sftp_view.preview_loading = pane == SftpPane::Remote;
             self.sftp_view.dialog = Some(SftpDialog::Preview {
@@ -935,6 +937,8 @@ impl WorkspaceApp {
     fn close_sftp_dialog(&mut self) {
         self.sftp_view.dialog = None;
         self.sftp_view.dialog_value.clear();
+        self.sftp_view.preview_asset_owner = None;
+        self.sftp_view.preview_session = PreviewSession::default();
         self.sftp_view.focused_input = None;
         self.ime_marked_text = None;
     }

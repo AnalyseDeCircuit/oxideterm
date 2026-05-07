@@ -1,0 +1,21 @@
+[package]
+name = "oxideterm-preview"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[features]
+default = []
+pdfium = ["pdfium-render"]
+
+[dependencies]
+gpui.workspace = true
+image.workspace = true
+mime_guess = "2"
+pdfium-render = { version = "0.8", optional = true }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3.23"

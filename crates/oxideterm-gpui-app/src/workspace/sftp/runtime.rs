@@ -232,11 +232,31 @@ impl WorkspaceApp {
                     self.sftp_view.preview_path = Some(path);
                     match result {
                         Ok(content) => {
+                            let asset_owner =
+                                PreviewAssetOwner::from_asset_content_owned_temp(&content);
+                            if let Some(owner) = asset_owner.as_ref() {
+                                match owner.kind() {
+                                    AssetFileKind::Audio => {
+                                        let _ = self.sftp_view.preview_audio.load(owner.path());
+                                    }
+                                    AssetFileKind::Video => {
+                                        let _ = self.sftp_view.preview_video.load(owner.path());
+                                    }
+                                    AssetFileKind::Image
+                                    | AssetFileKind::Pdf
+                                    | AssetFileKind::Office => {}
+                                }
+                            }
+                            self.sftp_view.preview_session =
+                                PreviewSession::ready(content.clone(), asset_owner.clone());
+                            self.sftp_view.preview_asset_owner = asset_owner;
                             self.sftp_view.preview_content = Some(content);
                             self.sftp_view.preview_error = None;
                         }
                         Err(error) => {
                             self.sftp_view.preview_content = None;
+                            self.sftp_view.preview_asset_owner = None;
+                            self.sftp_view.preview_session = PreviewSession::error(error.clone());
                             self.sftp_view.preview_error = Some(error);
                         }
                     }

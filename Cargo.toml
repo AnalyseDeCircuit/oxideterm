@@ -8,6 +8,7 @@ members = [
   "crates/oxideterm-code-editor",
   "crates/oxideterm-connections",
   "crates/oxideterm-forwarding",
+  "crates/oxideterm-preview",
   "crates/oxideterm-i18n",
   "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",

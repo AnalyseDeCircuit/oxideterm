@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use oxideterm_preview::{PreviewAssetKind as AssetFileKind, PreviewContent};
+
 pub mod constants {
     pub const MAX_TEXT_PREVIEW_SIZE: u64 = 2 * 1024 * 1024;
     pub const MAX_PREVIEW_SIZE: u64 = 50 * 1024 * 1024;
@@ -89,55 +91,6 @@ pub enum TransferState {
     Completed,
     Failed,
     Cancelled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AssetFileKind {
-    Image,
-    Video,
-    Audio,
-    Pdf,
-    Office,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PreviewContent {
-    Text {
-        data: String,
-        mime_type: Option<String>,
-        language: Option<String>,
-        encoding: String,
-        #[serde(default)]
-        confidence: f32,
-        #[serde(default)]
-        has_bom: bool,
-    },
-    Image {
-        data: String,
-        mime_type: String,
-    },
-    AssetFile {
-        path: String,
-        mime_type: String,
-        kind: AssetFileKind,
-    },
-    Hex {
-        data: String,
-        total_size: u64,
-        offset: u64,
-        chunk_size: u64,
-        has_more: bool,
-    },
-    TooLarge {
-        size: u64,
-        max_size: u64,
-        recommend_download: bool,
-    },
-    Unsupported {
-        mime_type: String,
-        reason: String,
-    },
 }
 
 pub struct AdaptiveChunkSizer {

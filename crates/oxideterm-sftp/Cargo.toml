@@ -14,6 +14,7 @@ flate2 = "1.1.9"
 futures-util = "0.3"
 glob = "0.3"
 mime_guess = "2"
+oxideterm-preview = { path = "../oxideterm-preview" }
 parking_lot.workspace = true
 redb = "2.1"
 rmp-serde = "1"

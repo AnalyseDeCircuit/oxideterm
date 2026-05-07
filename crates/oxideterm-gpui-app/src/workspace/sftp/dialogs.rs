@@ -59,7 +59,7 @@ impl WorkspaceApp {
             SftpDialog::Preview { name } => (
                 name,
                 self.i18n.t("sftp.preview.description"),
-                self.render_sftp_preview_body(has_background),
+                self.render_sftp_preview_body(has_background, cx),
                 Some(self.i18n.t("sftp.preview.close")),
             ),
         };
@@ -684,14 +684,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_preview_body(&self, has_background: bool) -> AnyElement {
+    fn render_sftp_preview_body(&self, has_background: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let body = if self.sftp_view.preview_loading {
             self.render_sftp_preview_text(self.i18n.t("common.loading"))
         } else if let Some(error) = &self.sftp_view.preview_error {
             self.render_sftp_preview_text(error.clone())
         } else if let Some(content) = &self.sftp_view.preview_content {
-            self.render_sftp_preview_content(content)
+            self.render_sftp_preview_content(content, cx)
         } else {
             self.render_sftp_preview_text(String::new())
         };
@@ -720,7 +720,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_preview_content(&self, content: &PreviewContent) -> AnyElement {
+    fn render_sftp_preview_content(
+        &self,
+        content: &PreviewContent,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         match content {
             PreviewContent::Image { mime_type, data } => {
                 let source = format!("data:{mime_type};base64,{data}");
@@ -734,10 +738,144 @@ impl WorkspaceApp {
             PreviewContent::AssetFile {
                 path,
                 mime_type,
-                kind,
-            } => self.render_sftp_preview_asset_placeholder(path, mime_type, kind.clone()),
+                kind: AssetFileKind::Pdf,
+            } => self.render_sftp_preview_pdf(path, mime_type),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Audio,
+            } => self.render_sftp_preview_audio(path, mime_type, cx),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Video,
+            } => self.render_sftp_preview_video(path, mime_type),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Office,
+            } => self.render_sftp_preview_office(path, mime_type),
             _ => self.render_sftp_preview_text(preview_content_text(content)),
         }
+    }
+
+    fn render_sftp_preview_pdf(&self, path: &str, mime_type: &str) -> AnyElement {
+        let backend = PdfiumPreviewBackend;
+        let path_buf = std::path::PathBuf::from(path);
+        match backend.render_page(&path_buf, 0, 900) {
+            Ok(bitmap) => {
+                if let Some(image) = bitmap.into_render_image() {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            gpui::img(image)
+                                .w_full()
+                                .h(px(456.0))
+                                .object_fit(ObjectFit::Contain),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(SFTP_TEXT_XS))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(format!("PDF · {mime_type} · page 1")),
+                        )
+                        .into_any_element()
+                } else {
+                    self.render_sftp_native_asset_status(
+                        "PDF",
+                        path,
+                        mime_type,
+                        "PDFium rendered a page but GPUI could not build a bitmap.",
+                    )
+                    .into_any_element()
+                }
+            }
+            Err(error) => self.render_sftp_native_asset_status(
+                "PDF",
+                path,
+                mime_type,
+                &format!("{error}"),
+            )
+            .into_any_element(),
+        }
+    }
+
+    fn render_sftp_preview_audio(
+        &self,
+        path: &str,
+        mime_type: &str,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let snapshot = self.sftp_view.preview_audio.snapshot();
+        let detail = snapshot.error.unwrap_or_else(|| {
+            format!(
+                "native audio preview state: {:?} at {:.1}s",
+                snapshot.state,
+                snapshot.position.as_secs_f32()
+            )
+        });
+        self.render_sftp_native_asset_status("Audio", path, mime_type, &detail)
+            .into_any_element()
+    }
+
+    fn render_sftp_preview_video(&self, path: &str, mime_type: &str) -> AnyElement {
+        let snapshot = self.sftp_view.preview_video.snapshot();
+        let detail = snapshot.error.unwrap_or_else(|| {
+            format!("{} backend is unavailable", self.sftp_view.preview_video.backend_name())
+        });
+        self.render_sftp_native_asset_status("Video", path, mime_type, &detail)
+            .into_any_element()
+    }
+
+    fn render_sftp_preview_office(&self, path: &str, mime_type: &str) -> AnyElement {
+        self.render_sftp_native_asset_status(
+            "Office",
+            path,
+            mime_type,
+            "Office preview requires the later Office -> PDF/image conversion pipeline.",
+        )
+        .into_any_element()
+    }
+
+    fn render_sftp_native_asset_status(
+        &self,
+        title: &str,
+        path: &str,
+        mime_type: &str,
+        detail: &str,
+    ) -> gpui::Div {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .min_h(px(456.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg_panel))
+            .text_size(px(SFTP_TEXT_XS))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .text_size(px(SFTP_TEXT_SM))
+                    .text_color(rgb(theme.text))
+                    .child(title.to_string()),
+            )
+            .child(mime_type.to_string())
+            .child(div().max_w(px(680.0)).child(detail.to_string()))
+            .child(
+                div()
+                    .max_w(px(680.0))
+                    .truncate()
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .child(path.to_string()),
+            )
     }
 
     fn render_sftp_preview_image(
@@ -765,14 +903,4 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_preview_asset_placeholder(
-        &self,
-        path: &str,
-        mime_type: &str,
-        kind: AssetFileKind,
-    ) -> AnyElement {
-        // Non-image assets require the dedicated GPUI/WebView preview surface.
-        // Keep the real temp asset path visible instead of masquerading as a media viewer.
-        self.render_sftp_preview_text(format!("{kind:?} asset\n{mime_type}\n{path}"))
-    }
 }

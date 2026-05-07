@@ -8,6 +8,11 @@ use oxideterm_gpui_ui::{
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
 };
+use oxideterm_preview::{
+    AudioPreviewBackend, PdfPreviewBackend, PdfiumPreviewBackend, PlatformVideoBackend,
+    PreviewAssetOwner, PreviewSession, UnsupportedAudioPreviewBackend,
+    UnsupportedPlatformVideoBackend,
+};
 use oxideterm_sftp::{
     AssetFileKind, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession,
@@ -308,6 +313,10 @@ pub(super) struct SftpViewState {
     dialog_value: String,
     preview_path: Option<String>,
     preview_content: Option<PreviewContent>,
+    preview_asset_owner: Option<PreviewAssetOwner>,
+    preview_session: PreviewSession,
+    preview_audio: UnsupportedAudioPreviewBackend,
+    preview_video: UnsupportedPlatformVideoBackend,
     preview_error: Option<String>,
     preview_loading: bool,
     transfers: Vec<SftpTransferItem>,
@@ -351,6 +360,10 @@ impl Default for SftpViewState {
             dialog_value: String::new(),
             preview_path: None,
             preview_content: None,
+            preview_asset_owner: None,
+            preview_session: PreviewSession::default(),
+            preview_audio: UnsupportedAudioPreviewBackend,
+            preview_video: UnsupportedPlatformVideoBackend,
             preview_error: None,
             preview_loading: false,
             transfers: Vec::new(),
