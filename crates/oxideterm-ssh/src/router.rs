@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use dashmap::DashMap;
+use oxideterm_sftp::{SftpError, SftpSession};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use crate::{
-    ConnectionConsumer, ConnectionInfo, ConnectionState, SshConfig, SshConnectionHandle,
-    SshConnectionRegistry,
+    AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState, SshConfig,
+    SshConnectionHandle, SshConnectionRegistry,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -321,6 +324,64 @@ impl NodeRouter {
         })
     }
 
+    pub async fn acquire_sftp(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        let resolved = self.resolve_connection(node_id)?;
+        let AcquiredSftpMeta {
+            session,
+            was_new,
+            cwd,
+        } = resolved
+            .handle
+            .acquire_sftp_with_meta()
+            .await
+            .map_err(|error| sftp_route_error("SFTP init failed", error))?;
+
+        if was_new {
+            let _ = self
+                .registry
+                .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
+        }
+        self.set_sftp_ready(node_id, true, cwd)?;
+        Ok(session)
+    }
+
+    pub async fn acquire_transfer_sftp(&self, node_id: &NodeId) -> Result<SftpSession, RouteError> {
+        let resolved = self.resolve_connection(node_id)?;
+        resolved
+            .handle
+            .acquire_transfer_sftp()
+            .await
+            .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))
+    }
+
+    pub async fn invalidate_and_reacquire_sftp(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        let resolved = self.resolve_connection(node_id)?;
+        let had_sftp = resolved.handle.invalidate_sftp().await;
+        if had_sftp {
+            let _ = self
+                .registry
+                .mark_sftp_session(&resolved.connection_id, false, None);
+            self.set_sftp_ready(node_id, false, None)?;
+        }
+
+        let AcquiredSftpMeta { session, cwd, .. } = resolved
+            .handle
+            .acquire_sftp_with_meta()
+            .await
+            .map_err(|error| sftp_route_error("SFTP rebuild failed", error))?;
+        let _ = self
+            .registry
+            .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
+        self.set_sftp_ready(node_id, true, cwd)?;
+        Ok(session)
+    }
+
     pub fn node_state(&self, node_id: &NodeId) -> Result<NodeStateSnapshot, RouteError> {
         let mut route = self
             .nodes
@@ -409,6 +470,22 @@ impl NodeRouter {
             }
         }
     }
+
+    fn set_sftp_ready(
+        &self,
+        node_id: &NodeId,
+        ready: bool,
+        cwd: Option<String>,
+    ) -> Result<(), RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.state.sftp_ready = ready;
+        route.state.sftp_cwd = cwd;
+        route.generation += 1;
+        Ok(())
+    }
 }
 
 fn readiness_for_connection(connection: &ConnectionInfo) -> NodeReadiness {
@@ -420,6 +497,10 @@ fn readiness_for_connection(connection: &ConnectionInfo) -> NodeReadiness {
             NodeReadiness::Disconnected
         }
     }
+}
+
+fn sftp_route_error(prefix: &str, error: SftpError) -> RouteError {
+    RouteError::CapabilityUnavailable(format!("{prefix}: {error}"))
 }
 
 #[cfg(test)]

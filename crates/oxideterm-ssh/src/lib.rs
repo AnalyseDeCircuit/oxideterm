@@ -13,17 +13,22 @@ mod connection_registry;
 mod host_key;
 mod reconnect;
 mod router;
-mod sftp_transfer;
 mod transport;
 
 pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
-    ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig, ConnectionPoolStats, ConnectionState,
-    HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, ProbeConnectionStatus, SftpSessionState,
-    SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
-    WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
+    ConnectionPoolStats, ConnectionState, HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL,
+    ProbeConnectionStatus, SftpSessionState, SshConnectionHandle, SshConnectionRegistry,
+    WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use host_key::{HostKeyStatus, check_host_key, remove_host_key};
+pub use oxideterm_sftp::{
+    DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM, FileInfo, FileType,
+    ListFilter, MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpError,
+    SftpSession, SftpTransferManager, SftpTransferPermit, SftpTransferRuntimeSettings, SortOrder,
+    TransferDirection, TransferProgress, TransferState,
+};
 pub use reconnect::{
     PhaseEvent, PhaseResult, ReconnectJob, ReconnectOrchestratorStore, ReconnectPhase,
     ReconnectSnapshot, ReconnectTiming,
@@ -31,11 +36,6 @@ pub use reconnect::{
 pub use router::{
     NodeId, NodeReadiness, NodeRouter, NodeState, NodeStateEvent, NodeStateSnapshot,
     ResolvedConnection, RouteError, TerminalEndpoint,
-};
-pub use sftp_transfer::{
-    DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM,
-    MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpTransferManager,
-    SftpTransferPermit, SftpTransferRuntimeSettings,
 };
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
