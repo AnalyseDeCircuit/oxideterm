@@ -12,6 +12,7 @@ members = [
   "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",
   "crates/oxideterm-settings",
+  "crates/oxideterm-sftp",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
   "crates/oxideterm-terminal-encoding",
@@ -53,7 +54,7 @@ sha2 = "0.10"
 signature = "2"
 ssh-encoding = "0.2"
 thiserror = "2.0"
-tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs"] }
 tracing = "0.1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1.12"

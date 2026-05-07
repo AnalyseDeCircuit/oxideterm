@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 dashmap.workspace = true
+oxideterm-sftp = { path = "../oxideterm-sftp" }
 parking_lot.workspace = true
 russh = { path = "../russh" }
 serde.workspace = true
@@ -13,5 +14,6 @@ signature.workspace = true
 ssh-encoding.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true

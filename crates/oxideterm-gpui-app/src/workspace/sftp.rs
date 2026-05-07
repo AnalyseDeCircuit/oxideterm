@@ -1,8 +1,15 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use gpui::{StatefulInteractiveElement, prelude::*};
+use gpui::{ObjectFit, StatefulInteractiveElement, prelude::*};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
-use serde::Deserialize;
+use oxideterm_sftp::{
+    AssetFileKind, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
+    ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession,
+    SortOrder as RemoteSortOrder, StoredTransferProgress, TransferProgress,
+    TransferState as RemoteTransferState, TransferStrategy as RemoteTransferStrategy,
+    TransferType as RemoteTransferType, probe_tar_compression, probe_tar_support,
+    tar_download_directory, tar_upload_directory,
+};
 
 const SFTP_ROOT_PADDING: f32 = 8.0; // Tauri p-2
 const SFTP_GAP: f32 = 8.0; // Tauri gap-2
@@ -78,9 +85,15 @@ enum SftpFileType {
 #[derive(Clone, Debug)]
 pub(super) struct SftpFileEntry {
     name: String,
+    path: String,
     file_type: SftpFileType,
     size: u64,
     modified: Option<i64>,
+    permissions: Option<String>,
+    owner: Option<String>,
+    group: Option<String>,
+    is_symlink: bool,
+    symlink_target: Option<String>,
 }
 
 #[derive(Debug)]
@@ -88,10 +101,31 @@ pub(super) enum SftpWorkerResult {
     RemoteList {
         tab_id: TabId,
         node_id: NodeId,
-        connection_id: String,
         session_id: String,
         path: String,
         result: Result<RemoteSftpListing, String>,
+    },
+    TransferProgress {
+        id: u64,
+        transferred: u64,
+        total: u64,
+        state: SftpTransferState,
+        error: Option<String>,
+    },
+    TransferComplete {
+        id: u64,
+        result: Result<(), String>,
+        refresh_remote: bool,
+        refresh_local: bool,
+    },
+    RemoteMutationComplete {
+        result: Result<(), String>,
+        refresh_remote: bool,
+        refresh_local: bool,
+    },
+    PreviewLoaded {
+        path: String,
+        result: Result<PreviewContent, String>,
     },
 }
 
@@ -99,22 +133,6 @@ pub(super) enum SftpWorkerResult {
 pub(super) struct RemoteSftpListing {
     cwd: String,
     files: Vec<SftpFileEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteListOutput {
-    cwd: String,
-    entries: Vec<RemoteListEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteListEntry {
-    name: String,
-    is_dir: bool,
-    size: u64,
-    modified: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -146,7 +164,7 @@ enum SftpTransferDirection {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SftpTransferState {
+pub(super) enum SftpTransferState {
     Pending,
     Active,
     Paused,
@@ -167,6 +185,31 @@ struct SftpTransferItem {
     transferred: u64,
     state: SftpTransferState,
     error: Option<String>,
+}
+
+#[derive(Default)]
+struct DirectoryProgressAccumulator {
+    files: HashMap<(String, String), (u64, u64)>,
+}
+
+impl DirectoryProgressAccumulator {
+    fn update(&mut self, progress: TransferProgress) -> TransferProgress {
+        self.files.insert(
+            (progress.remote_path.clone(), progress.local_path.clone()),
+            (progress.transferred_bytes, progress.total_bytes),
+        );
+        let transferred_bytes = self
+            .files
+            .values()
+            .map(|(transferred, _)| *transferred)
+            .sum();
+        let total_bytes = self.files.values().map(|(_, total)| *total).sum();
+        TransferProgress {
+            transferred_bytes,
+            total_bytes,
+            ..progress
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -218,6 +261,10 @@ pub(super) struct SftpViewState {
     editing_remote_path: bool,
     dialog: Option<SftpDialog>,
     dialog_value: String,
+    preview_path: Option<String>,
+    preview_content: Option<PreviewContent>,
+    preview_error: Option<String>,
+    preview_loading: bool,
     transfers: Vec<SftpTransferItem>,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
@@ -227,12 +274,12 @@ pub(super) struct SftpViewState {
 impl Default for SftpViewState {
     fn default() -> Self {
         let local_path = home_path_mock();
-        let remote_path = "/home/lipsc".to_string();
+        let remote_path = String::new();
         Self {
             active_pane: SftpPane::Remote,
             local_path_input: local_path.clone(),
             remote_path_input: remote_path.clone(),
-            local_path,
+            local_path: local_path.clone(),
             remote_path,
             local_filter: String::new(),
             remote_filter: String::new(),
@@ -244,8 +291,8 @@ impl Default for SftpViewState {
             remote_selected: HashSet::new(),
             local_last_selected: None,
             remote_last_selected: None,
-            local_files: mock_local_files(),
-            remote_files: mock_remote_files(),
+            local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
+            remote_files: Vec::new(),
             remote_loading: false,
             remote_load_pending: false,
             remote_load_inflight: false,
@@ -255,6 +302,10 @@ impl Default for SftpViewState {
             editing_remote_path: false,
             dialog: None,
             dialog_value: String::new(),
+            preview_path: None,
+            preview_content: None,
+            preview_error: None,
+            preview_loading: false,
             transfers: Vec::new(),
             show_incomplete: false,
             context_menu: None,
@@ -334,7 +385,11 @@ impl WorkspaceApp {
         path: String,
         cx: &mut Context<Self>,
     ) {
-        let resolved = match self.node_router.resolve_connection(&node_id) {
+        let session_id = format!("node:{}:sftp", node_id.0);
+        let resolved = match self
+            .node_router
+            .acquire_connection(&node_id, ConnectionConsumer::Sftp(session_id.clone()))
+        {
             Ok(resolved) => resolved,
             Err(error) => {
                 self.sftp_view.remote_loading = false;
@@ -344,18 +399,6 @@ impl WorkspaceApp {
                 cx.notify();
                 return;
             }
-        };
-        let session_id = format!("node:{}:sftp", node_id.0);
-        let Some(handle) = self
-            .ssh_registry
-            .acquire_sftp_session(&resolved.connection_id, session_id.clone())
-        else {
-            self.sftp_view.remote_loading = false;
-            self.sftp_view.remote_load_pending = false;
-            self.sftp_view.remote_load_inflight = false;
-            self.sftp_view.init_error = Some(self.i18n.t("sftp.errors.connection_lost"));
-            cx.notify();
-            return;
         };
         self.sftp_connection_consumers.insert(
             session_id.clone(),
@@ -371,18 +414,12 @@ impl WorkspaceApp {
 
         let tx = self.sftp_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
-        let connection_id = resolved.connection_id;
+        let router = self.node_router.clone();
         runtime.spawn(async move {
-            let command = remote_list_command(&path);
-            let result = handle
-                .run_command(&command, Duration::from_secs(8), 512 * 1024)
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|output| parse_remote_listing(&output));
+            let result = load_remote_sftp_listing(router, &node_id, &path).await;
             let _ = tx.send(SftpWorkerResult::RemoteList {
                 tab_id,
                 node_id,
-                connection_id,
                 session_id,
                 path,
                 result,
@@ -403,7 +440,6 @@ impl WorkspaceApp {
                 SftpWorkerResult::RemoteList {
                     tab_id,
                     node_id,
-                    connection_id,
                     session_id,
                     path,
                     result,
@@ -420,11 +456,8 @@ impl WorkspaceApp {
                                 self.sftp_view.remote_selected.clear();
                                 self.sftp_view.remote_last_selected = None;
                                 self.sftp_view.init_error = None;
-                                let _ = self.ssh_registry.mark_sftp_session(
-                                    &connection_id,
-                                    true,
-                                    Some(cwd.clone()),
-                                );
+                                // GPUI still carries a session id for tab/UI compatibility, but
+                                // the real SFTP owner lives in ConnectionEntry via NodeRouter.
                                 if let Ok(event) = self.node_router.bind_sftp_session(
                                     &node_id,
                                     session_id,
@@ -434,16 +467,96 @@ impl WorkspaceApp {
                                 }
                             }
                             Err(error) => {
-                                let _ = self.ssh_registry.mark_sftp_session(
-                                    &connection_id,
-                                    false,
-                                    None,
-                                );
                                 self.sftp_view.init_error = Some(format!("{}: {error}", path));
                             }
                         }
                         changed = true;
                     }
+                }
+                SftpWorkerResult::TransferProgress {
+                    id,
+                    transferred,
+                    total,
+                    state,
+                    error,
+                } => {
+                    if let Some(item) = self
+                        .sftp_view
+                        .transfers
+                        .iter_mut()
+                        .find(|item| item.id == id)
+                    {
+                        item.transferred = transferred;
+                        item.size = total.max(item.size);
+                        item.state = state;
+                        item.error = error;
+                        changed = true;
+                    }
+                }
+                SftpWorkerResult::TransferComplete {
+                    id,
+                    result,
+                    refresh_remote,
+                    refresh_local,
+                } => {
+                    if let Some(item) = self
+                        .sftp_view
+                        .transfers
+                        .iter_mut()
+                        .find(|item| item.id == id)
+                    {
+                        match result {
+                            Ok(()) => {
+                                item.transferred = item.size;
+                                item.state = SftpTransferState::Completed;
+                                item.error = None;
+                            }
+                            Err(error) => {
+                                item.state = SftpTransferState::Error;
+                                item.error = Some(error);
+                            }
+                        }
+                    }
+                    if refresh_remote {
+                        self.sftp_view.remote_load_pending = true;
+                    }
+                    if refresh_local && let Ok(files) = list_local_files(&self.sftp_view.local_path)
+                    {
+                        self.sftp_view.local_files = files;
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::RemoteMutationComplete {
+                    result,
+                    refresh_remote,
+                    refresh_local,
+                } => {
+                    if let Err(error) = result {
+                        self.sftp_view.init_error = Some(error);
+                    }
+                    if refresh_remote {
+                        self.sftp_view.remote_load_pending = true;
+                    }
+                    if refresh_local && let Ok(files) = list_local_files(&self.sftp_view.local_path)
+                    {
+                        self.sftp_view.local_files = files;
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::PreviewLoaded { path, result } => {
+                    self.sftp_view.preview_loading = false;
+                    self.sftp_view.preview_path = Some(path);
+                    match result {
+                        Ok(content) => {
+                            self.sftp_view.preview_content = Some(content);
+                            self.sftp_view.preview_error = None;
+                        }
+                        Err(error) => {
+                            self.sftp_view.preview_content = None;
+                            self.sftp_view.preview_error = Some(error);
+                        }
+                    }
+                    changed = true;
                 }
             }
         }
@@ -1225,6 +1338,12 @@ impl WorkspaceApp {
             let name = file.name.clone();
             let row_file = file.clone();
             let context_file = file.clone();
+            let display_name = if let Some(target) = file.symlink_target.as_ref() {
+                format!("{} -> {target}", file.name)
+            } else {
+                file.name.clone()
+            };
+            let _metadata_fields_consumed = (&file.permissions, &file.owner, &file.group);
             let is_selected = selected.contains(&name);
             list = list.child(
                 div()
@@ -1258,7 +1377,9 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(Self::render_lucide_icon(
-                                if file.file_type == SftpFileType::Directory {
+                                if file.is_symlink {
+                                    LucideIcon::Link2
+                                } else if file.file_type == SftpFileType::Directory {
                                     LucideIcon::Folder
                                 } else {
                                     LucideIcon::File
@@ -1266,11 +1387,13 @@ impl WorkspaceApp {
                                 SFTP_ICON_MD,
                                 if file.file_type == SftpFileType::Directory {
                                     rgb(SFTP_FOLDER_BLUE)
+                                } else if file.is_symlink {
+                                    rgb(theme.accent)
                                 } else {
                                     rgb(theme.text_muted)
                                 },
                             ))
-                            .child(div().truncate().child(file.name.clone())),
+                            .child(div().truncate().child(display_name)),
                     )
                     .child(
                         div()
@@ -1706,7 +1829,7 @@ impl WorkspaceApp {
                                 cx.listener({
                                     let id = transfer.id;
                                     move |this, _event, _window, cx| {
-                                        this.set_mock_transfer_state(id, SftpTransferState::Paused);
+                                        this.set_sftp_transfer_state(id, SftpTransferState::Paused);
                                         cx.stop_propagation();
                                         cx.notify();
                                     }
@@ -1721,7 +1844,7 @@ impl WorkspaceApp {
                             cx.listener({
                                 let id = transfer.id;
                                 move |this, _event, _window, cx| {
-                                    this.set_mock_transfer_state(id, SftpTransferState::Pending);
+                                    this.set_sftp_transfer_state(id, SftpTransferState::Pending);
                                     cx.stop_propagation();
                                     cx.notify();
                                 }
@@ -1745,7 +1868,7 @@ impl WorkspaceApp {
                         cx.listener({
                             let id = transfer.id;
                             move |this, _event, _window, cx| {
-                                this.cancel_or_remove_mock_transfer(id);
+                                this.cancel_or_remove_sftp_transfer(id);
                                 cx.stop_propagation();
                                 cx.notify();
                             }
@@ -1806,7 +1929,7 @@ impl WorkspaceApp {
                     false,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.queue_mock_sftp_transfers(menu.pane, direction);
+                        this.queue_sftp_transfers(menu.pane, direction);
                         this.sftp_view.context_menu = None;
                         cx.stop_propagation();
                         cx.notify();
@@ -2505,6 +2628,15 @@ impl WorkspaceApp {
 
     fn render_sftp_preview_body(&self, has_background: bool) -> AnyElement {
         let theme = self.tokens.ui;
+        let body = if self.sftp_view.preview_loading {
+            self.render_sftp_preview_text(self.i18n.t("common.loading"))
+        } else if let Some(error) = &self.sftp_view.preview_error {
+            self.render_sftp_preview_text(error.clone())
+        } else if let Some(content) = &self.sftp_view.preview_content {
+            self.render_sftp_preview_content(content)
+        } else {
+            self.render_sftp_preview_text(String::new())
+        };
         div()
             .h(px(520.0))
             .flex()
@@ -2516,12 +2648,74 @@ impl WorkspaceApp {
                     .flex_1()
                     .overflow_y_scroll()
                     .p(px(16.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(SFTP_TEXT_XS))
                     .text_color(rgb(theme.text))
-                    .child("server {\n  listen 8080;\n  root /srv/www;\n}\n"),
+                    .child(body),
             )
             .into_any_element()
+    }
+
+    fn render_sftp_preview_text(&self, text: String) -> AnyElement {
+        div()
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_size(px(SFTP_TEXT_XS))
+            .child(text)
+            .into_any_element()
+    }
+
+    fn render_sftp_preview_content(&self, content: &PreviewContent) -> AnyElement {
+        match content {
+            PreviewContent::Image { mime_type, data } => {
+                let source = format!("data:{mime_type};base64,{data}");
+                self.render_sftp_preview_image(source, mime_type.clone())
+            }
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Image,
+            } => self.render_sftp_preview_image(std::path::PathBuf::from(path), mime_type.clone()),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind,
+            } => self.render_sftp_preview_asset_placeholder(path, mime_type, kind.clone()),
+            _ => self.render_sftp_preview_text(preview_content_text(content)),
+        }
+    }
+
+    fn render_sftp_preview_image(
+        &self,
+        source: impl Into<gpui::ImageSource>,
+        fallback_label: String,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        gpui::img(source)
+            .w_full()
+            .h(px(456.0))
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(move || {
+                div()
+                    .w_full()
+                    .h(px(456.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(SFTP_TEXT_SM))
+                    .text_color(rgb(theme.text_muted))
+                    .child(fallback_label.clone())
+                    .into_any_element()
+            })
+            .into_any_element()
+    }
+
+    fn render_sftp_preview_asset_placeholder(
+        &self,
+        path: &str,
+        mime_type: &str,
+        kind: AssetFileKind,
+    ) -> AnyElement {
+        // Non-image assets require the dedicated GPUI/WebView preview surface.
+        // Keep the real temp asset path visible instead of masquerading as a media viewer.
+        self.render_sftp_preview_text(format!("{kind:?} asset\n{mime_type}\n{path}"))
     }
 
     fn render_sftp_init_error(
@@ -2643,7 +2837,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.queue_mock_sftp_transfers(pane, direction);
+                    this.queue_sftp_transfers(pane, direction);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -2827,7 +3021,7 @@ impl WorkspaceApp {
                 if self.sftp_view.active_pane == SftpPane::Local
                     && !self.sftp_view.local_selected.is_empty()
                 {
-                    self.queue_mock_sftp_transfers(SftpPane::Local, SftpTransferDirection::Upload);
+                    self.queue_sftp_transfers(SftpPane::Local, SftpTransferDirection::Upload);
                     cx.notify();
                     return true;
                 }
@@ -2837,10 +3031,7 @@ impl WorkspaceApp {
                 if self.sftp_view.active_pane == SftpPane::Remote
                     && !self.sftp_view.remote_selected.is_empty()
                 {
-                    self.queue_mock_sftp_transfers(
-                        SftpPane::Remote,
-                        SftpTransferDirection::Download,
-                    );
+                    self.queue_sftp_transfers(SftpPane::Remote, SftpTransferDirection::Download);
                     cx.notify();
                     return true;
                 }
@@ -2904,8 +3095,17 @@ impl WorkspaceApp {
         match pane {
             SftpPane::Local => {
                 self.sftp_view.local_path = path.clone();
-                self.sftp_view.local_path_input = path;
+                self.sftp_view.local_path_input = path.clone();
                 self.sftp_view.editing_local_path = false;
+                self.sftp_view.local_files = list_local_files(&path).unwrap_or_else(|error| {
+                    vec![sftp_file_entry(
+                        format!("Unable to read folder: {error}"),
+                        path.clone(),
+                        SftpFileType::File,
+                        0,
+                        None,
+                    )]
+                });
                 self.sftp_view.local_selected.clear();
                 self.sftp_view.local_last_selected = None;
             }
@@ -3134,10 +3334,45 @@ impl WorkspaceApp {
             };
             self.set_sftp_path(pane, join_sftp_path(&base, &file.name));
         } else {
+            self.sftp_view.preview_path = Some(file.path.clone());
+            self.sftp_view.preview_content = None;
+            self.sftp_view.preview_error = None;
+            self.sftp_view.preview_loading = pane == SftpPane::Remote;
             self.sftp_view.dialog = Some(SftpDialog::Preview {
                 name: file.name.clone(),
             });
+            if pane == SftpPane::Remote {
+                self.spawn_remote_sftp_preview(file.path.clone());
+            } else {
+                self.sftp_view.preview_loading = true;
+                self.spawn_local_sftp_preview(file.path.clone());
+            }
         }
+    }
+
+    fn spawn_remote_sftp_preview(&self, path: String) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let router = self.node_router.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = load_remote_sftp_preview(router, &node_id, &path).await;
+            let _ = tx.send(SftpWorkerResult::PreviewLoaded { path, result });
+        });
+    }
+
+    fn spawn_local_sftp_preview(&self, path: String) {
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = load_local_sftp_preview(&path).await;
+            let _ = tx.send(SftpWorkerResult::PreviewLoaded { path, result });
+        });
     }
 
     fn open_sftp_context_menu(
@@ -3179,7 +3414,13 @@ impl WorkspaceApp {
         self.sftp_view.focused_input = Some(SftpInput::DialogValue);
     }
 
-    fn queue_mock_sftp_transfers(&mut self, pane: SftpPane, direction: SftpTransferDirection) {
+    fn queue_sftp_transfers(&mut self, pane: SftpPane, direction: SftpTransferDirection) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
         let selected = match pane {
             SftpPane::Local => self.sftp_view.local_selected.clone(),
             SftpPane::Remote => self.sftp_view.remote_selected.clone(),
@@ -3196,26 +3437,305 @@ impl WorkspaceApp {
             let id = self.sftp_view.next_transfer_id;
             self.sftp_view.next_transfer_id += 1;
             let size = file.map(|file| file.size).unwrap_or_default().max(1);
+            let is_directory = file.is_some_and(|file| file.file_type == SftpFileType::Directory);
+            let local_path = match (direction, file) {
+                (SftpTransferDirection::Upload, Some(file)) => file.path.clone(),
+                _ => join_local_path(&self.sftp_view.local_path, &name),
+            };
+            let remote_path = match (direction, file) {
+                (SftpTransferDirection::Download, Some(file)) => file.path.clone(),
+                _ => join_sftp_path(&self.sftp_view.remote_path, &name),
+            };
             self.sftp_view.transfers.push(SftpTransferItem {
                 id,
-                name: if file.is_some_and(|file| file.file_type == SftpFileType::Directory) {
+                name: if is_directory {
                     format!("{name}/")
                 } else {
                     name.clone()
                 },
-                local_path: format!("{}/{}", self.sftp_view.local_path, name),
-                remote_path: format!("{}/{}", self.sftp_view.remote_path, name),
+                local_path: local_path.clone(),
+                remote_path: remote_path.clone(),
                 direction,
                 size,
-                transferred: (size / 3).max(1),
-                state: SftpTransferState::Active,
+                transferred: 0,
+                state: SftpTransferState::Pending,
                 error: None,
             });
+            self.spawn_sftp_transfer_task(
+                id,
+                node_id.clone(),
+                direction,
+                is_directory,
+                local_path,
+                remote_path,
+            );
         }
         self.clear_sftp_selection(pane);
     }
 
-    fn set_mock_transfer_state(&mut self, id: u64, state: SftpTransferState) {
+    fn spawn_sftp_transfer_task(
+        &self,
+        id: u64,
+        node_id: NodeId,
+        direction: SftpTransferDirection,
+        is_directory: bool,
+        local_path: String,
+        remote_path: String,
+    ) {
+        let router = self.node_router.clone();
+        let manager = self.sftp_transfer_manager.clone();
+        let progress_store = self.sftp_progress_store.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let transfer_id = id.to_string();
+            let mut directory_progress = is_directory.then(|| {
+                let transfer_type = match direction {
+                    SftpTransferDirection::Upload => RemoteTransferType::Upload,
+                    SftpTransferDirection::Download => RemoteTransferType::Download,
+                };
+                let mut progress = StoredTransferProgress::new(
+                    transfer_id.clone(),
+                    transfer_type,
+                    match direction {
+                        SftpTransferDirection::Upload => local_path.clone().into(),
+                        SftpTransferDirection::Download => remote_path.clone().into(),
+                    },
+                    match direction {
+                        SftpTransferDirection::Upload => remote_path.clone().into(),
+                        SftpTransferDirection::Download => local_path.clone().into(),
+                    },
+                    0,
+                    format!("node:{}", node_id.0),
+                );
+                progress.strategy = RemoteTransferStrategy::DirectoryRecursive;
+                progress
+            });
+            if let Some(progress) = directory_progress.as_ref() {
+                let _ = progress_store.save(progress).await;
+            }
+            let _ = tx.send(SftpWorkerResult::TransferProgress {
+                id,
+                transferred: 0,
+                total: 0,
+                state: SftpTransferState::Active,
+                error: None,
+            });
+            let (progress_tx, mut progress_rx) =
+                tokio::sync::mpsc::channel::<TransferProgress>(100);
+            let progress_ui_tx = tx.clone();
+            let progress_store_for_task = progress_store.clone();
+            tokio::spawn(async move {
+                let mut accumulator = DirectoryProgressAccumulator::default();
+                while let Some(progress) = progress_rx.recv().await {
+                    let progress = if is_directory {
+                        accumulator.update(progress)
+                    } else {
+                        progress
+                    };
+                    if let Some(stored) = directory_progress.as_mut() {
+                        stored.total_bytes = stored.total_bytes.max(progress.total_bytes);
+                        stored.update_progress(progress.transferred_bytes);
+                        let _ = progress_store_for_task.save(stored).await;
+                    }
+                    let _ = progress_ui_tx.send(SftpWorkerResult::TransferProgress {
+                        id,
+                        transferred: progress.transferred_bytes,
+                        total: progress.total_bytes,
+                        state: sftp_transfer_state_from_remote(progress.state),
+                        error: progress.error,
+                    });
+                }
+            });
+
+            let result = async {
+                let _permit = manager.acquire_permit().await;
+                let sftp = router
+                    .acquire_transfer_sftp(&node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                match (direction, is_directory) {
+                    (SftpTransferDirection::Upload, true) => {
+                        let resolved = router
+                            .resolve_connection(&node_id)
+                            .map_err(|error| error.to_string())?;
+                        if probe_tar_support(&resolved.handle).await {
+                            {
+                                let shared = router
+                                    .acquire_sftp(&node_id)
+                                    .await
+                                    .map_err(|error| error.to_string())?;
+                                let shared = shared.lock().await;
+                                for prefix in remote_directory_prefixes(&remote_path) {
+                                    let _ = shared.mkdir(&prefix).await;
+                                }
+                            }
+                            let compression = probe_tar_compression(&resolved.handle).await;
+                            let tar_result = tar_upload_directory(
+                                &resolved.handle,
+                                &local_path,
+                                &remote_path,
+                                &transfer_id,
+                                Some(progress_tx.clone()),
+                                Some(manager.clone()),
+                                Some(compression),
+                            )
+                            .await;
+                            match tar_result {
+                                Ok(_) => {}
+                                Err(error)
+                                    if !manager
+                                        .get_control(&transfer_id)
+                                        .is_some_and(|control| control.is_cancelled()) =>
+                                {
+                                    sftp.upload_dir(
+                                        &local_path,
+                                        &remote_path,
+                                        &transfer_id,
+                                        Some(progress_tx),
+                                        Some(manager.clone()),
+                                    )
+                                    .await
+                                    .map_err(|fallback_error| {
+                                        format!(
+                                            "tar upload failed ({error}); recursive fallback failed ({fallback_error})"
+                                        )
+                                    })?;
+                                }
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        } else {
+                            sftp.upload_dir(
+                                &local_path,
+                                &remote_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        }
+                    }
+                    (SftpTransferDirection::Upload, false) => {
+                        sftp.upload_with_resume(
+                            &local_path,
+                            &remote_path,
+                            progress_store.clone(),
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                            Some(transfer_id.clone()),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    }
+                    (SftpTransferDirection::Download, true) => {
+                        let resolved = router
+                            .resolve_connection(&node_id)
+                            .map_err(|error| error.to_string())?;
+                        if probe_tar_support(&resolved.handle).await {
+                            let compression = probe_tar_compression(&resolved.handle).await;
+                            let tar_result = tar_download_directory(
+                                &resolved.handle,
+                                &remote_path,
+                                &local_path,
+                                &transfer_id,
+                                Some(progress_tx.clone()),
+                                Some(manager.clone()),
+                                Some(compression),
+                            )
+                            .await;
+                            match tar_result {
+                                Ok(_) => {}
+                                Err(error)
+                                    if !manager
+                                        .get_control(&transfer_id)
+                                        .is_some_and(|control| control.is_cancelled()) =>
+                                {
+                                    sftp.download_dir(
+                                        &remote_path,
+                                        &local_path,
+                                        &transfer_id,
+                                        Some(progress_tx),
+                                        Some(manager.clone()),
+                                    )
+                                    .await
+                                    .map_err(|fallback_error| {
+                                        format!(
+                                            "tar download failed ({error}); recursive fallback failed ({fallback_error})"
+                                        )
+                                    })?;
+                                }
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        } else {
+                            sftp.download_dir(
+                                &remote_path,
+                                &local_path,
+                                &transfer_id,
+                                Some(progress_tx),
+                                Some(manager.clone()),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        }
+                    }
+                    (SftpTransferDirection::Download, false) => {
+                        sftp.download_with_resume(
+                            &remote_path,
+                            &local_path,
+                            progress_store.clone(),
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                            Some(transfer_id.clone()),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    }
+                }
+                Ok::<(), String>(())
+            }
+            .await
+            .map_err(|error| error.to_string());
+
+            if is_directory {
+                match &result {
+                    Ok(()) => {
+                        let _ = progress_store.delete(&transfer_id).await;
+                    }
+                    Err(error) if error.to_ascii_lowercase().contains("cancel") => {
+                        let _ = progress_store.delete(&transfer_id).await;
+                    }
+                    Err(error) => {
+                        if let Ok(Some(mut progress)) = progress_store.load(&transfer_id).await {
+                            progress.mark_failed(error.clone());
+                            let _ = progress_store.save(&progress).await;
+                        }
+                    }
+                }
+            }
+
+            let _ = tx.send(SftpWorkerResult::TransferComplete {
+                id,
+                result,
+                refresh_remote: matches!(direction, SftpTransferDirection::Upload),
+                refresh_local: matches!(direction, SftpTransferDirection::Download),
+            });
+        });
+    }
+
+    fn set_sftp_transfer_state(&mut self, id: u64, state: SftpTransferState) {
+        match state {
+            SftpTransferState::Paused => {
+                self.sftp_transfer_manager.pause(&id.to_string());
+            }
+            SftpTransferState::Pending | SftpTransferState::Active => {
+                self.sftp_transfer_manager.resume(&id.to_string());
+            }
+            SftpTransferState::Cancelled => {
+                self.sftp_transfer_manager.cancel(&id.to_string());
+            }
+            SftpTransferState::Completed | SftpTransferState::Error => {}
+        }
         if let Some(item) = self
             .sftp_view
             .transfers
@@ -3226,7 +3746,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn cancel_or_remove_mock_transfer(&mut self, id: u64) {
+    fn cancel_or_remove_sftp_transfer(&mut self, id: u64) {
         if let Some(index) = self
             .sftp_view
             .transfers
@@ -3238,11 +3758,47 @@ impl WorkspaceApp {
                 SftpTransferState::Active | SftpTransferState::Pending | SftpTransferState::Paused
             );
             if active {
+                self.sftp_transfer_manager.cancel(&id.to_string());
                 self.sftp_view.transfers[index].state = SftpTransferState::Cancelled;
             } else {
                 self.sftp_view.transfers.remove(index);
             }
         }
+    }
+
+    fn spawn_remote_sftp_mutation<F>(&self, operation: F)
+    where
+        F: FnOnce(
+                SftpSession,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
+            > + Send
+            + 'static,
+    {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let router = self.node_router.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = async {
+                let sftp = router
+                    .acquire_transfer_sftp(&node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                operation(sftp).await
+            }
+            .await;
+            let _ = tx.send(SftpWorkerResult::RemoteMutationComplete {
+                result,
+                refresh_remote: true,
+                refresh_local: false,
+            });
+        });
     }
 
     fn close_sftp_dialog(&mut self) {
@@ -3260,36 +3816,97 @@ impl WorkspaceApp {
             SftpDialog::Rename { pane, old_name } => {
                 let new_name = self.sftp_view.dialog_value.trim().to_string();
                 if !new_name.is_empty() {
-                    let files = match pane {
-                        SftpPane::Local => &mut self.sftp_view.local_files,
-                        SftpPane::Remote => &mut self.sftp_view.remote_files,
-                    };
-                    if let Some(file) = files.iter_mut().find(|file| file.name == old_name) {
-                        file.name = new_name;
+                    match pane {
+                        SftpPane::Local => {
+                            let old_path = join_local_path(&self.sftp_view.local_path, &old_name);
+                            let new_path = join_local_path(&self.sftp_view.local_path, &new_name);
+                            let _ = std::fs::rename(old_path, new_path);
+                            if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
+                                self.sftp_view.local_files = files;
+                            }
+                        }
+                        SftpPane::Remote => {
+                            let old_path = self
+                                .sftp_view
+                                .remote_files
+                                .iter()
+                                .find(|file| file.name == old_name)
+                                .map(|file| file.path.clone())
+                                .unwrap_or_else(|| {
+                                    join_sftp_path(&self.sftp_view.remote_path, &old_name)
+                                });
+                            let new_path = join_sftp_path(&parent_path(&old_path, true), &new_name);
+                            self.spawn_remote_sftp_mutation(move |sftp| {
+                                Box::pin(async move {
+                                    sftp.rename(&old_path, &new_path)
+                                        .await
+                                        .map_err(|error| error.to_string())
+                                })
+                            });
+                        }
                     }
                 }
             }
             SftpDialog::NewFolder { pane } => {
                 let name = self.sftp_view.dialog_value.trim().to_string();
                 if !name.is_empty() {
-                    let files = match pane {
-                        SftpPane::Local => &mut self.sftp_view.local_files,
-                        SftpPane::Remote => &mut self.sftp_view.remote_files,
-                    };
-                    files.push(SftpFileEntry {
-                        name,
-                        file_type: SftpFileType::Directory,
-                        size: 0,
-                        modified: Some(1_778_100_000),
-                    });
+                    match pane {
+                        SftpPane::Local => {
+                            let path = join_local_path(&self.sftp_view.local_path, &name);
+                            let _ = std::fs::create_dir_all(path);
+                            if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
+                                self.sftp_view.local_files = files;
+                            }
+                        }
+                        SftpPane::Remote => {
+                            let path = join_sftp_path(&self.sftp_view.remote_path, &name);
+                            self.spawn_remote_sftp_mutation(move |sftp| {
+                                Box::pin(async move {
+                                    sftp.mkdir(&path).await.map_err(|error| error.to_string())
+                                })
+                            });
+                        }
+                    }
                 }
             }
             SftpDialog::Delete { pane, files } => {
-                let target = match pane {
-                    SftpPane::Local => &mut self.sftp_view.local_files,
-                    SftpPane::Remote => &mut self.sftp_view.remote_files,
-                };
-                target.retain(|file| !files.contains(&file.name));
+                match pane {
+                    SftpPane::Local => {
+                        for name in files {
+                            let path = join_local_path(&self.sftp_view.local_path, &name);
+                            if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+                                let _ = std::fs::remove_dir_all(path);
+                            } else {
+                                let _ = std::fs::remove_file(path);
+                            }
+                        }
+                        if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
+                            self.sftp_view.local_files = files;
+                        }
+                    }
+                    SftpPane::Remote => {
+                        let remote_files = self.sftp_view.remote_files.clone();
+                        let targets = files
+                            .into_iter()
+                            .filter_map(|name| {
+                                remote_files
+                                    .iter()
+                                    .find(|file| file.name == name)
+                                    .map(|file| file.path.clone())
+                            })
+                            .collect::<Vec<_>>();
+                        self.spawn_remote_sftp_mutation(move |sftp| {
+                            Box::pin(async move {
+                                for path in targets {
+                                    sftp.delete_recursive(&path)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                }
+                                Ok(())
+                            })
+                        });
+                    }
+                }
                 self.clear_sftp_selection(pane);
             }
             _ => {}
@@ -3341,24 +3958,44 @@ fn home_path_mock() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/Users/lipsc".to_string())
 }
 
-fn mock_local_files() -> Vec<SftpFileEntry> {
-    vec![
-        dir("Projects"),
-        dir("Downloads"),
-        file("config.toml", 4_320),
-        file("notes.md", 12_420),
-        file("archive.tar", 42 * 1024 * 1024),
-    ]
-}
-
-fn mock_remote_files() -> Vec<SftpFileEntry> {
-    vec![
-        dir("app"),
-        dir("logs"),
-        file("config.toml", 4_118),
-        file("server.log", 384_000),
-        file("release.tar.gz", 18 * 1024 * 1024),
-    ]
+fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = entry.path().to_string_lossy().to_string();
+        let file_type = if metadata.is_dir() {
+            SftpFileType::Directory
+        } else {
+            SftpFileType::File
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs() as i64);
+        entries.push(SftpFileEntry {
+            name,
+            path: full_path,
+            file_type,
+            size: metadata.len(),
+            modified,
+            permissions: None,
+            owner: None,
+            group: None,
+            is_symlink: metadata.file_type().is_symlink(),
+            symlink_target: std::fs::read_link(entry.path())
+                .ok()
+                .map(|target| target.to_string_lossy().to_string()),
+        });
+    }
+    entries.sort_by(|left, right| match (left.file_type, right.file_type) {
+        (SftpFileType::Directory, SftpFileType::File) => std::cmp::Ordering::Less,
+        (SftpFileType::File, SftpFileType::Directory) => std::cmp::Ordering::Greater,
+        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    });
+    Ok(entries)
 }
 
 fn mock_drives() -> Vec<SftpDrive> {
@@ -3382,21 +4019,24 @@ fn mock_drives() -> Vec<SftpDrive> {
     ]
 }
 
-fn dir(name: &str) -> SftpFileEntry {
+fn sftp_file_entry(
+    name: String,
+    path: String,
+    file_type: SftpFileType,
+    size: u64,
+    modified: Option<i64>,
+) -> SftpFileEntry {
     SftpFileEntry {
-        name: name.to_string(),
-        file_type: SftpFileType::Directory,
-        size: 0,
-        modified: Some(1_778_100_000),
-    }
-}
-
-fn file(name: &str, size: u64) -> SftpFileEntry {
-    SftpFileEntry {
-        name: name.to_string(),
-        file_type: SftpFileType::File,
+        name,
+        path,
+        file_type,
         size,
-        modified: Some(1_778_100_000),
+        modified,
+        permissions: None,
+        owner: None,
+        group: None,
+        is_symlink: false,
+        symlink_target: None,
     }
 }
 
@@ -3505,38 +4145,219 @@ fn join_sftp_path(base: &str, name: &str) -> String {
     }
 }
 
-fn remote_list_command(path: &str) -> String {
-    format!(
-        "SFTP_PATH={} python3 - <<'PY'\n\
-import json, os, stat\n\
-path = os.environ.get('SFTP_PATH') or '.'\n\
-cwd = os.path.abspath(os.path.expanduser(path))\n\
-entries = []\n\
-for name in os.listdir(cwd):\n\
-    full = os.path.join(cwd, name)\n\
-    st = os.lstat(full)\n\
-    entries.append({{'name': name, 'isDir': stat.S_ISDIR(st.st_mode), 'size': st.st_size, 'modified': int(st.st_mtime)}})\n\
-print(json.dumps({{'cwd': cwd, 'entries': entries}}, ensure_ascii=False))\n\
-PY",
-        shell_quote(path)
-    )
+fn remote_directory_prefixes(path: &str) -> Vec<String> {
+    let mut prefixes = Vec::new();
+    let absolute = path.starts_with('/');
+    let components: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    for index in 0..components.len() {
+        let joined = components[..=index].join("/");
+        prefixes.push(if absolute {
+            format!("/{joined}")
+        } else {
+            joined
+        });
+    }
+    prefixes
 }
 
-fn parse_remote_listing(output: &str) -> Result<RemoteSftpListing, String> {
-    let parsed: RemoteListOutput =
-        serde_json::from_str(output.trim()).map_err(|error| error.to_string())?;
-    let mut files = parsed
-        .entries
+fn join_local_path(base: &str, name: &str) -> String {
+    let mut path = std::path::PathBuf::from(base);
+    path.push(name);
+    path.to_string_lossy().to_string()
+}
+
+fn sftp_transfer_state_from_remote(state: RemoteTransferState) -> SftpTransferState {
+    match state {
+        RemoteTransferState::Pending => SftpTransferState::Pending,
+        RemoteTransferState::InProgress => SftpTransferState::Active,
+        RemoteTransferState::Paused => SftpTransferState::Paused,
+        RemoteTransferState::Completed => SftpTransferState::Completed,
+        RemoteTransferState::Failed => SftpTransferState::Error,
+        RemoteTransferState::Cancelled => SftpTransferState::Cancelled,
+    }
+}
+
+fn preview_content_text(content: &PreviewContent) -> String {
+    match content {
+        PreviewContent::Text {
+            data,
+            encoding,
+            confidence,
+            has_bom,
+            ..
+        } => {
+            let bom = if *has_bom { ", BOM" } else { "" };
+            format!(
+                "encoding: {encoding} ({:.0}%{bom})\n\n{data}",
+                confidence * 100.0
+            )
+        }
+        PreviewContent::Image { mime_type, data } => {
+            format!(
+                "{mime_type}\nimage preview payload: {} base64 chars",
+                data.len()
+            )
+        }
+        PreviewContent::AssetFile {
+            path,
+            mime_type,
+            kind,
+        } => {
+            format!("{kind:?} asset\n{mime_type}\n{path}")
+        }
+        PreviewContent::Hex {
+            data,
+            total_size,
+            offset,
+            chunk_size,
+            has_more,
+        } => {
+            format!(
+                "hex preview: offset {offset}, chunk {chunk_size}, total {total_size}, has_more {has_more}\n\n{data}"
+            )
+        }
+        PreviewContent::TooLarge {
+            size,
+            max_size,
+            recommend_download,
+        } => {
+            format!(
+                "too large to preview: {size} bytes (limit {max_size}), recommend_download={recommend_download}"
+            )
+        }
+        PreviewContent::Unsupported { mime_type, reason } => {
+            format!("unsupported preview: {mime_type}\n{reason}")
+        }
+    }
+}
+
+async fn load_remote_sftp_listing(
+    router: NodeRouter,
+    node_id: &NodeId,
+    path: &str,
+) -> Result<RemoteSftpListing, String> {
+    let sftp = router
+        .acquire_sftp(node_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    match list_remote_sftp_once(&sftp, path).await {
+        Ok(listing) => Ok(listing),
+        Err(error) if error.is_channel_recoverable() => {
+            let sftp = router
+                .invalidate_and_reacquire_sftp(node_id)
+                .await
+                .map_err(|route_error| route_error.to_string())?;
+            list_remote_sftp_once(&sftp, path)
+                .await
+                .map_err(|retry_error| retry_error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+async fn load_remote_sftp_preview(
+    router: NodeRouter,
+    node_id: &NodeId,
+    path: &str,
+) -> Result<PreviewContent, String> {
+    let sftp = router
+        .acquire_sftp(node_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let sftp = sftp.lock().await;
+    sftp.preview(path).await.map_err(|error| error.to_string())
+}
+
+async fn load_local_sftp_preview(path: &str) -> Result<PreviewContent, String> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| error.to_string())?;
+    let size = metadata.len();
+    const MAX_LOCAL_TEXT_PREVIEW: u64 = 2 * 1024 * 1024;
+    if size > MAX_LOCAL_TEXT_PREVIEW {
+        return Ok(PreviewContent::TooLarge {
+            size,
+            max_size: MAX_LOCAL_TEXT_PREVIEW,
+            recommend_download: false,
+        });
+    }
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|error| error.to_string())?;
+    match String::from_utf8(bytes.clone()) {
+        Ok(data) => Ok(PreviewContent::Text {
+            data,
+            mime_type: None,
+            language: None,
+            encoding: "UTF-8".to_string(),
+            confidence: 1.0,
+            has_bom: false,
+        }),
+        Err(_) => Ok(PreviewContent::Hex {
+            data: local_hex_dump(&bytes, 0),
+            total_size: size,
+            offset: 0,
+            chunk_size: bytes.len() as u64,
+            has_more: false,
+        }),
+    }
+}
+
+fn local_hex_dump(data: &[u8], offset: u64) -> String {
+    use std::fmt::Write;
+    let mut output = String::new();
+    for (index, chunk) in data.chunks(16).enumerate() {
+        let address = offset + (index * 16) as u64;
+        let _ = write!(output, "{address:08X}  ");
+        for (column, byte) in chunk.iter().enumerate() {
+            if column == 8 {
+                output.push(' ');
+            }
+            let _ = write!(output, "{byte:02X} ");
+        }
+        output.push('\n');
+    }
+    output
+}
+
+async fn list_remote_sftp_once(
+    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    path: &str,
+) -> Result<RemoteSftpListing, SftpError> {
+    let sftp = sftp.lock().await;
+    let cwd = sftp.canonicalize(path).await?;
+    let entries = sftp
+        .list_dir(
+            &cwd,
+            Some(RemoteListFilter {
+                show_hidden: true,
+                pattern: None,
+                sort: RemoteSortOrder::Name,
+            }),
+        )
+        .await?;
+    Ok(remote_listing_from_file_infos(cwd, entries))
+}
+
+fn remote_listing_from_file_infos(cwd: String, entries: Vec<RemoteFileInfo>) -> RemoteSftpListing {
+    let mut files = entries
         .into_iter()
         .map(|entry| SftpFileEntry {
             name: entry.name,
-            file_type: if entry.is_dir {
-                SftpFileType::Directory
-            } else {
-                SftpFileType::File
+            path: entry.path,
+            file_type: match entry.file_type {
+                RemoteFileType::Directory => SftpFileType::Directory,
+                RemoteFileType::File | RemoteFileType::Symlink | RemoteFileType::Unknown => {
+                    SftpFileType::File
+                }
             },
             size: entry.size,
-            modified: entry.modified,
+            modified: Some(entry.modified),
+            permissions: Some(entry.permissions),
+            owner: entry.owner,
+            group: entry.group,
+            is_symlink: entry.is_symlink,
+            symlink_target: entry.symlink_target,
         })
         .collect::<Vec<_>>();
     files.sort_by(|left, right| match (left.file_type, right.file_type) {
@@ -3544,14 +4365,7 @@ fn parse_remote_listing(output: &str) -> Result<RemoteSftpListing, String> {
         (SftpFileType::File, SftpFileType::Directory) => std::cmp::Ordering::Greater,
         _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
     });
-    Ok(RemoteSftpListing {
-        cwd: parsed.cwd,
-        files,
-    })
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    RemoteSftpListing { cwd, files }
 }
 
 fn format_file_size(bytes: u64) -> String {

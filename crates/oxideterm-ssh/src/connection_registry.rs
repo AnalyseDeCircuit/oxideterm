@@ -3,6 +3,7 @@
 
 use std::{
     any::Any,
+    fmt,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -11,8 +12,10 @@ use std::{
 };
 
 use dashmap::DashMap;
+use oxideterm_sftp::{SftpError, SftpSession};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -79,6 +82,35 @@ pub struct SftpSessionState {
     pub cwd: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct AcquiredSftpMeta {
+    pub session: Arc<Mutex<SftpSession>>,
+    pub was_new: bool,
+    pub cwd: Option<String>,
+}
+
+enum SharedSftpState {
+    Empty,
+    Initializing {
+        notify: Arc<Notify>,
+        generation: u64,
+    },
+    Ready(Arc<Mutex<SftpSession>>),
+}
+
+impl fmt::Debug for SharedSftpState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("Empty"),
+            Self::Initializing { generation, .. } => formatter
+                .debug_struct("Initializing")
+                .field("generation", generation)
+                .finish(),
+            Self::Ready(_) => formatter.write_str("Ready(<sftp-session>)"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConnectionPoolConfig {
     pub idle_timeout: Option<Duration>,
@@ -116,6 +148,8 @@ struct ConnectionEntry {
     ref_count: AtomicU64,
     consumers: RwLock<Vec<ConnectionConsumer>>,
     physical: RwLock<Option<Arc<dyn Any + Send + Sync>>>,
+    sftp: Mutex<SharedSftpState>,
+    sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
@@ -133,6 +167,8 @@ impl ConnectionEntry {
             ref_count: AtomicU64::new(0),
             consumers: RwLock::new(Vec::new()),
             physical: RwLock::new(None),
+            sftp: Mutex::new(SharedSftpState::Empty),
+            sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
@@ -203,9 +239,144 @@ impl SshConnectionHandle {
         self.entry.touch();
     }
 
-    pub fn clear_physical(&self) {
+    pub async fn clear_physical(&self) {
         *self.entry.physical.write() = None;
+        self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
+        let mut guard = self.entry.sftp.lock().await;
+        match std::mem::replace(&mut *guard, SharedSftpState::Empty) {
+            SharedSftpState::Initializing { notify, .. } => notify.notify_waiters(),
+            SharedSftpState::Empty | SharedSftpState::Ready(_) => {}
+        }
+        *self.entry.sftp_state.write() = SftpSessionState::default();
         self.entry.touch();
+    }
+
+    pub async fn acquire_sftp(&self) -> Result<Arc<Mutex<SftpSession>>, SftpError> {
+        Ok(self.acquire_sftp_with_meta().await?.session)
+    }
+
+    pub async fn acquire_sftp_with_meta(&self) -> Result<AcquiredSftpMeta, SftpError> {
+        loop {
+            let initializing = {
+                let mut guard = self.entry.sftp.lock().await;
+                match &*guard {
+                    SharedSftpState::Ready(session) => {
+                        let session = Arc::clone(session);
+                        drop(guard);
+                        let cwd = {
+                            let sftp = session.lock().await;
+                            Some(sftp.cwd().to_string())
+                        };
+                        return Ok(AcquiredSftpMeta {
+                            session,
+                            was_new: false,
+                            cwd,
+                        });
+                    }
+                    SharedSftpState::Initializing { notify, .. } => Some(notify.clone()),
+                    SharedSftpState::Empty => {
+                        let generation = self.entry.sftp_generation.load(Ordering::Acquire);
+                        let notify = Arc::new(Notify::new());
+                        *guard = SharedSftpState::Initializing {
+                            notify: notify.clone(),
+                            generation,
+                        };
+                        None
+                    }
+                }
+            };
+
+            if let Some(notify) = initializing {
+                notify.notified().await;
+                continue;
+            }
+
+            let created = SftpSession::new(self.clone(), self.connection_id().to_string()).await;
+            let mut guard = self.entry.sftp.lock().await;
+            match created {
+                Ok(sftp) => {
+                    let cwd = Some(sftp.cwd().to_string());
+                    let session = Arc::new(Mutex::new(sftp));
+                    match &*guard {
+                        SharedSftpState::Ready(existing) => {
+                            let existing = Arc::clone(existing);
+                            drop(guard);
+                            let cwd = {
+                                let sftp = existing.lock().await;
+                                Some(sftp.cwd().to_string())
+                            };
+                            return Ok(AcquiredSftpMeta {
+                                session: existing,
+                                was_new: false,
+                                cwd,
+                            });
+                        }
+                        SharedSftpState::Initializing { notify, generation }
+                            if *generation
+                                == self.entry.sftp_generation.load(Ordering::Acquire) =>
+                        {
+                            let notify = notify.clone();
+                            *guard = SharedSftpState::Ready(Arc::clone(&session));
+                            notify.notify_waiters();
+                            self.entry.touch();
+                            return Ok(AcquiredSftpMeta {
+                                session,
+                                was_new: true,
+                                cwd,
+                            });
+                        }
+                        SharedSftpState::Initializing { notify, .. } => {
+                            notify.clone().notify_waiters();
+                            *guard = SharedSftpState::Empty;
+                            continue;
+                        }
+                        SharedSftpState::Empty => continue,
+                    }
+                }
+                Err(error) => {
+                    if let SharedSftpState::Initializing { notify, .. } = &*guard {
+                        let notify = notify.clone();
+                        *guard = SharedSftpState::Empty;
+                        notify.notify_waiters();
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    pub async fn acquire_transfer_sftp(&self) -> Result<SftpSession, SftpError> {
+        SftpSession::new(self.clone(), self.connection_id().to_string()).await
+    }
+
+    pub async fn clear_sftp(&self) {
+        let mut guard = self.entry.sftp.lock().await;
+        self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
+        if let SharedSftpState::Initializing { notify, .. } =
+            std::mem::replace(&mut *guard, SharedSftpState::Empty)
+        {
+            notify.notify_waiters();
+        }
+        *self.entry.sftp_state.write() = SftpSessionState::default();
+        self.entry.touch();
+    }
+
+    pub async fn invalidate_sftp(&self) -> bool {
+        let mut guard = self.entry.sftp.lock().await;
+        self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
+        let had_sftp = match std::mem::replace(&mut *guard, SharedSftpState::Empty) {
+            SharedSftpState::Empty => false,
+            SharedSftpState::Initializing { notify, .. } => {
+                notify.notify_waiters();
+                true
+            }
+            SharedSftpState::Ready(_) => true,
+        };
+        if had_sftp {
+            *self.entry.sftp_state.write() = SftpSessionState::default();
+            self.entry.touch();
+        }
+        had_sftp
     }
 }
 

@@ -6,7 +6,11 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use tokio::sync::{Notify, Semaphore};
+use parking_lot::RwLock;
+use std::collections::HashMap;
+use tokio::sync::{Notify, Semaphore, watch};
+
+use crate::SftpError;
 
 pub const DEFAULT_SFTP_CONCURRENT_TRANSFERS: usize = 3;
 pub const DEFAULT_SFTP_DIRECTORY_PARALLELISM: usize = 4;
@@ -49,8 +53,86 @@ impl Drop for SftpTransferPermit {
 }
 
 #[derive(Debug)]
+pub struct SftpTransferControl {
+    cancel_tx: watch::Sender<bool>,
+    cancel_rx: watch::Receiver<bool>,
+    pause_tx: watch::Sender<bool>,
+    pause_rx: watch::Receiver<bool>,
+}
+
+impl SftpTransferControl {
+    pub fn new() -> Self {
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let (pause_tx, pause_rx) = watch::channel(false);
+        Self {
+            cancel_tx,
+            cancel_rx,
+            pause_tx,
+            pause_rx,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancel_rx.borrow()
+    }
+
+    pub fn is_paused(&self) -> bool {
+        *self.pause_rx.borrow()
+    }
+
+    pub fn cancel(&self) {
+        let _ = self.cancel_tx.send(true);
+    }
+
+    pub fn pause(&self) {
+        let _ = self.pause_tx.send(true);
+    }
+
+    pub fn resume(&self) {
+        let _ = self.pause_tx.send(false);
+    }
+
+    pub fn subscribe_cancellation(&self) -> watch::Receiver<bool> {
+        self.cancel_rx.clone()
+    }
+
+    pub fn subscribe_pause(&self) -> watch::Receiver<bool> {
+        self.pause_rx.clone()
+    }
+}
+
+impl Default for SftpTransferControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct SftpTransferGuard {
+    manager: Option<Arc<SftpTransferManager>>,
+    transfer_id: String,
+}
+
+impl SftpTransferGuard {
+    pub fn new(manager: Option<&Arc<SftpTransferManager>>, transfer_id: impl Into<String>) -> Self {
+        Self {
+            manager: manager.cloned(),
+            transfer_id: transfer_id.into(),
+        }
+    }
+}
+
+impl Drop for SftpTransferGuard {
+    fn drop(&mut self) {
+        if let Some(manager) = &self.manager {
+            manager.unregister(&self.transfer_id);
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct SftpTransferManager {
     semaphore: Arc<Semaphore>,
+    controls: RwLock<HashMap<String, Arc<SftpTransferControl>>>,
     active_count: Arc<AtomicUsize>,
     max_concurrent_transfers: AtomicUsize,
     directory_parallelism: AtomicUsize,
@@ -62,6 +144,7 @@ impl SftpTransferManager {
     pub fn new() -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(MAX_SFTP_CONCURRENT_TRANSFERS)),
+            controls: RwLock::new(HashMap::new()),
             active_count: Arc::new(AtomicUsize::new(0)),
             max_concurrent_transfers: AtomicUsize::new(DEFAULT_SFTP_CONCURRENT_TRANSFERS),
             directory_parallelism: AtomicUsize::new(DEFAULT_SFTP_DIRECTORY_PARALLELISM),
@@ -107,6 +190,75 @@ impl SftpTransferManager {
 
     pub fn active_count(&self) -> usize {
         self.active_count.load(Ordering::Acquire)
+    }
+
+    pub fn registered_count(&self) -> usize {
+        self.controls.read().len()
+    }
+
+    pub fn register(&self, transfer_id: &str) -> Arc<SftpTransferControl> {
+        let control = Arc::new(SftpTransferControl::new());
+        self.controls
+            .write()
+            .insert(transfer_id.to_string(), control.clone());
+        control
+    }
+
+    pub fn get_control(&self, transfer_id: &str) -> Option<Arc<SftpTransferControl>> {
+        self.controls.read().get(transfer_id).cloned()
+    }
+
+    pub fn unregister(&self, transfer_id: &str) {
+        self.controls.write().remove(transfer_id);
+    }
+
+    pub fn cancel(&self, transfer_id: &str) -> bool {
+        if let Some(control) = self.get_control(transfer_id) {
+            control.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn pause(&self, transfer_id: &str) -> bool {
+        if let Some(control) = self.get_control(transfer_id) {
+            control.pause();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn resume(&self, transfer_id: &str) -> bool {
+        if let Some(control) = self.get_control(transfer_id) {
+            control.resume();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn cancel_all(&self) {
+        for control in self.controls.read().values() {
+            control.cancel();
+        }
+    }
+
+    pub async fn check_control(&self, transfer_id: &str) -> Result<(), SftpError> {
+        let Some(control) = self.get_control(transfer_id) else {
+            return Ok(());
+        };
+        if control.is_cancelled() {
+            return Err(SftpError::TransferCancelled);
+        }
+        while control.is_paused() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if control.is_cancelled() {
+                return Err(SftpError::TransferCancelled);
+            }
+        }
+        Ok(())
     }
 
     pub async fn acquire_permit(&self) -> SftpTransferPermit {

@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
 use parking_lot::RwLock;
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
@@ -416,6 +417,27 @@ impl SshConnectionHandle {
         })
     }
 
+    pub(crate) async fn open_session_channel(
+        &self,
+    ) -> Result<russh::Channel<client::Msg>, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for SFTP".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot open an SFTP channel".to_string(),
+            ));
+        }
+
+        let handle = pooled.target.lock().await;
+        handle
+            .channel_open_session()
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))
+    }
+
     pub fn set_remote_forward_handler(
         &self,
         handler: Arc<dyn RemoteForwardHandler>,
@@ -562,6 +584,30 @@ impl SshOutputBatcher {
             SSH_OUTPUT_FLUSH_MS
         };
         self.flush_deadline = Some(now + Duration::from_millis(delay));
+    }
+}
+
+impl SftpChannelOpener for SshConnectionHandle {
+    fn open_sftp_channel(
+        &self,
+    ) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
+        async {
+            self.open_session_channel()
+                .await
+                .map_err(|error| SftpError::ChannelError(error.to_string()))
+        }
+    }
+}
+
+impl SftpExecChannelOpener for SshConnectionHandle {
+    fn open_exec_channel(
+        &self,
+    ) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
+        async {
+            self.open_session_channel()
+                .await
+                .map_err(|error| SftpError::ChannelError(error.to_string()))
+        }
     }
 }
 
@@ -741,7 +787,7 @@ impl SshTransportClient {
 
         let pooled = if let Some(existing) = connection.physical::<PooledSshConnection>() {
             if existing.is_closed().await {
-                connection.clear_physical();
+                connection.clear_physical().await;
                 match self.connect_authenticated_connection().await {
                     Ok(pooled) => {
                         connection.set_physical(pooled.clone());
@@ -785,7 +831,7 @@ impl SshTransportClient {
                 let _ = registry.mark_state(&connection_id, ConnectionState::Active);
             }
             Err(error) => {
-                connection.clear_physical();
+                connection.clear_physical().await;
                 let _ =
                     registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
                 registry.release(&connection_id, &consumer);

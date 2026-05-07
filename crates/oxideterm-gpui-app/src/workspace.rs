@@ -43,11 +43,14 @@ use oxideterm_settings::{
     Language, PersistedSettings, SettingsStore, TerminalEncoding as SettingsTerminalEncoding,
     default_settings_path,
 };
+use oxideterm_sftp::{
+    DummyProgressStore, ProgressStore, RedbProgressStore, SftpTransferManager,
+    SftpTransferRuntimeSettings,
+};
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeReadiness, NodeRouter,
     NodeStateEvent, PhaseResult, ProbeConnectionStatus, ReconnectOrchestratorStore, ReconnectPhase,
-    ReconnectSnapshot, SftpTransferManager, SftpTransferRuntimeSettings, SshConfig,
-    SshConnectionRegistry,
+    ReconnectSnapshot, SshConfig, SshConnectionRegistry,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
@@ -128,6 +131,7 @@ pub(crate) struct WorkspaceApp {
     forwarding_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
     sftp_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
     sftp_transfer_manager: Arc<SftpTransferManager>,
+    sftp_progress_store: Arc<dyn ProgressStore>,
     node_router: NodeRouter,
     node_event_tx: std::sync::mpsc::Sender<NodeStateEvent>,
     node_event_rx: std::sync::mpsc::Receiver<NodeStateEvent>,
@@ -226,6 +230,19 @@ impl WorkspaceApp {
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
+        let sftp_progress_store: Arc<dyn ProgressStore> = {
+            let path = default_settings_path()
+                .parent()
+                .map(|parent| parent.join("sftp_progress.redb"))
+                .unwrap_or_else(|| std::path::PathBuf::from("sftp_progress.redb"));
+            match RedbProgressStore::new(path) {
+                Ok(store) => Arc::new(store),
+                Err(error) => {
+                    eprintln!("failed to load SFTP progress store: {error}");
+                    Arc::new(DummyProgressStore)
+                }
+            }
+        };
         let forwarding_runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -281,6 +298,7 @@ impl WorkspaceApp {
             forwarding_connection_consumers: HashMap::new(),
             sftp_connection_consumers: HashMap::new(),
             sftp_transfer_manager,
+            sftp_progress_store,
             node_router,
             node_event_tx,
             node_event_rx,

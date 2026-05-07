@@ -1,0 +1,28 @@
+[package]
+name = "oxideterm-sftp"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+base64.workspace = true
+chardetng = "0.1"
+chrono.workspace = true
+encoding_rs.workspace = true
+flate2 = "1.1.9"
+futures-util = "0.3"
+glob = "0.3"
+mime_guess = "2"
+parking_lot.workspace = true
+redb = "2.1"
+rmp-serde = "1"
+russh = { path = "../russh" }
+russh-sftp = "2.1.2"
+serde.workspace = true
+tar = "0.4"
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zstd = "0.13"
