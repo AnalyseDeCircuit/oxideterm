@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
     Password,
@@ -70,7 +72,7 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpPassphrase,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: String,
@@ -81,6 +83,23 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) agent_forwarding: bool,
+}
+
+impl fmt::Debug for NewConnectionProxyHop {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NewConnectionProxyHop")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_tab", &self.auth_tab)
+            .field("password", &"[redacted secret]")
+            .field("key_path", &self.key_path)
+            .field("cert_path", &self.cert_path)
+            .field("passphrase", &"[redacted secret]")
+            .field("agent_forwarding", &self.agent_forwarding)
+            .finish()
+    }
 }
 
 impl NewConnectionProxyHop {
@@ -103,7 +122,7 @@ impl NewConnectionProxyHop {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) name: String,
     pub(in crate::workspace) host: String,
@@ -133,6 +152,45 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) selected_field: Option<NewConnectionField>,
     pub(in crate::workspace) error: Option<String>,
     pub(in crate::workspace) pending: bool,
+}
+
+impl fmt::Debug for NewConnectionForm {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NewConnectionForm")
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth_tab", &self.auth_tab)
+            .field("password", &"[redacted secret]")
+            .field(
+                "saved_password_keychain_id",
+                &self.saved_password_keychain_id,
+            )
+            .field("password_loaded", &self.password_loaded)
+            .field("password_visible", &self.password_visible)
+            .field("password_loading", &self.password_loading)
+            .field("password_error", &self.password_error)
+            .field("key_path", &self.key_path)
+            .field("cert_path", &self.cert_path)
+            .field("passphrase", &"[redacted secret]")
+            .field("save_password", &self.save_password)
+            .field("group", &self.group)
+            .field("color", &self.color)
+            .field("tags", &self.tags)
+            .field("proxy_hops", &self.proxy_hops)
+            .field("proxy_chain_expanded", &self.proxy_chain_expanded)
+            .field("jump_server_form", &self.jump_server_form)
+            .field("agent_forwarding", &self.agent_forwarding)
+            .field("save_connection", &self.save_connection)
+            .field("field_focused", &self.field_focused)
+            .field("focused_field", &self.focused_field)
+            .field("selected_field", &self.selected_field)
+            .field("error", &self.error)
+            .field("pending", &self.pending)
+            .finish()
+    }
 }
 
 impl Default for NewConnectionForm {

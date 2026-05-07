@@ -1,9 +1,11 @@
+use std::fmt;
+
 use anyhow::Result;
 use chrono::Utc;
 
 use crate::{
     ConnectionOptions, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
-    SshConfigHost,
+    SecretString, SshConfigHost,
 };
 
 pub const IMPORTED_GROUP: &str = "Imported";
@@ -19,29 +21,45 @@ pub enum ConnectionAuthDraftKind {
     TwoFactor,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConnectionAuthDraft {
     pub kind: ConnectionAuthDraftKind,
-    pub password: String,
+    pub password: SecretString,
     pub password_keychain_id: Option<String>,
     pub password_loaded: bool,
     pub save_password: bool,
     pub key_path: String,
     pub cert_path: String,
-    pub passphrase: String,
+    pub passphrase: SecretString,
+}
+
+impl fmt::Debug for ConnectionAuthDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectionAuthDraft")
+            .field("kind", &self.kind)
+            .field("password", &self.password)
+            .field("password_keychain_id", &self.password_keychain_id)
+            .field("password_loaded", &self.password_loaded)
+            .field("save_password", &self.save_password)
+            .field("key_path", &self.key_path)
+            .field("cert_path", &self.cert_path)
+            .field("passphrase", &self.passphrase)
+            .finish()
+    }
 }
 
 impl Default for ConnectionAuthDraft {
     fn default() -> Self {
         Self {
             kind: ConnectionAuthDraftKind::Password,
-            password: String::new(),
+            password: SecretString::default(),
             password_keychain_id: None,
             password_loaded: true,
             save_password: false,
             key_path: String::new(),
             cert_path: String::new(),
-            passphrase: String::new(),
+            passphrase: SecretString::default(),
         }
     }
 }
@@ -220,7 +238,7 @@ mod tests {
     fn password_draft() -> ConnectionAuthDraft {
         ConnectionAuthDraft {
             kind: ConnectionAuthDraftKind::Password,
-            password: "secret".to_string(),
+            password: SecretString::from("secret"),
             save_password: true,
             ..ConnectionAuthDraft::default()
         }

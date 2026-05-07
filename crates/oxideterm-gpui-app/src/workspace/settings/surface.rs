@@ -40,6 +40,13 @@ impl WorkspaceApp {
                     .min_w(px(0.0))
                     .min_h(px(0.0))
                     .overflow_y_scroll()
+                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                        // GPUI can advance scroll state without rebuilding the settings view,
+                        // so cached trigger bounds must not survive a settings scroll.
+                        this.open_settings_select = None;
+                        this.clear_settings_select_anchors();
+                        cx.notify();
+                    }))
                     .child(
                         div()
                             .w_full()
@@ -48,7 +55,15 @@ impl WorkspaceApp {
                             .child(self.render_settings_tab_content(cx)),
                     ),
             )
+            .when_some(self.render_settings_select_overlay(cx), |surface, overlay| {
+                surface.child(overlay)
+            })
             .into_any_element()
+    }
+
+    fn clear_settings_select_anchors(&mut self) {
+        self.select_anchors
+            .retain(|id, _| matches!(id, SelectAnchorId::NewConnectionGroup));
     }
 
     fn render_settings_nav(
@@ -188,10 +203,6 @@ impl WorkspaceApp {
                 SettingsTab::Keybindings => self.settings_keybindings(),
                 SettingsTab::Help => self.settings_help(cx),
             })
-            .when_some(
-                self.render_settings_select_overlay(cx),
-                |content, overlay| content.child(overlay),
-            )
             .into_any_element()
     }
 

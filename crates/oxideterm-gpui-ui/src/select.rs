@@ -106,12 +106,14 @@ impl Element for SelectAnchorProbe {
         if let Some(child) = self.child.as_mut() {
             child.prepaint(window, cx);
         }
+        // Keep the anchor in the same draw pass as the trigger. Deferring this by a
+        // frame lets scroll containers expose stale bounds to deferred popups.
         if let Some(on_bounds) = self.on_bounds.take() {
             let anchor = OverlayAnchor {
                 id: self.id,
                 bounds,
             };
-            window.on_next_frame(move |window, cx| on_bounds(anchor, window, cx));
+            on_bounds(anchor, window, cx);
         }
     }
 

@@ -5881,6 +5881,7 @@ dependencies = [
  "serde_json",
  "uuid",
  "whoami",
+ "zeroize",
 ]
 
 [[package]]

@@ -6,13 +6,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::SecretString;
+
 const SERVICE_NAME: &str = "com.oxideterm.ssh";
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConnectionKeychain {
     service: String,
     #[cfg(test)]
-    test_store: Option<Arc<Mutex<HashMap<String, String>>>>,
+    test_store: Option<Arc<Mutex<HashMap<String, SecretString>>>>,
 }
 
 impl Default for ConnectionKeychain {
@@ -26,23 +28,23 @@ impl Default for ConnectionKeychain {
 }
 
 impl ConnectionKeychain {
-    pub(crate) fn store(&self, id: &str, secret: &str) -> Result<()> {
+    pub(crate) fn store(&self, id: &str, secret: &SecretString) -> Result<()> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
             store
                 .lock()
                 .map_err(|error| anyhow::anyhow!("failed to lock test keychain: {error}"))?
-                .insert(id.to_string(), secret.to_string());
+                .insert(id.to_string(), secret.clone());
             return Ok(());
         }
 
         let entry = self.entry(id)?;
         entry
-            .set_password(secret)
+            .set_password(secret.expose_secret())
             .with_context(|| format!("failed to store password in OS keychain for {id}"))
     }
 
-    pub(crate) fn get(&self, id: &str) -> Result<String> {
+    pub(crate) fn get(&self, id: &str) -> Result<SecretString> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
             return store
@@ -55,7 +57,7 @@ impl ConnectionKeychain {
 
         let entry = self.entry(id)?;
         match entry.get_password() {
-            Ok(secret) => Ok(secret),
+            Ok(secret) => Ok(SecretString::from(secret)),
             Err(keyring::Error::NoEntry) => bail!("Password not saved for this connection"),
             Err(error) => Err(error)
                 .with_context(|| format!("failed to load password from OS keychain for {id}")),

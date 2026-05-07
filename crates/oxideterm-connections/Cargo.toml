@@ -12,3 +12,4 @@ serde_json.workspace = true
 keyring.workspace = true
 uuid.workspace = true
 whoami.workspace = true
+zeroize.workspace = true

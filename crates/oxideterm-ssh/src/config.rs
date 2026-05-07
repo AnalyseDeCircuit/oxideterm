@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -77,7 +79,7 @@ pub struct ProxyHopConfig {
     pub expected_host_key_fingerprint: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthMethod {
     Password {
@@ -96,6 +98,43 @@ pub enum AuthMethod {
     KeyboardInteractive,
 }
 
+impl fmt::Debug for AuthMethod {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Password { .. } => formatter
+                .debug_struct("Password")
+                .field("password", &"[redacted secret]")
+                .finish(),
+            Self::Key {
+                key_path,
+                passphrase,
+            } => formatter
+                .debug_struct("Key")
+                .field("key_path", key_path)
+                .field(
+                    "passphrase",
+                    &passphrase.as_ref().map(|_| "[redacted secret]"),
+                )
+                .finish(),
+            Self::Agent => formatter.write_str("Agent"),
+            Self::Certificate {
+                key_path,
+                cert_path,
+                passphrase,
+            } => formatter
+                .debug_struct("Certificate")
+                .field("key_path", key_path)
+                .field("cert_path", cert_path)
+                .field(
+                    "passphrase",
+                    &passphrase.as_ref().map(|_| "[redacted secret]"),
+                )
+                .finish(),
+            Self::KeyboardInteractive => formatter.write_str("KeyboardInteractive"),
+        }
+    }
+}
+
 impl AuthMethod {
     pub fn password(password: impl Into<String>) -> Self {
         Self::Password {
@@ -103,10 +142,21 @@ impl AuthMethod {
         }
     }
 
+    pub fn password_secret(password: Zeroizing<String>) -> Self {
+        Self::Password { password }
+    }
+
     pub fn key(key_path: impl Into<String>, passphrase: Option<String>) -> Self {
         Self::Key {
             key_path: key_path.into(),
             passphrase: passphrase.map(Zeroizing::new),
+        }
+    }
+
+    pub fn key_secret(key_path: impl Into<String>, passphrase: Option<Zeroizing<String>>) -> Self {
+        Self::Key {
+            key_path: key_path.into(),
+            passphrase,
         }
     }
 
@@ -119,6 +169,18 @@ impl AuthMethod {
             key_path: key_path.into(),
             cert_path: cert_path.into(),
             passphrase: passphrase.map(Zeroizing::new),
+        }
+    }
+
+    pub fn certificate_secret(
+        key_path: impl Into<String>,
+        cert_path: impl Into<String>,
+        passphrase: Option<Zeroizing<String>>,
+    ) -> Self {
+        Self::Certificate {
+            key_path: key_path.into(),
+            cert_path: cert_path.into(),
+            passphrase,
         }
     }
 }

@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::keychain::ConnectionKeychain;
+use crate::{SecretString, keychain::ConnectionKeychain};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,7 +38,7 @@ pub enum SavedAuth {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keychain_id: Option<String>,
         #[serde(default, rename = "password", skip_serializing)]
-        plaintext_password: Option<String>,
+        plaintext_password: Option<SecretString>,
     },
     Key {
         key_path: String,
@@ -47,7 +47,7 @@ pub enum SavedAuth {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         passphrase_keychain_id: Option<String>,
         #[serde(default, rename = "passphrase", skip_serializing)]
-        plaintext_passphrase: Option<String>,
+        plaintext_passphrase: Option<SecretString>,
     },
     Certificate {
         key_path: String,
@@ -57,7 +57,7 @@ pub enum SavedAuth {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         passphrase_keychain_id: Option<String>,
         #[serde(default, rename = "passphrase", skip_serializing)]
-        plaintext_passphrase: Option<String>,
+        plaintext_passphrase: Option<SecretString>,
     },
     Agent,
 }
@@ -435,14 +435,14 @@ impl ConnectionStore {
         Ok(self.get(&id).map(ConnectionInfo::from).expect("imported"))
     }
 
-    pub fn get_connection_password(&self, id: &str) -> Result<String> {
+    pub fn get_connection_password(&self, id: &str) -> Result<SecretString> {
         let conn = self
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
         self.get_saved_auth_password(&conn.auth)
     }
 
-    pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<String> {
+    pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<SecretString> {
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -459,14 +459,14 @@ impl ConnectionStore {
         }
     }
 
-    pub fn get_connection_passphrase(&self, id: &str) -> Result<Option<String>> {
+    pub fn get_connection_passphrase(&self, id: &str) -> Result<Option<SecretString>> {
         let conn = self
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found"))?;
         self.get_saved_auth_passphrase(&conn.auth)
     }
 
-    pub fn get_saved_auth_passphrase(&self, auth: &SavedAuth) -> Result<Option<String>> {
+    pub fn get_saved_auth_passphrase(&self, auth: &SavedAuth) -> Result<Option<SecretString>> {
         match auth {
             SavedAuth::Key {
                 passphrase_keychain_id: Some(keychain_id),
@@ -941,7 +941,7 @@ mod tests {
                 "conn-1",
                 SavedAuth::Password {
                     keychain_id: None,
-                    plaintext_password: Some("secret".to_string()),
+                    plaintext_password: Some(SecretString::from("secret")),
                 },
             ))
             .unwrap();
@@ -966,7 +966,7 @@ mod tests {
                 "conn-1",
                 SavedAuth::Password {
                     keychain_id: None,
-                    plaintext_password: Some(String::new()),
+                    plaintext_password: Some(SecretString::default()),
                 },
             ))
             .unwrap();
@@ -1013,7 +1013,7 @@ mod tests {
                 "conn-1",
                 SavedAuth::Password {
                     keychain_id: None,
-                    plaintext_password: Some("secret".to_string()),
+                    plaintext_password: Some(SecretString::from("secret")),
                 },
             ))
             .unwrap();
@@ -1030,7 +1030,7 @@ mod tests {
                 "conn-1",
                 SavedAuth::Password {
                     keychain_id: Some(previous_keychain_id.clone()),
-                    plaintext_password: Some(String::new()),
+                    plaintext_password: Some(SecretString::default()),
                 },
             ))
             .unwrap();
@@ -1053,7 +1053,7 @@ mod tests {
                 "conn-1",
                 SavedAuth::Password {
                     keychain_id: None,
-                    plaintext_password: Some("secret".to_string()),
+                    plaintext_password: Some(SecretString::from("secret")),
                 },
             ))
             .unwrap();
@@ -1100,7 +1100,7 @@ mod tests {
         assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
         assert_eq!(
             store.get_connection_passphrase("conn-2").unwrap(),
-            Some("key-secret".to_string())
+            Some(SecretString::from("key-secret"))
         );
         let saved = fs::read_to_string(&path).unwrap();
         assert!(saved.contains("\"keychain_id\""));
@@ -1119,7 +1119,7 @@ mod tests {
                     key_path: "/tmp/id".to_string(),
                     has_passphrase: true,
                     passphrase_keychain_id: None,
-                    plaintext_passphrase: Some("key-secret".to_string()),
+                    plaintext_passphrase: Some(SecretString::from("key-secret")),
                 },
             ))
             .unwrap();
@@ -1157,7 +1157,7 @@ mod tests {
         }
         assert_eq!(
             store.get_connection_passphrase("conn-1").unwrap(),
-            Some("key-secret".to_string())
+            Some(SecretString::from("key-secret"))
         );
     }
 
@@ -1171,7 +1171,7 @@ mod tests {
                     key_path: "/tmp/id".to_string(),
                     has_passphrase: true,
                     passphrase_keychain_id: None,
-                    plaintext_passphrase: Some("key-secret".to_string()),
+                    plaintext_passphrase: Some(SecretString::from("key-secret")),
                 },
             ))
             .unwrap();
@@ -1222,7 +1222,7 @@ mod tests {
                     cert_path: "/tmp/id-cert.pub".to_string(),
                     has_passphrase: true,
                     passphrase_keychain_id: None,
-                    plaintext_passphrase: Some("cert-secret".to_string()),
+                    plaintext_passphrase: Some(SecretString::from("cert-secret")),
                 },
             ))
             .unwrap();
@@ -1251,7 +1251,7 @@ mod tests {
         }
         assert_eq!(
             store.get_connection_passphrase("conn-1").unwrap(),
-            Some("cert-secret".to_string())
+            Some(SecretString::from("cert-secret"))
         );
     }
 
@@ -1265,7 +1265,7 @@ mod tests {
             username: "ops".to_string(),
             auth: SavedAuth::Password {
                 keychain_id: None,
-                plaintext_password: Some("jump-secret".to_string()),
+                plaintext_password: Some(SecretString::from("jump-secret")),
             },
             agent_forwarding: true,
         }];
@@ -1295,7 +1295,7 @@ mod tests {
                 key_path: "/tmp/jump-key".to_string(),
                 has_passphrase: true,
                 passphrase_keychain_id: None,
-                plaintext_passphrase: Some("jump-key-secret".to_string()),
+                plaintext_passphrase: Some(SecretString::from("jump-key-secret")),
             },
             agent_forwarding: false,
         }];

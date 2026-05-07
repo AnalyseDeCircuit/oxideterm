@@ -1640,7 +1640,7 @@ impl WorkspaceApp {
                     form.password_loading = false;
                     match result {
                         Ok(password) => {
-                            form.password = password;
+                            form.password = password.expose_secret().to_string();
                             form.password_loaded = true;
                             form.password_visible = true;
                             form.password_error = None;

@@ -5,8 +5,8 @@ use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias, save_request_from_draft,
-    saved_connection_from_ssh_host,
+    SecretString, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
+    save_request_from_draft, saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_ui::{
     IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
@@ -2742,7 +2742,10 @@ pub(super) fn form_from_saved_connection(
             plaintext_password,
         } => (
             SshAuthTab::Password,
-            plaintext_password.clone().unwrap_or_default(),
+            plaintext_password
+                .as_ref()
+                .map(|password| password.expose_secret().to_string())
+                .unwrap_or_default(),
             String::new(),
             String::new(),
             String::new(),
@@ -2867,10 +2870,10 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
         username: hop.username.clone(),
         auth: ConnectionAuthDraft {
             kind: auth_draft_kind(hop.auth_tab),
-            password: hop.password.clone(),
+            password: SecretString::from(hop.password.clone()),
             key_path: hop.key_path.clone(),
             cert_path: hop.cert_path.clone(),
-            passphrase: hop.passphrase.clone(),
+            passphrase: SecretString::from(hop.passphrase.clone()),
             save_password: true,
             ..ConnectionAuthDraft::default()
         },
@@ -2881,13 +2884,13 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
 fn auth_draft_from_form(form: &NewConnectionForm) -> ConnectionAuthDraft {
     ConnectionAuthDraft {
         kind: auth_draft_kind(form.auth_tab),
-        password: form.password.clone(),
+        password: SecretString::from(form.password.clone()),
         password_keychain_id: form.saved_password_keychain_id.clone(),
         password_loaded: form.password_loaded,
         save_password: form.save_password,
         key_path: form.key_path.clone(),
         cert_path: form.cert_path.clone(),
-        passphrase: form.passphrase.clone(),
+        passphrase: SecretString::from(form.passphrase.clone()),
     }
 }
 
@@ -2946,11 +2949,13 @@ fn auth_method_from_saved_auth(store: &ConnectionStore, auth: &SavedAuth) -> Opt
         SavedAuth::Password {
             plaintext_password: Some(password),
             ..
-        } => AuthMethod::password(password.clone()),
+        } => AuthMethod::password_secret(password.clone().into_zeroizing()),
         SavedAuth::Password {
             keychain_id: Some(_),
             ..
-        } => AuthMethod::password(store.get_saved_auth_password(auth).ok()?),
+        } => {
+            AuthMethod::password_secret(store.get_saved_auth_password(auth).ok()?.into_zeroizing())
+        }
         SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
@@ -2959,23 +2964,25 @@ fn auth_method_from_saved_auth(store: &ConnectionStore, auth: &SavedAuth) -> Opt
             key_path,
             plaintext_passphrase,
             ..
-        } => AuthMethod::key(
+        } => AuthMethod::key_secret(
             key_path.clone(),
             plaintext_passphrase
                 .clone()
-                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten()),
+                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten())
+                .map(SecretString::into_zeroizing),
         ),
         SavedAuth::Certificate {
             key_path,
             cert_path,
             plaintext_passphrase,
             ..
-        } => AuthMethod::certificate(
+        } => AuthMethod::certificate_secret(
             key_path.clone(),
             cert_path.clone(),
             plaintext_passphrase
                 .clone()
-                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten()),
+                .or_else(|| store.get_saved_auth_passphrase(auth).ok().flatten())
+                .map(SecretString::into_zeroizing),
         ),
         SavedAuth::Agent => AuthMethod::Agent,
     })

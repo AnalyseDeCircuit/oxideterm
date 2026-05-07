@@ -1204,11 +1204,13 @@ impl WorkspaceApp {
                 LucideIcon::Plus,
                 "layout.empty.new_connection",
                 true,
+                true,
                 cx,
             ))
             .child(self.render_welcome_action_button(
                 LucideIcon::Terminal,
                 "layout.empty.new_local_terminal",
+                false,
                 false,
                 cx,
             ))
@@ -1220,25 +1222,35 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label_key: &str,
         opens_connection_form: bool,
+        filled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let (bg, border) = if filled {
+            (rgb(theme.bg_panel), rgb(theme.border))
+        } else {
+            (rgba(0x00000000), rgb(theme.border))
+        };
         div()
-            .h(px(40.0))
-            .px(px(18.0))
+            .h(px(self.tokens.metrics.ui_button_default_height))
+            .px(px(self.tokens.metrics.ui_button_default_padding_x))
             .flex()
             .items_center()
             .justify_center()
             .gap(px(8.0))
-            .rounded(px(self.tokens.radii.lg))
+            .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(rgba((theme.border_strong << 8) | 0xcc))
-            .bg(rgba((theme.bg_panel << 8) | 0x8c))
+            .border_color(border)
+            .bg(bg)
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(theme.text))
             .cursor_pointer()
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
+            .hover(move |button| {
+                button
+                    .bg(rgb(theme.bg_hover))
+                    .border_color(rgb(theme.border_strong))
+            })
             .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text)))
             .child(self.i18n.t(label_key))
             .on_mouse_down(
@@ -1292,7 +1304,7 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
-                    .font_family(SharedString::from("JetBrainsMono Nerd Font"))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(11.0))
                     .line_height(px(14.0))
                     .text_color(rgb(theme.text))
