@@ -13,6 +13,7 @@ use std::{
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::SshConfig;
@@ -62,6 +63,22 @@ pub struct ConnectionInfo {
     pub idle_timeout_secs: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeConnectionStatus {
+    Alive,
+    Dead,
+    NotFound,
+    NotApplicable,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpSessionState {
+    pub ready: bool,
+    pub cwd: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConnectionPoolConfig {
     pub idle_timeout: Option<Duration>,
@@ -99,6 +116,7 @@ struct ConnectionEntry {
     ref_count: AtomicU64,
     consumers: RwLock<Vec<ConnectionConsumer>>,
     physical: RwLock<Option<Arc<dyn Any + Send + Sync>>>,
+    sftp_state: RwLock<SftpSessionState>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
     idle_timeout: Option<Duration>,
@@ -115,6 +133,7 @@ impl ConnectionEntry {
             ref_count: AtomicU64::new(0),
             consumers: RwLock::new(Vec::new()),
             physical: RwLock::new(None),
+            sftp_state: RwLock::new(SftpSessionState::default()),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
@@ -298,6 +317,85 @@ impl SshConnectionRegistry {
             }
         }
         changed
+    }
+
+    pub async fn probe_single_connection(
+        &self,
+        connection_id: &str,
+        timeout: Duration,
+    ) -> ProbeConnectionStatus {
+        let Some(handle) = self.get(connection_id) else {
+            return ProbeConnectionStatus::NotFound;
+        };
+        match handle.state() {
+            ConnectionState::Active | ConnectionState::Idle | ConnectionState::LinkDown => {}
+            ConnectionState::Connecting
+            | ConnectionState::Reconnecting
+            | ConnectionState::Disconnecting
+            | ConnectionState::Disconnected
+            | ConnectionState::Error(_) => return ProbeConnectionStatus::NotApplicable,
+        }
+
+        let mut alive = handle.probe_alive(timeout).await.is_ok();
+        if !alive {
+            sleep(Duration::from_millis(250)).await;
+            alive = handle.probe_alive(timeout).await.is_ok();
+        }
+
+        if alive {
+            let _ = self.mark_state(connection_id, ConnectionState::Active);
+            ProbeConnectionStatus::Alive
+        } else {
+            let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
+            ProbeConnectionStatus::Dead
+        }
+    }
+
+    pub fn acquire_sftp_session(
+        &self,
+        connection_id: &str,
+        consumer_id: impl Into<String>,
+    ) -> Option<SshConnectionHandle> {
+        self.acquire_consumer_for_connection(
+            connection_id,
+            ConnectionConsumer::Sftp(consumer_id.into()),
+        )
+    }
+
+    pub fn acquire_consumer_for_connection(
+        &self,
+        connection_id: &str,
+        consumer: ConnectionConsumer,
+    ) -> Option<SshConnectionHandle> {
+        let handle = self.get(connection_id)?;
+        {
+            let mut consumers = handle.entry.consumers.write();
+            if !consumers.contains(&consumer) {
+                consumers.push(consumer);
+                handle.entry.ref_count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        *handle.entry.state.write() = ConnectionState::Active;
+        handle.entry.touch();
+        Some(handle)
+    }
+
+    pub fn mark_sftp_session(
+        &self,
+        connection_id: &str,
+        ready: bool,
+        cwd: Option<String>,
+    ) -> Option<SftpSessionState> {
+        let handle = self.get(connection_id)?;
+        let state = SftpSessionState { ready, cwd };
+        *handle.entry.sftp_state.write() = state.clone();
+        handle.entry.touch();
+        Some(state)
+    }
+
+    pub fn sftp_session_state(&self, connection_id: &str) -> Option<SftpSessionState> {
+        let handle = self.get(connection_id)?;
+        Some(handle.entry.sftp_state.read().clone())
     }
 
     pub fn get(&self, connection_id: &str) -> Option<SshConnectionHandle> {

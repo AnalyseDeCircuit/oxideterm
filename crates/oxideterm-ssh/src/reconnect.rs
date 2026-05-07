@@ -127,7 +127,11 @@ impl ReconnectOrchestratorStore {
         snapshot.snapshot_at = Some(SystemTime::now());
 
         if let Some(job) = self.jobs.get(&node_id) {
-            return job.clone();
+            if job.ended_at.is_none() {
+                return job.clone();
+            }
+            drop(job);
+            self.jobs.remove(&node_id);
         }
 
         let mut job = ReconnectJob {

@@ -5924,6 +5924,8 @@ dependencies = [
  "parking_lot",
  "raw-window-handle",
  "regex",
+ "serde",
+ "serde_json",
  "tokio",
  "windows 0.61.3",
 ]

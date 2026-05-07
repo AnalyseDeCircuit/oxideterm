@@ -25,6 +25,8 @@ pub enum SelectAnchorId {
     SettingsTerminalCursorStyle,
     SettingsLocalShell,
     SettingsConnectionIdleTimeout,
+    SettingsSftpConcurrent,
+    SettingsSftpDirectoryParallelism,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     NewConnectionGroup,

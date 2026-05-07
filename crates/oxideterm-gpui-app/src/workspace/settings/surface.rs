@@ -229,6 +229,8 @@ impl WorkspaceApp {
         );
         self.background_image_cache
             .set_byte_limit(self.render_policy.image_cache_bytes);
+        self.sftp_transfer_manager
+            .apply_settings(sftp_runtime_settings_from_settings(&settings));
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
         let panes = self
