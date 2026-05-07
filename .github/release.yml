@@ -1,6 +1,3 @@
-# GitHub Auto-generated Release Notes configuration
-# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
-
 changelog:
   exclude:
     labels:
@@ -12,31 +9,6 @@ changelog:
       - dependabot
 
   categories:
-    - title: "✨ New Features"
-      labels:
-        - feature
-        - enhancement
-    - title: "🐛 Bug Fixes"
-      labels:
-        - bug
-        - fix
-        - bugfix
-    - title: "🔒 Security"
-      labels:
-        - security
-    - title: "⚡ Performance"
-      labels:
-        - performance
-    - title: "🌐 Internationalization"
-      labels:
-        - i18n
-    - title: "🔌 Plugin System"
-      labels:
-        - plugin
-    - title: "📖 Documentation"
-      labels:
-        - documentation
-        - docs
-    - title: "🏗️ Other Changes"
+    - title: "Changes"
       labels:
         - "*"
