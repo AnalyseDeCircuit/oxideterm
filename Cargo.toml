@@ -45,6 +45,7 @@ icy_sixel = "0.5.0"
 image = "0.25.10"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 libc = "0.2"
+memmap2 = "0.9"
 parking_lot = "0.12"
 polling = "3.11"
 raw-window-handle = "0.6"

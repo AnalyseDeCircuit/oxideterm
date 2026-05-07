@@ -11,19 +11,27 @@ mod audio;
 mod pdf;
 mod renderer;
 mod session;
+mod text;
 mod types;
 mod video;
 
 pub use asset::{PreviewAssetOwner, PreviewAssetOwnership};
 pub use audio::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewSnapshot, AudioPreviewState,
-    MemoryAudioPreviewBackend, UnsupportedAudioPreviewBackend,
+    MemoryAudioPreviewBackend, RodioAudioPreviewBackend, UnsupportedAudioPreviewBackend,
 };
 pub use pdf::{
     PdfDocumentInfo, PdfPageBitmap, PdfPreviewBackend, PdfPreviewError, PdfiumPreviewBackend,
 };
 pub use renderer::PreviewRenderer;
-pub use session::{PreviewAction, PreviewSession, PreviewSessionState, PreviewSource};
+pub use session::{
+    PreviewAction, PreviewLoadError, PreviewLoadOptions, PreviewSession, PreviewSessionState,
+    PreviewSource,
+};
+pub use text::{
+    detect_and_decode, detect_and_decode_with_hint, encode_to_encoding, extension_to_language,
+    generate_hex_dump, is_likely_text_content,
+};
 pub use types::{
     PreviewAssetKind, PreviewContent, PreviewKind, classify_preview_path, classify_preview_type,
 };

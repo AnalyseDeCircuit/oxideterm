@@ -239,10 +239,8 @@ impl WorkspaceApp {
                                     AssetFileKind::Audio => {
                                         let _ = self.sftp_view.preview_audio.load(owner.path());
                                     }
-                                    AssetFileKind::Video => {
-                                        let _ = self.sftp_view.preview_video.load(owner.path());
-                                    }
                                     AssetFileKind::Image
+                                    | AssetFileKind::Video
                                     | AssetFileKind::Pdf
                                     | AssetFileKind::Office => {}
                                 }

@@ -1362,7 +1362,7 @@ impl SftpSession {
     ) -> Result<PreviewContent, SftpError> {
         let max_size = match kind {
             AssetFileKind::Audio | AssetFileKind::Video => constants::MAX_MEDIA_PREVIEW_SIZE,
-            AssetFileKind::Office => 50 * 1024 * 1024,
+            AssetFileKind::Office => constants::MAX_OFFICE_CONVERT_SIZE,
             AssetFileKind::Image | AssetFileKind::Pdf => constants::MAX_PREVIEW_SIZE,
         };
         if size > max_size {

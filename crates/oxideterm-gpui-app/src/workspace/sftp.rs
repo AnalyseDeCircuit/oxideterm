@@ -9,9 +9,8 @@ use oxideterm_gpui_ui::{
     text_input::{text_caret, text_input_anchor_probe},
 };
 use oxideterm_preview::{
-    AudioPreviewBackend, PdfPreviewBackend, PdfiumPreviewBackend, PlatformVideoBackend,
-    PreviewAssetOwner, PreviewSession, UnsupportedAudioPreviewBackend,
-    UnsupportedPlatformVideoBackend,
+    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PdfPreviewBackend,
+    PdfiumPreviewBackend, PreviewAssetOwner, PreviewSession, RodioAudioPreviewBackend,
 };
 use oxideterm_sftp::{
     AssetFileKind, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
@@ -21,6 +20,8 @@ use oxideterm_sftp::{
     TransferType as RemoteTransferType, probe_tar_compression, probe_tar_support,
     tar_download_directory, tar_upload_directory,
 };
+
+include!("sftp/native_video.rs");
 
 const SFTP_ROOT_PADDING: f32 = 8.0; // Tauri p-2
 const SFTP_GAP: f32 = 8.0; // Tauri gap-2
@@ -315,8 +316,9 @@ pub(super) struct SftpViewState {
     preview_content: Option<PreviewContent>,
     preview_asset_owner: Option<PreviewAssetOwner>,
     preview_session: PreviewSession,
-    preview_audio: UnsupportedAudioPreviewBackend,
-    preview_video: UnsupportedPlatformVideoBackend,
+    preview_audio: RodioAudioPreviewBackend,
+    preview_audio_tick_active: bool,
+    preview_video_surface: SharedSftpNativeVideoSurface,
     preview_error: Option<String>,
     preview_loading: bool,
     transfers: Vec<SftpTransferItem>,
@@ -362,8 +364,9 @@ impl Default for SftpViewState {
             preview_content: None,
             preview_asset_owner: None,
             preview_session: PreviewSession::default(),
-            preview_audio: UnsupportedAudioPreviewBackend,
-            preview_video: UnsupportedPlatformVideoBackend,
+            preview_audio: RodioAudioPreviewBackend::new(),
+            preview_audio_tick_active: false,
+            preview_video_surface: SharedSftpNativeVideoSurface::default(),
             preview_error: None,
             preview_loading: false,
             transfers: Vec::new(),

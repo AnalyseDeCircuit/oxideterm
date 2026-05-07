@@ -9,12 +9,17 @@ default = []
 pdfium = ["pdfium-render"]
 
 [dependencies]
+chardetng = "0.1"
+encoding_rs.workspace = true
 gpui.workspace = true
 image.workspace = true
+memmap2.workspace = true
 mime_guess = "2"
 pdfium-render = { version = "0.8", optional = true }
+rodio = { version = "0.21.1", default-features = true }
 serde.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

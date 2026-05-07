@@ -415,6 +415,7 @@ impl WorkspaceApp {
             };
             self.set_sftp_path(pane, join_sftp_path(&base, &file.name));
         } else {
+            self.stop_sftp_preview_media();
             self.sftp_view.preview_path = Some(file.path.clone());
             self.sftp_view.preview_content = None;
             self.sftp_view.preview_asset_owner = None;
@@ -935,12 +936,69 @@ impl WorkspaceApp {
     }
 
     fn close_sftp_dialog(&mut self) {
+        self.stop_sftp_preview_media();
         self.sftp_view.dialog = None;
         self.sftp_view.dialog_value.clear();
         self.sftp_view.preview_asset_owner = None;
         self.sftp_view.preview_session = PreviewSession::default();
         self.sftp_view.focused_input = None;
         self.ime_marked_text = None;
+    }
+
+    fn stop_sftp_preview_media(&mut self) {
+        let _ = self
+            .sftp_view
+            .preview_audio
+            .command(AudioPreviewCommand::Stop);
+        self.sftp_view.preview_audio_tick_active = false;
+        self.sftp_view.preview_video_surface.detach();
+    }
+
+    fn toggle_sftp_preview_audio(&mut self, cx: &mut Context<Self>) {
+        let _ = self
+            .sftp_view
+            .preview_audio
+            .command(AudioPreviewCommand::PlayPause);
+        self.schedule_sftp_preview_audio_tick(cx);
+    }
+
+    fn seek_sftp_preview_audio(&mut self, position: std::time::Duration, cx: &mut Context<Self>) {
+        let _ = self
+            .sftp_view
+            .preview_audio
+            .command(AudioPreviewCommand::Seek(position));
+        self.schedule_sftp_preview_audio_tick(cx);
+    }
+
+    fn schedule_sftp_preview_audio_tick(&mut self, cx: &mut Context<Self>) {
+        if self.sftp_view.preview_audio_tick_active {
+            return;
+        }
+        self.sftp_view.preview_audio_tick_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        let playing = matches!(
+                            this.sftp_view.preview_audio.snapshot().state,
+                            AudioPreviewState::Playing
+                        );
+                        if !playing {
+                            this.sftp_view.preview_audio_tick_active = false;
+                        }
+                        cx.notify();
+                        playing
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn accept_sftp_dialog(&mut self) {

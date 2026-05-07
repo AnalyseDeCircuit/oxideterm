@@ -533,6 +533,13 @@ fn sftp_file_name(path: &str) -> String {
         .to_string()
 }
 
+fn format_sftp_media_time(duration: std::time::Duration) -> String {
+    let total = duration.as_secs();
+    let minutes = total / 60;
+    let seconds = total % 60;
+    format!("{minutes}:{seconds:02}")
+}
+
 fn diff_cell(
     number: &str,
     content: &str,
