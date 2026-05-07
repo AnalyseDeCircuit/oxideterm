@@ -340,6 +340,77 @@ impl SshConnectionHandle {
             })
     }
 
+    pub async fn run_command(
+        &self,
+        command: &str,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<String, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for remote command execution".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot execute remote commands".to_string(),
+            ));
+        }
+
+        let mut channel = {
+            let handle = pooled.target.lock().await;
+            handle
+                .channel_open_session()
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?
+        };
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+
+        let mut output = Vec::new();
+        let mut exit_status = None;
+        tokio::time::timeout(timeout, async {
+            while let Some(message) = channel.wait().await {
+                match message {
+                    ChannelMsg::Data { data } => {
+                        output.extend_from_slice(&data);
+                    }
+                    ChannelMsg::ExtendedData { data, ext } if ext == 1 => {
+                        output.extend_from_slice(&data);
+                    }
+                    ChannelMsg::ExitStatus {
+                        exit_status: status,
+                    } => {
+                        exit_status = Some(status);
+                    }
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    _ => {}
+                }
+                if output.len() > max_output_size {
+                    output.truncate(max_output_size);
+                    break;
+                }
+            }
+        })
+        .await
+        .map_err(|_| SshTransportError::Timeout)?;
+        let _ = channel.close().await;
+
+        if let Some(status) = exit_status
+            && status != 0
+        {
+            return Err(SshTransportError::Channel(format!(
+                "remote command exited with status {status}"
+            )));
+        }
+
+        String::from_utf8(output).map_err(|error| {
+            SshTransportError::Channel(format!("remote command output was not UTF-8: {error}"))
+        })
+    }
+
     pub fn set_remote_forward_handler(
         &self,
         handler: Arc<dyn RemoteForwardHandler>,

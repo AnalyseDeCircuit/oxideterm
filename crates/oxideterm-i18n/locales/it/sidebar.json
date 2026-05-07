@@ -1,23 +1,52 @@
 {
   "sidebar": {
-    "active_sessions": "Sessioni attive",
-    "no_sessions": "Nessuna sessione",
-    "add_new_connection": "Clicca + per aggiungere una connessione",
     "actions": {
-      "new_local_terminal": "Nuovo terminale locale"
+      "expand": "Espandi Barra Laterale",
+      "collapse": "Comprimi Barra Laterale",
+      "new_local_terminal": "Nuovo Terminale Locale",
+      "open_pylance_guide": "Apri Guida Pylance"
     },
     "panels": {
-      "sessions": "Sessioni attive",
-      "saved_connections": "Connessioni salvate",
-      "session_manager": "Gestore sessioni",
-      "files": "Gestore file",
-      "connection_pool": "Pool di connessioni",
-      "connection_monitor": "Monitor connessioni",
-      "connection_matrix": "Matrice di connessioni",
-      "plugins": "Plugin",
+      "sessions": "Sessioni Attive",
+      "saved": "Connessioni Salvate",
+      "saved_title": "Connessioni Salvate",
+      "sftp": "SFTP",
+      "sftp_sessions": "Sessioni SFTP",
+      "files": "Gestione File",
+      "forwards": "Port Forwarding",
+      "forwards_title": "Port Forwarding",
+      "connection_pool": "Pool Connessioni",
+      "connection_monitor": "Monitor Connessioni",
+      "connection_matrix": "Matrice Connessioni",
       "ai": "OxideSens",
-      "activity": "Attività"
-    }
+      "ai_assistant": "OxideSens (Prossimamente)",
+      "settings": "Impostazioni",
+      "no_saved_connections": "Nessuna connessione salvata",
+      "no_active_sessions": "Nessuna sessione attiva",
+      "no_connected_sessions": "Nessuna sessione connessa",
+      "import_tooltip": "Importa da file .oxide",
+      "export_tooltip": "Esporta in file .oxide",
+      "system_health": "Stato del sistema",
+      "session_manager": "Gestore sessioni",
+      "open_session_manager": "Apri gestore sessioni",
+      "plugins": "Plugin",
+      "activity": "Attività",
+      "event_log": "Registro eventi",
+      "notifications": "Notifiche",
+      "saved_connections": "Connessioni salvate"
+    },
+    "tooltips": {
+      "settings": "Impostazioni",
+      "ai_hint": "OxideSens",
+      "switch_tree": "Vista ad albero",
+      "switch_focus": "Vista focus",
+      "auto_route": "Connessione auto-routing",
+      "new_connection": "Nuova connessione",
+      "collapse": "Comprimi"
+    },
+    "active_sessions": "Sessioni attive",
+    "no_sessions": "Nessuna sessione",
+    "add_new_connection": "Clicca + per aggiungere una connessione"
   },
   "sessions": {
     "tree": {
@@ -25,8 +54,10 @@
       "click_to_add": "Clicca + per aggiungere una connessione",
       "actions": {
         "new_terminal": "Nuovo terminale",
+        "sftp": "SFTP",
         "disconnect": "Disconnetti",
-        "reconnect": "Riconnetti"
+        "reconnect": "Riconnetti",
+        "port_forwarding": "Port Forwarding"
       }
     },
     "focused_list": {

@@ -1,23 +1,52 @@
 {
   "sidebar": {
-    "active_sessions": "Phiên hoạt động",
-    "no_sessions": "Không có phiên",
-    "add_new_connection": "Nhấn + để thêm kết nối",
     "actions": {
-      "new_local_terminal": "Terminal cục bộ mới"
+      "expand": "Mở rộng thanh bên",
+      "collapse": "Thu gọn thanh bên",
+      "new_local_terminal": "Terminal cục bộ mới",
+      "open_pylance_guide": "Mở hướng dẫn Pylance"
     },
     "panels": {
       "sessions": "Phiên hoạt động",
-      "saved_connections": "Kết nối đã lưu",
-      "session_manager": "Quản lý phiên",
-      "files": "Quản lý tệp",
+      "saved": "Kết nối đã lưu",
+      "saved_title": "Kết nối đã lưu",
+      "sftp": "SFTP",
+      "sftp_sessions": "Phiên SFTP",
+      "files": "Trình Quản Lý Tệp",
+      "forwards": "Chuyển tiếp cổng",
+      "forwards_title": "Chuyển tiếp cổng",
       "connection_pool": "Nhóm kết nối",
       "connection_monitor": "Giám sát kết nối",
       "connection_matrix": "Ma trận kết nối",
-      "plugins": "Plugin",
       "ai": "OxideSens",
-      "activity": "Hoạt động"
-    }
+      "ai_assistant": "OxideSens (Sắp ra mắt)",
+      "settings": "Cài đặt",
+      "no_saved_connections": "Không có kết nối đã lưu",
+      "no_active_sessions": "Không có phiên hoạt động",
+      "no_connected_sessions": "Không có phiên đã kết nối",
+      "import_tooltip": "Nhập từ file .oxide",
+      "export_tooltip": "Xuất sang file .oxide",
+      "system_health": "Sức khỏe hệ thống",
+      "session_manager": "Quản lý phiên",
+      "open_session_manager": "Mở quản lý phiên",
+      "plugins": "Plugin",
+      "activity": "Hoạt động",
+      "event_log": "Nhật ký sự kiện",
+      "notifications": "Thông báo",
+      "saved_connections": "Kết nối đã lưu"
+    },
+    "tooltips": {
+      "settings": "Cài đặt",
+      "ai_hint": "OxideSens",
+      "switch_tree": "Chế độ cây",
+      "switch_focus": "Chế độ tập trung",
+      "auto_route": "Kết nối tự động",
+      "new_connection": "Kết nối mới",
+      "collapse": "Thu gọn"
+    },
+    "active_sessions": "Phiên hoạt động",
+    "no_sessions": "Không có phiên",
+    "add_new_connection": "Nhấn + để thêm kết nối"
   },
   "sessions": {
     "tree": {
@@ -25,8 +54,10 @@
       "click_to_add": "Nhấn + để thêm kết nối",
       "actions": {
         "new_terminal": "Terminal mới",
+        "sftp": "SFTP",
         "disconnect": "Ngắt kết nối",
-        "reconnect": "Kết nối lại"
+        "reconnect": "Kết nối lại",
+        "port_forwarding": "Chuyển tiếp cổng"
       }
     },
     "focused_list": {

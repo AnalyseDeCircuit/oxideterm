@@ -1,0 +1,110 @@
+{
+  "copy_address": "Copy address",
+  "copied": "Copied!",
+  "forwards": {
+    "quick": {
+      "title": "Quick Forwards",
+      "jupyter": "Jupyter (8888)",
+      "tensorboard": "TensorBoard (6006)",
+      "vscode": "VS Code (8080)"
+    },
+    "table": {
+      "title": "Active Forwards",
+      "type": "Type",
+      "local_address": "Local Address",
+      "remote_address": "Remote Address",
+      "status": "Status",
+      "actions": "Actions",
+      "no_forwards": "No active port forwards"
+    },
+    "type": {
+      "local": "local",
+      "remote": "remote",
+      "dynamic": "dynamic"
+    },
+    "status": {
+      "active": "active",
+      "stopped": "stopped",
+      "failed": "failed",
+      "suspended": "suspended",
+      "suspended_hint": "SSH disconnected",
+      "starting": "starting",
+      "error": "error"
+    },
+    "actions": {
+      "new_forward": "New Forward",
+      "stop": "Stop forward",
+      "restart": "Restart forward",
+      "edit": "Edit forward",
+      "delete": "Delete forward",
+      "will_recover": "Auto-recover on reconnect",
+      "confirm_delete_title": "Delete Forward",
+      "confirm_delete_desc": "Are you sure you want to delete this port forwarding rule?"
+    },
+    "form": {
+      "new_title": "New Forward Rule",
+      "edit_title": "Edit Forward Rule",
+      "cancel": "Cancel",
+      "type": "Type",
+      "create_forward": "Create Forward",
+      "creating": "Creating...",
+      "save_changes": "Save Changes",
+      "saving": "Saving...",
+      "type_local": "Local (L)",
+      "type_remote": "Remote (R)",
+      "type_dynamic": "Dynamic (SOCKS5)",
+      "local_client": "Local (Client)",
+      "remote_server": "Remote (Server)",
+      "bind_address": "Bind Address",
+      "target_address": "Target Address",
+      "socks5_mode": "SOCKS5 Proxy Mode",
+      "host_placeholder": "Host",
+      "port_placeholder": "Port",
+      "skip_check": "Skip port availability check (advanced)",
+      "checking_port": "Checking port availability...",
+      "port_required": "Port is required",
+      "port_invalid": "Port must be between 1 and 65535",
+      "desc": "Example: Local=127.0.0.1:8080, Remote=localhost:3000 → access remote:3000 via localhost:8080"
+    },
+    "toast": {
+      "jupyter_created": "Jupyter forward created",
+      "jupyter_desc": "localhost:8888 → remote:8888",
+      "tensorboard_created": "TensorBoard forward created",
+      "tensorboard_desc": "localhost:6006 → remote:6006",
+      "vscode_created": "VS Code Server forward created",
+      "vscode_desc": "localhost:8080 → remote:8080",
+      "create_failed": "Failed to create forward",
+      "forward_updated": "Forward updated successfully",
+      "update_failed": "Failed to update forward",
+      "suspended_title": "Forward Suspended",
+      "suspended_desc": "SSH connection lost. Forward will auto-recover on reconnect.",
+      "error_title": "Forward Error",
+      "session_suspended_title": "Session Disconnected",
+      "session_suspended_desc": "{{count}} forwards suspended. Will auto-recover on reconnect."
+    },
+    "detection": {
+      "detected": "Detected port",
+      "port": "Port",
+      "forward": "Forward",
+      "auto": "auto-detected",
+      "forwarded": "Port forwarded",
+      "forwardError": "Failed to forward port",
+      "remotePorts": "Remote Listening Ports",
+      "bindAddr": "Bind Address",
+      "process": "Process",
+      "action": "Action",
+      "scanning": "Detecting listening ports...",
+      "noPorts": "No listening ports detected yet",
+      "alreadyForwarded": "Forwarded"
+    },
+    "messages": {
+      "node_not_ready": "Open an active SSH terminal for this node before managing forwards.",
+      "connection_not_ready": "SSH connection is not ready yet.",
+      "created": "Forward created",
+      "updated": "Forward updated",
+      "stopped": "Forward stopped",
+      "restarted": "Forward restarted",
+      "deleted": "Forward deleted"
+    }
+  }
+}

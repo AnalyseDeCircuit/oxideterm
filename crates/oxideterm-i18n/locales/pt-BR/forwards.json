@@ -1,0 +1,110 @@
+{
+  "copy_address": "Copiar endereço",
+  "copied": "Copiado!",
+  "forwards": {
+    "quick": {
+      "title": "Encaminhamento rápido",
+      "jupyter": "Jupyter (8888)",
+      "tensorboard": "TensorBoard (6006)",
+      "vscode": "VS Code (8080)"
+    },
+    "table": {
+      "title": "Encaminhamentos ativos",
+      "type": "Tipo",
+      "local_address": "Endereço local",
+      "remote_address": "Endereço remoto",
+      "status": "Status",
+      "actions": "Ações",
+      "no_forwards": "Nenhum encaminhamento de porta ativo"
+    },
+    "type": {
+      "local": "Local",
+      "remote": "Remoto",
+      "dynamic": "Dinâmico"
+    },
+    "status": {
+      "active": "Ativo",
+      "stopped": "Parado",
+      "failed": "Falhou",
+      "suspended": "Suspenso",
+      "suspended_hint": "SSH desconectado",
+      "starting": "iniciando",
+      "error": "erro"
+    },
+    "actions": {
+      "new_forward": "Novo encaminhamento",
+      "stop": "Parar encaminhamento",
+      "restart": "Reiniciar encaminhamento",
+      "edit": "Editar encaminhamento",
+      "delete": "Excluir encaminhamento",
+      "will_recover": "Recuperação automática ao reconectar",
+      "confirm_delete_title": "Excluir redirecionamento",
+      "confirm_delete_desc": "Tem certeza de que deseja excluir esta regra de redirecionamento de porta?"
+    },
+    "form": {
+      "new_title": "Nova regra de encaminhamento",
+      "edit_title": "Editar regra de encaminhamento",
+      "cancel": "Cancelar",
+      "type": "Tipo",
+      "create_forward": "Criar encaminhamento",
+      "creating": "Criando...",
+      "save_changes": "Salvar alterações",
+      "saving": "Salvando...",
+      "type_local": "Local (L)",
+      "type_remote": "Remoto (R)",
+      "type_dynamic": "Dinâmico (SOCKS5)",
+      "local_client": "Local (Cliente)",
+      "remote_server": "Remoto (Servidor)",
+      "bind_address": "Endereço de bind",
+      "target_address": "Endereço de destino",
+      "socks5_mode": "Modo proxy SOCKS5",
+      "host_placeholder": "Host",
+      "port_placeholder": "Porta",
+      "skip_check": "Pular verificação de disponibilidade da porta (avançado)",
+      "checking_port": "Verificando disponibilidade da porta...",
+      "port_required": "A porta é obrigatória",
+      "port_invalid": "A porta deve estar entre 1 e 65535",
+      "desc": "Exemplo: Local=127.0.0.1:8080, Remoto=localhost:3000 → Acessar remote:3000 via localhost:8080"
+    },
+    "toast": {
+      "jupyter_created": "Encaminhamento Jupyter criado",
+      "jupyter_desc": "localhost:8888 → remote:8888",
+      "tensorboard_created": "Encaminhamento TensorBoard criado",
+      "tensorboard_desc": "localhost:6006 → remote:6006",
+      "vscode_created": "Encaminhamento VS Code Server criado",
+      "vscode_desc": "localhost:8080 → remote:8080",
+      "create_failed": "Falha ao criar encaminhamento",
+      "forward_updated": "Encaminhamento atualizado com sucesso",
+      "update_failed": "Falha ao atualizar encaminhamento",
+      "suspended_title": "Encaminhamento suspenso",
+      "suspended_desc": "Conexão SSH perdida. Será recuperado automaticamente ao reconectar.",
+      "error_title": "Erro no encaminhamento",
+      "session_suspended_title": "Sessão desconectada",
+      "session_suspended_desc": "{{count}} encaminhamentos suspensos. Serão recuperados automaticamente ao reconectar."
+    },
+    "detection": {
+      "detected": "Porta detectada",
+      "port": "Porta",
+      "forward": "Encaminhar",
+      "auto": "detecção automática",
+      "forwarded": "Porta encaminhada",
+      "forwardError": "Falha ao encaminhar a porta",
+      "remotePorts": "Portas remotas em escuta",
+      "bindAddr": "Endereço de ligação",
+      "process": "Processo",
+      "action": "Ação",
+      "scanning": "Detectando portas em escuta...",
+      "noPorts": "Nenhuma porta em escuta detectada ainda",
+      "alreadyForwarded": "Encaminhada"
+    },
+    "messages": {
+      "node_not_ready": "Abra um terminal SSH ativo para este nó antes de gerenciar encaminhamentos.",
+      "connection_not_ready": "A conexão SSH ainda não está pronta.",
+      "created": "Encaminhamento criado",
+      "updated": "Encaminhamento atualizado",
+      "stopped": "Encaminhamento parado",
+      "restarted": "Encaminhamento reiniciado",
+      "deleted": "Encaminhamento excluído"
+    }
+  }
+}

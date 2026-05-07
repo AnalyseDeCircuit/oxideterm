@@ -22,6 +22,8 @@ pub enum SplitDirection {
 pub enum TabKind {
     LocalTerminal,
     SshTerminal,
+    Sftp,
+    Forwards,
     SessionManager,
     Settings,
 }

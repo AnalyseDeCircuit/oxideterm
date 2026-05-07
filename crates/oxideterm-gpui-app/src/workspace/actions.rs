@@ -100,6 +100,15 @@ impl WorkspaceApp {
             return;
         }
 
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::Sftp)
+            && self.sftp_view.focused_input.is_some()
+        {
+            let _ = self.handle_sftp_key(event, cx);
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
         {
             self.close_settings(window, cx);

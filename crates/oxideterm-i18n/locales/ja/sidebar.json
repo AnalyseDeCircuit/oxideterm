@@ -1,23 +1,52 @@
 {
   "sidebar": {
-    "active_sessions": "アクティブなセッション",
-    "no_sessions": "セッションなし",
-    "add_new_connection": "+ をクリックして新しい接続を追加",
     "actions": {
-      "new_local_terminal": "新しいローカルターミナル"
+      "expand": "サイドバーを展開",
+      "collapse": "サイドバーを折りたたむ",
+      "new_local_terminal": "新規ローカルターミナル",
+      "open_pylance_guide": "Pylanceガイドを開く"
     },
     "panels": {
-      "sessions": "アクティブなセッション",
-      "saved_connections": "保存済み接続",
-      "session_manager": "セッションマネージャー",
+      "sessions": "アクティブセッション",
+      "saved": "保存済み接続",
+      "saved_title": "保存済み接続",
+      "sftp": "SFTP",
+      "sftp_sessions": "SFTPセッション",
       "files": "ファイルマネージャー",
+      "forwards": "ポートフォワーディング",
+      "forwards_title": "ポートフォワーディング",
       "connection_pool": "接続プール",
       "connection_monitor": "接続モニター",
       "connection_matrix": "接続マトリックス",
-      "plugins": "プラグイン",
       "ai": "OxideSens",
-      "activity": "アクティビティ"
-    }
+      "ai_assistant": "OxideSens（近日公開）",
+      "settings": "設定",
+      "no_saved_connections": "保存済み接続がありません",
+      "no_active_sessions": "アクティブなセッションがありません",
+      "no_connected_sessions": "接続中のセッションがありません",
+      "import_tooltip": ".oxideファイルからインポート",
+      "export_tooltip": ".oxideファイルにエクスポート",
+      "system_health": "システムヘルス",
+      "session_manager": "セッションマネージャー",
+      "open_session_manager": "セッションマネージャーを開く",
+      "plugins": "プラグイン",
+      "activity": "アクティビティ",
+      "event_log": "イベントログ",
+      "notifications": "通知",
+      "saved_connections": "保存済み接続"
+    },
+    "tooltips": {
+      "settings": "設定",
+      "ai_hint": "OxideSens",
+      "switch_tree": "ツリービューに切替",
+      "switch_focus": "フォーカスビューに切替",
+      "auto_route": "自動ルート接続",
+      "new_connection": "新規接続",
+      "collapse": "折りたたむ"
+    },
+    "active_sessions": "アクティブなセッション",
+    "no_sessions": "セッションなし",
+    "add_new_connection": "+ をクリックして新しい接続を追加"
   },
   "sessions": {
     "tree": {
@@ -25,8 +54,10 @@
       "click_to_add": "+ をクリックして新しい接続を追加",
       "actions": {
         "new_terminal": "新しいターミナル",
+        "sftp": "SFTP",
         "disconnect": "切断",
-        "reconnect": "再接続"
+        "reconnect": "再接続",
+        "port_forwarding": "ポートフォワーディング"
       }
     },
     "focused_list": {

@@ -9,6 +9,8 @@ const EN_PARTS: &[&str] = &[
     include_str!("../locales/en/settings.json"),
     include_str!("../locales/en/settings_view.json"),
     include_str!("../locales/en/sessionManager.json"),
+    include_str!("../locales/en/forwards.json"),
+    include_str!("../locales/en/sftp.json"),
     include_str!("../locales/en/ssh.json"),
     include_str!("../locales/en/terminal.json"),
 ];
@@ -19,6 +21,8 @@ const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/settings.json"),
     include_str!("../locales/de/settings_view.json"),
     include_str!("../locales/de/sessionManager.json"),
+    include_str!("../locales/de/forwards.json"),
+    include_str!("../locales/de/sftp.json"),
     include_str!("../locales/de/ssh.json"),
     include_str!("../locales/de/terminal.json"),
 ];
@@ -29,6 +33,8 @@ const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/settings.json"),
     include_str!("../locales/es-ES/settings_view.json"),
     include_str!("../locales/es-ES/sessionManager.json"),
+    include_str!("../locales/es-ES/forwards.json"),
+    include_str!("../locales/es-ES/sftp.json"),
     include_str!("../locales/es-ES/ssh.json"),
     include_str!("../locales/es-ES/terminal.json"),
 ];
@@ -39,6 +45,8 @@ const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/settings.json"),
     include_str!("../locales/fr-FR/settings_view.json"),
     include_str!("../locales/fr-FR/sessionManager.json"),
+    include_str!("../locales/fr-FR/forwards.json"),
+    include_str!("../locales/fr-FR/sftp.json"),
     include_str!("../locales/fr-FR/ssh.json"),
     include_str!("../locales/fr-FR/terminal.json"),
 ];
@@ -49,6 +57,8 @@ const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/settings.json"),
     include_str!("../locales/it/settings_view.json"),
     include_str!("../locales/it/sessionManager.json"),
+    include_str!("../locales/it/forwards.json"),
+    include_str!("../locales/it/sftp.json"),
     include_str!("../locales/it/ssh.json"),
     include_str!("../locales/it/terminal.json"),
 ];
@@ -59,6 +69,8 @@ const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/settings.json"),
     include_str!("../locales/ja/settings_view.json"),
     include_str!("../locales/ja/sessionManager.json"),
+    include_str!("../locales/ja/forwards.json"),
+    include_str!("../locales/ja/sftp.json"),
     include_str!("../locales/ja/ssh.json"),
     include_str!("../locales/ja/terminal.json"),
 ];
@@ -69,6 +81,8 @@ const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/settings.json"),
     include_str!("../locales/ko/settings_view.json"),
     include_str!("../locales/ko/sessionManager.json"),
+    include_str!("../locales/ko/forwards.json"),
+    include_str!("../locales/ko/sftp.json"),
     include_str!("../locales/ko/ssh.json"),
     include_str!("../locales/ko/terminal.json"),
 ];
@@ -79,6 +93,8 @@ const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/settings.json"),
     include_str!("../locales/pt-BR/settings_view.json"),
     include_str!("../locales/pt-BR/sessionManager.json"),
+    include_str!("../locales/pt-BR/forwards.json"),
+    include_str!("../locales/pt-BR/sftp.json"),
     include_str!("../locales/pt-BR/ssh.json"),
     include_str!("../locales/pt-BR/terminal.json"),
 ];
@@ -89,6 +105,8 @@ const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/settings.json"),
     include_str!("../locales/vi/settings_view.json"),
     include_str!("../locales/vi/sessionManager.json"),
+    include_str!("../locales/vi/forwards.json"),
+    include_str!("../locales/vi/sftp.json"),
     include_str!("../locales/vi/ssh.json"),
     include_str!("../locales/vi/terminal.json"),
 ];
@@ -99,6 +117,8 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/settings.json"),
     include_str!("../locales/zh-CN/settings_view.json"),
     include_str!("../locales/zh-CN/sessionManager.json"),
+    include_str!("../locales/zh-CN/forwards.json"),
+    include_str!("../locales/zh-CN/sftp.json"),
     include_str!("../locales/zh-CN/ssh.json"),
     include_str!("../locales/zh-CN/terminal.json"),
 ];
@@ -109,6 +129,8 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/settings.json"),
     include_str!("../locales/zh-TW/settings_view.json"),
     include_str!("../locales/zh-TW/sessionManager.json"),
+    include_str!("../locales/zh-TW/forwards.json"),
+    include_str!("../locales/zh-TW/sftp.json"),
     include_str!("../locales/zh-TW/ssh.json"),
     include_str!("../locales/zh-TW/terminal.json"),
 ];
@@ -334,6 +356,256 @@ mod tests {
             "ssh.kbi.title",
             "ssh.kbi.continue",
             "ssh.kbi.cancelled",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn sidebar_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "sidebar.active_sessions",
+            "sidebar.no_sessions",
+            "sidebar.add_new_connection",
+            "sidebar.actions.expand",
+            "sidebar.actions.collapse",
+            "sidebar.actions.new_local_terminal",
+            "sidebar.actions.open_pylance_guide",
+            "sidebar.panels.sessions",
+            "sidebar.panels.saved",
+            "sidebar.panels.saved_connections",
+            "sidebar.panels.saved_title",
+            "sidebar.panels.sftp",
+            "sidebar.panels.sftp_sessions",
+            "sidebar.panels.files",
+            "sidebar.panels.forwards",
+            "sidebar.panels.forwards_title",
+            "sidebar.panels.connection_pool",
+            "sidebar.panels.connection_monitor",
+            "sidebar.panels.connection_matrix",
+            "sidebar.panels.ai",
+            "sidebar.panels.ai_assistant",
+            "sidebar.panels.settings",
+            "sidebar.panels.no_saved_connections",
+            "sidebar.panels.no_active_sessions",
+            "sidebar.panels.no_connected_sessions",
+            "sidebar.panels.import_tooltip",
+            "sidebar.panels.export_tooltip",
+            "sidebar.panels.system_health",
+            "sidebar.panels.session_manager",
+            "sidebar.panels.open_session_manager",
+            "sidebar.panels.plugins",
+            "sidebar.panels.activity",
+            "sidebar.panels.event_log",
+            "sidebar.panels.notifications",
+            "sidebar.tooltips.settings",
+            "sidebar.tooltips.ai_hint",
+            "sidebar.tooltips.switch_tree",
+            "sidebar.tooltips.switch_focus",
+            "sidebar.tooltips.auto_route",
+            "sidebar.tooltips.new_connection",
+            "sidebar.tooltips.collapse",
+            "sessions.tree.no_sessions",
+            "sessions.tree.click_to_add",
+            "sessions.tree.actions.new_terminal",
+            "sessions.tree.actions.sftp",
+            "sessions.tree.actions.port_forwarding",
+            "sessions.tree.actions.disconnect",
+            "sessions.tree.actions.reconnect",
+            "sessions.focused_list.terminal",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn forwarding_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "copy_address",
+            "copied",
+            "forwards.quick.title",
+            "forwards.quick.jupyter",
+            "forwards.quick.tensorboard",
+            "forwards.quick.vscode",
+            "forwards.table.title",
+            "forwards.table.type",
+            "forwards.table.local_address",
+            "forwards.table.remote_address",
+            "forwards.table.status",
+            "forwards.table.actions",
+            "forwards.table.no_forwards",
+            "forwards.type.local",
+            "forwards.type.remote",
+            "forwards.type.dynamic",
+            "forwards.status.active",
+            "forwards.status.stopped",
+            "forwards.status.failed",
+            "forwards.status.starting",
+            "forwards.status.error",
+            "forwards.status.suspended",
+            "forwards.status.suspended_hint",
+            "forwards.actions.new_forward",
+            "forwards.actions.stop",
+            "forwards.actions.restart",
+            "forwards.actions.edit",
+            "forwards.actions.delete",
+            "forwards.actions.will_recover",
+            "forwards.actions.confirm_delete_title",
+            "forwards.actions.confirm_delete_desc",
+            "forwards.form.new_title",
+            "forwards.form.edit_title",
+            "forwards.form.cancel",
+            "forwards.form.type",
+            "forwards.form.create_forward",
+            "forwards.form.creating",
+            "forwards.form.save_changes",
+            "forwards.form.saving",
+            "forwards.form.type_local",
+            "forwards.form.type_remote",
+            "forwards.form.type_dynamic",
+            "forwards.form.local_client",
+            "forwards.form.remote_server",
+            "forwards.form.bind_address",
+            "forwards.form.target_address",
+            "forwards.form.socks5_mode",
+            "forwards.form.host_placeholder",
+            "forwards.form.port_placeholder",
+            "forwards.form.skip_check",
+            "forwards.form.checking_port",
+            "forwards.form.port_required",
+            "forwards.form.port_invalid",
+            "forwards.form.desc",
+            "forwards.toast.jupyter_created",
+            "forwards.toast.jupyter_desc",
+            "forwards.toast.tensorboard_created",
+            "forwards.toast.tensorboard_desc",
+            "forwards.toast.vscode_created",
+            "forwards.toast.vscode_desc",
+            "forwards.toast.create_failed",
+            "forwards.toast.forward_updated",
+            "forwards.toast.update_failed",
+            "forwards.toast.suspended_title",
+            "forwards.toast.suspended_desc",
+            "forwards.toast.error_title",
+            "forwards.toast.session_suspended_title",
+            "forwards.toast.session_suspended_desc",
+            "forwards.messages.node_not_ready",
+            "forwards.messages.connection_not_ready",
+            "forwards.messages.created",
+            "forwards.messages.updated",
+            "forwards.messages.stopped",
+            "forwards.messages.restarted",
+            "forwards.messages.deleted",
+            "forwards.detection.detected",
+            "forwards.detection.port",
+            "forwards.detection.forward",
+            "forwards.detection.auto",
+            "forwards.detection.forwarded",
+            "forwards.detection.forwardError",
+            "forwards.detection.remotePorts",
+            "forwards.detection.bindAddr",
+            "forwards.detection.process",
+            "forwards.detection.action",
+            "forwards.detection.scanning",
+            "forwards.detection.noPorts",
+            "forwards.detection.alreadyForwarded",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn sftp_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "sftp.file_list.local",
+            "sftp.file_list.remote",
+            "sftp.file_list.filter_placeholder",
+            "sftp.file_list.path_placeholder",
+            "sftp.file_list.col_name",
+            "sftp.file_list.col_size",
+            "sftp.file_list.col_modified",
+            "sftp.toolbar.show_drives",
+            "sftp.toolbar.go_up",
+            "sftp.toolbar.home",
+            "sftp.toolbar.refresh",
+            "sftp.toolbar.upload_count",
+            "sftp.toolbar.download_count",
+            "sftp.context.preview",
+            "sftp.context.rename",
+            "sftp.context.delete",
+            "sftp.context.new_folder",
+            "sftp.dialogs.select_drive",
+            "sftp.dialogs.rename",
+            "sftp.dialogs.new_folder",
+            "sftp.dialogs.delete",
+            "sftp.conflict.title",
+            "sftp.conflict.overwrite",
+            "sftp.diff.title",
+            "sftp.preview.description",
+            "sftp.queue.title",
+            "sftp.queue.clear_done",
+            "sftp.queue.incomplete_title",
+            "sftp.queue.status_waiting",
+            "sftp.queue.status_paused",
+            "sftp.queue.status_completed",
+            "sftp.queue.status_cancelled",
+            "sftp.queue.status_error",
+            "sftp.queue.empty",
+            "sftp.errors.connection_lost",
         ];
 
         for locale in locales {

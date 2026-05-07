@@ -1,0 +1,110 @@
+{
+  "copy_address": "アドレスをコピー",
+  "copied": "コピーしました",
+  "forwards": {
+    "quick": {
+      "title": "クイック転送",
+      "jupyter": "Jupyter (8888)",
+      "tensorboard": "TensorBoard (6006)",
+      "vscode": "VS Code (8080)"
+    },
+    "table": {
+      "title": "アクティブな転送",
+      "type": "タイプ",
+      "local_address": "ローカルアドレス",
+      "remote_address": "リモートアドレス",
+      "status": "ステータス",
+      "actions": "アクション",
+      "no_forwards": "アクティブなポート転送がありません"
+    },
+    "type": {
+      "local": "ローカル",
+      "remote": "リモート",
+      "dynamic": "ダイナミック"
+    },
+    "status": {
+      "active": "アクティブ",
+      "stopped": "停止",
+      "failed": "失敗",
+      "suspended": "中断",
+      "suspended_hint": "SSH切断",
+      "starting": "開始中",
+      "error": "エラー"
+    },
+    "actions": {
+      "new_forward": "新規転送",
+      "stop": "転送を停止",
+      "restart": "転送を再起動",
+      "edit": "転送を編集",
+      "delete": "転送を削除",
+      "will_recover": "再接続時に自動復旧",
+      "confirm_delete_title": "転送ルールを削除",
+      "confirm_delete_desc": "このポート転送ルールを削除しますか？"
+    },
+    "form": {
+      "new_title": "新規転送ルール",
+      "edit_title": "転送ルールを編集",
+      "cancel": "キャンセル",
+      "type": "タイプ",
+      "create_forward": "転送を作成",
+      "creating": "作成中...",
+      "save_changes": "変更を保存",
+      "saving": "保存中...",
+      "type_local": "ローカル (L)",
+      "type_remote": "リモート (R)",
+      "type_dynamic": "ダイナミック (SOCKS5)",
+      "local_client": "ローカル（クライアント）",
+      "remote_server": "リモート（サーバー）",
+      "bind_address": "バインドアドレス",
+      "target_address": "ターゲットアドレス",
+      "socks5_mode": "SOCKS5プロキシモード",
+      "host_placeholder": "ホスト",
+      "port_placeholder": "ポート",
+      "skip_check": "ポート利用可能チェックをスキップ（上級者向け）",
+      "checking_port": "ポートの利用可能性を確認中...",
+      "port_required": "ポートは必須です",
+      "port_invalid": "ポートは1から65535の範囲で指定してください",
+      "desc": "例: ローカル=127.0.0.1:8080, リモート=localhost:3000 → localhost:8080経由でremote:3000にアクセス"
+    },
+    "toast": {
+      "jupyter_created": "Jupyter転送が作成されました",
+      "jupyter_desc": "localhost:8888 → remote:8888",
+      "tensorboard_created": "TensorBoard転送が作成されました",
+      "tensorboard_desc": "localhost:6006 → remote:6006",
+      "vscode_created": "VS Code Server転送が作成されました",
+      "vscode_desc": "localhost:8080 → remote:8080",
+      "create_failed": "転送の作成に失敗しました",
+      "forward_updated": "転送が正常に更新されました",
+      "update_failed": "転送の更新に失敗しました",
+      "suspended_title": "転送が中断されました",
+      "suspended_desc": "SSH接続が切断されました。再接続時に自動復旧します。",
+      "error_title": "転送エラー",
+      "session_suspended_title": "セッション切断",
+      "session_suspended_desc": "{{count}}個の転送が中断されました。再接続時に自動復旧します。"
+    },
+    "detection": {
+      "detected": "ポートを検出",
+      "port": "ポート",
+      "forward": "転送",
+      "auto": "自動検出",
+      "forwarded": "ポートを転送しました",
+      "forwardError": "ポートの転送に失敗しました",
+      "remotePorts": "リモートリスニングポート",
+      "bindAddr": "バインドアドレス",
+      "process": "プロセス",
+      "action": "操作",
+      "scanning": "リスニングポートを検出中...",
+      "noPorts": "リスニングポートはまだ検出されていません",
+      "alreadyForwarded": "転送済み"
+    },
+    "messages": {
+      "node_not_ready": "転送を管理する前に、このノードのアクティブな SSH ターミナルを開いてください。",
+      "connection_not_ready": "SSH 接続はまだ準備できていません。",
+      "created": "転送を作成しました",
+      "updated": "転送を更新しました",
+      "stopped": "転送を停止しました",
+      "restarted": "転送を再起動しました",
+      "deleted": "転送を削除しました"
+    }
+  }
+}

@@ -1,23 +1,52 @@
 {
   "sidebar": {
-    "active_sessions": "Aktive Sitzungen",
-    "no_sessions": "Keine Sitzungen",
-    "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
     "actions": {
-      "new_local_terminal": "Neues lokales Terminal"
+      "expand": "Seitenleiste erweitern",
+      "collapse": "Seitenleiste einklappen",
+      "new_local_terminal": "Neues lokales Terminal",
+      "open_pylance_guide": "Pylance-Anleitung öffnen"
     },
     "panels": {
       "sessions": "Aktive Sitzungen",
-      "saved_connections": "Gespeicherte Verbindungen",
-      "session_manager": "Sitzungsmanager",
+      "saved": "Gespeicherte Verbindungen",
+      "saved_title": "Gespeicherte Verbindungen",
+      "sftp": "SFTP",
+      "sftp_sessions": "SFTP-Sitzungen",
       "files": "Dateimanager",
+      "forwards": "Portweiterleitung",
+      "forwards_title": "Portweiterleitung",
       "connection_pool": "Verbindungspool",
       "connection_monitor": "Verbindungsmonitor",
       "connection_matrix": "Verbindungsmatrix",
-      "plugins": "Plugins",
       "ai": "OxideSens",
-      "activity": "Aktivität"
-    }
+      "ai_assistant": "OxideSens (Demnächst verfügbar)",
+      "settings": "Einstellungen",
+      "no_saved_connections": "Keine gespeicherten Verbindungen",
+      "no_active_sessions": "Keine aktiven Sitzungen",
+      "no_connected_sessions": "Keine verbundenen Sitzungen",
+      "import_tooltip": "Aus .oxide-Datei importieren",
+      "export_tooltip": "In .oxide-Datei exportieren",
+      "system_health": "Systemzustand",
+      "session_manager": "Sitzungsmanager",
+      "open_session_manager": "Sitzungsmanager öffnen",
+      "plugins": "Plugins",
+      "activity": "Aktivität",
+      "event_log": "Ereignisprotokoll",
+      "notifications": "Benachrichtigungen",
+      "saved_connections": "Gespeicherte Verbindungen"
+    },
+    "tooltips": {
+      "settings": "Einstellungen",
+      "ai_hint": "OxideSens",
+      "switch_tree": "Baumansicht",
+      "switch_focus": "Fokusansicht",
+      "auto_route": "Auto-Route-Verbindung",
+      "new_connection": "Neue Verbindung",
+      "collapse": "Einklappen"
+    },
+    "active_sessions": "Aktive Sitzungen",
+    "no_sessions": "Keine Sitzungen",
+    "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen"
   },
   "sessions": {
     "tree": {
@@ -25,8 +54,10 @@
       "click_to_add": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
       "actions": {
         "new_terminal": "Neues Terminal",
+        "sftp": "SFTP",
         "disconnect": "Trennen",
-        "reconnect": "Erneut verbinden"
+        "reconnect": "Erneut verbinden",
+        "port_forwarding": "Portweiterleitung"
       }
     },
     "focused_list": {

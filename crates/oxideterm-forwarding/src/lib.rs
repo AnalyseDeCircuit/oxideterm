@@ -8,19 +8,29 @@
 //! SSH bridge state out of GPUI views.
 
 mod bridge;
+mod detection;
 mod dynamic;
 mod error;
+mod events;
 mod local;
 mod manager;
 mod model;
 mod registry;
 mod remote;
+mod saved;
 
 pub use bridge::{
     ActiveConnectionCounter, BridgeStatsRecorder, DEFAULT_FORWARD_IDLE_TIMEOUT,
     FORWARD_BRIDGE_CHANNEL_CAPACITY, FORWARD_BRIDGE_READ_BUFFER_SIZE,
 };
+pub use detection::{DetectedPort, PortDetectionSnapshot, PortDetectionTracker};
 pub use error::ForwardingError;
+pub use events::ForwardEvent;
 pub use manager::ForwardingManager;
 pub use model::{ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate};
 pub use registry::ForwardingRegistry;
+pub use saved::{
+    ApplySavedForwardsSyncSnapshotResult, DeletedPersistedForwardTombstone,
+    FORWARD_TOMBSTONE_RETENTION_DAYS, PersistedForward, PersistedForwardDto, SavedForwardError,
+    SavedForwardStore, SavedForwardSyncRecord, SavedForwardsSyncSnapshot,
+};

@@ -1,23 +1,52 @@
 {
   "sidebar": {
-    "active_sessions": "활성 세션",
-    "no_sessions": "세션 없음",
-    "add_new_connection": "+를 클릭하여 새 연결 추가",
     "actions": {
-      "new_local_terminal": "새 로컬 터미널"
+      "expand": "사이드바 펼치기",
+      "collapse": "사이드바 접기",
+      "new_local_terminal": "새 로컬 터미널",
+      "open_pylance_guide": "Pylance 가이드 열기"
     },
     "panels": {
       "sessions": "활성 세션",
-      "saved_connections": "저장된 연결",
-      "session_manager": "세션 관리자",
+      "saved": "저장된 연결",
+      "saved_title": "저장된 연결",
+      "sftp": "SFTP",
+      "sftp_sessions": "SFTP 세션",
       "files": "파일 관리자",
+      "forwards": "포트 포워딩",
+      "forwards_title": "포트 포워딩",
       "connection_pool": "연결 풀",
       "connection_monitor": "연결 모니터",
       "connection_matrix": "연결 매트릭스",
-      "plugins": "플러그인",
       "ai": "OxideSens",
-      "activity": "활동"
-    }
+      "ai_assistant": "OxideSens (출시 예정)",
+      "settings": "설정",
+      "no_saved_connections": "저장된 연결 없음",
+      "no_active_sessions": "활성 세션 없음",
+      "no_connected_sessions": "연결된 세션 없음",
+      "import_tooltip": ".oxide 파일에서 가져오기",
+      "export_tooltip": ".oxide 파일로 내보내기",
+      "system_health": "시스템 상태",
+      "session_manager": "세션 관리자",
+      "open_session_manager": "세션 관리자 열기",
+      "plugins": "플러그인",
+      "activity": "활동",
+      "event_log": "이벤트 로그",
+      "notifications": "알림",
+      "saved_connections": "저장된 연결"
+    },
+    "tooltips": {
+      "settings": "설정",
+      "ai_hint": "OxideSens",
+      "switch_tree": "트리 보기",
+      "switch_focus": "포커스 보기",
+      "auto_route": "자동 라우팅 연결",
+      "new_connection": "새 연결",
+      "collapse": "접기"
+    },
+    "active_sessions": "활성 세션",
+    "no_sessions": "세션 없음",
+    "add_new_connection": "+를 클릭하여 새 연결 추가"
   },
   "sessions": {
     "tree": {
@@ -25,8 +54,10 @@
       "click_to_add": "+를 클릭하여 새 연결 추가",
       "actions": {
         "new_terminal": "새 터미널",
+        "sftp": "SFTP",
         "disconnect": "연결 끊기",
-        "reconnect": "다시 연결"
+        "reconnect": "다시 연결",
+        "port_forwarding": "포트 포워딩"
       }
     },
     "focused_list": {

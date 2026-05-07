@@ -1,9 +1,11 @@
 mod actions;
+mod forwards;
 mod ime;
 mod new_connection;
 mod pane_tree;
 mod session_manager;
 mod settings;
+mod sftp;
 mod sidebar;
 mod tabs;
 
@@ -22,7 +24,7 @@ use gpui::{
     div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
-use oxideterm_forwarding::ForwardingRegistry;
+use oxideterm_forwarding::{ForwardEvent, ForwardingRegistry, SavedForwardStore};
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
@@ -127,6 +129,13 @@ pub(crate) struct WorkspaceApp {
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
+    forward_tab_nodes: HashMap<TabId, NodeId>,
+    forwarding_view: forwards::ForwardsViewState,
+    sftp_tab_nodes: HashMap<TabId, NodeId>,
+    sftp_view: sftp::SftpViewState,
+    forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,
+    forwarding_worker_rx: std::sync::mpsc::Receiver<forwards::ForwardingWorkerResult>,
+    forwarding_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
     i18n: I18n,
     tokens: ThemeTokens,
     detected_graphics: DetectedGraphics,
@@ -172,9 +181,19 @@ impl WorkspaceApp {
             )),
             ..ConnectionPoolConfig::default()
         });
-        let forwarding_registry = ForwardingRegistry::new();
+        let (forwarding_event_tx, forwarding_event_rx) = std::sync::mpsc::channel();
+        let forwarding_registry = match SavedForwardStore::load(default_saved_forwards_path()) {
+            Ok(store) => {
+                ForwardingRegistry::new_with_event_sender_and_store(forwarding_event_tx, store)
+            }
+            Err(error) => {
+                eprintln!("failed to load saved forwards store: {error}");
+                ForwardingRegistry::new_with_event_sender(forwarding_event_tx)
+            }
+        };
         let node_router = NodeRouter::new(ssh_registry.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
+        let (forwarding_worker_tx, forwarding_worker_rx) = std::sync::mpsc::channel();
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -227,6 +246,13 @@ impl WorkspaceApp {
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
+            forward_tab_nodes: HashMap::new(),
+            forwarding_view: forwards::ForwardsViewState::default(),
+            sftp_tab_nodes: HashMap::new(),
+            sftp_view: sftp::SftpViewState::default(),
+            forwarding_worker_tx,
+            forwarding_worker_rx,
+            forwarding_event_rx,
             i18n: I18n::new(locale_from_settings(settings.general.language)),
             tokens,
             detected_graphics,
@@ -253,11 +279,15 @@ impl WorkspaceApp {
                 if window_handle
                     .update(cx, |workspace, window, cx| {
                         workspace.poll_ssh_worker_results(window, cx);
+                        workspace.poll_forwarding_worker_results(cx);
+                        workspace.poll_forwarding_events(cx);
                         workspace.sync_ssh_node_lifecycle(cx);
+                        workspace.maybe_start_forwards_port_scan(cx);
                         if workspace.new_connection_form.is_some()
                             || workspace.keyboard_interactive_challenge.is_some()
                             || workspace.focused_settings_input.is_some()
                             || workspace.session_manager.focused_input.is_some()
+                            || workspace.sftp_view.focused_input.is_some()
                         {
                             workspace.new_connection_caret_visible =
                                 !workspace.new_connection_caret_visible;
@@ -396,6 +426,8 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
     match kind {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
+        TabKind::Sftp => "sftp",
+        TabKind::Forwards => "forwards",
         TabKind::SessionManager => "session_manager",
         TabKind::Settings => "settings",
     }
@@ -543,6 +575,7 @@ impl Focusable for WorkspaceApp {
 impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_tab_titles(cx);
+        self.poll_forwarding_worker_results(cx);
         let title = self
             .active_tab()
             .map(|tab| self.tab_display_title(tab))
@@ -571,6 +604,8 @@ impl Render for WorkspaceApp {
         let content = if let Some(tab) = self.active_tab() {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
+                (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
@@ -628,6 +663,28 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     let _ = this.handle_session_manager_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::Forwards)
+                    && this.forwarding_view.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_forwards_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::Sftp)
+                    && this.sftp_view.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    let _ = this.handle_sftp_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.active_surface == ActiveSurface::Settings
@@ -934,4 +991,12 @@ fn default_connections_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("connections.json")
+}
+
+fn default_saved_forwards_path() -> PathBuf {
+    default_settings_path()
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("forwards.json")
 }

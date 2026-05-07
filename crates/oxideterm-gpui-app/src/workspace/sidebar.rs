@@ -637,6 +637,34 @@ impl WorkspaceApp {
                         }
                     }),
                 ));
+                children.push(self.render_session_action_item(
+                    1,
+                    false,
+                    LucideIcon::FolderInput,
+                    self.i18n.t("sessions.tree.actions.sftp"),
+                    SessionActionVariant::Primary,
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_sftp_tab(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ));
+                children.push(self.render_session_action_item(
+                    1,
+                    false,
+                    LucideIcon::ArrowLeftRight,
+                    self.i18n.t("sessions.tree.actions.port_forwarding"),
+                    SessionActionVariant::Primary,
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_forwards_tab(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ));
                 for (index, session_id) in terminal_ids.iter().copied().enumerate() {
                     children.push(self.render_session_terminal_item(
                         1,

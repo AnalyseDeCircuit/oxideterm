@@ -230,6 +230,8 @@ impl WorkspaceApp {
     pub(super) fn sync_ssh_node_lifecycle(&mut self, cx: &mut Context<Self>) {
         let terminal_nodes = self.terminal_ssh_nodes.clone();
         let mut changed = false;
+        let mut sessions_to_suspend = Vec::new();
+        let mut sessions_to_restore = Vec::new();
         for (session_id, node_id) in terminal_nodes {
             let readiness = self
                 .pane_id_for_session(session_id)
@@ -247,9 +249,64 @@ impl WorkspaceApp {
             if let Some(node) = self.ssh_nodes.get_mut(&node_id)
                 && node.readiness != readiness
             {
+                if matches!(node.readiness, NodeReadiness::Ready)
+                    && matches!(
+                        readiness,
+                        NodeReadiness::Error | NodeReadiness::Disconnected
+                    )
+                {
+                    sessions_to_suspend.push(session_id.0.to_string());
+                }
+                if !matches!(node.readiness, NodeReadiness::Ready)
+                    && matches!(readiness, NodeReadiness::Ready)
+                {
+                    sessions_to_restore.push(session_id);
+                }
                 node.readiness = readiness;
                 changed = true;
             }
+        }
+        if !sessions_to_suspend.is_empty() {
+            let forwarding_registry = self.forwarding_registry.clone();
+            std::thread::spawn(move || {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                runtime.block_on(async move {
+                    for session_id in sessions_to_suspend {
+                        let _ = forwarding_registry.suspend_session(&session_id).await;
+                    }
+                });
+            });
+        }
+        let sessions_to_restore: Vec<_> = sessions_to_restore
+            .into_iter()
+            .filter_map(|session_id| {
+                let pane_id = self.pane_id_for_session(session_id)?;
+                let handle = self.panes.get(&pane_id)?.read(cx).ssh_connection_handle()?;
+                Some((session_id.0.to_string(), handle))
+            })
+            .collect();
+        if !sessions_to_restore.is_empty() {
+            let forwarding_registry = self.forwarding_registry.clone();
+            std::thread::spawn(move || {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                runtime.block_on(async move {
+                    for (session_id, handle) in sessions_to_restore {
+                        let _ = forwarding_registry
+                            .restore_session(session_id, handle)
+                            .await;
+                    }
+                });
+            });
         }
         if changed {
             cx.notify();
@@ -279,6 +336,20 @@ impl WorkspaceApp {
             Some(TabKind::Settings) => {
                 self.active_surface = ActiveSurface::Settings;
                 self.active_sidebar_section = SidebarSection::Settings;
+            }
+            Some(TabKind::Forwards) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Sessions;
+            }
+            Some(TabKind::Sftp) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Sessions;
+                if let Some(active_tab_id) = self.active_tab_id
+                    && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id)
+                {
+                    self.active_ssh_node_id = Some(node_id.clone());
+                    self.expanded_ssh_nodes.insert(node_id.clone());
+                }
             }
             Some(TabKind::SessionManager) => {
                 self.active_surface = ActiveSurface::Terminal;
@@ -450,6 +521,7 @@ impl WorkspaceApp {
             return;
         };
         let tab = self.tabs.remove(index);
+        self.sftp_tab_nodes.remove(&tab.id);
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
@@ -654,6 +726,8 @@ impl WorkspaceApp {
             let icon = match tab.kind {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
+                TabKind::Sftp => LucideIcon::FolderInput,
+                TabKind::Forwards => LucideIcon::ArrowLeftRight,
                 TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::Settings => LucideIcon::Settings,
             };

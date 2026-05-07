@@ -5887,9 +5887,14 @@ dependencies = [
 name = "oxideterm-forwarding"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dashmap",
  "oxideterm-ssh",
+ "russh",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

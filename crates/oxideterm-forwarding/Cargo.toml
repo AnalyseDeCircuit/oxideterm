@@ -5,10 +5,18 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 dashmap.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+russh = { path = "../russh" }
+serde_json.workspace = true
+tempfile = "3.23"

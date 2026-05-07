@@ -6,8 +6,10 @@ use gpui::{
 };
 
 use super::WorkspaceApp;
+use super::forwards::ForwardInput;
 use super::new_connection::NewConnectionField;
 use super::session_manager::SessionManagerInput;
+use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 
@@ -16,6 +18,8 @@ pub(super) enum WorkspaceImeTarget {
     Search,
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
+    Forwards(ForwardInput),
+    Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
 }
@@ -26,6 +30,8 @@ impl WorkspaceImeTarget {
             Self::Search => 1,
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
+            Self::Forwards(input) => 1_700 + input.anchor_key(),
+            Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
         };
@@ -297,6 +303,22 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Forwards)
+            && let Some(input) = self.forwarding_view.focused_input
+        {
+            return Some(WorkspaceImeTarget::Forwards(input));
+        }
+
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
+            && let Some(input) = self.sftp_view.focused_input
+        {
+            return Some(WorkspaceImeTarget::Sftp(input));
+        }
+
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
@@ -332,6 +354,20 @@ impl WorkspaceApp {
                             self.session_manager.new_group_name.clone()
                         }
                     })
+                } else {
+                    None
+                }
+            }
+            WorkspaceImeTarget::Forwards(input) => {
+                if self.forwarding_view.focused_input == Some(input) {
+                    Some(self.forward_input_value(input).to_string())
+                } else {
+                    None
+                }
+            }
+            WorkspaceImeTarget::Sftp(input) => {
+                if self.sftp_view.focused_input == Some(input) {
+                    Some(self.sftp_input_value(input).to_string())
                 } else {
                     None
                 }
@@ -428,6 +464,21 @@ impl WorkspaceApp {
                             );
                         }
                     }
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::Forwards(input) => {
+                if self.forwarding_view.focused_input == Some(input) {
+                    replace_utf16(self.forward_input_value_mut(input), replacement_range, text);
+                    self.forwarding_view.error = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::Sftp(input) => {
+                if self.sftp_view.focused_input == Some(input) {
+                    replace_utf16(self.sftp_input_value_mut(input), replacement_range, text);
+                    self.new_connection_caret_visible = true;
                     cx.notify();
                 }
             }
