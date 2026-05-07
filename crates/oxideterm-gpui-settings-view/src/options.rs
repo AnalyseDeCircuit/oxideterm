@@ -260,6 +260,19 @@ pub fn set_connection_idle_timeout(settings: &mut PersistedSettings, value: i64)
     settings.connection_pool.idle_timeout_secs = value;
 }
 
+pub fn sftp_concurrent_options() -> &'static [i64] {
+    &[1, 2, 3, 4, 5, 6, 8, 10]
+}
+
+pub fn sftp_directory_parallelism_options() -> &'static [i64] {
+    &[1, 2, 3, 4, 5, 6, 8, 10, 12, 16]
+}
+
+pub fn sftp_transfer_count_label(i18n: &I18n, count: i64) -> String {
+    i18n.t("settings_view.sftp.transfer_count")
+        .replace("{{count}}", &count.to_string())
+}
+
 pub fn set_reconnect_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.reconnect.enabled = value;
 }

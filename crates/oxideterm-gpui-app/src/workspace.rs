@@ -44,7 +44,9 @@ use oxideterm_settings::{
     default_settings_path,
 };
 use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionPoolConfig, NodeId, NodeReadiness, NodeRouter, SshConfig,
+    ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeReadiness, NodeRouter,
+    NodeStateEvent, PhaseResult, ProbeConnectionStatus, ReconnectOrchestratorStore, ReconnectPhase,
+    ReconnectSnapshot, SftpTransferManager, SftpTransferRuntimeSettings, SshConfig,
     SshConnectionRegistry,
 };
 use oxideterm_terminal::{
@@ -122,7 +124,17 @@ pub(crate) struct WorkspaceApp {
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_registry: SshConnectionRegistry,
     forwarding_registry: ForwardingRegistry,
+    forwarding_runtime: Arc<tokio::runtime::Runtime>,
+    forwarding_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
+    sftp_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
+    sftp_transfer_manager: Arc<SftpTransferManager>,
     node_router: NodeRouter,
+    node_event_tx: std::sync::mpsc::Sender<NodeStateEvent>,
+    node_event_rx: std::sync::mpsc::Receiver<NodeStateEvent>,
+    node_event_generations: HashMap<NodeId, u64>,
+    reconnect_orchestrator: ReconnectOrchestratorStore,
+    reconnect_worker_tx: std::sync::mpsc::Sender<ReconnectWorkerResult>,
+    reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
@@ -133,6 +145,8 @@ pub(crate) struct WorkspaceApp {
     forwarding_view: forwards::ForwardsViewState,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     sftp_view: sftp::SftpViewState,
+    sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
+    sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,
     forwarding_worker_rx: std::sync::mpsc::Receiver<forwards::ForwardingWorkerResult>,
     forwarding_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
@@ -159,6 +173,19 @@ struct WorkspaceSshNode {
     title: String,
     terminal_ids: Vec<TerminalSessionId>,
     readiness: NodeReadiness,
+}
+
+#[derive(Debug)]
+pub(super) enum ReconnectWorkerResult {
+    GraceRecovered {
+        node_id: NodeId,
+        connection_id: String,
+    },
+    GraceExpired {
+        node_id: NodeId,
+        connection_id: String,
+        detail: String,
+    },
 }
 
 impl WorkspaceApp {
@@ -194,6 +221,17 @@ impl WorkspaceApp {
         let node_router = NodeRouter::new(ssh_registry.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
         let (forwarding_worker_tx, forwarding_worker_rx) = std::sync::mpsc::channel();
+        let (node_event_tx, node_event_rx) = std::sync::mpsc::channel();
+        let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
+        let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
+        let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
+        sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
+        let forwarding_runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("oxideterm-forwarding")
+                .build()?,
+        );
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
@@ -239,7 +277,17 @@ impl WorkspaceApp {
             ssh_worker_rx,
             ssh_registry,
             forwarding_registry,
+            forwarding_runtime,
+            forwarding_connection_consumers: HashMap::new(),
+            sftp_connection_consumers: HashMap::new(),
+            sftp_transfer_manager,
             node_router,
+            node_event_tx,
+            node_event_rx,
+            node_event_generations: HashMap::new(),
+            reconnect_orchestrator: ReconnectOrchestratorStore::default(),
+            reconnect_worker_tx,
+            reconnect_worker_rx,
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
@@ -250,6 +298,8 @@ impl WorkspaceApp {
             forwarding_view: forwards::ForwardsViewState::default(),
             sftp_tab_nodes: HashMap::new(),
             sftp_view: sftp::SftpViewState::default(),
+            sftp_worker_tx,
+            sftp_worker_rx,
             forwarding_worker_tx,
             forwarding_worker_rx,
             forwarding_event_rx,
@@ -279,6 +329,10 @@ impl WorkspaceApp {
                 if window_handle
                     .update(cx, |workspace, window, cx| {
                         workspace.poll_ssh_worker_results(window, cx);
+                        workspace.poll_node_events(cx);
+                        workspace.poll_reconnect_worker_results(cx);
+                        workspace.poll_sftp_worker_results(cx);
+                        workspace.maybe_start_sftp_remote_load(cx);
                         workspace.poll_forwarding_worker_results(cx);
                         workspace.poll_forwarding_events(cx);
                         workspace.sync_ssh_node_lifecycle(cx);
@@ -439,6 +493,20 @@ fn terminal_background_fit(fit: BackgroundFit) -> TerminalBackgroundFit {
         BackgroundFit::Contain => TerminalBackgroundFit::Contain,
         BackgroundFit::Fill => TerminalBackgroundFit::Fill,
         BackgroundFit::Tile => TerminalBackgroundFit::Tile,
+    }
+}
+
+fn sftp_runtime_settings_from_settings(
+    settings: &PersistedSettings,
+) -> SftpTransferRuntimeSettings {
+    SftpTransferRuntimeSettings {
+        max_concurrent_transfers: settings.sftp.max_concurrent_transfers.max(1) as usize,
+        speed_limit_kbps: if settings.sftp.speed_limit_enabled {
+            settings.sftp.speed_limit_kbps.max(0) as usize
+        } else {
+            0
+        },
+        directory_parallelism: settings.sftp.directory_parallelism.max(1) as usize,
     }
 }
 

@@ -49,6 +49,8 @@ pub enum SettingsSelect {
     TerminalCursorStyle,
     LocalShell,
     ConnectionIdleTimeout,
+    SftpConcurrent,
+    SftpDirectoryParallelism,
     HighlightPreset,
     HighlightRenderMode(usize),
 }
@@ -69,6 +71,8 @@ impl SettingsSelect {
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::LocalShell => SelectAnchorId::SettingsLocalShell,
             Self::ConnectionIdleTimeout => SelectAnchorId::SettingsConnectionIdleTimeout,
+            Self::SftpConcurrent => SelectAnchorId::SettingsSftpConcurrent,
+            Self::SftpDirectoryParallelism => SelectAnchorId::SettingsSftpDirectoryParallelism,
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
         }
@@ -85,6 +89,7 @@ pub enum SettingsInput {
     ConnectionDefaultUsername,
     ConnectionDefaultPort,
     ConnectionNewGroup,
+    SftpSpeedLimitKbps,
     HighlightLabel(usize),
     HighlightPattern(usize),
     HighlightForeground(usize),
@@ -102,6 +107,7 @@ impl SettingsInput {
             Self::ConnectionDefaultUsername => 6,
             Self::ConnectionDefaultPort => 7,
             Self::ConnectionNewGroup => 8,
+            Self::SftpSpeedLimitKbps => 9,
             Self::HighlightLabel(index) => 100 + index as u64 * 4,
             Self::HighlightPattern(index) => 101 + index as u64 * 4,
             Self::HighlightForeground(index) => 102 + index as u64 * 4,

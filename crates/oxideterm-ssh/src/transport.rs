@@ -267,6 +267,10 @@ impl PooledSshConnection {
 }
 
 impl SshConnectionHandle {
+    pub async fn probe_alive(&self, timeout: Duration) -> Result<(), SshTransportError> {
+        self.run_command("true", timeout, 256).await.map(|_| ())
+    }
+
     pub async fn open_direct_tcpip(
         &self,
         host: &str,

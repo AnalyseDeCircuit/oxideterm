@@ -1109,25 +1109,21 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         let mut rows = vec![
             self.plain_settings_card(vec![
-                self.number_row(
+                self.select_setting_row(
                     "settings_view.sftp.concurrent",
                     "settings_view.sftp.concurrent_hint",
-                    settings.sftp.max_concurrent_transfers,
-                    1,
-                    1,
-                    16,
-                    set_sftp_concurrent,
+                    SettingsSelect::SftpConcurrent,
+                    sftp_transfer_count_label(&self.i18n, settings.sftp.max_concurrent_transfers),
+                    self.tokens.metrics.settings_select_width,
                     cx,
                 ),
                 self.card_separator(),
-                self.number_row(
+                self.select_setting_row(
                     "settings_view.sftp.directory_parallelism",
                     "settings_view.sftp.directory_parallelism_hint",
-                    settings.sftp.directory_parallelism,
-                    1,
-                    1,
-                    16,
-                    set_sftp_directory_parallelism,
+                    SettingsSelect::SftpDirectoryParallelism,
+                    sftp_transfer_count_label(&self.i18n, settings.sftp.directory_parallelism),
+                    self.tokens.metrics.settings_select_width,
                     cx,
                 ),
             ]),
@@ -1141,15 +1137,16 @@ impl WorkspaceApp {
         ];
 
         if settings.sftp.speed_limit_enabled {
-            rows.push(self.plain_settings_card(vec![self.number_row(
+            rows.push(self.plain_settings_card(vec![self.setting_row(
                 "settings_view.sftp.speed_limit",
                 "settings_view.sftp.bandwidth_hint",
-                settings.sftp.speed_limit_kbps,
-                100,
-                0,
-                1024 * 1024,
-                set_sftp_speed_limit_kbps,
-                cx,
+                self.settings_text_input_control(
+                    SettingsInput::SftpSpeedLimitKbps,
+                    settings.sftp.speed_limit_kbps.to_string(),
+                    "0 = unlimited".to_string(),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ),
             )]));
         }
 

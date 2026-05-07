@@ -421,6 +421,54 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &count in sftp_concurrent_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            sftp_transfer_count_label(&self.i18n, count),
+                            count == settings.sftp.max_concurrent_transfers,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.sftp.max_concurrent_transfers = count,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Sftp, SettingsSelect::SftpDirectoryParallelism) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &count in sftp_directory_parallelism_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            sftp_transfer_count_label(&self.i18n, count),
+                            count == settings.sftp.directory_parallelism,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.sftp.directory_parallelism = count,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             _ => None,
         }?;
 

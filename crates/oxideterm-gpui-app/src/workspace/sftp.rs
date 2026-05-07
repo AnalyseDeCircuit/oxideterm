@@ -2,6 +2,7 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
+use serde::Deserialize;
 
 const SFTP_ROOT_PADDING: f32 = 8.0; // Tauri p-2
 const SFTP_GAP: f32 = 8.0; // Tauri gap-2
@@ -75,9 +76,43 @@ enum SftpFileType {
 }
 
 #[derive(Clone, Debug)]
-struct SftpFileEntry {
+pub(super) struct SftpFileEntry {
     name: String,
     file_type: SftpFileType,
+    size: u64,
+    modified: Option<i64>,
+}
+
+#[derive(Debug)]
+pub(super) enum SftpWorkerResult {
+    RemoteList {
+        tab_id: TabId,
+        node_id: NodeId,
+        connection_id: String,
+        session_id: String,
+        path: String,
+        result: Result<RemoteSftpListing, String>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct RemoteSftpListing {
+    cwd: String,
+    files: Vec<SftpFileEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteListOutput {
+    cwd: String,
+    entries: Vec<RemoteListEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteListEntry {
+    name: String,
+    is_dir: bool,
     size: u64,
     modified: Option<i64>,
 }
@@ -175,6 +210,8 @@ pub(super) struct SftpViewState {
     local_files: Vec<SftpFileEntry>,
     remote_files: Vec<SftpFileEntry>,
     remote_loading: bool,
+    remote_load_pending: bool,
+    remote_load_inflight: bool,
     init_error: Option<String>,
     pub(super) focused_input: Option<SftpInput>,
     editing_local_path: bool,
@@ -210,6 +247,8 @@ impl Default for SftpViewState {
             local_files: mock_local_files(),
             remote_files: mock_remote_files(),
             remote_loading: false,
+            remote_load_pending: false,
+            remote_load_inflight: false,
             init_error: None,
             focused_input: None,
             editing_local_path: false,
@@ -261,8 +300,176 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.active_sidebar_section = SidebarSection::Sessions;
         self.active_ssh_node_id = Some(node_id);
+        self.sftp_view.remote_load_pending = true;
         self.persist_sidebar_settings();
         cx.notify();
+    }
+
+    pub(super) fn maybe_start_sftp_remote_load(&mut self, cx: &mut Context<Self>) {
+        if self.sftp_view.remote_load_inflight || !self.sftp_view.remote_load_pending {
+            return;
+        }
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        if self
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .is_none_or(|tab| tab.kind != TabKind::Sftp)
+        {
+            return;
+        }
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let path = self.sftp_view.remote_path.clone();
+        self.start_sftp_remote_load(tab_id, node_id, path, cx);
+    }
+
+    fn start_sftp_remote_load(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let resolved = match self.node_router.resolve_connection(&node_id) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.sftp_view.remote_loading = false;
+                self.sftp_view.remote_load_pending = false;
+                self.sftp_view.remote_load_inflight = false;
+                self.sftp_view.init_error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+        let session_id = format!("node:{}:sftp", node_id.0);
+        let Some(handle) = self
+            .ssh_registry
+            .acquire_sftp_session(&resolved.connection_id, session_id.clone())
+        else {
+            self.sftp_view.remote_loading = false;
+            self.sftp_view.remote_load_pending = false;
+            self.sftp_view.remote_load_inflight = false;
+            self.sftp_view.init_error = Some(self.i18n.t("sftp.errors.connection_lost"));
+            cx.notify();
+            return;
+        };
+        self.sftp_connection_consumers.insert(
+            session_id.clone(),
+            (
+                resolved.connection_id.clone(),
+                ConnectionConsumer::Sftp(session_id.clone()),
+            ),
+        );
+        self.sftp_view.remote_loading = true;
+        self.sftp_view.remote_load_pending = false;
+        self.sftp_view.remote_load_inflight = true;
+        self.sftp_view.init_error = None;
+
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let connection_id = resolved.connection_id;
+        runtime.spawn(async move {
+            let command = remote_list_command(&path);
+            let result = handle
+                .run_command(&command, Duration::from_secs(8), 512 * 1024)
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|output| parse_remote_listing(&output));
+            let _ = tx.send(SftpWorkerResult::RemoteList {
+                tab_id,
+                node_id,
+                connection_id,
+                session_id,
+                path,
+                result,
+            });
+        });
+        cx.notify();
+    }
+
+    pub(super) fn poll_sftp_worker_results(&mut self, cx: &mut Context<Self>) {
+        let mut results = Vec::new();
+        while let Ok(result) = self.sftp_worker_rx.try_recv() {
+            results.push(result);
+        }
+
+        let mut changed = false;
+        for result in results {
+            match result {
+                SftpWorkerResult::RemoteList {
+                    tab_id,
+                    node_id,
+                    connection_id,
+                    session_id,
+                    path,
+                    result,
+                } => {
+                    if Some(tab_id) == self.active_tab_id {
+                        self.sftp_view.remote_load_inflight = false;
+                        self.sftp_view.remote_loading = false;
+                        match result {
+                            Ok(listing) => {
+                                let cwd = listing.cwd;
+                                self.sftp_view.remote_path = cwd.clone();
+                                self.sftp_view.remote_path_input = cwd.clone();
+                                self.sftp_view.remote_files = listing.files;
+                                self.sftp_view.remote_selected.clear();
+                                self.sftp_view.remote_last_selected = None;
+                                self.sftp_view.init_error = None;
+                                let _ = self.ssh_registry.mark_sftp_session(
+                                    &connection_id,
+                                    true,
+                                    Some(cwd.clone()),
+                                );
+                                if let Ok(event) = self.node_router.bind_sftp_session(
+                                    &node_id,
+                                    session_id,
+                                    Some(cwd),
+                                ) {
+                                    self.emit_node_event(event);
+                                }
+                            }
+                            Err(error) => {
+                                let _ = self.ssh_registry.mark_sftp_session(
+                                    &connection_id,
+                                    false,
+                                    None,
+                                );
+                                self.sftp_view.init_error = Some(format!("{}: {error}", path));
+                            }
+                        }
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn apply_sftp_ready_event(
+        &mut self,
+        node_id: &NodeId,
+        ready: bool,
+        cwd: Option<String>,
+    ) {
+        if self
+            .active_tab_id
+            .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+            != Some(node_id)
+        {
+            return;
+        }
+        self.sftp_view.remote_loading = !ready;
+        if let Some(cwd) = cwd {
+            self.sftp_view.remote_path = cwd.clone();
+            self.sftp_view.remote_path_input = cwd;
+        }
     }
 
     pub(super) fn render_sftp_surface(
@@ -2397,7 +2604,10 @@ impl WorkspaceApp {
             LucideIcon::LoaderCircle,
             self.i18n.t("sftp.toolbar.refresh"),
             cx.listener(move |this, _event, _window, cx| {
-                this.sftp_view.remote_loading = pane == SftpPane::Remote;
+                if pane == SftpPane::Remote {
+                    this.sftp_view.remote_load_pending = true;
+                    this.sftp_view.remote_loading = true;
+                }
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -2703,7 +2913,8 @@ impl WorkspaceApp {
                 self.sftp_view.remote_path = path.clone();
                 self.sftp_view.remote_path_input = path;
                 self.sftp_view.editing_remote_path = false;
-                self.sftp_view.remote_loading = false;
+                self.sftp_view.remote_loading = true;
+                self.sftp_view.remote_load_pending = true;
                 self.sftp_view.remote_selected.clear();
                 self.sftp_view.remote_last_selected = None;
             }
@@ -3292,6 +3503,55 @@ fn join_sftp_path(base: &str, name: &str) -> String {
     } else {
         format!("{normalized}/{name}")
     }
+}
+
+fn remote_list_command(path: &str) -> String {
+    format!(
+        "SFTP_PATH={} python3 - <<'PY'\n\
+import json, os, stat\n\
+path = os.environ.get('SFTP_PATH') or '.'\n\
+cwd = os.path.abspath(os.path.expanduser(path))\n\
+entries = []\n\
+for name in os.listdir(cwd):\n\
+    full = os.path.join(cwd, name)\n\
+    st = os.lstat(full)\n\
+    entries.append({{'name': name, 'isDir': stat.S_ISDIR(st.st_mode), 'size': st.st_size, 'modified': int(st.st_mtime)}})\n\
+print(json.dumps({{'cwd': cwd, 'entries': entries}}, ensure_ascii=False))\n\
+PY",
+        shell_quote(path)
+    )
+}
+
+fn parse_remote_listing(output: &str) -> Result<RemoteSftpListing, String> {
+    let parsed: RemoteListOutput =
+        serde_json::from_str(output.trim()).map_err(|error| error.to_string())?;
+    let mut files = parsed
+        .entries
+        .into_iter()
+        .map(|entry| SftpFileEntry {
+            name: entry.name,
+            file_type: if entry.is_dir {
+                SftpFileType::Directory
+            } else {
+                SftpFileType::File
+            },
+            size: entry.size,
+            modified: entry.modified,
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| match (left.file_type, right.file_type) {
+        (SftpFileType::Directory, SftpFileType::File) => std::cmp::Ordering::Less,
+        (SftpFileType::File, SftpFileType::Directory) => std::cmp::Ordering::Greater,
+        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    });
+    Ok(RemoteSftpListing {
+        cwd: parsed.cwd,
+        files,
+    })
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn format_file_size(bytes: u64) -> String {

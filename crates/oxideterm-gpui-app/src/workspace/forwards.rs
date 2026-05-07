@@ -14,7 +14,7 @@ use oxideterm_forwarding::{
 };
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 use oxideterm_ssh::NodeId;
-use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource, TerminalSessionId};
+use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 
 use super::ime::WorkspaceImeTarget;
 use super::*;
@@ -26,8 +26,6 @@ const FORWARDS_CARD_RADIUS: f32 = 8.0; // Tauri rounded-lg
 const FORWARDS_FORM_RADIUS: f32 = 2.0; // Tauri rounded-sm
 const FORWARDS_TABLE_HEADER_H: f32 = 34.0; // Tauri px-4 py-2 text-sm
 const FORWARDS_TABLE_ROW_H: f32 = 42.0;
-const FORWARDS_TEXT_SM: f32 = 13.0;
-const FORWARDS_TEXT_XS: f32 = 12.0;
 const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
 const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
 const FORWARDS_BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] theme bg/panel/card 40%
@@ -42,9 +40,19 @@ const FORWARDS_TW_ALPHA_50: u32 = 0x80; // Tauri /50
 const FORWARDS_ALPHA_TRANSPARENT: u32 = 0x00; // Tauri transparent root when tab background is active
 const FORWARDS_DEFAULT_BIND_ADDRESS: &str = "localhost"; // Tauri create form default bindAddress
 const FORWARDS_DEFAULT_TARGET_HOST: &str = "localhost"; // Tauri create form default targetHost
+const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";
+#[cfg(target_os = "windows")]
+const FORWARDS_PLATFORM_CJK_UI_FONT: &str = "DengXian"; // Tauri browser CJK fallback on zh-CN Windows
+#[cfg(target_os = "macos")]
+const FORWARDS_PLATFORM_CJK_UI_FONT: &str = "PingFang SC"; // Native equivalent when DengXian is unavailable
+#[cfg(target_os = "linux")]
+const FORWARDS_PLATFORM_CJK_UI_FONT: &str = "Noto Sans CJK SC";
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+const FORWARDS_PLATFORM_CJK_UI_FONT: &str = ".SystemUIFont";
 
 // Tailwind palette literals used by the Tauri ForwardsView source.
 const TW_BLACK: u32 = 0x000000;
+const TW_BLUE_300: u32 = 0x93c5fd;
 const TW_BLUE_400: u32 = 0x60a5fa;
 const TW_BLUE_500: u32 = 0x3b82f6;
 const TW_BLUE_900: u32 = 0x1e3a8a;
@@ -233,6 +241,9 @@ impl WorkspaceApp {
             .size_full()
             .overflow_y_scroll()
             .p(px(FORWARDS_PAGE_PADDING))
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
             .bg(if has_background {
                 forwards_transparent()
             } else {
@@ -373,59 +384,76 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_forward_button(
-            self.i18n.t(label_key),
-            None,
-            ForwardButtonVariant::Secondary,
-            enabled,
-            has_background,
-            cx.listener(move |this, _event, _window, cx| {
-                let persist = this.forward_persist_context_for_node(&node_id);
-                let registry = this.forwarding_registry.clone();
-                this.start_forward_operation(
-                    tab_id,
-                    node_id.clone(),
-                    "forwards.messages.created",
-                    move |manager| {
-                        Box::pin(async move {
-                            let created = match label_key {
-                                "forwards.quick.jupyter" => {
-                                    manager.forward_jupyter(port, port).await?
-                                }
-                                "forwards.quick.tensorboard" => {
-                                    manager.forward_tensorboard(port, port).await?
-                                }
-                                "forwards.quick.vscode" => {
-                                    manager.forward_vscode(port, port).await?
-                                }
-                                _ => unreachable!("unknown forward quick action"),
-                            };
-                            if let Some((session_id, owner_connection_id)) = persist {
-                                let forward_id = created.id.clone();
-                                let _ = registry.sync_persisted_forward_rule(
-                                    &forward_id,
-                                    &session_id,
-                                    owner_connection_id,
-                                    created,
-                                );
-                            }
-                            Ok(())
-                        })
-                    },
-                    cx,
-                );
-                cx.stop_propagation();
-            }),
-        )
-        .map(|button| {
-            button.child(
+        let theme = self.tokens.ui;
+        div()
+            .h(px(36.0))
+            .px_4()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(forwards_theme_border(theme.border, has_background))
+            .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(theme.text))
+            .opacity(if enabled { 1.0 } else { 0.5 })
+            .child(
                 div()
                     .size(px(8.0))
                     .rounded_full()
                     .bg(forwards_palette_color(dot_color)),
             )
-        })
-        .into_any_element()
+            .child(self.render_forward_ui_text(self.i18n.t(label_key)))
+            .when(enabled, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(move |button| {
+                        button.bg(forwards_theme_hover_bg(theme.bg_hover, has_background))
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let persist = this.forward_persist_context_for_node(&node_id);
+                            let registry = this.forwarding_registry.clone();
+                            this.start_forward_operation(
+                                tab_id,
+                                node_id.clone(),
+                                "forwards.messages.created",
+                                move |manager| {
+                                    Box::pin(async move {
+                                        let created = match label_key {
+                                            "forwards.quick.jupyter" => {
+                                                manager.forward_jupyter(port, port).await?
+                                            }
+                                            "forwards.quick.tensorboard" => {
+                                                manager.forward_tensorboard(port, port).await?
+                                            }
+                                            "forwards.quick.vscode" => {
+                                                manager.forward_vscode(port, port).await?
+                                            }
+                                            _ => unreachable!("unknown forward quick action"),
+                                        };
+                                        if let Some((session_id, owner_connection_id)) = persist {
+                                            let forward_id = created.id.clone();
+                                            let _ = registry.sync_persisted_forward_rule(
+                                                &forward_id,
+                                                &session_id,
+                                                owner_connection_id,
+                                                created,
+                                            );
+                                        }
+                                        Ok(())
+                                    })
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+            })
+            .into_any_element()
     }
 
     fn render_forwards_table(
@@ -462,24 +490,29 @@ impl WorkspaceApp {
                                     cx.stop_propagation();
                                 }),
                             ))
-                            .child(self.render_forward_button(
-                                self.i18n.t("forwards.actions.new_forward"),
-                                Some(LucideIcon::Plus),
-                                if self.forwarding_view.show_new_form {
-                                    ForwardButtonVariant::Secondary
-                                } else {
-                                    ForwardButtonVariant::Primary
-                                },
-                                true,
-                                has_background,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.forwarding_view.show_new_form =
-                                        !this.forwarding_view.show_new_form;
-                                    this.forwarding_view.error = None;
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                }),
-                            )),
+                            .child(
+                                self.render_forward_button(
+                                    self.i18n.t("forwards.actions.new_forward"),
+                                    Some(LucideIcon::Plus),
+                                    if self.forwarding_view.show_new_form {
+                                        ForwardButtonVariant::Secondary
+                                    } else {
+                                        ForwardButtonVariant::Primary
+                                    },
+                                    true,
+                                    has_background,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.forwarding_view.show_new_form =
+                                            !this.forwarding_view.show_new_form;
+                                        this.forwarding_view.error = None;
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .h(px(32.0))
+                                .px_3()
+                                .text_size(px(self.tokens.metrics.ui_text_xs)),
+                            ),
                     ),
             )
             .child(
@@ -502,7 +535,7 @@ impl WorkspaceApp {
                                 .justify_center()
                                 .gap(px(12.0))
                                 .rounded_b(px(FORWARDS_CARD_RADIUS))
-                                .text_size(px(FORWARDS_TEXT_SM))
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.text_muted))
                                 .child(Self::render_lucide_icon(
                                     LucideIcon::ArrowUpDown,
@@ -512,7 +545,9 @@ impl WorkspaceApp {
                                         FORWARDS_TW_ALPHA_30,
                                     ),
                                 ))
-                                .child(self.i18n.t("forwards.table.no_forwards")),
+                                .child(self.render_forward_ui_text(
+                                    self.i18n.t("forwards.table.no_forwards"),
+                                )),
                         )
                     })
                     .children(forwards.into_iter().enumerate().map(|(index, rule)| {
@@ -546,7 +581,7 @@ impl WorkspaceApp {
         )
         .border_b_1()
         .border_color(forwards_theme_border(theme.border, has_background))
-        .text_size(px(FORWARDS_TEXT_XS))
+        .text_size(px(self.tokens.metrics.ui_text_sm))
         .text_color(rgb(theme.text_muted))
         .child(self.forward_cell(0.9, self.i18n.t("forwards.table.type")))
         .child(self.forward_cell(1.35, self.i18n.t("forwards.table.local_address")))
@@ -557,7 +592,7 @@ impl WorkspaceApp {
                 .w(px(128.0))
                 .pr(px(16.0))
                 .text_align(gpui::TextAlign::Right)
-                .child(self.i18n.t("forwards.table.actions")),
+                .child(self.render_forward_ui_text(self.i18n.t("forwards.table.actions"))),
         )
         .into_any_element()
     }
@@ -593,10 +628,10 @@ impl WorkspaceApp {
         .border_b_1()
         .border_color(forwards_theme_border_half(theme.border, has_background))
         .hover(move |row| row.bg(forwards_theme_hover_bg(theme.bg_hover, has_background)))
-        .text_size(px(FORWARDS_TEXT_SM))
+        .text_size(px(self.tokens.metrics.ui_text_sm))
         .child(self.forward_cell_element(0.9, self.render_forward_type_badge(rule.forward_type)))
         .child(self.render_forward_address_cell(&rule, local, tab_id, cx))
-        .child(self.forward_cell(1.35, remote))
+        .child(self.forward_mono_cell(1.35, remote))
         .child(self.forward_cell_element(1.6, self.render_forward_status(&rule.status, stats)))
         .child(
             div()
@@ -608,7 +643,7 @@ impl WorkspaceApp {
                 .when(active, |actions| {
                     actions.child(self.render_forward_icon_button(
                         LucideIcon::Square,
-                        TW_YELLOW_400,
+                        theme.text_muted,
                         has_background,
                         cx.listener({
                             let node_id = node_id.clone();
@@ -634,7 +669,7 @@ impl WorkspaceApp {
                     actions
                         .child(self.render_forward_icon_button(
                             LucideIcon::Play,
-                            TW_GREEN_400,
+                            theme.text_muted,
                             has_background,
                             cx.listener({
                                 let node_id = node_id.clone();
@@ -672,7 +707,7 @@ impl WorkspaceApp {
                         ))
                         .child(self.render_forward_icon_button(
                             LucideIcon::Pencil,
-                            TW_BLUE_400,
+                            theme.text_muted,
                             has_background,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_forward_edit_form(rule_for_edit.clone(), cx);
@@ -684,14 +719,16 @@ impl WorkspaceApp {
                     actions.child(
                         div()
                             .px_2()
-                            .text_size(px(FORWARDS_TEXT_XS))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(forwards_palette_alpha(TW_ORANGE_400, FORWARDS_TW_ALPHA_50))
-                            .child(self.i18n.t("forwards.actions.will_recover")),
+                            .child(self.render_forward_ui_text(
+                                self.i18n.t("forwards.actions.will_recover"),
+                            )),
                     )
                 })
                 .child(self.render_forward_icon_button(
                     LucideIcon::Trash2,
-                    TW_RED_400,
+                    theme.text_muted,
                     has_background,
                     cx.listener(move |this, _event, _window, cx| {
                         this.forwarding_view.pending_delete_forward = Some(rule_for_delete.clone());
@@ -714,7 +751,7 @@ impl WorkspaceApp {
         let should_copy = rule.forward_type != ForwardType::Remote
             && matches!(rule.status, ForwardStatus::Active);
         if !should_copy {
-            return self.forward_cell(1.35, address);
+            return self.forward_mono_cell(1.35, address);
         }
 
         let forward_id = rule.id.clone();
@@ -726,7 +763,7 @@ impl WorkspaceApp {
                 .items_center()
                 .gap(px(4.0))
                 .truncate()
-                .font_family(SharedString::from("monospace"))
+                .font_family(self.forward_mono_font())
                 .text_color(rgb(self.tokens.ui.text))
                 .hover({
                     let accent = self.tokens.ui.accent;
@@ -802,25 +839,32 @@ impl WorkspaceApp {
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(FORWARDS_TEXT_SM))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
-                            .child(self.i18n.t("forwards.form.new_title")),
+                            .child(
+                                self.render_forward_ui_text(self.i18n.t("forwards.form.new_title")),
+                            ),
                     )
-                    .child(self.render_forward_button(
-                        self.i18n.t("forwards.form.cancel"),
-                        None,
-                        ForwardButtonVariant::Ghost,
-                        true,
-                        has_background,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.forwarding_view.show_new_form = false;
-                            this.forwarding_view.error = None;
-                            this.forwarding_view.focused_input = None;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    )),
+                    .child(
+                        self.render_forward_button(
+                            self.i18n.t("forwards.form.cancel"),
+                            None,
+                            ForwardButtonVariant::Ghost,
+                            true,
+                            has_background,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.forwarding_view.show_new_form = false;
+                                this.forwarding_view.error = None;
+                                this.forwarding_view.focused_input = None;
+                                cx.notify();
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .h(px(32.0))
+                        .px_3()
+                        .text_size(px(self.tokens.metrics.ui_text_xs)),
+                    ),
             )
             .child(self.render_forward_type_picker(has_background, cx))
             .child(self.render_forward_address_form(false, has_background, cx))
@@ -893,10 +937,12 @@ impl WorkspaceApp {
                             .justify_between()
                             .child(
                                 div()
-                                    .text_size(px(FORWARDS_TEXT_SM))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("forwards.form.edit_title")),
+                                    .child(self.render_forward_ui_text(
+                                        self.i18n.t("forwards.form.edit_title"),
+                                    )),
                             )
                             .child(self.render_forward_icon_button(
                                 LucideIcon::X,
@@ -912,14 +958,25 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
-                            .text_size(px(FORWARDS_TEXT_XS))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(format!(
-                                "{}: {} | ID: {}...",
-                                self.i18n.t("forwards.form.type"),
-                                forward_type_label(editing.clone(), &self.i18n),
-                                editing.id.chars().take(8).collect::<String>()
-                            )),
+                            .child(format!("{}:", self.i18n.t("forwards.form.type")))
+                            .child(forward_type_label(editing.clone(), &self.i18n))
+                            .child("|")
+                            .child("ID:")
+                            .child(
+                                div()
+                                    .font_family(settings_mono_font_family(
+                                        self.settings_store.settings(),
+                                    ))
+                                    .child(format!(
+                                        "{}...",
+                                        editing.id.chars().take(8).collect::<String>()
+                                    )),
+                            ),
                     )
                     .child(self.render_forward_address_form(true, has_background, cx))
                     .when_some(self.forwarding_view.error.as_ref(), |modal, error| {
@@ -995,16 +1052,20 @@ impl WorkspaceApp {
                     .gap(px(14.0))
                     .child(
                         div()
-                            .text_size(px(FORWARDS_TEXT_SM))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
-                            .child(self.i18n.t("forwards.actions.confirm_delete_title")),
+                            .child(self.render_forward_ui_text(
+                                self.i18n.t("forwards.actions.confirm_delete_title"),
+                            )),
                     )
                     .child(
                         div()
-                            .text_size(px(FORWARDS_TEXT_XS))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("forwards.actions.confirm_delete_desc")),
+                            .child(self.render_forward_ui_text(
+                                self.i18n.t("forwards.actions.confirm_delete_desc"),
+                            )),
                     )
                     .child(
                         div()
@@ -1093,12 +1154,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let selected = self.forwarding_view.forward_type == forward_type;
+        let label = self.i18n.t(label_key);
         div()
             .flex()
             .items_center()
             .gap(px(8.0))
             .cursor_pointer()
-            .text_size(px(FORWARDS_TEXT_SM))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(theme.text))
             .child(
                 div()
@@ -1117,7 +1179,7 @@ impl WorkspaceApp {
                         radio.child(div().size(px(8.0)).rounded_full().bg(rgb(theme.accent)))
                     }),
             )
-            .child(self.i18n.t(label_key))
+            .child(self.render_forward_ui_text(label))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -1146,7 +1208,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .px_2()
             .cursor_pointer()
-            .text_size(px(FORWARDS_TEXT_XS))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(theme.text_muted))
             .child(
                 div()
@@ -1174,7 +1236,7 @@ impl WorkspaceApp {
                         ))
                     }),
             )
-            .child(self.i18n.t("forwards.form.skip_check"))
+            .child(self.render_forward_ui_text(self.i18n.t("forwards.form.skip_check")))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -1245,9 +1307,9 @@ impl WorkspaceApp {
                     .pt(px(22.0))
                     .text_center()
                     .italic()
-                    .text_size(px(FORWARDS_TEXT_SM))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("forwards.form.socks5_mode"))
+                    .child(self.render_forward_ui_text(self.i18n.t("forwards.form.socks5_mode")))
                     .into_any_element()
             } else {
                 self.render_forward_address_side(
@@ -1286,9 +1348,9 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(
                 div()
-                    .text_size(px(FORWARDS_TEXT_XS))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label),
+                    .child(self.render_forward_ui_text(label)),
             )
             .child(
                 div()
@@ -1325,6 +1387,7 @@ impl WorkspaceApp {
             target.anchor_id(),
             div()
                 .when(fill, |wrapper| wrapper.w_full())
+                .font_family(self.forward_mono_font())
                 .child(text_input(
                     &self.tokens,
                     TextInputView {
@@ -1370,10 +1433,10 @@ impl WorkspaceApp {
             .items_center()
             .rounded(px(4.0))
             .bg(forwards_palette_alpha(bg, FORWARDS_TW_ALPHA_30))
-            .text_size(px(FORWARDS_TEXT_XS))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(forwards_palette_color(text))
-            .child(forward_type_key(forward_type, &self.i18n))
+            .child(self.render_forward_ui_text(forward_type_key(forward_type, &self.i18n)))
             .into_any_element()
     }
 
@@ -1393,7 +1456,7 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(6.0))
-            .text_size(px(FORWARDS_TEXT_XS))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(text_color))
             .child(
                 div()
@@ -1401,7 +1464,7 @@ impl WorkspaceApp {
                     .rounded_full()
                     .bg(forwards_palette_color(dot)),
             )
-            .child(self.i18n.t(forward_status_key(status)))
+            .child(self.render_forward_ui_text(self.i18n.t(forward_status_key(status))))
             .when_some(stats, |row, stats| {
                 row.child(
                     div()
@@ -1409,6 +1472,7 @@ impl WorkspaceApp {
                         .flex()
                         .items_center()
                         .gap(px(4.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(Self::render_lucide_icon(
                             LucideIcon::Activity,
@@ -1439,21 +1503,21 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let (bg, border, text, hover_bg) = match variant {
             ForwardButtonVariant::Primary => (
-                rgb(theme.accent),
-                rgb(theme.accent),
-                theme.accent_text,
-                rgb(theme.accent_hover),
+                rgb(theme.text),
+                forwards_transparent(),
+                theme.bg,
+                forwards_theme_with_alpha(theme.text, 0xe6),
             ),
             ForwardButtonVariant::Secondary => (
-                forwards_theme_hover_bg(theme.bg_hover, has_background),
+                forwards_theme_panel_bg(theme.bg_panel, has_background),
                 forwards_theme_border(theme.border, has_background),
                 theme.text,
-                forwards_theme_bg(theme.bg_active, has_background),
+                forwards_theme_hover_bg(theme.bg_hover, has_background),
             ),
             ForwardButtonVariant::Ghost => (
-                forwards_theme_panel_bg(theme.bg_panel, has_background),
-                forwards_theme_panel_bg(theme.bg_panel, has_background),
-                theme.text_muted,
+                forwards_transparent(),
+                forwards_transparent(),
+                theme.text,
                 forwards_theme_hover_bg(theme.bg_hover, has_background),
             ),
             ForwardButtonVariant::Danger => (
@@ -1464,8 +1528,8 @@ impl WorkspaceApp {
             ),
         };
         div()
-            .h(px(32.0))
-            .px_3()
+            .h(px(36.0))
+            .px_4()
             .flex()
             .items_center()
             .gap(px(6.0))
@@ -1473,7 +1537,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(border)
             .bg(bg)
-            .text_size(px(FORWARDS_TEXT_SM))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(text))
             .opacity(if enabled { 1.0 } else { 0.5 })
@@ -1486,7 +1550,7 @@ impl WorkspaceApp {
             .when_some(icon, |button, icon| {
                 button.child(Self::render_lucide_icon(icon, 14.0, rgb(text)))
             })
-            .child(label)
+            .child(self.render_forward_ui_text(label))
     }
 
     fn render_forward_icon_button(
@@ -1518,9 +1582,29 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_forward_ui_text(&self, text: String) -> gpui::Div {
+        let has_cjk = forwards_text_has_cjk(&text);
+        div()
+            .when(has_cjk, |label| {
+                label.font_family(forwards_cjk_ui_font_family(
+                    &self.settings_store.settings().appearance.ui_font_family,
+                ))
+            })
+            .child(text)
+    }
+
+    fn forward_mono_font(&self) -> SharedString {
+        settings_mono_font_family(self.settings_store.settings())
+    }
+
     fn render_forwards_section_title(&self, label: String) -> AnyElement {
         div()
-            .text_size(px(FORWARDS_TEXT_XS))
+            .when(forwards_text_has_cjk(&label), |title| {
+                title.font_family(forwards_cjk_ui_font_family(
+                    &self.settings_store.settings().appearance.ui_font_family,
+                ))
+            })
+            .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(label.to_uppercase())
@@ -1542,9 +1626,23 @@ impl WorkspaceApp {
             .border_color(forwards_palette_alpha(TW_RED_900, FORWARDS_TW_ALPHA_50))
             .bg(forwards_palette_alpha(TW_RED_950, FORWARDS_TW_ALPHA_30))
             .p_3()
-            .text_size(px(FORWARDS_TEXT_XS))
-            .text_color(forwards_palette_color(TW_RED_400))
-            .child(error.to_string())
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(forwards_palette_color(TW_RED_400))
+                    .child("⚠ Error"),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_family(self.forward_mono_font())
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(error.to_string()),
+            )
             .into_any_element()
     }
 
@@ -1577,7 +1675,7 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(forwards_palette_alpha(TW_BLUE_500, FORWARDS_TW_ALPHA_30))
                     .bg(forwards_palette_alpha(TW_BLUE_500, FORWARDS_TW_ALPHA_05))
-                    .text_size(px(FORWARDS_TEXT_SM))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
                     .child(
                         div()
                             .min_w(px(0.0))
@@ -1590,42 +1688,66 @@ impl WorkspaceApp {
                                 14.0,
                                 forwards_palette_color(TW_BLUE_400),
                             ))
-                            .child(div().truncate().child(format!(
-                                "{} :{}{}",
-                                self.i18n.t("forwards.detection.detected"),
-                                port.port,
-                                port.process_name
-                                    .as_ref()
-                                    .map(|process| format!(
-                                        " ({process}{})",
-                                        port.pid
-                                            .map(|pid| format!(" #{pid}"))
-                                            .unwrap_or_default()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .flex()
+                                    .items_center()
+                                    .child(self.render_forward_ui_text(
+                                        self.i18n.t("forwards.detection.detected"),
                                     ))
-                                    .unwrap_or_default()
-                            ))),
+                                    .child(" ")
+                                    .child(
+                                        div()
+                                            .font_family(settings_mono_font_family(
+                                                self.settings_store.settings(),
+                                            ))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(forwards_palette_color(TW_BLUE_300))
+                                            .child(format!(":{}", port.port)),
+                                    )
+                                    .when_some(port.process_name.as_ref(), |text, process| {
+                                        text.child(
+                                            div()
+                                                .ml_1()
+                                                .text_color(rgb(self.tokens.ui.text_muted))
+                                                .child(format!(
+                                                    "({process}{})",
+                                                    port.pid
+                                                        .map(|pid| format!(" #{pid}"))
+                                                        .unwrap_or_default()
+                                                )),
+                                        )
+                                    }),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap(px(4.0))
-                            .child(self.render_forward_button(
-                                self.i18n.t("forwards.detection.forward"),
-                                Some(LucideIcon::ArrowRight),
-                                ForwardButtonVariant::Ghost,
-                                true,
-                                has_background,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.create_local_forward_for_detected_port(
-                                        tab_id,
-                                        forward_node_id.clone(),
-                                        forward_port.clone(),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ))
+                            .child(
+                                self.render_forward_button(
+                                    self.i18n.t("forwards.detection.forward"),
+                                    Some(LucideIcon::ArrowRight),
+                                    ForwardButtonVariant::Ghost,
+                                    true,
+                                    has_background,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.create_local_forward_for_detected_port(
+                                            tab_id,
+                                            forward_node_id.clone(),
+                                            forward_port.clone(),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .h(px(24.0))
+                                .px_2()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(forwards_palette_color(TW_BLUE_400)),
+                            )
                             .child(self.render_forward_icon_button(
                                 LucideIcon::X,
                                 self.tokens.ui.text_muted,
@@ -1683,10 +1805,10 @@ impl WorkspaceApp {
                     .child(self.render_forwards_section_title(
                         self.i18n.t("forwards.detection.remotePorts"),
                     ))
-                    .when(!visible_ports.is_empty(), |header| {
+                    .when(!self.forwarding_view.detected_ports.is_empty(), |header| {
                         header.child(
                             div()
-                                .text_size(px(FORWARDS_TEXT_XS))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(format!("({})", visible_ports.len())),
                         )
@@ -1707,7 +1829,7 @@ impl WorkspaceApp {
                         )
                         .border_b_1()
                         .border_color(forwards_theme_border(theme.border, has_background))
-                        .text_size(px(FORWARDS_TEXT_XS))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
                         .text_color(rgb(theme.text_muted))
                         .child(self.forward_cell(1.0, self.i18n.t("forwards.detection.port")))
                         .child(self.forward_cell(1.4, self.i18n.t("forwards.detection.bindAddr")))
@@ -1717,7 +1839,9 @@ impl WorkspaceApp {
                                 .w(px(128.0))
                                 .pr(px(16.0))
                                 .text_align(gpui::TextAlign::Right)
-                                .child(self.i18n.t("forwards.detection.action")),
+                                .child(self.render_forward_ui_text(
+                                    self.i18n.t("forwards.detection.action"),
+                                )),
                         ),
                     )
                     .when(visible_ports.is_empty(), |table| {
@@ -1728,7 +1852,7 @@ impl WorkspaceApp {
                                 .items_center()
                                 .justify_center()
                                 .rounded_b(px(FORWARDS_CARD_RADIUS))
-                                .text_size(px(FORWARDS_TEXT_XS))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(if self.forwarding_view.port_scan_pending {
                                     self.i18n.t("forwards.detection.scanning")
@@ -1783,12 +1907,12 @@ impl WorkspaceApp {
         .border_b_1()
         .border_color(forwards_theme_border_half(theme.border, has_background))
         .hover(move |row| row.bg(forwards_theme_hover_bg(theme.bg_hover, has_background)))
-        .text_size(px(FORWARDS_TEXT_XS))
+        .text_size(px(self.tokens.metrics.ui_text_sm))
         .child(
             self.forward_cell_element(
                 1.0,
                 div()
-                    .font_family(SharedString::from("monospace"))
+                    .font_family(self.forward_mono_font())
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(forwards_palette_color(TW_EMERALD_400))
                     .child(port.port.to_string())
@@ -1800,7 +1924,8 @@ impl WorkspaceApp {
                 1.4,
                 div()
                     .truncate()
-                    .font_family(SharedString::from("monospace"))
+                    .font_family(self.forward_mono_font())
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(if port.bind_addr.is_empty() {
                         "0.0.0.0".to_string()
@@ -1815,6 +1940,7 @@ impl WorkspaceApp {
                 1.4,
                 div()
                     .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(match (port.process_name.clone(), port.pid) {
                         (Some(process), Some(pid)) => format!("{process} ({pid})"),
@@ -1841,7 +1967,7 @@ impl WorkspaceApp {
                         .border_1()
                         .border_color(forwards_palette_alpha(TW_EMERALD_800, FORWARDS_TW_ALPHA_40))
                         .bg(forwards_palette_alpha(TW_EMERALD_900, FORWARDS_TW_ALPHA_30))
-                        .text_size(px(FORWARDS_TEXT_XS))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(forwards_palette_color(TW_EMERALD_400))
                         .child(Self::render_lucide_icon(
@@ -1849,7 +1975,9 @@ impl WorkspaceApp {
                             12.0,
                             forwards_palette_color(TW_EMERALD_400),
                         ))
-                        .child(self.i18n.t("forwards.detection.alreadyForwarded"))
+                        .child(self.render_forward_ui_text(
+                            self.i18n.t("forwards.detection.alreadyForwarded"),
+                        ))
                         .into_any_element()
                 } else {
                     self.render_forward_button(
@@ -1869,7 +1997,7 @@ impl WorkspaceApp {
                         }),
                     )
                     .h(px(24.0))
-                    .text_size(px(FORWARDS_TEXT_XS))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .into_any_element()
                 }),
         )
@@ -1899,9 +2027,18 @@ impl WorkspaceApp {
     fn forward_cell(&self, flex: f32, text: String) -> AnyElement {
         self.forward_cell_element(
             flex,
+            self.render_forward_ui_text(text)
+                .truncate()
+                .into_any_element(),
+        )
+    }
+
+    fn forward_mono_cell(&self, flex: f32, text: String) -> AnyElement {
+        self.forward_cell_element(
+            flex,
             div()
                 .truncate()
-                .font_family(SharedString::from("monospace"))
+                .font_family(self.forward_mono_font())
                 .child(text)
                 .into_any_element(),
         )
@@ -2142,13 +2279,11 @@ impl WorkspaceApp {
         self.forwarding_view.pending = true;
         self.forwarding_view.error = None;
         let tx = self.forwarding_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
-            let result = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime
-                    .block_on(operation(manager))
-                    .map_err(|error| error.to_string()),
-                Err(error) => Err(format!("failed to initialize forwarding runtime: {error}")),
-            };
+            let result = runtime
+                .block_on(operation(manager))
+                .map_err(|error| error.to_string());
             let _ = tx.send(ForwardingWorkerResult::Operation {
                 tab_id,
                 message_key,
@@ -2207,13 +2342,11 @@ impl WorkspaceApp {
         self.forwarding_view.port_scan_error = None;
         self.forwarding_view.last_port_scan_started = Some(Instant::now());
         let tx = self.forwarding_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
-            let result = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime
-                    .block_on(manager.scan_remote_ports())
-                    .map_err(|error| error.to_string()),
-                Err(error) => Err(format!("failed to initialize forwarding runtime: {error}")),
-            };
+            let result = runtime
+                .block_on(manager.scan_remote_ports())
+                .map_err(|error| error.to_string());
             let _ = tx.send(ForwardingWorkerResult::PortScan { tab_id, result });
         });
         cx.notify();
@@ -2351,44 +2484,45 @@ impl WorkspaceApp {
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id) else {
             return false;
         };
-        self.ssh_nodes
-            .get(node_id)
-            .and_then(|node| node.terminal_ids.first())
-            .is_some_and(|active_session_id| active_session_id.0.to_string() == session_id)
+        self.forwarding_session_id_for_node(node_id) == session_id
     }
 
     fn forwarding_manager_for_node_readonly(
         &self,
         node_id: &NodeId,
     ) -> Option<Arc<ForwardingManager>> {
-        let session_id = self.ssh_nodes.get(node_id)?.terminal_ids.first()?;
-        self.forwarding_registry.get(&session_id.0.to_string())
+        self.forwarding_registry
+            .get(&self.forwarding_session_id_for_node(node_id))
     }
 
     fn forwarding_manager_for_node(
         &mut self,
         node_id: &NodeId,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Result<Arc<ForwardingManager>, String> {
-        let session_id = *self
+        let node = self
             .ssh_nodes
             .get(node_id)
-            .and_then(|node| node.terminal_ids.first())
+            .cloned()
             .ok_or_else(|| self.i18n.t("forwards.messages.node_not_ready"))?;
-        if let Some(manager) = self.forwarding_registry.get(&session_id.0.to_string()) {
+        let session_id = self.forwarding_session_id_for_node(node_id);
+        if let Some(manager) = self.forwarding_registry.get(&session_id) {
             return Ok(manager);
         }
-        let pane_id = self
-            .pane_id_for_terminal_session(session_id)
-            .ok_or_else(|| self.i18n.t("forwards.messages.connection_not_ready"))?;
+        if self.node_router.node_state(node_id).is_err() {
+            self.node_router
+                .upsert_node(node_id.clone(), node.config.clone());
+        }
+        let consumer = ConnectionConsumer::PortForward(session_id.clone());
         let handle = self
-            .panes
-            .get(&pane_id)
-            .and_then(|pane| pane.read(cx).ssh_connection_handle())
-            .ok_or_else(|| self.i18n.t("forwards.messages.connection_not_ready"))?;
+            .node_router
+            .acquire_connection(node_id, consumer.clone())
+            .map_err(|_| self.i18n.t("forwards.messages.connection_not_ready"))?;
+        self.forwarding_connection_consumers
+            .insert(session_id.clone(), (handle.connection_id.clone(), consumer));
         let manager = self
             .forwarding_registry
-            .register(session_id.0.to_string(), handle);
+            .register(session_id.clone(), handle.handle);
         self.start_saved_forwards_for_node(node_id, session_id, manager.clone());
         Ok(manager)
     }
@@ -2398,23 +2532,24 @@ impl WorkspaceApp {
         node_id: &NodeId,
     ) -> Option<(String, Option<String>)> {
         let node = self.ssh_nodes.get(node_id)?;
-        let session_id = node.terminal_ids.first()?.0.to_string();
-        Some((session_id, node.saved_connection_id.clone()))
+        Some((
+            self.forwarding_session_id_for_node(node_id),
+            node.saved_connection_id.clone(),
+        ))
     }
 
     fn start_saved_forwards_for_node(
         &self,
         node_id: &NodeId,
-        session_id: TerminalSessionId,
+        session_id: String,
         manager: Arc<ForwardingManager>,
     ) {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return;
         };
-        let session_id_string = session_id.0.to_string();
         if let Some(owner_connection_id) = node.saved_connection_id.as_ref() {
             let _ = self.forwarding_registry.saved_store().map(|store| {
-                store.bind_owned_forwards_to_session(owner_connection_id, &session_id_string)
+                store.bind_owned_forwards_to_session(owner_connection_id, &session_id)
             });
         }
         let saved_forwards = if let Some(owner_connection_id) = node.saved_connection_id.as_ref() {
@@ -2422,7 +2557,7 @@ impl WorkspaceApp {
                 .load_owned_forwards(owner_connection_id)
         } else {
             self.forwarding_registry
-                .load_persisted_forwards(&session_id_string)
+                .load_persisted_forwards(&session_id)
         };
         let auto_start_rules: Vec<ForwardRule> = saved_forwards
             .into_iter()
@@ -2432,24 +2567,17 @@ impl WorkspaceApp {
         if auto_start_rules.is_empty() {
             return;
         }
-        thread::spawn(move || {
-            let Ok(runtime) = tokio::runtime::Runtime::new() else {
-                return;
-            };
-            runtime.block_on(async move {
-                for mut rule in auto_start_rules {
-                    rule.status = ForwardStatus::Starting;
-                    let _ = manager.create_forward(rule).await;
-                }
-            });
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            for mut rule in auto_start_rules {
+                rule.status = ForwardStatus::Starting;
+                let _ = manager.create_forward(rule).await;
+            }
         });
     }
 
-    fn pane_id_for_terminal_session(&self, session_id: TerminalSessionId) -> Option<PaneId> {
-        self.tabs
-            .iter()
-            .filter_map(|tab| tab.root_pane.as_ref())
-            .find_map(|root| root.pane_id_for_session(session_id))
+    pub(super) fn forwarding_session_id_for_node(&self, node_id: &NodeId) -> String {
+        format!("{FORWARDS_NODE_SESSION_PREFIX}{}", node_id.0)
     }
 
     fn open_forward_edit_form(&mut self, rule: ForwardRule, cx: &mut Context<Self>) {
@@ -2600,6 +2728,46 @@ fn forwards_palette_color(color: u32) -> gpui::Rgba {
 
 fn forwards_palette_alpha(color: u32, alpha: u32) -> gpui::Rgba {
     rgba((color << 8) | alpha)
+}
+
+fn forwards_cjk_ui_font_family(configured_family: &str) -> SharedString {
+    configured_family
+        .split(',')
+        .map(|family| family.trim().trim_matches(['"', '\'']))
+        .find(|family| forwards_is_cjk_ui_font(family))
+        .map(|family| SharedString::from(family.to_string()))
+        .unwrap_or_else(|| SharedString::from(FORWARDS_PLATFORM_CJK_UI_FONT))
+}
+
+fn forwards_is_cjk_ui_font(family: &str) -> bool {
+    let lower = family.to_ascii_lowercase();
+    family.contains("等线")
+        || family.contains("微软雅黑")
+        || family.contains("黑体")
+        || family.contains("苹方")
+        || family.contains("思源黑体")
+        || lower.contains("dengxian")
+        || lower.contains("microsoft yahei")
+        || lower.contains("simhei")
+        || lower.contains("pingfang")
+        || lower.contains("noto sans cjk")
+        || lower.contains("source han sans")
+}
+
+fn forwards_text_has_cjk(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(
+            ch as u32,
+            0x3400..=0x4dbf
+                | 0x4e00..=0x9fff
+                | 0xf900..=0xfaff
+                | 0x20000..=0x2a6df
+                | 0x2a700..=0x2b73f
+                | 0x2b740..=0x2b81f
+                | 0x2b820..=0x2ceaf
+                | 0x30000..=0x3134f
+        )
+    })
 }
 
 fn forwards_transparent() -> gpui::Rgba {

@@ -457,6 +457,7 @@ impl WorkspaceApp {
             }
             SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
             SettingsInput::ConnectionNewGroup => self.settings_connection_new_group.clone(),
+            SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
             SettingsInput::HighlightLabel(index) => settings
                 .terminal
                 .highlight_rules
@@ -551,6 +552,16 @@ impl WorkspaceApp {
             SettingsInput::ConnectionNewGroup => {
                 self.settings_connection_new_group = self.settings_input_draft.clone();
                 cx.notify();
+            }
+            SettingsInput::SftpSpeedLimitKbps => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| settings.sftp.speed_limit_kbps = value.max(0),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
             }
             SettingsInput::HighlightLabel(index) => {
                 let value = self.settings_input_draft.trim().to_string();
