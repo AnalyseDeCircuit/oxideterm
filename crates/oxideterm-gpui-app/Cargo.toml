@@ -14,6 +14,7 @@ chrono.workspace = true
 gpui.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
@@ -35,7 +36,13 @@ tokio.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.24.5"
+gstreamer-video = "0.24.5"
+raw-window-handle.workspace = true
+x11-dl = "2.21.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"

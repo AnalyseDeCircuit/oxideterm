@@ -101,6 +101,9 @@ pub enum Inline {
     /// `![alt](url)`.
     Image { alt: String, url: String },
 
+    /// `$...$` or `$$...$$` LaTeX math.
+    Math { latex: String, display: bool },
+
     /// `[^label]`.
     FootnoteReference { label: String, index: usize },
 

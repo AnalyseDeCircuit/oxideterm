@@ -297,6 +297,20 @@ fn preview_content_text(content: &PreviewContent) -> String {
     }
 }
 
+fn sftp_preview_is_markdown(language: Option<&str>, mime_type: Option<&str>) -> bool {
+    language.is_some_and(|language| {
+        matches!(
+            language.to_ascii_lowercase().as_str(),
+            "markdown" | "md" | "rmd"
+        )
+    }) || mime_type.is_some_and(|mime_type| {
+        matches!(
+            mime_type.to_ascii_lowercase().as_str(),
+            "text/markdown" | "text/x-markdown"
+        )
+    })
+}
+
 async fn load_remote_sftp_listing(
     router: NodeRouter,
     node_id: &NodeId,

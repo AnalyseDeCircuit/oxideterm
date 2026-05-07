@@ -30,6 +30,7 @@
 //! - Smart punctuation
 
 pub mod highlight;
+pub mod math;
 pub mod model;
 pub mod options;
 pub mod parser;

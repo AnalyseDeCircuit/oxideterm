@@ -4,6 +4,7 @@ use gpui::{
     AnchoredPositionMode, Corner, ObjectFit, StatefulInteractiveElement, UniformListScrollHandle,
     anchored, deferred, prelude::*, uniform_list,
 };
+use oxideterm_gpui_markdown::{MarkdownOptions, markdown_with_options};
 use oxideterm_gpui_ui::{
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
@@ -136,6 +137,7 @@ pub(super) enum SftpWorkerResult {
         refresh_local: bool,
     },
     PreviewLoaded {
+        generation: u64,
         path: String,
         result: Result<PreviewContent, String>,
     },
@@ -316,6 +318,7 @@ pub(super) struct SftpViewState {
     preview_content: Option<PreviewContent>,
     preview_asset_owner: Option<PreviewAssetOwner>,
     preview_session: PreviewSession,
+    preview_generation: u64,
     preview_audio: RodioAudioPreviewBackend,
     preview_audio_tick_active: bool,
     preview_video_surface: SharedSftpNativeVideoSurface,
@@ -364,6 +367,7 @@ impl Default for SftpViewState {
             preview_content: None,
             preview_asset_owner: None,
             preview_session: PreviewSession::default(),
+            preview_generation: 0,
             preview_audio: RodioAudioPreviewBackend::new(),
             preview_audio_tick_active: false,
             preview_video_surface: SharedSftpNativeVideoSurface::default(),

@@ -11,11 +11,12 @@ use std::path::PathBuf;
 use gpui::{
     AnyElement, Font, FontStyle, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
     StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, div, image_cache, img, px,
-    retain_all,
+    relative, retain_all,
 };
 use oxideterm_theme::ThemeTokens;
 
 use crate::highlight;
+use crate::math;
 use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument};
 use crate::options::MarkdownOptions;
 use crate::style;
@@ -395,9 +396,11 @@ fn render_styled_inlines(
     }
 
     // If any run contains an image, use a container with mixed children.
-    let has_images = flat.iter().any(|r| r.image_url.is_some());
+    let has_images_or_math = flat
+        .iter()
+        .any(|r| r.image_url.is_some() || r.math_latex.is_some());
 
-    if has_images {
+    if has_images_or_math {
         return render_mixed_inlines(&flat, tokens, opts);
     }
 
@@ -420,14 +423,18 @@ fn render_styled_inlines(
         .into_any_element()
 }
 
-/// Render a sequence of flat runs that contains at least one image.
-/// Text segments are grouped into `StyledText` elements; images are rendered
-/// via `img()` with a max-width constraint.
+/// Render a sequence of flat runs that contains at least one image or formula.
+/// Text segments are grouped into `StyledText` elements; images and RaTeX
+/// formulas are rendered as GPUI image nodes.
 fn render_mixed_inlines(
     flat: &[FlatRun],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
+    if flat.iter().any(|run| run.math_display) {
+        return render_display_mixed_inlines(flat, tokens, opts);
+    }
+
     let mut children: Vec<AnyElement> = Vec::new();
     let mut text_buf = String::new();
     let mut run_buf: Vec<TextRun> = Vec::new();
@@ -447,6 +454,9 @@ fn render_mixed_inlines(
         if let Some(ref url) = run.image_url {
             flush_text(&mut text_buf, &mut run_buf, &mut children);
             children.push(render_image(url, opts));
+        } else if let Some(ref latex) = run.math_latex {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_math(latex, false, tokens, opts));
         } else {
             let start = text_buf.len();
             text_buf.push_str(&run.text);
@@ -460,6 +470,64 @@ fn render_mixed_inlines(
     flush_text(&mut text_buf, &mut run_buf, &mut children);
 
     div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(opts.block_gap * 0.35))
+        .children(children)
+        .into_any_element()
+}
+
+fn render_display_mixed_inlines(
+    flat: &[FlatRun],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    let mut children: Vec<AnyElement> = Vec::new();
+    let mut text_buf = String::new();
+    let mut run_buf: Vec<TextRun> = Vec::new();
+
+    let flush_text =
+        |text_buf: &mut String, run_buf: &mut Vec<TextRun>, children: &mut Vec<AnyElement>| {
+            if !text_buf.trim().is_empty() {
+                children.push(
+                    div()
+                        .text_size(style::body_font_size(opts))
+                        .text_color(style::text_color(tokens))
+                        .child(
+                            StyledText::new(SharedString::from(std::mem::take(text_buf)))
+                                .with_runs(std::mem::take(run_buf)),
+                        )
+                        .into_any_element(),
+                );
+            } else {
+                text_buf.clear();
+                run_buf.clear();
+            }
+        };
+
+    for run in flat {
+        if let Some(ref latex) = run.math_latex {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_math(latex, run.math_display, tokens, opts));
+        } else if let Some(ref url) = run.image_url {
+            flush_text(&mut text_buf, &mut run_buf, &mut children);
+            children.push(render_image(url, opts));
+        } else {
+            let start = text_buf.len();
+            text_buf.push_str(&run.text);
+            let len = text_buf.len() - start;
+            if len > 0 {
+                run_buf.push(text_run_for_flat(run, len, tokens, opts));
+            }
+        }
+    }
+
+    flush_text(&mut text_buf, &mut run_buf, &mut children);
+
+    div()
+        .w_full()
         .flex()
         .flex_col()
         .gap(px(opts.block_gap * 0.5))
@@ -493,6 +561,42 @@ fn image_path_from_url(url: &str) -> Option<PathBuf> {
         None
     } else {
         Some(PathBuf::from(url))
+    }
+}
+
+fn render_math(
+    latex: &str,
+    display: bool,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    match math::render_math_svg_image(latex, display, tokens, opts) {
+        Ok(image) => {
+            let formula = img(image).max_w(relative(1.0));
+            if display {
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .py(px(opts.math_display_padding))
+                    .child(formula)
+                    .into_any_element()
+            } else {
+                formula.into_any_element()
+            }
+        }
+        Err(error) => {
+            let text = if display {
+                format!("$$ {latex} $$")
+            } else {
+                format!("${latex}$")
+            };
+            div()
+                .text_size(style::code_font_size(opts))
+                .text_color(style::muted_color(tokens))
+                .child(SharedString::from(format!("{text} ({error})")))
+                .into_any_element()
+        }
     }
 }
 
@@ -571,6 +675,8 @@ struct FlatRun {
     strikethrough: bool,
     /// If set, this run represents an image and should be rendered via `img()`.
     image_url: Option<String>,
+    math_latex: Option<String>,
+    math_display: bool,
 }
 
 fn collect_runs(
@@ -593,6 +699,8 @@ fn collect_runs(
                     link,
                     strikethrough,
                     image_url: None,
+                    math_latex: None,
+                    math_display: false,
                 });
             }
             Inline::Bold(children) => {
@@ -610,6 +718,8 @@ fn collect_runs(
                     link,
                     strikethrough,
                     image_url: None,
+                    math_latex: None,
+                    math_display: false,
                 });
             }
             Inline::Link { text: children, .. } => {
@@ -627,6 +737,21 @@ fn collect_runs(
                     link: false,
                     strikethrough: false,
                     image_url: Some(url.clone()),
+                    math_latex: None,
+                    math_display: false,
+                });
+            }
+            Inline::Math { latex, display } => {
+                out.push(FlatRun {
+                    text: String::new(),
+                    bold: false,
+                    italic: false,
+                    code: false,
+                    link: false,
+                    strikethrough: false,
+                    image_url: None,
+                    math_latex: Some(latex.clone()),
+                    math_display: *display,
                 });
             }
             Inline::FootnoteReference { index, .. } => {
@@ -638,6 +763,8 @@ fn collect_runs(
                     link: true,
                     strikethrough,
                     image_url: None,
+                    math_latex: None,
+                    math_display: false,
                 });
             }
             Inline::LineBreak => {
@@ -649,6 +776,8 @@ fn collect_runs(
                     link,
                     strikethrough,
                     image_url: None,
+                    math_latex: None,
+                    math_display: false,
                 });
             }
         }

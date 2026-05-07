@@ -23,6 +23,7 @@ pub(crate) enum LucideIcon {
     Download,
     Eye,
     EyeOff,
+    ExternalLink,
     File,
     FolderInput,
     Folder,
@@ -88,6 +89,7 @@ impl LucideIcon {
             Self::Download => "lucide/download.svg",
             Self::Eye => "lucide/eye.svg",
             Self::EyeOff => "lucide/eye-off.svg",
+            Self::ExternalLink => "lucide/external-link.svg",
             Self::File => "lucide/file.svg",
             Self::FolderInput => "lucide/folder-input.svg",
             Self::Folder => "lucide/folder.svg",
@@ -157,6 +159,7 @@ impl AssetSource for NativeAssets {
             "lucide/download.svg" => DOWNLOAD,
             "lucide/eye.svg" => EYE,
             "lucide/eye-off.svg" => EYE_OFF,
+            "lucide/external-link.svg" => EXTERNAL_LINK,
             "lucide/file.svg" => FILE,
             "lucide/folder-input.svg" => FOLDER_INPUT,
             "lucide/folder.svg" => FOLDER,
@@ -226,6 +229,7 @@ impl AssetSource for NativeAssets {
                 "download.svg",
                 "eye.svg",
                 "eye-off.svg",
+                "external-link.svg",
                 "file.svg",
                 "folder-input.svg",
                 "folder.svg",
@@ -299,6 +303,7 @@ const COPY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height=
 const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>"#;
 const EYE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const EYE_OFF: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>"#;
+const EXTERNAL_LINK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>"#;
 const FILE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>"#;
 const FOLDER_INPUT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2A2 2 0 0 0 12.07 6H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/></svg>"#;
 const FOLDER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;

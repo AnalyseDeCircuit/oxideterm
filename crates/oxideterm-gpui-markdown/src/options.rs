@@ -64,6 +64,21 @@ pub struct MarkdownOptions {
 
     /// Width of the left border on blockquotes, in pixels.
     pub blockquote_border_width: f32,
+
+    /// Inline math font-size scale relative to body text.
+    pub math_inline_scale: f32,
+
+    /// Display math font-size scale relative to body text.
+    pub math_display_scale: f32,
+
+    /// Internal padding around inline math SVG output, in pixels.
+    pub math_inline_padding: f32,
+
+    /// Internal padding around display math SVG output, in pixels.
+    pub math_display_padding: f32,
+
+    /// Stroke width for vector math paths, in pixels.
+    pub math_stroke_width: f32,
 }
 
 impl Default for MarkdownOptions {
@@ -106,6 +121,11 @@ impl MarkdownOptions {
             image_cache_id: MARKDOWN_IMAGE_CACHE_ID,
             max_image_width: metrics.markdown_max_image_width,
             blockquote_border_width: metrics.markdown_blockquote_border_width,
+            math_inline_scale: 1.0,
+            math_display_scale: 1.2,
+            math_inline_padding: 1.0,
+            math_display_padding: 6.0,
+            math_stroke_width: 1.5,
         }
     }
 }

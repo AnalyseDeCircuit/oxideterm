@@ -15,6 +15,7 @@ pub fn parse(source: &str) -> MarkdownDocument {
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH
         | Options::ENABLE_SMART_PUNCTUATION;
     let parser = Parser::new_ext(source, options);
 
@@ -108,6 +109,18 @@ pub fn parse(source: &str) -> MarkdownDocument {
             }
             Event::Code(code) => {
                 ctx.push_inline(Inline::Code(code.to_string()));
+            }
+            Event::InlineMath(latex) => {
+                ctx.push_inline(Inline::Math {
+                    latex: latex.to_string(),
+                    display: false,
+                });
+            }
+            Event::DisplayMath(latex) => {
+                ctx.push_inline(Inline::Math {
+                    latex: latex.to_string(),
+                    display: true,
+                });
             }
             Event::SoftBreak => {
                 ctx.push_inline(Inline::Text(" ".into()));
@@ -411,6 +424,17 @@ fn inlines_to_plain_text(inlines: &[Inline]) -> String {
                 out.push_str(&inlines_to_plain_text(inner));
             }
             Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::Math { latex, display } => {
+                if *display {
+                    out.push_str("$$");
+                    out.push_str(latex);
+                    out.push_str("$$");
+                } else {
+                    out.push('$');
+                    out.push_str(latex);
+                    out.push('$');
+                }
+            }
             Inline::FootnoteReference { index, .. } => {
                 out.push_str(&format!("[{}]", index));
             }
@@ -513,6 +537,30 @@ mod tests {
                 );
             }
             other => panic!("expected Paragraph, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_inline_and_display_math() {
+        let doc = parse("Inline $a^2+b^2=c^2$.\n\n$$\\frac{1}{2}$$");
+        assert_eq!(doc.blocks.len(), 2);
+        match &doc.blocks[0] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Math { latex, display: false } if latex == "a^2+b^2=c^2"
+                )));
+            }
+            other => panic!("expected inline math Paragraph, got {:?}", other),
+        }
+        match &doc.blocks[1] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Math { latex, display: true } if latex == "\\frac{1}{2}"
+                )));
+            }
+            other => panic!("expected display math Paragraph, got {:?}", other),
         }
     }
 

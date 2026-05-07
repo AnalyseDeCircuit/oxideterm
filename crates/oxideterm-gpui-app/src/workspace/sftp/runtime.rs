@@ -227,7 +227,16 @@ impl WorkspaceApp {
                     }
                     changed = true;
                 }
-                SftpWorkerResult::PreviewLoaded { path, result } => {
+                SftpWorkerResult::PreviewLoaded {
+                    generation,
+                    path,
+                    result,
+                } => {
+                    // Preview loads race with quick file switching and dialog close. Match
+                    // Tauri's current-preview ownership by dropping stale worker completions.
+                    if generation != self.sftp_view.preview_generation {
+                        continue;
+                    }
                     self.sftp_view.preview_loading = false;
                     self.sftp_view.preview_path = Some(path);
                     match result {

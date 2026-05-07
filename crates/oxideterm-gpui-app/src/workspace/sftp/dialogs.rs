@@ -726,6 +726,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match content {
+            PreviewContent::Text {
+                data,
+                mime_type,
+                language,
+                ..
+            } if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref()) => {
+                self.render_sftp_preview_markdown(data)
+            }
             PreviewContent::Image { mime_type, data } => {
                 let source = format!("data:{mime_type};base64,{data}");
                 self.render_sftp_preview_image(source, mime_type.clone())
@@ -749,14 +757,19 @@ impl WorkspaceApp {
                 path,
                 mime_type,
                 kind: AssetFileKind::Video,
-            } => self.render_sftp_preview_video(path, mime_type),
+            } => self.render_sftp_preview_video(path, mime_type, cx),
             PreviewContent::AssetFile {
                 path,
                 mime_type,
                 kind: AssetFileKind::Office,
-            } => self.render_sftp_preview_office(path, mime_type),
+            } => self.render_sftp_preview_office(path, mime_type, cx),
             _ => self.render_sftp_preview_text(preview_content_text(content)),
         }
+    }
+
+    fn render_sftp_preview_markdown(&self, source: &str) -> AnyElement {
+        let opts = MarkdownOptions::from_theme(&self.tokens);
+        markdown_with_options(&self.tokens, source, &opts)
     }
 
     fn render_sftp_preview_pdf(&self, path: &str, mime_type: &str) -> AnyElement {
@@ -983,46 +996,71 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_preview_video(&self, path: &str, mime_type: &str) -> AnyElement {
-        #[cfg(target_os = "macos")]
+    fn render_sftp_preview_video(
+        &self,
+        path: &str,
+        mime_type: &str,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            let theme = self.tokens.ui;
+            let snapshot = self.sftp_view.preview_video_surface.snapshot();
+            let detail = snapshot.error.unwrap_or_else(|| {
+                "Native video playback is initializing.".to_string()
+            });
+            let fallback = self.render_sftp_native_asset_status_with_external(
+                "Video",
+                path,
+                mime_type,
+                &detail,
+                _cx,
+            );
             sftp_native_video_element(
                 path.to_string(),
                 self.sftp_view.preview_video_surface.clone(),
-                div()
-                    .w_full()
-                    .h(px(456.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .p_4()
-                    .bg(rgb(theme.bg_sunken))
-                    .text_size(px(SFTP_TEXT_XS))
-                    .text_color(rgb(theme.text_muted))
-                    .child(mime_type.to_string()),
+                fallback,
             )
             .into_any_element()
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             let snapshot = self.sftp_view.preview_video_surface.snapshot();
             let detail = snapshot.error.unwrap_or_else(|| {
                 format!("{} backend is unavailable", snapshot.backend)
             });
-            self.render_sftp_native_asset_status("Video", path, mime_type, &detail)
+            self.render_sftp_native_asset_status_with_external(
+                "Video", path, mime_type, &detail, _cx,
+            )
                 .into_any_element()
         }
     }
 
-    fn render_sftp_preview_office(&self, path: &str, mime_type: &str) -> AnyElement {
-        self.render_sftp_native_asset_status(
+    fn render_sftp_preview_office(
+        &self,
+        path: &str,
+        mime_type: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_sftp_native_asset_status_with_external(
             "Office",
             path,
             mime_type,
             "Office preview requires the later Office -> PDF/image conversion pipeline.",
+            cx,
         )
         .into_any_element()
+    }
+
+    fn render_sftp_native_asset_status_with_external(
+        &self,
+        title: &str,
+        path: &str,
+        mime_type: &str,
+        detail: &str,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.render_sftp_native_asset_status(title, path, mime_type, detail)
+            .child(self.render_sftp_external_open_button(path.to_string(), cx))
     }
 
     fn render_sftp_native_asset_status(
@@ -1062,6 +1100,44 @@ impl WorkspaceApp {
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .child(path.to_string()),
             )
+    }
+
+    fn render_sftp_external_open_button(
+        &self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .mt_2()
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg))
+            .px_3()
+            .text_size(px(SFTP_TEXT_XS))
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(move |button| button.bg(rgb(theme.bg_hover)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.open_sftp_preview_external(&path);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::ExternalLink,
+                SFTP_ICON_MD,
+                rgb(theme.text),
+            ))
+            .child(self.i18n.t("sftp.preview.open_external"))
+            .into_any_element()
     }
 
     fn render_sftp_preview_image(

@@ -416,6 +416,8 @@ impl WorkspaceApp {
             self.set_sftp_path(pane, join_sftp_path(&base, &file.name));
         } else {
             self.stop_sftp_preview_media();
+            self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
+            let generation = self.sftp_view.preview_generation;
             self.sftp_view.preview_path = Some(file.path.clone());
             self.sftp_view.preview_content = None;
             self.sftp_view.preview_asset_owner = None;
@@ -426,10 +428,10 @@ impl WorkspaceApp {
                 name: file.name.clone(),
             });
             if pane == SftpPane::Remote {
-                self.spawn_remote_sftp_preview(file.path.clone());
+                self.spawn_remote_sftp_preview(file.path.clone(), generation);
             } else {
                 self.sftp_view.preview_loading = true;
-                self.spawn_local_sftp_preview(file.path.clone());
+                self.spawn_local_sftp_preview(file.path.clone(), generation);
             }
         }
     }
@@ -484,7 +486,17 @@ impl WorkspaceApp {
         }
     }
 
-    fn spawn_remote_sftp_preview(&self, path: String) {
+    fn open_sftp_preview_external(&mut self, path: &str) {
+        if let Err(error) = open_path_in_external_app(path) {
+            self.sftp_view.preview_error = Some(format!(
+                "{}: {}",
+                self.i18n.t("sftp.toast.open_external_failed"),
+                error
+            ));
+        }
+    }
+
+    fn spawn_remote_sftp_preview(&self, path: String, generation: u64) {
         let Some(tab_id) = self.active_tab_id else {
             return;
         };
@@ -496,16 +508,24 @@ impl WorkspaceApp {
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = load_remote_sftp_preview(router, &node_id, &path).await;
-            let _ = tx.send(SftpWorkerResult::PreviewLoaded { path, result });
+            let _ = tx.send(SftpWorkerResult::PreviewLoaded {
+                generation,
+                path,
+                result,
+            });
         });
     }
 
-    fn spawn_local_sftp_preview(&self, path: String) {
+    fn spawn_local_sftp_preview(&self, path: String, generation: u64) {
         let tx = self.sftp_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = load_local_sftp_preview(&path).await;
-            let _ = tx.send(SftpWorkerResult::PreviewLoaded { path, result });
+            let _ = tx.send(SftpWorkerResult::PreviewLoaded {
+                generation,
+                path,
+                result,
+            });
         });
     }
 
@@ -937,6 +957,7 @@ impl WorkspaceApp {
 
     fn close_sftp_dialog(&mut self) {
         self.stop_sftp_preview_media();
+        self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
         self.sftp_view.dialog = None;
         self.sftp_view.dialog_value.clear();
         self.sftp_view.preview_asset_owner = None;
@@ -1105,5 +1126,37 @@ impl WorkspaceApp {
             _ => {}
         }
         self.close_sftp_dialog();
+    }
+}
+
+fn open_path_in_external_app(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", "", path]);
+        command
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    let status = command
+        .status()
+        .map_err(|error| format!("failed to launch external app: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("external app exited with status {status}"))
     }
 }
