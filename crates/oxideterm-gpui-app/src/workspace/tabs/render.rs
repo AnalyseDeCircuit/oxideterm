@@ -1,0 +1,305 @@
+impl WorkspaceApp {
+    pub(super) fn render_tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let scroll_x = self.tab_scroll_x.max(0.0);
+        let mut bar = div()
+            .h(px(self.tokens.metrics.tabbar_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .pl(px(self.tokens.metrics.tabbar_leading_offset))
+            .overflow_hidden()
+            .border_b_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg))
+            .on_scroll_wheel(cx.listener(|this, event, window, cx| {
+                this.handle_tabbar_scroll(event, window, cx);
+            }));
+
+        let mut tabs_row = div()
+            .h_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .flex_none()
+            .relative()
+            .left(px(-scroll_x));
+
+        for tab in &self.tabs {
+            let tab_id = tab.id;
+            let active = Some(tab_id) == self.active_tab_id;
+            let tab_width = self.tab_visual_width(tab);
+            let icon = match tab.kind {
+                TabKind::LocalTerminal => LucideIcon::Square,
+                TabKind::SshTerminal => LucideIcon::Terminal,
+                TabKind::Sftp => LucideIcon::FolderInput,
+                TabKind::Forwards => LucideIcon::ArrowLeftRight,
+                TabKind::SessionManager => LucideIcon::LayoutList,
+                TabKind::Settings => LucideIcon::Settings,
+            };
+            let tab_text = self.tab_display_title(tab);
+            let tab_text_color = if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            };
+            tabs_row = tabs_row.child(
+                div()
+                    .id(("workspace-tab", tab_id.0))
+                    .h_full()
+                    .flex_none()
+                    .w(px(tab_width))
+                    .min_w(px(self.tokens.metrics.tab_min_width))
+                    .max_w(px(self.tokens.metrics.tab_max_width))
+                    .px(px(self.tokens.metrics.tab_padding_x))
+                    .relative()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(self.tokens.metrics.tab_gap))
+                    .border_r_1()
+                    .border_color(rgb(theme.border))
+                    .bg(if active {
+                        rgb(theme.bg_panel)
+                    } else {
+                        rgb(theme.bg)
+                    })
+                    .text_color(if active {
+                        rgb(theme.text)
+                    } else {
+                        rgb(theme.text_muted)
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.set_active_tab(tab_id, window, cx);
+                        }),
+                    )
+                    .when(active, |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .h(px(self.tokens.metrics.tab_active_accent_height))
+                                .bg(rgb(theme.accent)),
+                        )
+                    })
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        self.tokens.metrics.tab_icon_size,
+                        tab_text_color,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.tab_font_size))
+                            .child(tab_text),
+                    )
+                    .child(
+                        div()
+                            .size(px(self.tokens.metrics.tab_close_button_size))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .text_color(rgb(theme.text_muted))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                self.tokens.metrics.tab_close_icon_size,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.set_active_tab(tab_id, window, cx);
+                                    this.close_active_tab(window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+        }
+
+        bar = bar.child(tabs_row);
+        bar.into_any_element()
+    }
+
+    pub(super) fn render_empty_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(16.0))
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text_muted))
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(384.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(self.render_welcome_brand())
+                    .child(self.render_welcome_actions(cx))
+                    .child(self.render_welcome_shortcuts()),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_brand(&self) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .text_size(px(48.0))
+                    .line_height(px(48.0))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("layout.empty.title"))
+                    .child(
+                        div()
+                            .w(px(3.0))
+                            .h(px(34.0))
+                            .ml(px(6.0))
+                            .rounded(px(self.tokens.radii.active_indicator))
+                            .bg(rgb(self.tokens.ui.accent)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_center()
+            .gap(px(12.0))
+            .child(self.render_welcome_action_button(
+                LucideIcon::Plus,
+                "layout.empty.new_connection",
+                true,
+                true,
+                cx,
+            ))
+            .child(self.render_welcome_action_button(
+                LucideIcon::Terminal,
+                "layout.empty.new_local_terminal",
+                false,
+                false,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_welcome_action_button(
+        &self,
+        icon: LucideIcon,
+        label_key: &str,
+        opens_connection_form: bool,
+        filled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (bg, border) = if filled {
+            (rgb(theme.bg_panel), rgb(theme.border))
+        } else {
+            (rgba(0x00000000), rgb(theme.border))
+        };
+        div()
+            .h(px(self.tokens.metrics.ui_button_default_height))
+            .px(px(self.tokens.metrics.ui_button_default_padding_x))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(border)
+            .bg(bg)
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(move |button| {
+                button
+                    .bg(rgb(theme.bg_hover))
+                    .border_color(rgb(theme.border_strong))
+            })
+            .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text)))
+            .child(self.i18n.t(label_key))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if opens_connection_form {
+                        this.open_new_connection_form(window, cx);
+                    } else {
+                        let _ = this.create_local_terminal_tab(window, cx);
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_shortcuts(&self) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .justify_center()
+            .gap_x(px(20.0))
+            .gap_y(px(8.0))
+            .pt(px(4.0))
+            .child(self.render_welcome_shortcut(shortcut_key("K"), "command_palette.title"))
+            .child(self.render_welcome_shortcut(shortcut_key("N"), "layout.empty.new_connection"))
+            .child(
+                self.render_welcome_shortcut(shortcut_key("T"), "layout.empty.new_local_terminal"),
+            )
+            .child(
+                self.render_welcome_shortcut(shortcut_key("/"), "layout.empty.keyboard_shortcuts"),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_shortcut(&self, key: String, label_key: &str) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_size(px(11.0))
+                    .line_height(px(14.0))
+                    .text_color(rgb(theme.text))
+                    .child(key),
+            )
+            .child(self.i18n.t(label_key))
+            .into_any_element()
+    }
+}

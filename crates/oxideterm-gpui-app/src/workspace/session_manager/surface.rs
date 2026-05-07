@@ -1,0 +1,137 @@
+impl WorkspaceApp {
+    pub(super) fn render_session_manager_surface(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let has_background = self
+            .terminal_background_preferences("session_manager")
+            .is_some();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
+            .text_color(rgb(theme.text))
+            .child(self.render_session_manager_toolbar(window, has_background, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .flex()
+                    .flex_row()
+                    .child(self.render_session_manager_folder_tree(has_background, cx))
+                    .child(self.render_session_manager_table(has_background, cx)),
+            )
+            .when_some(self.session_manager.status.clone(), |surface, status| {
+                surface.child(
+                    div()
+                        .h(px(32.0))
+                        .flex()
+                        .items_center()
+                        .px_4()
+                        .border_t_1()
+                        .border_color(theme_border(theme.border, has_background))
+                        .bg(theme_bg(theme.bg, has_background))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(theme.accent))
+                        .child(status),
+                )
+            })
+            .when(self.session_manager.show_new_group, |surface| {
+                surface.child(self.render_new_group_dialog(cx))
+            })
+            .when(self.session_manager.show_import, |surface| {
+                surface.child(self.render_ssh_config_import_dialog(cx))
+            })
+            .when_some(
+                self.session_manager
+                    .row_context_menu_connection_id
+                    .as_deref()
+                    .and_then(|id| self.connection_info_by_id(id)),
+                |surface, conn| {
+                    surface.child(self.render_row_context_menu(conn, window, has_background, cx))
+                },
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn handle_session_manager_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(input) = self.session_manager.focused_input else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return false;
+        }
+        match key {
+            "escape" => {
+                self.session_manager.focused_input = None;
+                self.ime_marked_text = None;
+                cx.notify();
+                true
+            }
+            "enter" if input == SessionManagerInput::NewGroup => {
+                self.create_session_group(cx);
+                true
+            }
+            "backspace" => {
+                match input {
+                    SessionManagerInput::Search => self.session_manager.search_query.pop(),
+                    SessionManagerInput::SavedSearch => {
+                        self.session_manager.saved_search_query.pop()
+                    }
+                    SessionManagerInput::NewGroup => self.session_manager.new_group_name.pop(),
+                };
+                if input == SessionManagerInput::Search {
+                    self.clear_session_selection_for_invisible_rows();
+                }
+                cx.notify();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn open_session_manager_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self
+            .tabs
+            .iter()
+            .find(|tab| tab.kind == TabKind::SessionManager)
+        {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id();
+            self.tabs.push(Tab {
+                id: tab_id,
+                kind: TabKind::SessionManager,
+                title: self.i18n.t("sessionManager.title"),
+                title_source: TabTitleSource::I18nKey("sessionManager.title"),
+                root_pane: None,
+                active_pane_id: None,
+            });
+            tab_id
+        };
+        self.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        self.active_sidebar_section = SidebarSection::Connections;
+        self.needs_active_pane_focus = false;
+        if self.sidebar_collapsed {
+            self.sidebar_collapsed = false;
+        }
+        window.focus(&self.focus_handle);
+        self.reveal_active_tab(window);
+        self.persist_sidebar_settings();
+        cx.notify();
+    }
+
+}

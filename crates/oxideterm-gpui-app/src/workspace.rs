@@ -86,6 +86,7 @@ use oxideterm_gpui_settings_view::{
 };
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
+use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
 
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
@@ -631,28 +632,6 @@ fn alpha_byte(alpha: f32) -> u32 {
     (alpha.clamp(0.0, 1.0) * 255.0).round() as u32
 }
 
-fn settings_ui_font_family(configured_family: &str) -> SharedString {
-    css_font_family_head(configured_family).unwrap_or_else(tauri_default_ui_font_family)
-}
-
-#[cfg(target_os = "macos")]
-fn tauri_default_ui_font_family() -> SharedString {
-    // Tauri --font-sans falls through from unbundled Inter to -apple-system on macOS.
-    SharedString::from("SF Pro Text")
-}
-
-#[cfg(target_os = "windows")]
-fn tauri_default_ui_font_family() -> SharedString {
-    // Tauri --font-sans falls through from unbundled Inter to the Windows UI font.
-    SharedString::from("Segoe UI")
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn tauri_default_ui_font_family() -> SharedString {
-    // Tauri --font-sans falls through to Roboto before the generic sans-serif family.
-    SharedString::from("Roboto")
-}
-
 fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
     SharedString::from(
         settings
@@ -660,14 +639,6 @@ fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
             .font_family
             .terminal_family_name(&settings.terminal.custom_font_family),
     )
-}
-
-fn css_font_family_head(configured_family: &str) -> Option<SharedString> {
-    configured_family
-        .split(',')
-        .map(|family| family.trim().trim_matches(['"', '\'']))
-        .find(|family| !family.is_empty())
-        .map(|family| SharedString::from(family.to_string()))
 }
 
 impl Focusable for WorkspaceApp {

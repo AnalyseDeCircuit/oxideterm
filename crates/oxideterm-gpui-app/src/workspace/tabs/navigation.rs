@@ -1,0 +1,406 @@
+impl WorkspaceApp {
+    pub(super) fn set_active_tab(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.iter().any(|tab| tab.id == tab_id) {
+            self.active_tab_id = Some(tab_id);
+            self.sync_active_tab_surface();
+            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+            });
+            self.focus_active_pane(window, cx);
+            self.reveal_active_tab(window);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_active_tab_surface(&mut self) {
+        match self.active_tab().map(|tab| &tab.kind) {
+            Some(TabKind::Settings) => {
+                self.active_surface = ActiveSurface::Settings;
+                self.active_sidebar_section = SidebarSection::Settings;
+            }
+            Some(TabKind::Forwards) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Sessions;
+            }
+            Some(TabKind::Sftp) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Sessions;
+                if let Some(active_tab_id) = self.active_tab_id
+                    && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id)
+                {
+                    self.active_ssh_node_id = Some(node_id.clone());
+                    self.expanded_ssh_nodes.insert(node_id.clone());
+                }
+            }
+            Some(TabKind::SessionManager) => {
+                self.active_surface = ActiveSurface::Terminal;
+                self.active_sidebar_section = SidebarSection::Connections;
+            }
+            _ => {
+                self.active_surface = ActiveSurface::Terminal;
+            }
+        }
+        if let Some(session_id) = self.active_terminal_session_id()
+            && let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+        {
+            self.active_ssh_node_id = Some(node_id.clone());
+            self.expanded_ssh_nodes.insert(node_id.clone());
+        }
+    }
+
+    pub(super) fn focus_active_pane(&self, window: &mut Window, cx: &App) {
+        if let Some(pane) = self.active_pane() {
+            pane.read(cx).focus(window);
+        } else {
+            window.focus(&self.focus_handle);
+        }
+    }
+
+    fn register_ssh_terminal_session(
+        &mut self,
+        node_id: NodeId,
+        saved_connection_id: Option<String>,
+        config: SshConfig,
+        title: String,
+        session_id: TerminalSessionId,
+    ) {
+        self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        self.expanded_ssh_nodes.insert(node_id.clone());
+        self.active_ssh_node_id = Some(node_id.clone());
+        if let Some(saved_connection_id) = saved_connection_id.as_ref() {
+            self.saved_ssh_nodes
+                .insert(saved_connection_id.clone(), node_id.clone());
+        }
+
+        self.ssh_nodes
+            .entry(node_id.clone())
+            .and_modify(|node| {
+                node.config = config.clone();
+                node.title = title.clone();
+                node.readiness = NodeReadiness::Connecting;
+                if !node.terminal_ids.contains(&session_id) {
+                    node.terminal_ids.push(session_id);
+                }
+                if node.saved_connection_id.is_none() {
+                    node.saved_connection_id = saved_connection_id.clone();
+                }
+            })
+            .or_insert_with(|| WorkspaceSshNode {
+                saved_connection_id,
+                config,
+                title,
+                terminal_ids: vec![session_id],
+                readiness: NodeReadiness::Connecting,
+            });
+    }
+
+    pub(super) fn unregister_ssh_terminal_session(&mut self, session_id: TerminalSessionId) {
+        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_runtime = self.forwarding_runtime.clone();
+        let forwarding_session_id = session_id.0.to_string();
+        if let Some((connection_id, consumer)) = self
+            .forwarding_connection_consumers
+            .remove(&forwarding_session_id)
+        {
+            self.ssh_registry.release(&connection_id, &consumer);
+        }
+        forwarding_runtime.spawn(async move {
+            let _ = forwarding_registry.remove(&forwarding_session_id).await;
+        });
+
+        let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
+            return;
+        };
+        let _ = self
+            .node_router
+            .unbind_terminal_session(&node_id, &session_id.0.to_string());
+        let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
+            return;
+        };
+        node.terminal_ids.retain(|id| *id != session_id);
+    }
+
+    pub(super) fn focus_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((tab_id, pane_id)) = self.tabs.iter().find_map(|tab| {
+            tab.root_pane
+                .as_ref()
+                .and_then(|root| root.pane_id_for_session(session_id))
+                .map(|pane_id| (tab.id, pane_id))
+        }) else {
+            return false;
+        };
+        self.active_tab_id = Some(tab_id);
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+            tab.active_pane_id = Some(pane_id);
+        }
+        if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+            && let Some(node) = self.ssh_nodes.get_mut(node_id)
+        {
+            node.readiness = NodeReadiness::Ready;
+            self.active_ssh_node_id = Some(node_id.clone());
+            self.expanded_ssh_nodes.insert(node_id.clone());
+        }
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
+        true
+    }
+
+    pub(super) fn close_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.focus_terminal_session(session_id, window, cx) {
+            return;
+        }
+        let single_pane_tab = self
+            .active_tab()
+            .and_then(|tab| tab.root_pane.as_ref())
+            .is_none_or(|root| root.pane_count() <= 1);
+        if single_pane_tab {
+            self.close_active_tab(window, cx);
+        } else {
+            self.close_active_pane(window, cx);
+        }
+    }
+
+    pub(super) fn disconnect_ssh_node(
+        &mut self,
+        node_id: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_ids) = self
+            .ssh_nodes
+            .get(node_id)
+            .map(|node| node.terminal_ids.clone())
+        else {
+            return;
+        };
+
+        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_runtime = self.forwarding_runtime.clone();
+        let forwarding_session_id = self.forwarding_session_id_for_node(node_id);
+        if let Some((connection_id, consumer)) = self
+            .forwarding_connection_consumers
+            .remove(&forwarding_session_id)
+        {
+            self.ssh_registry.release(&connection_id, &consumer);
+        }
+        forwarding_runtime.spawn(async move {
+            let _ = forwarding_registry.remove(&forwarding_session_id).await;
+        });
+
+        for session_id in session_ids {
+            self.close_terminal_session(session_id, window, cx);
+        }
+        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+            node.readiness = NodeReadiness::Disconnected;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn close_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.active_tab_index() else {
+            return;
+        };
+        let tab = self.tabs.remove(index);
+        if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
+            self.release_sftp_session_for_node(&node_id);
+        }
+        let mut pane_ids = Vec::new();
+        let mut session_ids = Vec::new();
+        if let Some(root_pane) = &tab.root_pane {
+            root_pane.collect_pane_ids(&mut pane_ids);
+            root_pane.collect_session_ids(&mut session_ids);
+        }
+        for session_id in session_ids {
+            self.unregister_ssh_terminal_session(session_id);
+        }
+        for pane_id in pane_ids {
+            if let Some(pane) = self.panes.remove(&pane_id) {
+                let _ = pane.update(cx, |pane, _cx| pane.shutdown());
+            }
+        }
+
+        self.active_tab_id = if self.tabs.is_empty() {
+            None
+        } else {
+            Some(self.tabs[index.min(self.tabs.len() - 1)].id)
+        };
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
+    }
+
+    fn release_sftp_session_for_node(&mut self, node_id: &NodeId) {
+        let session_id = format!("node:{}:sftp", node_id.0);
+        if let Some((connection_id, consumer)) = self.sftp_connection_consumers.remove(&session_id)
+        {
+            self.ssh_registry.release(&connection_id, &consumer);
+            let _ = self
+                .ssh_registry
+                .mark_sftp_session(&connection_id, false, None);
+        }
+    }
+
+    pub(super) fn next_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        let current = self.active_tab_index().unwrap_or(0);
+        let next = if forward {
+            (current + 1) % self.tabs.len()
+        } else if current == 0 {
+            self.tabs.len() - 1
+        } else {
+            current - 1
+        };
+        self.active_tab_id = Some(self.tabs[next].id);
+        self.sync_active_tab_surface();
+        self.needs_active_pane_focus = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
+    }
+
+    pub(super) fn go_to_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs.get(index) {
+            self.active_tab_id = Some(tab.id);
+            self.sync_active_tab_surface();
+            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+                matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+            });
+            self.focus_active_pane(window, cx);
+            self.reveal_active_tab(window);
+            cx.notify();
+        }
+    }
+
+    fn tabbar_viewport_width(&self, window: &Window) -> f32 {
+        let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
+        let sidebar_width = if self.sidebar_collapsed {
+            self.tokens.metrics.activity_bar_width
+        } else {
+            self.sidebar_width
+        };
+        (window_width - sidebar_width).max(0.0)
+    }
+
+    fn tabbar_content_width(&self) -> f32 {
+        self.tokens.metrics.tabbar_leading_offset
+            + self
+                .tabs
+                .iter()
+                .map(|tab| self.tab_visual_width(tab))
+                .sum::<f32>()
+    }
+
+    fn tabbar_max_scroll(&self, window: &Window) -> f32 {
+        (self.tabbar_content_width() - self.tabbar_viewport_width(window)).max(0.0)
+    }
+
+    fn clamp_tab_scroll(&mut self, window: &Window) {
+        self.tab_scroll_x = self.tab_scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+    }
+
+    pub(super) fn reveal_active_tab(&mut self, window: &Window) {
+        let Some(index) = self.active_tab_index() else {
+            self.clamp_tab_scroll(window);
+            return;
+        };
+        let tab_left = self.tokens.metrics.tabbar_leading_offset
+            + self
+                .tabs
+                .iter()
+                .take(index)
+                .map(|tab| self.tab_visual_width(tab))
+                .sum::<f32>();
+        let tab_right = tab_left + self.tab_visual_width(&self.tabs[index]);
+        let viewport_width = self.tabbar_viewport_width(window);
+
+        if tab_left < self.tab_scroll_x {
+            self.tab_scroll_x = tab_left;
+        } else if tab_right > self.tab_scroll_x + viewport_width {
+            self.tab_scroll_x = tab_right - viewport_width;
+        }
+        self.clamp_tab_scroll(window);
+    }
+
+    pub(super) fn tab_display_title(&self, tab: &Tab) -> String {
+        let title = match tab.title_source {
+            TabTitleSource::Static => tab.title.clone(),
+            TabTitleSource::I18nKey(key) => self.i18n.t(key),
+        };
+        if matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+            let pane_count = tab.root_pane.as_ref().map_or(1, PaneNode::pane_count);
+            if pane_count > 1 {
+                return format!("{title} ({pane_count})");
+            }
+        }
+        title
+    }
+
+    fn tab_visual_width(&self, tab: &Tab) -> f32 {
+        let metrics = self.tokens.metrics;
+        let title = self.tab_display_title(tab);
+        let cjk_width_adjustment = if title.chars().any(|ch| !ch.is_ascii()) {
+            metrics.tab_font_size * 2.0
+        } else {
+            0.0
+        };
+        let title_width =
+            title.chars().count() as f32 * metrics.tab_font_size * metrics.tab_title_width_ratio
+                + cjk_width_adjustment;
+        let fixed_width = metrics.tab_padding_x * 2.0
+            + metrics.tab_icon_size
+            + metrics.tab_gap * 2.0
+            + metrics.tab_close_button_size;
+
+        (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
+    }
+
+    pub(super) fn handle_tabbar_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event
+            .delta
+            .pixel_delta(px(self.tokens.metrics.tabbar_height));
+        let horizontal = if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+            f32::from(delta.x)
+        } else {
+            f32::from(delta.y)
+        };
+        if horizontal == 0.0 {
+            return;
+        }
+
+        self.tab_scroll_x += horizontal;
+        self.clamp_tab_scroll(window);
+        cx.stop_propagation();
+        cx.notify();
+    }
+}

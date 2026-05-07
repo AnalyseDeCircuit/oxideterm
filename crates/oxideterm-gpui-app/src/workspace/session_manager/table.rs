@@ -1,0 +1,895 @@
+impl WorkspaceApp {
+    fn render_session_manager_table(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let rows = self.filtered_session_connections();
+        let all_selected = !rows.is_empty()
+            && rows
+                .iter()
+                .all(|row| self.session_manager.selected_ids.contains(&row.id));
+        let empty_message = if self.session_manager.search_query.trim().is_empty() {
+            self.i18n.t("sessionManager.table.no_connections")
+        } else {
+            self.i18n.t("sessionManager.table.no_search_results")
+        };
+        div()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
+            .child(self.render_connection_table_header(has_background, all_selected, cx))
+            .child(
+                div()
+                    .id("session-manager-table-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_y_scroll()
+                    .when(rows.is_empty(), |body| {
+                        body.flex().items_center().justify_center().child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(16.0))
+                                .py(px(64.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::Server,
+                                    48.0,
+                                    rgba((theme.text_muted << 8) | 0x4d),
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child(empty_message),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt_1()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .child(
+                                                    self.i18n.t(
+                                                        "sessionManager.table.no_connections_hint",
+                                                    ),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    self.render_toolbar_button(
+                                        LucideIcon::Plus,
+                                        self.i18n.t("sessionManager.toolbar.new_connection"),
+                                        ButtonVariant::Default,
+                                        has_background,
+                                        true,
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, window, cx| {
+                                            this.open_new_connection_form(window, cx);
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                                ),
+                        )
+                    })
+                    .children(
+                        rows.into_iter()
+                            .map(|conn| self.render_connection_table_row(conn, has_background, cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_connection_table_header(
+        &self,
+        has_background: bool,
+        all_selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        tauri_table_header(
+            &self.tokens,
+            self.manager_table_colors(has_background),
+            self.manager_table_metrics(),
+        )
+        .child(tauri_table_checkbox_cell(
+            MANAGER_COL_CHECKBOX,
+            checkbox(&self.tokens, String::new(), all_selected).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.toggle_all_visible_connections(cx);
+                    cx.stop_propagation();
+                }),
+            ),
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.name",
+            SessionSortField::Name,
+            MANAGER_COL_NAME_BASIS,
+            true,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.host",
+            SessionSortField::Host,
+            MANAGER_COL_HOST,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.port",
+            SessionSortField::Port,
+            MANAGER_COL_PORT,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.username",
+            SessionSortField::Username,
+            MANAGER_COL_USERNAME,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.auth_type",
+            SessionSortField::AuthType,
+            MANAGER_COL_AUTH,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.group",
+            SessionSortField::Group,
+            MANAGER_COL_GROUP,
+            false,
+            cx,
+        ))
+        .child(self.render_sort_header(
+            "sessionManager.table.last_used",
+            SessionSortField::LastUsed,
+            MANAGER_COL_LAST_USED,
+            false,
+            cx,
+        ))
+        .child(tauri_table_spacer_cell(MANAGER_COL_ACTIONS))
+        .into_any_element()
+    }
+
+    fn render_sort_header(
+        &self,
+        label_key: &'static str,
+        field: SessionSortField,
+        width: f32,
+        flexible: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.session_manager.sort_field == field;
+        let (icon, icon_color) = if active {
+            let icon = match self.session_manager.sort_direction {
+                SortDirection::Asc => LucideIcon::ArrowUp,
+                SortDirection::Desc => LucideIcon::ArrowDown,
+            };
+            (icon, rgb(0x60a5fa))
+        } else {
+            (
+                LucideIcon::ArrowUpDown,
+                rgba((theme.text_muted << 8) | 0x66),
+            )
+        };
+        tauri_table_sort_header(
+            &self.tokens,
+            &self.manager_table_cell_options(width, flexible),
+            self.i18n.t(label_key),
+            Self::render_lucide_icon(icon, 14.0, icon_color),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                if this.session_manager.sort_field == field {
+                    this.session_manager.sort_direction =
+                        this.session_manager.sort_direction.toggled();
+                } else {
+                    this.session_manager.sort_field = field;
+                    this.session_manager.sort_direction = SortDirection::Asc;
+                }
+                cx.notify();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn render_connection_table_row(
+        &self,
+        conn: ConnectionInfo,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self.session_manager.selected_ids.contains(&conn.id);
+        let hovered =
+            self.session_manager.hovered_connection_id.as_deref() == Some(conn.id.as_str());
+        let id = conn.id.clone();
+        let color = conn.color.as_deref().and_then(parse_hex_color);
+        tauri_table_row(
+            self.manager_table_colors(has_background),
+            self.manager_table_metrics(),
+            selected,
+        )
+        .id((
+            gpui::ElementId::from("session-manager-table-row"),
+            conn.id.clone(),
+        ))
+        .on_hover(cx.listener({
+            let id = conn.id.clone();
+            move |this, is_hovered: &bool, _window, cx| {
+                if *is_hovered {
+                    this.session_manager.hovered_connection_id = Some(id.clone());
+                } else if this.session_manager.hovered_connection_id.as_deref() == Some(id.as_str())
+                {
+                    this.session_manager.hovered_connection_id = None;
+                }
+                cx.notify();
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                this.session_manager.row_context_menu_connection_id = None;
+                if event.click_count == 2 {
+                    this.open_saved_connection(&id, window, cx);
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener({
+                let id = conn.id.clone();
+                move |this, event: &MouseDownEvent, _window, cx| {
+                    this.session_manager.row_context_menu_connection_id = Some(id.clone());
+                    this.session_manager.row_context_menu_x = f32::from(event.position.x);
+                    this.session_manager.row_context_menu_y = f32::from(event.position.y);
+                    this.session_manager.row_menu_connection_id = None;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }),
+        )
+        .when_some(color, |row, color| {
+            row.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(MANAGER_COLOR_INDICATOR_WIDTH))
+                    .rounded_l(px(self.tokens.radii.sm))
+                    .bg(rgb(color)),
+            )
+        })
+        .child(tauri_table_checkbox_cell(
+            MANAGER_COL_CHECKBOX,
+            checkbox(&self.tokens, String::new(), selected).on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let id = conn.id.clone();
+                    move |this, _event, _window, cx| {
+                        this.toggle_connection_selection(&id);
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                }),
+            ),
+        ))
+        .child(self.render_table_cell(
+            conn.name.clone(),
+            MANAGER_COL_NAME_BASIS,
+            TauriTableCellStyle::Primary,
+            true,
+        ))
+        .child(self.render_table_cell(
+            conn.host.clone(),
+            MANAGER_COL_HOST,
+            TauriTableCellStyle::MetaMono,
+            false,
+        ))
+        .child(self.render_table_cell(
+            conn.port.to_string(),
+            MANAGER_COL_PORT,
+            TauriTableCellStyle::MetaMono,
+            false,
+        ))
+        .child(self.render_table_cell(
+            conn.username.clone(),
+            MANAGER_COL_USERNAME,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(self.render_auth_badge_cell(conn.auth_type))
+        .child(self.render_table_cell(
+            conn.group.clone().unwrap_or_else(|| "—".to_string()),
+            MANAGER_COL_GROUP,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(self.render_table_cell(
+            format_last_used(conn.last_used_at.as_deref(), &self.i18n),
+            MANAGER_COL_LAST_USED,
+            TauriTableCellStyle::Meta,
+            false,
+        ))
+        .child(tauri_table_spacer_cell(MANAGER_COL_ACTIONS))
+        .child(self.render_inline_row_actions(conn, hovered, has_background, cx))
+        .into_any_element()
+    }
+
+    fn render_table_cell(
+        &self,
+        text: String,
+        width: f32,
+        style: TauriTableCellStyle,
+        flexible: bool,
+    ) -> AnyElement {
+        tauri_table_cell(
+            &self.tokens,
+            &self.manager_table_cell_options(width, flexible),
+            style,
+            text,
+        )
+    }
+
+    fn manager_table_colors(&self, has_background: bool) -> TauriTableColors {
+        let theme = self.tokens.ui;
+        TauriTableColors {
+            header_border: theme_border(theme.border, has_background),
+            header_bg: theme_secondary_bg(theme.bg_secondary, has_background),
+            row_border: theme_border_half(theme.border, has_background),
+            row_hover_bg: theme_hover_bg(theme.bg_hover, has_background),
+            row_selected_bg: rgba((theme.info << 8) | BG_ACTIVE_ROW_SELECTED_ALPHA),
+        }
+    }
+
+    fn manager_table_metrics(&self) -> TauriTableMetrics {
+        TauriTableMetrics {
+            header_text_size: MANAGER_TABLE_HEADER_TEXT_SIZE,
+            ..TauriTableMetrics::default()
+        }
+    }
+
+    fn manager_table_cell_options(&self, width: f32, flexible: bool) -> TauriTableCellOptions {
+        TauriTableCellOptions {
+            width,
+            min_width: MANAGER_COL_NAME_MIN,
+            flexible,
+            padding_left: if flexible { 4.0 } else { 0.0 },
+            primary_text_size: MANAGER_ROW_TEXT_SIZE,
+            meta_text_size: MANAGER_ROW_META_TEXT_SIZE,
+            mono_font: Some(settings_mono_font_family(self.settings_store.settings())),
+        }
+    }
+
+    fn render_auth_badge_cell(&self, auth_type: AuthType) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (icon, label, bg, fg) = auth_badge_style(auth_type, theme.text_muted, theme.text);
+        div()
+            .w(px(MANAGER_COL_AUTH))
+            .flex_none()
+            .flex()
+            .items_center()
+            .child(icon_badge(
+                IconBadgeMetrics {
+                    width: auth_badge_width(label),
+                    gap: MANAGER_AUTH_BADGE_GAP,
+                    padding_x: MANAGER_AUTH_BADGE_PADDING_X,
+                    padding_y: 2.0,
+                    text_size: MANAGER_AUTH_BADGE_TEXT_SIZE,
+                    radius: self.tokens.radii.md,
+                },
+                label,
+                Self::render_lucide_icon(icon, MANAGER_AUTH_BADGE_ICON_SIZE, fg),
+                bg,
+                fg,
+            ))
+            .into_any_element()
+    }
+
+    fn render_inline_row_actions(
+        &self,
+        conn: ConnectionInfo,
+        visible: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let menu_open =
+            self.session_manager.row_menu_connection_id.as_deref() == Some(conn.id.as_str());
+        let actions_visible = visible || menu_open;
+        div()
+            .absolute()
+            .right_0()
+            .top_0()
+            .bottom_0()
+            .w(px(MANAGER_COL_ACTIONS))
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(2.0))
+            .opacity(if actions_visible { 1.0 } else { 0.0 })
+            .bg(if actions_visible {
+                theme_hover_bg(theme.bg_hover, has_background)
+            } else {
+                theme_bg(theme.bg, has_background)
+            })
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::Play,
+                    MANAGER_ROW_ACTION_BUTTON,
+                    12.0,
+                    rgb(0x4ade80),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.open_saved_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::Pencil,
+                    MANAGER_ROW_ACTION_BUTTON,
+                    12.0,
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.open_saved_connection_editor(&id, None, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_icon_button(
+                    LucideIcon::MoreHorizontal,
+                    MANAGER_ROW_MORE_BUTTON,
+                    14.0,
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, event: &MouseDownEvent, window, cx| {
+                            this.session_manager.row_menu_connection_id =
+                                if this.session_manager.row_menu_connection_id.as_deref()
+                                    == Some(id.as_str())
+                                {
+                                    None
+                                } else {
+                                    Some(id.clone())
+                                };
+                            let viewport_height = f32::from(window.viewport_size().height);
+                            this.session_manager.row_menu_opens_above = f32::from(event.position.y)
+                                + MANAGER_ROW_MENU_HEIGHT
+                                > viewport_height;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .when(menu_open, |actions| {
+                actions.child(self.render_row_more_menu(
+                    conn,
+                    has_background,
+                    self.session_manager.row_menu_opens_above,
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_row_more_menu(
+        &self,
+        conn: ConnectionInfo,
+        has_background: bool,
+        opens_above: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .absolute()
+            .when(!opens_above, |menu| menu.top(px(30.0)))
+            .when(opens_above, |menu| menu.bottom(px(30.0)))
+            .right(px(0.0))
+            .w(px(MANAGER_ROW_MENU_WIDTH))
+            .p(px(4.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_panel_bg(theme.bg_panel, has_background))
+            .shadow_lg()
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Zap,
+                    self.i18n.t("sessionManager.actions.test_connection"),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.test_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Copy,
+                    self.i18n.t("sessionManager.actions.duplicate"),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.duplicate_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .h(px(1.0))
+                    .my(px(4.0))
+                    .bg(theme_border_half(theme.border, has_background)),
+            )
+            .child(
+                self.render_row_menu_item(
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessionManager.actions.delete"),
+                    rgb(0xf87171),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.session_manager.row_menu_connection_id = None;
+                            this.delete_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_row_context_menu(
+        &self,
+        conn: ConnectionInfo,
+        window: &Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let x = self
+            .session_manager
+            .row_context_menu_x
+            .min(f32::from(viewport.width) - MANAGER_ROW_MENU_WIDTH - 8.0)
+            .max(8.0);
+        let y = self
+            .session_manager
+            .row_context_menu_y
+            .min(f32::from(viewport.height) - MANAGER_ROW_CONTEXT_MENU_HEIGHT - 8.0)
+            .max(8.0);
+        let theme = self.tokens.ui;
+        div()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(MANAGER_ROW_MENU_WIDTH))
+            .p(px(4.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_panel_bg(theme.bg_panel, has_background))
+            .shadow_lg()
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Play,
+                    self.i18n.t("sessionManager.actions.connect"),
+                    rgb(theme.text),
+                    rgb(0x4ade80),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.open_saved_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Zap,
+                    self.i18n.t("sessionManager.actions.test_connection"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.test_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Pencil,
+                    self.i18n.t("sessionManager.actions.edit"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.close_session_row_menus();
+                            this.open_saved_connection_editor(&id, None, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Copy,
+                    self.i18n.t("sessionManager.actions.duplicate"),
+                    rgb(theme.text),
+                    rgb(theme.text),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.close_session_row_menus();
+                            this.duplicate_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .h(px(1.0))
+                    .my(px(4.0))
+                    .bg(theme_border_half(theme.border, has_background)),
+            )
+            .child(
+                self.render_row_menu_item_with_icon_color(
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessionManager.actions.delete"),
+                    rgb(0xf87171),
+                    rgb(0xf87171),
+                    has_background,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.close_session_row_menus();
+                            this.delete_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_row_menu_item(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .h(px(30.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px_2()
+            .rounded(px(self.tokens.radii.sm))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, 16.0, color))
+            .child(label)
+    }
+
+    fn render_row_menu_item_with_icon_color(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        text_color: Rgba,
+        icon_color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .h(px(30.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px_2()
+            .rounded(px(self.tokens.radii.sm))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(text_color)
+            .cursor_pointer()
+            .hover(move |item| item.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, 16.0, icon_color))
+            .child(label)
+    }
+
+    fn render_row_icon_button(
+        &self,
+        icon: LucideIcon,
+        size: f32,
+        icon_size: f32,
+        icon_color: Rgba,
+        has_background: bool,
+    ) -> gpui::Div {
+        div()
+            .size(px(size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.sm))
+            .cursor_pointer()
+            .hover(move |button| button.bg(theme_hover_bg(self.tokens.ui.bg_hover, has_background)))
+            .child(Self::render_lucide_icon(icon, icon_size, icon_color))
+    }
+
+    #[allow(dead_code)]
+    fn render_row_actions(&self, conn: ConnectionInfo, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w(px(210.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                self.render_row_action_button(
+                    self.i18n.t("sessionManager.actions.connect"),
+                    ButtonVariant::Default,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_saved_connection(&id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_action_button(
+                    self.i18n.t("sessionManager.actions.edit"),
+                    ButtonVariant::Secondary,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_saved_connection_editor(&id, None, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_action_button(
+                    self.i18n.t("sessionManager.actions.duplicate"),
+                    ButtonVariant::Secondary,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.duplicate_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .child(
+                self.render_row_action_button(
+                    self.i18n.t("sessionManager.actions.delete"),
+                    ButtonVariant::Destructive,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let id = conn.id.clone();
+                        move |this, _event, _window, cx| {
+                            this.delete_connection(&id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    #[allow(dead_code)]
+    fn render_row_action_button(&self, label: String, variant: ButtonVariant) -> gpui::Div {
+        button_with(
+            &self.tokens,
+            label,
+            ButtonOptions {
+                variant,
+                size: ButtonSize::Sm,
+                radius: ButtonRadius::Md,
+                disabled: false,
+            },
+        )
+    }
+}

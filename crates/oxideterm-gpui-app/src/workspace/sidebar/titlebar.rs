@@ -1,0 +1,89 @@
+impl WorkspaceApp {
+    pub(super) fn render_title_bar(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        let titlebar_bg = titlebar_background(theme.bg_panel, theme.bg_active, theme.accent);
+        let titlebar_border = mix_rgb(titlebar_bg, theme.border, 0.65);
+        let label_color = readable_color(titlebar_bg, theme.accent, theme.text_heading);
+        let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
+        let label_padding_left = if cfg!(target_os = "macos") {
+            self.tokens.metrics.titlebar_label_x()
+        } else {
+            12.0
+        };
+
+        div()
+            .h(px(self.tokens.metrics.titlebar_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .window_control_area(gpui::WindowControlArea::Drag)
+            .bg(rgb(titlebar_bg))
+            .border_b_1()
+            .border_color(rgb(titlebar_border))
+            .text_size(px(self.tokens.metrics.titlebar_label_font_size))
+            .text_color(rgb(text_color))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .pl(px(label_padding_left))
+                    .text_color(rgb(label_color))
+                    .child(self.i18n.t("titlebar.open_recent_project")),
+            )
+            .when(cfg!(target_os = "windows"), |bar| {
+                bar.child(self.render_windows_titlebar_controls(titlebar_bg, text_color))
+            })
+            .into_any_element()
+    }
+
+    fn render_windows_titlebar_controls(&self, titlebar_bg: u32, text_color: u32) -> AnyElement {
+        div()
+            .h_full()
+            .flex()
+            .flex_row()
+            .window_control_area(gpui::WindowControlArea::Drag)
+            .child(self.windows_titlebar_button(
+                "−",
+                gpui::WindowControlArea::Min,
+                titlebar_button_hover(titlebar_bg),
+                text_color,
+            ))
+            .child(self.windows_titlebar_button(
+                "□",
+                gpui::WindowControlArea::Max,
+                titlebar_button_hover(titlebar_bg),
+                text_color,
+            ))
+            .child(self.windows_titlebar_button(
+                "×",
+                gpui::WindowControlArea::Close,
+                0xc42b1c,
+                0xffffff,
+            ))
+            .into_any_element()
+    }
+
+    fn windows_titlebar_button(
+        &self,
+        glyph: &'static str,
+        control_area: gpui::WindowControlArea,
+        hover_bg: u32,
+        text_color: u32,
+    ) -> AnyElement {
+        div()
+            .w(px(46.0))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(13.0))
+            .text_color(rgb(text_color))
+            .window_control_area(control_area)
+            .hover(move |button| button.bg(rgb(hover_bg)))
+            .child(glyph)
+            .into_any_element()
+    }
+}
