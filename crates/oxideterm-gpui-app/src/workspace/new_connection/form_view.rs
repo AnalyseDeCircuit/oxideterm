@@ -42,7 +42,6 @@ const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
 const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]
 const TAURI_PROXY_CHAIN_SECTION_PADDING: f32 = 16.0; // Tauri p-4
 const TAURI_PROXY_CHAIN_HEADER_MARGIN: f32 = 16.0; // Tauri mb-4
-const TAURI_PROXY_CHAIN_RADIUS_LG: f32 = 8.0; // Tauri rounded-lg
 const TAURI_PROXY_CHAIN_NODE_SIZE: f32 = 32.0; // Tauri w-8 h-8
 const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
 const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
@@ -943,7 +942,7 @@ impl WorkspaceApp {
         div()
             .flex()
             .flex_col()
-            .rounded(px(TAURI_PROXY_CHAIN_RADIUS_LG))
+            .rounded(px(self.tokens.radii.lg))
             .border_t_1()
             .border_color(rgb(self.tokens.ui.border))
             .p(px(TAURI_PROXY_CHAIN_SECTION_PADDING))
@@ -1180,7 +1179,7 @@ impl WorkspaceApp {
                         .flex_1()
                         .border_1()
                         .border_color(rgb(self.tokens.ui.border))
-                        .rounded(px(TAURI_PROXY_CHAIN_RADIUS_LG))
+                        .rounded(px(self.tokens.radii.lg))
                         .p(px(TAURI_PROXY_CHAIN_CARD_PADDING))
                         .flex()
                         .flex_col()

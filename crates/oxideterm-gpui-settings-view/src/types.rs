@@ -51,6 +51,7 @@ pub enum SettingsSelect {
     ConnectionIdleTimeout,
     SftpConcurrent,
     SftpDirectoryParallelism,
+    SftpConflict,
     HighlightPreset,
     HighlightRenderMode(usize),
 }
@@ -73,6 +74,7 @@ impl SettingsSelect {
             Self::ConnectionIdleTimeout => SelectAnchorId::SettingsConnectionIdleTimeout,
             Self::SftpConcurrent => SelectAnchorId::SettingsSftpConcurrent,
             Self::SftpDirectoryParallelism => SelectAnchorId::SettingsSftpDirectoryParallelism,
+            Self::SftpConflict => SelectAnchorId::SettingsSftpConflict,
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
         }

@@ -22,8 +22,6 @@ use super::*;
 const FORWARDS_MAX_WIDTH: f32 = 896.0; // Tauri max-w-4xl
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
-const FORWARDS_CARD_RADIUS: f32 = 8.0; // Tauri rounded-lg
-const FORWARDS_FORM_RADIUS: f32 = 2.0; // Tauri rounded-sm
 const FORWARDS_TABLE_HEADER_H: f32 = 34.0; // Tauri px-4 py-2 text-sm
 const FORWARDS_TABLE_ROW_H: f32 = 42.0;
 const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
@@ -520,7 +518,7 @@ impl WorkspaceApp {
                     .min_h(px(100.0))
                     .w_full()
                     .overflow_hidden()
-                    .rounded(px(FORWARDS_CARD_RADIUS))
+                    .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
                     .bg(forwards_theme_card_bg(theme.bg_card, has_background))
@@ -534,7 +532,7 @@ impl WorkspaceApp {
                                 .items_center()
                                 .justify_center()
                                 .gap(px(12.0))
-                                .rounded_b(px(FORWARDS_CARD_RADIUS))
+                                .rounded_b(px(self.tokens.radii.lg))
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.text_muted))
                                 .child(Self::render_lucide_icon(
@@ -821,7 +819,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .rounded(px(FORWARDS_FORM_RADIUS))
+            .rounded(px(self.tokens.radii.xs))
             .border_1()
             .border_color(forwards_theme_border(theme.border, has_background))
             .bg(forwards_theme_with_alpha(
@@ -922,7 +920,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w(px(500.0))
-                    .rounded(px(FORWARDS_CARD_RADIUS))
+                    .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
                     .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
@@ -1042,7 +1040,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w(px(420.0))
-                    .rounded(px(FORWARDS_CARD_RADIUS))
+                    .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
                     .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
@@ -1213,7 +1211,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .size(px(14.0))
-                    .rounded(px(FORWARDS_FORM_RADIUS))
+                    .rounded(px(self.tokens.radii.xs))
                     .border_1()
                     .border_color(if checked {
                         rgb(theme.accent)
@@ -1272,7 +1270,7 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(16.0))
             .p_4()
-            .rounded(px(FORWARDS_FORM_RADIUS))
+            .rounded(px(self.tokens.radii.xs))
             .border_1()
             .border_color(forwards_theme_border_half(theme.border, has_background))
             .bg(forwards_theme_sunken_bg(theme.bg_sunken, has_background))
@@ -1431,7 +1429,7 @@ impl WorkspaceApp {
             .px_2()
             .flex()
             .items_center()
-            .rounded(px(4.0))
+            .rounded(px(self.tokens.radii.sm))
             .bg(forwards_palette_alpha(bg, FORWARDS_TW_ALPHA_30))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_weight(gpui::FontWeight::MEDIUM)
@@ -1621,7 +1619,7 @@ impl WorkspaceApp {
 
     fn render_forwards_error(&self, error: &str) -> AnyElement {
         div()
-            .rounded(px(FORWARDS_FORM_RADIUS))
+            .rounded(px(self.tokens.radii.xs))
             .border_1()
             .border_color(forwards_palette_alpha(TW_RED_900, FORWARDS_TW_ALPHA_50))
             .bg(forwards_palette_alpha(TW_RED_950, FORWARDS_TW_ALPHA_30))
@@ -1671,7 +1669,7 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
-                    .rounded(px(6.0))
+                    .rounded(px(self.tokens.radii.md))
                     .border_1()
                     .border_color(forwards_palette_alpha(TW_BLUE_500, FORWARDS_TW_ALPHA_30))
                     .bg(forwards_palette_alpha(TW_BLUE_500, FORWARDS_TW_ALPHA_05))
@@ -1816,7 +1814,7 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .rounded(px(FORWARDS_CARD_RADIUS))
+                    .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(forwards_theme_border(theme.border, has_background))
                     .overflow_hidden()
@@ -1851,7 +1849,7 @@ impl WorkspaceApp {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded_b(px(FORWARDS_CARD_RADIUS))
+                                .rounded_b(px(self.tokens.radii.lg))
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(if self.forwarding_view.port_scan_pending {
@@ -1963,7 +1961,7 @@ impl WorkspaceApp {
                         .flex()
                         .items_center()
                         .gap(px(4.0))
-                        .rounded(px(4.0))
+                        .rounded(px(self.tokens.radii.sm))
                         .border_1()
                         .border_color(forwards_palette_alpha(TW_EMERALD_800, FORWARDS_TW_ALPHA_40))
                         .bg(forwards_palette_alpha(TW_EMERALD_900, FORWARDS_TW_ALPHA_30))
@@ -2017,10 +2015,10 @@ impl WorkspaceApp {
             .items_center()
             .bg(bg)
             .when(matches!(corners, ForwardRowCorners::Top), |row| {
-                row.rounded_t(px(FORWARDS_CARD_RADIUS))
+                row.rounded_t(px(self.tokens.radii.lg))
             })
             .when(matches!(corners, ForwardRowCorners::Bottom), |row| {
-                row.rounded_b(px(FORWARDS_CARD_RADIUS))
+                row.rounded_b(px(self.tokens.radii.lg))
             })
     }
 

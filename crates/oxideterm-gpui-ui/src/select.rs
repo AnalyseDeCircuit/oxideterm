@@ -27,6 +27,7 @@ pub enum SelectAnchorId {
     SettingsConnectionIdleTimeout,
     SettingsSftpConcurrent,
     SettingsSftpDirectoryParallelism,
+    SettingsSftpConflict,
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     NewConnectionGroup,
@@ -139,9 +140,11 @@ pub fn select_trigger(
     div()
         .h(px(tokens.metrics.ui_control_height))
         .w_full()
+        .min_w(px(0.0))
         .flex()
         .items_center()
         .justify_between()
+        .overflow_hidden()
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgba((tokens.ui.border << 8) | 0x80))
@@ -175,7 +178,7 @@ pub fn select_popup_with_max_height(
 ) -> Stateful<Div> {
     div()
         .id("select-popup-scroll")
-        .w(px(width.max(tokens.metrics.ui_select_min_width)))
+        .min_w(px(width.max(tokens.metrics.ui_select_min_width)))
         .max_h(px(max_height))
         .overflow_y_scroll()
         .rounded(px(tokens.radii.md))
@@ -242,6 +245,7 @@ pub fn select_item(tokens: &ThemeTokens, label: impl Into<String>, selected: boo
         .relative()
         .flex()
         .w_full()
+        .min_w(px(0.0))
         .items_center()
         .rounded(px(tokens.radii.xs))
         .py(px(tokens.metrics.ui_menu_item_padding_y))

@@ -614,7 +614,25 @@ fn alpha_byte(alpha: f32) -> u32 {
 }
 
 fn settings_ui_font_family(configured_family: &str) -> SharedString {
-    css_font_family_head(configured_family).unwrap_or_else(|| SharedString::from("Inter"))
+    css_font_family_head(configured_family).unwrap_or_else(tauri_default_ui_font_family)
+}
+
+#[cfg(target_os = "macos")]
+fn tauri_default_ui_font_family() -> SharedString {
+    // Tauri --font-sans falls through from unbundled Inter to -apple-system on macOS.
+    SharedString::from("SF Pro Text")
+}
+
+#[cfg(target_os = "windows")]
+fn tauri_default_ui_font_family() -> SharedString {
+    // Tauri --font-sans falls through from unbundled Inter to the Windows UI font.
+    SharedString::from("Segoe UI")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn tauri_default_ui_font_family() -> SharedString {
+    // Tauri --font-sans falls through to Roboto before the generic sans-serif family.
+    SharedString::from("Roboto")
 }
 
 fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
@@ -1066,4 +1084,29 @@ fn default_saved_forwards_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("forwards.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_font_uses_first_configured_family() {
+        assert_eq!(
+            settings_ui_font_family("\"DengXian\", \"Microsoft YaHei\"").as_ref(),
+            "DengXian"
+        );
+    }
+
+    #[test]
+    fn empty_ui_font_uses_tauri_platform_fallback() {
+        #[cfg(target_os = "macos")]
+        let expected = "SF Pro Text";
+        #[cfg(target_os = "windows")]
+        let expected = "Segoe UI";
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let expected = "Roboto";
+
+        assert_eq!(settings_ui_font_family("").as_ref(), expected);
+    }
 }

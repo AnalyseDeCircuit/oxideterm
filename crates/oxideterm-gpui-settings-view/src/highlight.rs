@@ -4,6 +4,7 @@ use oxideterm_settings::{
     HighlightRule, HighlightRuleRenderMode, MAX_HIGHLIGHT_PATTERN_LENGTH,
     create_default_highlight_rule,
 };
+use oxideterm_theme::ThemeTokens;
 
 #[derive(Clone)]
 pub struct HighlightPreset {
@@ -109,7 +110,11 @@ fn collect_preview_matches<'a>(
     }
 }
 
-pub fn highlight_preview_segment(text: &str, rule: &HighlightRule) -> AnyElement {
+pub fn highlight_preview_segment(
+    tokens: &ThemeTokens,
+    text: &str,
+    rule: &HighlightRule,
+) -> AnyElement {
     let fallback = 0xf59e0b;
     let fg = rule
         .foreground
@@ -123,7 +128,7 @@ pub fn highlight_preview_segment(text: &str, rule: &HighlightRule) -> AnyElement
         .unwrap_or(fallback);
     div()
         .px(px(2.0))
-        .rounded(px(2.0))
+        .rounded(px(tokens.radii.xs))
         .text_color(rgb(fg))
         .when(
             rule.render_mode == HighlightRuleRenderMode::Background,

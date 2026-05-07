@@ -1186,7 +1186,7 @@ impl WorkspaceApp {
                             .w(px(3.0))
                             .h(px(34.0))
                             .ml(px(6.0))
-                            .rounded(px(2.0))
+                            .rounded(px(self.tokens.radii.active_indicator))
                             .bg(rgb(self.tokens.ui.accent)),
                     ),
             )

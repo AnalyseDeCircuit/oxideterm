@@ -623,6 +623,7 @@ impl WorkspaceApp {
                 row = row.child(line[cursor..matched.start].to_string());
             }
             row = row.child(highlight_preview_segment(
+                &self.tokens,
                 &line[matched.start..matched.end],
                 matched.rule,
             ));

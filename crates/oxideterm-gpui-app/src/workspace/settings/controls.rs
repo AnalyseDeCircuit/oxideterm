@@ -469,6 +469,35 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Sftp, SettingsSelect::SftpConflict) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for action in [
+                    oxideterm_settings::ConflictAction::Ask,
+                    oxideterm_settings::ConflictAction::Overwrite,
+                    oxideterm_settings::ConflictAction::Skip,
+                    oxideterm_settings::ConflictAction::Rename,
+                ] {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            conflict_label(action, &self.i18n),
+                            action == settings.sftp.conflict_action,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| settings.sftp.conflict_action = action,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             _ => None,
         }?;
 

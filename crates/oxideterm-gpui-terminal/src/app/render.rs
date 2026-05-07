@@ -11,6 +11,11 @@ use super::TerminalPane;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
+const PASTE_PREVIEW_TEXT_RADIUS: f32 = 4.0;
+const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
+const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
+const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
+
 impl Focusable for TerminalPane {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -156,7 +161,7 @@ impl TerminalPane {
         );
 
         let mut preview = div()
-            .rounded(px(4.0))
+            .rounded(px(PASTE_PREVIEW_TEXT_RADIUS))
             .border_1()
             .border_color(rgb(0x2f343d))
             .bg(rgb(0x090b0f))
@@ -198,7 +203,7 @@ impl TerminalPane {
             .child(
                 div()
                     .w(px(448.0))
-                    .rounded(px(8.0))
+                    .rounded(px(PASTE_CONFIRM_DIALOG_RADIUS))
                     .border_1()
                     .border_color(rgba(0xeab30880))
                     .bg(rgba(0x151922f2))
@@ -272,7 +277,7 @@ impl TerminalPane {
                                     )
                                     .child(
                                         div()
-                                            .rounded(px(4.0))
+                                            .rounded(px(PASTE_CONFIRM_BUTTON_RADIUS))
                                             .bg(rgb(0xca8a04))
                                             .px(px(12.0))
                                             .py(px(4.0))
@@ -300,7 +305,7 @@ impl TerminalPane {
             .gap(px(4.0))
             .child(
                 div()
-                    .rounded(px(4.0))
+                    .rounded(px(TERMINAL_KEY_HINT_RADIUS))
                     .bg(rgb(0x222834))
                     .px(px(6.0))
                     .py(px(2.0))

@@ -269,8 +269,12 @@ pub fn sftp_directory_parallelism_options() -> &'static [i64] {
 }
 
 pub fn sftp_transfer_count_label(i18n: &I18n, count: i64) -> String {
-    i18n.t("settings_view.sftp.transfer_count")
-        .replace("{{count}}", &count.to_string())
+    let key = if count == 1 {
+        "settings_view.sftp.transfer_count_one"
+    } else {
+        "settings_view.sftp.transfer_count_other"
+    };
+    i18n.t(key).replace("{{count}}", &count.to_string())
 }
 
 pub fn set_reconnect_enabled(settings: &mut PersistedSettings, value: bool) {
