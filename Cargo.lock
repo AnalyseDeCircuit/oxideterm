@@ -6575,8 +6575,10 @@ dependencies = [
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-terminal-unicode",
+ "oxideterm-trzsz",
  "parking_lot",
  "regex",
+ "serde_json",
 ]
 
 [[package]]
@@ -6687,6 +6689,7 @@ dependencies = [
  "oxideterm-ssh",
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",
+ "oxideterm-trzsz",
  "polling",
  "tokio",
  "tracing",

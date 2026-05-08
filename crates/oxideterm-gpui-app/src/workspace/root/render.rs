@@ -8,6 +8,7 @@ impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_tab_titles(cx);
         self.poll_forwarding_worker_results(cx);
+        self.poll_terminal_notices(cx);
         let title = self
             .active_tab()
             .map(|tab| self.tab_display_title(tab))
@@ -50,6 +51,7 @@ impl Render for WorkspaceApp {
             self.active_tab().map(|tab| tab_background_key(&tab.kind)),
             cx,
         );
+        let toast_layer = self.render_workspace_toasts();
 
         div()
             .id("workspace-root")
@@ -346,9 +348,67 @@ impl Render for WorkspaceApp {
                     }
                 },
             )
+            .when_some(toast_layer, |root, layer| root.child(layer))
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),
             ))
+    }
+}
+
+impl WorkspaceApp {
+    fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) {
+        const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
+
+        let now = Instant::now();
+        self.workspace_toasts
+            .retain(|toast| toast.expires_at > now);
+
+        let mut added = false;
+        while let Ok(notice) = self.terminal_notice_rx.try_recv() {
+            self.workspace_toasts.push(WorkspaceToast {
+                notice,
+                expires_at: now + WORKSPACE_TOAST_TTL,
+            });
+            added = true;
+        }
+
+        if added {
+            cx.spawn(async move |weak, cx| {
+                Timer::after(WORKSPACE_TOAST_TTL).await;
+                let _ = weak.update(cx, |workspace, cx| {
+                    let now = Instant::now();
+                    workspace
+                        .workspace_toasts
+                        .retain(|toast| toast.expires_at > now);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+
+    fn render_workspace_toasts(&self) -> Option<AnyElement> {
+        if self.workspace_toasts.is_empty() {
+            return None;
+        }
+
+        let toasts = self.workspace_toasts.iter().map(|toast| ToastView {
+            title: toast.notice.title.clone(),
+            description: toast.notice.description.clone(),
+            status_text: toast.notice.status_text.clone(),
+            progress: toast.notice.progress,
+            variant: toast_variant_from_terminal(toast.notice.variant),
+        });
+        Some(toaster(&self.tokens, toasts).into_any_element())
+    }
+}
+
+fn toast_variant_from_terminal(variant: TerminalNoticeVariant) -> ToastVariant {
+    match variant {
+        TerminalNoticeVariant::Default => ToastVariant::Default,
+        TerminalNoticeVariant::Success => ToastVariant::Success,
+        TerminalNoticeVariant::Error => ToastVariant::Error,
+        TerminalNoticeVariant::Warning => ToastVariant::Warning,
     }
 }

@@ -419,45 +419,33 @@ impl WorkspaceApp {
                             cx,
                         ),
                         self.card_separator(),
-                        self.number_row(
+                        self.in_band_transfer_number_row(
                             "settings_view.terminal.in_band_transfer.max_chunk_bytes",
                             "settings_view.terminal.in_band_transfer.max_chunk_bytes_hint",
+                            SettingsInput::InBandTransferMaxChunkBytes,
                             settings.terminal.in_band_transfer.max_chunk_bytes,
-                            262144,
-                            1024,
-                            16 * 1024 * 1024,
-                            set_in_band_transfer_max_chunk_bytes,
+                            128.0,
                             cx,
                         ),
                         self.card_separator(),
-                        self.number_row(
+                        self.in_band_transfer_number_row(
                             "settings_view.terminal.in_band_transfer.max_file_count",
                             "settings_view.terminal.in_band_transfer.max_file_count_hint",
+                            SettingsInput::InBandTransferMaxFileCount,
                             settings.terminal.in_band_transfer.max_file_count,
-                            1,
-                            1,
-                            10000,
-                            set_in_band_transfer_max_file_count,
+                            128.0,
                             cx,
                         ),
                         self.card_separator(),
-                        self.number_row(
+                        self.in_band_transfer_number_row(
                             "settings_view.terminal.in_band_transfer.max_total_bytes",
                             "settings_view.terminal.in_band_transfer.max_total_bytes_hint",
-                            settings.terminal.in_band_transfer.max_total_bytes / (1024 * 1024),
-                            512,
-                            1,
-                            1024 * 1024,
-                            set_in_band_transfer_max_total_mb,
+                            SettingsInput::InBandTransferMaxTotalBytes,
+                            settings.terminal.in_band_transfer.max_total_bytes,
+                            160.0,
                             cx,
                         ),
-                        self.card_separator(),
-                        self.value_row(
-                            "settings_view.terminal.in_band_transfer.title",
-                            "settings_view.terminal.in_band_transfer.runtime_note",
-                            self.i18n
-                                .t("settings_view.terminal.in_band_transfer.runtime_note"),
-                        ),
+                        self.in_band_transfer_runtime_note(),
                     ],
                 ));
             }
@@ -467,5 +455,49 @@ impl WorkspaceApp {
         }
 
         rows
+    }
+
+    fn in_band_transfer_number_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        input: SettingsInput,
+        value: i64,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.setting_row(
+            label_key,
+            hint_key,
+            self.number_input(input, value.to_string(), width, cx),
+        )
+    }
+
+    fn in_band_transfer_runtime_note(&self) -> AnyElement {
+        const TAURI_RUNTIME_NOTE_BORDER_ALPHA: f32 = 0.30;
+        const TAURI_RUNTIME_NOTE_BACKGROUND_ALPHA: f32 = 0.10;
+
+        // Tauri renders this as `border-amber-500/30 bg-amber-500/10 p-3 text-xs`;
+        // keep the amber opacity mapping explicit instead of folding it into
+        // the generic settings card row style.
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba(
+                (self.tokens.ui.warning << 8) | alpha_byte(TAURI_RUNTIME_NOTE_BORDER_ALPHA),
+            ))
+            .bg(rgba(
+                (self.tokens.ui.warning << 8) | alpha_byte(TAURI_RUNTIME_NOTE_BACKGROUND_ALPHA),
+            ))
+            .p(px(12.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(
+                self.i18n
+                    .t("settings_view.terminal.in_band_transfer.runtime_note"),
+            )
+            .into_any_element()
     }
 }

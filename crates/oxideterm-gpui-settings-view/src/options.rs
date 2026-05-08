@@ -412,6 +412,10 @@ pub fn set_in_band_transfer_max_file_count(settings: &mut PersistedSettings, val
     settings.terminal.in_band_transfer.max_file_count = value;
 }
 
+pub fn set_in_band_transfer_max_total_bytes(settings: &mut PersistedSettings, value: i64) {
+    settings.terminal.in_band_transfer.max_total_bytes = value;
+}
+
 pub fn set_in_band_transfer_max_total_mb(settings: &mut PersistedSettings, value: i64) {
     settings.terminal.in_band_transfer.max_total_bytes = value * 1024 * 1024;
 }

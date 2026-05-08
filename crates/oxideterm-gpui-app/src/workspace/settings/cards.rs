@@ -463,6 +463,17 @@ impl WorkspaceApp {
             SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
             SettingsInput::ConnectionNewGroup => self.settings_connection_new_group.clone(),
             SettingsInput::SftpSpeedLimitKbps => settings.sftp.speed_limit_kbps.to_string(),
+            SettingsInput::InBandTransferMaxChunkBytes => {
+                settings.terminal.in_band_transfer.max_chunk_bytes.to_string()
+            }
+            SettingsInput::InBandTransferMaxFileCount => {
+                settings.terminal.in_band_transfer.max_file_count.to_string()
+            }
+            SettingsInput::InBandTransferMaxTotalBytes => settings
+                .terminal
+                .in_band_transfer
+                .max_total_bytes
+                .to_string(),
             SettingsInput::HighlightLabel(index) => settings
                 .terminal
                 .highlight_rules
@@ -572,6 +583,40 @@ impl WorkspaceApp {
                 if let Ok(value) = self.settings_input_draft.parse::<i64>() {
                     self.edit_settings(
                         |settings| settings.sftp.speed_limit_kbps = value.max(0),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::InBandTransferMaxChunkBytes => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| {
+                            settings.terminal.in_band_transfer.max_chunk_bytes = value.max(1024)
+                        },
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::InBandTransferMaxFileCount => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| settings.terminal.in_band_transfer.max_file_count = value.max(1),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::InBandTransferMaxTotalBytes => {
+                if let Ok(value) = self.settings_input_draft.parse::<i64>() {
+                    self.edit_settings(
+                        |settings| {
+                            settings.terminal.in_band_transfer.max_total_bytes = value.max(1024)
+                        },
                         cx,
                     );
                 } else {

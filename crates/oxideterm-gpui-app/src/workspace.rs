@@ -13,7 +13,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -31,8 +31,13 @@ use oxideterm_gpui_platform::{
 };
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, TerminalBackgroundFit, TerminalBackgroundPreferences,
-    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule, TerminalPane,
-    TerminalPasteLabels, TerminalUiPreferences, TerminalUiTheme,
+    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule, TerminalNotice,
+    TerminalNoticeVariant, TerminalPane, TerminalPasteLabels, TerminalTrzszLabels,
+    TerminalUiPreferences, TerminalUiTheme,
+};
+use oxideterm_gpui_ui::{
+    toast::{ToastVariant, ToastView},
+    toaster::toaster,
 };
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_render_policy::{
@@ -169,6 +174,15 @@ pub(crate) struct WorkspaceApp {
     settings_selected_ssh_hosts: HashSet<String>,
     settings_connection_status: Option<String>,
     local_shells: Vec<ShellInfo>,
+    terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
+    terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
+    workspace_toasts: Vec<WorkspaceToast>,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceToast {
+    notice: TerminalNotice,
+    expires_at: Instant,
 }
 
 // Root workspace pieces are included from here to preserve private access

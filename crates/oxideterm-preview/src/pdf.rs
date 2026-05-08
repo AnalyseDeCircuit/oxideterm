@@ -1,7 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "pdfium")]
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::RenderImage;

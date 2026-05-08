@@ -45,6 +45,7 @@ pub use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,
     TerminalInputEncoder as RawTerminalInputEncoder, TerminalOutputDecoder,
 };
+pub use oxideterm_trzsz::{TrzszTransferDirection, TrzszTransferPolicy, TrzszTransferSelection};
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
 pub use session::{
     SshPtySession, SshSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,

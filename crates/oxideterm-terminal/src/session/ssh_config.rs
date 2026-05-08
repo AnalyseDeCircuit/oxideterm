@@ -3,6 +3,7 @@ pub struct SshSessionConfig {
     registry: Option<SshConnectionRegistry>,
     consumer: Option<ConnectionConsumer>,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
+    trzsz_policy: Option<TrzszTransferPolicy>,
 }
 
 impl SshSessionConfig {
@@ -12,6 +13,7 @@ impl SshSessionConfig {
             registry: None,
             consumer: None,
             prompt_handler: None,
+            trzsz_policy: None,
         }
     }
 
@@ -41,6 +43,15 @@ impl SshSessionConfig {
         self.prompt_handler = Some(prompt_handler);
         self
     }
+
+    pub fn with_trzsz_policy(mut self, policy: Option<TrzszTransferPolicy>) -> Self {
+        self.trzsz_policy = policy;
+        self
+    }
+
+    pub fn trzsz_policy(&self) -> Option<TrzszTransferPolicy> {
+        self.trzsz_policy.clone()
+    }
 }
 
 impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
@@ -50,6 +61,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             registry: None,
             consumer: None,
             prompt_handler: None,
+            trzsz_policy: None,
         }
     }
 }
@@ -61,6 +73,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("registry", &self.registry)
             .field("consumer", &self.consumer)
             .field("prompt_handler", &self.prompt_handler.is_some())
+            .field("trzsz_policy", &self.trzsz_policy)
             .finish()
     }
 }

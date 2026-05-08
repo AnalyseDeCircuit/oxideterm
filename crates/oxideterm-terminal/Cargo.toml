@@ -12,6 +12,7 @@ libc.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
+oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 polling.workspace = true
 tokio.workspace = true
 tracing.workspace = true

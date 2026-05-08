@@ -130,6 +130,26 @@ impl TerminalSession {
         self.backend.set_encoding(encoding);
     }
 
+    pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
+        self.backend.set_trzsz_policy(policy);
+    }
+
+    pub fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {
+        self.backend.take_trzsz_transfer()
+    }
+
+    pub fn feed_trzsz_terminal_output(&mut self, bytes: &[u8]) {
+        self.backend.feed_trzsz_terminal_output(bytes);
+    }
+
+    pub fn interrupt_trzsz_transfer(&mut self) {
+        self.backend.interrupt_trzsz_transfer();
+    }
+
+    pub fn finish_trzsz_transfer(&mut self) {
+        self.backend.finish_trzsz_transfer();
+    }
+
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.backend.lifecycle()
     }

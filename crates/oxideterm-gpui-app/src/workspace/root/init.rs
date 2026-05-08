@@ -34,6 +34,7 @@ impl WorkspaceApp {
         let (node_event_tx, node_event_rx) = std::sync::mpsc::channel();
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
+        let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -141,6 +142,9 @@ impl WorkspaceApp {
             settings_selected_ssh_hosts: HashSet::new(),
             settings_connection_status: None,
             local_shells,
+            terminal_notice_tx,
+            terminal_notice_rx,
+            workspace_toasts: Vec::new(),
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();
@@ -234,6 +238,16 @@ impl WorkspaceApp {
     ) -> TerminalUiPreferences {
         let settings = self.settings_store.settings();
         let terminal = &settings.terminal;
+        let in_band_transfer = &terminal.in_band_transfer;
+        let trzsz_policy =
+            (in_band_transfer.enabled && in_band_transfer.provider == "trzsz").then(|| {
+                oxideterm_terminal::TrzszTransferPolicy {
+                    allow_directory: in_band_transfer.allow_directory,
+                    max_chunk_bytes: in_band_transfer.max_chunk_bytes.max(1) as usize,
+                    max_file_count: in_band_transfer.max_file_count.max(1) as usize,
+                    max_total_bytes: in_band_transfer.max_total_bytes.max(1) as u64,
+                }
+            });
         TerminalUiPreferences {
             font_family: terminal
                 .font_family
@@ -263,6 +277,76 @@ impl WorkspaceApp {
                 cancel: self.i18n.t("terminal.paste.cancel"),
                 paste: self.i18n.t("terminal.paste.paste"),
             },
+            trzsz_labels: TerminalTrzszLabels {
+                select_upload_directory_title: self
+                    .i18n
+                    .t("terminal.trzsz.select_upload_directory_title"),
+                select_upload_directory_description: self
+                    .i18n
+                    .t("terminal.trzsz.select_upload_directory_description"),
+                select_upload_files_title: self.i18n.t("terminal.trzsz.select_upload_files_title"),
+                select_upload_files_description: self
+                    .i18n
+                    .t("terminal.trzsz.select_upload_files_description"),
+                select_download_directory_title: self
+                    .i18n
+                    .t("terminal.trzsz.select_download_directory_title"),
+                select_download_directory_description: self
+                    .i18n
+                    .t("terminal.trzsz.select_download_directory_description"),
+                cancelled_title: self.i18n.t("terminal.trzsz.cancelled_title"),
+                cancelled_description: self.i18n.t("terminal.trzsz.cancelled_description"),
+                completed_title: self.i18n.t("terminal.trzsz.completed_title"),
+                completed_description: self.i18n.t("terminal.trzsz.completed_description"),
+                failed_title: self.i18n.t("terminal.trzsz.failed_title"),
+                failed_description: self.i18n.t("terminal.trzsz.failed_description"),
+                connection_lost_title: self.i18n.t("terminal.trzsz.connection_lost_title"),
+                connection_lost_description: self
+                    .i18n
+                    .t("terminal.trzsz.connection_lost_description"),
+                partial_cleanup_title: self.i18n.t("terminal.trzsz.partial_cleanup_title"),
+                partial_cleanup_description: self
+                    .i18n
+                    .t("terminal.trzsz.partial_cleanup_description"),
+                version_mismatch_title: self.i18n.t("terminal.trzsz.version_mismatch_title"),
+                version_mismatch_description: self
+                    .i18n
+                    .t("terminal.trzsz.version_mismatch_description"),
+                path_invalid_title: self.i18n.t("terminal.trzsz.path_invalid_title"),
+                path_invalid_description: self.i18n.t("terminal.trzsz.path_invalid_description"),
+                symlink_not_supported_title: self
+                    .i18n
+                    .t("terminal.trzsz.symlink_not_supported_title"),
+                symlink_not_supported_description: self
+                    .i18n
+                    .t("terminal.trzsz.symlink_not_supported_description"),
+                conflict_detected_title: self.i18n.t("terminal.trzsz.conflict_detected_title"),
+                conflict_detected_description: self
+                    .i18n
+                    .t("terminal.trzsz.conflict_detected_description"),
+                directory_not_allowed_title: self
+                    .i18n
+                    .t("terminal.trzsz.directory_not_allowed_title"),
+                directory_not_allowed_description: self
+                    .i18n
+                    .t("terminal.trzsz.directory_not_allowed_description"),
+                max_file_count_title: self.i18n.t("terminal.trzsz.max_file_count_title"),
+                max_file_count_description: self
+                    .i18n
+                    .t("terminal.trzsz.max_file_count_description"),
+                max_total_bytes_title: self.i18n.t("terminal.trzsz.max_total_bytes_title"),
+                max_total_bytes_description: self
+                    .i18n
+                    .t("terminal.trzsz.max_total_bytes_description"),
+                disabled_title: self.i18n.t("terminal.trzsz.disabled_title"),
+                disabled_description: self.i18n.t("terminal.trzsz.disabled_description"),
+            },
+            notice_sink: Some({
+                let tx = self.terminal_notice_tx.clone();
+                Arc::new(move |notice| {
+                    let _ = tx.send(notice);
+                })
+            }),
             highlight_rules: terminal
                 .highlight_rules
                 .iter()
@@ -286,6 +370,7 @@ impl WorkspaceApp {
                     priority: rule.priority,
                 })
                 .collect(),
+            trzsz_policy,
             theme: TerminalUiTheme::new(
                 self.tokens.terminal.background,
                 self.tokens.terminal.foreground,

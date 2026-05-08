@@ -1,0 +1,22 @@
+[package]
+name = "oxideterm-trzsz"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+flate2 = "1.1.9"
+md5 = "0.7"
+parking_lot.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+uuid.workspace = true
+walkdir = "2.5"
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3.23"

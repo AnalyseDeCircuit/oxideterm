@@ -1,11 +1,13 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
     Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
-use oxideterm_terminal::{TerminalColor, TerminalCursorShape, TerminalEncoding};
+use oxideterm_terminal::{
+    TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
+};
 
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
 pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
@@ -52,7 +54,10 @@ pub struct TerminalUiPreferences {
     pub render_policy: EffectiveRenderPolicy,
     pub background: Option<TerminalBackgroundPreferences>,
     pub paste_labels: TerminalPasteLabels,
+    pub trzsz_labels: TerminalTrzszLabels,
+    pub notice_sink: Option<Arc<dyn Fn(TerminalNotice) + Send + Sync + 'static>>,
     pub highlight_rules: Vec<TerminalHighlightRule>,
+    pub trzsz_policy: Option<TrzszTransferPolicy>,
 }
 
 impl Default for TerminalUiPreferences {
@@ -75,7 +80,123 @@ impl Default for TerminalUiPreferences {
             render_policy: EffectiveRenderPolicy::quality(),
             background: None,
             paste_labels: TerminalPasteLabels::default(),
+            trzsz_labels: TerminalTrzszLabels::default(),
+            notice_sink: None,
             highlight_rules: Vec::new(),
+            trzsz_policy: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalNoticeVariant {
+    Default,
+    Success,
+    Error,
+    Warning,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalNotice {
+    pub title: String,
+    pub description: Option<String>,
+    pub status_text: Option<String>,
+    pub progress: Option<f32>,
+    pub variant: TerminalNoticeVariant,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalTrzszLabels {
+    pub select_upload_directory_title: String,
+    pub select_upload_directory_description: String,
+    pub select_upload_files_title: String,
+    pub select_upload_files_description: String,
+    pub select_download_directory_title: String,
+    pub select_download_directory_description: String,
+    pub cancelled_title: String,
+    pub cancelled_description: String,
+    pub completed_title: String,
+    pub completed_description: String,
+    pub failed_title: String,
+    pub failed_description: String,
+    pub connection_lost_title: String,
+    pub connection_lost_description: String,
+    pub partial_cleanup_title: String,
+    pub partial_cleanup_description: String,
+    pub version_mismatch_title: String,
+    pub version_mismatch_description: String,
+    pub path_invalid_title: String,
+    pub path_invalid_description: String,
+    pub symlink_not_supported_title: String,
+    pub symlink_not_supported_description: String,
+    pub conflict_detected_title: String,
+    pub conflict_detected_description: String,
+    pub directory_not_allowed_title: String,
+    pub directory_not_allowed_description: String,
+    pub max_file_count_title: String,
+    pub max_file_count_description: String,
+    pub max_total_bytes_title: String,
+    pub max_total_bytes_description: String,
+    pub disabled_title: String,
+    pub disabled_description: String,
+}
+
+impl Default for TerminalTrzszLabels {
+    fn default() -> Self {
+        Self {
+            select_upload_directory_title: "Select folders to upload".to_string(),
+            select_upload_directory_description: "Choose local folders to send with trzsz."
+                .to_string(),
+            select_upload_files_title: "Select files to upload".to_string(),
+            select_upload_files_description: "Choose one or more local files for this trzsz transfer."
+                .to_string(),
+            select_download_directory_title: "Select download location".to_string(),
+            select_download_directory_description: "Choose a local folder to receive trzsz files."
+                .to_string(),
+            cancelled_title: "Transfer cancelled".to_string(),
+            cancelled_description: "The trzsz transfer was cancelled before it completed."
+                .to_string(),
+            completed_title: "Transfer completed".to_string(),
+            completed_description: "The trzsz transfer completed successfully.".to_string(),
+            failed_title: "Transfer failed".to_string(),
+            failed_description: "OxideTerm could not complete this trzsz transfer.".to_string(),
+            connection_lost_title: "Transfer interrupted by connection loss".to_string(),
+            connection_lost_description:
+                "The SSH connection changed while the trzsz transfer was running. Reconnect and start the transfer again."
+                    .to_string(),
+            partial_cleanup_title: "Transfer cleanup incomplete".to_string(),
+            partial_cleanup_description:
+                "Temporary transfer state could not be fully cleaned up. You can keep using the terminal, but old transfer files may remain."
+                    .to_string(),
+            version_mismatch_title: "trzsz protocol mismatch".to_string(),
+            version_mismatch_description:
+                "The remote trzsz runtime is not compatible with this OxideTerm build."
+                    .to_string(),
+            path_invalid_title: "Download path rejected".to_string(),
+            path_invalid_description:
+                "OxideTerm blocked this trzsz transfer because the selected path is invalid or outside the allowed download root."
+                    .to_string(),
+            symlink_not_supported_title: "Symlink transfer is not supported".to_string(),
+            symlink_not_supported_description:
+                "The current OxideTerm trzsz bridge does not write symbolic links.".to_string(),
+            conflict_detected_title: "File conflict detected".to_string(),
+            conflict_detected_description:
+                "A file or folder with the same name already exists at the destination.".to_string(),
+            directory_not_allowed_title: "Directory transfer disabled".to_string(),
+            directory_not_allowed_description:
+                "The current terminal settings do not allow trzsz directory transfer.".to_string(),
+            max_file_count_title: "Too many files selected".to_string(),
+            max_file_count_description:
+                "This transfer contains {{selected}} files, exceeding the configured limit of {{max}}."
+                    .to_string(),
+            max_total_bytes_title: "Transfer size limit exceeded".to_string(),
+            max_total_bytes_description:
+                "This transfer requires {{selected}}, exceeding the configured limit of {{max}}."
+                    .to_string(),
+            disabled_title: "trzsz is not enabled".to_string(),
+            disabled_description:
+                "The remote server started a trzsz transfer, but in-band file transfer is not enabled. Enable trzsz in Settings -> Terminal."
+                    .to_string(),
         }
     }
 }

@@ -12,5 +12,7 @@ oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
+oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true
 regex.workspace = true
+serde_json.workspace = true

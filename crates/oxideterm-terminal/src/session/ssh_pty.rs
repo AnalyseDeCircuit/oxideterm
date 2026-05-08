@@ -19,6 +19,7 @@ pub struct SshPtySession {
     output_decoder: TerminalOutputDecoder,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
+    trzsz_consumer: Option<TrzszConsumer>,
 }
 
 impl SshPtySession {
@@ -75,6 +76,8 @@ impl SshPtySession {
             let _ = connect_tx.send(Err("failed to initialize SSH runtime".to_string()));
         }
 
+        let trzsz_consumer = config.trzsz_policy().map(TrzszConsumer::new);
+
         Self {
             config,
             term,
@@ -96,6 +99,7 @@ impl SshPtySession {
             output_decoder: TerminalOutputDecoder::new(encoding),
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
+            trzsz_consumer,
         }
     }
 
@@ -132,6 +136,14 @@ impl SshPtySession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
+        if self.trzsz_consumer.is_some() {
+            self.feed_trzsz_transport_output(bytes);
+            return;
+        }
+        self.feed_transport_output_to_terminal(bytes);
+    }
+
+    fn feed_transport_output_to_terminal(&mut self, bytes: &[u8]) {
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -161,6 +173,63 @@ impl SshPtySession {
                 let _ = self.write_protocol_bytes(&response);
             }
         }
+    }
+
+    fn feed_trzsz_transport_output(&mut self, bytes: &[u8]) {
+        let mut events = Vec::new();
+        if let Some(consumer) = self.trzsz_consumer.as_mut() {
+            events.extend(consumer.process_server_output(bytes));
+            events.extend(consumer.drain_detected_handshakes());
+        }
+        self.handle_trzsz_consumer_events(events);
+    }
+
+    fn handle_trzsz_consumer_events(&mut self, events: Vec<TrzszConsumerEvent>) {
+        for event in events {
+            match event {
+                TrzszConsumerEvent::WriteTerminal(bytes) => {
+                    self.feed_transport_output_to_terminal(&bytes);
+                }
+                TrzszConsumerEvent::SendServer(bytes) => {
+                    let _ = self.send_command(SshTransportCommand::Data(bytes));
+                }
+                TrzszConsumerEvent::TransferStarted(handshake) => {
+                    // Tauri creates the transfer owner at magic-key detection time
+                    // before showing file dialogs. Keep the same lock boundary:
+                    // all later PTY output is routed into the pending transfer
+                    // buffer until GPUI confirms/cancels the prompt.
+                    self.pending_events.push(TerminalEvent::TrzszTransferPrompt {
+                        direction: handshake.direction,
+                        selection: handshake.selection,
+                        remote_is_windows: handshake.remote_is_windows,
+                    });
+                }
+                TrzszConsumerEvent::TransferDataQueued => {}
+                TrzszConsumerEvent::TransferCancelRequested => {}
+                TrzszConsumerEvent::UploadTimedOut { .. } => {}
+            }
+        }
+    }
+
+    fn route_trzsz_text_input(&mut self, text: &str) -> bool {
+        let Some(consumer) = self.trzsz_consumer.as_mut() else {
+            return false;
+        };
+        let events = consumer.process_terminal_input(text);
+        self.handle_trzsz_consumer_events(events);
+        true
+    }
+
+    fn flush_trzsz_server_writes(&mut self) -> bool {
+        let Some(consumer) = self.trzsz_consumer.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        for bytes in consumer.take_server_writes() {
+            let _ = self.send_command(SshTransportCommand::Data(bytes));
+            changed = true;
+        }
+        changed
     }
 
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
@@ -319,6 +388,7 @@ impl TerminalSessionBackend for SshPtySession {
     fn read_pending(&mut self) -> bool {
         let mut changed = self.process_connect_result();
         changed |= self.drain_transport_output().changed;
+        changed |= self.flush_trzsz_server_writes();
         while let Ok(event) = self.event_rx.try_recv() {
             if self.handle_alacritty_event(event) {
                 changed = true;
@@ -334,6 +404,9 @@ impl TerminalSessionBackend for SshPtySession {
             report.mark_changed();
         }
         report.combine(self.drain_transport_output_with_budget(budget));
+        if self.flush_trzsz_server_writes() {
+            report.mark_changed();
+        }
 
         while report.events_drained < budget.max_events {
             let Ok(event) = self.event_rx.try_recv() else {
@@ -368,6 +441,9 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn write_text(&mut self, text: &str) -> Result<()> {
+        if self.route_trzsz_text_input(text) {
+            return Ok(());
+        }
         let encoded = self.input_encoder.encode_text(text);
         self.write_protocol_bytes(encoded.as_ref())
     }
@@ -388,6 +464,43 @@ impl TerminalSessionBackend for SshPtySession {
         self.output_decoder.reset();
         self.input_encoder.set_encoding(encoding);
         self.encoding_detector.set_encoding(encoding);
+    }
+
+    fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
+        // Tauri's terminal controller applies in-band transfer settings to an
+        // existing terminal controller, not only to future panes. Native keeps
+        // the same user-visible contract by replacing the idle consumer when
+        // settings change; active transfers are left owned by the current
+        // consumer so a settings toggle cannot orphan an in-flight protocol.
+        match (&mut self.trzsz_consumer, policy) {
+            (Some(consumer), Some(policy)) => consumer.update_transfer_policy(policy),
+            (Some(consumer), None) if consumer.is_transferring() => {}
+            (_, policy) => {
+                self.trzsz_consumer = policy.map(TrzszConsumer::new);
+            }
+        }
+    }
+
+    fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {
+        self.trzsz_consumer
+            .as_mut()
+            .and_then(TrzszConsumer::take_active_transfer)
+    }
+
+    fn feed_trzsz_terminal_output(&mut self, bytes: &[u8]) {
+        self.feed_transport_output_to_terminal(bytes);
+    }
+
+    fn interrupt_trzsz_transfer(&mut self) {
+        if let Some(consumer) = self.trzsz_consumer.as_mut() {
+            consumer.interrupt_transfer();
+        }
+    }
+
+    fn finish_trzsz_transfer(&mut self) {
+        if let Some(consumer) = self.trzsz_consumer.as_mut() {
+            consumer.finish_transfer();
+        }
     }
 
     fn mode(&self) -> TermMode {

@@ -18,6 +18,11 @@ pub enum TerminalEvent {
     BlinkChanged(bool),
     ChildExited(Option<i32>),
     MagicDetected(TerminalMagicKind),
+    TrzszTransferPrompt {
+        direction: TrzszTransferDirection,
+        selection: TrzszTransferSelection,
+        remote_is_windows: bool,
+    },
     EncodingHint(EncodingHint),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),

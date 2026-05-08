@@ -111,10 +111,11 @@ impl WorkspaceApp {
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let session_config = SshSessionConfig::from(config)
             .with_registry(self.ssh_registry.clone(), consumer)
-            .with_prompt_handler(prompt_handler);
-        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
+            .with_prompt_handler(prompt_handler)
+            .with_trzsz_policy(preferences.trzsz_policy.clone());
         let pane = cx.new(|cx| {
             TerminalPane::new_ssh_with_preferences(session_config, preferences, window, cx)
                 .expect("failed to initialize ssh terminal pane")

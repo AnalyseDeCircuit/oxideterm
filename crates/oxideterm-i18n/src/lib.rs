@@ -273,6 +273,7 @@ mod tests {
         assert_eq!(i18n.t("ssh.form.title"), "新建连接");
         assert_eq!(i18n.t("sidebar.panels.sessions"), "活动会话");
         assert_eq!(i18n.t("terminal.local_terminal"), "本地终端");
+        assert_eq!(i18n.t("terminal.trzsz.completed_title"), "传输已完成");
     }
 
     #[test]
@@ -606,6 +607,52 @@ mod tests {
             "sftp.queue.status_error",
             "sftp.queue.empty",
             "sftp.errors.connection_lost",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_trzsz_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "terminal.trzsz.select_upload_directory_title",
+            "terminal.trzsz.select_upload_directory_description",
+            "terminal.trzsz.select_upload_files_title",
+            "terminal.trzsz.select_upload_files_description",
+            "terminal.trzsz.select_download_directory_title",
+            "terminal.trzsz.select_download_directory_description",
+            "terminal.trzsz.cancelled_title",
+            "terminal.trzsz.cancelled_description",
+            "terminal.trzsz.completed_title",
+            "terminal.trzsz.completed_description",
+            "terminal.trzsz.failed_title",
+            "terminal.trzsz.failed_description",
+            "terminal.trzsz.version_mismatch_title",
+            "terminal.trzsz.path_invalid_title",
+            "terminal.trzsz.symlink_not_supported_title",
+            "terminal.trzsz.conflict_detected_title",
+            "terminal.trzsz.directory_not_allowed_title",
+            "terminal.trzsz.max_file_count_title",
+            "terminal.trzsz.max_total_bytes_title",
+            "terminal.trzsz.disabled_title",
         ];
 
         for locale in locales {
