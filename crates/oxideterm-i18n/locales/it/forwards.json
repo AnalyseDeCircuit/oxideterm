@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Nuovo inoltro",
+      "stop_all": "Ferma tutto",
+      "suspend_all": "Sospendi tutto",
+      "restore_suspended": "Ripristina",
       "stop": "Ferma inoltro",
       "restart": "Riavvia inoltro",
       "edit": "Modifica inoltro",
@@ -103,6 +106,9 @@
       "created": "Inoltro creato",
       "updated": "Inoltro aggiornato",
       "stopped": "Inoltro fermato",
+      "stopped_all": "Tutti gli inoltri fermati",
+      "suspended_all": "Inoltri sospesi",
+      "restored": "Inoltri sospesi ripristinati",
       "restarted": "Inoltro riavviato",
       "deleted": "Inoltro eliminato"
     }

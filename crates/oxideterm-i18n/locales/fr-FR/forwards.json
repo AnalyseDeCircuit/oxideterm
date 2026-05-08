@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Nouveau transfert",
+      "stop_all": "Tout arrêter",
+      "suspend_all": "Tout suspendre",
+      "restore_suspended": "Restaurer",
       "stop": "Arrêter le transfert",
       "restart": "Redémarrer le transfert",
       "edit": "Modifier le transfert",
@@ -103,6 +106,9 @@
       "created": "Transfert créé",
       "updated": "Transfert mis à jour",
       "stopped": "Transfert arrêté",
+      "stopped_all": "Tous les transferts sont arrêtés",
+      "suspended_all": "Transferts suspendus",
+      "restored": "Transferts suspendus restaurés",
       "restarted": "Transfert redémarré",
       "deleted": "Transfert supprimé"
     }

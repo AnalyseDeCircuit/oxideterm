@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Neue Weiterleitung",
+      "stop_all": "Alle stoppen",
+      "suspend_all": "Alle aussetzen",
+      "restore_suspended": "Wiederherstellen",
       "stop": "Weiterleitung stoppen",
       "restart": "Weiterleitung neu starten",
       "edit": "Weiterleitung bearbeiten",
@@ -103,6 +106,9 @@
       "created": "Weiterleitung erstellt",
       "updated": "Weiterleitung aktualisiert",
       "stopped": "Weiterleitung gestoppt",
+      "stopped_all": "Alle Weiterleitungen gestoppt",
+      "suspended_all": "Weiterleitungen ausgesetzt",
+      "restored": "Ausgesetzte Weiterleitungen wiederhergestellt",
       "restarted": "Weiterleitung neu gestartet",
       "deleted": "Weiterleitung gelöscht"
     }

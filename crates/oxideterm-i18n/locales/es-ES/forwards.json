@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Nuevo reenvío",
+      "stop_all": "Detener todo",
+      "suspend_all": "Suspender todo",
+      "restore_suspended": "Restaurar",
       "stop": "Detener reenvío",
       "restart": "Reiniciar reenvío",
       "edit": "Editar reenvío",
@@ -103,6 +106,9 @@
       "created": "Reenvío creado",
       "updated": "Reenvío actualizado",
       "stopped": "Reenvío detenido",
+      "stopped_all": "Todos los reenvíos detenidos",
+      "suspended_all": "Reenvíos suspendidos",
+      "restored": "Reenvíos suspendidos restaurados",
       "restarted": "Reenvío reiniciado",
       "deleted": "Reenvío eliminado"
     }

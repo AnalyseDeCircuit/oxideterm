@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "新規転送",
+      "stop_all": "すべて停止",
+      "suspend_all": "すべて一時停止",
+      "restore_suspended": "復元",
       "stop": "転送を停止",
       "restart": "転送を再起動",
       "edit": "転送を編集",
@@ -103,6 +106,9 @@
       "created": "転送を作成しました",
       "updated": "転送を更新しました",
       "stopped": "転送を停止しました",
+      "stopped_all": "すべての転送を停止しました",
+      "suspended_all": "転送を一時停止しました",
+      "restored": "一時停止した転送を復元しました",
       "restarted": "転送を再起動しました",
       "deleted": "転送を削除しました"
     }

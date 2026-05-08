@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Novo encaminhamento",
+      "stop_all": "Parar todos",
+      "suspend_all": "Suspender todos",
+      "restore_suspended": "Restaurar",
       "stop": "Parar encaminhamento",
       "restart": "Reiniciar encaminhamento",
       "edit": "Editar encaminhamento",
@@ -103,6 +106,9 @@
       "created": "Encaminhamento criado",
       "updated": "Encaminhamento atualizado",
       "stopped": "Encaminhamento parado",
+      "stopped_all": "Todos os encaminhamentos foram parados",
+      "suspended_all": "Encaminhamentos suspensos",
+      "restored": "Encaminhamentos suspensos restaurados",
       "restarted": "Encaminhamento reiniciado",
       "deleted": "Encaminhamento excluído"
     }

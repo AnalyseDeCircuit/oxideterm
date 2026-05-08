@@ -237,6 +237,73 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn stop_all_forward_rules(&mut self, tab_id: TabId, node_id: NodeId, cx: &mut Context<Self>) {
+        self.start_forward_operation(
+            tab_id,
+            node_id,
+            "forwards.messages.stopped_all",
+            move |manager| {
+                Box::pin(async move {
+                    manager.stop_all().await;
+                    Ok(())
+                })
+            },
+            cx,
+        );
+    }
+
+    fn suspend_all_forward_rules(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_forward_operation(
+            tab_id,
+            node_id,
+            "forwards.messages.suspended_all",
+            move |manager| {
+                Box::pin(async move {
+                    // Mirrors Tauri pause_port_forwards: stopping listeners is
+                    // not deletion. Rules move to Suspended so reconnect/restore
+                    // can recreate them from the same manager owner.
+                    manager.suspend_all_and_save_rules().await;
+                    Ok(())
+                })
+            },
+            cx,
+        );
+    }
+
+    fn restore_suspended_forward_rules(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = self.forwarding_session_id_for_node(&node_id);
+        let router = self.node_router.clone();
+        self.start_forward_operation(
+            tab_id,
+            node_id.clone(),
+            "forwards.messages.restored",
+            move |manager| {
+                Box::pin(async move {
+                    let consumer = ConnectionConsumer::PortForward(session_id);
+                    let handle = router
+                        .acquire_connection(&node_id, consumer)
+                        .map_err(|error| oxideterm_forwarding::ForwardingError::Ssh(error.to_string()))?;
+                    let results = manager.restore_saved_forwards(handle.handle).await;
+                    if let Some(error) = results.into_iter().find_map(Result::err) {
+                        return Err(error);
+                    }
+                    Ok(())
+                })
+            },
+            cx,
+        );
+    }
+
     fn start_port_scan_for_forwards_tab(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
             return;

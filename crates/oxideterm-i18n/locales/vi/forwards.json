@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "Chuyển tiếp mới",
+      "stop_all": "Dừng tất cả",
+      "suspend_all": "Tạm dừng tất cả",
+      "restore_suspended": "Khôi phục",
       "stop": "Dừng chuyển tiếp",
       "restart": "Khởi động lại chuyển tiếp",
       "edit": "Chỉnh sửa chuyển tiếp",
@@ -103,6 +106,9 @@
       "created": "Đã tạo chuyển tiếp",
       "updated": "Đã cập nhật chuyển tiếp",
       "stopped": "Đã dừng chuyển tiếp",
+      "stopped_all": "Đã dừng tất cả chuyển tiếp",
+      "suspended_all": "Đã tạm dừng chuyển tiếp",
+      "restored": "Đã khôi phục chuyển tiếp tạm dừng",
       "restarted": "Đã khởi động lại chuyển tiếp",
       "deleted": "Đã xóa chuyển tiếp"
     }
