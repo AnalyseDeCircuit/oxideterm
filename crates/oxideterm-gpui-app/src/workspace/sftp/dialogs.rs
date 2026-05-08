@@ -1015,12 +1015,14 @@ impl WorkspaceApp {
         let diff_lines = std::sync::Arc::new(lines);
         let diff_scroll = self.sftp_view.diff_scroll.clone();
         div()
+            .w_full()
             .h(px(480.0))
             .flex()
             .flex_col()
             .bg(rgb(theme.bg_sunken))
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .border_b_1()
                     .border_color(rgb(theme.border))
@@ -1097,6 +1099,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .id("sftp-diff-scroll")
+                    .w_full()
                     .flex_1()
                     .overflow_y_scroll()
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
@@ -1149,6 +1152,7 @@ impl WorkspaceApp {
                                                 line.content
                                             };
                                             div()
+                                                .w_full()
                                                 .h(px(SFTP_DIFF_ROW_HEIGHT))
                                                 .flex()
                                                 .border_b_1()

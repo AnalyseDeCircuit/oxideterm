@@ -3,7 +3,6 @@ enum ForwardButtonVariant {
     Primary,
     Secondary,
     Ghost,
-    Danger,
 }
 
 #[derive(Clone, Copy)]

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::SftpError;
 
@@ -248,18 +248,29 @@ impl RedbProgressStore {
             SftpError::StorageError(format!("Failed to open progress table: {error}"))
         })?;
         let mut incomplete_entries = Vec::new();
+        let mut invalid_entries = Vec::new();
         for item in table.iter().map_err(|error| {
             SftpError::StorageError(format!("Failed to iterate progress table: {error}"))
         })? {
-            let (_key, value) = item.map_err(|error| {
+            let (key, value) = item.map_err(|error| {
                 SftpError::StorageError(format!("Failed to read progress entry: {error}"))
             })?;
-            let progress: StoredTransferProgress =
-                rmp_serde::from_slice(value.value()).map_err(|error| {
-                    SftpError::StorageError(format!(
-                        "Failed to deserialize progress during index rebuild: {error}"
-                    ))
-                })?;
+            let transfer_id = key.value().to_string();
+            let progress: StoredTransferProgress = match rmp_serde::from_slice(value.value()) {
+                Ok(progress) => progress,
+                Err(error) => {
+                    // Older native builds briefly wrote incompatible progress rows while the
+                    // transfer schema was being ported. Tauri rebuilds indexes from valid
+                    // resumable transfers; one stale row must not disable the whole store.
+                    warn!(
+                        transfer_id,
+                        error = %error,
+                        "dropping unreadable SFTP transfer progress row during index rebuild"
+                    );
+                    invalid_entries.push(transfer_id);
+                    continue;
+                }
+            };
             if progress.is_incomplete() {
                 incomplete_entries.push((progress.transfer_id, progress.session_id));
             }
@@ -271,7 +282,7 @@ impl RedbProgressStore {
             SftpError::StorageError(format!("Failed to begin write transaction: {error}"))
         })?;
         {
-            let progress_table = write_txn.open_table(PROGRESS_TABLE).map_err(|error| {
+            let mut progress_table = write_txn.open_table(PROGRESS_TABLE).map_err(|error| {
                 SftpError::StorageError(format!("Failed to open progress table: {error}"))
             })?;
             let mut incomplete_table =
@@ -303,6 +314,15 @@ impl RedbProgressStore {
                         "Failed to clear session incomplete index table: {error}"
                     ))
                 })?;
+            for transfer_id in invalid_entries {
+                progress_table
+                    .remove(transfer_id.as_str())
+                    .map_err(|error| {
+                        SftpError::StorageError(format!(
+                            "Failed to remove unreadable progress entry: {error}"
+                        ))
+                    })?;
+            }
             for (transfer_id, session_id) in incomplete_entries {
                 if let Some(value) = progress_table.get(transfer_id.as_str()).map_err(|error| {
                     SftpError::StorageError(format!(
@@ -555,5 +575,70 @@ impl ProgressStore for RedbProgressStore {
             self.delete(&progress.transfer_id).await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    fn temp_progress_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxideterm-sftp-{name}-{nonce}.redb"))
+    }
+
+    #[test]
+    fn progress_store_rebuild_drops_unreadable_legacy_rows() {
+        let path = temp_progress_path("legacy-row");
+        {
+            let db = redb::Database::create(&path).expect("create test redb");
+            let write_txn = db.begin_write().expect("begin seed transaction");
+            {
+                let mut progress_table = write_txn
+                    .open_table(PROGRESS_TABLE)
+                    .expect("open progress table");
+                let mut incomplete_table = write_txn
+                    .open_table(INCOMPLETE_PROGRESS_TABLE)
+                    .expect("open incomplete table");
+                let mut session_index_table = write_txn
+                    .open_table(SESSION_INCOMPLETE_INDEX_TABLE)
+                    .expect("open session index table");
+
+                // msgpack integer 36 is the exact incompatible legacy shape from the
+                // native transfer-progress port. It must not disable the whole store.
+                let legacy_integer: &[u8] = &[36_u8];
+                progress_table
+                    .insert("legacy", legacy_integer)
+                    .expect("seed invalid progress row");
+                incomplete_table
+                    .insert("legacy", legacy_integer)
+                    .expect("seed invalid incomplete row");
+                session_index_table
+                    .insert("session:legacy", "legacy")
+                    .expect("seed stale session index row");
+            }
+            write_txn.commit().expect("commit seed transaction");
+        }
+
+        let store = RedbProgressStore::new(&path).expect("open progress store");
+        let read_txn = store.db.begin_read().expect("begin read transaction");
+        let progress_table = read_txn
+            .open_table(PROGRESS_TABLE)
+            .expect("open rebuilt progress table");
+        assert!(
+            progress_table
+                .get("legacy")
+                .expect("read legacy progress row")
+                .is_none()
+        );
+        drop(progress_table);
+        drop(read_txn);
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 }

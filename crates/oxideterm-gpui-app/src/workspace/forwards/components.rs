@@ -99,12 +99,6 @@ impl WorkspaceApp {
                 theme.text,
                 forwards_theme_hover_bg(theme.bg_hover, has_background),
             ),
-            ForwardButtonVariant::Danger => (
-                forwards_palette_color(TW_RED_500),
-                forwards_palette_color(TW_RED_500),
-                theme.accent_text,
-                forwards_palette_color(TW_RED_400),
-            ),
         };
         div()
             .h(px(36.0))

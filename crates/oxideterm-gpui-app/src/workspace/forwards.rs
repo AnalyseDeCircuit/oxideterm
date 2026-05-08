@@ -13,6 +13,7 @@ use oxideterm_forwarding::{
     ForwardUpdate, ForwardingManager, PortDetectionSnapshot,
 };
 use oxideterm_gpui_ui::{
+    ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
     surface::{color_for_background, color_for_background_or_alpha, color_with_alpha},
     text_input::{TextInputView, text_input, text_input_anchor_probe},
     typography::tauri_cjk_ui_font_family as forwards_cjk_ui_font_family,

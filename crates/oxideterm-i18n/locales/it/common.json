@@ -31,6 +31,11 @@
   },
   "common": {
     "enabled": "Attivato",
-    "disabled": "Disattivato"
+    "disabled": "Disattivato",
+    "actions": {
+      "cancel": "Annulla",
+      "confirm": "Conferma",
+      "delete": "Elimina"
+    }
   }
 }

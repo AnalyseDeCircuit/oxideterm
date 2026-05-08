@@ -758,7 +758,8 @@ fn diff_cell(
         })
         .child(
             div()
-                .w(px(48.0))
+                .w(px(SFTP_DIFF_LINE_NUMBER_COL))
+                .flex_none()
                 .px(px(8.0))
                 .py(px(2.0))
                 .text_align(gpui::TextAlign::Right)

@@ -31,6 +31,11 @@
   },
   "common": {
     "enabled": "已啟用",
-    "disabled": "已停用"
+    "disabled": "已停用",
+    "actions": {
+      "cancel": "取消",
+      "confirm": "確認",
+      "delete": "刪除"
+    }
   }
 }
