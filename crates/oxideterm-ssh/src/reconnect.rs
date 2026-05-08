@@ -55,11 +55,27 @@ pub struct ReconnectSnapshot {
     pub node_id: String,
     pub terminal_pane_ids: Vec<String>,
     pub old_terminal_session_ids: Vec<String>,
+    pub terminal_sessions_by_node: Vec<ReconnectNodeTerminalSnapshot>,
     pub active_port_forward_ids: Vec<String>,
     pub inflight_sftp_transfer_ids: Vec<String>,
+    pub incomplete_sftp_transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
     pub open_ide_file_paths: Vec<String>,
     pub old_connection_ids: Vec<String>,
     pub snapshot_at: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectNodeTerminalSnapshot {
+    pub node_id: String,
+    pub old_terminal_session_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectNodeTransferSnapshot {
+    pub node_id: String,
+    pub transfer_ids: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -208,6 +224,15 @@ impl ReconnectOrchestratorStore {
 
     pub fn job(&self, node_id: &str) -> Option<ReconnectJob> {
         self.jobs.get(node_id).map(|job| job.clone())
+    }
+
+    pub fn update_snapshot<F>(&self, node_id: &str, update: F) -> Option<ReconnectJob>
+    where
+        F: FnOnce(&mut ReconnectSnapshot),
+    {
+        let mut job = self.jobs.get_mut(node_id)?;
+        update(&mut job.snapshot);
+        Some(job.clone())
     }
 
     pub fn jobs(&self) -> Vec<ReconnectJob> {

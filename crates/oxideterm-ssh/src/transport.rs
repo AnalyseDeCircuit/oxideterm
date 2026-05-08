@@ -841,6 +841,133 @@ impl SshTransportClient {
         result
     }
 
+    pub async fn connect_node_with_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+    ) -> Result<SshConnectionHandle, SshTransportError> {
+        let connection = registry.acquire(self.config.clone(), consumer.clone());
+        self.connect_existing_node_with_registry(registry, consumer, connection)
+            .await
+    }
+
+    pub async fn connect_existing_node_with_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        connection: SshConnectionHandle,
+    ) -> Result<SshConnectionHandle, SshTransportError> {
+        let connection_id = connection.connection_id().to_string();
+
+        // Tauri's connect_tree_node establishes the SSH transport before any
+        // terminal is created. Native uses the same registry physical slot so
+        // SFTP, forwarding, and later terminal panes all consume the node
+        // connection instead of bootstrapping from a terminal shell.
+        let pooled = if let Some(existing) = connection.physical::<PooledSshConnection>() {
+            if existing.is_closed().await {
+                connection.clear_physical().await;
+                self.connect_authenticated_connection().await
+            } else {
+                Ok(existing)
+            }
+        } else {
+            self.connect_authenticated_connection().await
+        };
+
+        match pooled {
+            Ok(pooled) => {
+                connection.set_physical(pooled);
+                let _ = registry.mark_state(&connection_id, ConnectionState::Active);
+                Ok(connection)
+            }
+            Err(error) => {
+                let _ =
+                    registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
+                registry.release(&connection_id, &consumer);
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn connect_child_node_via_parent_with_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        connection: SshConnectionHandle,
+        parent: SshConnectionHandle,
+    ) -> Result<SshConnectionHandle, SshTransportError> {
+        let connection_id = connection.connection_id().to_string();
+        let remote_forward_handler = Arc::new(RwLock::new(None));
+
+        // This is the native equivalent of Tauri establish_tunneled_connection:
+        // the child SSH transport is opened over the parent's direct-tcpip
+        // channel, then stored in the child's registry entry. The child node
+        // still gets its own physical target connection and is resolved through
+        // NodeRouter afterwards.
+        let pooled = async {
+            let Some(parent_pooled) = parent.physical::<PooledSshConnection>() else {
+                return Err(SshTransportError::ConnectionFailed(
+                    "parent node has no active SSH transport for tunneled connect".to_string(),
+                ));
+            };
+            if parent_pooled.is_closed().await {
+                return Err(SshTransportError::ConnectionFailed(
+                    "parent SSH transport is closed and cannot open child tunnel".to_string(),
+                ));
+            }
+
+            let stream = {
+                let parent_handle = parent_pooled.target.lock().await;
+                open_direct_tcpip_stream(&parent_handle, &self.config.host, self.config.port)
+                    .await?
+            };
+            let mut target = tokio::time::timeout(
+                Duration::from_secs(self.config.timeout_secs),
+                client::connect_stream(
+                    Arc::new(ssh_client_config()),
+                    stream,
+                    NativeClientHandler::new(
+                        self.config.host.clone(),
+                        self.config.port,
+                        self.config.strict_host_key_checking,
+                        self.config.trust_host_key,
+                        self.config.expected_host_key_fingerprint.clone(),
+                        self.config.agent_forwarding,
+                        remote_forward_handler.clone(),
+                    ),
+                ),
+            )
+            .await
+            .map_err(|_| SshTransportError::Timeout)?
+            .map_err(|error| {
+                SshTransportError::ConnectionFailed(format!(
+                    "failed to connect child node via parent tunnel: {error}"
+                ))
+            })?;
+            authenticate(&mut target, &self.config, self.prompt_handler.as_deref()).await?;
+            Ok(Arc::new(PooledSshConnection::tunneled(
+                target,
+                Vec::new(),
+                remote_forward_handler,
+            )))
+        }
+        .await;
+
+        match pooled {
+            Ok(pooled) => {
+                connection.set_physical(pooled);
+                let _ = registry.mark_state(&connection_id, ConnectionState::Active);
+                Ok(connection)
+            }
+            Err(error) => {
+                let _ =
+                    registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
+                registry.release(&connection_id, &consumer);
+                Err(error)
+            }
+        }
+    }
+
     async fn connect_shell_inner(
         self,
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,

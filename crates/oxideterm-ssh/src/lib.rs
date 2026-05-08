@@ -30,12 +30,13 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    PhaseEvent, PhaseResult, ReconnectJob, ReconnectOrchestratorStore, ReconnectPhase,
-    ReconnectSnapshot, ReconnectTiming,
+    PhaseEvent, PhaseResult, ReconnectJob, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
+    ReconnectTiming,
 };
 pub use router::{
-    NodeId, NodeReadiness, NodeRouter, NodeState, NodeStateEvent, NodeStateSnapshot,
-    ResolvedConnection, RouteError, TerminalEndpoint,
+    NodeEventEmitter, NodeEventSequencer, NodeId, NodeReadiness, NodeRouter, NodeRuntimeStore,
+    NodeState, NodeStateEvent, NodeStateSnapshot, ResolvedConnection, RouteError, TerminalEndpoint,
 };
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,

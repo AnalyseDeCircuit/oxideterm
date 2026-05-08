@@ -20,6 +20,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::SshConfig;
+use crate::router::NodeEventEmitter;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
@@ -385,6 +386,7 @@ pub struct SshConnectionRegistry {
     config: ConnectionPoolConfig,
     by_key: Arc<DashMap<String, Arc<ConnectionEntry>>>,
     by_id: Arc<DashMap<String, String>>,
+    node_event_emitter: Arc<RwLock<Option<NodeEventEmitter>>>,
 }
 
 impl SshConnectionRegistry {
@@ -393,7 +395,12 @@ impl SshConnectionRegistry {
             config,
             by_key: Arc::new(DashMap::new()),
             by_id: Arc::new(DashMap::new()),
+            node_event_emitter: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub fn set_node_event_emitter(&self, emitter: NodeEventEmitter) {
+        *self.node_event_emitter.write() = Some(emitter);
     }
 
     pub fn acquire(&self, config: SshConfig, consumer: ConnectionConsumer) -> SshConnectionHandle {
@@ -456,7 +463,18 @@ impl SshConnectionRegistry {
         let entry = self.by_key.get(&key)?.clone();
         *entry.state.write() = state;
         entry.touch();
-        Some(entry.info())
+        let info = entry.info();
+        if let Some(emitter) = self.node_event_emitter.read().clone() {
+            // Match Tauri's registry-to-node event flow: low-level connection
+            // state changes are translated through the shared NodeEventEmitter
+            // whenever the connection has been registered to a node.
+            let _ = emitter.emit_state_from_connection(
+                &info.connection_id,
+                &info.state,
+                "connection state changed",
+            );
+        }
+        Some(info)
     }
 
     pub fn mark_link_down_cascade(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {

@@ -9,6 +9,14 @@ struct WorkspaceSshNode {
 
 #[derive(Debug)]
 pub(super) enum ReconnectWorkerResult {
+    NodeConnected {
+        node_id: NodeId,
+        connection_id: String,
+    },
+    NodeConnectFailed {
+        node_id: NodeId,
+        error: String,
+    },
     GraceRecovered {
         node_id: NodeId,
         connection_id: String,
@@ -16,6 +24,11 @@ pub(super) enum ReconnectWorkerResult {
     GraceExpired {
         node_id: NodeId,
         connection_id: String,
+        detail: String,
+    },
+    SftpTransfersSnapshotted {
+        node_id: NodeId,
+        transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
         detail: String,
     },
 }

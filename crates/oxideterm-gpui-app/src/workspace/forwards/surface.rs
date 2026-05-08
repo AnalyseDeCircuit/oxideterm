@@ -33,11 +33,10 @@ impl WorkspaceApp {
 
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
-        self.active_sidebar_section = SidebarSection::Sessions;
-        self.active_ssh_node_id = Some(node_id);
+        self.active_ssh_node_id = Some(node_id.clone());
+        self.ensure_node_connection_started(&node_id);
         self.forwarding_view.error = None;
         self.start_port_scan_for_forwards_tab(tab_id, cx);
-        self.persist_sidebar_settings();
         cx.notify();
     }
 

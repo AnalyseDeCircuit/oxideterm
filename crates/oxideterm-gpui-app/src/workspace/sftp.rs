@@ -181,10 +181,17 @@ pub(super) enum SftpWorkerResult {
         error: Option<String>,
     },
     TransferComplete {
+        node_id: NodeId,
+        transfer_id: String,
         id: u64,
         result: Result<(), String>,
         refresh_remote: bool,
         refresh_local: bool,
+    },
+    ResumeIncompleteTransferLoaded {
+        node_id: NodeId,
+        transfer_id: String,
+        result: Result<StoredTransferProgress, String>,
     },
     RemoteMutationComplete {
         result: Result<(), String>,

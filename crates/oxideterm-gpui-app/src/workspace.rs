@@ -50,12 +50,13 @@ use oxideterm_settings::{
 };
 use oxideterm_sftp::{
     DummyProgressStore, ProgressStore, RedbProgressStore, SftpTransferManager,
-    SftpTransferRuntimeSettings,
+    SftpTransferRuntimeSettings, StoredTransferProgress,
 };
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeReadiness, NodeRouter,
-    NodeStateEvent, PhaseResult, ProbeConnectionStatus, ReconnectOrchestratorStore, ReconnectPhase,
-    ReconnectSnapshot, SshConfig, SshConnectionRegistry,
+    NodeRuntimeStore, NodeStateEvent, PhaseResult, ProbeConnectionStatus,
+    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
+    ReconnectPhase, ReconnectSnapshot, SshConfig, SshConnectionRegistry, SshTransportClient,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
@@ -138,6 +139,7 @@ pub(crate) struct WorkspaceApp {
     sftp_connection_consumers: HashMap<String, (String, ConnectionConsumer)>,
     sftp_transfer_manager: Arc<SftpTransferManager>,
     sftp_progress_store: Arc<dyn ProgressStore>,
+    node_runtime_store: NodeRuntimeStore,
     node_router: NodeRouter,
     node_event_tx: std::sync::mpsc::Sender<NodeStateEvent>,
     node_event_rx: std::sync::mpsc::Receiver<NodeStateEvent>,
@@ -145,6 +147,8 @@ pub(crate) struct WorkspaceApp {
     reconnect_orchestrator: ReconnectOrchestratorStore,
     reconnect_worker_tx: std::sync::mpsc::Sender<ReconnectWorkerResult>,
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
+    pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
+    reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,

@@ -18,18 +18,19 @@ impl WorkspaceApp {
     }
 
     pub(super) fn sync_active_tab_surface(&mut self) {
+        // Tauri keeps `sidebarUI.activeSection` independent from tab focus:
+        // `setActiveTab`/`closeTab` only change the active tab, while the
+        // sidebar section changes from explicit sidebar button clicks. Preserve
+        // that ownership here so closing a terminal cannot jump the sidebar.
         match self.active_tab().map(|tab| &tab.kind) {
             Some(TabKind::Settings) => {
                 self.active_surface = ActiveSurface::Settings;
-                self.active_sidebar_section = SidebarSection::Settings;
             }
             Some(TabKind::Forwards) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Sessions;
             }
             Some(TabKind::Sftp) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Sessions;
                 if let Some(active_tab_id) = self.active_tab_id
                     && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id)
                 {
@@ -39,7 +40,6 @@ impl WorkspaceApp {
             }
             Some(TabKind::SessionManager) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Connections;
             }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
@@ -184,32 +184,60 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_ids) = self
-            .ssh_nodes
-            .get(node_id)
-            .map(|node| node.terminal_ids.clone())
-        else {
+        if !self.ssh_nodes.contains_key(node_id) {
             return;
-        };
-
-        let forwarding_registry = self.forwarding_registry.clone();
-        let forwarding_runtime = self.forwarding_runtime.clone();
-        let forwarding_session_id = self.forwarding_session_id_for_node(node_id);
-        if let Some((connection_id, consumer)) = self
-            .forwarding_connection_consumers
-            .remove(&forwarding_session_id)
-        {
-            self.ssh_registry.release(&connection_id, &consumer);
         }
-        forwarding_runtime.spawn(async move {
-            let _ = forwarding_registry.remove(&forwarding_session_id).await;
-        });
 
-        for session_id in session_ids {
-            self.close_terminal_session(session_id, window, cx);
+        let mut nodes_to_disconnect = self.node_runtime_store.subtree_postorder(node_id);
+        if nodes_to_disconnect.is_empty() {
+            nodes_to_disconnect.push(node_id.clone());
         }
-        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
-            node.readiness = NodeReadiness::Disconnected;
+        for affected_node_id in &nodes_to_disconnect {
+            let forwarding_registry = self.forwarding_registry.clone();
+            let forwarding_runtime = self.forwarding_runtime.clone();
+            let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
+            if let Some((connection_id, consumer)) = self
+                .forwarding_connection_consumers
+                .remove(&forwarding_session_id)
+            {
+                self.ssh_registry.release(&connection_id, &consumer);
+            }
+            forwarding_runtime.spawn(async move {
+                let _ = forwarding_registry.remove(&forwarding_session_id).await;
+            });
+        }
+
+        // Tauri's `disconnectNode` closes tabs by affected nodeId, not just by
+        // terminal session id. Keep SFTP/forwards tabs from surviving as orphaned
+        // node-scoped surfaces after an explicit disconnect.
+        for affected_node_id in &nodes_to_disconnect {
+            self.close_tabs_for_node(affected_node_id, window, cx);
+
+            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
+                let node_consumer = ConnectionConsumer::NodeRouter(affected_node_id.0.clone());
+                self.ssh_registry.release(&connection_id, &node_consumer);
+                if let Some(handle) = self.ssh_registry.get(&connection_id) {
+                    let runtime = self.forwarding_runtime.clone();
+                    runtime.spawn(async move {
+                        handle.clear_physical().await;
+                    });
+                }
+                if let Some(info) = self
+                    .ssh_registry
+                    .mark_state(&connection_id, ConnectionState::Disconnected)
+                    && let Some(event) = self
+                        .node_router
+                        .sync_connection_state_by_connection_id(&info, "explicit disconnect")
+                {
+                    self.emit_node_event(event);
+                }
+                self.node_router.emitter().unregister(&connection_id);
+            }
+
+            if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
+                node.readiness = NodeReadiness::Disconnected;
+                node.terminal_ids.clear();
+            }
         }
         cx.notify();
     }
@@ -218,10 +246,24 @@ impl WorkspaceApp {
         let Some(index) = self.active_tab_index() else {
             return;
         };
+        self.close_tab_at_index(index, window, cx);
+    }
+
+    fn close_tab_by_id(&mut self, tab_id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return;
+        };
+        self.close_tab_at_index(index, window, cx);
+    }
+
+    fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let old_active_tab_id = self.active_tab_id;
+        let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let tab = self.tabs.remove(index);
         if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
             self.release_sftp_session_for_node(&node_id);
         }
+        self.forward_tab_nodes.remove(&tab.id);
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
@@ -239,6 +281,10 @@ impl WorkspaceApp {
 
         self.active_tab_id = if self.tabs.is_empty() {
             None
+        } else if !removed_was_active
+            && old_active_tab_id.is_some_and(|tab_id| self.tabs.iter().any(|tab| tab.id == tab_id))
+        {
+            old_active_tab_id
         } else {
             Some(self.tabs[index.min(self.tabs.len() - 1)].id)
         };
@@ -249,6 +295,39 @@ impl WorkspaceApp {
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
         cx.notify();
+    }
+
+    fn close_tabs_for_node(
+        &mut self,
+        node_id: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tab_ids = self
+            .tabs
+            .iter()
+            .filter(|tab| self.tab_belongs_to_node(tab, node_id))
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            self.close_tab_by_id(tab_id, window, cx);
+        }
+    }
+
+    fn tab_belongs_to_node(&self, tab: &Tab, node_id: &NodeId) -> bool {
+        if self.sftp_tab_nodes.get(&tab.id) == Some(node_id) {
+            return true;
+        }
+        if self.forward_tab_nodes.get(&tab.id) == Some(node_id) {
+            return true;
+        }
+        let mut session_ids = Vec::new();
+        if let Some(root_pane) = &tab.root_pane {
+            root_pane.collect_session_ids(&mut session_ids);
+        }
+        session_ids
+            .into_iter()
+            .any(|session_id| self.terminal_ssh_nodes.get(&session_id) == Some(node_id))
     }
 
     fn release_sftp_session_for_node(&mut self, node_id: &NodeId) {

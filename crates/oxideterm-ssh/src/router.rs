@@ -4,9 +4,13 @@
 use dashmap::DashMap;
 use oxideterm_sftp::{SftpError, SftpSession};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, timeout};
 
 use crate::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState, SshConfig,
@@ -114,8 +118,24 @@ pub enum NodeStateEvent {
 }
 
 #[derive(Clone, Debug)]
-struct NodeRoute {
+pub struct NodeRuntimeSnapshot {
+    pub config: SshConfig,
+    pub parent_id: Option<NodeId>,
+    pub children_ids: Vec<NodeId>,
+    pub depth: u32,
+    pub connection_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub sftp_session_id: Option<String>,
+    pub state: NodeState,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug)]
+struct NodeRuntimeEntry {
     config: SshConfig,
+    parent_id: Option<NodeId>,
+    children_ids: Vec<NodeId>,
+    depth: u32,
     connection_id: Option<String>,
     terminal_session_id: Option<String>,
     sftp_session_id: Option<String>,
@@ -123,22 +143,13 @@ struct NodeRoute {
     generation: u64,
 }
 
-#[derive(Clone, Debug)]
-pub struct NodeRouter {
-    registry: SshConnectionRegistry,
-    nodes: DashMap<NodeId, NodeRoute>,
-    connection_nodes: DashMap<String, NodeId>,
+#[derive(Clone, Debug, Default)]
+pub struct NodeRuntimeStore {
+    nodes: Arc<DashMap<NodeId, NodeRuntimeEntry>>,
+    connection_nodes: Arc<DashMap<String, NodeId>>,
 }
 
-impl NodeRouter {
-    pub fn new(registry: SshConnectionRegistry) -> Self {
-        Self {
-            registry,
-            nodes: DashMap::new(),
-            connection_nodes: DashMap::new(),
-        }
-    }
-
+impl NodeRuntimeStore {
     pub fn upsert_node(&self, node_id: NodeId, config: SshConfig) {
         self.nodes
             .entry(node_id)
@@ -146,8 +157,11 @@ impl NodeRouter {
                 route.config = config.clone();
                 route.generation += 1;
             })
-            .or_insert_with(|| NodeRoute {
+            .or_insert_with(|| NodeRuntimeEntry {
                 config,
+                parent_id: None,
+                children_ids: Vec::new(),
+                depth: 0,
                 connection_id: None,
                 terminal_session_id: None,
                 sftp_session_id: None,
@@ -156,83 +170,85 @@ impl NodeRouter {
             });
     }
 
-    pub fn resolve_connection(&self, node_id: &NodeId) -> Result<ResolvedConnection, RouteError> {
-        let route = self
-            .nodes
-            .get(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = route
-            .connection_id
-            .clone()
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let terminal_session_id = route.terminal_session_id.clone();
-        let sftp_session_id = route.sftp_session_id.clone();
-        drop(route);
-
-        let handle = self
-            .registry
-            .get(&connection_id)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        self.require_resolvable_state(node_id, &handle.info())?;
-        Ok(ResolvedConnection {
-            connection_id,
-            handle,
-            terminal_session_id,
-            sftp_session_id,
+    pub fn snapshot(&self, node_id: &NodeId) -> Option<NodeRuntimeSnapshot> {
+        let route = self.nodes.get(node_id)?;
+        Some(NodeRuntimeSnapshot {
+            config: route.config.clone(),
+            parent_id: route.parent_id.clone(),
+            children_ids: route.children_ids.clone(),
+            depth: route.depth,
+            connection_id: route.connection_id.clone(),
+            terminal_session_id: route.terminal_session_id.clone(),
+            sftp_session_id: route.sftp_session_id.clone(),
+            state: route.state.clone(),
+            generation: route.generation,
         })
     }
 
-    pub fn acquire_connection(
+    pub fn upsert_child_node(
         &self,
-        node_id: &NodeId,
-        consumer: ConnectionConsumer,
-    ) -> Result<ResolvedConnection, RouteError> {
-        let mut route = self
-            .nodes
-            .get_mut(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        let connection_id = route
-            .connection_id
-            .clone()
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let handle = self
-            .registry
-            .get(&connection_id)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        self.require_resolvable_state(node_id, &handle.info())?;
-        let handle = self
-            .registry
-            .acquire_consumer_for_connection(&connection_id, consumer)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        route.generation += 1;
-        route.state.readiness = readiness_for_connection(&handle.info());
-        route.state.error = None;
-        let terminal_session_id = route.terminal_session_id.clone();
-        let sftp_session_id = route.sftp_session_id.clone();
-        drop(route);
+        parent_id: NodeId,
+        node_id: NodeId,
+        config: SshConfig,
+    ) -> Result<(), RouteError> {
+        let parent_depth = {
+            let mut parent = self
+                .nodes
+                .get_mut(&parent_id)
+                .ok_or_else(|| RouteError::NodeNotFound(parent_id.0.clone()))?;
+            if !parent.children_ids.contains(&node_id) {
+                parent.children_ids.push(node_id.clone());
+                parent.generation += 1;
+            }
+            parent.depth
+        };
 
-        self.connection_nodes
-            .insert(connection_id.clone(), node_id.clone());
-        self.require_resolvable_state(node_id, &handle.info())?;
-        Ok(ResolvedConnection {
-            connection_id,
-            handle,
-            terminal_session_id,
-            sftp_session_id,
-        })
+        self.nodes
+            .entry(node_id)
+            .and_modify(|route| {
+                route.config = config.clone();
+                route.parent_id = Some(parent_id.clone());
+                route.depth = parent_depth + 1;
+                route.generation += 1;
+            })
+            .or_insert_with(|| NodeRuntimeEntry {
+                config,
+                parent_id: Some(parent_id),
+                children_ids: Vec::new(),
+                depth: parent_depth + 1,
+                connection_id: None,
+                terminal_session_id: None,
+                sftp_session_id: None,
+                state: NodeState::default(),
+                generation: 0,
+            });
+        Ok(())
     }
 
-    pub fn bind_connection(
+    pub fn subtree_postorder(&self, node_id: &NodeId) -> Vec<NodeId> {
+        fn collect(store: &NodeRuntimeStore, node_id: &NodeId, output: &mut Vec<NodeId>) {
+            let children = store
+                .nodes
+                .get(node_id)
+                .map(|node| node.children_ids.clone())
+                .unwrap_or_default();
+            for child_id in children {
+                collect(store, &child_id, output);
+            }
+            output.push(node_id.clone());
+        }
+
+        let mut nodes = Vec::new();
+        collect(self, node_id, &mut nodes);
+        nodes
+    }
+
+    fn bind_connection(
         &self,
         node_id: &NodeId,
-        connection_id: impl Into<String>,
+        connection_id: String,
+        connection: &ConnectionInfo,
     ) -> Result<NodeStateEvent, RouteError> {
-        let connection_id = connection_id.into();
-        let handle = self
-            .registry
-            .get(&connection_id)
-            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let connection = handle.info();
         let mut route = self
             .nodes
             .get_mut(node_id)
@@ -246,7 +262,7 @@ impl NodeRouter {
             .insert(connection_id.clone(), node_id.clone());
         route.connection_id = Some(connection_id);
         route.generation += 1;
-        route.state.readiness = readiness_for_connection(&connection);
+        route.state.readiness = readiness_for_connection(connection);
         route.state.error = match &connection.state {
             ConnectionState::Error(error) => Some(error.clone()),
             ConnectionState::LinkDown => Some("Link down".to_string()),
@@ -260,21 +276,21 @@ impl NodeRouter {
         })
     }
 
-    pub fn bind_terminal_session(
+    fn bind_terminal_session(
         &self,
         node_id: &NodeId,
-        session_id: impl Into<String>,
+        session_id: String,
     ) -> Result<(), RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        route.terminal_session_id = Some(session_id.into());
+        route.terminal_session_id = Some(session_id);
         route.generation += 1;
         Ok(())
     }
 
-    pub fn unbind_terminal_session(
+    fn unbind_terminal_session(
         &self,
         node_id: &NodeId,
         session_id: &str,
@@ -290,29 +306,17 @@ impl NodeRouter {
         Ok(())
     }
 
-    pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
-        self.connection_nodes
-            .get(connection_id)
-            .map(|entry| entry.value().clone())
-    }
-
-    pub fn connection_id_for_node(&self, node_id: &NodeId) -> Option<String> {
-        self.nodes
-            .get(node_id)
-            .and_then(|route| route.connection_id.clone())
-    }
-
-    pub fn bind_sftp_session(
+    fn bind_sftp_session(
         &self,
         node_id: &NodeId,
-        session_id: impl Into<String>,
+        session_id: String,
         cwd: Option<String>,
     ) -> Result<NodeStateEvent, RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        route.sftp_session_id = Some(session_id.into());
+        route.sftp_session_id = Some(session_id);
         route.generation += 1;
         route.state.sftp_ready = true;
         route.state.sftp_cwd = cwd;
@@ -324,96 +328,23 @@ impl NodeRouter {
         })
     }
 
-    pub async fn acquire_sftp(
+    fn set_sftp_ready(
         &self,
         node_id: &NodeId,
-    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
-        let resolved = self.resolve_connection(node_id)?;
-        let AcquiredSftpMeta {
-            session,
-            was_new,
-            cwd,
-        } = resolved
-            .handle
-            .acquire_sftp_with_meta()
-            .await
-            .map_err(|error| sftp_route_error("SFTP init failed", error))?;
-
-        if was_new {
-            let _ = self
-                .registry
-                .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
-        }
-        self.set_sftp_ready(node_id, true, cwd)?;
-        Ok(session)
-    }
-
-    pub async fn acquire_transfer_sftp(&self, node_id: &NodeId) -> Result<SftpSession, RouteError> {
-        let resolved = self.resolve_connection(node_id)?;
-        resolved
-            .handle
-            .acquire_transfer_sftp()
-            .await
-            .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))
-    }
-
-    pub async fn invalidate_and_reacquire_sftp(
-        &self,
-        node_id: &NodeId,
-    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
-        let resolved = self.resolve_connection(node_id)?;
-        let had_sftp = resolved.handle.invalidate_sftp().await;
-        if had_sftp {
-            let _ = self
-                .registry
-                .mark_sftp_session(&resolved.connection_id, false, None);
-            self.set_sftp_ready(node_id, false, None)?;
-        }
-
-        let AcquiredSftpMeta { session, cwd, .. } = resolved
-            .handle
-            .acquire_sftp_with_meta()
-            .await
-            .map_err(|error| sftp_route_error("SFTP rebuild failed", error))?;
-        let _ = self
-            .registry
-            .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
-        self.set_sftp_ready(node_id, true, cwd)?;
-        Ok(session)
-    }
-
-    pub fn node_state(&self, node_id: &NodeId) -> Result<NodeStateSnapshot, RouteError> {
+        ready: bool,
+        cwd: Option<String>,
+    ) -> Result<(), RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        if let Some(connection_id) = route.connection_id.clone() {
-            if let Some(handle) = self.registry.get(&connection_id) {
-                let info = handle.info();
-                route.state.readiness = readiness_for_connection(&info);
-                route.state.error = match &info.state {
-                    ConnectionState::Error(error) => Some(error.clone()),
-                    ConnectionState::LinkDown => Some("Link down".to_string()),
-                    _ => None,
-                };
-                if let Some(sftp_state) = self.registry.sftp_session_state(&connection_id) {
-                    route.state.sftp_ready = sftp_state.ready;
-                    route.state.sftp_cwd = sftp_state.cwd;
-                }
-            } else {
-                route.state.readiness = NodeReadiness::Disconnected;
-                route.state.error = None;
-                route.state.sftp_ready = false;
-                route.state.sftp_cwd = None;
-            }
-        }
-        Ok(NodeStateSnapshot {
-            state: route.state.clone(),
-            generation: route.generation,
-        })
+        route.state.sftp_ready = ready;
+        route.state.sftp_cwd = cwd;
+        route.generation += 1;
+        Ok(())
     }
 
-    pub fn sync_connection_state(
+    fn update_connection_state(
         &self,
         node_id: &NodeId,
         connection: &ConnectionInfo,
@@ -437,14 +368,540 @@ impl NodeRouter {
         })
     }
 
+    pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
+        self.connection_nodes
+            .get(connection_id)
+            .map(|entry| entry.value().clone())
+    }
+
+    pub fn connection_id_for_node(&self, node_id: &NodeId) -> Option<String> {
+        self.nodes
+            .get(node_id)
+            .and_then(|route| route.connection_id.clone())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NodeEventSequencer {
+    generations: Arc<DashMap<NodeId, u64>>,
+}
+
+impl NodeEventSequencer {
+    pub fn next(&self, node_id: &NodeId) -> u64 {
+        let mut generation = self.generations.entry(node_id.clone()).or_insert(0);
+        *generation += 1;
+        *generation
+    }
+
+    pub fn current(&self, node_id: &NodeId) -> u64 {
+        self.generations
+            .get(node_id)
+            .map(|generation| *generation)
+            .unwrap_or_default()
+    }
+
+    pub fn reset(&self, node_id: &NodeId) {
+        self.generations.remove(node_id);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NodeEventEmitter {
+    sequencer: NodeEventSequencer,
+    connection_nodes: Arc<DashMap<String, NodeId>>,
+    listeners: Arc<parking_lot::RwLock<Vec<mpsc::Sender<NodeStateEvent>>>>,
+}
+
+impl NodeEventEmitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn sequencer(&self) -> &NodeEventSequencer {
+        &self.sequencer
+    }
+
+    pub fn subscribe(&self, sender: mpsc::Sender<NodeStateEvent>) {
+        self.listeners.write().push(sender);
+    }
+
+    pub fn register(&self, connection_id: impl Into<String>, node_id: NodeId) {
+        self.connection_nodes.insert(connection_id.into(), node_id);
+    }
+
+    pub fn unregister(&self, connection_id: &str) -> Option<NodeId> {
+        self.connection_nodes
+            .remove(connection_id)
+            .map(|(_, node_id)| node_id)
+    }
+
+    pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
+        self.connection_nodes
+            .get(connection_id)
+            .map(|entry| entry.value().clone())
+    }
+
+    pub fn emit_connection_state_changed(
+        &self,
+        connection_id: &str,
+        state: NodeReadiness,
+        reason: impl Into<String>,
+    ) -> Option<NodeStateEvent> {
+        let node_id = self.node_id_for_connection(connection_id)?;
+        let generation = self.sequencer.next(&node_id);
+        let event = NodeStateEvent::ConnectionStateChanged {
+            node_id: node_id.0,
+            generation,
+            state,
+            reason: reason.into(),
+        };
+        self.dispatch(&event);
+        Some(event)
+    }
+
+    pub fn emit_state_from_connection(
+        &self,
+        connection_id: &str,
+        connection_state: &ConnectionState,
+        reason: impl Into<String>,
+    ) -> Option<NodeStateEvent> {
+        let reason = reason.into();
+        let reason = match connection_state {
+            ConnectionState::Error(error) if reason.is_empty() => error.clone(),
+            ConnectionState::Error(error) => format!("{reason}: {error}"),
+            ConnectionState::LinkDown if reason.is_empty() => "link down".to_string(),
+            _ => reason,
+        };
+        self.emit_connection_state_changed(
+            connection_id,
+            readiness_for_connection_state(connection_state),
+            reason,
+        )
+    }
+
+    pub fn emit_sftp_ready(
+        &self,
+        connection_id: &str,
+        ready: bool,
+        cwd: Option<String>,
+    ) -> Option<NodeStateEvent> {
+        let node_id = self.node_id_for_connection(connection_id)?;
+        let generation = self.sequencer.next(&node_id);
+        let event = NodeStateEvent::SftpReady {
+            node_id: node_id.0,
+            generation,
+            ready,
+            cwd,
+        };
+        self.dispatch(&event);
+        Some(event)
+    }
+
+    pub fn emit_terminal_endpoint_changed(
+        &self,
+        connection_id: &str,
+        ws_port: u16,
+        ws_token: impl Into<String>,
+    ) -> Option<NodeStateEvent> {
+        let node_id = self.node_id_for_connection(connection_id)?;
+        let generation = self.sequencer.next(&node_id);
+        let event = NodeStateEvent::TerminalEndpointChanged {
+            node_id: node_id.0,
+            generation,
+            ws_port,
+            ws_token: ws_token.into(),
+        };
+        self.dispatch(&event);
+        Some(event)
+    }
+
+    fn dispatch(&self, event: &NodeStateEvent) {
+        let listeners = self.listeners.read().clone();
+        for listener in listeners {
+            let _ = listener.send(event.clone());
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NodeRouter {
+    registry: SshConnectionRegistry,
+    runtime: NodeRuntimeStore,
+    emitter: NodeEventEmitter,
+}
+
+impl NodeRouter {
+    pub fn new(registry: SshConnectionRegistry) -> Self {
+        Self::with_runtime_store(registry, NodeRuntimeStore::default())
+    }
+
+    pub fn with_runtime_store(registry: SshConnectionRegistry, runtime: NodeRuntimeStore) -> Self {
+        Self::with_runtime_store_and_emitter(registry, runtime, NodeEventEmitter::default())
+    }
+
+    pub fn with_runtime_store_and_emitter(
+        registry: SshConnectionRegistry,
+        runtime: NodeRuntimeStore,
+        emitter: NodeEventEmitter,
+    ) -> Self {
+        registry.set_node_event_emitter(emitter.clone());
+        Self {
+            registry,
+            runtime,
+            emitter,
+        }
+    }
+
+    pub fn runtime_store(&self) -> NodeRuntimeStore {
+        self.runtime.clone()
+    }
+
+    pub fn emitter(&self) -> &NodeEventEmitter {
+        &self.emitter
+    }
+
+    pub fn upsert_node(&self, node_id: NodeId, config: SshConfig) {
+        self.runtime.upsert_node(node_id, config);
+    }
+
+    pub fn resolve_connection(&self, node_id: &NodeId) -> Result<ResolvedConnection, RouteError> {
+        let runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let connection_id = runtime
+            .connection_id
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+
+        let handle = self
+            .registry
+            .get(&connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        self.require_resolvable_state(node_id, &handle.info())?;
+        Ok(ResolvedConnection {
+            connection_id,
+            handle,
+            terminal_session_id: runtime.terminal_session_id,
+            sftp_session_id: runtime.sftp_session_id,
+        })
+    }
+
+    pub fn acquire_connection(
+        &self,
+        node_id: &NodeId,
+        consumer: ConnectionConsumer,
+    ) -> Result<ResolvedConnection, RouteError> {
+        let runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let connection_id = runtime
+            .connection_id
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        let handle = self
+            .registry
+            .get(&connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        self.require_resolvable_state(node_id, &handle.info())?;
+        let handle = self
+            .registry
+            .acquire_consumer_for_connection(&connection_id, consumer)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        let _ =
+            self.runtime
+                .update_connection_state(node_id, &handle.info(), "connection acquired");
+
+        self.require_resolvable_state(node_id, &handle.info())?;
+        Ok(ResolvedConnection {
+            connection_id,
+            handle,
+            terminal_session_id: runtime.terminal_session_id,
+            sftp_session_id: runtime.sftp_session_id,
+        })
+    }
+
+    pub async fn acquire_connection_wait(
+        &self,
+        node_id: &NodeId,
+        consumer: ConnectionConsumer,
+        max_wait: Duration,
+    ) -> Result<ResolvedConnection, RouteError> {
+        let runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let connection_id = runtime
+            .connection_id
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        self.wait_for_active(&connection_id, max_wait).await?;
+        let handle = self
+            .registry
+            .acquire_consumer_for_connection(&connection_id, consumer)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        let _ =
+            self.runtime
+                .update_connection_state(node_id, &handle.info(), "connection acquired");
+
+        Ok(ResolvedConnection {
+            connection_id,
+            handle,
+            terminal_session_id: runtime.terminal_session_id,
+            sftp_session_id: runtime.sftp_session_id,
+        })
+    }
+
+    pub fn bind_connection(
+        &self,
+        node_id: &NodeId,
+        connection_id: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let connection_id = connection_id.into();
+        let handle = self
+            .registry
+            .get(&connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        let connection = handle.info();
+        let event = self
+            .runtime
+            .bind_connection(node_id, connection_id.clone(), &connection)?;
+        // Tauri registers connectionId -> nodeId when the runtime tree binds a
+        // connection. Native keeps the same translation point so lower-level
+        // connection events can be consumed as node events without consulting
+        // terminal panes.
+        self.emitter
+            .register(connection_id.clone(), node_id.clone());
+        Ok(self
+            .emitter
+            .emit_state_from_connection(&connection_id, &connection.state, "connection bound")
+            .unwrap_or(event))
+    }
+
+    pub fn bind_terminal_session(
+        &self,
+        node_id: &NodeId,
+        session_id: impl Into<String>,
+    ) -> Result<(), RouteError> {
+        self.runtime
+            .bind_terminal_session(node_id, session_id.into())
+    }
+
+    pub fn unbind_terminal_session(
+        &self,
+        node_id: &NodeId,
+        session_id: &str,
+    ) -> Result<(), RouteError> {
+        self.runtime.unbind_terminal_session(node_id, session_id)
+    }
+
+    pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
+        self.runtime.node_id_for_connection(connection_id)
+    }
+
+    pub fn connection_id_for_node(&self, node_id: &NodeId) -> Option<String> {
+        self.runtime.connection_id_for_node(node_id)
+    }
+
+    pub fn bind_sftp_session(
+        &self,
+        node_id: &NodeId,
+        session_id: impl Into<String>,
+        cwd: Option<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        self.runtime
+            .bind_sftp_session(node_id, session_id.into(), cwd)
+    }
+
+    pub async fn acquire_sftp(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        let resolved = self
+            .resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await?;
+        let AcquiredSftpMeta {
+            session,
+            was_new,
+            cwd,
+        } = resolved
+            .handle
+            .acquire_sftp_with_meta()
+            .await
+            .map_err(|error| sftp_route_error("SFTP init failed", error))?;
+
+        if was_new {
+            let _ = self
+                .registry
+                .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
+        }
+        self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        Ok(session)
+    }
+
+    pub async fn acquire_transfer_sftp(&self, node_id: &NodeId) -> Result<SftpSession, RouteError> {
+        let resolved = self
+            .resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await?;
+        resolved
+            .handle
+            .acquire_transfer_sftp()
+            .await
+            .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))
+    }
+
+    pub async fn invalidate_and_reacquire_sftp(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        let resolved = self
+            .resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await?;
+        let had_sftp = resolved.handle.invalidate_sftp().await;
+        if had_sftp {
+            let _ = self
+                .registry
+                .mark_sftp_session(&resolved.connection_id, false, None);
+            self.runtime.set_sftp_ready(node_id, false, None)?;
+        }
+
+        let AcquiredSftpMeta { session, cwd, .. } = resolved
+            .handle
+            .acquire_sftp_with_meta()
+            .await
+            .map_err(|error| sftp_route_error("SFTP rebuild failed", error))?;
+        let _ = self
+            .registry
+            .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
+        self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        Ok(session)
+    }
+
+    pub fn node_state(&self, node_id: &NodeId) -> Result<NodeStateSnapshot, RouteError> {
+        let mut runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        if let Some(connection_id) = runtime.connection_id.clone() {
+            if let Some(handle) = self.registry.get(&connection_id) {
+                let info = handle.info();
+                runtime.state.readiness = readiness_for_connection(&info);
+                runtime.state.error = match &info.state {
+                    ConnectionState::Error(error) => Some(error.clone()),
+                    ConnectionState::LinkDown => Some("Link down".to_string()),
+                    _ => None,
+                };
+                if let Some(sftp_state) = self.registry.sftp_session_state(&connection_id) {
+                    runtime.state.sftp_ready = sftp_state.ready;
+                    runtime.state.sftp_cwd = sftp_state.cwd;
+                }
+            } else {
+                runtime.state.readiness = NodeReadiness::Disconnected;
+                runtime.state.error = None;
+                runtime.state.sftp_ready = false;
+                runtime.state.sftp_cwd = None;
+            }
+        }
+        Ok(NodeStateSnapshot {
+            state: runtime.state,
+            generation: self
+                .emitter
+                .sequencer()
+                .current(node_id)
+                .max(runtime.generation),
+        })
+    }
+
+    pub fn sync_connection_state(
+        &self,
+        node_id: &NodeId,
+        connection: &ConnectionInfo,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let reason = reason.into();
+        let event = self
+            .runtime
+            .update_connection_state(node_id, connection, reason.clone())?;
+        Ok(self
+            .emitter
+            .emit_state_from_connection(&connection.connection_id, &connection.state, reason)
+            .unwrap_or(event))
+    }
+
     pub fn sync_connection_state_by_connection_id(
         &self,
         connection: &ConnectionInfo,
         reason: impl Into<String>,
     ) -> Option<NodeStateEvent> {
-        let node_id = self.node_id_for_connection(&connection.connection_id)?;
+        let node_id = self
+            .emitter
+            .node_id_for_connection(&connection.connection_id)
+            .or_else(|| self.node_id_for_connection(&connection.connection_id))?;
         self.sync_connection_state(&node_id, connection, reason)
             .ok()
+    }
+
+    async fn resolve_connection_wait(
+        &self,
+        node_id: &NodeId,
+        max_wait: Duration,
+    ) -> Result<ResolvedConnection, RouteError> {
+        let runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let connection_id = runtime
+            .connection_id
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+
+        self.wait_for_active(&connection_id, max_wait).await?;
+        let handle = self
+            .registry
+            .get(&connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        Ok(ResolvedConnection {
+            connection_id,
+            handle,
+            terminal_session_id: runtime.terminal_session_id,
+            sftp_session_id: runtime.sftp_session_id,
+        })
+    }
+
+    async fn wait_for_active(
+        &self,
+        connection_id: &str,
+        max_wait: Duration,
+    ) -> Result<(), RouteError> {
+        let result = timeout(max_wait, async {
+            loop {
+                let Some(handle) = self.registry.get(connection_id) else {
+                    return Err(RouteError::NotConnected(connection_id.to_string()));
+                };
+                match handle.state() {
+                    ConnectionState::Active | ConnectionState::Idle => return Ok(()),
+                    ConnectionState::Error(error) => {
+                        return Err(RouteError::ConnectionError(error));
+                    }
+                    ConnectionState::Disconnecting | ConnectionState::Disconnected => {
+                        return Err(RouteError::NotConnected(connection_id.to_string()));
+                    }
+                    ConnectionState::LinkDown => {
+                        return Err(RouteError::NotConnected(format!(
+                            "Connection {connection_id} is link_down"
+                        )));
+                    }
+                    ConnectionState::Connecting | ConnectionState::Reconnecting => {
+                        sleep(Duration::from_millis(200)).await;
+                    }
+                }
+            }
+        })
+        .await;
+
+        match result {
+            Ok(inner) => inner,
+            Err(_) => Err(RouteError::ConnectionTimeout(format!(
+                "Timed out waiting for connection {connection_id} to become active ({max_wait:?})"
+            ))),
+        }
     }
 
     fn require_resolvable_state(
@@ -470,26 +927,14 @@ impl NodeRouter {
             }
         }
     }
-
-    fn set_sftp_ready(
-        &self,
-        node_id: &NodeId,
-        ready: bool,
-        cwd: Option<String>,
-    ) -> Result<(), RouteError> {
-        let mut route = self
-            .nodes
-            .get_mut(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        route.state.sftp_ready = ready;
-        route.state.sftp_cwd = cwd;
-        route.generation += 1;
-        Ok(())
-    }
 }
 
 fn readiness_for_connection(connection: &ConnectionInfo) -> NodeReadiness {
-    match &connection.state {
+    readiness_for_connection_state(&connection.state)
+}
+
+fn readiness_for_connection_state(state: &ConnectionState) -> NodeReadiness {
+    match state {
         ConnectionState::Active | ConnectionState::Idle => NodeReadiness::Ready,
         ConnectionState::Connecting | ConnectionState::Reconnecting => NodeReadiness::Connecting,
         ConnectionState::Error(_) | ConnectionState::LinkDown => NodeReadiness::Error,

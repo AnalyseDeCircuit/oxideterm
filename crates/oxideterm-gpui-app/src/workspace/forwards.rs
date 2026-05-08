@@ -10,7 +10,7 @@ use gpui::{
 };
 use oxideterm_forwarding::{
     DetectedPort, ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardType,
-    ForwardUpdate, ForwardingManager, PortDetectionSnapshot,
+    ForwardUpdate, ForwardingManager, ForwardingRegistry, PortDetectionSnapshot,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,
@@ -155,10 +155,15 @@ pub(super) enum ForwardingWorkerResult {
     Operation {
         tab_id: TabId,
         message_key: &'static str,
+        binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<(), String>,
+    },
+    Binding {
+        binding: Option<(String, String, ConnectionConsumer)>,
     },
     PortScan {
         tab_id: TabId,
+        binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<PortDetectionSnapshot, String>,
     },
 }

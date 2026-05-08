@@ -98,6 +98,107 @@ impl WorkspaceApp {
         );
     }
 
+    pub(super) fn request_sftp_transfer_resume_for_node(
+        &self,
+        node_id: NodeId,
+        transfer_id: String,
+    ) {
+        let progress_store = self.sftp_progress_store.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = progress_store
+                .load(&transfer_id)
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|progress| {
+                    progress.ok_or_else(|| {
+                        "Transfer not found in progress store".to_string()
+                    })
+                });
+            let _ = tx.send(SftpWorkerResult::ResumeIncompleteTransferLoaded {
+                node_id,
+                transfer_id,
+                result,
+            });
+        });
+    }
+
+    fn queue_sftp_resume_transfer_for_node(
+        &mut self,
+        node_id: NodeId,
+        progress: StoredTransferProgress,
+    ) -> bool {
+        if !progress.is_incomplete() {
+            return false;
+        }
+        let direction = match progress.transfer_type {
+            RemoteTransferType::Upload => SftpTransferDirection::Upload,
+            RemoteTransferType::Download => SftpTransferDirection::Download,
+        };
+        let (local_path, remote_path) = match direction {
+            SftpTransferDirection::Upload => (
+                progress.source_path.to_string_lossy().to_string(),
+                progress.destination_path.to_string_lossy().to_string(),
+            ),
+            SftpTransferDirection::Download => (
+                progress.destination_path.to_string_lossy().to_string(),
+                progress.source_path.to_string_lossy().to_string(),
+            ),
+        };
+        let name = progress
+            .source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| progress.source_path.to_str().unwrap_or(""))
+            .to_string();
+        let is_directory = progress.is_directory();
+        let id = self.sftp_view.next_transfer_id;
+        self.sftp_view.next_transfer_id += 1;
+
+        if self
+            .active_tab_id
+            .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+            == Some(&node_id)
+        {
+            self.sftp_view
+                .incomplete_transfers
+                .retain(|item| item.transfer_id != progress.transfer_id);
+            if self.sftp_view.incomplete_transfers.is_empty() {
+                self.sftp_view.show_incomplete = false;
+            }
+            self.sftp_view.transfers.push(SftpTransferItem {
+                id,
+                transfer_id: progress.transfer_id.clone(),
+                name: if is_directory { format!("{name}/") } else { name },
+                local_path: local_path.clone(),
+                remote_path: remote_path.clone(),
+                direction,
+                size: progress.total_bytes.max(1),
+                transferred: progress.transferred_bytes,
+                speed: 0,
+                state: SftpTransferState::Pending,
+                error: None,
+            });
+        }
+
+        // This is the native equivalent of Tauri's node_sftp_resume_transfer:
+        // the transfer owner is the node/router-backed manager, not the SFTP
+        // tab. The UI row is optional; reconnect must still resume in the
+        // background when no SFTP tab is focused.
+        self.spawn_sftp_transfer_task(
+            id,
+            progress.transfer_id.clone(),
+            node_id,
+            direction,
+            is_directory,
+            local_path,
+            remote_path,
+            Some(progress),
+        );
+        true
+    }
+
     fn spawn_sftp_transfer_task(
         &self,
         id: u64,
@@ -586,6 +687,8 @@ impl WorkspaceApp {
             }
 
             let _ = tx.send(SftpWorkerResult::TransferComplete {
+                node_id: node_id.clone(),
+                transfer_id,
                 id,
                 result: result.map(|_| ()),
                 refresh_remote: matches!(direction, SftpTransferDirection::Upload),

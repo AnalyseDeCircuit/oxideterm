@@ -33,10 +33,9 @@ impl WorkspaceApp {
 
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
-        self.active_sidebar_section = SidebarSection::Sessions;
-        self.active_ssh_node_id = Some(node_id);
+        self.active_ssh_node_id = Some(node_id.clone());
+        self.ensure_node_connection_started(&node_id);
         self.sftp_view.remote_load_pending = true;
-        self.persist_sidebar_settings();
         cx.notify();
     }
 
@@ -176,11 +175,14 @@ impl WorkspaceApp {
                     }
                 }
                 SftpWorkerResult::TransferComplete {
+                    node_id,
+                    transfer_id,
                     id,
                     result,
                     refresh_remote,
                     refresh_local,
                 } => {
+                    self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id);
                     let should_refresh = if let Some(item) = self
                         .sftp_view
                         .transfers
@@ -191,10 +193,18 @@ impl WorkspaceApp {
                     } else {
                         result.is_ok()
                     };
-                    if should_refresh && refresh_remote {
+                    let active_sftp_node = self
+                        .active_tab_id
+                        .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+                        .cloned();
+                    if active_sftp_node.as_ref() == Some(&node_id)
+                        && should_refresh
+                        && refresh_remote
+                    {
                         self.sftp_view.remote_load_pending = true;
                     }
-                    if should_refresh
+                    if active_sftp_node.as_ref() == Some(&node_id)
+                        && should_refresh
                         && refresh_local
                         && let Ok(files) = list_local_files(&self.sftp_view.local_path)
                     {
@@ -206,6 +216,27 @@ impl WorkspaceApp {
                         .cloned()
                     {
                         self.spawn_sftp_incomplete_load(node_id);
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::ResumeIncompleteTransferLoaded {
+                    node_id,
+                    transfer_id,
+                    result,
+                } => {
+                    match result {
+                        Ok(progress) if progress.is_incomplete() => {
+                            if !self.queue_sftp_resume_transfer_for_node(node_id.clone(), progress)
+                            {
+                                self.on_sftp_transfer_finished_for_reconnect(
+                                    &node_id,
+                                    &transfer_id,
+                                );
+                            }
+                        }
+                        Ok(_) | Err(_) => {
+                            self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id);
+                        }
                     }
                     changed = true;
                 }

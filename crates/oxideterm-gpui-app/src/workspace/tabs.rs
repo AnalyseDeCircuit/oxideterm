@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::forwards::ForwardingWorkerResult;
 
 include!("tabs/create.rs");
 include!("tabs/state.rs");

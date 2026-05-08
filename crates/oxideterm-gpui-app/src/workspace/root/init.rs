@@ -28,10 +28,16 @@ impl WorkspaceApp {
                 ForwardingRegistry::new_with_event_sender(forwarding_event_tx)
             }
         };
-        let node_router = NodeRouter::new(ssh_registry.clone());
+        // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
+        // the router resolves capabilities from this shared node runtime store
+        // instead of owning the node lifecycle itself.
+        let node_runtime_store = NodeRuntimeStore::default();
+        let node_router =
+            NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
         let (forwarding_worker_tx, forwarding_worker_rx) = std::sync::mpsc::channel();
         let (node_event_tx, node_event_rx) = std::sync::mpsc::channel();
+        node_router.emitter().subscribe(node_event_tx.clone());
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
@@ -106,6 +112,7 @@ impl WorkspaceApp {
             sftp_connection_consumers: HashMap::new(),
             sftp_transfer_manager,
             sftp_progress_store,
+            node_runtime_store,
             node_router,
             node_event_tx,
             node_event_rx,
@@ -113,6 +120,8 @@ impl WorkspaceApp {
             reconnect_orchestrator: ReconnectOrchestratorStore::default(),
             reconnect_worker_tx,
             reconnect_worker_rx,
+            pending_reconnect_transfer_resumes: HashMap::new(),
+            reconnect_transfer_resume_totals: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
@@ -159,7 +168,7 @@ impl WorkspaceApp {
                         weak.update(cx, |workspace, cx| {
                             workspace.poll_ssh_worker_results(window, cx);
                             workspace.poll_node_events(cx);
-                            workspace.poll_reconnect_worker_results(cx);
+                            workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_sftp_worker_results(cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);

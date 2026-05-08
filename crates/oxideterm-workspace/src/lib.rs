@@ -165,6 +165,29 @@ impl PaneNode {
         }
     }
 
+    pub fn replace_session(
+        &mut self,
+        old_session_id: TerminalSessionId,
+        new_pane_id: PaneId,
+        new_session_id: TerminalSessionId,
+    ) -> Option<PaneId> {
+        match self {
+            Self::Leaf {
+                pane_id,
+                session_id,
+            } if *session_id == old_session_id => {
+                let old_pane_id = *pane_id;
+                *pane_id = new_pane_id;
+                *session_id = new_session_id;
+                Some(old_pane_id)
+            }
+            Self::Leaf { .. } => None,
+            Self::Group { children, .. } => children.iter_mut().find_map(|child| {
+                child.replace_session(old_session_id, new_pane_id, new_session_id)
+            }),
+        }
+    }
+
     pub fn collect_pane_ids(&self, panes: &mut Vec<PaneId>) {
         match self {
             Self::Leaf { pane_id, .. } => panes.push(*pane_id),
@@ -438,6 +461,29 @@ mod tests {
         node.collect_session_ids(&mut sessions);
 
         assert_eq!(sessions, vec![session_a, session_b]);
+    }
+
+    #[test]
+    fn replaces_terminal_session_in_place() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let new_pane = PaneId(42);
+        let new_session = TerminalSessionId(77);
+        let mut node = PaneNode::Group {
+            id: group,
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                PaneNode::leaf(pane_a, session_a),
+                PaneNode::leaf(pane_b, session_b),
+            ],
+            sizes: vec![50.0, 50.0],
+        };
+
+        assert_eq!(
+            node.replace_session(session_b, new_pane, new_session),
+            Some(pane_b)
+        );
+        assert_eq!(node.pane_id_for_session(new_session), Some(new_pane));
+        assert_eq!(node.pane_id_for_session(session_b), None);
     }
 
     #[test]

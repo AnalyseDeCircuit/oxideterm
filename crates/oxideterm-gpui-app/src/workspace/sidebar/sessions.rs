@@ -56,9 +56,7 @@ impl WorkspaceApp {
         if expanded {
             if matches!(
                 node_view.status(),
-                ActiveSessionStatus::Active
-                    | ActiveSessionStatus::Connected
-                    | ActiveSessionStatus::Connecting
+                ActiveSessionStatus::Active | ActiveSessionStatus::Connected
             ) {
                 children.push(self.render_session_action_item(
                     1,

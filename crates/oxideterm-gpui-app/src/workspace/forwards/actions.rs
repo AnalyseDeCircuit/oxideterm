@@ -212,25 +212,42 @@ impl WorkspaceApp {
             > + Send
             + 'static,
     {
-        let manager = match self.forwarding_manager_for_node(&node_id, cx) {
-            Ok(manager) => manager,
-            Err(error) => {
-                self.forwarding_view.error = Some(error);
-                cx.notify();
-                return;
-            }
-        };
+        if !self.ensure_node_connection_started(&node_id) {
+            self.forwarding_view.error = Some(self.i18n.t("forwards.messages.node_not_ready"));
+            cx.notify();
+            return;
+        }
         self.forwarding_view.pending = true;
         self.forwarding_view.error = None;
+        let session_id = self.forwarding_session_id_for_node(&node_id);
+        let owner_connection_id = self
+            .ssh_nodes
+            .get(&node_id)
+            .and_then(|node| node.saved_connection_id.clone());
+        let router = self.node_router.clone();
+        let registry = self.forwarding_registry.clone();
         let tx = self.forwarding_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
-            let result = runtime
-                .block_on(operation(manager))
-                .map_err(|error| error.to_string());
+            let (binding, result) = match runtime.block_on(Self::forwarding_manager_for_node_async(
+                router,
+                registry,
+                session_id,
+                node_id,
+                owner_connection_id,
+            )) {
+                Ok((manager, binding)) => {
+                    let result = runtime
+                        .block_on(operation(manager))
+                        .map_err(|error| error.to_string());
+                    (binding, result)
+                }
+                Err(error) => (None, Err(error)),
+            };
             let _ = tx.send(ForwardingWorkerResult::Operation {
                 tab_id,
                 message_key,
+                binding,
                 result,
             });
         });
@@ -291,7 +308,8 @@ impl WorkspaceApp {
                 Box::pin(async move {
                     let consumer = ConnectionConsumer::PortForward(session_id);
                     let handle = router
-                        .acquire_connection(&node_id, consumer)
+                        .acquire_connection_wait(&node_id, consumer, Duration::from_secs(15))
+                        .await
                         .map_err(|error| oxideterm_forwarding::ForwardingError::Ssh(error.to_string()))?;
                     let results = manager.restore_saved_forwards(handle.handle).await;
                     if let Some(error) = results.into_iter().find_map(Result::err) {
@@ -339,26 +357,47 @@ impl WorkspaceApp {
         if self.forwarding_view.port_scan_pending {
             return;
         }
-        let manager = match self.forwarding_manager_for_node(&node_id, cx) {
-            Ok(manager) => manager,
-            Err(error) => {
-                self.forwarding_view.port_scan_error = Some(error);
-                self.forwarding_view.has_scanned_ports = true;
-                cx.notify();
-                return;
-            }
-        };
+        if !self.ensure_node_connection_started(&node_id) {
+            self.forwarding_view.port_scan_error =
+                Some(self.i18n.t("forwards.messages.node_not_ready"));
+            self.forwarding_view.has_scanned_ports = true;
+            cx.notify();
+            return;
+        }
 
         self.forwarding_view.port_scan_pending = true;
         self.forwarding_view.port_scan_error = None;
         self.forwarding_view.last_port_scan_started = Some(Instant::now());
+        let session_id = self.forwarding_session_id_for_node(&node_id);
+        let owner_connection_id = self
+            .ssh_nodes
+            .get(&node_id)
+            .and_then(|node| node.saved_connection_id.clone());
+        let router = self.node_router.clone();
+        let registry = self.forwarding_registry.clone();
         let tx = self.forwarding_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
-            let result = runtime
-                .block_on(manager.scan_remote_ports())
-                .map_err(|error| error.to_string());
-            let _ = tx.send(ForwardingWorkerResult::PortScan { tab_id, result });
+            let (binding, result) = match runtime.block_on(Self::forwarding_manager_for_node_async(
+                router,
+                registry,
+                session_id,
+                node_id,
+                owner_connection_id,
+            )) {
+                Ok((manager, binding)) => {
+                    let result = runtime
+                        .block_on(manager.scan_remote_ports())
+                        .map_err(|error| error.to_string());
+                    (binding, result)
+                }
+                Err(error) => (None, Err(error)),
+            };
+            let _ = tx.send(ForwardingWorkerResult::PortScan {
+                tab_id,
+                binding,
+                result,
+            });
         });
         cx.notify();
     }
@@ -373,8 +412,10 @@ impl WorkspaceApp {
                 ForwardingWorkerResult::Operation {
                     tab_id,
                     message_key,
+                    binding,
                     result,
                 } => {
+                    self.remember_forwarding_binding(binding);
                     if Some(tab_id) == self.active_tab_id {
                         self.forwarding_view.pending = false;
                         match result {
@@ -391,7 +432,16 @@ impl WorkspaceApp {
                         cx.notify();
                     }
                 }
-                ForwardingWorkerResult::PortScan { tab_id, result } => {
+                ForwardingWorkerResult::Binding { binding } => {
+                    self.remember_forwarding_binding(binding);
+                    cx.notify();
+                }
+                ForwardingWorkerResult::PortScan {
+                    tab_id,
+                    binding,
+                    result,
+                } => {
+                    self.remember_forwarding_binding(binding);
                     if Some(tab_id) == self.active_tab_id {
                         self.forwarding_view.port_scan_pending = false;
                         match result {
@@ -506,36 +556,66 @@ impl WorkspaceApp {
             .get(&self.forwarding_session_id_for_node(node_id))
     }
 
-    fn forwarding_manager_for_node(
+    fn remember_forwarding_binding(
         &mut self,
-        node_id: &NodeId,
-        _cx: &mut Context<Self>,
-    ) -> Result<Arc<ForwardingManager>, String> {
-        let node = self
-            .ssh_nodes
-            .get(node_id)
-            .cloned()
-            .ok_or_else(|| self.i18n.t("forwards.messages.node_not_ready"))?;
-        let session_id = self.forwarding_session_id_for_node(node_id);
-        if let Some(manager) = self.forwarding_registry.get(&session_id) {
-            return Ok(manager);
+        binding: Option<(String, String, ConnectionConsumer)>,
+    ) {
+        if let Some((session_id, connection_id, consumer)) = binding {
+            self.forwarding_connection_consumers
+                .insert(session_id, (connection_id, consumer));
         }
-        if self.node_router.node_state(node_id).is_err() {
-            self.node_router
-                .upsert_node(node_id.clone(), node.config.clone());
+    }
+
+    async fn forwarding_manager_for_node_async(
+        router: NodeRouter,
+        registry: ForwardingRegistry,
+        session_id: String,
+        node_id: NodeId,
+        owner_connection_id: Option<String>,
+    ) -> Result<
+        (
+            Arc<ForwardingManager>,
+            Option<(String, String, ConnectionConsumer)>,
+        ),
+        String,
+    > {
+        if let Some(manager) = registry.get(&session_id) {
+            return Ok((manager, None));
         }
+
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
-        let handle = self
-            .node_router
-            .acquire_connection(node_id, consumer.clone())
-            .map_err(|_| self.i18n.t("forwards.messages.connection_not_ready"))?;
-        self.forwarding_connection_consumers
-            .insert(session_id.clone(), (handle.connection_id.clone(), consumer));
-        let manager = self
-            .forwarding_registry
-            .register(session_id.clone(), handle.handle);
-        self.start_saved_forwards_for_node(node_id, session_id, manager.clone());
-        Ok(manager)
+        let resolved = router
+            .acquire_connection_wait(&node_id, consumer.clone(), Duration::from_secs(15))
+            .await
+            .map_err(|error| error.to_string())?;
+        let connection_id = resolved.connection_id.clone();
+        let manager = registry.register(session_id.clone(), resolved.handle);
+
+        // Tauri restore paths are node-first, but saved forwards are still bound
+        // to the stable saved-connection owner when one exists. Do the binding
+        // in the async manager creation path so initial create/scan waits for
+        // the same node-ready state as restore.
+        if let Some(owner_connection_id) = owner_connection_id.as_ref() {
+            let _ = registry
+                .saved_store()
+                .map(|store| store.bind_owned_forwards_to_session(owner_connection_id, &session_id));
+        }
+        let saved_forwards = if let Some(owner_connection_id) = owner_connection_id.as_ref() {
+            registry.load_owned_forwards(owner_connection_id)
+        } else {
+            registry.load_persisted_forwards(&session_id)
+        };
+        let auto_start_rules: Vec<ForwardRule> = saved_forwards
+            .into_iter()
+            .filter(|forward| forward.auto_start)
+            .map(|forward| forward.rule)
+            .collect();
+        for mut rule in auto_start_rules {
+            rule.status = ForwardStatus::Starting;
+            let _ = manager.create_forward(rule).await;
+        }
+
+        Ok((manager, Some((session_id, connection_id, consumer))))
     }
 
     fn forward_persist_context_for_node(
@@ -547,44 +627,6 @@ impl WorkspaceApp {
             self.forwarding_session_id_for_node(node_id),
             node.saved_connection_id.clone(),
         ))
-    }
-
-    fn start_saved_forwards_for_node(
-        &self,
-        node_id: &NodeId,
-        session_id: String,
-        manager: Arc<ForwardingManager>,
-    ) {
-        let Some(node) = self.ssh_nodes.get(node_id) else {
-            return;
-        };
-        if let Some(owner_connection_id) = node.saved_connection_id.as_ref() {
-            let _ = self.forwarding_registry.saved_store().map(|store| {
-                store.bind_owned_forwards_to_session(owner_connection_id, &session_id)
-            });
-        }
-        let saved_forwards = if let Some(owner_connection_id) = node.saved_connection_id.as_ref() {
-            self.forwarding_registry
-                .load_owned_forwards(owner_connection_id)
-        } else {
-            self.forwarding_registry
-                .load_persisted_forwards(&session_id)
-        };
-        let auto_start_rules: Vec<ForwardRule> = saved_forwards
-            .into_iter()
-            .filter(|forward| forward.auto_start)
-            .map(|forward| forward.rule)
-            .collect();
-        if auto_start_rules.is_empty() {
-            return;
-        }
-        let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
-            for mut rule in auto_start_rules {
-                rule.status = ForwardStatus::Starting;
-                let _ = manager.create_forward(rule).await;
-            }
-        });
     }
 
     pub(super) fn forwarding_session_id_for_node(&self, node_id: &NodeId) -> String {

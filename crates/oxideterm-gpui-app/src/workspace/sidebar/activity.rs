@@ -140,8 +140,9 @@ impl WorkspaceApp {
                     } else if section == SidebarSection::Connections {
                         this.open_session_manager_tab(window, cx);
                     } else if section == SidebarSection::Workspace {
-                        this.active_sidebar_section = section;
-                        this.persist_sidebar_settings();
+                        // Tauri treats the bottom square as a local-terminal action,
+                        // not as a sidebar content section. Keep the current sidebar
+                        // selection unchanged when it opens a terminal tab.
                         let _ = this.create_local_terminal_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
