@@ -41,14 +41,6 @@ impl WorkspaceApp {
             .and_then(|pane_id| self.panes.get(&pane_id).cloned())
     }
 
-    fn pane_id_for_session(&self, session_id: TerminalSessionId) -> Option<PaneId> {
-        self.tabs.iter().find_map(|tab| {
-            tab.root_pane
-                .as_ref()
-                .and_then(|root| root.pane_id_for_session(session_id))
-        })
-    }
-
     pub(super) fn active_terminal_session_id(&self) -> Option<TerminalSessionId> {
         let tab = self.active_tab()?;
         let pane_id = tab.active_pane_id?;

@@ -11,6 +11,7 @@ mod tabs;
 
 use std::{
     collections::{HashMap, HashSet},
+    fs,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -30,10 +31,10 @@ use oxideterm_gpui_platform::{
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
 };
 use oxideterm_gpui_terminal::{
-    BackgroundImageRenderCache, TerminalBackgroundFit, TerminalBackgroundPreferences,
-    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule, TerminalNotice,
-    TerminalNoticeVariant, TerminalPane, TerminalPasteLabels, TerminalTrzszLabels,
-    TerminalUiPreferences, TerminalUiTheme,
+    BackgroundImageRenderCache, SharedTerminalSession, TerminalBackgroundFit,
+    TerminalBackgroundPreferences, TerminalHighlightRenderMode,
+    TerminalHighlightRule as UiHighlightRule, TerminalNotice, TerminalNoticeVariant, TerminalPane,
+    TerminalPasteLabels, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
     toast::{ToastVariant, ToastView},
@@ -53,10 +54,11 @@ use oxideterm_sftp::{
     SftpTransferRuntimeSettings, StoredTransferProgress,
 };
 use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeReadiness, NodeRouter,
-    NodeRuntimeStore, NodeStateEvent, PhaseResult, ProbeConnectionStatus,
-    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, SshConfig, SshConnectionRegistry, SshTransportClient,
+    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeOrigin,
+    NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeSnapshot,
+    NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
+    SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
@@ -149,6 +151,7 @@ pub(crate) struct WorkspaceApp {
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
+    terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
@@ -187,6 +190,34 @@ pub(crate) struct WorkspaceApp {
 struct WorkspaceToast {
     notice: TerminalNotice,
     expires_at: Instant,
+}
+
+#[derive(Clone)]
+struct WorkspaceTerminalEndpointSession {
+    endpoint: TerminalEndpoint,
+    session: SharedTerminalSession,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedNodeTreeSnapshot {
+    version: u32,
+    exported_at_ms: u64,
+    root_ids: Vec<NodeId>,
+    nodes: Vec<PersistedNodeTreeNode>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedNodeTreeNode {
+    id: NodeId,
+    parent_id: Option<NodeId>,
+    children_ids: Vec<NodeId>,
+    depth: u32,
+    origin: NodeOrigin,
+    config: Option<SshConfig>,
+    created_at_ms: u64,
+    generation: u64,
 }
 
 // Root workspace pieces are included from here to preserve private access

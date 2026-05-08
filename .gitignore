@@ -29,3 +29,4 @@ target/
 .codex-private/
 tauri版本代码/*
 .deps
+docs/native-editor-ide-plan.md

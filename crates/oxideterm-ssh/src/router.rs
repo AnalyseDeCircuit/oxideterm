@@ -5,8 +5,9 @@ use dashmap::DashMap;
 use oxideterm_sftp::{SftpError, SftpSession};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -49,7 +50,59 @@ pub enum NodeReadiness {
     Disconnected,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeOrigin {
+    ManualPreset {
+        saved_connection_id: String,
+        hop_index: u32,
+    },
+    AutoRoute {
+        target_host: String,
+        route_id: String,
+        hop_index: u32,
+    },
+    DrillDown {
+        timestamp: i64,
+    },
+    Direct,
+    Restored {
+        saved_connection_id: String,
+    },
+}
+
+impl Default for NodeOrigin {
+    fn default() -> Self {
+        Self::Direct
+    }
+}
+
+impl NodeOrigin {
+    pub fn origin_type(&self) -> &'static str {
+        match self {
+            Self::ManualPreset { .. } => "manual_preset",
+            Self::AutoRoute { .. } => "auto_route",
+            Self::DrillDown { .. } => "drill_down",
+            Self::Direct => "direct",
+            Self::Restored { .. } => "restored",
+        }
+    }
+
+    pub fn saved_connection_id(&self) -> Option<&str> {
+        match self {
+            Self::ManualPreset {
+                saved_connection_id,
+                ..
+            }
+            | Self::Restored {
+                saved_connection_id,
+            } => Some(saved_connection_id),
+            Self::AutoRoute { .. } | Self::DrillDown { .. } | Self::Direct => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalEndpoint {
     pub ws_port: u16,
@@ -123,10 +176,12 @@ pub struct NodeRuntimeSnapshot {
     pub parent_id: Option<NodeId>,
     pub children_ids: Vec<NodeId>,
     pub depth: u32,
+    pub origin: NodeOrigin,
     pub connection_id: Option<String>,
     pub terminal_session_id: Option<String>,
     pub sftp_session_id: Option<String>,
     pub state: NodeState,
+    pub created_at_ms: u64,
     pub generation: u64,
 }
 
@@ -136,25 +191,89 @@ struct NodeRuntimeEntry {
     parent_id: Option<NodeId>,
     children_ids: Vec<NodeId>,
     depth: u32,
+    origin: NodeOrigin,
     connection_id: Option<String>,
     terminal_session_id: Option<String>,
     sftp_session_id: Option<String>,
     state: NodeState,
+    created_at_ms: u64,
     generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTreeSnapshot {
+    pub version: u32,
+    pub exported_at_ms: u64,
+    pub root_ids: Vec<NodeId>,
+    pub nodes: Vec<NodeTreeSnapshotNode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTreeSnapshotNode {
+    pub id: NodeId,
+    pub parent_id: Option<NodeId>,
+    pub children_ids: Vec<NodeId>,
+    pub depth: u32,
+    pub config: SshConfig,
+    pub origin: NodeOrigin,
+    pub state: NodeState,
+    pub connection_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub sftp_session_id: Option<String>,
+    pub created_at_ms: u64,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlatNode {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub depth: u32,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub state: NodeReadiness,
+    pub error: Option<String>,
+    pub has_children: bool,
+    pub is_last_child: bool,
+    pub origin_type: String,
+    pub terminal_session_id: Option<String>,
+    pub sftp_session_id: Option<String>,
+    pub ssh_connection_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTreeSummary {
+    pub total_nodes: usize,
+    pub root_count: usize,
+    pub connected_count: usize,
+    pub max_depth: u32,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct NodeRuntimeStore {
     nodes: Arc<DashMap<NodeId, NodeRuntimeEntry>>,
+    root_ids: Arc<parking_lot::RwLock<Vec<NodeId>>>,
     connection_nodes: Arc<DashMap<String, NodeId>>,
 }
 
 impl NodeRuntimeStore {
     pub fn upsert_node(&self, node_id: NodeId, config: SshConfig) {
+        self.upsert_node_with_origin(node_id, config, NodeOrigin::Direct);
+    }
+
+    pub fn upsert_node_with_origin(&self, node_id: NodeId, config: SshConfig, origin: NodeOrigin) {
+        let is_new = !self.nodes.contains_key(&node_id);
         self.nodes
-            .entry(node_id)
+            .entry(node_id.clone())
             .and_modify(|route| {
                 route.config = config.clone();
+                route.origin = origin.clone();
                 route.generation += 1;
             })
             .or_insert_with(|| NodeRuntimeEntry {
@@ -162,12 +281,20 @@ impl NodeRuntimeStore {
                 parent_id: None,
                 children_ids: Vec::new(),
                 depth: 0,
+                origin,
                 connection_id: None,
                 terminal_session_id: None,
                 sftp_session_id: None,
                 state: NodeState::default(),
+                created_at_ms: now_ms(),
                 generation: 0,
             });
+        if is_new {
+            let mut root_ids = self.root_ids.write();
+            if !root_ids.contains(&node_id) {
+                root_ids.push(node_id);
+            }
+        }
     }
 
     pub fn snapshot(&self, node_id: &NodeId) -> Option<NodeRuntimeSnapshot> {
@@ -177,10 +304,12 @@ impl NodeRuntimeStore {
             parent_id: route.parent_id.clone(),
             children_ids: route.children_ids.clone(),
             depth: route.depth,
+            origin: route.origin.clone(),
             connection_id: route.connection_id.clone(),
             terminal_session_id: route.terminal_session_id.clone(),
             sftp_session_id: route.sftp_session_id.clone(),
             state: route.state.clone(),
+            created_at_ms: route.created_at_ms,
             generation: route.generation,
         })
     }
@@ -190,6 +319,16 @@ impl NodeRuntimeStore {
         parent_id: NodeId,
         node_id: NodeId,
         config: SshConfig,
+    ) -> Result<(), RouteError> {
+        self.upsert_child_node_with_origin(parent_id, node_id, config, NodeOrigin::Direct)
+    }
+
+    pub fn upsert_child_node_with_origin(
+        &self,
+        parent_id: NodeId,
+        node_id: NodeId,
+        config: SshConfig,
+        origin: NodeOrigin,
     ) -> Result<(), RouteError> {
         let parent_depth = {
             let mut parent = self
@@ -204,11 +343,12 @@ impl NodeRuntimeStore {
         };
 
         self.nodes
-            .entry(node_id)
+            .entry(node_id.clone())
             .and_modify(|route| {
                 route.config = config.clone();
                 route.parent_id = Some(parent_id.clone());
                 route.depth = parent_depth + 1;
+                route.origin = origin.clone();
                 route.generation += 1;
             })
             .or_insert_with(|| NodeRuntimeEntry {
@@ -216,13 +356,170 @@ impl NodeRuntimeStore {
                 parent_id: Some(parent_id),
                 children_ids: Vec::new(),
                 depth: parent_depth + 1,
+                origin,
                 connection_id: None,
                 terminal_session_id: None,
                 sftp_session_id: None,
                 state: NodeState::default(),
+                created_at_ms: now_ms(),
                 generation: 0,
             });
+        self.root_ids.write().retain(|id| id != &node_id);
         Ok(())
+    }
+
+    pub fn export_snapshot(&self) -> NodeTreeSnapshot {
+        let mut nodes = self
+            .nodes
+            .iter()
+            .map(|entry| {
+                let route = entry.value();
+                NodeTreeSnapshotNode {
+                    id: entry.key().clone(),
+                    parent_id: route.parent_id.clone(),
+                    children_ids: route.children_ids.clone(),
+                    depth: route.depth,
+                    config: route.config.clone(),
+                    origin: route.origin.clone(),
+                    state: route.state.clone(),
+                    connection_id: route.connection_id.clone(),
+                    terminal_session_id: route.terminal_session_id.clone(),
+                    sftp_session_id: route.sftp_session_id.clone(),
+                    created_at_ms: route.created_at_ms,
+                    generation: route.generation,
+                }
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by_key(|node| (node.depth, node.created_at_ms, node.id.0.clone()));
+
+        NodeTreeSnapshot {
+            version: 1,
+            exported_at_ms: now_ms(),
+            root_ids: self.root_ids.read().clone(),
+            nodes,
+        }
+    }
+
+    pub fn apply_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
+        let node_ids = snapshot
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
+        for node in &snapshot.nodes {
+            if let Some(parent_id) = &node.parent_id
+                && !node_ids.contains(parent_id)
+            {
+                return Err(RouteError::NodeNotFound(parent_id.0.clone()));
+            }
+        }
+
+        self.nodes.clear();
+        self.connection_nodes.clear();
+        {
+            let mut root_ids = self.root_ids.write();
+            root_ids.clear();
+            root_ids.extend(snapshot.root_ids);
+        }
+
+        for node in snapshot.nodes {
+            if let Some(connection_id) = node.connection_id.as_ref() {
+                self.connection_nodes
+                    .insert(connection_id.clone(), node.id.clone());
+            }
+            self.nodes.insert(
+                node.id,
+                NodeRuntimeEntry {
+                    config: node.config,
+                    parent_id: node.parent_id,
+                    children_ids: node.children_ids,
+                    depth: node.depth,
+                    origin: node.origin,
+                    connection_id: node.connection_id,
+                    terminal_session_id: node.terminal_session_id,
+                    sftp_session_id: node.sftp_session_id,
+                    state: node.state,
+                    created_at_ms: node.created_at_ms,
+                    generation: node.generation,
+                },
+            );
+        }
+        self.reconcile_topology();
+        Ok(())
+    }
+
+    pub fn clear(&self) {
+        self.nodes.clear();
+        self.connection_nodes.clear();
+        self.root_ids.write().clear();
+    }
+
+    pub fn flatten(&self) -> Vec<FlatNode> {
+        fn collect(store: &NodeRuntimeStore, node_id: &NodeId, output: &mut Vec<FlatNode>) {
+            let Some(route) = store.nodes.get(node_id) else {
+                return;
+            };
+            let route = route.value().clone();
+            output.push(store.flat_node(node_id, &route));
+            for child_id in route.children_ids {
+                collect(store, &child_id, output);
+            }
+        }
+
+        let mut output = Vec::new();
+        for root_id in self.root_ids.read().iter() {
+            collect(self, root_id, &mut output);
+        }
+        output
+    }
+
+    pub fn summary(&self) -> SessionTreeSummary {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect::<Vec<_>>();
+        SessionTreeSummary {
+            total_nodes: nodes.len(),
+            root_count: self.root_ids.read().len(),
+            connected_count: nodes
+                .iter()
+                .filter(|node| matches!(node.state.readiness, NodeReadiness::Ready))
+                .count(),
+            max_depth: nodes.iter().map(|node| node.depth).max().unwrap_or(0),
+        }
+    }
+
+    pub fn reconcile_with_connections(&self, connections: &HashMap<String, ConnectionState>) {
+        for mut route in self.nodes.iter_mut() {
+            let Some(connection_id) = route.connection_id.clone() else {
+                route.state.readiness = NodeReadiness::Disconnected;
+                route.state.error = None;
+                continue;
+            };
+            match connections.get(&connection_id) {
+                Some(state) => {
+                    route.state.readiness = readiness_for_connection_state(state);
+                    route.state.error = match state {
+                        ConnectionState::Error(error) => Some(error.clone()),
+                        ConnectionState::LinkDown => Some("Link down".to_string()),
+                        _ => None,
+                    };
+                }
+                None => {
+                    route.connection_id = None;
+                    route.terminal_session_id = None;
+                    route.sftp_session_id = None;
+                    route.state.ws_endpoint = None;
+                    route.state.sftp_ready = false;
+                    route.state.sftp_cwd = None;
+                    route.state.readiness = NodeReadiness::Disconnected;
+                    route.state.error = None;
+                }
+            }
+            route.generation += 1;
+        }
+        self.rebuild_connection_index();
     }
 
     pub fn subtree_postorder(&self, node_id: &NodeId) -> Vec<NodeId> {
@@ -286,8 +583,29 @@ impl NodeRuntimeStore {
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
         route.terminal_session_id = Some(session_id);
+        route.state.ws_endpoint = None;
         route.generation += 1;
         Ok(())
+    }
+
+    fn bind_terminal_endpoint(
+        &self,
+        node_id: &NodeId,
+        endpoint: TerminalEndpoint,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.terminal_session_id = Some(endpoint.session_id.clone());
+        route.state.ws_endpoint = Some(endpoint.clone());
+        route.generation += 1;
+        Ok(NodeStateEvent::TerminalEndpointChanged {
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            ws_port: endpoint.ws_port,
+            ws_token: endpoint.ws_token,
+        })
     }
 
     fn unbind_terminal_session(
@@ -301,6 +619,7 @@ impl NodeRuntimeStore {
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
         if route.terminal_session_id.as_deref() == Some(session_id) {
             route.terminal_session_id = None;
+            route.state.ws_endpoint = None;
             route.generation += 1;
         }
         Ok(())
@@ -378,6 +697,90 @@ impl NodeRuntimeStore {
         self.nodes
             .get(node_id)
             .and_then(|route| route.connection_id.clone())
+    }
+
+    fn flat_node(&self, node_id: &NodeId, route: &NodeRuntimeEntry) -> FlatNode {
+        let is_last_child = if let Some(parent_id) = &route.parent_id {
+            self.nodes
+                .get(parent_id)
+                .is_none_or(|parent| parent.children_ids.last() == Some(node_id))
+        } else {
+            self.root_ids.read().last() == Some(node_id)
+        };
+        FlatNode {
+            id: node_id.0.clone(),
+            parent_id: route.parent_id.as_ref().map(|id| id.0.clone()),
+            depth: route.depth,
+            host: route.config.host.clone(),
+            port: route.config.port,
+            username: route.config.username.clone(),
+            display_name: None,
+            state: route.state.readiness.clone(),
+            error: route.state.error.clone(),
+            has_children: !route.children_ids.is_empty(),
+            is_last_child,
+            origin_type: route.origin.origin_type().to_string(),
+            terminal_session_id: route.terminal_session_id.clone(),
+            sftp_session_id: route.sftp_session_id.clone(),
+            ssh_connection_id: route.connection_id.clone(),
+        }
+    }
+
+    fn reconcile_topology(&self) {
+        let node_ids = self
+            .nodes
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<HashSet<_>>();
+        for mut route in self.nodes.iter_mut() {
+            route.children_ids.retain(|id| node_ids.contains(id));
+            if route
+                .parent_id
+                .as_ref()
+                .is_some_and(|parent_id| !node_ids.contains(parent_id))
+            {
+                route.parent_id = None;
+                route.depth = 0;
+            }
+        }
+
+        let mut computed_roots = self
+            .nodes
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .value()
+                    .parent_id
+                    .is_none()
+                    .then_some(entry.key().clone())
+            })
+            .collect::<Vec<_>>();
+        computed_roots.sort_by_key(|id| {
+            self.nodes
+                .get(id)
+                .map(|node| node.created_at_ms)
+                .unwrap_or_default()
+        });
+
+        let mut roots = self.root_ids.write();
+        roots.retain(|id| node_ids.contains(id) && computed_roots.contains(id));
+        for root_id in computed_roots {
+            if !roots.contains(&root_id) {
+                roots.push(root_id);
+            }
+        }
+        drop(roots);
+        self.rebuild_connection_index();
+    }
+
+    fn rebuild_connection_index(&self) {
+        self.connection_nodes.clear();
+        for entry in self.nodes.iter() {
+            if let Some(connection_id) = entry.value().connection_id.as_ref() {
+                self.connection_nodes
+                    .insert(connection_id.clone(), entry.key().clone());
+            }
+        }
     }
 }
 
@@ -564,6 +967,37 @@ impl NodeRouter {
         self.runtime.upsert_node(node_id, config);
     }
 
+    pub fn upsert_node_with_origin(&self, node_id: NodeId, config: SshConfig, origin: NodeOrigin) {
+        self.runtime
+            .upsert_node_with_origin(node_id, config, origin);
+    }
+
+    pub fn export_tree_snapshot(&self) -> NodeTreeSnapshot {
+        self.runtime.export_snapshot()
+    }
+
+    pub fn apply_tree_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
+        self.runtime.apply_snapshot(snapshot)
+    }
+
+    pub fn flatten_tree(&self) -> Vec<FlatNode> {
+        self.runtime.flatten()
+    }
+
+    pub fn tree_summary(&self) -> SessionTreeSummary {
+        self.runtime.summary()
+    }
+
+    pub fn reconcile_runtime_tree(&self) {
+        let connections = self
+            .registry
+            .list()
+            .into_iter()
+            .map(|info| (info.connection_id, info.state))
+            .collect::<HashMap<_, _>>();
+        self.runtime.reconcile_with_connections(&connections);
+    }
+
     pub fn resolve_connection(&self, node_id: &NodeId) -> Result<ResolvedConnection, RouteError> {
         let runtime = self
             .runtime
@@ -685,12 +1119,34 @@ impl NodeRouter {
             .bind_terminal_session(node_id, session_id.into())
     }
 
+    pub fn bind_terminal_endpoint(
+        &self,
+        node_id: &NodeId,
+        endpoint: TerminalEndpoint,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let event = self
+            .runtime
+            .bind_terminal_endpoint(node_id, endpoint.clone())?;
+        self.emitter.dispatch(&event);
+        Ok(event)
+    }
+
     pub fn unbind_terminal_session(
         &self,
         node_id: &NodeId,
         session_id: &str,
     ) -> Result<(), RouteError> {
         self.runtime.unbind_terminal_session(node_id, session_id)
+    }
+
+    pub fn terminal_url(&self, node_id: &NodeId) -> Result<TerminalEndpoint, RouteError> {
+        let runtime = self
+            .runtime
+            .snapshot(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        runtime.state.ws_endpoint.ok_or_else(|| {
+            RouteError::NotConnected(format!("No active terminal session for node {}", node_id.0))
+        })
     }
 
     pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
@@ -948,6 +1404,14 @@ fn sftp_route_error(prefix: &str, error: SftpError) -> RouteError {
     RouteError::CapabilityUnavailable(format!("{prefix}: {error}"))
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -975,6 +1439,116 @@ mod tests {
         assert_eq!(state.state.readiness, NodeReadiness::Ready);
         assert_eq!(resolved.terminal_session_id.as_deref(), Some("term-a"));
         assert!(!resolved.connection_id.is_empty());
+    }
+
+    #[test]
+    fn terminal_url_tracks_bound_endpoint() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let node = NodeId::new("node-a");
+        router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
+
+        let endpoint = TerminalEndpoint {
+            ws_port: 0,
+            ws_token: "native-terminal-term-a".to_string(),
+            session_id: "term-a".to_string(),
+        };
+        router
+            .bind_terminal_endpoint(&node, endpoint.clone())
+            .unwrap();
+
+        assert_eq!(router.terminal_url(&node).unwrap(), endpoint);
+
+        router.unbind_terminal_session(&node, "term-a").unwrap();
+        assert!(matches!(
+            router.terminal_url(&node),
+            Err(RouteError::NotConnected(_))
+        ));
+    }
+
+    #[test]
+    fn runtime_tree_snapshot_preserves_origin_and_topology() {
+        let store = NodeRuntimeStore::default();
+        let root = NodeId::new("root");
+        let child = NodeId::new("child");
+        store.upsert_node_with_origin(
+            root.clone(),
+            SshConfig::password("jump", 22, "me", "pw"),
+            NodeOrigin::ManualPreset {
+                saved_connection_id: "saved-a".to_string(),
+                hop_index: 0,
+            },
+        );
+        store
+            .upsert_child_node_with_origin(
+                root.clone(),
+                child.clone(),
+                SshConfig::password("target", 22, "me", "pw"),
+                NodeOrigin::ManualPreset {
+                    saved_connection_id: "saved-a".to_string(),
+                    hop_index: 1,
+                },
+            )
+            .unwrap();
+
+        let snapshot = store.export_snapshot();
+        let restored = NodeRuntimeStore::default();
+        restored.apply_snapshot(snapshot).unwrap();
+
+        let flat = restored.flatten();
+        assert_eq!(flat.len(), 2);
+        assert_eq!(flat[0].id, "root");
+        assert_eq!(flat[0].origin_type, "manual_preset");
+        assert_eq!(flat[1].id, "child");
+        assert_eq!(flat[1].parent_id.as_deref(), Some("root"));
+        assert_eq!(restored.summary().max_depth, 1);
+    }
+
+    #[test]
+    fn reconcile_runtime_tree_clears_missing_runtime_connection() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let node = NodeId::new("node-a");
+        router
+            .apply_tree_snapshot(NodeTreeSnapshot {
+                version: 1,
+                exported_at_ms: now_ms(),
+                root_ids: vec![node.clone()],
+                nodes: vec![NodeTreeSnapshotNode {
+                    id: node.clone(),
+                    parent_id: None,
+                    children_ids: Vec::new(),
+                    depth: 0,
+                    config: SshConfig::password("host", 22, "me", "pw"),
+                    origin: NodeOrigin::Direct,
+                    state: NodeState {
+                        readiness: NodeReadiness::Ready,
+                        error: None,
+                        sftp_ready: true,
+                        sftp_cwd: Some("/home/me".to_string()),
+                        ws_endpoint: Some(TerminalEndpoint {
+                            ws_port: 0,
+                            ws_token: "token".to_string(),
+                            session_id: "term-a".to_string(),
+                        }),
+                    },
+                    connection_id: Some("missing-connection".to_string()),
+                    terminal_session_id: Some("term-a".to_string()),
+                    sftp_session_id: Some("sftp-a".to_string()),
+                    created_at_ms: now_ms(),
+                    generation: 1,
+                }],
+            })
+            .unwrap();
+
+        router.reconcile_runtime_tree();
+        let state = router.node_state(&node).unwrap();
+        let snapshot = router.runtime_store().snapshot(&node).unwrap();
+
+        assert_eq!(state.state.readiness, NodeReadiness::Disconnected);
+        assert!(snapshot.connection_id.is_none());
+        assert!(snapshot.terminal_session_id.is_none());
+        assert!(snapshot.state.ws_endpoint.is_none());
     }
 
     #[test]

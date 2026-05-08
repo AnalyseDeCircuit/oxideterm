@@ -96,8 +96,14 @@ impl WorkspaceApp {
             id
         });
 
+        let origin = saved_connection_id
+            .as_ref()
+            .map(|id| NodeOrigin::Restored {
+                saved_connection_id: id.clone(),
+            })
+            .unwrap_or(NodeOrigin::Direct);
         self.node_runtime_store
-            .upsert_node(node_id.clone(), config.clone());
+            .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
         if self.node_router.connection_id_for_node(&node_id).is_none() {
             let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
             let node_handle = self.ssh_registry.acquire(config.clone(), node_consumer);
@@ -113,9 +119,6 @@ impl WorkspaceApp {
                 self.emit_node_event(event);
             }
         }
-        let _ = self
-            .node_router
-            .bind_terminal_session(&node_id, session_id.0.to_string());
         self.register_ssh_terminal_session(
             node_id.clone(),
             saved_connection_id,
@@ -123,16 +126,18 @@ impl WorkspaceApp {
             title.clone(),
             session_id,
         );
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
-        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let session_config = SshSessionConfig::from(config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
+        let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
+        self.register_terminal_endpoint_session(&node_id, session_id, shared_session.clone());
         let pane = cx.new(|cx| {
-            TerminalPane::new_ssh_with_preferences(session_config, preferences, window, cx)
+            TerminalPane::from_shared_session(shared_session, preferences, window, cx)
                 .expect("failed to initialize ssh terminal pane")
         });
 
@@ -153,6 +158,7 @@ impl WorkspaceApp {
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
         self.reveal_active_tab(window);
+        self.persist_session_tree_snapshot();
         cx.notify();
         Ok(session_id)
     }
@@ -168,17 +174,26 @@ impl WorkspaceApp {
             .get(node_id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        let origin = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .map(|snapshot| snapshot.origin)
+            .or_else(|| {
+                node.saved_connection_id
+                    .as_ref()
+                    .map(|id| NodeOrigin::Restored {
+                        saved_connection_id: id.clone(),
+                    })
+            })
+            .unwrap_or(NodeOrigin::Direct);
         self.node_runtime_store
-            .upsert_node(node_id.clone(), node.config.clone());
+            .upsert_node_with_origin(node_id.clone(), node.config.clone(), origin);
         if self.node_router.connection_id_for_node(node_id).is_none() {
             self.ensure_node_connection_started(node_id);
         }
 
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
-        let _ = self
-            .node_router
-            .bind_terminal_session(node_id, session_id.0.to_string());
         self.register_ssh_terminal_session(
             node_id.clone(),
             node.saved_connection_id.clone(),
@@ -190,20 +205,51 @@ impl WorkspaceApp {
         // Tauri remounts terminal tabs by replacing the old session id in the
         // pane tree after reconnect. The new GPUI pane is only a consumer of
         // the node-owned SSH connection; node liveness stays with NodeRouter.
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
-        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::SshTerminal);
         let session_config = SshSessionConfig::from(node.config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
+        let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
+        self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone());
         let pane = cx.new(|cx| {
-            TerminalPane::new_ssh_with_preferences(session_config, preferences, window, cx)
+            TerminalPane::from_shared_session(shared_session, preferences, window, cx)
                 .expect("failed to remount ssh terminal pane")
         });
         self.panes.insert(pane_id, pane);
+        self.persist_session_tree_snapshot();
         Ok((pane_id, session_id))
+    }
+
+    fn register_terminal_endpoint_session(
+        &mut self,
+        node_id: &NodeId,
+        session_id: TerminalSessionId,
+        session: SharedTerminalSession,
+    ) {
+        let endpoint = TerminalEndpoint {
+            // Native GPUI does not need a loopback WebSocket, but the owner
+            // boundary mirrors Tauri: NodeRouter exposes a stable terminal
+            // endpoint and GPUI panes consume the session by id instead of
+            // being the authoritative terminal owner.
+            ws_port: 0,
+            ws_token: format!("native-terminal-{}", session_id.0),
+            session_id: session_id.0.to_string(),
+        };
+        self.terminal_endpoint_sessions.insert(
+            session_id,
+            WorkspaceTerminalEndpointSession {
+                endpoint: endpoint.clone(),
+                session,
+            },
+        );
+        if let Ok(event) = self.node_router.bind_terminal_endpoint(node_id, endpoint) {
+            self.emit_node_event(event);
+        }
+        self.persist_session_tree_snapshot();
     }
 
     pub(super) fn open_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {

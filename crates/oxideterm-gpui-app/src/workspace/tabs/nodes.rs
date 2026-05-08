@@ -6,18 +6,22 @@ impl WorkspaceApp {
         let mut nodes_to_restore = Vec::new();
         let mut nodes_to_grace = Vec::new();
         for (session_id, node_id) in terminal_nodes {
-            let terminal_snapshot = self
-                .pane_id_for_session(session_id)
-                .and_then(|pane_id| self.panes.get(&pane_id))
-                .map(|pane| {
-                    let pane = pane.read(cx);
-                    let readiness = match pane.lifecycle() {
+            let terminal_snapshot = self.terminal_endpoint_sessions.get(&session_id).map(
+                |endpoint_session| {
+                    // This mirrors Tauri's SessionRegistry boundary: node
+                    // lifecycle is read from the terminal endpoint owner,
+                    // not from the currently mounted GPUI pane. Panes may
+                    // be replaced during reconnect/remount; the endpoint
+                    // owner is the stable terminal-session record.
+                    let terminal = endpoint_session.session.lock();
+                    let readiness = match terminal.lifecycle() {
                         TerminalLifecycle::Running => NodeReadiness::Ready,
                         TerminalLifecycle::Exited(_) => NodeReadiness::Error,
                         TerminalLifecycle::Closed => NodeReadiness::Disconnected,
                     };
-                    (readiness, pane.ssh_connection_handle())
-                });
+                    (readiness, terminal.ssh_connection_handle())
+                },
+            );
             let Some((terminal_readiness, ssh_handle)) = terminal_snapshot else {
                 self.unregister_ssh_terminal_session(session_id);
                 changed = true;
@@ -145,6 +149,7 @@ impl WorkspaceApp {
                     if let Ok(event) = self.node_router.bind_connection(&node_id, connection_id) {
                         self.emit_node_event(event);
                     }
+                    self.persist_session_tree_snapshot();
                     self.restore_forwarding_session_for_node(&node_id);
                     if self
                         .reconnect_orchestrator
@@ -208,6 +213,7 @@ impl WorkspaceApp {
                         reason: error,
                     };
                     self.emit_node_event(event);
+                    self.persist_session_tree_snapshot();
                     changed = true;
                 }
                 ReconnectWorkerResult::GraceRecovered {
@@ -729,8 +735,20 @@ impl WorkspaceApp {
                 return true;
         }
 
+        let origin = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .map(|snapshot| snapshot.origin)
+            .or_else(|| {
+                node.saved_connection_id
+                    .as_ref()
+                    .map(|id| NodeOrigin::Restored {
+                        saved_connection_id: id.clone(),
+                    })
+            })
+            .unwrap_or(NodeOrigin::Direct);
         self.node_runtime_store
-            .upsert_node(node_id.clone(), node.config.clone());
+            .upsert_node_with_origin(node_id.clone(), node.config.clone(), origin);
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
         let handle = self.ssh_registry.acquire(node.config.clone(), consumer.clone());
         let connection_id = handle.connection_id().to_string();

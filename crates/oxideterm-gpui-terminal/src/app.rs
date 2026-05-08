@@ -40,6 +40,8 @@ pub(crate) use image_cache::TerminalRenderedImage;
 pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 
+pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
+
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     focus_handle: FocusHandle,
@@ -137,18 +139,34 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
-        let terminal = Arc::new(Mutex::new(TerminalSession::ssh_with_graphics_and_encoding(
+        let terminal = Self::ssh_shared_session(config, &preferences);
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
+    pub fn ssh_shared_session(
+        config: SshSessionConfig,
+        preferences: &TerminalUiPreferences,
+    ) -> SharedTerminalSession {
+        Arc::new(Mutex::new(TerminalSession::ssh_with_graphics_and_encoding(
             config,
             DEFAULT_COLS,
             DEFAULT_ROWS,
-            graphics_options_from_preferences(&preferences),
+            graphics_options_from_preferences(preferences),
             preferences.terminal_encoding,
-        )));
+        )))
+    }
+
+    pub fn from_shared_session(
+        terminal: SharedTerminalSession,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
         Self::from_session(terminal, preferences, window, cx)
     }
 
     fn from_session(
-        terminal: Arc<Mutex<TerminalSession>>,
+        terminal: SharedTerminalSession,
         preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,

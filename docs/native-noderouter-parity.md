@@ -18,9 +18,9 @@ entry point, not a UI tab owner and not a connection builder.
 
 | Tauri owner | Rustnative owner | Notes |
 | --- | --- | --- |
-| `SessionTreeState` runtime snapshot | `WorkspaceApp::node_runtime_store` | Stores runtime ids plus first-class parent/child/depth topology. It still does not persist the full Tauri tree shape. |
+| `SessionTreeState` runtime snapshot | `NodeRuntimeStore` plus `session_tree.json` restore | Stores runtime ids, origin metadata, parent/child/depth topology, flat tree snapshots, summaries, startup restore, and registry reconciliation. |
 | `SshConnectionRegistry` | `SshConnectionRegistry` | Shared SSH connection and consumer ownership. |
-| `SessionRegistry` terminal endpoint | GPUI terminal pane/session maps | Not fully equivalent yet; native terminals are still direct GPUI entities. |
+| `SessionRegistry` terminal endpoint | `WorkspaceApp::terminal_endpoint_sessions` plus `NodeRouter::terminal_url` | Native now has a SessionRegistry-shaped owner record and node endpoint snapshot. The GPUI pane consumes the shared terminal session instead of being the authoritative owner. |
 | `NodeRouter` | `NodeRouter` | Now resolves from the shared runtime store and registry instead of owning node state maps directly. |
 | `NodeEventEmitter` | `NodeEventEmitter` plus GPUI `node_event_tx` | Native now has a connection-id to node-id emitter, sequencer, listener dispatch, and registry state-change emission. |
 | `ConnectionEntry.sftp` owner | `ConnectionEntry` / `SshConnectionHandle` SFTP owner | Shared and transfer SFTP entries are node-first, not terminal-pane-first. |
@@ -41,9 +41,15 @@ entry point, not a UI tab owner and not a connection builder.
 
 ## Remaining Gaps
 
-- Native still lacks full Tauri `SessionTreeState` persistence and origin metadata:
-  manual preset, auto path, dynamic drill-down, saved tree snapshots, and full
-  runtime reconciliation are not complete yet.
+- Native now carries Tauri-style `SessionTreeState` metadata in
+  `NodeRuntimeStore`: `ManualPreset`, `AutoRoute`, `DrillDown`, `Direct`, and
+  `Restored` origins, root ordering, child ordering, flat-node snapshots,
+  summaries, and registry reconciliation. GPUI persists a `session_tree.json`
+  snapshot and restores saved-connection nodes through `ConnectionStore` so
+  runtime SSH/SFTP/terminal ids are rebuilt rather than trusted after restart.
+  For secret safety, ad-hoc nodes that would require serializing runtime
+  passwords or passphrases are not written to disk; saved connections restore
+  through their keychain-backed connection records.
 - Native has node-only connect for direct nodes and tunneled child nodes. The child
   path uses the parent connection's `direct-tcpip` channel before authenticating the
   child target.
@@ -52,8 +58,11 @@ entry point, not a UI tab owner and not a connection builder.
   resolve the node on the forwarding worker path before registering a manager.
 - Registry `mark_state` now emits through `NodeEventEmitter` when the connection is
   registered to a node.
-- Terminal endpoint ownership is not yet Tauri's `SessionRegistry` URL endpoint
-  model; GPUI panes still hold the terminal session directly.
+- Terminal endpoint ownership now has the Tauri-shaped owner boundary in native:
+  workspace owns terminal endpoint/session records, `NodeRouter::terminal_url`
+  resolves by node id, and GPUI panes consume the shared session. Native keeps
+  this endpoint in-process by design; the Tauri loopback WebSocket was an IPC
+  workaround and is not a rustnative requirement.
 - Grace-period reconnect now falls back to the node-only connect path after probe
   expiry and records the Tauri phase order through ssh-connect, await-terminal,
   restore-forwards, resume-transfers, restore-ide, and verify. Terminal panes are

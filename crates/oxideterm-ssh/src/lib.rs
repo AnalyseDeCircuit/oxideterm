@@ -35,8 +35,9 @@ pub use reconnect::{
     ReconnectTiming,
 };
 pub use router::{
-    NodeEventEmitter, NodeEventSequencer, NodeId, NodeReadiness, NodeRouter, NodeRuntimeStore,
-    NodeState, NodeStateEvent, NodeStateSnapshot, ResolvedConnection, RouteError, TerminalEndpoint,
+    FlatNode, NodeEventEmitter, NodeEventSequencer, NodeId, NodeOrigin, NodeReadiness, NodeRouter,
+    NodeRuntimeStore, NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeSnapshot,
+    NodeTreeSnapshotNode, ResolvedConnection, RouteError, SessionTreeSummary, TerminalEndpoint,
 };
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,

@@ -4,7 +4,7 @@ pub mod terminal_ui;
 mod terminal_view;
 mod trzsz_worker;
 
-pub use app::TerminalPane;
+pub use app::{SharedTerminalSession, TerminalPane};
 pub use background_cache::BackgroundImageRenderCache;
 pub use terminal_ui::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalHighlightRenderMode,

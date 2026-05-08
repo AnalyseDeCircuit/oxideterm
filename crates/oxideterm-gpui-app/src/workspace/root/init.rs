@@ -65,7 +65,7 @@ impl WorkspaceApp {
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
-        let workspace = Self {
+        let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
             active_tab_id: None,
@@ -122,6 +122,7 @@ impl WorkspaceApp {
             reconnect_worker_rx,
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_totals: HashMap::new(),
+            terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
@@ -155,6 +156,7 @@ impl WorkspaceApp {
             terminal_notice_rx,
             workspace_toasts: Vec::new(),
         };
+        workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();
         cx.spawn(async move |weak, cx| {

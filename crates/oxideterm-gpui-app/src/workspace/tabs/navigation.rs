@@ -113,16 +113,25 @@ impl WorkspaceApp {
             let _ = forwarding_registry.remove(&forwarding_session_id).await;
         });
 
+        // Drop the SessionRegistry-shaped owner before unbinding the node
+        // endpoint, matching Tauri's terminal close cleanup order: endpoint
+        // metadata is removed without touching the node's SSH connection.
+        let endpoint_session = self.terminal_endpoint_sessions.remove(&session_id);
         let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
             return;
         };
+        let endpoint_session_id = endpoint_session
+            .as_ref()
+            .map(|owner| owner.endpoint.session_id.clone())
+            .unwrap_or_else(|| session_id.0.to_string());
         let _ = self
             .node_router
-            .unbind_terminal_session(&node_id, &session_id.0.to_string());
+            .unbind_terminal_session(&node_id, &endpoint_session_id);
         let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
             return;
         };
         node.terminal_ids.retain(|id| *id != session_id);
+        self.persist_session_tree_snapshot();
     }
 
     pub(super) fn focus_terminal_session(
@@ -239,6 +248,7 @@ impl WorkspaceApp {
                 node.terminal_ids.clear();
             }
         }
+        self.persist_session_tree_snapshot();
         cx.notify();
     }
 

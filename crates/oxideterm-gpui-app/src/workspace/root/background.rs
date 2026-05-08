@@ -106,3 +106,10 @@ fn default_saved_forwards_path() -> PathBuf {
         .join("forwards.json")
 }
 
+fn default_session_tree_path() -> PathBuf {
+    default_settings_path()
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("session_tree.json")
+}

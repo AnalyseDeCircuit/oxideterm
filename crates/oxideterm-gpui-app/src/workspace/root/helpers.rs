@@ -143,3 +143,164 @@ fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
             .terminal_family_name(&settings.terminal.custom_font_family),
     )
 }
+
+impl WorkspaceApp {
+    fn restore_session_tree_snapshot(&mut self) {
+        let path = default_session_tree_path();
+        let Ok(bytes) = fs::read(&path) else {
+            return;
+        };
+        let Ok(persisted) = serde_json::from_slice::<PersistedNodeTreeSnapshot>(&bytes) else {
+            eprintln!("failed to parse session tree snapshot: {}", path.display());
+            return;
+        };
+        let mut restored_nodes = Vec::new();
+        let mut restored_ids = HashSet::new();
+
+        for node in persisted.nodes {
+            let config = node.config.or_else(|| {
+                let saved_connection_id = node.origin.saved_connection_id()?;
+                let connection = self.connection_store.get(saved_connection_id)?;
+                self::session_manager::ssh_config_from_saved_connection(
+                    &self.connection_store,
+                    connection,
+                )
+            });
+            let Some(config) = config else {
+                continue;
+            };
+            restored_ids.insert(node.id.clone());
+            restored_nodes.push(NodeTreeSnapshotNode {
+                id: node.id,
+                parent_id: node.parent_id,
+                children_ids: node.children_ids,
+                depth: node.depth,
+                config,
+                origin: node.origin,
+                state: NodeState::default(),
+                connection_id: None,
+                terminal_session_id: None,
+                sftp_session_id: None,
+                created_at_ms: node.created_at_ms,
+                generation: node.generation,
+            });
+        }
+
+        let restored_roots = persisted
+            .root_ids
+            .into_iter()
+            .filter(|id| restored_ids.contains(id))
+            .collect::<Vec<_>>();
+        let snapshot = NodeTreeSnapshot {
+            version: persisted.version,
+            exported_at_ms: persisted.exported_at_ms,
+            root_ids: restored_roots,
+            nodes: restored_nodes,
+        };
+        if let Err(error) = self.node_router.apply_tree_snapshot(snapshot.clone()) {
+            eprintln!("failed to restore session tree snapshot: {error}");
+            return;
+        }
+
+        // Rebuild the UI-facing node cache from the SessionTree owner. Runtime
+        // ids are deliberately cleared above: after process restart, Tauri also
+        // needs reconnect/connect_tree_node to create fresh SSH/SFTP/terminal
+        // owners instead of trusting stale ids from disk.
+        for node in snapshot.nodes {
+            let title = node
+                .origin
+                .saved_connection_id()
+                .and_then(|id| self.connection_store.get(id))
+                .map(|connection| connection.name.clone())
+                .unwrap_or_else(|| format!("{}@{}", node.config.username, node.config.host));
+            if let Some(saved_connection_id) = node.origin.saved_connection_id() {
+                self.saved_ssh_nodes
+                    .insert(saved_connection_id.to_string(), node.id.clone());
+            }
+            self.ssh_nodes.insert(
+                node.id,
+                WorkspaceSshNode {
+                    saved_connection_id: node.origin.saved_connection_id().map(str::to_string),
+                    config: node.config,
+                    title,
+                    terminal_ids: Vec::new(),
+                    readiness: NodeReadiness::Disconnected,
+                },
+            );
+        }
+    }
+
+    fn persist_session_tree_snapshot(&self) {
+        let runtime = self.node_router.export_tree_snapshot();
+        let nodes = runtime
+            .nodes
+            .into_iter()
+            .filter_map(|node| {
+                let config = persistable_session_tree_config(&node);
+                if config.is_none() && node.origin.saved_connection_id().is_none() {
+                    return None;
+                }
+                Some(PersistedNodeTreeNode {
+                    id: node.id,
+                    parent_id: node.parent_id,
+                    children_ids: node.children_ids,
+                    depth: node.depth,
+                    origin: node.origin,
+                    config,
+                    created_at_ms: node.created_at_ms,
+                    generation: node.generation,
+                })
+            })
+            .collect::<Vec<_>>();
+        let retained_ids = nodes.iter().map(|node| node.id.clone()).collect::<HashSet<_>>();
+        let persisted = PersistedNodeTreeSnapshot {
+            version: runtime.version,
+            exported_at_ms: runtime.exported_at_ms,
+            root_ids: runtime
+                .root_ids
+                .into_iter()
+                .filter(|id| retained_ids.contains(id))
+                .collect(),
+            nodes,
+        };
+        let path = default_session_tree_path();
+        if let Err(error) = write_session_tree_snapshot(&path, &persisted) {
+            eprintln!("failed to persist session tree snapshot: {error}");
+        }
+    }
+}
+
+fn write_session_tree_snapshot(path: &PathBuf, snapshot: &PersistedNodeTreeSnapshot) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(snapshot)?;
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn persistable_session_tree_config(node: &NodeTreeSnapshotNode) -> Option<SshConfig> {
+    if node.origin.saved_connection_id().is_some() {
+        return None;
+    }
+    config_without_runtime_secret(&node.config).then(|| node.config.clone())
+}
+
+fn config_without_runtime_secret(config: &SshConfig) -> bool {
+    auth_without_runtime_secret(&config.auth)
+        && config.proxy_chain.as_ref().is_none_or(|chain| {
+            chain
+                .iter()
+                .all(|hop| auth_without_runtime_secret(&hop.auth))
+        })
+}
+
+fn auth_without_runtime_secret(auth: &AuthMethod) -> bool {
+    match auth {
+        AuthMethod::Password { .. } => false,
+        AuthMethod::Key { passphrase, .. } | AuthMethod::Certificate { passphrase, .. } => {
+            passphrase.is_none()
+        }
+        AuthMethod::Agent | AuthMethod::KeyboardInteractive => true,
+    }
+}
