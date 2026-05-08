@@ -1695,33 +1695,29 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     }
   }, [searchOpen, aiPanelOpen, effectivePaneId, focusTerminal, onFocus]);
 
-  const cancelCommandMarkDoubleClick = useCallback((event: React.MouseEvent) => {
+  const skipCommandMarkMultiClick = useCallback((event: React.MouseEvent) => {
     if (event.button !== 0 || event.detail <= 1) return false;
     commandMarkPointerRef.current = null;
     clearTerminalCommandMarkSelection(effectivePaneId);
-    terminalRef.current?.clearSelection();
-    event.preventDefault();
-    event.stopPropagation();
-    (event.nativeEvent as MouseEvent & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
     return true;
   }, [effectivePaneId]);
 
   const handleCommandMarkPointerDown = useCallback((event: React.MouseEvent) => {
     // Command-mark hit testing must only observe real xterm viewport clicks.
     // The search bar and other overlays live inside the terminal shell; letting
-    // their double-clicks reach cancelCommandMarkDoubleClick would clear xterm's
-    // SearchAddon selection and break next/previous search navigation.
+    // Multi-clicks are reserved for xterm word/line selection, so command mark
+    // hit testing must step aside instead of cancelling the native selection.
     if (event.button !== 0 || !containerRef.current?.contains(event.target as Node)) {
       commandMarkPointerRef.current = null;
       return;
     }
-    if (cancelCommandMarkDoubleClick(event)) return;
+    if (skipCommandMarkMultiClick(event)) return;
     commandMarkPointerRef.current = {
       x: event.clientX,
       y: event.clientY,
       selection: terminalRef.current?.getSelection() ?? '',
     };
-  }, [cancelCommandMarkDoubleClick]);
+  }, [skipCommandMarkMultiClick]);
 
   const handleCommandMarkPointerUp = useCallback((event: React.MouseEvent) => {
     const start = commandMarkPointerRef.current;
@@ -1729,7 +1725,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     const term = terminalRef.current;
     const container = containerRef.current;
     if (!start || !term || !container?.contains(event.target as Node)) return;
-    if (cancelCommandMarkDoubleClick(event)) return;
+    if (skipCommandMarkMultiClick(event)) return;
     if (event.button !== 0) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
     const selection = term.getSelection();
@@ -1742,7 +1738,7 @@ export const LocalTerminalView: React.FC<LocalTerminalViewProps> = ({
     void selectTerminalCommandMarkAtLineFromFacts(term, effectivePaneId, sessionId, line).then((selected) => {
       if (!selected) clearTerminalCommandMarkSelection(effectivePaneId);
     });
-  }, [cancelCommandMarkDoubleClick, effectivePaneId, sessionId]);
+  }, [skipCommandMarkMultiClick, effectivePaneId, sessionId]);
 
   // ── Background Image ──────────────────────────────────────────────────────────
   const currentTheme = getTerminalTheme(terminalSettings.theme);
