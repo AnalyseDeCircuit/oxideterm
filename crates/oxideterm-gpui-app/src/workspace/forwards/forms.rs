@@ -207,100 +207,57 @@ impl WorkspaceApp {
         &self,
         node_id: NodeId,
         tab_id: TabId,
-        has_background: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let Some(rule) = self.forwarding_view.pending_delete_forward.as_ref() else {
             return div().into_any_element();
         };
         let forward_id = rule.id.clone();
         let confirm_id = forward_id.clone();
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(forwards_palette_alpha(TW_BLACK, FORWARDS_TW_ALPHA_50))
-            .child(
-                div()
-                    .w(px(420.0))
-                    .rounded(px(self.tokens.radii.lg))
-                    .border_1()
-                    .border_color(forwards_theme_border(theme.border, has_background))
-                    .bg(forwards_theme_panel_bg(theme.bg_panel, has_background))
-                    .p(px(20.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text))
-                            .child(self.render_forward_ui_text(
-                                self.i18n.t("forwards.actions.confirm_delete_title"),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_forward_ui_text(
-                                self.i18n.t("forwards.actions.confirm_delete_desc"),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.0))
-                            .child(self.render_forward_button(
-                                self.i18n.t("forwards.form.cancel"),
-                                None,
-                                ForwardButtonVariant::Ghost,
-                                true,
-                                has_background,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.forwarding_view.pending_delete_forward = None;
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                }),
-                            ))
-                            .child(self.render_forward_button(
-                                self.i18n.t("forwards.actions.delete"),
-                                Some(LucideIcon::Trash2),
-                                ForwardButtonVariant::Danger,
-                                true,
-                                has_background,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.forwarding_view.pending_delete_forward = None;
-                                    let registry = this.forwarding_registry.clone();
-                                    let delete_id = confirm_id.clone();
-                                    this.start_forward_operation(
-                                        tab_id,
-                                        node_id.clone(),
-                                        "forwards.messages.deleted",
-                                        move |manager| {
-                                            Box::pin(async move {
-                                                manager.delete_forward(&delete_id).await?;
-                                                let _ =
-                                                    registry.delete_persisted_forward(&delete_id);
-                                                Ok(())
-                                            })
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    ),
-            )
-            .into_any_element()
+        confirm_dialog(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: self
+                    .render_forward_ui_text(self.i18n.t("forwards.actions.confirm_delete_title"))
+                    .into_any_element(),
+                description: Some(
+                    self.render_forward_ui_text(self.i18n.t("forwards.actions.confirm_delete_desc"))
+                        .into_any_element(),
+                ),
+                cancel_label: self
+                    .render_forward_ui_text(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: self
+                    .render_forward_ui_text(self.i18n.t("common.actions.confirm"))
+                    .into_any_element(),
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.forwarding_view.pending_delete_forward = None;
+                cx.notify();
+                cx.stop_propagation();
+            }),
+            cx.listener(move |this, _event, _window, cx| {
+                this.forwarding_view.pending_delete_forward = None;
+                let registry = this.forwarding_registry.clone();
+                let delete_id = confirm_id.clone();
+                this.start_forward_operation(
+                    tab_id,
+                    node_id.clone(),
+                    "forwards.messages.deleted",
+                    move |manager| {
+                        Box::pin(async move {
+                            manager.delete_forward(&delete_id).await?;
+                            let _ = registry.delete_persisted_forward(&delete_id);
+                            Ok(())
+                        })
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
     }
 
     fn render_forward_type_picker(

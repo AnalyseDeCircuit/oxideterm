@@ -42,6 +42,7 @@ const SFTP_ICON_MD: f32 = 14.0; // Tauri h-3.5 w-3.5
 const SFTP_TOOL_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
+const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
 const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
 const SFTP_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%

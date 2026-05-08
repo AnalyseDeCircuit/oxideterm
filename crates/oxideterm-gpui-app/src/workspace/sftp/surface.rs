@@ -527,7 +527,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .when_some(width, |header, width| header.w(px(width)).justify_end())
+            .when_some(width, |header, width| {
+                header.w(px(width)).flex_none().justify_end()
+            })
             .when(width.is_none(), |header| header.flex_1())
             .min_w(px(0.0))
             .flex()
@@ -785,6 +787,7 @@ impl WorkspaceApp {
                                 (&file.permissions, &file.owner, &file.group);
                             let is_selected = row_selected.contains(&name);
                             div()
+                                .w_full()
                                 .h(px(SFTP_ROW_HEIGHT))
                                 .flex()
                                 .flex_row()
@@ -838,6 +841,7 @@ impl WorkspaceApp {
                                 .child(
                                     div()
                                         .w(px(SFTP_SIZE_COL))
+                                        .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
                                         .child(if file.file_type == SftpFileType::Directory {
@@ -849,6 +853,7 @@ impl WorkspaceApp {
                                 .child(
                                     div()
                                         .w(px(SFTP_MODIFIED_COL))
+                                        .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
                                         .child(format_modified(file.modified)),

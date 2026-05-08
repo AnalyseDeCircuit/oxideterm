@@ -31,6 +31,11 @@
   },
   "common": {
     "enabled": "활성화됨",
-    "disabled": "비활성화됨"
+    "disabled": "비활성화됨",
+    "actions": {
+      "cancel": "취소",
+      "confirm": "확인",
+      "delete": "삭제"
+    }
   }
 }

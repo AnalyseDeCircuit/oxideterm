@@ -4,6 +4,7 @@ pub mod badge;
 pub mod button;
 pub mod checkbox;
 pub mod command;
+pub mod confirm;
 pub mod context_menu;
 pub mod dialog;
 pub mod dropdown_menu;
@@ -31,6 +32,7 @@ pub mod typography;
 pub use badge::{IconBadgeMetrics, icon_badge, icon_badge_metrics_from_tokens};
 pub use button::{ButtonTone, button};
 pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
+pub use confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 pub use form_field::form_field;
 pub use modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay};
 pub use surface::{

@@ -31,6 +31,11 @@
   },
   "common": {
     "enabled": "Đã bật",
-    "disabled": "Đã tắt"
+    "disabled": "Đã tắt",
+    "actions": {
+      "cancel": "Hủy",
+      "confirm": "Xác nhận",
+      "delete": "Xóa"
+    }
   }
 }

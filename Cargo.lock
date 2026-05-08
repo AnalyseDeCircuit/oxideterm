@@ -6489,6 +6489,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "gpui",
+ "gpui-component",
  "gstreamer",
  "gstreamer-video",
  "objc2",

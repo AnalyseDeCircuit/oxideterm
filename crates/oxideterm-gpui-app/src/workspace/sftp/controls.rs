@@ -39,10 +39,11 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .size(px(SFTP_TOOL_BUTTON))
+            .flex_none()
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(self.tokens.radii.sm))
+            .rounded(px(self.tokens.radii.md))
             .text_color(rgb(theme.text))
             .hover(move |button| button.bg(rgb(theme.bg_hover)))
             .cursor_pointer()

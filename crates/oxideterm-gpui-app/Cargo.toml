@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+gpui-component.workspace = true
 gpui.workspace = true
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-code-editor = { path = "../oxideterm-code-editor", features = ["syntax"] }
