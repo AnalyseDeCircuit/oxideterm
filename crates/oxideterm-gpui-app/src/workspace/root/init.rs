@@ -143,36 +143,59 @@ impl WorkspaceApp {
             local_shells,
         };
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
-        let window_handle = window
-            .window_handle()
-            .downcast::<Self>()
-            .expect("workspace root window handle");
-        cx.spawn(async move |_weak, cx| {
+        let window_handle = window.window_handle();
+        cx.spawn(async move |weak, cx| {
             loop {
                 Timer::after(Duration::from_millis(530)).await;
-                if window_handle
-                    .update(cx, |workspace, window, cx| {
-                        workspace.poll_ssh_worker_results(window, cx);
-                        workspace.poll_node_events(cx);
-                        workspace.poll_reconnect_worker_results(cx);
-                        workspace.poll_sftp_worker_results(cx);
-                        workspace.maybe_start_sftp_remote_load(cx);
-                        workspace.poll_forwarding_worker_results(cx);
-                        workspace.poll_forwarding_events(cx);
-                        workspace.sync_ssh_node_lifecycle(cx);
-                        workspace.maybe_start_forwards_port_scan(cx);
-                        if workspace.new_connection_form.is_some()
-                            || workspace.keyboard_interactive_challenge.is_some()
-                            || workspace.focused_settings_input.is_some()
-                            || workspace.session_manager.focused_input.is_some()
-                            || workspace.sftp_view.focused_input.is_some()
-                        {
-                            workspace.new_connection_caret_visible =
-                                !workspace.new_connection_caret_visible;
-                            cx.notify();
-                        } else if !workspace.new_connection_caret_visible {
-                            workspace.new_connection_caret_visible = true;
-                        }
+                // Keep the workspace polling loop tied to the WorkspaceApp entity itself.
+                // The window root is gpui_component::Root<WorkspaceApp>, so downcasting a
+                // window handle to WorkspaceApp is not valid during startup.
+                if cx
+                    .update_window(window_handle, |_, window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.poll_ssh_worker_results(window, cx);
+                            workspace.poll_node_events(cx);
+                            workspace.poll_reconnect_worker_results(cx);
+                            workspace.poll_sftp_worker_results(cx);
+                            workspace.maybe_start_sftp_remote_load(cx);
+                            workspace.poll_forwarding_worker_results(cx);
+                            workspace.poll_forwarding_events(cx);
+                            workspace.sync_ssh_node_lifecycle(cx);
+                            workspace.maybe_start_forwards_port_scan(cx);
+                            if workspace.new_connection_form.is_some()
+                                || workspace.keyboard_interactive_challenge.is_some()
+                                || workspace.focused_settings_input.is_some()
+                                || workspace.session_manager.focused_input.is_some()
+                                || workspace.sftp_view.focused_input.is_some()
+                            {
+                                workspace.new_connection_caret_visible =
+                                    !workspace.new_connection_caret_visible;
+                                cx.notify();
+                            } else if !workspace.new_connection_caret_visible {
+                                workspace.new_connection_caret_visible = true;
+                            }
+                        })
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+        let sftp_window_handle = window.window_handle();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                // Tauri fires nodeSftpListDir immediately from the SFTP path effect. Keep
+                // native SFTP navigation off the slower caret/lifecycle loop so folder
+                // changes do not wait for the 530ms workspace tick.
+                Timer::after(Duration::from_millis(60)).await;
+                if cx
+                    .update_window(sftp_window_handle, |_, _window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.poll_sftp_worker_results(cx);
+                            workspace.maybe_start_sftp_remote_load(cx);
+                        })
                     })
                     .is_err()
                 {

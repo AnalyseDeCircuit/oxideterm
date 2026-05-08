@@ -54,6 +54,7 @@ impl Render for WorkspaceApp {
         div()
             .id("workspace-root")
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(workspace_background(&self.tokens, vibrancy_mode))
@@ -112,10 +113,11 @@ impl Render for WorkspaceApp {
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
                 {
-                    let sftp_quick_look_space = event.keystroke.key.as_str() == "space"
+                    let sftp_key = event.keystroke.key.as_str();
+                    let sftp_quick_look_space = matches!(sftp_key, "space" | " ")
                         && this.sftp_view.focused_input.is_none()
                         && this.sftp_view.dialog.is_none();
-                    let sftp_markdown_preview_toggle = event.keystroke.key.as_str() == "u"
+                    let sftp_markdown_preview_toggle = sftp_key == "u"
                         && this.sftp_view.focused_input.is_none()
                         && matches!(
                             this.sftp_view.dialog.as_ref(),
@@ -329,6 +331,21 @@ impl Render for WorkspaceApp {
             .when(self.keyboard_interactive_challenge.is_some(), |root| {
                 root.child(self.render_keyboard_interactive_dialog(cx))
             })
+            .when(
+                self.active_tab()
+                    .is_some_and(|tab| matches!(tab.kind, TabKind::Sftp)),
+                |root| {
+                    if let Some(dialog) = self.sftp_view.dialog.as_ref() {
+                        // Tauri's Radix Dialog portals a modal overlay at the window root.
+                        // Keep GPUI SFTP dialogs outside the SFTP pane tree so hit-testing and
+                        // scroll input cannot leak to file rows behind the preview.
+                        let has_background = self.terminal_background_preferences("sftp").is_some();
+                        root.child(self.render_sftp_dialog(dialog.clone(), has_background, cx))
+                    } else {
+                        root
+                    }
+                },
+            )
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),

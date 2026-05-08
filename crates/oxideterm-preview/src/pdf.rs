@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::RenderImage;
@@ -112,9 +112,79 @@ impl PdfPreviewBackend for PdfiumPreviewBackend {
 fn bind_pdfium() -> Result<pdfium_render::prelude::Pdfium, PdfPreviewError> {
     use pdfium_render::prelude::Pdfium;
 
-    let bindings = Pdfium::bind_to_system_library()
-        .map_err(|error| PdfPreviewError::BackendUnavailable(error.to_string()))?;
-    Ok(Pdfium::new(bindings))
+    let mut attempts = Vec::new();
+    for candidate in pdfium_library_candidates() {
+        match Pdfium::bind_to_library(&candidate) {
+            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+            Err(error) => attempts.push(format!("{}: {}", candidate.display(), error)),
+        }
+    }
+
+    match Pdfium::bind_to_system_library() {
+        Ok(bindings) => Ok(Pdfium::new(bindings)),
+        Err(error) => {
+            attempts.push(format!("system library: {error}"));
+            Err(PdfPreviewError::BackendUnavailable(attempts.join("; ")))
+        }
+    }
+}
+
+#[cfg(feature = "pdfium")]
+fn pdfium_library_candidates() -> Vec<PathBuf> {
+    use pdfium_render::prelude::Pdfium;
+
+    let mut candidates = Vec::new();
+
+    for env_key in ["OXIDETERM_PDFIUM_PATH", "PDFIUM_DYNAMIC_LIB_PATH"] {
+        let Ok(raw_path) = std::env::var(env_key) else {
+            continue;
+        };
+        let path = PathBuf::from(raw_path);
+        if path.extension().is_some() {
+            push_unique_candidate(&mut candidates, path);
+        } else {
+            push_unique_candidate(
+                &mut candidates,
+                Pdfium::pdfium_platform_library_name_at_path(&path),
+            );
+        }
+    }
+
+    // PDFium is a runtime dynamic library, not part of the Rust crate. Native
+    // builds look next to the executable first, then in macOS bundle Resources,
+    // matching the packaging shape documented for release builds.
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            push_unique_candidate(
+                &mut candidates,
+                Pdfium::pdfium_platform_library_name_at_path(exe_dir),
+            );
+
+            #[cfg(target_os = "macos")]
+            if let Some(bundle_dir) = exe_dir.parent().and_then(Path::parent) {
+                push_unique_candidate(
+                    &mut candidates,
+                    Pdfium::pdfium_platform_library_name_at_path(&bundle_dir.join("Resources")),
+                );
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        push_unique_candidate(
+            &mut candidates,
+            Pdfium::pdfium_platform_library_name_at_path(&cwd),
+        );
+    }
+
+    candidates
+}
+
+#[cfg(feature = "pdfium")]
+fn push_unique_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
 }
 
 #[cfg(not(feature = "pdfium"))]

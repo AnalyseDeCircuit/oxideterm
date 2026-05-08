@@ -2,15 +2,27 @@
 
 `oxideterm-preview` keeps PDF rendering behind the `pdfium` feature. When the
 feature is disabled, `PdfiumPreviewBackend` reports an explicit unavailable
-state. When the feature is enabled, the backend currently calls
-`Pdfium::bind_to_system_library()`, so a developer machine with PDFium installed
-can render PDFs but a user machine without the dynamic library will fail closed.
+state. When the feature is enabled, the backend binds a real PDFium dynamic
+library from the native app lookup chain below and fails closed when no matching
+library is present.
 
 The native app must not ship with a "works on my machine" PDF path. Release
 builds that enable PDF preview need one of these concrete distribution modes:
 
-1. Bundle a platform PDFium dynamic library next to the app binary and add that
-   directory to the runtime lookup path before constructing `PdfiumPreviewBackend`.
+Runtime lookup order:
+
+1. `OXIDETERM_PDFIUM_PATH`, either a full library path or a directory.
+2. `PDFIUM_DYNAMIC_LIB_PATH`, either a full library path or a directory.
+3. The directory containing the native executable.
+4. macOS app bundle `Contents/Resources`.
+5. The current working directory.
+6. The system dynamic-library path through `Pdfium::bind_to_system_library()`.
+
+Release builds that enable PDF preview need one of these concrete distribution
+modes:
+
+1. Bundle a platform PDFium dynamic library next to the app binary or in the
+   macOS app bundle Resources directory.
 2. Use a platform package that installs PDFium as an app dependency and verify
    the loader path during startup.
 3. Compile without `pdfium` and show the existing explicit unsupported preview

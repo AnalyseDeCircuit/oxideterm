@@ -244,12 +244,7 @@ impl WorkspaceApp {
             .filter(|language| !language.trim().is_empty())
             .unwrap_or("text")
             .to_ascii_lowercase();
-        let lines = std::sync::Arc::new(
-            source
-                .split('\n')
-                .map(|line| line.to_string())
-                .collect::<Vec<_>>(),
-        );
+        let lines = std::sync::Arc::new(sftp_preview_visual_lines(source));
         let row_count = lines.len();
         let list_lines = lines.clone();
         let font_family = settings_mono_font_family(self.settings_store.settings());
@@ -268,7 +263,7 @@ impl WorkspaceApp {
                             let content: AnyElement =
                                 if language != "text"
                                     && let Some(runs) =
-                                        highlight::highlight_code(&language, line, &opts)
+                                        highlight::highlight_code(&language, &line.content, &opts)
                                 {
                                     let (text, text_runs) =
                                         highlight::highlighted_runs_to_text_runs(&runs);
@@ -276,7 +271,7 @@ impl WorkspaceApp {
                                         .with_runs(text_runs)
                                         .into_any_element()
                                 } else {
-                                    SharedString::from(line.clone()).into_any_element()
+                                    SharedString::from(line.content.clone()).into_any_element()
                                 };
                             div()
                                 .h(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
@@ -298,13 +293,16 @@ impl WorkspaceApp {
                                             (theme.text_muted << 8)
                                                 | SFTP_PREVIEW_CODE_GUTTER_ALPHA,
                                         ))
-                                        .child((index + 1).to_string()),
+                                        .child(
+                                            line.line_number
+                                                .map(|line_number| line_number.to_string())
+                                                .unwrap_or_default(),
+                                        ),
                                 )
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w(px(0.0))
-                                        .overflow_hidden()
                                         .child(content),
                                 )
                                 .into_any_element()

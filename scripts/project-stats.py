@@ -78,6 +78,166 @@ def fmt_bytes(b: int) -> str:
     return f"{b} B"
 
 
+# ── 行类型统计 ────────────────────────────────────────────────────────────────
+
+def count_lines(path: Path, lang: str) -> tuple[int, int, int]:
+    """返回 (code, comment, blank)，忽略无法解码的文件。"""
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return 0, 0, 0
+
+    single_prefixes = SINGLE_COMMENT.get(lang, ())
+    use_block = lang in BLOCK_COMMENT_LANGS
+
+    code = comment = blank = 0
+    in_block = False
+
+    for raw in text.splitlines():
+        line = raw.strip()
+
+        if not line:
+            blank += 1
+            continue
+
+        if in_block:
+            comment += 1
+            if "*/" in line:
+                in_block = False
+            continue
+
+        if use_block and line.startswith("/*"):
+            comment += 1
+            if "*/" not in line[2:]:
+                in_block = True
+            continue
+
+        if any(line.startswith(p) for p in single_prefixes):
+            comment += 1
+        else:
+            code += 1
+
+    return code, comment, blank
+
+
+# ── 文件遍历 ──────────────────────────────────────────────────────────────────
+
+def collect(root: Path) -> dict[str, dict]:
+    """
+    返回 {lang: {files, code, comment, blank, bytes}}
+    """
+    stats: dict[str, dict] = {}
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # 原地过滤，避免递归进排除目录
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith(".")]
+
+        for fname in filenames:
+            ext = Path(fname).suffix.lower()
+            lang = EXT_TO_LANG.get(ext)
+            if lang is None:
+                continue
+
+            fpath = Path(dirpath) / fname
+            try:
+                size = fpath.stat().st_size
+            except OSError:
+                continue
+
+            code, comment, blank = count_lines(fpath, lang)
+
+            if lang not in stats:
+                stats[lang] = {"files": 0, "code": 0, "comment": 0, "blank": 0, "bytes": 0}
+            s = stats[lang]
+            s["files"]   += 1
+            s["code"]    += code
+            s["comment"] += comment
+            s["blank"]   += blank
+            s["bytes"]   += size
+
+    return stats
+
+
+# ── 输出 ──────────────────────────────────────────────────────────────────────
+
+def print_table(stats: dict[str, dict]) -> None:
+    if not stats:
+        print("没有找到任何源文件。")
+        return
+
+    # 按代码行数降序排列
+    rows = sorted(stats.items(), key=lambda kv: kv[1]["code"], reverse=True)
+
+    col_lang    = max(len("语言"),    max(len(k) for k in stats)) + 2
+    col_files   = max(len("文件数"),  max(len(fmt_num(v["files"]))   for v in stats.values())) + 2
+    col_code    = max(len("代码行"),  max(len(fmt_num(v["code"]))    for v in stats.values())) + 2
+    col_comment = max(len("注释行"),  max(len(fmt_num(v["comment"])) for v in stats.values())) + 2
+    col_blank   = max(len("空白行"),  max(len(fmt_num(v["blank"]))   for v in stats.values())) + 2
+    col_size    = max(len("大小"),    max(len(fmt_bytes(v["bytes"])) for v in stats.values())) + 2
+
+    sep = (
+        "─" * col_lang + "┬" +
+        "─" * col_files + "┬" +
+        "─" * col_code + "┬" +
+        "─" * col_comment + "┬" +
+        "─" * col_blank + "┬" +
+        "─" * col_size
+    )
+
+    header = (
+        bold(cyan(f"{'语言':<{col_lang}}")) + "│" +
+        bold(f"{'文件数':>{col_files}}") + "│" +
+        bold(green(f"{'代码行':>{col_code}}")) + "│" +
+        bold(dim(f"{'注释行':>{col_comment}}")) + "│" +
+        bold(dim(f"{'空白行':>{col_blank}}")) + "│" +
+        bold(f"{'大小':>{col_size}}")
+    )
+
+    print()
+    print(header)
+    print(sep)
+
+    total = {"files": 0, "code": 0, "comment": 0, "blank": 0, "bytes": 0}
+    for lang, v in rows:
+        print(
+            cyan(f"{lang:<{col_lang}}") + "│" +
+            f"{fmt_num(v['files']):>{col_files}}" + "│" +
+            green(f"{fmt_num(v['code']):>{col_code}}") + "│" +
+            dim(f"{fmt_num(v['comment']):>{col_comment}}") + "│" +
+            dim(f"{fmt_num(v['blank']):>{col_blank}}") + "│" +
+            f"{fmt_bytes(v['bytes']):>{col_size}}"
+        )
+        for k in total:
+            total[k] += v[k]
+
+    print(sep)
+    print(
+        bold(f"{'合计':<{col_lang}}") + "│" +
+        bold(f"{fmt_num(total['files']):>{col_files}}") + "│" +
+        bold(green(f"{fmt_num(total['code']):>{col_code}}")) + "│" +
+        bold(dim(f"{fmt_num(total['comment']):>{col_comment}}")) + "│" +
+        bold(dim(f"{fmt_num(total['blank']):>{col_blank}}")) + "│" +
+        bold(f"{fmt_bytes(total['bytes']):>{col_size}}")
+    )
+    print()
+
+
+# ── 入口 ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT
+    print(dim(f"扫描目录: {root}"))
+    t0 = time.monotonic()
+    stats = collect(root)
+    elapsed = time.monotonic() - t0
+    print_table(stats)
+    print(dim(f"耗时 {elapsed:.2f}s"))
+
+
+if __name__ == "__main__":
+    main()
+
+
 class LineCount:
     __slots__ = ("total", "code", "comment", "blank")
 

@@ -521,10 +521,12 @@ async fn list_remote_sftp_once(
     path: &str,
 ) -> Result<RemoteSftpListing, SftpError> {
     let sftp = sftp.lock().await;
-    let cwd = sftp.canonicalize(path).await?;
-    let entries = sftp
-        .list_dir(
-            &cwd,
+    // Tauri's node_sftp_list_dir performs one SFTP path resolution inside
+    // list_dir. Native used to canonicalize here and then list_dir canonicalized
+    // again, adding a visible RTT on every folder change.
+    let (cwd, entries) = sftp
+        .list_dir_with_cwd(
+            path,
             Some(RemoteListFilter {
                 show_hidden: true,
                 pattern: None,
@@ -583,11 +585,19 @@ fn format_file_size(bytes: u64) -> String {
 }
 
 fn format_modified(modified: Option<i64>) -> String {
-    if modified.is_some() {
-        "2026/5/7".to_string()
-    } else {
-        "-".to_string()
-    }
+    let Some(modified) = modified.filter(|modified| *modified > 0) else {
+        return "-".to_string();
+    };
+    let Some(datetime) = chrono::DateTime::from_timestamp(modified, 0) else {
+        return "-".to_string();
+    };
+    // Tauri renders `new Date(file.modified * 1000).toLocaleDateString()`;
+    // native keeps the same Unix-seconds -> local-date contract instead of
+    // showing UTC or a placeholder date.
+    datetime
+        .with_timezone(&chrono::Local)
+        .format("%Y/%-m/%-d")
+        .to_string()
 }
 
 fn format_conflict_modified(modified: Option<i64>) -> String {
@@ -668,12 +678,144 @@ fn sftp_diff_stats(lines: &[SftpDiffLine]) -> SftpDiffStats {
     stats
 }
 
+#[derive(Clone, Debug)]
+struct SftpPreviewVisualLine {
+    line_number: Option<usize>,
+    content: String,
+}
+
+#[derive(Clone, Debug)]
+struct SftpDiffVisualLine {
+    kind: SftpDiffLineKind,
+    left_line_num: String,
+    right_line_num: String,
+    left_content: String,
+    right_content: String,
+}
+
+fn sftp_preview_visual_lines(source: &str) -> Vec<SftpPreviewVisualLine> {
+    source
+        .split('\n')
+        .enumerate()
+        .flat_map(|(index, line)| {
+            wrap_sftp_virtual_text_line(line, SFTP_PREVIEW_CODE_WRAP_COLUMNS)
+                .into_iter()
+                .enumerate()
+                .map(move |(chunk_index, content)| SftpPreviewVisualLine {
+                    line_number: (chunk_index == 0).then_some(index + 1),
+                    content,
+                })
+        })
+        .collect()
+}
+
+fn sftp_diff_visual_lines(lines: &[SftpDiffLine]) -> Vec<SftpDiffVisualLine> {
+    let mut visual_lines = Vec::new();
+    for line in lines {
+        let removed = line.kind == SftpDiffLineKind::Removed;
+        let added = line.kind == SftpDiffLineKind::Added;
+        let left_content = if added {
+            String::new()
+        } else if removed {
+            format!("- {}", line.content)
+        } else {
+            line.content.clone()
+        };
+        let right_content = if removed {
+            String::new()
+        } else if added {
+            format!("+ {}", line.content)
+        } else {
+            line.content.clone()
+        };
+        let left_chunks = wrap_sftp_virtual_text_line(&left_content, SFTP_DIFF_WRAP_COLUMNS);
+        let right_chunks = wrap_sftp_virtual_text_line(&right_content, SFTP_DIFF_WRAP_COLUMNS);
+        let row_count = left_chunks.len().max(right_chunks.len()).max(1);
+
+        for chunk_index in 0..row_count {
+            visual_lines.push(SftpDiffVisualLine {
+                kind: line.kind,
+                left_line_num: if chunk_index == 0 {
+                    line.left_line_num
+                        .map(|number| number.to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                right_line_num: if chunk_index == 0 {
+                    line.right_line_num
+                        .map(|number| number.to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                left_content: left_chunks.get(chunk_index).cloned().unwrap_or_default(),
+                right_content: right_chunks.get(chunk_index).cloned().unwrap_or_default(),
+            });
+        }
+    }
+    visual_lines
+}
+
+fn wrap_sftp_virtual_text_line(line: &str, max_columns: usize) -> Vec<String> {
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    // Tauri uses CSS overflow for long `whitespace-pre` lines. GPUI's virtual
+    // lists here have fixed row heights, so we pre-split by character columns
+    // to keep long preview/diff lines readable without letting them bleed out
+    // of the modal or forcing the UI tree to render every source line at once.
+    let max_columns = max_columns.max(1);
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut width = 0usize;
+    for ch in line.chars() {
+        if width >= max_columns {
+            chunks.push(std::mem::take(&mut current));
+            width = 0;
+        }
+        current.push(ch);
+        width += 1;
+    }
+    chunks.push(current);
+    chunks
+}
+
 fn sftp_file_name(path: &str) -> String {
     path.rsplit(['/', '\\'])
         .next()
         .filter(|name| !name.is_empty())
         .unwrap_or(path)
         .to_string()
+}
+
+fn sftp_breadcrumb_max_scroll(segments: &[PathSegment], viewport_width: f32, icon_size: f32) -> f32 {
+    let content_width = sftp_breadcrumb_content_width(segments, icon_size);
+    (content_width - viewport_width.max(0.0)).max(0.0)
+}
+
+fn sftp_breadcrumb_content_width(segments: &[PathSegment], icon_size: f32) -> f32 {
+    segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            let chevron = if index > 0 { icon_size + 2.0 } else { 0.0 };
+            let root_icon = if index == 0 { icon_size + 4.0 } else { 0.0 };
+            let label = (segment.name.chars().count() as f32 * 8.0).min(120.0);
+            chevron + root_icon + label + 12.0
+        })
+        .sum()
+}
+
+fn sftp_path_bar_viewport_width(window: &Window) -> f32 {
+    let viewport = f32::from(window.viewport_size().width);
+    let pane_width = ((viewport - SFTP_ROOT_PADDING * 2.0 - SFTP_GAP) / 2.0).max(0.0);
+    // Header title, toolbar icon buttons, gaps, path-bar padding and borders.
+    // This mirrors the Tauri `PathBreadcrumb className="flex-1"` slot closely
+    // enough for scroll clamping while the actual GPUI clipping still happens
+    // in the rendered path bar.
+    (pane_width - 260.0).max(80.0)
 }
 
 fn format_sftp_media_time(duration: std::time::Duration) -> String {
@@ -728,4 +870,20 @@ fn diff_cell(
                 .child(content.to_string()),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod sftp_helper_tests {
+    use super::*;
+
+    #[test]
+    fn modified_date_matches_tauri_seconds_contract() {
+        assert_eq!(format_modified(None), "-");
+        assert_eq!(format_modified(Some(0)), "-");
+
+        let rendered = format_modified(Some(1_700_000_000));
+        assert_ne!(rendered, "-");
+        assert_ne!(rendered, "2026/5/7");
+        assert!(rendered.contains('/'));
+    }
 }

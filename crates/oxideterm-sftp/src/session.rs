@@ -120,12 +120,30 @@ impl SftpSession {
         filter: Option<ListFilter>,
     ) -> Result<Vec<FileInfo>, SftpError> {
         let canonical_path = self.resolve_path(path).await?;
+        self.list_dir_resolved(&canonical_path, filter).await
+    }
+
+    pub async fn list_dir_with_cwd(
+        &self,
+        path: &str,
+        filter: Option<ListFilter>,
+    ) -> Result<(String, Vec<FileInfo>), SftpError> {
+        let canonical_path = self.resolve_path(path).await?;
+        let entries = self.list_dir_resolved(&canonical_path, filter).await?;
+        Ok((canonical_path, entries))
+    }
+
+    async fn list_dir_resolved(
+        &self,
+        canonical_path: &str,
+        filter: Option<ListFilter>,
+    ) -> Result<Vec<FileInfo>, SftpError> {
         debug!("Listing SFTP directory: {canonical_path}");
         let read_dir = self
             .sftp
-            .read_dir(&canonical_path)
+            .read_dir(canonical_path)
             .await
-            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+            .map_err(|error| self.map_sftp_error(error, canonical_path))?;
         let mut entries = Vec::new();
 
         for entry in read_dir {
@@ -137,7 +155,7 @@ impl SftpSession {
                 continue;
             }
 
-            let full_path = join_remote_path(&canonical_path, &name);
+            let full_path = join_remote_path(canonical_path, &name);
             let metadata = entry.metadata();
             let entry_file_type = file_type_from_attrs(&metadata);
             let (symlink_target, target_file_type) = if entry_file_type == FileType::Symlink {

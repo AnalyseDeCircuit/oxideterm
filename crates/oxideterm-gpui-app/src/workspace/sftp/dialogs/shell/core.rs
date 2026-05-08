@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    fn render_sftp_dialog(
+    pub(super) fn render_sftp_dialog(
         &self,
         dialog: SftpDialog,
         has_background: bool,
@@ -96,6 +96,9 @@ impl WorkspaceApp {
             .items_center()
             .justify_center()
             .bg(rgba(SFTP_DIALOG_OVERLAY_ALPHA))
+            // Matches Radix DialogOverlay's modal behavior: the backdrop is the top
+            // hitbox, so file rows and scroll containers behind preview cannot react.
+            .occlude()
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()

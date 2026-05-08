@@ -28,3 +28,4 @@ target/
 /docs/tauri
 .codex-private/
 tauri版本代码/*
+.deps

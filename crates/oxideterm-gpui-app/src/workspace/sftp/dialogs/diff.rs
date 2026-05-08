@@ -10,8 +10,9 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let lines = compute_sftp_diff(local_content, remote_content);
         let stats = sftp_diff_stats(&lines);
-        let line_count = lines.len();
-        let diff_lines = std::sync::Arc::new(lines);
+        let visual_lines = sftp_diff_visual_lines(&lines);
+        let line_count = visual_lines.len();
+        let diff_lines = std::sync::Arc::new(visual_lines);
         let diff_scroll = self.sftp_view.diff_scroll.clone();
         div()
             .w_full()
@@ -128,28 +129,6 @@ impl WorkspaceApp {
                                             let removed =
                                                 line.kind == SftpDiffLineKind::Removed;
                                             let added = line.kind == SftpDiffLineKind::Added;
-                                            let left_num = line
-                                                .left_line_num
-                                                .map(|number| number.to_string())
-                                                .unwrap_or_default();
-                                            let right_num = line
-                                                .right_line_num
-                                                .map(|number| number.to_string())
-                                                .unwrap_or_default();
-                                            let left_content = if added {
-                                                String::new()
-                                            } else if removed {
-                                                format!("- {}", line.content)
-                                            } else {
-                                                line.content.clone()
-                                            };
-                                            let right_content = if removed {
-                                                String::new()
-                                            } else if added {
-                                                format!("+ {}", line.content)
-                                            } else {
-                                                line.content
-                                            };
                                             div()
                                                 .w_full()
                                                 .h(px(SFTP_DIFF_ROW_HEIGHT))
@@ -157,15 +136,15 @@ impl WorkspaceApp {
                                                 .border_b_1()
                                                 .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_HALF_ALPHA))
                                                 .child(diff_cell(
-                                                    &left_num,
-                                                    &left_content,
+                                                    &line.left_line_num,
+                                                    &line.left_content,
                                                     removed,
                                                     theme.border,
                                                     true,
                                                 ))
                                                 .child(diff_cell(
-                                                    &right_num,
-                                                    &right_content,
+                                                    &line.right_line_num,
+                                                    &line.right_content,
                                                     added,
                                                     theme.border,
                                                     false,

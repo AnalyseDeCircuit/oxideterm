@@ -213,6 +213,7 @@ impl WorkspaceApp {
     fn set_sftp_path(&mut self, pane: SftpPane, path: String) {
         match pane {
             SftpPane::Local => {
+                self.sftp_view.local_path_scroll_x = 0.0;
                 self.sftp_view.local_path = path.clone();
                 self.sftp_view.local_path_input = path.clone();
                 self.sftp_view.editing_local_path = false;
@@ -229,6 +230,7 @@ impl WorkspaceApp {
                 self.sftp_view.local_last_selected = None;
             }
             SftpPane::Remote => {
+                self.sftp_view.remote_path_scroll_x = 0.0;
                 self.sftp_view.remote_path = path.clone();
                 self.sftp_view.remote_path_input = path;
                 self.sftp_view.editing_remote_path = false;
@@ -256,6 +258,46 @@ impl WorkspaceApp {
                 self.sftp_view.focused_input = Some(SftpInput::RemotePath);
             }
         }
+    }
+
+    fn handle_sftp_breadcrumb_scroll(
+        &mut self,
+        pane: SftpPane,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event.delta.pixel_delta(px(SFTP_PANE_HEADER_HEIGHT));
+        let horizontal = if f32::from(delta.x).abs() > f32::from(delta.y).abs() {
+            f32::from(delta.x)
+        } else {
+            f32::from(delta.y)
+        };
+        if horizontal == 0.0 {
+            return;
+        }
+
+        let path = match pane {
+            SftpPane::Local => &self.sftp_view.local_path,
+            SftpPane::Remote => &self.sftp_view.remote_path,
+        };
+        let segments = sftp_path_segments(path, pane == SftpPane::Remote);
+        let max_scroll = sftp_breadcrumb_max_scroll(
+            &segments,
+            sftp_path_bar_viewport_width(window),
+            SFTP_ICON_MD,
+        );
+        if max_scroll <= 0.0 {
+            return;
+        }
+
+        let scroll = match pane {
+            SftpPane::Local => &mut self.sftp_view.local_path_scroll_x,
+            SftpPane::Remote => &mut self.sftp_view.remote_path_scroll_x,
+        };
+        *scroll = (*scroll + horizontal).clamp(0.0, max_scroll);
+        cx.stop_propagation();
+        cx.notify();
     }
 
     fn commit_sftp_path_input(&mut self, pane: SftpPane) {

@@ -1,8 +1,9 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, StatefulInteractiveElement, StyledText,
-    Subscription, UniformListScrollHandle, anchored, deferred, prelude::*, uniform_list,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, SharedString,
+    StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle, anchored,
+    deferred, prelude::*, uniform_list,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
@@ -48,6 +49,8 @@ const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
 const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
 const SFTP_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal
+const SFTP_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // GPUI virtual rows need soft-wrapped chunks instead of hidden overflow.
+const SFTP_DIFF_WRAP_COLUMNS: usize = 64; // max-w-5xl split diff leaves roughly this many mono chars per side.
 const SFTP_PREVIEW_FONT_DEFAULT_SIZE: f32 = 32.0; // Tauri FontPreview initial fontSize
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
 const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
@@ -401,6 +404,8 @@ pub(super) struct SftpViewState {
     remote_selected: HashSet<String>,
     local_file_scroll: UniformListScrollHandle,
     remote_file_scroll: UniformListScrollHandle,
+    local_path_scroll_x: f32,
+    remote_path_scroll_x: f32,
     diff_scroll: UniformListScrollHandle,
     preview_code_scroll: UniformListScrollHandle,
     preview_markdown_scroll: MarkdownVirtualListScrollHandle,
@@ -474,6 +479,8 @@ impl Default for SftpViewState {
             remote_selected: HashSet::new(),
             local_file_scroll: UniformListScrollHandle::new(),
             remote_file_scroll: UniformListScrollHandle::new(),
+            local_path_scroll_x: 0.0,
+            remote_path_scroll_x: 0.0,
             diff_scroll: UniformListScrollHandle::new(),
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),

@@ -29,7 +29,8 @@ impl WorkspaceApp {
             .bg(sftp_bg(theme.bg, has_background))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
+                cx.listener(|this, _event, window, cx| {
+                    window.focus(&this.focus_handle);
                     this.sftp_view.context_menu = None;
                     cx.notify();
                 }),
@@ -58,6 +59,7 @@ impl WorkspaceApp {
                         self.sftp_view.focused_input,
                         false,
                         has_background,
+                        window,
                         cx,
                     ))
                     .child(
@@ -77,15 +79,16 @@ impl WorkspaceApp {
                             self.sftp_view.focused_input,
                             self.sftp_view.remote_loading,
                             has_background,
+                            window,
                             cx,
                         ),
                     ),
             )
             .child(self.render_sftp_transfer_queue(has_background, cx));
 
-        if let Some(dialog) = self.sftp_view.dialog.as_ref() {
-            root = root.child(self.render_sftp_dialog(dialog.clone(), has_background, cx));
-        } else if let Some(menu) = self.sftp_view.context_menu.clone() {
+        if self.sftp_view.dialog.is_none()
+            && let Some(menu) = self.sftp_view.context_menu.clone()
+        {
             root = root.child(self.render_sftp_context_menu(menu, window, has_background, cx));
         }
 
@@ -108,6 +111,7 @@ impl WorkspaceApp {
         focused_input: Option<SftpInput>,
         loading: bool,
         has_background: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -150,6 +154,7 @@ impl WorkspaceApp {
                 transfer_direction,
                 active,
                 has_background,
+                window,
                 cx,
             ))
             .child(self.render_sftp_column_header(
@@ -184,6 +189,7 @@ impl WorkspaceApp {
         transfer_direction: SftpTransferDirection,
         active: bool,
         has_background: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -226,6 +232,7 @@ impl WorkspaceApp {
                 path_editing,
                 focused_input,
                 has_background,
+                window,
                 cx,
             ));
 
@@ -244,9 +251,8 @@ impl WorkspaceApp {
                     LucideIcon::FolderOpen,
                     self.i18n.t("sftp.toolbar.browse_folder"),
                     cx.listener(|this, _event, _window, cx| {
-                        this.sftp_view.dialog = Some(SftpDialog::Drives);
+                        this.browse_sftp_local_folder(cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 ));
         }
@@ -304,6 +310,7 @@ impl WorkspaceApp {
         editing: bool,
         focused_input: Option<SftpInput>,
         has_background: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -361,7 +368,7 @@ impl WorkspaceApp {
                 )
             })
             .when(!editing, |bar| {
-                bar.child(self.render_sftp_breadcrumb(pane, path, cx))
+                bar.child(self.render_sftp_breadcrumb(pane, path, window, cx))
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -393,31 +400,40 @@ impl WorkspaceApp {
         &self,
         pane: SftpPane,
         path: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let segments = sftp_path_segments(path, pane == SftpPane::Remote);
-        let mut row = div()
-            .flex_1()
-            .min_w(px(0.0))
+        let max_scroll = sftp_breadcrumb_max_scroll(
+            &segments,
+            sftp_path_bar_viewport_width(window),
+            SFTP_ICON_MD,
+        );
+        let scroll_x = match pane {
+            SftpPane::Local => self.sftp_view.local_path_scroll_x,
+            SftpPane::Remote => self.sftp_view.remote_path_scroll_x,
+        }
+        .clamp(0.0, max_scroll);
+        let mut inner = div()
+            .flex_none()
+            .relative()
+            .left(px(-scroll_x))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(2.0))
-            .overflow_hidden()
-            .text_size(px(SFTP_TEXT_SM));
-
-        for (index, segment) in segments.into_iter().enumerate() {
+            .gap(px(2.0));
+        for (index, segment) in segments.iter().cloned().enumerate() {
             if index > 0 {
-                row = row.child(Self::render_lucide_icon(
+                inner = inner.child(Self::render_lucide_icon(
                     LucideIcon::ChevronRight,
                     SFTP_ICON_MD,
                     rgb(theme.text_muted),
                 ));
             }
-            let is_last = index + 1 == sftp_path_segments(path, pane == SftpPane::Remote).len();
+            let is_last = index + 1 == segments.len();
             let full_path = segment.full_path.clone();
-            row = row.child(
+            inner = inner.child(
                 div()
                     .max_w(px(120.0))
                     .h(px(20.0))
@@ -462,7 +478,26 @@ impl WorkspaceApp {
                     ),
             );
         }
-        row.into_any_element()
+
+        div()
+            .flex_1()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .overflow_hidden()
+            .text_size(px(SFTP_TEXT_SM))
+            .on_scroll_wheel(cx.listener(move |this, event, window, cx| {
+                this.handle_sftp_breadcrumb_scroll(pane, event, window, cx);
+            }))
+            .child(
+                // Tauri PathBreadcrumb is `overflow-x-auto`. GPUI's native
+                // scroll container does not expose the same hidden scrollbar
+                // shape here, so we preserve the user-visible horizontal scroll
+                // by translating the full breadcrumb row inside the clipped bar.
+                inner,
+            )
+            .into_any_element()
     }
 
     fn render_sftp_column_header(
