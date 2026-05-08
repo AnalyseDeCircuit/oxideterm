@@ -20,6 +20,7 @@ rodio = { version = "0.21.1", default-features = true }
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+ttf-parser = "0.25"
 
 [dev-dependencies]
 serde_json.workspace = true

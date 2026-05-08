@@ -13,6 +13,7 @@ pub enum PreviewAssetKind {
     Audio,
     Pdf,
     Office,
+    Font,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub enum PreviewKind {
     Audio,
     Video,
     Office,
+    Font,
     TooLarge,
     Unsupported,
 }
@@ -78,6 +80,7 @@ impl PreviewContent {
                 PreviewAssetKind::Audio => PreviewKind::Audio,
                 PreviewAssetKind::Pdf => PreviewKind::Pdf,
                 PreviewAssetKind::Office => PreviewKind::Office,
+                PreviewAssetKind::Font => PreviewKind::Font,
             },
             Self::Hex { .. } => PreviewKind::Hex,
             Self::TooLarge { .. } => PreviewKind::TooLarge,
@@ -112,6 +115,9 @@ pub fn classify_preview_type(extension: &str, mime_type: &str) -> PreviewKind {
     if is_office_extension(extension) {
         return PreviewKind::Office;
     }
+    if is_font_extension(extension) || mime_type.starts_with("font/") {
+        return PreviewKind::Font;
+    }
     if mime_type.starts_with("image/") {
         return PreviewKind::Image;
     }
@@ -143,6 +149,44 @@ fn is_office_extension(extension: &str) -> bool {
     )
 }
 
+pub fn is_font_extension(extension: &str) -> bool {
+    matches!(extension, "ttf" | "otf" | "woff" | "woff2" | "eot")
+}
+
+pub fn font_mime_type(extension: &str, fallback: &str) -> String {
+    match extension {
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "eot" => "application/vnd.ms-fontobject",
+        _ => fallback,
+    }
+    .to_string()
+}
+
+pub fn font_family_name_from_bytes(bytes: &[u8]) -> Option<String> {
+    use ttf_parser::name_id;
+
+    let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+    let names = face.names();
+
+    [
+        name_id::TYPOGRAPHIC_FAMILY,
+        name_id::FAMILY,
+        name_id::FULL_NAME,
+    ]
+    .into_iter()
+    .find_map(|name_id| {
+        names
+            .into_iter()
+            .find(|name| name.name_id == name_id)
+            .and_then(|name| name.to_string())
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +212,10 @@ mod tests {
         assert_eq!(
             classify_preview_type("docx", "application/octet-stream"),
             PreviewKind::Office
+        );
+        assert_eq!(
+            classify_preview_type("ttf", "application/octet-stream"),
+            PreviewKind::Font
         );
         assert_eq!(
             classify_preview_type("txt", "text/plain"),

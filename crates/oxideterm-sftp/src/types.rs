@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 pub use oxideterm_preview::{
     PreviewAssetKind as AssetFileKind, PreviewContent, detect_and_decode, encode_to_encoding,
-    extension_to_language, generate_hex_dump, is_likely_text_content,
+    extension_to_language, font_mime_type, generate_hex_dump, is_font_extension,
+    is_likely_text_content,
 };
 
 pub mod constants {

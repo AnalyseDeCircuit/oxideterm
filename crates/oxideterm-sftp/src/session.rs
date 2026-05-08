@@ -24,8 +24,8 @@ use super::{
     types::{
         AdaptiveChunkSizer, AssetFileKind, FileInfo, FileType, ListFilter, PreviewContent,
         SortOrder, TransferDirection, TransferProgress, TransferState, constants,
-        detect_and_decode, extension_to_language, generate_hex_dump, is_likely_text_content,
-        is_office_extension, is_text_extension,
+        detect_and_decode, extension_to_language, font_mime_type, generate_hex_dump,
+        is_font_extension, is_likely_text_content, is_office_extension, is_text_extension,
     },
 };
 use crate::{
@@ -303,6 +303,17 @@ impl SftpSession {
                     file_size,
                     &mime_type,
                     AssetFileKind::Office,
+                )
+                .await;
+        }
+        if is_font_extension(&extension) || mime_type.starts_with("font/") {
+            let font_mime_type = font_mime_type(&extension, &mime_type);
+            return self
+                .preview_asset(
+                    &canonical_path,
+                    file_size,
+                    &font_mime_type,
+                    AssetFileKind::Font,
                 )
                 .await;
         }
@@ -1363,7 +1374,9 @@ impl SftpSession {
         let max_size = match kind {
             AssetFileKind::Audio | AssetFileKind::Video => constants::MAX_MEDIA_PREVIEW_SIZE,
             AssetFileKind::Office => constants::MAX_OFFICE_CONVERT_SIZE,
-            AssetFileKind::Image | AssetFileKind::Pdf => constants::MAX_PREVIEW_SIZE,
+            AssetFileKind::Image | AssetFileKind::Pdf | AssetFileKind::Font => {
+                constants::MAX_PREVIEW_SIZE
+            }
         };
         if size > max_size {
             return Ok(PreviewContent::TooLarge {

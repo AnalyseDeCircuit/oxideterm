@@ -34,6 +34,7 @@ pub use text::{
 };
 pub use types::{
     PreviewAssetKind, PreviewContent, PreviewKind, classify_preview_path, classify_preview_type,
+    font_family_name_from_bytes, font_mime_type, is_font_extension,
 };
 pub use video::{
     PlatformVideoBackend, PlatformVideoSnapshot, PlatformVideoState,

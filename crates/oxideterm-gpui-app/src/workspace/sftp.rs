@@ -1,14 +1,16 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, StatefulInteractiveElement, Subscription,
-    UniformListScrollHandle, anchored, deferred, prelude::*, uniform_list,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, StatefulInteractiveElement, StyledText,
+    Subscription, UniformListScrollHandle, anchored, deferred, prelude::*, uniform_list,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
     InputState as CodeEditorInputState,
 };
-use oxideterm_gpui_markdown::{MarkdownOptions, markdown_with_options};
+use oxideterm_gpui_markdown::{
+    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
+};
 use oxideterm_gpui_ui::{
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
@@ -16,6 +18,7 @@ use oxideterm_gpui_ui::{
 use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PdfPreviewBackend,
     PdfiumPreviewBackend, PreviewAssetOwner, PreviewSession, RodioAudioPreviewBackend,
+    font_family_name_from_bytes,
 };
 use oxideterm_sftp::{
     AssetFileKind, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
@@ -25,6 +28,7 @@ use oxideterm_sftp::{
     TransferType as RemoteTransferType, encode_to_encoding, probe_tar_compression,
     probe_tar_support, tar_download_directory, tar_upload_directory,
 };
+use std::borrow::Cow;
 
 mod native_video;
 
@@ -43,6 +47,8 @@ const SFTP_TOOL_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
 const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
+const SFTP_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal
+const SFTP_PREVIEW_FONT_DEFAULT_SIZE: f32 = 32.0; // Tauri FontPreview initial fontSize
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
 const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
 const SFTP_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%
@@ -80,6 +86,7 @@ const SFTP_EDITOR_RETRY_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-orange-500/10
 const SFTP_CONFLICT_NEWER_BG_ALPHA: u32 = 0x4d; // Tauri bg-green-950/30
 const SFTP_DIFF_HEADER_BG_ALPHA: u32 = 0x33; // Tauri bg-red/green-950/20
 const SFTP_DIFF_LINE_BG_ALPHA: u32 = 0x4d; // Tauri bg-red/green-950/30
+const SFTP_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%
 const SFTP_READONLY_BADGE_BG_ALPHA: u32 = 0x26; // Tauri warning badge translucent fill
 const SFTP_DIALOG_WIDTH_XS: f32 = 320.0; // Tauri max-w-xs
 const SFTP_DIALOG_WIDTH_SM: f32 = 384.0; // Tauri max-w-sm
@@ -111,7 +118,7 @@ impl SftpInput {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SftpPane {
+pub(super) enum SftpPane {
     Local,
     Remote,
 }
@@ -315,7 +322,7 @@ impl DirectoryProgressAccumulator {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-enum SftpDialog {
+pub(super) enum SftpDialog {
     Drives,
     Rename {
         pane: SftpPane,
@@ -395,6 +402,8 @@ pub(super) struct SftpViewState {
     local_file_scroll: UniformListScrollHandle,
     remote_file_scroll: UniformListScrollHandle,
     diff_scroll: UniformListScrollHandle,
+    preview_code_scroll: UniformListScrollHandle,
+    preview_markdown_scroll: MarkdownVirtualListScrollHandle,
     local_last_selected: Option<String>,
     remote_last_selected: Option<String>,
     local_files: Vec<SftpFileEntry>,
@@ -406,7 +415,7 @@ pub(super) struct SftpViewState {
     pub(super) focused_input: Option<SftpInput>,
     editing_local_path: bool,
     editing_remote_path: bool,
-    dialog: Option<SftpDialog>,
+    pub(super) dialog: Option<SftpDialog>,
     conflict_state: Option<SftpConflictState>,
     dialog_value: String,
     preview_pane: Option<SftpPane>,
@@ -421,6 +430,10 @@ pub(super) struct SftpViewState {
     preview_error: Option<String>,
     preview_loading: bool,
     preview_hex_loading_more: bool,
+    preview_markdown_source_mode: bool,
+    preview_font_family: Option<String>,
+    preview_font_error: Option<String>,
+    preview_font_size: f32,
     preview_editor_input: Option<Entity<CodeEditorInputState>>,
     preview_editor_subscription: Option<Subscription>,
     preview_editor_initial_content: String,
@@ -462,6 +475,8 @@ impl Default for SftpViewState {
             local_file_scroll: UniformListScrollHandle::new(),
             remote_file_scroll: UniformListScrollHandle::new(),
             diff_scroll: UniformListScrollHandle::new(),
+            preview_code_scroll: UniformListScrollHandle::new(),
+            preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
             local_last_selected: None,
             remote_last_selected: None,
             local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
@@ -488,6 +503,10 @@ impl Default for SftpViewState {
             preview_error: None,
             preview_loading: false,
             preview_hex_loading_more: false,
+            preview_markdown_source_mode: false,
+            preview_font_family: None,
+            preview_font_error: None,
+            preview_font_size: SFTP_PREVIEW_FONT_DEFAULT_SIZE,
             preview_editor_input: None,
             preview_editor_subscription: None,
             preview_editor_initial_content: String::new(),

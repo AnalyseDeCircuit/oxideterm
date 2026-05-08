@@ -30,6 +30,7 @@
 //! - Smart punctuation
 
 pub mod highlight;
+pub mod layout;
 pub mod math;
 pub mod model;
 pub mod options;
@@ -37,10 +38,12 @@ pub mod parser;
 pub mod render;
 pub mod style;
 
+pub use gpui_component::VirtualListScrollHandle as MarkdownVirtualListScrollHandle;
+pub use layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 pub use model::MarkdownDocument;
 pub use options::MarkdownOptions;
 
-use gpui::AnyElement;
+use gpui::{AnyElement, ElementId, Entity, Render};
 use oxideterm_theme::ThemeTokens;
 
 /// Parse and render markdown source into a GPUI element tree.
@@ -60,4 +63,20 @@ pub fn markdown_with_options(
 ) -> AnyElement {
     let document = parser::parse(source);
     render::render_document(&document, tokens, opts)
+}
+
+/// Parse and render markdown with block-level virtual scrolling.
+pub fn markdown_virtual_with_options<V>(
+    view: Entity<V>,
+    id: impl Into<ElementId>,
+    tokens: &ThemeTokens,
+    source: &str,
+    opts: &MarkdownOptions,
+    scroll_handle: &MarkdownVirtualListScrollHandle,
+) -> AnyElement
+where
+    V: Render,
+{
+    let document = parser::parse(source);
+    render::render_document_virtual(view, id, &document, tokens, opts, scroll_handle)
 }
