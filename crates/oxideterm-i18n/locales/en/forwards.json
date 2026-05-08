@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "New Forward",
+      "stop_all": "Stop All",
+      "suspend_all": "Suspend All",
+      "restore_suspended": "Restore",
       "stop": "Stop forward",
       "restart": "Restart forward",
       "edit": "Edit forward",
@@ -103,6 +106,9 @@
       "created": "Forward created",
       "updated": "Forward updated",
       "stopped": "Forward stopped",
+      "stopped_all": "All forwards stopped",
+      "suspended_all": "Forwards suspended",
+      "restored": "Suspended forwards restored",
       "restarted": "Forward restarted",
       "deleted": "Forward deleted"
     }

@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "新建转发",
+      "stop_all": "全部停止",
+      "suspend_all": "全部挂起",
+      "restore_suspended": "恢复",
       "stop": "停止转发",
       "restart": "重启转发",
       "edit": "编辑转发",
@@ -103,6 +106,9 @@
       "created": "转发已创建",
       "updated": "转发已更新",
       "stopped": "转发已停止",
+      "stopped_all": "所有转发已停止",
+      "suspended_all": "转发已挂起",
+      "restored": "已恢复挂起的转发",
       "restarted": "转发已重启",
       "deleted": "转发已删除"
     }

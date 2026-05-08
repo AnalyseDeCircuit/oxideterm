@@ -115,6 +115,10 @@ impl WorkspaceApp {
         let tx = self.sftp_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
+            let resume_directory_strategy = resume_progress
+                .as_ref()
+                .filter(|_| is_directory)
+                .map(|progress| progress.strategy.clone());
             let resolved_connection_id = router
                 .resolve_connection(&node_id)
                 .map(|resolved| resolved.connection_id)
@@ -254,12 +258,64 @@ impl WorkspaceApp {
                 if is_directory {
                     manager.mark_background_transfer_active(&transfer_id);
                 }
-                let sftp = router
-                    .acquire_transfer_sftp(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let item_count = match (direction, is_directory) {
-                    (SftpTransferDirection::Upload, true) => {
+                let item_count = match (direction, is_directory, resume_directory_strategy.clone())
+                {
+                    (
+                        SftpTransferDirection::Upload,
+                        true,
+                        Some(RemoteTransferStrategy::DirectoryTar),
+                    ) => {
+                        // Tauri node_sftp_resume_transfer honors the stored
+                        // directory strategy. Do not re-probe auto mode during
+                        // resume, otherwise a failed tar task can unexpectedly
+                        // restart as tar again instead of its persisted strategy.
+                        {
+                            let shared = router
+                                .acquire_sftp(&node_id)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            let shared = shared.lock().await;
+                            for prefix in remote_directory_prefixes(&remote_path) {
+                                let _ = shared.mkdir(&prefix).await;
+                            }
+                        }
+                        let compression = sftp_tar_compression_probe_for_node(&router, &node_id)
+                            .await?;
+                        let resolved = router
+                            .resolve_connection(&node_id)
+                            .map_err(|error| error.to_string())?;
+                        tar_upload_directory(
+                            &resolved.handle,
+                            &local_path,
+                            &remote_path,
+                            &transfer_id,
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                            Some(compression),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?
+                    }
+                    (
+                        SftpTransferDirection::Upload,
+                        true,
+                        Some(RemoteTransferStrategy::DirectoryRecursive),
+                    ) => {
+                        let sftp = router
+                            .acquire_transfer_sftp(&node_id)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        sftp.upload_dir(
+                            &local_path,
+                            &remote_path,
+                            &transfer_id,
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?
+                    }
+                    (SftpTransferDirection::Upload, true, _) => {
                         if sftp_tar_probe_for_node(&router, &node_id).await? {
                             {
                                 let shared = router
@@ -301,6 +357,10 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
+                                    let sftp = router
+                                        .acquire_transfer_sftp(&node_id)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
                                     sftp.upload_dir(
                                         &local_path,
                                         &remote_path,
@@ -322,6 +382,10 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
+                            let sftp = router
+                                .acquire_transfer_sftp(&node_id)
+                                .await
+                                .map_err(|error| error.to_string())?;
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -333,7 +397,11 @@ impl WorkspaceApp {
                             .map_err(|error| error.to_string())?
                         }
                     }
-                    (SftpTransferDirection::Upload, false) => {
+                    (SftpTransferDirection::Upload, false, _) => {
+                        let sftp = router
+                            .acquire_transfer_sftp(&node_id)
+                            .await
+                            .map_err(|error| error.to_string())?;
                         sftp.upload_with_resume(
                             &local_path,
                             &remote_path,
@@ -346,7 +414,48 @@ impl WorkspaceApp {
                         .map_err(|error| error.to_string())?;
                         0
                     }
-                    (SftpTransferDirection::Download, true) => {
+                    (
+                        SftpTransferDirection::Download,
+                        true,
+                        Some(RemoteTransferStrategy::DirectoryTar),
+                    ) => {
+                        let compression = sftp_tar_compression_probe_for_node(&router, &node_id)
+                            .await?;
+                        let resolved = router
+                            .resolve_connection(&node_id)
+                            .map_err(|error| error.to_string())?;
+                        tar_download_directory(
+                            &resolved.handle,
+                            &remote_path,
+                            &local_path,
+                            &transfer_id,
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                            Some(compression),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?
+                    }
+                    (
+                        SftpTransferDirection::Download,
+                        true,
+                        Some(RemoteTransferStrategy::DirectoryRecursive),
+                    ) => {
+                        let sftp = router
+                            .acquire_transfer_sftp(&node_id)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        sftp.download_dir(
+                            &remote_path,
+                            &local_path,
+                            &transfer_id,
+                            Some(progress_tx),
+                            Some(manager.clone()),
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?
+                    }
+                    (SftpTransferDirection::Download, true, _) => {
                         if sftp_tar_probe_for_node(&router, &node_id).await? {
                             let compression =
                                 sftp_tar_compression_probe_for_node(&router, &node_id).await?;
@@ -378,6 +487,10 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
+                                    let sftp = router
+                                        .acquire_transfer_sftp(&node_id)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
                                     sftp.download_dir(
                                         &remote_path,
                                         &local_path,
@@ -399,6 +512,10 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
+                            let sftp = router
+                                .acquire_transfer_sftp(&node_id)
+                                .await
+                                .map_err(|error| error.to_string())?;
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -410,7 +527,11 @@ impl WorkspaceApp {
                             .map_err(|error| error.to_string())?
                         }
                     }
-                    (SftpTransferDirection::Download, false) => {
+                    (SftpTransferDirection::Download, false, _) => {
+                        let sftp = router
+                            .acquire_transfer_sftp(&node_id)
+                            .await
+                            .map_err(|error| error.to_string())?;
                         sftp.download_with_resume(
                             &remote_path,
                             &local_path,

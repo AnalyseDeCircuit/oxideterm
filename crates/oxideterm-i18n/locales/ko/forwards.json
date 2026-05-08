@@ -33,6 +33,9 @@
     },
     "actions": {
       "new_forward": "새 포워드",
+      "stop_all": "모두 중지",
+      "suspend_all": "모두 일시 중단",
+      "restore_suspended": "복원",
       "stop": "포워드 중지",
       "restart": "포워드 재시작",
       "edit": "포워드 편집",
@@ -103,6 +106,9 @@
       "created": "포워딩이 생성되었습니다",
       "updated": "포워딩이 업데이트되었습니다",
       "stopped": "포워딩이 중지되었습니다",
+      "stopped_all": "모든 포워딩이 중지되었습니다",
+      "suspended_all": "포워딩이 일시 중단되었습니다",
+      "restored": "일시 중단된 포워딩이 복원되었습니다",
       "restarted": "포워딩이 재시작되었습니다",
       "deleted": "포워딩이 삭제되었습니다"
     }
