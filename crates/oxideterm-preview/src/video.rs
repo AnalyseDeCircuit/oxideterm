@@ -18,6 +18,7 @@ pub enum PlatformVideoState {
     Ready,
     Playing,
     Paused,
+    Ended,
     Error,
 }
 

@@ -1,14 +1,54 @@
+const LOCAL_GIT_BASH_ID: &str = "git-bash";
+
+fn normalized_local_git_bash_path(path: Option<&str>) -> Option<PathBuf> {
+    let path = path?.trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn local_git_bash_override(path: Option<&str>) -> Option<ShellInfo> {
+    let path = normalized_local_git_bash_path(path)?;
+    Some(
+        ShellInfo::new(LOCAL_GIT_BASH_ID, "Git Bash", path)
+            .with_args(vec!["--login".to_string()]),
+    )
+}
+
+fn effective_local_shells(shells: &[ShellInfo], git_bash_path: Option<&str>) -> Vec<ShellInfo> {
+    let Some(override_shell) = local_git_bash_override(git_bash_path) else {
+        return shells.to_vec();
+    };
+
+    let mut effective = shells
+        .iter()
+        .filter(|shell| shell.id != LOCAL_GIT_BASH_ID)
+        .cloned()
+        .collect::<Vec<_>>();
+    effective.push(override_shell);
+    effective
+}
+
 impl WorkspaceApp {
+    fn effective_local_shells_for_settings(
+        &self,
+        settings: &PersistedSettings,
+    ) -> Vec<ShellInfo> {
+        effective_local_shells(
+            &self.local_shells,
+            settings.local_terminal.git_bash_path.as_deref(),
+        )
+    }
+
     fn local_shell_select_row(
         &self,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let effective_shells = self.effective_local_shells_for_settings(settings);
         let value = settings
             .local_terminal
             .default_shell_id
             .as_deref()
-            .and_then(|id| self.local_shells.iter().find(|shell| shell.id == id))
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
             .map(|shell| shell.label.clone())
             .unwrap_or_else(|| self.i18n.t("settings_view.local_terminal.select_shell"));
 
@@ -23,12 +63,14 @@ impl WorkspaceApp {
     }
 
     fn local_shell_path_hint(&self, settings: &PersistedSettings) -> Option<AnyElement> {
+        let effective_shells = self.effective_local_shells_for_settings(settings);
         let default_shell = settings
             .local_terminal
             .default_shell_id
             .as_deref()
-            .and_then(|id| self.local_shells.iter().find(|shell| shell.id == id))
-            .or_else(|| self.local_shells.first())?;
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
+            .or_else(|| effective_shells.first())?
+            .clone();
 
         Some(
             div()
@@ -138,10 +180,12 @@ impl WorkspaceApp {
 
     pub(super) fn local_terminal_config(&self) -> LocalPtyConfig {
         let settings = &self.settings_store.settings().local_terminal;
+        let effective_shells =
+            effective_local_shells(&self.local_shells, settings.git_bash_path.as_deref());
         let shell = settings
             .default_shell_id
             .as_deref()
-            .and_then(|id| self.local_shells.iter().find(|shell| shell.id == id))
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
             .cloned();
         let cwd = settings
             .default_cwd
@@ -175,12 +219,46 @@ impl WorkspaceApp {
 
     pub(super) fn local_terminal_tab_title(&self) -> String {
         let settings = &self.settings_store.settings().local_terminal;
+        let effective_shells =
+            effective_local_shells(&self.local_shells, settings.git_bash_path.as_deref());
         settings
             .default_shell_id
             .as_deref()
-            .and_then(|id| self.local_shells.iter().find(|shell| shell.id == id))
-            .or_else(|| self.local_shells.first())
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
+            .or_else(|| effective_shells.first())
             .map(|shell| shell.label.clone())
             .unwrap_or_else(|| "Local".to_string())
+    }
+}
+
+#[cfg(test)]
+mod local_terminal_tests {
+    use super::*;
+
+    #[test]
+    fn git_bash_override_replaces_scanned_git_bash_shell() {
+        let shells = vec![
+            ShellInfo::new("cmd", "Command Prompt", "cmd.exe"),
+            ShellInfo::new("git-bash", "Git Bash", r"C:\Program Files\Git\bin\bash.exe"),
+        ];
+
+        let effective = effective_local_shells(
+            &shells,
+            Some(r" D:\PortableGit\bin\bash.exe "),
+        );
+
+        assert_eq!(effective.len(), 2);
+        let git_bash = effective
+            .iter()
+            .find(|shell| shell.id == LOCAL_GIT_BASH_ID)
+            .expect("git bash override should be present");
+        assert_eq!(git_bash.path, PathBuf::from(r"D:\PortableGit\bin\bash.exe"));
+        assert_eq!(git_bash.args, vec!["--login"]);
+    }
+
+    #[test]
+    fn blank_git_bash_override_keeps_scanned_shells() {
+        let shells = vec![ShellInfo::new("cmd", "Command Prompt", "cmd.exe")];
+        assert_eq!(effective_local_shells(&shells, Some("  ")), shells);
     }
 }

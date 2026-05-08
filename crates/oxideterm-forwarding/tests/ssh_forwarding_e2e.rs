@@ -70,7 +70,7 @@ async fn dynamic_forward_moves_socks5_bytes_through_real_ssh_server() {
     stream.write_all(&request).await.unwrap();
     let mut response = [0_u8; 10];
     stream.read_exact(&mut response).await.unwrap();
-    assert_eq!(response[1], 0x00);
+    assert_eq!(response, [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
 
     stream.write_all(b"dynamic").await.unwrap();
     let mut buf = [0_u8; 7];

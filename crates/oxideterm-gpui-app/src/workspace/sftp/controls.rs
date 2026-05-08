@@ -76,7 +76,7 @@ impl WorkspaceApp {
 
     fn render_sftp_refresh_button(&self, pane: SftpPane, cx: &mut Context<Self>) -> AnyElement {
         self.render_sftp_icon_button(
-            LucideIcon::LoaderCircle,
+            LucideIcon::RefreshCw,
             self.i18n.t("sftp.toolbar.refresh"),
             cx.listener(move |this, _event, _window, cx| {
                 if pane == SftpPane::Remote {

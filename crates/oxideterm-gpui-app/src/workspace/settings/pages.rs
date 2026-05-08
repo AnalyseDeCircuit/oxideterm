@@ -11,6 +11,25 @@ impl WorkspaceApp {
         shell_rows.push(self.card_separator());
         shell_rows.push(
             self.setting_row(
+                "settings_view.local_terminal.git_bash_path",
+                "settings_view.local_terminal.git_bash_path_hint",
+                self.settings_text_input_control(
+                    SettingsInput::LocalGitBashPath,
+                    settings
+                        .local_terminal
+                        .git_bash_path
+                        .clone()
+                        .unwrap_or_default(),
+                    self.i18n
+                        .t("settings_view.local_terminal.git_bash_path_placeholder"),
+                    300.0,
+                    cx,
+                ),
+            ),
+        );
+        shell_rows.push(self.card_separator());
+        shell_rows.push(
+            self.setting_row(
                 "settings_view.local_terminal.default_cwd",
                 "settings_view.local_terminal.default_cwd_hint",
                 self.settings_text_input_control(
@@ -86,7 +105,8 @@ impl WorkspaceApp {
             "Ctrl+Shift+T"
         };
 
-        let shell_list = if self.local_shells.is_empty() {
+        let effective_shells = self.effective_local_shells_for_settings(settings);
+        let shell_list = if effective_shells.is_empty() {
             vec![
                 div()
                     .text_align(gpui::TextAlign::Center)
@@ -96,7 +116,7 @@ impl WorkspaceApp {
                     .into_any_element(),
             ]
         } else {
-            self.local_shells
+            effective_shells
                 .iter()
                 .map(|shell| {
                     self.available_shell_row(

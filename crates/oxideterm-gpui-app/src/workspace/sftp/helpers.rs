@@ -20,6 +20,15 @@ fn sftp_border(color: u32, has_background: bool) -> Rgba {
     color_for_background(color, has_background, 0x99)
 }
 
+fn is_sftp_incomplete_store_compat_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("deserialize")
+        || error.contains("invalid type")
+        || error.contains("connection_not_found")
+        || error.contains("notfound")
+        || error.contains("not found")
+}
+
 fn home_path_mock() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/Users/lipsc".to_string())
 }
@@ -232,6 +241,76 @@ fn join_local_path(base: &str, name: &str) -> String {
     path.to_string_lossy().to_string()
 }
 
+fn unique_sftp_conflict_name(name: &str, existing_files: &[SftpFileEntry]) -> String {
+    let existing_names = existing_files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect::<HashSet<_>>();
+    let last_dot = name.rfind('.');
+    let (base_name, extension) = match last_dot {
+        Some(index) if index > 0 => (&name[..index], &name[index..]),
+        _ => (name, ""),
+    };
+
+    let mut counter = 1;
+    loop {
+        let candidate = format!("{base_name} ({counter}){extension}");
+        if !existing_names.contains(candidate.as_str()) {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
+fn sftp_conflict_resolution_from_settings(
+    action: oxideterm_settings::ConflictAction,
+) -> SftpConflictResolution {
+    match action {
+        oxideterm_settings::ConflictAction::Ask
+        | oxideterm_settings::ConflictAction::Overwrite => SftpConflictResolution::Overwrite,
+        oxideterm_settings::ConflictAction::Skip => SftpConflictResolution::Skip,
+        oxideterm_settings::ConflictAction::Rename => SftpConflictResolution::Rename,
+    }
+}
+
+fn sftp_transfer_conflicts(
+    pending_transfers: &[SftpPendingTransfer],
+    target_files: &[SftpFileEntry],
+) -> Vec<SftpConflictInfo> {
+    pending_transfers
+        .iter()
+        .filter(|transfer| transfer.source.file_type != SftpFileType::Directory)
+        .filter_map(|transfer| {
+            let target = target_files.iter().find(|file| {
+                file.name == transfer.name && file.file_type != SftpFileType::Directory
+            })?;
+            Some(SftpConflictInfo {
+                file_name: transfer.name.clone(),
+                source_size: transfer.source.size,
+                source_modified: transfer.source.modified,
+                target_size: target.size,
+                target_modified: target.modified,
+                direction: transfer.direction,
+            })
+        })
+        .collect()
+}
+
+fn sftp_source_not_newer_than_target(
+    transfer: &SftpPendingTransfer,
+    target_files: &[SftpFileEntry],
+) -> bool {
+    let Some(target) = target_files.iter().find(|file| {
+        file.name == transfer.name && file.file_type != SftpFileType::Directory
+    }) else {
+        return false;
+    };
+    match (transfer.source.modified, target.modified) {
+        (Some(source_modified), Some(target_modified)) => source_modified <= target_modified,
+        _ => false,
+    }
+}
+
 fn sftp_transfer_state_from_remote(state: RemoteTransferState) -> SftpTransferState {
     match state {
         RemoteTransferState::Pending => SftpTransferState::Pending,
@@ -311,6 +390,32 @@ fn sftp_preview_is_markdown(language: Option<&str>, mime_type: Option<&str>) -> 
     })
 }
 
+fn sftp_editor_language(language: Option<&str>, name: &str) -> String {
+    let raw = language
+        .filter(|language| !language.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::path::Path::new(name)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "text".to_string());
+    match raw.to_ascii_lowercase().as_str() {
+        "rs" => "rust",
+        "py" => "python",
+        "js" | "jsx" => "javascript",
+        "ts" => "typescript",
+        "md" | "markdown" => "markdown",
+        "yml" => "yaml",
+        "sh" | "bash" | "zsh" => "bash",
+        "makefile" | "mk" => "make",
+        "txt" | "text" | "conf" | "cfg" | "ini" | "env" => "text",
+        other => other,
+    }
+    .to_string()
+}
+
 async fn load_remote_sftp_listing(
     router: NodeRouter,
     node_id: &NodeId,
@@ -346,6 +451,69 @@ async fn load_remote_sftp_preview(
         .map_err(|error| error.to_string())?;
     let sftp = sftp.lock().await;
     sftp.preview(path).await.map_err(|error| error.to_string())
+}
+
+async fn load_remote_sftp_preview_hex(
+    router: NodeRouter,
+    node_id: &NodeId,
+    path: &str,
+    offset: u64,
+) -> Result<PreviewContent, String> {
+    let sftp = router
+        .acquire_sftp(node_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let sftp = sftp.lock().await;
+    sftp.preview_with_offset(path, offset)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn save_remote_sftp_preview(
+    router: NodeRouter,
+    node_id: &NodeId,
+    path: &str,
+    content: &str,
+    encoding: &str,
+) -> Result<SftpPreviewSaveResult, String> {
+    let target_encoding = if encoding.trim().is_empty() {
+        "UTF-8"
+    } else {
+        encoding
+    };
+    let encoded = encode_to_encoding(content, target_encoding);
+    let sftp = router
+        .acquire_sftp(node_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let sftp = sftp.lock().await;
+    let write_result = sftp
+        .write_content(path, &encoded)
+        .await
+        .map_err(|error| error.to_string())?;
+    let file_info = sftp.stat(path).await.map_err(|error| error.to_string())?;
+    Ok(SftpPreviewSaveResult {
+        mtime: (file_info.modified > 0).then_some(file_info.modified as u64),
+        size: Some(file_info.size),
+        encoding_used: target_encoding.to_string(),
+        atomic_write: write_result.atomic_write,
+    })
+}
+
+fn sftp_preview_editor_is_network_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    [
+        "network",
+        "connection",
+        "timeout",
+        "disconnected",
+        "eof",
+        "broken pipe",
+        "reset by peer",
+        "channel closed",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 async fn load_local_sftp_preview(path: &str) -> Result<PreviewContent, String> {
@@ -474,6 +642,19 @@ fn format_modified(modified: Option<i64>) -> String {
     }
 }
 
+fn format_conflict_modified(modified: Option<i64>) -> String {
+    let Some(modified) = modified else {
+        return "Unknown".to_string();
+    };
+    let Some(datetime) = chrono::DateTime::from_timestamp(modified, 0) else {
+        return "Unknown".to_string();
+    };
+    datetime
+        .with_timezone(&chrono::Local)
+        .format("%Y/%-m/%-d %-H:%M:%S")
+        .to_string()
+}
+
 fn compute_sftp_diff(left: &str, right: &str) -> Vec<SftpDiffLine> {
     let left_lines = left.split('\n').collect::<Vec<_>>();
     let right_lines = right.split('\n').collect::<Vec<_>>();
@@ -568,9 +749,9 @@ fn diff_cell(
         .border_color(rgb(border))
         .bg(if highlighted {
             if left {
-                rgba(0x7f1d1d4d)
+                rgba((0x7f1d1d << 8) | SFTP_DIFF_LINE_BG_ALPHA)
             } else {
-                rgba(0x14532d4d)
+                rgba((0x14532d << 8) | SFTP_DIFF_LINE_BG_ALPHA)
             }
         } else {
             rgba(0x00000000)

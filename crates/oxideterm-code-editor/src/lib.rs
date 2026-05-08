@@ -12,6 +12,15 @@ use oxideterm_theme::ThemeTokens;
 /// Default feature gate used by upper layers when checking editor support.
 pub const CODE_EDITOR_BACKEND: &str = "gpui-component-input";
 
+/// Initialize the editor backend.
+///
+/// The workspace keeps editor calls behind this crate, so the GPUI component
+/// key bindings and theme globals are initialized here instead of leaking the
+/// concrete backend into application startup.
+pub fn init(cx: &mut gpui::App) {
+    gpui_component::init(cx);
+}
+
 /// OxideTerm-owned editor mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CodeEditorMode {

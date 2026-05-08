@@ -1,8 +1,12 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, ObjectFit, StatefulInteractiveElement, UniformListScrollHandle,
-    anchored, deferred, prelude::*, uniform_list,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, StatefulInteractiveElement, Subscription,
+    UniformListScrollHandle, anchored, deferred, prelude::*, uniform_list,
+};
+use oxideterm_code_editor::backend::input::{
+    Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
+    InputState as CodeEditorInputState,
 };
 use oxideterm_gpui_markdown::{MarkdownOptions, markdown_with_options};
 use oxideterm_gpui_ui::{
@@ -18,23 +22,26 @@ use oxideterm_sftp::{
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession,
     SortOrder as RemoteSortOrder, StoredTransferProgress, TransferProgress,
     TransferState as RemoteTransferState, TransferStrategy as RemoteTransferStrategy,
-    TransferType as RemoteTransferType, probe_tar_compression, probe_tar_support,
-    tar_download_directory, tar_upload_directory,
+    TransferType as RemoteTransferType, encode_to_encoding, probe_tar_compression,
+    probe_tar_support, tar_download_directory, tar_upload_directory,
 };
 
-include!("sftp/native_video.rs");
+mod native_video;
+
+use native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
 
 const SFTP_ROOT_PADDING: f32 = 8.0; // Tauri p-2
 const SFTP_GAP: f32 = 8.0; // Tauri gap-2
 const SFTP_PANE_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10
 const SFTP_QUEUE_HEIGHT: f32 = 192.0; // Tauri h-48
 const SFTP_TEXT_XS: f32 = 12.0; // Tauri text-xs
-const SFTP_TEXT_SM: f32 = 13.0; // Tauri text-sm
+const SFTP_TEXT_SM: f32 = 14.0; // Tauri text-sm
 const SFTP_TEXT_10: f32 = 10.0; // Tauri text-[10px]
 const SFTP_ICON_SM: f32 = 12.0; // Tauri h-3 w-3
 const SFTP_ICON_MD: f32 = 14.0; // Tauri h-3.5 w-3.5
 const SFTP_TOOL_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const SFTP_ROW_HEIGHT: f32 = 25.0; // Tauri px-2 py-1 text-xs
+const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
 const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
 const SFTP_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%
@@ -54,6 +61,7 @@ const SFTP_BREADCRUMB_HOVER_ALPHA: u32 = 0x80; // Tauri hover:bg-theme-bg-hover/
 const SFTP_FOLDER_BLUE: u32 = 0x60a5fa; // Tauri text-blue-400
 const SFTP_GREEN: u32 = 0x22c55e; // Tauri text-green-500
 const SFTP_YELLOW: u32 = 0xeab308; // Tauri text-yellow-500
+const SFTP_ORANGE: u32 = 0xfb923c; // Tauri text-orange-400
 const SFTP_RED: u32 = 0xf87171; // Tauri text-red-400
 const SFTP_CONTEXT_MENU_WIDTH: f32 = 180.0; // Tauri min-w-[180px]
 const SFTP_CONTEXT_MENU_MAX_HEIGHT: f32 = 252.0; // 7 items + separators, clamped like fixed portal menu
@@ -61,6 +69,24 @@ const SFTP_CONTEXT_MENU_PADDING: f32 = 4.0; // Tauri py-1
 const SFTP_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0; // Tauri px-3 py-1.5 text-xs
 const SFTP_DIALOG_OVERLAY_ALPHA: u32 = 0x99; // Tauri Dialog overlay opacity
 const SFTP_DIALOG_SHADOW_ALPHA: u32 = 0x40; // Tauri shadow-lg-ish overlay shadow
+const SFTP_DIALOG_BORDER_SUBTLE_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
+const SFTP_DIALOG_BORDER_HALF_ALPHA: u32 = 0x80; // Tauri border-theme-border/50
+const SFTP_DIALOG_DIVIDER_ALPHA: u32 = 0x66; // Tauri border-theme-border/40
+const SFTP_CONFIRM_ICON_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10
+const SFTP_CONFIRM_ICON_RING_ALPHA: u32 = 0x33; // Tauri ring-theme-accent/20
+const SFTP_CONFIRM_ACTION_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-theme-accent/10
+const SFTP_EDITOR_RETRY_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-orange-500/10
+const SFTP_CONFLICT_NEWER_BG_ALPHA: u32 = 0x4d; // Tauri bg-green-950/30
+const SFTP_DIFF_HEADER_BG_ALPHA: u32 = 0x33; // Tauri bg-red/green-950/20
+const SFTP_DIFF_LINE_BG_ALPHA: u32 = 0x4d; // Tauri bg-red/green-950/30
+const SFTP_READONLY_BADGE_BG_ALPHA: u32 = 0x26; // Tauri warning badge translucent fill
+const SFTP_DIALOG_WIDTH_XS: f32 = 320.0; // Tauri max-w-xs
+const SFTP_DIALOG_WIDTH_SM: f32 = 384.0; // Tauri max-w-sm
+const SFTP_DIALOG_WIDTH_LG: f32 = 512.0; // Tauri max-w-lg
+const SFTP_DIALOG_WIDTH_4XL: f32 = 896.0; // Tauri max-w-4xl
+const SFTP_DIALOG_WIDTH_5XL: f32 = 1024.0; // Tauri max-w-5xl
+const SFTP_EDITOR_DIALOG_WIDTH_6XL: f32 = 1152.0; // Tauri max-w-6xl
+const SFTP_HEX_PREVIEW_CHUNK_SIZE: u64 = 16 * 1024; // Tauri nodeSftpPreviewHex load-more step
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum SftpInput {
@@ -136,10 +162,27 @@ pub(super) enum SftpWorkerResult {
         refresh_remote: bool,
         refresh_local: bool,
     },
+    IncompleteTransfersLoaded {
+        node_id: NodeId,
+        result: Result<Vec<StoredTransferProgress>, String>,
+    },
     PreviewLoaded {
         generation: u64,
         path: String,
         result: Result<PreviewContent, String>,
+    },
+    PreviewHexLoaded {
+        generation: u64,
+        path: String,
+        offset: u64,
+        result: Result<PreviewContent, String>,
+    },
+    PreviewSaved {
+        generation: u64,
+        path: String,
+        content: String,
+        encoding: String,
+        result: Result<SftpPreviewSaveResult, String>,
     },
 }
 
@@ -147,6 +190,14 @@ pub(super) enum SftpWorkerResult {
 pub(super) struct RemoteSftpListing {
     cwd: String,
     files: Vec<SftpFileEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SftpPreviewSaveResult {
+    mtime: Option<u64>,
+    size: Option<u64>,
+    encoding_used: String,
+    atomic_write: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +227,40 @@ enum SftpTransferDirection {
     Download,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SftpConflictResolution {
+    Skip,
+    Overwrite,
+    Rename,
+    SkipOlder,
+}
+
+#[derive(Clone, Debug)]
+struct SftpPendingTransfer {
+    name: String,
+    direction: SftpTransferDirection,
+    source: SftpFileEntry,
+}
+
+#[derive(Clone, Debug)]
+struct SftpConflictInfo {
+    file_name: String,
+    source_size: u64,
+    source_modified: Option<i64>,
+    target_size: u64,
+    target_modified: Option<i64>,
+    direction: SftpTransferDirection,
+}
+
+#[derive(Clone, Debug)]
+struct SftpConflictState {
+    conflicts: Vec<SftpConflictInfo>,
+    current_index: usize,
+    pending_transfers: Vec<SftpPendingTransfer>,
+    resolved_actions: HashMap<String, SftpConflictResolution>,
+    apply_to_all: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SftpTransferState {
@@ -191,6 +276,7 @@ pub(super) enum SftpTransferState {
 #[derive(Clone, Debug)]
 struct SftpTransferItem {
     id: u64,
+    transfer_id: String,
     name: String,
     local_path: String,
     remote_path: String,
@@ -251,6 +337,12 @@ enum SftpDialog {
     Preview {
         name: String,
     },
+    Editor {
+        name: String,
+    },
+    EditorCloseConfirm {
+        name: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,6 +393,7 @@ pub(super) struct SftpViewState {
     remote_selected: HashSet<String>,
     local_file_scroll: UniformListScrollHandle,
     remote_file_scroll: UniformListScrollHandle,
+    diff_scroll: UniformListScrollHandle,
     local_last_selected: Option<String>,
     remote_last_selected: Option<String>,
     local_files: Vec<SftpFileEntry>,
@@ -313,7 +406,9 @@ pub(super) struct SftpViewState {
     editing_local_path: bool,
     editing_remote_path: bool,
     dialog: Option<SftpDialog>,
+    conflict_state: Option<SftpConflictState>,
     dialog_value: String,
+    preview_pane: Option<SftpPane>,
     preview_path: Option<String>,
     preview_content: Option<PreviewContent>,
     preview_asset_owner: Option<PreviewAssetOwner>,
@@ -324,7 +419,22 @@ pub(super) struct SftpViewState {
     preview_video_surface: SharedSftpNativeVideoSurface,
     preview_error: Option<String>,
     preview_loading: bool,
+    preview_hex_loading_more: bool,
+    preview_editor_input: Option<Entity<CodeEditorInputState>>,
+    preview_editor_subscription: Option<Subscription>,
+    preview_editor_initial_content: String,
+    preview_editor_language: Option<String>,
+    preview_editor_encoding: String,
+    preview_editor_dirty: bool,
+    preview_editor_saving: bool,
+    preview_editor_save_error: Option<String>,
+    preview_editor_network_error: bool,
+    preview_editor_retry_count: u32,
+    preview_editor_last_saved_mtime: Option<u64>,
+    preview_editor_last_atomic_write: Option<bool>,
     transfers: Vec<SftpTransferItem>,
+    incomplete_transfers: Vec<StoredTransferProgress>,
+    incomplete_load_inflight: bool,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
     next_transfer_id: u64,
@@ -350,6 +460,7 @@ impl Default for SftpViewState {
             remote_selected: HashSet::new(),
             local_file_scroll: UniformListScrollHandle::new(),
             remote_file_scroll: UniformListScrollHandle::new(),
+            diff_scroll: UniformListScrollHandle::new(),
             local_last_selected: None,
             remote_last_selected: None,
             local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
@@ -362,7 +473,9 @@ impl Default for SftpViewState {
             editing_local_path: false,
             editing_remote_path: false,
             dialog: None,
+            conflict_state: None,
             dialog_value: String::new(),
+            preview_pane: None,
             preview_path: None,
             preview_content: None,
             preview_asset_owner: None,
@@ -373,7 +486,22 @@ impl Default for SftpViewState {
             preview_video_surface: SharedSftpNativeVideoSurface::default(),
             preview_error: None,
             preview_loading: false,
+            preview_hex_loading_more: false,
+            preview_editor_input: None,
+            preview_editor_subscription: None,
+            preview_editor_initial_content: String::new(),
+            preview_editor_language: None,
+            preview_editor_encoding: "UTF-8".to_string(),
+            preview_editor_dirty: false,
+            preview_editor_saving: false,
+            preview_editor_save_error: None,
+            preview_editor_network_error: false,
+            preview_editor_retry_count: 0,
+            preview_editor_last_saved_mtime: None,
+            preview_editor_last_atomic_write: None,
             transfers: Vec::new(),
+            incomplete_transfers: Vec::new(),
+            incomplete_load_inflight: false,
             show_incomplete: false,
             context_menu: None,
             next_transfer_id: 1,

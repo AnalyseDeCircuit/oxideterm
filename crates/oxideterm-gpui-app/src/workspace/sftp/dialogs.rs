@@ -5,6 +5,10 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let SftpDialog::EditorCloseConfirm { name } = dialog.clone() {
+            return self.render_sftp_editor_close_confirm_dialog(name, cx);
+        }
+
         let theme = self.tokens.ui;
         let (title, description, body, primary) = match dialog.clone() {
             SftpDialog::Drives => (
@@ -35,8 +39,8 @@ impl WorkspaceApp {
             ),
             SftpDialog::Conflict => (
                 self.i18n.t("sftp.conflict.title"),
-                self.i18n.t("sftp.conflict.description"),
-                self.render_sftp_conflict_body(has_background),
+                self.sftp_conflict_description(),
+                self.render_sftp_conflict_body(has_background, cx),
                 Some(self.i18n.t("sftp.conflict.overwrite")),
             ),
             SftpDialog::Diff {
@@ -62,6 +66,24 @@ impl WorkspaceApp {
                 self.render_sftp_preview_body(has_background, cx),
                 Some(self.i18n.t("sftp.preview.close")),
             ),
+            SftpDialog::Editor { name } => (
+                name,
+                self.i18n.t("sftp.preview.editor_description"),
+                self.render_sftp_editor_body(has_background, cx),
+                None,
+            ),
+            SftpDialog::EditorCloseConfirm { .. } => unreachable!(),
+        };
+        let width = match dialog {
+            SftpDialog::Drives => SFTP_DIALOG_WIDTH_XS,
+            SftpDialog::Rename { .. } | SftpDialog::NewFolder { .. } | SftpDialog::Delete { .. } => {
+                SFTP_DIALOG_WIDTH_SM
+            }
+            SftpDialog::Conflict => SFTP_DIALOG_WIDTH_LG,
+            SftpDialog::Diff { .. } => SFTP_DIALOG_WIDTH_5XL,
+            SftpDialog::Preview { .. } => SFTP_DIALOG_WIDTH_4XL,
+            SftpDialog::Editor { .. } => SFTP_EDITOR_DIALOG_WIDTH_6XL,
+            SftpDialog::EditorCloseConfirm { .. } => unreachable!(),
         };
 
         div()
@@ -74,19 +96,21 @@ impl WorkspaceApp {
             .items_center()
             .justify_center()
             .bg(rgba(SFTP_DIALOG_OVERLAY_ALPHA))
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
-                    .w(px(match dialog {
-                        SftpDialog::Diff { .. } | SftpDialog::Preview { .. } => 960.0,
-                        _ => 512.0,
-                    }))
+                    .w(px(width))
                     .max_w(relative(0.9))
                     .max_h(relative(0.9))
+                    .flex()
+                    .flex_col()
                     .overflow_hidden()
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(sftp_panel_bg(theme.bg_elevated, has_background, 0xff))
+                    // Tauri DialogContent stays opaque; only the overlay is translucent.
+                    .bg(rgb(theme.bg_elevated))
+                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                     .shadow(vec![gpui::BoxShadow {
                         color: gpui::Hsla::from(rgba(SFTP_DIALOG_SHADOW_ALPHA)),
                         offset: gpui::point(px(0.0), px(16.0)),
@@ -99,21 +123,41 @@ impl WorkspaceApp {
                             .py(px(12.0))
                             .border_b_1()
                             .border_color(rgb(theme.border))
-                            .bg(sftp_panel_bg(theme.bg_panel, has_background, 0xff))
+                            // Mirrors DialogHeader bg-theme-bg-panel, not the tab background alpha path.
+                            .bg(rgb(theme.bg_panel))
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
                                     .text_size(px(SFTP_TEXT_SM))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
+                                    .when(matches!(dialog, SftpDialog::Conflict), |row| {
+                                        row.child(Self::render_lucide_icon(
+                                            LucideIcon::AlertTriangle,
+                                            20.0,
+                                            rgb(SFTP_YELLOW),
+                                        ))
+                                    })
+                                    .when(matches!(dialog, SftpDialog::Diff { .. }), |row| {
+                                        row.child(Self::render_lucide_icon(
+                                            LucideIcon::ArrowLeftRight,
+                                            16.0,
+                                            rgb(theme.accent),
+                                        ))
+                                    })
                                     .child(title),
                             )
-                            .child(
+                            .when(!description.is_empty(), |header| {
+                                header.child(
                                 div()
                                     .mt(px(6.0))
                                     .text_size(px(SFTP_TEXT_SM))
                                     .text_color(rgb(theme.text_muted))
                                     .child(description),
-                            ),
+                                )
+                            }),
                     )
                     .child(body)
                     .child(self.render_sftp_dialog_footer(
@@ -130,7 +174,7 @@ impl WorkspaceApp {
         &self,
         dialog: SftpDialog,
         primary: Option<String>,
-        has_background: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -139,7 +183,8 @@ impl WorkspaceApp {
             .py(px(12.0))
             .border_t_1()
             .border_color(rgb(theme.border))
-            .bg(sftp_panel_bg(theme.bg_panel, has_background, 0xff))
+            // Mirrors DialogFooter bg-theme-bg-panel, not the tab background alpha path.
+            .bg(rgb(theme.bg_panel))
             .flex()
             .flex_row()
             .flex_wrap()
@@ -149,6 +194,9 @@ impl WorkspaceApp {
         if let SftpDialog::Preview { name } = dialog.clone() {
             let path = self.sftp_view.preview_path.clone().unwrap_or_default();
             let can_compare = self.can_compare_sftp_preview(&name);
+            let can_edit = self.can_edit_sftp_preview();
+            let can_download = self.sftp_view.preview_pane == Some(SftpPane::Remote)
+                && self.sftp_view.preview_path.is_some();
             return footer
                 .justify_between()
                 .child(
@@ -165,6 +213,18 @@ impl WorkspaceApp {
                     div()
                         .flex()
                         .gap(px(8.0))
+                        .when(can_edit, |actions| {
+                            let name = name.clone();
+                            actions.child(self.render_sftp_text_button(
+                                self.i18n.t("sftp.preview.edit"),
+                                true,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.open_sftp_preview_editor(&name, window, cx);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ))
+                        })
                         .when(can_compare, |actions| {
                             let name = name.clone();
                             actions.child(self.render_sftp_text_button(
@@ -172,6 +232,19 @@ impl WorkspaceApp {
                                 false,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.open_sftp_preview_compare(&name);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ))
+                        })
+                        .when(can_download, |actions| {
+                            let name = name.clone();
+                            actions.child(self.render_sftp_text_button(
+                                self.i18n.t("sftp.preview.download"),
+                                false,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.download_sftp_preview(&name);
+                                    this.close_sftp_dialog();
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -190,7 +263,138 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
+        if let SftpDialog::Editor { .. } = dialog.clone() {
+            let path = self.sftp_view.preview_path.clone().unwrap_or_default();
+            let saving = self.sftp_view.preview_editor_saving;
+            let dirty = self.sftp_view.preview_editor_dirty;
+            let save_label = if saving {
+                self.i18n.t("sftp.preview.saving")
+            } else {
+                self.i18n.t("sftp.preview.save")
+            };
+            return footer
+                .justify_between()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .px(px(8.0))
+                        .truncate()
+                        .text_size(px(SFTP_TEXT_XS))
+                        .text_color(rgb(theme.text_muted))
+                        .child(path),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(self.render_sftp_text_button(
+                            save_label,
+                            true,
+                            cx.listener(move |this, _event, _window, cx| {
+                                if !saving && dirty {
+                                    this.save_sftp_preview_editor(cx);
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ))
+                        .child(self.render_sftp_text_button(
+                            self.i18n.t("sftp.preview.close"),
+                            false,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.request_close_sftp_editor();
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        )),
+                )
+                .into_any_element();
+        }
+
+        if let SftpDialog::EditorCloseConfirm { name } = dialog.clone() {
+            return footer
+                .child(self.render_sftp_text_button(
+                    self.i18n.t("sftp.dialogs.cancel"),
+                    false,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.cancel_sftp_editor_close_confirm(name.clone());
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ))
+                .child(self.render_sftp_text_button(
+                    self.i18n.t("sftp.preview.discard"),
+                    true,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.discard_sftp_editor_changes();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ))
+                .into_any_element();
+        }
+
+        if let SftpDialog::Diff {
+            local_content,
+            remote_content,
+            ..
+        } = dialog.clone()
+        {
+            let stats = sftp_diff_stats(&compute_sftp_diff(&local_content, &remote_content));
+            return footer
+                .justify_between()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .text_size(px(SFTP_TEXT_XS))
+                        .text_color(rgb(theme.text_muted))
+                        .child(
+                            self.i18n
+                                .t("sftp.diff.unchanged")
+                                .replace("{{count}}", &stats.unchanged.to_string()),
+                        )
+                        .child(", ")
+                        .child(
+                            div().text_color(rgb(SFTP_GREEN)).child(
+                                self.i18n
+                                    .t("sftp.diff.added")
+                                    .replace("{{count}}", &stats.added.to_string()),
+                            ),
+                        )
+                        .child(", ")
+                        .child(
+                            div().text_color(rgb(SFTP_RED)).child(
+                                self.i18n
+                                    .t("sftp.diff.removed")
+                                    .replace("{{count}}", &stats.removed.to_string()),
+                            ),
+                        ),
+                )
+                .child(self.render_sftp_text_button(
+                    self.i18n.t("sftp.diff.close"),
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_sftp_dialog();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ))
+                .into_any_element();
+        }
+
         if matches!(dialog, SftpDialog::Conflict) {
+            let source_newer = self
+                .sftp_view
+                .conflict_state
+                .as_ref()
+                .and_then(|state| state.conflicts.get(state.current_index))
+                .and_then(|conflict| {
+                    Some(conflict.source_modified? > conflict.target_modified?)
+                });
             return footer
                 .justify_between()
                 .child(
@@ -201,20 +405,24 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.conflict.skip"),
                             false,
                             cx.listener(|this, _event, _window, cx| {
-                                this.close_sftp_dialog();
+                                this.resolve_sftp_transfer_conflict(SftpConflictResolution::Skip);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
                         ))
-                        .child(self.render_sftp_text_button(
-                            self.i18n.t("sftp.conflict.skip_older"),
-                            false,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.close_sftp_dialog();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        )),
+                        .when(source_newer.is_some(), |actions| {
+                            actions.child(self.render_sftp_text_button(
+                                self.i18n.t("sftp.conflict.skip_older"),
+                                false,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.resolve_sftp_transfer_conflict(
+                                        SftpConflictResolution::SkipOlder,
+                                    );
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ))
+                        }),
                 )
                 .child(
                     div()
@@ -224,7 +432,7 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.conflict.keep_both"),
                             false,
                             cx.listener(|this, _event, _window, cx| {
-                                this.close_sftp_dialog();
+                                this.resolve_sftp_transfer_conflict(SftpConflictResolution::Rename);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -233,7 +441,9 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.conflict.overwrite"),
                             true,
                             cx.listener(|this, _event, _window, cx| {
-                                this.accept_sftp_dialog();
+                                this.resolve_sftp_transfer_conflict(
+                                    SftpConflictResolution::Overwrite,
+                                );
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -266,9 +476,137 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_sftp_editor_close_confirm_dialog(
+        &self,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .left_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(SFTP_DIALOG_OVERLAY_ALPHA))
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .w(px(SFTP_DIALOG_WIDTH_SM))
+                    .max_w(relative(0.9))
+                    .overflow_hidden()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_SUBTLE_ALPHA))
+                    .bg(rgb(theme.bg_elevated))
+                    .shadow(vec![gpui::BoxShadow {
+                        color: gpui::Hsla::from(rgba(SFTP_DIALOG_SHADOW_ALPHA)),
+                        offset: gpui::point(px(0.0), px(16.0)),
+                        blur_radius: px(32.0),
+                        spread_radius: px(0.0),
+                    }])
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(12.0))
+                            .px(px(24.0))
+                            .pt(px(24.0))
+                            .pb(px(16.0))
+                            .child(
+                                div()
+                                    .w(px(48.0))
+                                    .h(px(48.0))
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .border_1()
+                                    .border_color(rgba((theme.accent << 8) | SFTP_CONFIRM_ICON_RING_ALPHA))
+                                    .bg(rgba((theme.accent << 8) | SFTP_CONFIRM_ICON_BG_ALPHA))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::HelpCircle,
+                                        24.0,
+                                        rgb(theme.accent),
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(SFTP_TEXT_SM))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text))
+                                    .text_center()
+                                    .line_height(px(20.0))
+                                    .child(self.i18n.t("sftp.preview.unsaved_changes_confirm")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .border_t_1()
+                            .border_color(rgba((theme.border << 8) | SFTP_DIALOG_DIVIDER_ALPHA))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .py(px(10.0))
+                                    .border_r_1()
+                                    .border_color(rgba((theme.border << 8) | SFTP_DIALOG_DIVIDER_ALPHA))
+                                    .text_center()
+                                    .text_size(px(SFTP_TEXT_SM))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text_muted))
+                                    .hover(move |button| {
+                                        button
+                                            .bg(rgb(theme.bg_hover))
+                                            .text_color(rgb(theme.text))
+                                    })
+                                    .cursor_pointer()
+                                    .child(self.i18n.t("sftp.dialogs.cancel"))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.cancel_sftp_editor_close_confirm(name.clone());
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .py(px(10.0))
+                                    .text_center()
+                                    .text_size(px(SFTP_TEXT_SM))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.accent))
+                                    .hover(move |button| {
+                                        button.bg(rgba(
+                                            (theme.accent << 8) | SFTP_CONFIRM_ACTION_HOVER_ALPHA,
+                                        ))
+                                    })
+                                    .cursor_pointer()
+                                    .child(self.i18n.t("sftp.preview.confirm"))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.discard_sftp_editor_changes();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_sftp_drives_dialog_body(
         &self,
-        has_background: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -291,8 +629,8 @@ impl WorkspaceApp {
                             .px(px(12.0))
                             .py(px(10.0))
                             .border_b_1()
-                            .border_color(rgba((theme.border << 8) | 0x80))
-                            .bg(sftp_panel_bg(theme.bg_panel, has_background, 0xff))
+                            .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_HALF_ALPHA))
+                            .bg(rgb(theme.bg_panel))
                             .hover(move |row| row.bg(rgb(theme.bg_hover)))
                             .cursor_pointer()
                             .child(Self::render_lucide_icon(
@@ -324,7 +662,7 @@ impl WorkspaceApp {
                                                         .px(px(4.0))
                                                         .py(px(2.0))
                                                         .text_size(px(SFTP_TEXT_10))
-                                                        .bg(rgba((SFTP_YELLOW << 8) | 0x26))
+                                                        .bg(rgba((SFTP_YELLOW << 8) | SFTP_READONLY_BADGE_BG_ALPHA))
                                                         .text_color(rgb(SFTP_YELLOW))
                                                         .child(
                                                             self.i18n.t("sftp.dialogs.readOnly"),
@@ -370,7 +708,7 @@ impl WorkspaceApp {
     fn render_sftp_delete_dialog_body(
         &self,
         files: Vec<String>,
-        has_background: bool,
+        _has_background: bool,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -382,7 +720,7 @@ impl WorkspaceApp {
                     .max_h(px(128.0))
                     .overflow_y_scroll()
                     .rounded(px(self.tokens.radii.sm))
-                    .bg(sftp_bg(theme.bg_sunken, has_background))
+                    .bg(rgb(theme.bg_sunken))
                     .p(px(8.0))
                     .text_size(px(SFTP_TEXT_XS))
                     .text_color(rgb(theme.text_muted))
@@ -412,7 +750,7 @@ impl WorkspaceApp {
                     } else {
                         rgb(theme.border)
                     })
-                    .bg(rgba((theme.bg << 8) | 0x80))
+                    .bg(rgb(theme.bg))
                     .px(px(12.0))
                     .flex()
                     .items_center()
@@ -435,8 +773,52 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_sftp_conflict_body(&self, has_background: bool) -> AnyElement {
+    fn sftp_conflict_description(&self) -> String {
+        let mut description = self.i18n.t("sftp.conflict.description");
+        if let Some(state) = self.sftp_view.conflict_state.as_ref() {
+            let remaining = state
+                .conflicts
+                .len()
+                .saturating_sub(state.current_index + 1);
+            if remaining > 0 {
+                description.push(' ');
+                description.push_str(
+                    &self
+                        .i18n
+                        .t("sftp.conflict.remaining")
+                        .replace("{{count}}", &remaining.to_string()),
+                );
+            }
+        }
+        description
+    }
+
+    fn render_sftp_conflict_body(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let Some(state) = self.sftp_view.conflict_state.as_ref() else {
+            return div().into_any_element();
+        };
+        let Some(conflict) = state.conflicts.get(state.current_index) else {
+            return div().into_any_element();
+        };
+        let source_newer = match (conflict.source_modified, conflict.target_modified) {
+            (Some(source), Some(target)) => Some(source > target),
+            _ => None,
+        };
+        let source_label_key = match conflict.direction {
+            SftpTransferDirection::Upload => "sftp.conflict.local_file",
+            SftpTransferDirection::Download => "sftp.conflict.remote_file",
+        };
+        let target_label_key = match conflict.direction {
+            SftpTransferDirection::Upload => "sftp.conflict.remote_file",
+            SftpTransferDirection::Download => "sftp.conflict.local_file",
+        };
+        let show_apply_all = state.conflicts.len() > 1;
+        let apply_all = state.apply_to_all;
         div()
             .p(px(16.0))
             .flex()
@@ -449,10 +831,21 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(sftp_panel_bg(theme.bg_panel, has_background, 0xff))
+                    .bg(rgb(theme.bg_panel))
                     .text_size(px(SFTP_TEXT_SM))
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .child("config.toml"),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::File,
+                                16.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .child(conflict.file_name.clone()),
+                    ),
             )
             .child(
                 div()
@@ -464,8 +857,10 @@ impl WorkspaceApp {
                             .flex_1()
                             .min_w(px(0.0))
                             .child(self.render_sftp_file_compare_card(
-                                "sftp.conflict.local_file",
-                                true,
+                                source_label_key,
+                                source_newer == Some(true),
+                                conflict.source_size,
+                                conflict.source_modified,
                                 has_background,
                             )),
                     )
@@ -483,12 +878,54 @@ impl WorkspaceApp {
                     )
                     .child(div().flex_1().min_w(px(0.0)).child(
                         self.render_sftp_file_compare_card(
-                            "sftp.conflict.remote_file",
-                            false,
+                            target_label_key,
+                            source_newer == Some(false),
+                            conflict.target_size,
+                            conflict.target_modified,
                             has_background,
                         ),
                     )),
             )
+            .when(show_apply_all, |body| {
+                body.child(
+                    div()
+                        .pt(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            oxideterm_gpui_ui::checkbox(&self.tokens, String::new(), apply_all)
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.toggle_sftp_conflict_apply_all();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(SFTP_TEXT_SM))
+                                .text_color(rgb(theme.text_muted))
+                                .cursor_pointer()
+                                .child(
+                                    self.i18n.t("sftp.conflict.apply_all").replace(
+                                        "{{count}}",
+                                        &state.conflicts.len().to_string(),
+                                    ),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.toggle_sftp_conflict_apply_all();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                ),
+                        ),
+                )
+            })
             .into_any_element()
     }
 
@@ -496,7 +933,9 @@ impl WorkspaceApp {
         &self,
         label_key: &'static str,
         newer: bool,
-        has_background: bool,
+        size: u64,
+        modified: Option<i64>,
+        _has_background: bool,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -509,17 +948,27 @@ impl WorkspaceApp {
                 rgb(theme.border)
             })
             .bg(if newer {
-                rgba(0x052e1680)
+                rgba((0x052e16 << 8) | SFTP_CONFLICT_NEWER_BG_ALPHA)
             } else {
-                sftp_panel_bg(theme.bg_panel, has_background, 0xff)
+                rgb(theme.bg_panel)
             })
             .child(
                 div()
                     .mb(px(8.0))
+                    .flex()
+                    .items_center()
                     .text_size(px(SFTP_TEXT_XS))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t(label_key).to_uppercase()),
+                    .child(self.i18n.t(label_key).to_uppercase())
+                    .when(newer, |label| {
+                        label.child(
+                            div()
+                                .ml(px(8.0))
+                                .text_color(rgb(SFTP_GREEN))
+                                .child(self.i18n.t("sftp.conflict.newer")),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -532,7 +981,7 @@ impl WorkspaceApp {
                         SFTP_ICON_MD,
                         rgb(theme.text_muted),
                     ))
-                    .child("4.2 KB"),
+                    .child(format_file_size(size)),
             )
             .child(
                 div()
@@ -546,7 +995,7 @@ impl WorkspaceApp {
                         SFTP_ICON_MD,
                         rgb(theme.text_muted),
                     ))
-                    .child("2026-05-07 14:30"),
+                    .child(format_conflict_modified(modified)),
             )
             .into_any_element()
     }
@@ -557,16 +1006,19 @@ impl WorkspaceApp {
         local_content: &str,
         remote_path: &str,
         remote_content: &str,
-        has_background: bool,
+        _has_background: bool,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let lines = compute_sftp_diff(local_content, remote_content);
         let stats = sftp_diff_stats(&lines);
+        let line_count = lines.len();
+        let diff_lines = std::sync::Arc::new(lines);
+        let diff_scroll = self.sftp_view.diff_scroll.clone();
         div()
             .h(px(480.0))
             .flex()
             .flex_col()
-            .bg(sftp_bg(theme.bg_sunken, has_background))
+            .bg(rgb(theme.bg_sunken))
             .child(
                 div()
                     .flex()
@@ -581,13 +1033,25 @@ impl WorkspaceApp {
                             .gap(px(8.0))
                             .px(px(12.0))
                             .py(px(8.0))
-                            .bg(rgba(0x7f1d1d33))
-                            .text_color(rgb(0xfca5a5))
-                            .child(format!(
-                                "{}: {}",
-                                self.i18n.t("sftp.diff.local"),
-                                sftp_file_name(local_path)
+                            .bg(rgba((0x7f1d1d << 8) | SFTP_DIFF_HEADER_BG_ALPHA))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::File,
+                                SFTP_ICON_SM,
+                                rgb(SFTP_RED),
                             ))
+                            .child(
+                                div()
+                                    .text_color(rgb(0xfca5a5))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(format!("{}:", self.i18n.t("sftp.diff.local"))),
+                            )
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .truncate()
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(sftp_file_name(local_path)),
+                            )
                             .child(
                                 div()
                                     .ml_auto()
@@ -603,13 +1067,25 @@ impl WorkspaceApp {
                             .gap(px(8.0))
                             .px(px(12.0))
                             .py(px(8.0))
-                            .bg(rgba(0x14532d33))
-                            .text_color(rgb(0x86efac))
-                            .child(format!(
-                                "{}: {}",
-                                self.i18n.t("sftp.diff.remote"),
-                                sftp_file_name(remote_path)
+                            .bg(rgba((0x14532d << 8) | SFTP_DIFF_HEADER_BG_ALPHA))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::File,
+                                SFTP_ICON_SM,
+                                rgb(SFTP_GREEN),
                             ))
+                            .child(
+                                div()
+                                    .text_color(rgb(0x86efac))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(format!("{}:", self.i18n.t("sftp.diff.remote"))),
+                            )
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .truncate()
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(sftp_file_name(remote_path)),
+                            )
                             .child(
                                 div()
                                     .ml_auto()
@@ -625,7 +1101,8 @@ impl WorkspaceApp {
                     .overflow_y_scroll()
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(SFTP_TEXT_XS))
-                    .when(lines.is_empty(), |body| {
+                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .when(line_count == 0, |body| {
                         body.child(
                             div()
                                 .size_full()
@@ -636,58 +1113,78 @@ impl WorkspaceApp {
                                 .child(self.i18n.t("sftp.diff.identical")),
                         )
                     })
-                    .children(lines.into_iter().map(|line| {
-                        let removed = line.kind == SftpDiffLineKind::Removed;
-                        let added = line.kind == SftpDiffLineKind::Added;
-                        let left_num = line
-                            .left_line_num
-                            .map(|number| number.to_string())
-                            .unwrap_or_default();
-                        let right_num = line
-                            .right_line_num
-                            .map(|number| number.to_string())
-                            .unwrap_or_default();
-                        let left_content = if added {
-                            String::new()
-                        } else if removed {
-                            format!("- {}", line.content)
-                        } else {
-                            line.content.clone()
-                        };
-                        let right_content = if removed {
-                            String::new()
-                        } else if added {
-                            format!("+ {}", line.content)
-                        } else {
-                            line.content
-                        };
-                        div()
-                            .flex()
-                            .border_b_1()
-                            .border_color(rgba((theme.border << 8) | 0x80))
-                            .child(diff_cell(
-                                &left_num,
-                                &left_content,
-                                removed,
-                                theme.border,
-                                true,
-                            ))
-                            .child(diff_cell(
-                                &right_num,
-                                &right_content,
-                                added,
-                                theme.border,
-                                false,
-                            ))
-                    })),
+                    .when(line_count > 0, |body| {
+                        let diff_lines = diff_lines.clone();
+                        body.child(
+                            uniform_list(
+                                "sftp-diff-virtual-list",
+                                line_count,
+                                move |range, _window, _cx| {
+                                    range
+                                        .map(|index| {
+                                            let line = diff_lines[index].clone();
+                                            let removed =
+                                                line.kind == SftpDiffLineKind::Removed;
+                                            let added = line.kind == SftpDiffLineKind::Added;
+                                            let left_num = line
+                                                .left_line_num
+                                                .map(|number| number.to_string())
+                                                .unwrap_or_default();
+                                            let right_num = line
+                                                .right_line_num
+                                                .map(|number| number.to_string())
+                                                .unwrap_or_default();
+                                            let left_content = if added {
+                                                String::new()
+                                            } else if removed {
+                                                format!("- {}", line.content)
+                                            } else {
+                                                line.content.clone()
+                                            };
+                                            let right_content = if removed {
+                                                String::new()
+                                            } else if added {
+                                                format!("+ {}", line.content)
+                                            } else {
+                                                line.content
+                                            };
+                                            div()
+                                                .h(px(SFTP_DIFF_ROW_HEIGHT))
+                                                .flex()
+                                                .border_b_1()
+                                                .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_HALF_ALPHA))
+                                                .child(diff_cell(
+                                                    &left_num,
+                                                    &left_content,
+                                                    removed,
+                                                    theme.border,
+                                                    true,
+                                                ))
+                                                .child(diff_cell(
+                                                    &right_num,
+                                                    &right_content,
+                                                    added,
+                                                    theme.border,
+                                                    false,
+                                                ))
+                                                .into_any_element()
+                                        })
+                                        .collect::<Vec<_>>()
+                                },
+                            )
+                            .track_scroll(diff_scroll)
+                            .size_full()
+                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                        )
+                    }),
             )
             .into_any_element()
     }
 
-    fn render_sftp_preview_body(&self, has_background: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sftp_preview_body(&self, _has_background: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let body = if self.sftp_view.preview_loading {
-            self.render_sftp_preview_text(self.i18n.t("common.loading"))
+            self.render_sftp_preview_text(self.i18n.t("sftp.preview.loading"))
         } else if let Some(error) = &self.sftp_view.preview_error {
             self.render_sftp_preview_text(error.clone())
         } else if let Some(content) = &self.sftp_view.preview_content {
@@ -699,7 +1196,7 @@ impl WorkspaceApp {
             .h(px(520.0))
             .flex()
             .flex_col()
-            .bg(sftp_bg(theme.bg_sunken, has_background))
+            .bg(rgb(theme.bg_sunken))
             .child(
                 div()
                     .id("sftp-preview-scroll")
@@ -710,6 +1207,184 @@ impl WorkspaceApp {
                     .child(body),
             )
             .into_any_element()
+    }
+
+    fn render_sftp_editor_body(&self, _has_background: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let language = self
+            .sftp_view
+            .preview_editor_language
+            .clone()
+            .unwrap_or_else(|| "text".to_string());
+        let encoding = self.sftp_view.preview_editor_encoding.clone();
+        let (line, column) = self
+            .sftp_view
+            .preview_editor_input
+            .as_ref()
+            .map(|input| {
+                let pos = input.read(cx).cursor_position();
+                (pos.line + 1, pos.character + 1)
+            })
+            .unwrap_or((1, 1));
+        let status = if self.sftp_view.preview_editor_saving {
+            Some((self.i18n.t("sftp.preview.saving"), rgb(theme.text_muted)))
+        } else if self.sftp_view.preview_editor_dirty {
+            Some((self.i18n.t("sftp.preview.modified"), rgb(SFTP_YELLOW)))
+        } else if let Some(atomic) = self.sftp_view.preview_editor_last_atomic_write {
+            let key = if atomic {
+                "sftp.preview.saved_atomic"
+            } else {
+                "sftp.preview.saved_direct"
+            };
+            Some((self.i18n.t(key), rgb(SFTP_GREEN)))
+        } else {
+            None
+        };
+
+        div()
+            .h(px(600.0))
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg_sunken))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_hidden()
+                    .when_some(self.sftp_view.preview_editor_input.clone(), |body, input| {
+                        body.child(
+                            CodeEditorInput::new(&input)
+                                .appearance(false)
+                                .h_full()
+                                .font_family(settings_mono_font_family(
+                                    self.settings_store.settings(),
+                                ))
+                                .text_size(px(SFTP_TEXT_SM))
+                                .text_color(rgb(theme.text))
+                                .bg(rgb(theme.bg_sunken)),
+                        )
+                    })
+                    .when(self.sftp_view.preview_editor_input.is_none(), |body| {
+                        body.child(self.render_sftp_preview_text(String::new()))
+                    }),
+            )
+            .child(
+                div()
+                    .h(px(32.0))
+                    .flex_none()
+                    .px(px(16.0))
+                    .border_t_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_panel))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .text_size(px(SFTP_TEXT_XS))
+                    .text_color(rgb(theme.text_muted))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(16.0))
+                            .child(format!(
+                                "{} {}, {} {}",
+                                self.i18n.t("sftp.preview.line"),
+                                line,
+                                self.i18n.t("sftp.preview.column"),
+                                column
+                            ))
+                            .child(language)
+                            .child(format!(
+                                "{} {}",
+                                self.i18n.t("sftp.preview.encoding"),
+                                encoding
+                            )),
+                    )
+                .child(self.render_sftp_editor_status(status, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_sftp_editor_status(
+        &self,
+        status: Option<(String, gpui::Rgba)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if let Some(error) = &self.sftp_view.preview_editor_save_error {
+            let message = error.clone();
+            if self.sftp_view.preview_editor_network_error {
+                let retry_count = self.sftp_view.preview_editor_retry_count;
+                let label = if retry_count > 0 {
+                    format!("{} ({retry_count})", self.i18n.t("sftp.preview.retry"))
+                } else {
+                    self.i18n.t("sftp.preview.retry")
+                };
+                return div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .text_color(rgb(SFTP_ORANGE))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::WifiOff,
+                                SFTP_ICON_MD,
+                                rgb(SFTP_ORANGE),
+                            ))
+                            .child(div().max_w(px(320.0)).truncate().child(message)),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.0))
+                            .px(px(8.0))
+                            .rounded(px(self.tokens.radii.sm))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .text_size(px(SFTP_TEXT_XS))
+                            .text_color(rgb(SFTP_ORANGE))
+                            .hover(|style| {
+                                style.bg(rgba(
+                                    (SFTP_ORANGE << 8) | SFTP_EDITOR_RETRY_HOVER_ALPHA,
+                                ))
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.retry_sftp_preview_editor_save(cx);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::RefreshCcw,
+                                SFTP_ICON_SM,
+                                rgb(SFTP_ORANGE),
+                            ))
+                            .child(label),
+                    )
+                    .into_any_element();
+            }
+            return div()
+                .max_w(px(360.0))
+                .truncate()
+                .text_color(rgb(SFTP_RED))
+                .child(message)
+                .into_any_element();
+        }
+
+        if let Some((message, color)) = status {
+            div()
+                .max_w(px(360.0))
+                .truncate()
+                .text_color(color)
+                .child(message)
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        }
     }
 
     fn render_sftp_preview_text(&self, text: String) -> AnyElement {
@@ -763,8 +1438,93 @@ impl WorkspaceApp {
                 mime_type,
                 kind: AssetFileKind::Office,
             } => self.render_sftp_preview_office(path, mime_type, cx),
+            PreviewContent::Hex {
+                data,
+                total_size,
+                offset,
+                chunk_size,
+                has_more,
+            } => self.render_sftp_preview_hex(
+                data,
+                *total_size,
+                *offset,
+                *chunk_size,
+                *has_more,
+                cx,
+            ),
             _ => self.render_sftp_preview_text(preview_content_text(content)),
         }
+    }
+
+    fn render_sftp_preview_hex(
+        &self,
+        data: &str,
+        total_size: u64,
+        offset: u64,
+        chunk_size: u64,
+        has_more: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let showing = offset.saturating_add(chunk_size).min(total_size);
+        let loading_more = self.sftp_view.preview_hex_loading_more;
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mb(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(px(SFTP_TEXT_XS))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("sftp.preview.hex_view"))
+                    .child("•")
+                    .child(
+                        self.i18n
+                            .t("sftp.preview.showing_first")
+                            .replace("{{size}}", &format_file_size(showing)),
+                    )
+                    .when(total_size > 0, |header| {
+                        header.child("•").child(
+                            self.i18n
+                                .t("sftp.preview.total_size")
+                                .replace("{{size}}", &format_file_size(total_size)),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_size(px(SFTP_TEXT_XS))
+                    .line_height(px(20.0))
+                    .text_color(rgb(theme.text))
+                    .child(data.to_string()),
+            )
+            .when(has_more, |body| {
+                let label = if loading_more {
+                    self.i18n.t("sftp.preview.loading")
+                } else {
+                    self.i18n.t("sftp.preview.load_more")
+                };
+                body.child(
+                    div().mt(px(16.0)).flex().justify_center().child(
+                        self.render_sftp_text_button(
+                            label,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                if !loading_more {
+                                    this.load_more_sftp_preview_hex();
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    ),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_sftp_preview_markdown(&self, source: &str) -> AnyElement {

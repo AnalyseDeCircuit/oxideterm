@@ -53,6 +53,7 @@ fn main() {
     Application::new()
         .with_assets(NativeAssets)
         .run(|cx: &mut App| {
+            oxideterm_code_editor::init(cx);
             cx.activate(true);
             cx.on_action(quit);
             cx.bind_keys(platform::app_key_bindings());
