@@ -22,6 +22,8 @@ impl WorkspaceApp {
                 SftpTransferState::Completed | SftpTransferState::Cancelled
             )
         });
+        let incomplete_count = self.sftp_view.incomplete_transfers.len();
+        let has_incomplete = incomplete_count > 0;
 
         div()
             .h(px(SFTP_QUEUE_HEIGHT))
@@ -53,7 +55,7 @@ impl WorkspaceApp {
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.text_muted))
                             .child(self.queue_title(active_count))
-                            .when(true, |row| {
+                            .when(has_incomplete, |row| {
                                 row.child(
                                     div()
                                         .flex()
@@ -62,14 +64,14 @@ impl WorkspaceApp {
                                         .text_color(rgb(theme.accent))
                                         .cursor_pointer()
                                         .child(Self::render_lucide_icon(
-                                            LucideIcon::Clock,
+                                            LucideIcon::History,
                                             SFTP_ICON_SM,
                                             rgb(theme.accent),
                                         ))
                                         .child(
                                             self.i18n
                                                 .t("sftp.queue.incomplete_count")
-                                                .replace("{{count}}", "1"),
+                                                .replace("{{count}}", &incomplete_count.to_string()),
                                         )
                                         .on_mouse_down(
                                             MouseButton::Left,
@@ -113,7 +115,7 @@ impl WorkspaceApp {
                         )
                     }),
             )
-            .when(self.sftp_view.show_incomplete, |queue| {
+            .when(self.sftp_view.show_incomplete && has_incomplete, |queue| {
                 queue.child(self.render_sftp_incomplete_section(has_background, cx))
             })
             .child(
@@ -169,70 +171,164 @@ impl WorkspaceApp {
                     .max_h(px(128.0))
                     .overflow_y_scroll()
                     .p(px(8.0))
+                    .children(
+                        self.sftp_view
+                            .incomplete_transfers
+                            .iter()
+                            .cloned()
+                            .map(|transfer| {
+                                self.render_sftp_incomplete_row(transfer, has_background, cx)
+                            }),
+                    )
+                    .when(self.sftp_view.incomplete_load_inflight, |list| {
+                        list.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap(px(8.0))
+                                .py(px(8.0))
+                                .text_size(px(SFTP_TEXT_XS))
+                                .text_color(rgb(theme.text_muted))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::RefreshCw,
+                                    SFTP_ICON_SM,
+                                    rgb(theme.text_muted),
+                                ))
+                                .child(self.i18n.t("sftp.queue.loading")),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_sftp_incomplete_row(
+        &self,
+        transfer: StoredTransferProgress,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let name = transfer
+            .source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| transfer.source_path.to_str().unwrap_or(""))
+            .to_string();
+        let transfer_type = match transfer.transfer_type {
+            RemoteTransferType::Upload => "Upload",
+            RemoteTransferType::Download => "Download",
+        };
+        let status = match transfer.status {
+            oxideterm_sftp::TransferStatus::Paused => self.i18n.t("sftp.queue.status_paused"),
+            oxideterm_sftp::TransferStatus::Failed => self.i18n.t("sftp.queue.status_error"),
+            oxideterm_sftp::TransferStatus::Active => self.transfer_status_text(&SftpTransferItem {
+                id: 0,
+                transfer_id: transfer.transfer_id.clone(),
+                name: name.clone(),
+                local_path: String::new(),
+                remote_path: String::new(),
+                direction: SftpTransferDirection::Download,
+                size: transfer.total_bytes,
+                transferred: transfer.transferred_bytes,
+                state: SftpTransferState::Active,
+                error: None,
+            }),
+            oxideterm_sftp::TransferStatus::Completed => self.i18n.t("sftp.queue.status_completed"),
+            oxideterm_sftp::TransferStatus::Cancelled => self.i18n.t("sftp.queue.status_cancelled"),
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .p(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(rgba((SFTP_YELLOW << 8) | 0x4d))
+            .bg(sftp_panel_bg(
+                theme.bg_panel,
+                has_background,
+                SFTP_PANEL_80_ALPHA,
+            ))
+            .text_size(px(SFTP_TEXT_XS))
+            .child(
+                div()
+                    .w(px(16.0))
+                    .text_center()
+                    .text_color(rgb(SFTP_YELLOW))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child(match transfer.transfer_type {
+                        RemoteTransferType::Upload => "↑",
+                        RemoteTransferType::Download => "↓",
+                    }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(div().truncate().text_color(rgb(theme.text)).child(name))
                     .child(
                         div()
                             .flex()
-                            .flex_row()
-                            .items_center()
                             .gap(px(8.0))
-                            .p(px(8.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .border_1()
-                            .border_color(rgba((SFTP_YELLOW << 8) | 0x4d))
-                            .bg(sftp_panel_bg(
-                                theme.bg_panel,
-                                has_background,
-                                SFTP_PANEL_80_ALPHA,
-                            ))
-                            .text_size(px(SFTP_TEXT_XS))
-                            .child(
-                                div()
-                                    .w(px(16.0))
-                                    .text_center()
-                                    .text_color(rgb(SFTP_YELLOW))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .child("↓"),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .text_color(rgb(theme.text))
-                                            .child("archive.tar"),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .gap(px(8.0))
-                                            .text_size(px(SFTP_TEXT_10))
-                                            .text_color(rgb(theme.text_muted))
-                                            .child("Download")
-                                            .child("•")
-                                            .child("42%")
-                                            .child("•")
-                                            .child("18.0 MB / 42.0 MB"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(SFTP_TEXT_10))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("sftp.queue.status_paused")),
-                            )
-                            .child(self.render_sftp_icon_button(
-                                LucideIcon::Play,
-                                self.i18n.t("sftp.queue.resume_tooltip"),
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.sftp_view.show_incomplete = false;
+                            .text_size(px(SFTP_TEXT_10))
+                            .text_color(rgb(theme.text_muted))
+                            .child(transfer_type)
+                            .child("•")
+                            .child(format!("{:.0}%", transfer.progress_percent()))
+                            .child("•")
+                            .child(format!(
+                                "{} / {}",
+                                format_file_size(transfer.transferred_bytes),
+                                format_file_size(transfer.total_bytes)
+                            )),
+                    )
+                    .when_some(transfer.error.clone(), |row, error| {
+                        row.child(
+                            div()
+                                .text_size(px(SFTP_TEXT_10))
+                                .text_color(rgb(SFTP_RED))
+                                .truncate()
+                                .child(error),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(SFTP_TEXT_10))
+                    .text_color(rgb(theme.text_muted))
+                    .child(status),
+            )
+            .when(transfer.is_incomplete(), |row| {
+                row.child(
+                    div()
+                        .size(px(SFTP_TOOL_BUTTON))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(self.tokens.radii.sm))
+                        .text_color(rgb(SFTP_YELLOW))
+                        .hover(|button| button.bg(rgba((SFTP_YELLOW << 8) | 0x1a)))
+                        .cursor_pointer()
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::RotateCcw,
+                            SFTP_ICON_SM,
+                            rgb(SFTP_YELLOW),
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener({
+                                let transfer_id = transfer.transfer_id.clone();
+                                move |this, _event, _window, cx| {
+                                    this.resume_sftp_incomplete_transfer(transfer_id.clone());
                                     cx.stop_propagation();
                                     cx.notify();
-                                }),
-                            )),
-                    ),
-            )
+                                }
+                            }),
+                        ),
+                )
+            })
             .into_any_element()
     }
 

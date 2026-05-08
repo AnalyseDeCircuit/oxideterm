@@ -170,7 +170,7 @@ pub fn shell_args_for_profile(shell: &ShellInfo, load_profile: bool) -> Vec<Stri
 
 fn default_args_for_shell(shell_id: &str) -> Vec<String> {
     match shell_id {
-        "zsh" | "bash" | "fish" | "sh" | "dash" => vec!["--login".to_string()],
+        "zsh" | "bash" | "git-bash" | "fish" | "sh" | "dash" => vec!["--login".to_string()],
         "pwsh" | "powershell" => vec![
             "-NoLogo".to_string(),
             "-NoExit".to_string(),

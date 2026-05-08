@@ -447,6 +447,11 @@ impl WorkspaceApp {
                 .default_cwd
                 .clone()
                 .unwrap_or_default(),
+            SettingsInput::LocalGitBashPath => settings
+                .local_terminal
+                .git_bash_path
+                .clone()
+                .unwrap_or_default(),
             SettingsInput::LocalOhMyPoshTheme => settings
                 .local_terminal
                 .oh_my_posh_theme
@@ -520,6 +525,16 @@ impl WorkspaceApp {
                 self.edit_settings(
                     |settings| {
                         settings.local_terminal.default_cwd =
+                            (!value.is_empty()).then(|| value.clone());
+                    },
+                    cx,
+                );
+            }
+            SettingsInput::LocalGitBashPath => {
+                let value = self.settings_input_draft.trim().to_string();
+                self.edit_settings(
+                    |settings| {
+                        settings.local_terminal.git_bash_path =
                             (!value.is_empty()).then(|| value.clone());
                     },
                     cx,

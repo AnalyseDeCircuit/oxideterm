@@ -6,11 +6,14 @@ use gpui::{AssetSource, SharedString};
 #[derive(Clone, Copy)]
 pub(crate) enum LucideIcon {
     Activity,
+    AlertTriangle,
     ArrowDown,
+    ArrowDownAZ,
     ArrowLeftRight,
     ArrowRight,
     ArrowUp,
     ArrowUpDown,
+    ArrowUpAZ,
     Bell,
     BookOpen,
     Bot,
@@ -20,6 +23,7 @@ pub(crate) enum LucideIcon {
     Clock,
     Code2,
     Copy,
+    CornerDownLeft,
     Download,
     Eye,
     EyeOff,
@@ -30,6 +34,7 @@ pub(crate) enum LucideIcon {
     FolderOpen,
     HardDrive,
     HelpCircle,
+    History,
     Home,
     Image,
     Inbox,
@@ -52,6 +57,8 @@ pub(crate) enum LucideIcon {
     Puzzle,
     Radio,
     RefreshCcw,
+    RefreshCw,
+    RotateCcw,
     Rocket,
     Search,
     Server,
@@ -72,11 +79,14 @@ impl LucideIcon {
     pub(crate) fn path(self) -> &'static str {
         match self {
             Self::Activity => "lucide/activity.svg",
+            Self::AlertTriangle => "lucide/alert-triangle.svg",
             Self::ArrowDown => "lucide/arrow-down.svg",
+            Self::ArrowDownAZ => "lucide/arrow-down-a-z.svg",
             Self::ArrowLeftRight => "lucide/arrow-left-right.svg",
             Self::ArrowRight => "lucide/arrow-right.svg",
             Self::ArrowUp => "lucide/arrow-up.svg",
             Self::ArrowUpDown => "lucide/arrow-up-down.svg",
+            Self::ArrowUpAZ => "lucide/arrow-up-a-z.svg",
             Self::Bell => "lucide/bell.svg",
             Self::BookOpen => "lucide/book-open.svg",
             Self::Bot => "lucide/bot.svg",
@@ -86,6 +96,7 @@ impl LucideIcon {
             Self::Clock => "lucide/clock.svg",
             Self::Code2 => "lucide/code-2.svg",
             Self::Copy => "lucide/copy.svg",
+            Self::CornerDownLeft => "lucide/corner-down-left.svg",
             Self::Download => "lucide/download.svg",
             Self::Eye => "lucide/eye.svg",
             Self::EyeOff => "lucide/eye-off.svg",
@@ -96,6 +107,7 @@ impl LucideIcon {
             Self::FolderOpen => "lucide/folder-open.svg",
             Self::HardDrive => "lucide/hard-drive.svg",
             Self::HelpCircle => "lucide/help-circle.svg",
+            Self::History => "lucide/history.svg",
             Self::Home => "lucide/home.svg",
             Self::Image => "lucide/image.svg",
             Self::Inbox => "lucide/inbox.svg",
@@ -118,6 +130,8 @@ impl LucideIcon {
             Self::Puzzle => "lucide/puzzle.svg",
             Self::Radio => "lucide/radio.svg",
             Self::RefreshCcw => "lucide/refresh-ccw.svg",
+            Self::RefreshCw => "lucide/refresh-cw.svg",
+            Self::RotateCcw => "lucide/rotate-ccw.svg",
             Self::Rocket => "lucide/rocket.svg",
             Self::Search => "lucide/search.svg",
             Self::Server => "lucide/server.svg",
@@ -142,11 +156,14 @@ impl AssetSource for NativeAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         let svg = match path {
             "lucide/activity.svg" => ACTIVITY,
+            "lucide/alert-triangle.svg" => ALERT_TRIANGLE,
             "lucide/arrow-down.svg" => ARROW_DOWN,
+            "lucide/arrow-down-a-z.svg" => ARROW_DOWN_A_Z,
             "lucide/arrow-left-right.svg" => ARROW_LEFT_RIGHT,
             "lucide/arrow-right.svg" => ARROW_RIGHT,
             "lucide/arrow-up.svg" => ARROW_UP,
             "lucide/arrow-up-down.svg" => ARROW_UP_DOWN,
+            "lucide/arrow-up-a-z.svg" => ARROW_UP_A_Z,
             "lucide/bell.svg" => BELL,
             "lucide/book-open.svg" => BOOK_OPEN,
             "lucide/bot.svg" => BOT,
@@ -156,6 +173,7 @@ impl AssetSource for NativeAssets {
             "lucide/clock.svg" => CLOCK,
             "lucide/code-2.svg" => CODE_2,
             "lucide/copy.svg" => COPY,
+            "lucide/corner-down-left.svg" => CORNER_DOWN_LEFT,
             "lucide/download.svg" => DOWNLOAD,
             "lucide/eye.svg" => EYE,
             "lucide/eye-off.svg" => EYE_OFF,
@@ -166,6 +184,7 @@ impl AssetSource for NativeAssets {
             "lucide/folder-open.svg" => FOLDER_OPEN,
             "lucide/hard-drive.svg" => HARD_DRIVE,
             "lucide/help-circle.svg" => HELP_CIRCLE,
+            "lucide/history.svg" => HISTORY,
             "lucide/home.svg" => HOME,
             "lucide/image.svg" => IMAGE,
             "lucide/inbox.svg" => INBOX,
@@ -190,6 +209,8 @@ impl AssetSource for NativeAssets {
             "lucide/puzzle.svg" => PUZZLE,
             "lucide/radio.svg" => RADIO,
             "lucide/refresh-ccw.svg" => REFRESH_CCW,
+            "lucide/refresh-cw.svg" => REFRESH_CW,
+            "lucide/rotate-ccw.svg" => ROTATE_CCW,
             "lucide/rocket.svg" => ROCKET,
             "lucide/search.svg" => SEARCH,
             "lucide/server.svg" => SERVER,
@@ -213,10 +234,13 @@ impl AssetSource for NativeAssets {
         if path == "lucide" {
             return Ok([
                 "activity.svg",
+                "alert-triangle.svg",
                 "arrow-down.svg",
+                "arrow-down-a-z.svg",
                 "arrow-left-right.svg",
                 "arrow-up.svg",
                 "arrow-up-down.svg",
+                "arrow-up-a-z.svg",
                 "bell.svg",
                 "book-open.svg",
                 "bot.svg",
@@ -226,6 +250,7 @@ impl AssetSource for NativeAssets {
                 "clock.svg",
                 "code-2.svg",
                 "copy.svg",
+                "corner-down-left.svg",
                 "download.svg",
                 "eye.svg",
                 "eye-off.svg",
@@ -236,6 +261,7 @@ impl AssetSource for NativeAssets {
                 "folder-open.svg",
                 "hard-drive.svg",
                 "help-circle.svg",
+                "history.svg",
                 "home.svg",
                 "image.svg",
                 "inbox.svg",
@@ -260,6 +286,8 @@ impl AssetSource for NativeAssets {
                 "puzzle.svg",
                 "radio.svg",
                 "refresh-ccw.svg",
+                "refresh-cw.svg",
+                "rotate-ccw.svg",
                 "rocket.svg",
                 "search.svg",
                 "server.svg",
@@ -286,11 +314,14 @@ impl AssetSource for NativeAssets {
 // Lucide icons are from lucide, licensed ISC. Settings navigation icons match
 // the lucide-react v0.577.0 package used by the Tauri frontend.
 const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>"#;
+const ALERT_TRIANGLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>"#;
+const ARROW_DOWN_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;
 const ARROW_LEFT_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>"#;
 const ARROW_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>"#;
 const ARROW_UP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>"#;
 const ARROW_UP_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>"#;
+const ARROW_UP_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;
 const BELL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>"#;
 const BOOK_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>"#;
 const BOT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>"#;
@@ -300,6 +331,7 @@ const CHEVRON_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24
 const CLOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>"#;
 const CODE_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>"#;
 const COPY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"#;
+const CORNER_DOWN_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>"#;
 const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>"#;
 const EYE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const EYE_OFF: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>"#;
@@ -310,6 +342,7 @@ const FOLDER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" heigh
 const FOLDER_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>"#;
 const HARD_DRIVE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16h.01"/><path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M21.946 12.013H2.054"/><path d="M6 16h.01"/></svg>"#;
 const HELP_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"#;
+const HISTORY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>"#;
 const HOME: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>"#;
 const IMAGE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>"#;
 const INBOX: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"#;
@@ -334,6 +367,8 @@ const PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height=
 const PUZZLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg>"#;
 const RADIO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>"#;
 const REFRESH_CCW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>"#;
+const REFRESH_CW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>"#;
+const ROTATE_CCW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>"#;
 const ROCKET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>"#;
 const SEARCH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>"#;
 const SERVER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>"#;

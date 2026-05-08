@@ -369,7 +369,7 @@ impl WorkspaceApp {
             (SettingsTab::Local, SettingsSelect::LocalShell) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let selected = settings.local_terminal.default_shell_id.as_deref();
-                for shell in self.local_shells.clone() {
+                for shell in self.effective_local_shells_for_settings(settings) {
                     let shell_id = shell.id.clone();
                     popup = popup.child(
                         select_option(

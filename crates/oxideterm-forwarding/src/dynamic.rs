@@ -23,6 +23,7 @@ const SOCKS_ATYP_IPV4: u8 = 0x01;
 const SOCKS_ATYP_DOMAIN: u8 = 0x03;
 const SOCKS_ATYP_IPV6: u8 = 0x04;
 const SOCKS_REPLY_SUCCEEDED: u8 = 0x00;
+const SOCKS_REPLY_HOST_UNREACHABLE: u8 = 0x04;
 const SOCKS_REPLY_COMMAND_NOT_SUPPORTED: u8 = 0x07;
 const SOCKS_REPLY_ADDRESS_NOT_SUPPORTED: u8 = 0x08;
 const FORWARD_STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
@@ -152,14 +153,30 @@ async fn bridge_dynamic_connection(
     origin_port: u16,
 ) -> Result<(), ForwardingError> {
     let destination = read_socks5_connect_destination(&mut stream).await?;
-    let ssh_stream = ssh_connection
+    let ssh_stream = match ssh_connection
         .open_direct_tcpip(
             &destination.host,
             destination.port,
             &origin_host,
             origin_port,
         )
-        .await?;
+        .await
+    {
+        Ok(stream) => stream,
+        Err(error) => {
+            // Tauri reports direct-tcpip open failures to the SOCKS5 client before
+            // dropping the socket, so strict clients do not hang waiting for a reply.
+            if let Err(reply_error) =
+                send_socks5_failure(&mut stream, SOCKS_REPLY_HOST_UNREACHABLE).await
+            {
+                tracing::debug!(
+                    "dynamic forward {} failed to send SOCKS5 host-unreachable reply: {reply_error}",
+                    rule.id
+                );
+            }
+            return Err(ForwardingError::from(error));
+        }
+    };
     send_socks5_success(&mut stream).await?;
 
     bridge_tcp_to_ssh_stream(
@@ -229,9 +246,7 @@ async fn read_socks5_connect_destination(
             stream.read_exact(&mut len).await?;
             let mut host = vec![0_u8; len[0] as usize];
             stream.read_exact(&mut host).await?;
-            String::from_utf8(host).map_err(|error| {
-                ForwardingError::InvalidRule(format!("invalid SOCKS5 domain name: {error}"))
-            })?
+            String::from_utf8_lossy(&host).to_string()
         }
         SOCKS_ATYP_IPV6 => {
             let mut octets = [0_u8; 16];
@@ -295,4 +310,192 @@ fn validate_dynamic_rule(rule: &ForwardRule) -> Result<(), ForwardingError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn socks5_accepts_tauri_supported_address_types() {
+        let destination = read_destination_from_request(&[
+            SOCKS_VERSION_5,
+            SOCKS_CMD_CONNECT,
+            0x00,
+            SOCKS_ATYP_IPV4,
+            127,
+            0,
+            0,
+            1,
+            0x01,
+            0xbb,
+        ])
+        .await;
+        assert_eq!(
+            destination,
+            SocksDestination {
+                host: "127.0.0.1".to_string(),
+                port: 443,
+            }
+        );
+
+        let mut domain_request = vec![
+            SOCKS_VERSION_5,
+            SOCKS_CMD_CONNECT,
+            0x00,
+            SOCKS_ATYP_DOMAIN,
+            11,
+        ];
+        domain_request.extend_from_slice(b"example.com");
+        domain_request.extend_from_slice(&80_u16.to_be_bytes());
+        let destination = read_destination_from_request(&domain_request).await;
+        assert_eq!(
+            destination,
+            SocksDestination {
+                host: "example.com".to_string(),
+                port: 80,
+            }
+        );
+
+        let mut lossy_domain_request = vec![
+            SOCKS_VERSION_5,
+            SOCKS_CMD_CONNECT,
+            0x00,
+            SOCKS_ATYP_DOMAIN,
+            4,
+        ];
+        lossy_domain_request.extend_from_slice(&[b'h', b'i', 0xff, b'!']);
+        lossy_domain_request.extend_from_slice(&1080_u16.to_be_bytes());
+        let destination = read_destination_from_request(&lossy_domain_request).await;
+        assert_eq!(
+            destination,
+            SocksDestination {
+                host: String::from_utf8_lossy(&[b'h', b'i', 0xff, b'!']).to_string(),
+                port: 1080,
+            }
+        );
+
+        let mut ipv6_request = vec![SOCKS_VERSION_5, SOCKS_CMD_CONNECT, 0x00, SOCKS_ATYP_IPV6];
+        ipv6_request.extend_from_slice(&Ipv6Addr::LOCALHOST.octets());
+        ipv6_request.extend_from_slice(&8080_u16.to_be_bytes());
+        let destination = read_destination_from_request(&ipv6_request).await;
+        assert_eq!(
+            destination,
+            SocksDestination {
+                host: "::1".to_string(),
+                port: 8080,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn socks5_rejects_unsupported_command_with_tauri_reply() {
+        let reply = read_failure_reply_for_request(&[
+            SOCKS_VERSION_5,
+            0x02,
+            0x00,
+            SOCKS_ATYP_IPV4,
+            127,
+            0,
+            0,
+            1,
+            0x00,
+            0x50,
+        ])
+        .await;
+
+        assert_eq!(
+            reply,
+            socks5_reply(SOCKS_REPLY_COMMAND_NOT_SUPPORTED),
+            "native must mirror Tauri's REP_CMD_NOT_SUPPORTED response"
+        );
+    }
+
+    #[tokio::test]
+    async fn socks5_rejects_unsupported_address_type_with_tauri_reply() {
+        let reply =
+            read_failure_reply_for_request(&[SOCKS_VERSION_5, SOCKS_CMD_CONNECT, 0x00, 0x05]).await;
+
+        assert_eq!(
+            reply,
+            socks5_reply(SOCKS_REPLY_ADDRESS_NOT_SUPPORTED),
+            "native must mirror Tauri's REP_ADDR_NOT_SUPPORTED response"
+        );
+    }
+
+    #[tokio::test]
+    async fn socks5_success_reply_matches_tauri_shape() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut server_stream, _) = listener.accept().await.unwrap();
+            send_socks5_success(&mut server_stream).await.unwrap();
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut reply = [0_u8; 10];
+        client.read_exact(&mut reply).await.unwrap();
+        server.await.unwrap();
+
+        assert_eq!(reply, socks5_reply(SOCKS_REPLY_SUCCEEDED));
+    }
+
+    async fn read_destination_from_request(request: &[u8]) -> SocksDestination {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut server_stream, _) = listener.accept().await.unwrap();
+            read_socks5_connect_destination(&mut server_stream).await
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        send_greeting(&mut client).await;
+        client.write_all(request).await.unwrap();
+
+        server.await.unwrap().unwrap()
+    }
+
+    async fn read_failure_reply_for_request(request: &[u8]) -> [u8; 10] {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut server_stream, _) = listener.accept().await.unwrap();
+            let _ = read_socks5_connect_destination(&mut server_stream).await;
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        send_greeting(&mut client).await;
+        client.write_all(request).await.unwrap();
+
+        let mut reply = [0_u8; 10];
+        client.read_exact(&mut reply).await.unwrap();
+        server.await.unwrap();
+        reply
+    }
+
+    async fn send_greeting(client: &mut TcpStream) {
+        client
+            .write_all(&[SOCKS_VERSION_5, 0x01, SOCKS_AUTH_NONE])
+            .await
+            .unwrap();
+
+        let mut reply = [0_u8; 2];
+        client.read_exact(&mut reply).await.unwrap();
+        assert_eq!(reply, [SOCKS_VERSION_5, SOCKS_AUTH_NONE]);
+    }
+
+    fn socks5_reply(status: u8) -> [u8; 10] {
+        [
+            SOCKS_VERSION_5,
+            status,
+            0x00,
+            SOCKS_ATYP_IPV4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+    }
 }

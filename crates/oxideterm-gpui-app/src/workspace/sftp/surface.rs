@@ -132,7 +132,6 @@ impl WorkspaceApp {
                 sftp_border(theme.border, has_background)
             })
             .bg(sftp_bg(theme.bg, has_background))
-            .hover(move |pane| pane.border_color(rgba((theme.accent << 8) | 0x40)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -226,6 +225,7 @@ impl WorkspaceApp {
                 path_input,
                 path_editing,
                 focused_input,
+                has_background,
                 cx,
             ));
 
@@ -303,6 +303,7 @@ impl WorkspaceApp {
         path_input: &str,
         editing: bool,
         focused_input: Option<SftpInput>,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -325,7 +326,7 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.border)
             })
-            .bg(rgba((theme.bg_sunken << 8) | 0xcc))
+            .bg(sftp_bg(theme.bg_sunken, has_background))
             .overflow_hidden()
             .cursor_pointer()
             .when(editing, |bar| {
@@ -345,7 +346,7 @@ impl WorkspaceApp {
                         .rounded(px(self.tokens.radii.sm))
                         .hover(move |button| button.bg(rgb(theme.bg_hover)))
                         .child(Self::render_lucide_icon(
-                            LucideIcon::ArrowRight,
+                            LucideIcon::CornerDownLeft,
                             SFTP_ICON_SM,
                             rgb(theme.text),
                         ))
@@ -519,7 +520,7 @@ impl WorkspaceApp {
         pane: SftpPane,
         field: SftpSortField,
         active_field: SftpSortField,
-        _direction: SftpSortDirection,
+        direction: SftpSortDirection,
         label: String,
         width: Option<f32>,
         cx: &mut Context<Self>,
@@ -542,8 +543,13 @@ impl WorkspaceApp {
             .cursor_pointer()
             .child(div().truncate().child(label))
             .when(active_field == field, |header| {
+                let icon = match (field, direction) {
+                    (SftpSortField::Name, SftpSortDirection::Asc) => LucideIcon::ArrowUpAZ,
+                    (SftpSortField::Name, SftpSortDirection::Desc) => LucideIcon::ArrowDownAZ,
+                    _ => LucideIcon::ArrowUpDown,
+                };
                 header.child(Self::render_lucide_icon(
-                    LucideIcon::ArrowUpDown,
+                    icon,
                     SFTP_ICON_SM,
                     rgb(theme.accent),
                 ))

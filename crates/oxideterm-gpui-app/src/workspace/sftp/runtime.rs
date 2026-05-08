@@ -149,6 +149,7 @@ impl WorkspaceApp {
                                 ) {
                                     self.emit_node_event(event);
                                 }
+                                self.spawn_sftp_incomplete_load(node_id);
                             }
                             Err(error) => {
                                 self.sftp_view.init_error = Some(format!("{}: {error}", path));
@@ -208,6 +209,13 @@ impl WorkspaceApp {
                     {
                         self.sftp_view.local_files = files;
                     }
+                    if let Some(node_id) = self
+                        .active_tab_id
+                        .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+                        .cloned()
+                    {
+                        self.spawn_sftp_incomplete_load(node_id);
+                    }
                     changed = true;
                 }
                 SftpWorkerResult::RemoteMutationComplete {
@@ -227,6 +235,35 @@ impl WorkspaceApp {
                     }
                     changed = true;
                 }
+                SftpWorkerResult::IncompleteTransfersLoaded { node_id, result } => {
+                    if self
+                        .active_tab_id
+                        .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+                        != Some(&node_id)
+                    {
+                        continue;
+                    }
+                    self.sftp_view.incomplete_load_inflight = false;
+                    match result {
+                        Ok(transfers) => {
+                            self.sftp_view.incomplete_transfers = transfers
+                                .into_iter()
+                                .filter(StoredTransferProgress::is_incomplete)
+                                .collect();
+                            if self.sftp_view.incomplete_transfers.is_empty() {
+                                self.sftp_view.show_incomplete = false;
+                            }
+                        }
+                        Err(error) => {
+                            if !is_sftp_incomplete_store_compat_error(&error) {
+                                self.sftp_view.init_error = Some(error);
+                            }
+                            self.sftp_view.incomplete_transfers.clear();
+                            self.sftp_view.show_incomplete = false;
+                        }
+                    }
+                    changed = true;
+                }
                 SftpWorkerResult::PreviewLoaded {
                     generation,
                     path,
@@ -238,6 +275,7 @@ impl WorkspaceApp {
                         continue;
                     }
                     self.sftp_view.preview_loading = false;
+                    self.sftp_view.preview_hex_loading_more = false;
                     self.sftp_view.preview_path = Some(path);
                     match result {
                         Ok(content) => {
@@ -265,6 +303,116 @@ impl WorkspaceApp {
                             self.sftp_view.preview_asset_owner = None;
                             self.sftp_view.preview_session = PreviewSession::error(error.clone());
                             self.sftp_view.preview_error = Some(error);
+                        }
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::PreviewHexLoaded {
+                    generation,
+                    path,
+                    offset: _offset,
+                    result,
+                } => {
+                    if generation != self.sftp_view.preview_generation {
+                        continue;
+                    }
+                    self.sftp_view.preview_hex_loading_more = false;
+                    match result {
+                        Ok(PreviewContent::Hex {
+                            data: next_data,
+                            total_size: next_total_size,
+                            offset: next_offset,
+                            chunk_size: next_chunk_size,
+                            has_more: next_has_more,
+                        }) => {
+                            if self.sftp_view.preview_path.as_deref() == Some(path.as_str())
+                                && let Some(PreviewContent::Hex {
+                                    data,
+                                    total_size,
+                                    offset,
+                                    chunk_size,
+                                    has_more,
+                                }) = self.sftp_view.preview_content.as_mut()
+                            {
+                                data.push_str(&next_data);
+                                *total_size = next_total_size;
+                                *offset = next_offset;
+                                *chunk_size = next_chunk_size;
+                                *has_more = next_has_more;
+                                self.sftp_view.preview_error = None;
+                            }
+                        }
+                        Ok(other) => {
+                            self.sftp_view.preview_error = Some(format!(
+                                "{}: {}",
+                                self.i18n.t("sftp.toast.load_more_failed"),
+                                preview_content_text(&other)
+                            ));
+                        }
+                        Err(error) => {
+                            self.sftp_view.preview_error = Some(format!(
+                                "{}: {}",
+                                self.i18n.t("sftp.toast.load_more_failed"),
+                                error
+                            ));
+                        }
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::PreviewSaved {
+                    generation,
+                    path,
+                    content,
+                    encoding: _encoding,
+                    result,
+                } => {
+                    if generation != self.sftp_view.preview_generation {
+                        continue;
+                    }
+                    self.sftp_view.preview_editor_saving = false;
+                    match result {
+                        Ok(saved) => {
+                            self.sftp_view.preview_editor_dirty = false;
+                            self.sftp_view.preview_editor_initial_content = content.clone();
+                            self.sftp_view.preview_editor_save_error = None;
+                            self.sftp_view.preview_editor_network_error = false;
+                            self.sftp_view.preview_editor_retry_count = 0;
+                            self.sftp_view.preview_editor_last_saved_mtime = saved.mtime;
+                            self.sftp_view.preview_editor_last_atomic_write =
+                                Some(saved.atomic_write);
+                            self.sftp_view.preview_editor_encoding = saved.encoding_used.clone();
+                            self.sftp_view.preview_path = Some(path.clone());
+                            if let Some(PreviewContent::Text {
+                                data,
+                                encoding: current_encoding,
+                                ..
+                            }) = self.sftp_view.preview_content.as_mut()
+                            {
+                                *data = content;
+                                *current_encoding = saved.encoding_used.clone();
+                            }
+                            if let Some(file) = self
+                                .sftp_view
+                                .remote_files
+                                .iter_mut()
+                                .find(|file| file.path == path)
+                            {
+                                if let Some(size) = saved.size {
+                                    file.size = size;
+                                }
+                                file.modified = saved.mtime.map(|mtime| mtime as i64);
+                            }
+                            self.sftp_view.remote_load_pending = true;
+                        }
+                        Err(error) => {
+                            if sftp_preview_editor_is_network_error(&error) {
+                                self.sftp_view.preview_editor_network_error = true;
+                                self.sftp_view.preview_editor_save_error =
+                                    Some(self.i18n.t("sftp.preview.network_error"));
+                            } else {
+                                self.sftp_view.preview_editor_network_error = false;
+                                self.sftp_view.preview_editor_save_error = Some(error);
+                            }
                         }
                     }
                     changed = true;
