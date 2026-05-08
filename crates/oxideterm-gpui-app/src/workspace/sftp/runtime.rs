@@ -69,27 +69,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let session_id = format!("node:{}:sftp", node_id.0);
-        let resolved = match self
-            .node_router
-            .acquire_connection(&node_id, ConnectionConsumer::Sftp(session_id.clone()))
-        {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                self.sftp_view.remote_loading = false;
-                self.sftp_view.remote_load_pending = false;
-                self.sftp_view.remote_load_inflight = false;
-                self.sftp_view.init_error = Some(error.to_string());
-                cx.notify();
-                return;
-            }
-        };
-        self.sftp_connection_consumers.insert(
-            session_id.clone(),
-            (
-                resolved.connection_id.clone(),
-                ConnectionConsumer::Sftp(session_id.clone()),
-            ),
-        );
         self.sftp_view.remote_loading = true;
         self.sftp_view.remote_load_pending = false;
         self.sftp_view.remote_load_inflight = true;
@@ -99,6 +78,10 @@ impl WorkspaceApp {
         let runtime = self.forwarding_runtime.clone();
         let router = self.node_router.clone();
         runtime.spawn(async move {
+            // Tauri node_sftp_* calls do not synchronously borrow a terminal
+            // session before starting SFTP work. The worker waits on the
+            // node-owned connection and then opens the real SFTP subsystem
+            // channel from ConnectionEntry.
             let result = load_remote_sftp_listing(router, &node_id, &path).await;
             let _ = tx.send(SftpWorkerResult::RemoteList {
                 tab_id,
@@ -151,7 +134,20 @@ impl WorkspaceApp {
                                 self.spawn_sftp_incomplete_load(node_id);
                             }
                             Err(error) => {
-                                self.sftp_view.init_error = Some(format!("{}: {error}", path));
+                                if sftp_error_needs_node_reconnect(&error) {
+                                    // Tauri retries node SFTP through the
+                                    // connection entry owner. When native sees
+                                    // stale Active state from an old terminal
+                                    // shell, rebuild the node connection and
+                                    // queue the list again instead of leaving
+                                    // the tab stuck on a closed channel.
+                                    self.ensure_node_connection_started(&node_id);
+                                    self.sftp_view.remote_load_pending = true;
+                                    self.sftp_view.init_error = None;
+                                } else {
+                                    self.sftp_view.init_error =
+                                        Some(format!("{}: {error}", path));
+                                }
                             }
                         }
                         changed = true;
@@ -553,6 +549,24 @@ fn apply_tauri_transfer_completion(
     }
 }
 
+/// Classifies capability failures that should re-enter the node-only connect
+/// path instead of being shown as a final SFTP error.
+///
+/// This deliberately matches transport ownership failures, not ordinary SFTP
+/// errors such as permissions or missing files. It prevents a regression to the
+/// terminal-owned model: once every terminal pane is closed, SFTP should still
+/// be able to rebuild the node connection and retry through NodeRouter.
+fn sftp_error_needs_node_reconnect(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("stale")
+        || lower.contains("link_down")
+        || lower.contains("link down")
+        || lower.contains("transport is closed")
+        || lower.contains("transport is missing")
+        || lower.contains("ssh connection is closed")
+        || lower.contains("no active ssh connection")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +633,18 @@ mod tests {
 
         assert_eq!(item.state, SftpTransferState::Cancelled);
         assert_eq!(item.error, None);
+    }
+
+    #[test]
+    fn stale_node_sftp_errors_trigger_node_reconnect_retry() {
+        assert!(sftp_error_needs_node_reconnect(
+            "Connection abc is stale: transport is closed"
+        ));
+        assert!(sftp_error_needs_node_reconnect(
+            "SFTP init failed: Channel error: SSH connection is closed and cannot open an SFTP channel"
+        ));
+        assert!(!sftp_error_needs_node_reconnect(
+            "Permission denied: /home/me/secret"
+        ));
     }
 }

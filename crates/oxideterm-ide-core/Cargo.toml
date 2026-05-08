@@ -1,0 +1,10 @@
+[package]
+name = "oxideterm-ide-core"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

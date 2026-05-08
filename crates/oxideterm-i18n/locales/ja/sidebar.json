@@ -57,7 +57,8 @@
         "sftp": "SFTP",
         "disconnect": "切断",
         "reconnect": "再接続",
-        "port_forwarding": "ポートフォワーディング"
+        "port_forwarding": "ポートフォワーディング",
+        "drill_in": "ドリルイン（次のホップ）"
       }
     },
     "focused_list": {

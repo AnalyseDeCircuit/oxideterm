@@ -18,9 +18,9 @@ mod transport;
 pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
-    ConnectionPoolStats, ConnectionState, HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL,
-    ProbeConnectionStatus, SftpSessionState, SshConnectionHandle, SshConnectionRegistry,
-    WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, HEARTBEAT_FAIL_THRESHOLD,
+    HEARTBEAT_INTERVAL, ProbeConnectionStatus, SftpSessionState, SshConnectionHandle,
+    SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use host_key::{HostKeyStatus, check_host_key, remove_host_key};
 pub use oxideterm_sftp::{
@@ -36,8 +36,9 @@ pub use reconnect::{
 };
 pub use router::{
     FlatNode, NodeEventEmitter, NodeEventSequencer, NodeId, NodeOrigin, NodeReadiness, NodeRouter,
-    NodeRuntimeStore, NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeSnapshot,
-    NodeTreeSnapshotNode, ResolvedConnection, RouteError, SessionTreeSummary, TerminalEndpoint,
+    NodeRuntimeStore, NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeExpansion,
+    NodeTreeSnapshot, NodeTreeSnapshotNode, ResolvedConnection, RouteError, SessionTreeSummary,
+    TerminalEndpoint,
 };
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,

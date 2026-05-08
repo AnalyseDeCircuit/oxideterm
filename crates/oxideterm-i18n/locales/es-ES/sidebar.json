@@ -57,7 +57,8 @@
         "sftp": "SFTP",
         "disconnect": "Desconectar",
         "reconnect": "Reconectar",
-        "port_forwarding": "Reenvío de puertos"
+        "port_forwarding": "Reenvío de puertos",
+        "drill_in": "Profundizar (siguiente salto)"
       }
     },
     "focused_list": {

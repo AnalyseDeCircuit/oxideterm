@@ -722,17 +722,28 @@ impl WorkspaceApp {
             node.readiness,
             NodeReadiness::Ready | NodeReadiness::Connecting
         ) && let Some(connection_id) = self.node_router.connection_id_for_node(node_id)
-            && self.ssh_registry.get(&connection_id).is_some_and(|handle| {
-                matches!(
-                    handle.state(),
-                    ConnectionState::Active
-                        | ConnectionState::Idle
-                        | ConnectionState::Connecting
-                        | ConnectionState::Reconnecting
-                )
-            })
+            && let Some(handle) = self.ssh_registry.get(&connection_id)
         {
+            let state = handle.state();
+            let has_terminal_consumer = !node.terminal_ids.is_empty();
+            // Terminal panes are only shell-channel consumers. When no terminal
+            // remains, reopening SFTP/forwards must prove or rebuild the node
+            // transport through connect_tree_node instead of treating the old
+            // shell-created connection as authoritative.
+            if matches!(
+                state,
+                ConnectionState::Connecting | ConnectionState::Reconnecting
+            ) || (has_terminal_consumer
+                && matches!(state, ConnectionState::Active | ConnectionState::Idle))
+            {
                 return true;
+            }
+            // Tauri's node workflows can be reopened after all terminal panes
+            // are closed because connect_tree_node owns the physical transport.
+            // If native has no terminal consumer left, re-enter the node-only
+            // connect path instead of trusting a possibly stale shell-created
+            // handle. The transport layer will cheaply reuse an open pooled
+            // connection, or replace it when it has been closed.
         }
 
         let origin = self
@@ -766,27 +777,12 @@ impl WorkspaceApp {
             .node_runtime_store
             .snapshot(node_id)
             .and_then(|snapshot| snapshot.parent_id);
-        let parent_handle = if let Some(parent_id) = parent_id {
-            self.ensure_node_connection_started(&parent_id);
-            let Some(parent_handle) = self
-                .node_router
-                .connection_id_for_node(&parent_id)
-                .and_then(|connection_id| self.ssh_registry.get(&connection_id))
-            else {
-                return true;
-            };
-            if !matches!(
-                parent_handle.state(),
-                ConnectionState::Active | ConnectionState::Idle
-            ) {
-                return true;
-            }
-            Some(parent_handle)
-        } else {
-            None
-        };
+        if let Some(parent_id) = parent_id.as_ref() {
+            self.ensure_node_connection_started(parent_id);
+        }
         let config = node.config;
         let registry = self.ssh_registry.clone();
+        let router = self.node_router.clone();
         let tx = self.reconnect_worker_tx.clone();
         let node_id = node_id.clone();
         let node_handle = handle.clone();
@@ -802,6 +798,31 @@ impl WorkspaceApp {
                 node_handle.clear_physical().await;
             }
             let client = SshTransportClient::new(config).with_prompt_handler(prompt_handler);
+            let parent_handle = if let Some(parent_id) = parent_id {
+                // Tauri's connect_tree_node waits for the parent path before
+                // dialing a tunneled child. Native must do the same here: a
+                // fast SFTP/terminal open can request the target while the
+                // jump host is still Connecting.
+                match router
+                    .acquire_connection_wait(
+                        &parent_id,
+                        ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)),
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(parent) => Some(parent.handle),
+                    Err(error) => {
+                        let _ = tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                            node_id,
+                            error: error.to_string(),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             let result = if let Some(parent_handle) = parent_handle {
                 client
                     .connect_child_node_via_parent_with_registry(

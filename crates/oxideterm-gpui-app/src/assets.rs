@@ -9,6 +9,7 @@ pub(crate) enum LucideIcon {
     AlertCircle,
     AlertTriangle,
     ArrowDown,
+    ArrowDownRight,
     ArrowDownAZ,
     ArrowLeftRight,
     ArrowRight,
@@ -83,6 +84,7 @@ impl LucideIcon {
             Self::AlertCircle => "lucide/alert-circle.svg",
             Self::AlertTriangle => "lucide/alert-triangle.svg",
             Self::ArrowDown => "lucide/arrow-down.svg",
+            Self::ArrowDownRight => "lucide/arrow-down-right.svg",
             Self::ArrowDownAZ => "lucide/arrow-down-a-z.svg",
             Self::ArrowLeftRight => "lucide/arrow-left-right.svg",
             Self::ArrowRight => "lucide/arrow-right.svg",
@@ -161,6 +163,7 @@ impl AssetSource for NativeAssets {
             "lucide/alert-circle.svg" => ALERT_CIRCLE,
             "lucide/alert-triangle.svg" => ALERT_TRIANGLE,
             "lucide/arrow-down.svg" => ARROW_DOWN,
+            "lucide/arrow-down-right.svg" => ARROW_DOWN_RIGHT,
             "lucide/arrow-down-a-z.svg" => ARROW_DOWN_A_Z,
             "lucide/arrow-left-right.svg" => ARROW_LEFT_RIGHT,
             "lucide/arrow-right.svg" => ARROW_RIGHT,
@@ -321,6 +324,7 @@ const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const ALERT_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>"#;
 const ALERT_TRIANGLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>"#;
+const ARROW_DOWN_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>"#;
 const ARROW_DOWN_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;
 const ARROW_LEFT_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>"#;
 const ARROW_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>"#;

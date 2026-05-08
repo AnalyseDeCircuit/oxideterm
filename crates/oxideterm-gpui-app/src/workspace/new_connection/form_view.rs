@@ -39,6 +39,7 @@ const TAURI_PASSWORD_ICON_BUTTON_SIZE: f32 = 28.0; // Tauri h-7 w-7
 const TAURI_PASSWORD_ICON_BUTTON_OFFSET: f32 = 4.0; // Tauri right-1 top-1
 const TAURI_PASSWORD_ICON_SIZE: f32 = 16.0; // Tauri h-4 w-4
 const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
+const TAURI_DRILL_DOWN_MODAL_WIDTH: f32 = 480.0; // Tauri DrillDownDialog sm:max-w-[480px]
 const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]
 const TAURI_PROXY_CHAIN_SECTION_PADDING: f32 = 16.0; // Tauri p-4
 const TAURI_PROXY_CHAIN_HEADER_MARGIN: f32 = 16.0; // Tauri mb-4
@@ -265,9 +266,12 @@ impl WorkspaceApp {
         );
         let prompt_mode = mode == super::form_state::NewConnectionFormMode::SavedConnectionPrompt;
         let edit_properties_mode = mode.submits_saved_connection_properties();
+        let drill_down_mode = self.drill_down_parent_node_id.is_some();
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
-        let title = if prompt_mode {
+        let title = if drill_down_mode {
+            self.i18n.t("ssh.drill_down.title")
+        } else if prompt_mode {
             self.i18n
                 .t("sessionManager.connect_prompt.title")
                 .replace("{{name}}", &form.name)
@@ -276,7 +280,19 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("ssh.form.title")
         };
-        let description = if prompt_mode {
+        let description = if drill_down_mode {
+            let parent_host = self
+                .drill_down_parent_node_id
+                .as_ref()
+                .and_then(|node_id| self.ssh_nodes.get(node_id))
+                .map(|node| node.title.clone())
+                .unwrap_or_default();
+            self.i18n
+                .t("ssh.drill_down.description")
+                .replace("{{host}}", &parent_host)
+                .replace("<host>", "")
+                .replace("</host>", "")
+        } else if prompt_mode {
             format!("{}@{}:{}", form.username, form.host, form.port)
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.description")
@@ -290,7 +306,9 @@ impl WorkspaceApp {
         modal_overlay(
             &self.tokens,
             modal_container(&self.tokens)
-                .w(px(if prompt_mode || edit_properties_mode {
+                .w(px(if drill_down_mode {
+                    TAURI_DRILL_DOWN_MODAL_WIDTH
+                } else if prompt_mode || edit_properties_mode {
                     TAURI_EDIT_MODAL_WIDTH
                 } else {
                     self.tokens.metrics.modal_width
@@ -310,7 +328,7 @@ impl WorkspaceApp {
                                 .flex()
                                 .flex_col()
                                 .gap(px(self.tokens.metrics.modal_section_gap))
-                                .when(!prompt_mode, |content| {
+                                .when(!prompt_mode && !drill_down_mode, |content| {
                                     content
                                         .child(self.render_connection_field(
                                             self.i18n.t("ssh.form.name"),
@@ -357,6 +375,46 @@ impl WorkspaceApp {
                                             cx,
                                         ))
                                 })
+                                .when(drill_down_mode, |content| {
+                                    content
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .gap(px(self.tokens.metrics.form_host_port_gap))
+                                                .child(div().flex_1().child(
+                                                    self.render_connection_field(
+                                                        self.i18n.t("ssh.drill_down.target_host"),
+                                                        &form.host,
+                                                        self.i18n
+                                                            .t("ssh.drill_down.target_host_placeholder"),
+                                                        NewConnectionField::Host,
+                                                        false,
+                                                        cx,
+                                                    ),
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .w(px(self.tokens.metrics.form_port_width))
+                                                        .child(self.render_connection_field(
+                                                            self.i18n.t("ssh.drill_down.port"),
+                                                            &form.port,
+                                                            "22".to_string(),
+                                                            NewConnectionField::Port,
+                                                            false,
+                                                            cx,
+                                                        )),
+                                                ),
+                                        )
+                                        .child(self.render_connection_field(
+                                            self.i18n.t("ssh.drill_down.username"),
+                                            &form.username,
+                                            self.i18n.t("ssh.drill_down.username_placeholder"),
+                                            NewConnectionField::Username,
+                                            false,
+                                            cx,
+                                        ))
+                                })
                                 .when_some(
                                     if prompt_mode {
                                         form.error.clone()
@@ -369,6 +427,8 @@ impl WorkspaceApp {
                                 )
                                 .child(if prompt_mode {
                                     self.render_prompt_auth_radios(form.auth_tab, cx)
+                                } else if drill_down_mode {
+                                    self.render_drill_auth_tabs(form.auth_tab, cx)
                                 } else {
                                     self.render_auth_tabs(form.auth_tab, edit_properties_mode, cx)
                                 })
@@ -398,6 +458,15 @@ impl WorkspaceApp {
                                     } else if prompt_mode {
                                         content.child(self.render_connection_field(
                                             self.i18n.t("ssh.form.password"),
+                                            &form.password,
+                                            String::new(),
+                                            NewConnectionField::Password,
+                                            true,
+                                            cx,
+                                        ))
+                                    } else if drill_down_mode {
+                                        content.child(self.render_connection_field(
+                                            self.i18n.t("ssh.drill_down.password"),
                                             &form.password,
                                             String::new(),
                                             NewConnectionField::Password,
@@ -446,16 +515,23 @@ impl WorkspaceApp {
                                         || ((prompt_mode || edit_properties_mode)
                                             && form.auth_tab == SshAuthTab::DefaultKey),
                                     |content| {
-                                        let key_label = if edit_properties_mode {
+                                        let key_label = if drill_down_mode {
+                                            self.i18n.t("ssh.drill_down.key_path")
+                                        } else if edit_properties_mode {
                                             self.i18n.t("sessionManager.edit_properties.key_path")
                                         } else {
                                             self.i18n.t("ssh.form.key_file")
+                                        };
+                                        let key_placeholder = if drill_down_mode {
+                                            self.i18n.t("ssh.drill_down.key_path_placeholder")
+                                        } else {
+                                            "~/.ssh/id_ed25519".to_string()
                                         };
                                         let key_field = if prompt_mode {
                                             self.render_connection_field(
                                                 key_label,
                                                 &form.key_path,
-                                                "~/.ssh/id_ed25519".to_string(),
+                                                key_placeholder.clone(),
                                                 NewConnectionField::KeyPath,
                                                 false,
                                                 cx,
@@ -464,7 +540,7 @@ impl WorkspaceApp {
                                             self.render_connection_field_with_browse(
                                                 key_label,
                                                 &form.key_path,
-                                                "~/.ssh/id_ed25519".to_string(),
+                                                key_placeholder,
                                                 NewConnectionField::KeyPath,
                                                 cx,
                                             )
@@ -472,7 +548,11 @@ impl WorkspaceApp {
                                         content
                                             .child(key_field)
                                             .child(self.render_connection_field(
-                                                self.i18n.t("ssh.form.passphrase"),
+                                                if drill_down_mode {
+                                                    self.i18n.t("ssh.drill_down.passphrase")
+                                                } else {
+                                                    self.i18n.t("ssh.form.passphrase")
+                                                },
                                                 &form.passphrase,
                                                 self.i18n.t("ssh.form.passphrase_placeholder"),
                                                 NewConnectionField::Passphrase,
@@ -550,11 +630,20 @@ impl WorkspaceApp {
                                         })
                                 })
                                 .when(form.auth_tab == SshAuthTab::Agent, |content| {
-                                    content.child(
-                                        self.render_connection_hint(
-                                            self.i18n.t("ssh.form.agent_desc"),
-                                        ),
-                                    )
+                                    let content = content.child(self.render_connection_hint(
+                                        if drill_down_mode {
+                                            self.i18n.t("ssh.drill_down.agent_desc")
+                                        } else {
+                                            self.i18n.t("ssh.form.agent_desc")
+                                        },
+                                    ));
+                                    if drill_down_mode {
+                                        content.child(self.render_connection_hint(
+                                            self.i18n.t("ssh.drill_down.agent_hint"),
+                                        ))
+                                    } else {
+                                        content
+                                    }
                                 })
                                 .when(
                                     form.auth_tab == SshAuthTab::TwoFactor
@@ -566,15 +655,17 @@ impl WorkspaceApp {
                                         ))
                                     },
                                 )
-                                .child(self.render_connection_group_select(
-                                    if edit_properties_mode {
-                                        self.i18n.t("sessionManager.edit_properties.group")
-                                    } else {
-                                        self.i18n.t("ssh.form.group")
-                                    },
-                                    &form.group,
-                                    cx,
-                                ))
+                                .when(!drill_down_mode, |content| {
+                                    content.child(self.render_connection_group_select(
+                                        if edit_properties_mode {
+                                            self.i18n.t("sessionManager.edit_properties.group")
+                                        } else {
+                                            self.i18n.t("ssh.form.group")
+                                        },
+                                        &form.group,
+                                        cx,
+                                    ))
+                                })
                                 .when(edit_properties_mode, |content| {
                                     content.child(self.render_edit_color_field(&form.color, cx))
                                 })
@@ -586,13 +677,19 @@ impl WorkspaceApp {
                                             |form| form.agent_forwarding = !form.agent_forwarding,
                                             cx,
                                         ))
-                                        .child(self.render_connection_checkbox(
-                                            self.i18n.t("ssh.form.save_connection"),
-                                            form.save_connection,
-                                            |form| form.save_connection = !form.save_connection,
-                                            cx,
-                                        ))
-                                        .child(self.render_proxy_chain_section(cx))
+                                        .when(!drill_down_mode, |content| {
+                                            content
+                                                .child(self.render_connection_checkbox(
+                                                    self.i18n.t("ssh.form.save_connection"),
+                                                    form.save_connection,
+                                                    |form| {
+                                                        form.save_connection =
+                                                            !form.save_connection
+                                                    },
+                                                    cx,
+                                                ))
+                                                .child(self.render_proxy_chain_section(cx))
+                                        })
                                 }),
                         )
                         .when_some(
@@ -623,7 +720,8 @@ impl WorkspaceApp {
                         ))
                         .when(
                             self.editing_saved_connection_id.is_none()
-                                && self.saved_connection_prompt_action.is_none(),
+                                && self.saved_connection_prompt_action.is_none()
+                                && !drill_down_mode,
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     self.i18n.t("ssh.form.test"),
@@ -643,6 +741,12 @@ impl WorkspaceApp {
                                 == Some(SavedConnectionPromptAction::Connect)
                             {
                                 self.i18n.t("ssh.form.connect")
+                            } else if drill_down_mode {
+                                if form.pending {
+                                    self.i18n.t("ssh.drill_down.connecting")
+                                } else {
+                                    self.i18n.t("ssh.drill_down.connect")
+                                }
                             } else if self.editing_saved_connection_id.is_some() {
                                 self.i18n.t("sessionManager.edit_properties.save")
                             } else {
@@ -1819,6 +1923,31 @@ impl WorkspaceApp {
             );
         }
         row.into_any_element()
+    }
+
+    fn render_drill_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = [
+            (SshAuthTab::Agent, "ssh.drill_down.auth_agent"),
+            (SshAuthTab::SshKey, "ssh.drill_down.auth_key"),
+            (SshAuthTab::Password, "ssh.drill_down.auth_password"),
+        ];
+        let mut row = segmented_tabs(&self.tokens);
+        for (tab, key) in tabs {
+            row = row.child(
+                segmented_tab(&self.tokens, self.i18n.t(key), tab == active_tab).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            form.auth_tab = tab;
+                            clear_connection_selection(form);
+                        }
+                        this.open_new_connection_select = None;
+                        cx.notify();
+                    }),
+                ),
+            );
+        }
+        form_field(&self.tokens, self.i18n.t("ssh.drill_down.auth_method"), row).into_any_element()
     }
 
     fn render_edit_color_field(&self, value: &str, cx: &mut Context<Self>) -> AnyElement {

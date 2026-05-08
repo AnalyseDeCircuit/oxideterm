@@ -66,9 +66,31 @@ impl WorkspaceApp {
             return Ok(());
         }
 
-        let node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
+        let (target_config, node_id) = if config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
+            // Tauri does not represent a saved proxy chain as one target node
+            // with an embedded proxy_chain. It expands each hop into the
+            // SessionTree and then connects the target through its ancestors.
+            let expansion =
+                self.expand_saved_connection_tree(&saved_connection_id, config, title.clone())?;
+            let target_config = self
+                .node_runtime_store
+                .snapshot(&expansion.target_node_id)
+                .map(|snapshot| snapshot.config)
+                .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
+            (target_config, Some(expansion.target_node_id))
+        } else {
+            (
+                config,
+                self.saved_ssh_nodes.get(&saved_connection_id).cloned(),
+            )
+        };
+
         self.create_ssh_terminal_tab_for_node(
-            config,
+            target_config,
             title,
             Some(saved_connection_id),
             node_id,
@@ -96,10 +118,16 @@ impl WorkspaceApp {
             id
         });
 
-        let origin = saved_connection_id
-            .as_ref()
-            .map(|id| NodeOrigin::Restored {
-                saved_connection_id: id.clone(),
+        let origin = self
+            .node_runtime_store
+            .snapshot(&node_id)
+            .map(|snapshot| snapshot.origin)
+            .or_else(|| {
+                saved_connection_id
+                    .as_ref()
+                    .map(|id| NodeOrigin::Restored {
+                        saved_connection_id: id.clone(),
+                    })
             })
             .unwrap_or(NodeOrigin::Direct);
         self.node_runtime_store
@@ -161,6 +189,57 @@ impl WorkspaceApp {
         self.persist_session_tree_snapshot();
         cx.notify();
         Ok(session_id)
+    }
+
+    fn expand_saved_connection_tree(
+        &mut self,
+        saved_connection_id: &str,
+        mut config: SshConfig,
+        target_title: String,
+    ) -> Result<NodeTreeExpansion> {
+        let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        let hops = proxy_chain
+            .iter()
+            .map(ssh_config_from_proxy_hop)
+            .collect::<Vec<_>>();
+        let expansion = self
+            .node_router
+            .expand_manual_preset(saved_connection_id, hops, config)?;
+        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title);
+        self.persist_session_tree_snapshot();
+        Ok(expansion)
+    }
+
+    fn register_expanded_tree_nodes(
+        &mut self,
+        saved_connection_id: &str,
+        expansion: &NodeTreeExpansion,
+        target_title: String,
+    ) {
+        for node_id in &expansion.path_node_ids {
+            let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
+                continue;
+            };
+            let title = if node_id == &expansion.target_node_id {
+                target_title.clone()
+            } else {
+                format!("{}@{}", snapshot.config.username, snapshot.config.host)
+            };
+            self.ssh_nodes.insert(
+                node_id.clone(),
+                WorkspaceSshNode {
+                    saved_connection_id: snapshot.origin.saved_connection_id().map(str::to_string),
+                    config: snapshot.config,
+                    title,
+                    terminal_ids: Vec::new(),
+                    readiness: NodeReadiness::Disconnected,
+                },
+            );
+        }
+        self.saved_ssh_nodes.insert(
+            saved_connection_id.to_string(),
+            expansion.target_node_id.clone(),
+        );
     }
 
     fn create_ssh_terminal_pane_for_existing_node(
@@ -277,5 +356,20 @@ impl WorkspaceApp {
         self.persist_sidebar_settings();
         self.reveal_active_tab(window);
         cx.notify();
+    }
+}
+
+fn ssh_config_from_proxy_hop(hop: &ProxyHopConfig) -> SshConfig {
+    SshConfig {
+        host: hop.host.clone(),
+        port: hop.port,
+        username: hop.username.clone(),
+        auth: hop.auth.clone(),
+        proxy_chain: None,
+        agent_forwarding: hop.agent_forwarding,
+        strict_host_key_checking: hop.strict_host_key_checking,
+        trust_host_key: hop.trust_host_key,
+        expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
+        ..SshConfig::default()
     }
 }

@@ -97,6 +97,7 @@ impl WorkspaceApp {
             background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
             new_connection_form: None,
+            drill_down_parent_node_id: None,
             editing_saved_connection_id: None,
             saved_connection_prompt_action: None,
             open_new_connection_select: None,

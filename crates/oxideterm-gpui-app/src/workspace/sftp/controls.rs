@@ -23,6 +23,15 @@ impl WorkspaceApp {
                 false,
                 cx.listener(|this, _event, _window, cx| {
                     this.sftp_view.init_error = None;
+                    if let Some(tab_id) = this.active_tab_id
+                        && let Some(node_id) = this.sftp_tab_nodes.get(&tab_id).cloned()
+                    {
+                        // Retry mirrors Tauri node_sftp_list_dir: it retries
+                        // through the node owner, so a tab with no terminal
+                        // pane can rebuild the SSH/SFTP path first.
+                        this.ensure_node_connection_started(&node_id);
+                        this.sftp_view.remote_load_pending = true;
+                    }
                     cx.stop_propagation();
                     cx.notify();
                 }),

@@ -431,7 +431,16 @@ mod tests {
             "sessions.tree.actions.port_forwarding",
             "sessions.tree.actions.disconnect",
             "sessions.tree.actions.reconnect",
+            "sessions.tree.actions.drill_in",
             "sessions.focused_list.terminal",
+            "ssh.drill_down.title",
+            "ssh.drill_down.description",
+            "ssh.drill_down.target_host",
+            "ssh.drill_down.port",
+            "ssh.drill_down.username",
+            "ssh.drill_down.auth_method",
+            "ssh.drill_down.connect",
+            "ssh.drill_down.connecting",
         ];
 
         for locale in locales {

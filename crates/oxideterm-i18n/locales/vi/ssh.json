@@ -94,6 +94,30 @@
       "title": "Xác thực tương tác bàn phím",
       "continue": "Tiếp tục",
       "cancelled": "Xác thực tương tác bàn phím đã bị hủy."
+    },
+    "drill_down": {
+      "title": "Drill Down vào máy chủ mới",
+      "description": "Thiết lập kết nối tunnel từ <host>{{host}}</host>",
+      "target_host": "Host đích",
+      "target_host_placeholder": "192.168.1.100 hoặc internal-server",
+      "port": "Cổng",
+      "username": "Tên người dùng",
+      "username_placeholder": "root",
+      "auth_method": "Phương thức xác thực",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH Key",
+      "auth_password": "Mật khẩu",
+      "agent_desc": "Xác thực bằng SSH agent hệ thống.",
+      "agent_hint": "Đảm bảo SSH agent của bạn đang chạy và đã tải key cần thiết.",
+      "key_path": "Đường dẫn Key",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Duyệt",
+      "passphrase": "Passphrase Key (tùy chọn)",
+      "password": "Mật khẩu",
+      "cancel": "Hủy",
+      "connect": "Kết nối",
+      "connecting": "Đang kết nối...",
+      "parent_not_ready": "Nút cha chưa được kết nối"
     }
   }
 }

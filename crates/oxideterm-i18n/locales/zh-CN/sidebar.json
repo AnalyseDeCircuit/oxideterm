@@ -57,7 +57,8 @@
         "sftp": "SFTP",
         "port_forwarding": "端口转发",
         "disconnect": "断开",
-        "reconnect": "重新连接"
+        "reconnect": "重新连接",
+        "drill_in": "钻入 (下一跳)"
       }
     },
     "focused_list": {

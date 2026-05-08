@@ -579,10 +579,7 @@ impl WorkspaceApp {
         ),
         String,
     > {
-        if let Some(manager) = registry.get(&session_id) {
-            return Ok((manager, None));
-        }
-
+        let manager_existed = registry.get(&session_id).is_some();
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
         let resolved = router
             .acquire_connection_wait(&node_id, consumer.clone(), Duration::from_secs(15))
@@ -591,15 +588,18 @@ impl WorkspaceApp {
         let connection_id = resolved.connection_id.clone();
         let manager = registry.register(session_id.clone(), resolved.handle);
 
-        // Tauri restore paths are node-first, but saved forwards are still bound
-        // to the stable saved-connection owner when one exists. Do the binding
-        // in the async manager creation path so initial create/scan waits for
-        // the same node-ready state as restore.
+        // Existing managers may outlive a terminal pane. Always reacquire the
+        // node-owned handle and replace the manager connection before scanning
+        // or mutating rules, matching Tauri node_forwarding's pool-first owner.
         if let Some(owner_connection_id) = owner_connection_id.as_ref() {
             let _ = registry
                 .saved_store()
                 .map(|store| store.bind_owned_forwards_to_session(owner_connection_id, &session_id));
         }
+        if manager_existed {
+            return Ok((manager, Some((session_id, connection_id, consumer))));
+        }
+
         let saved_forwards = if let Some(owner_connection_id) = owner_connection_id.as_ref() {
             registry.load_owned_forwards(owner_connection_id)
         } else {

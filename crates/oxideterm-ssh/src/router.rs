@@ -12,10 +12,11 @@ use std::{
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
+use uuid::Uuid;
 
 use crate::{
-    AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState, SshConfig,
-    SshConnectionHandle, SshConnectionRegistry,
+    AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState,
+    ConnectionTransportStatus, SshConfig, SshConnectionHandle, SshConnectionRegistry,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -39,6 +40,10 @@ pub enum RouteError {
     CapabilityUnavailable(String),
     #[error("Connection timeout: {0}")]
     ConnectionTimeout(String),
+    #[error("Parent node is not connected: {0}")]
+    ParentNotConnected(String),
+    #[error("Maximum session tree depth exceeded: {0}")]
+    MaxDepthExceeded(u32),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -226,6 +231,14 @@ pub struct NodeTreeSnapshotNode {
     pub generation: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTreeExpansion {
+    pub target_node_id: NodeId,
+    pub path_node_ids: Vec<NodeId>,
+    pub chain_depth: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlatNode {
@@ -254,6 +267,8 @@ pub struct SessionTreeSummary {
     pub connected_count: usize,
     pub max_depth: u32,
 }
+
+const MAX_SESSION_TREE_DEPTH: u32 = 10;
 
 #[derive(Clone, Debug, Default)]
 pub struct NodeRuntimeStore {
@@ -366,6 +381,134 @@ impl NodeRuntimeStore {
             });
         self.root_ids.write().retain(|id| id != &node_id);
         Ok(())
+    }
+
+    pub fn drill_down(&self, parent_id: NodeId, config: SshConfig) -> Result<NodeId, RouteError> {
+        let parent = self
+            .nodes
+            .get(&parent_id)
+            .ok_or_else(|| RouteError::NodeNotFound(parent_id.0.clone()))?;
+        if !matches!(parent.state.readiness, NodeReadiness::Ready) {
+            return Err(RouteError::ParentNotConnected(parent_id.0.clone()));
+        }
+        let depth = parent.depth + 1;
+        if depth > MAX_SESSION_TREE_DEPTH {
+            return Err(RouteError::MaxDepthExceeded(MAX_SESSION_TREE_DEPTH));
+        }
+        drop(parent);
+
+        let node_id = generated_tree_node_id("drill");
+        self.upsert_child_node_with_origin(
+            parent_id,
+            node_id.clone(),
+            config,
+            NodeOrigin::DrillDown {
+                timestamp: now_ms() as i64 / 1000,
+            },
+        )?;
+        Ok(node_id)
+    }
+
+    pub fn expand_manual_preset(
+        &self,
+        saved_connection_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        let saved_connection_id = saved_connection_id.to_string();
+        self.expand_preset_chain_internal(hops, target, |hop_index| NodeOrigin::ManualPreset {
+            saved_connection_id: saved_connection_id.clone(),
+            hop_index,
+        })
+    }
+
+    pub fn expand_auto_route(
+        &self,
+        target_host: &str,
+        route_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        let target_host = target_host.to_string();
+        let route_id = route_id.to_string();
+        self.expand_preset_chain_internal(hops, target, |hop_index| NodeOrigin::AutoRoute {
+            target_host: target_host.clone(),
+            route_id: route_id.clone(),
+            hop_index,
+        })
+    }
+
+    fn expand_preset_chain_internal(
+        &self,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+        origin_for_hop: impl Fn(u32) -> NodeOrigin,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        if hops.is_empty() {
+            let target_node_id = generated_tree_node_id("direct");
+            self.upsert_node_with_origin(target_node_id.clone(), target, NodeOrigin::Direct);
+            return Ok(NodeTreeExpansion {
+                target_node_id: target_node_id.clone(),
+                path_node_ids: vec![target_node_id],
+                chain_depth: 1,
+            });
+        }
+
+        let chain_depth = hops.len() as u32 + 1;
+        if chain_depth > MAX_SESSION_TREE_DEPTH {
+            return Err(RouteError::MaxDepthExceeded(MAX_SESSION_TREE_DEPTH));
+        }
+
+        let root_id = generated_tree_node_id("hop");
+        self.upsert_node_with_origin(root_id.clone(), hops[0].clone(), origin_for_hop(0));
+        let mut path_node_ids = vec![root_id.clone()];
+        let mut current_id = root_id;
+
+        for (index, hop) in hops.into_iter().enumerate().skip(1) {
+            let hop_index = index as u32;
+            let node_id = generated_tree_node_id("hop");
+            self.upsert_child_node_with_origin(
+                current_id.clone(),
+                node_id.clone(),
+                hop,
+                origin_for_hop(hop_index),
+            )?;
+            path_node_ids.push(node_id.clone());
+            current_id = node_id;
+        }
+
+        let target_node_id = generated_tree_node_id("target");
+        self.upsert_child_node_with_origin(
+            current_id,
+            target_node_id.clone(),
+            target,
+            origin_for_hop(chain_depth - 1),
+        )?;
+        path_node_ids.push(target_node_id.clone());
+
+        // Tauri returns the path from root to target so the frontend can call
+        // connect_tree_node linearly. Native keeps the same shape even though
+        // GPUI can let `ensure_node_connection_started` walk ancestors itself.
+        Ok(NodeTreeExpansion {
+            target_node_id,
+            path_node_ids,
+            chain_depth,
+        })
+    }
+
+    pub fn path_to_node(&self, node_id: &NodeId) -> Result<Vec<NodeId>, RouteError> {
+        let mut path = Vec::new();
+        let mut current_id = Some(node_id.clone());
+        while let Some(id) = current_id {
+            let node = self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| RouteError::NodeNotFound(id.0.clone()))?;
+            path.push(id.clone());
+            current_id = node.parent_id.clone();
+        }
+        path.reverse();
+        Ok(path)
     }
 
     pub fn export_snapshot(&self) -> NodeTreeSnapshot {
@@ -988,6 +1131,35 @@ impl NodeRouter {
         self.runtime.summary()
     }
 
+    pub fn drill_down_node(
+        &self,
+        parent_id: NodeId,
+        config: SshConfig,
+    ) -> Result<NodeId, RouteError> {
+        self.runtime.drill_down(parent_id, config)
+    }
+
+    pub fn expand_manual_preset(
+        &self,
+        saved_connection_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        self.runtime
+            .expand_manual_preset(saved_connection_id, hops, target)
+    }
+
+    pub fn expand_auto_route(
+        &self,
+        target_host: &str,
+        route_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        self.runtime
+            .expand_auto_route(target_host, route_id, hops, target)
+    }
+
     pub fn reconcile_runtime_tree(&self) {
         let connections = self
             .registry
@@ -1326,13 +1498,44 @@ impl NodeRouter {
         connection_id: &str,
         max_wait: Duration,
     ) -> Result<(), RouteError> {
+        // This is the gate every node-first capability must pass. Do not relax
+        // it back to state-only checks: SFTP and forwarding can outlive all
+        // terminal panes, and a stale Active state with no live transport must
+        // drive connect_tree_node rebuild instead of leaking a closed handle to
+        // capability code.
         let result = timeout(max_wait, async {
             loop {
                 let Some(handle) = self.registry.get(connection_id) else {
                     return Err(RouteError::NotConnected(connection_id.to_string()));
                 };
                 match handle.state() {
-                    ConnectionState::Active | ConnectionState::Idle => return Ok(()),
+                    ConnectionState::Active | ConnectionState::Idle => {
+                        let transport_status = handle.transport_status().await;
+                        match transport_status {
+                            ConnectionTransportStatus::Open => return Ok(()),
+                            ConnectionTransportStatus::Closed
+                            | ConnectionTransportStatus::Missing => {
+                                let detail = match transport_status {
+                                    ConnectionTransportStatus::Closed => "transport is closed",
+                                    ConnectionTransportStatus::Missing => "transport is missing",
+                                    ConnectionTransportStatus::Open => unreachable!(),
+                                };
+                                // The Tauri pool resolves node workflows from a
+                                // registry-owned physical SSH connection, not
+                                // from the last terminal shell. If native sees
+                                // Active/Idle with no usable transport, treat
+                                // it as stale pool state so SFTP/forwarding can
+                                // drive connect_tree_node instead of borrowing
+                                // a closed shell-owned handle.
+                                let _ = self
+                                    .registry
+                                    .mark_state(connection_id, ConnectionState::LinkDown);
+                                return Err(RouteError::NotConnected(format!(
+                                    "Connection {connection_id} is stale: {detail}"
+                                )));
+                            }
+                        }
+                    }
                     ConnectionState::Error(error) => {
                         return Err(RouteError::ConnectionError(error));
                     }
@@ -1400,6 +1603,10 @@ fn readiness_for_connection_state(state: &ConnectionState) -> NodeReadiness {
     }
 }
 
+fn generated_tree_node_id(prefix: &str) -> NodeId {
+    NodeId::new(format!("{prefix}-{}", Uuid::new_v4()))
+}
+
 fn sftp_route_error(prefix: &str, error: SftpError) -> RouteError {
     RouteError::CapabilityUnavailable(format!("{prefix}: {error}"))
 }
@@ -1424,6 +1631,7 @@ mod tests {
         let config = SshConfig::password("host", 22, "me", "pw");
         router.upsert_node(node.clone(), config.clone());
         let terminal = registry.acquire(config, ConnectionConsumer::Terminal("term-a".into()));
+        registry.mark_state(terminal.connection_id(), ConnectionState::Active);
         router
             .bind_connection(&node, terminal.connection_id().to_string())
             .unwrap();
@@ -1505,6 +1713,88 @@ mod tests {
     }
 
     #[test]
+    fn expand_manual_preset_materializes_each_hop_as_own_node() {
+        let store = NodeRuntimeStore::default();
+        let expansion = store
+            .expand_manual_preset(
+                "saved-a",
+                vec![
+                    SshConfig::password("jump-a", 22, "me", "pw"),
+                    SshConfig::password("jump-b", 22, "me", "pw"),
+                ],
+                SshConfig::password("target", 22, "me", "pw"),
+            )
+            .unwrap();
+
+        assert_eq!(expansion.chain_depth, 3);
+        assert_eq!(expansion.path_node_ids.len(), 3);
+        assert_eq!(
+            expansion.path_node_ids.last(),
+            Some(&expansion.target_node_id)
+        );
+
+        let flat = store.flatten();
+        assert_eq!(flat.len(), 3);
+        assert_eq!(flat[0].origin_type, "manual_preset");
+        assert_eq!(flat[1].parent_id.as_deref(), Some(flat[0].id.as_str()));
+        assert_eq!(flat[2].parent_id.as_deref(), Some(flat[1].id.as_str()));
+
+        let target = store.snapshot(&expansion.target_node_id).unwrap();
+        assert_eq!(target.depth, 2);
+        assert_eq!(
+            target.origin,
+            NodeOrigin::ManualPreset {
+                saved_connection_id: "saved-a".to_string(),
+                hop_index: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn drill_down_requires_ready_parent_like_tauri_tree() {
+        let store = NodeRuntimeStore::default();
+        let root = NodeId::new("root");
+        store.upsert_node(root.clone(), SshConfig::password("jump", 22, "me", "pw"));
+
+        assert!(matches!(
+            store.drill_down(root.clone(), SshConfig::password("child", 22, "me", "pw")),
+            Err(RouteError::ParentNotConnected(_))
+        ));
+
+        {
+            let mut snapshot = store.snapshot(&root).unwrap();
+            snapshot.state.readiness = NodeReadiness::Ready;
+            store
+                .apply_snapshot(NodeTreeSnapshot {
+                    version: 1,
+                    exported_at_ms: now_ms(),
+                    root_ids: vec![root.clone()],
+                    nodes: vec![NodeTreeSnapshotNode {
+                        id: root.clone(),
+                        parent_id: None,
+                        children_ids: Vec::new(),
+                        depth: 0,
+                        config: snapshot.config,
+                        origin: snapshot.origin,
+                        state: snapshot.state,
+                        connection_id: snapshot.connection_id,
+                        terminal_session_id: snapshot.terminal_session_id,
+                        sftp_session_id: snapshot.sftp_session_id,
+                        created_at_ms: snapshot.created_at_ms,
+                        generation: snapshot.generation,
+                    }],
+                })
+                .unwrap();
+        }
+
+        let child = store
+            .drill_down(root.clone(), SshConfig::password("child", 22, "me", "pw"))
+            .unwrap();
+        let path = store.path_to_node(&child).unwrap();
+        assert_eq!(path, vec![root, child]);
+    }
+
+    #[test]
     fn reconcile_runtime_tree_clears_missing_runtime_connection() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry);
@@ -1570,5 +1860,31 @@ mod tests {
             Err(RouteError::NotConnected(_))
         ));
         assert_eq!(terminal.state(), ConnectionState::LinkDown);
+    }
+
+    #[test]
+    fn acquire_wait_rejects_active_entry_without_transport() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        let result =
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(router.acquire_connection_wait(
+                    &node,
+                    ConnectionConsumer::Sftp("node-a:sftp".into()),
+                    Duration::from_millis(20),
+                ));
+
+        assert!(matches!(result, Err(RouteError::NotConnected(_))));
+        assert_eq!(handle.state(), ConnectionState::LinkDown);
     }
 }

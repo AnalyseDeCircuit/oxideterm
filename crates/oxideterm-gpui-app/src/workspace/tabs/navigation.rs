@@ -82,7 +82,14 @@ impl WorkspaceApp {
             .and_modify(|node| {
                 node.config = config.clone();
                 node.title = title.clone();
-                node.readiness = NodeReadiness::Connecting;
+                // Adding another terminal opens a new shell channel on the
+                // node-owned SSH connection. Tauri does not downgrade an
+                // already-connected node to Connecting for that session-level
+                // operation, so preserve Ready here to avoid tree-wide status
+                // churn when users open terminal #2/#3/#4.
+                if !matches!(node.readiness, NodeReadiness::Ready) {
+                    node.readiness = NodeReadiness::Connecting;
+                }
                 if !node.terminal_ids.contains(&session_id) {
                     node.terminal_ids.push(session_id);
                 }
@@ -127,6 +134,10 @@ impl WorkspaceApp {
         let _ = self
             .node_router
             .unbind_terminal_session(&node_id, &endpoint_session_id);
+        // Tauri terminal close only removes the terminal/session mapping.
+        // Do not health-probe here: a closed shell channel is not evidence
+        // that the node-owned SSH transport died, and probing on the last
+        // terminal close can incorrectly drive the node into LinkDown.
         let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
             return;
         };

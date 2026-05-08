@@ -158,14 +158,9 @@ impl WorkspaceApp {
         let mut restored_ids = HashSet::new();
 
         for node in persisted.nodes {
-            let config = node.config.or_else(|| {
-                let saved_connection_id = node.origin.saved_connection_id()?;
-                let connection = self.connection_store.get(saved_connection_id)?;
-                self::session_manager::ssh_config_from_saved_connection(
-                    &self.connection_store,
-                    connection,
-                )
-            });
+            let config = node
+                .config
+                .or_else(|| saved_origin_config(&self.connection_store, &node.origin));
             let Some(config) = config else {
                 continue;
             };
@@ -206,6 +201,7 @@ impl WorkspaceApp {
         // ids are deliberately cleared above: after process restart, Tauri also
         // needs reconnect/connect_tree_node to create fresh SSH/SFTP/terminal
         // owners instead of trusting stale ids from disk.
+        let mut saved_targets: HashMap<String, (u32, NodeId)> = HashMap::new();
         for node in snapshot.nodes {
             let title = node
                 .origin
@@ -214,8 +210,13 @@ impl WorkspaceApp {
                 .map(|connection| connection.name.clone())
                 .unwrap_or_else(|| format!("{}@{}", node.config.username, node.config.host));
             if let Some(saved_connection_id) = node.origin.saved_connection_id() {
-                self.saved_ssh_nodes
-                    .insert(saved_connection_id.to_string(), node.id.clone());
+                let rank = restored_saved_node_rank(&node.origin);
+                let entry = saved_targets
+                    .entry(saved_connection_id.to_string())
+                    .or_insert((rank, node.id.clone()));
+                if rank >= entry.0 {
+                    *entry = (rank, node.id.clone());
+                }
             }
             self.ssh_nodes.insert(
                 node.id,
@@ -227,6 +228,9 @@ impl WorkspaceApp {
                     readiness: NodeReadiness::Disconnected,
                 },
             );
+        }
+        for (saved_connection_id, (_, node_id)) in saved_targets {
+            self.saved_ssh_nodes.insert(saved_connection_id, node_id);
         }
     }
 
@@ -270,6 +274,15 @@ impl WorkspaceApp {
     }
 }
 
+fn restored_saved_node_rank(origin: &NodeOrigin) -> u32 {
+    match origin {
+        NodeOrigin::ManualPreset { hop_index, .. } => *hop_index,
+        NodeOrigin::Restored { .. } => u32::MAX,
+        NodeOrigin::AutoRoute { hop_index, .. } => *hop_index,
+        NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => 0,
+    }
+}
+
 fn write_session_tree_snapshot(path: &PathBuf, snapshot: &PersistedNodeTreeSnapshot) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -284,6 +297,55 @@ fn persistable_session_tree_config(node: &NodeTreeSnapshotNode) -> Option<SshCon
         return None;
     }
     config_without_runtime_secret(&node.config).then(|| node.config.clone())
+}
+
+fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<SshConfig> {
+    match origin {
+        NodeOrigin::Restored {
+            saved_connection_id,
+        } => {
+            let connection = store.get(saved_connection_id)?;
+            self::session_manager::ssh_config_from_saved_connection(store, connection)
+        }
+        NodeOrigin::ManualPreset {
+            saved_connection_id,
+            hop_index,
+        } => {
+            let connection = store.get(saved_connection_id)?;
+            saved_manual_preset_hop_config(store, connection, *hop_index)
+        }
+        NodeOrigin::AutoRoute { .. } | NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => None,
+    }
+}
+
+fn saved_manual_preset_hop_config(
+    store: &ConnectionStore,
+    connection: &oxideterm_connections::SavedConnection,
+    hop_index: u32,
+) -> Option<SshConfig> {
+    let hop_index = hop_index as usize;
+    if hop_index < connection.proxy_chain.len() {
+        let hop = &connection.proxy_chain[hop_index];
+        return Some(SshConfig {
+            host: hop.host.clone(),
+            port: hop.port,
+            username: hop.username.clone(),
+            auth: self::session_manager::auth_method_from_saved_auth(store, &hop.auth)?,
+            proxy_chain: None,
+            agent_forwarding: hop.agent_forwarding,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        });
+    }
+
+    if hop_index == connection.proxy_chain.len() {
+        let mut target =
+            self::session_manager::ssh_config_from_saved_connection(store, connection)?;
+        target.proxy_chain = None;
+        return Some(target);
+    }
+
+    None
 }
 
 fn config_without_runtime_secret(config: &SshConfig) -> bool {

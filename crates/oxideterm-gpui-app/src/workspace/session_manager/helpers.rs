@@ -383,7 +383,10 @@ pub(super) fn proxy_chain_config_from_saved_connection(
         .collect()
 }
 
-fn auth_method_from_saved_auth(store: &ConnectionStore, auth: &SavedAuth) -> Option<AuthMethod> {
+pub(super) fn auth_method_from_saved_auth(
+    store: &ConnectionStore,
+    auth: &SavedAuth,
+) -> Option<AuthMethod> {
     Some(match auth {
         SavedAuth::Password {
             plaintext_password: Some(password),

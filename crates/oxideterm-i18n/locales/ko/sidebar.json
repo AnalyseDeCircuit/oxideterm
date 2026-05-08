@@ -57,7 +57,8 @@
         "sftp": "SFTP",
         "disconnect": "연결 끊기",
         "reconnect": "다시 연결",
-        "port_forwarding": "포트 포워딩"
+        "port_forwarding": "포트 포워딩",
+        "drill_in": "드릴 인 (다음 홉)"
       }
     },
     "focused_list": {

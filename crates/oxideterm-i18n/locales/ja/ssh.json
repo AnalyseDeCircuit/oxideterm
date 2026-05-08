@@ -94,6 +94,30 @@
       "title": "キーボード対話認証",
       "continue": "続行",
       "cancelled": "キーボード対話認証はキャンセルされました。"
+    },
+    "drill_down": {
+      "title": "新しいサーバーにドリルダウン",
+      "description": "<host>{{host}}</host>からトンネル接続を確立",
+      "target_host": "ターゲットホスト",
+      "target_host_placeholder": "192.168.1.100またはinternal-server",
+      "port": "ポート",
+      "username": "ユーザー名",
+      "username_placeholder": "root",
+      "auth_method": "認証方法",
+      "auth_agent": "SSHエージェント",
+      "auth_key": "SSHキー",
+      "auth_password": "パスワード",
+      "agent_desc": "システムSSHエージェントを使用して認証。",
+      "agent_hint": "SSHエージェントが実行中で、必要なキーが読み込まれていることを確認してください。",
+      "key_path": "キーパス",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "参照",
+      "passphrase": "キーパスフレーズ（オプション）",
+      "password": "パスワード",
+      "cancel": "キャンセル",
+      "connect": "接続",
+      "connecting": "接続中...",
+      "parent_not_ready": "親ノードが接続されていません"
     }
   }
 }

@@ -35,8 +35,8 @@ use tokio::{
 use zeroize::Zeroizing;
 
 use crate::{
-    AuthMethod, ConnectionConsumer, ConnectionState, ProxyHopConfig, SshConfig,
-    SshConnectionHandle, SshConnectionRegistry,
+    AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus, ProxyHopConfig,
+    SshConfig, SshConnectionHandle, SshConnectionRegistry,
     host_key::{
         HostKeyStatus, HostKeyVerification, check_host_key, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,
@@ -268,6 +268,30 @@ impl PooledSshConnection {
 }
 
 impl SshConnectionHandle {
+    /// Returns the real pooled SSH transport state behind this registry handle.
+    ///
+    /// Node-first consumers such as SFTP and port forwarding use this to avoid
+    /// the old native bug where an `Active` registry entry with a closed
+    /// terminal-created russh handle was borrowed as if it were healthy. Tauri
+    /// `ConnectionEntry` ownership requires the physical transport to be valid,
+    /// independent of whether any terminal pane still exists.
+    pub async fn transport_status(&self) -> ConnectionTransportStatus {
+        if let Some(pooled) = self.physical::<PooledSshConnection>() {
+            if pooled.is_closed().await {
+                ConnectionTransportStatus::Closed
+            } else {
+                ConnectionTransportStatus::Open
+            }
+        } else if self.has_physical() {
+            // Tests and embedders may install a non-russh physical marker. Treat
+            // that as open so the pool contract stays type-agnostic outside the
+            // real transport module.
+            ConnectionTransportStatus::Open
+        } else {
+            ConnectionTransportStatus::Missing
+        }
+    }
+
     pub async fn probe_alive(&self, timeout: Duration) -> Result<(), SshTransportError> {
         self.run_command("true", timeout, 256).await.map(|_| ())
     }

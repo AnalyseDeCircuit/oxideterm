@@ -94,6 +94,30 @@
       "title": "键盘交互认证",
       "continue": "继续",
       "cancelled": "键盘交互认证已取消。"
+    },
+    "drill_down": {
+      "title": "钻取新服务器",
+      "description": "从 <host>{{host}}</host> 建立隧道连接",
+      "target_host": "目标主机",
+      "target_host_placeholder": "192.168.1.100 或 internal-server",
+      "port": "端口",
+      "username": "用户名",
+      "username_placeholder": "root",
+      "auth_method": "认证方式",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH 密钥",
+      "auth_password": "密码",
+      "agent_desc": "使用系统 SSH Agent 进行认证。",
+      "agent_hint": "确保 SSH Agent 已运行并加载了所需密钥。",
+      "key_path": "密钥路径",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "浏览",
+      "passphrase": "密钥口令（可选）",
+      "password": "密码",
+      "cancel": "取消",
+      "connect": "连接",
+      "connecting": "连接中...",
+      "parent_not_ready": "父节点尚未连接"
     }
   }
 }

@@ -94,6 +94,30 @@
       "title": "키보드 대화형 인증",
       "continue": "계속",
       "cancelled": "키보드 대화형 인증이 취소되었습니다."
+    },
+    "drill_down": {
+      "title": "새 서버로 드릴 다운",
+      "description": "<host>{{host}}</host>에서 터널 연결 설정",
+      "target_host": "대상 호스트",
+      "target_host_placeholder": "192.168.1.100 또는 internal-server",
+      "port": "포트",
+      "username": "사용자명",
+      "username_placeholder": "root",
+      "auth_method": "인증 방법",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH 키",
+      "auth_password": "비밀번호",
+      "agent_desc": "시스템 SSH agent로 인증합니다.",
+      "agent_hint": "SSH agent가 실행 중이고 필요한 키가 로드되어 있는지 확인하세요.",
+      "key_path": "키 경로",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "찾아보기",
+      "passphrase": "키 패스프레이즈 (선택사항)",
+      "password": "비밀번호",
+      "cancel": "취소",
+      "connect": "연결",
+      "connecting": "연결 중...",
+      "parent_not_ready": "상위 노드가 연결되어 있지 않습니다"
     }
   }
 }

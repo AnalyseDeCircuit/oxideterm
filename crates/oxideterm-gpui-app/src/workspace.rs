@@ -55,10 +55,11 @@ use oxideterm_sftp::{
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeOrigin,
-    NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeSnapshot,
-    NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ReconnectNodeTerminalSnapshot,
-    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
-    SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
+    NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeExpansion,
+    NodeTreeSnapshot, NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig,
+    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
+    ReconnectPhase, ReconnectSnapshot, SshConfig, SshConnectionRegistry, SshTransportClient,
+    TerminalEndpoint,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
@@ -126,6 +127,7 @@ pub(crate) struct WorkspaceApp {
     background_blur_commit_generation: u64,
     background_cache_poll_scheduled: bool,
     new_connection_form: Option<NewConnectionForm>,
+    drill_down_parent_node_id: Option<NodeId>,
     editing_saved_connection_id: Option<String>,
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     open_new_connection_select: Option<NewConnectionSelect>,

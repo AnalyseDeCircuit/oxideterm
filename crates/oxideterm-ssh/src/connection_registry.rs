@@ -76,6 +76,13 @@ pub enum ProbeConnectionStatus {
     NotApplicable,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionTransportStatus {
+    Open,
+    Closed,
+    Missing,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SftpSessionState {
@@ -218,6 +225,15 @@ impl SshConnectionHandle {
 
     pub fn state(&self) -> ConnectionState {
         self.entry.state.read().clone()
+    }
+
+    /// Reports whether the registry entry contains any physical transport slot.
+    ///
+    /// This intentionally does not imply the transport is alive. Tauri keeps
+    /// node liveness in the connection registry, so SFTP/forwarding callers
+    /// must combine this with `transport_status()` before borrowing a handle.
+    pub fn has_physical(&self) -> bool {
+        self.entry.physical.read().is_some()
     }
 
     pub fn physical<T>(&self) -> Option<Arc<T>>
@@ -423,7 +439,11 @@ impl SshConnectionRegistry {
                 consumers.push(consumer);
             }
         }
-        *entry.state.write() = ConnectionState::Active;
+        // `acquire` only records a logical consumer. The physical SSH transport
+        // is established by connect_tree_node / terminal connect paths and
+        // marks the state Active after authentication succeeds. Marking Active
+        // here made SFTP/forwarding believe a closed terminal-owned transport
+        // was reusable, which diverges from Tauri's node-owned pool semantics.
         SshConnectionHandle { entry }
     }
 
@@ -564,7 +584,8 @@ impl SshConnectionRegistry {
                 handle.entry.ref_count.fetch_add(1, Ordering::SeqCst);
             }
         }
-        *handle.entry.state.write() = ConnectionState::Active;
+        // Adding a consumer must not resurrect a dead transport. The caller has
+        // already checked/waited for Active state before borrowing the handle.
         handle.entry.touch();
         Some(handle)
     }
@@ -641,7 +662,7 @@ mod tests {
 
         assert_eq!(first.connection_id(), second.connection_id());
         assert_eq!(first.info().ref_count, 2);
-        assert_eq!(registry.stats().active, 1);
+        assert_eq!(first.state(), ConnectionState::Connecting);
     }
 
     #[test]

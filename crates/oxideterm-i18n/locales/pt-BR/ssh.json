@@ -94,6 +94,30 @@
       "title": "Autenticação interativa por teclado",
       "continue": "Continuar",
       "cancelled": "A autenticação interativa por teclado foi cancelada."
+    },
+    "drill_down": {
+      "title": "Navegar para novo servidor",
+      "description": "Estabelecer conexão tunelizada a partir de <host>{{host}}</host>",
+      "target_host": "Host de destino",
+      "target_host_placeholder": "192.168.1.100 ou servidor-interno",
+      "port": "Porta",
+      "username": "Usuário",
+      "username_placeholder": "root",
+      "auth_method": "Método de autenticação",
+      "auth_agent": "Agente SSH",
+      "auth_key": "Chave SSH",
+      "auth_password": "Senha",
+      "agent_desc": "Autenticar usando o agente SSH do sistema.",
+      "agent_hint": "Certifique-se de que o agente SSH esteja em execução e tenha as chaves necessárias carregadas.",
+      "key_path": "Caminho da chave",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Procurar",
+      "passphrase": "Frase secreta da chave (opcional)",
+      "password": "Senha",
+      "cancel": "Cancelar",
+      "connect": "Conectar",
+      "connecting": "Conectando...",
+      "parent_not_ready": "O nó pai não está conectado"
     }
   }
 }

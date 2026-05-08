@@ -94,6 +94,30 @@
       "title": "Authentification clavier interactive",
       "continue": "Continuer",
       "cancelled": "L’authentification clavier interactive a été annulée."
+    },
+    "drill_down": {
+      "title": "Drill Down vers un nouveau serveur",
+      "description": "Établir une connexion tunnelée depuis <host>{{host}}</host>",
+      "target_host": "Hôte cible",
+      "target_host_placeholder": "192.168.1.100 ou serveur-interne",
+      "port": "Port",
+      "username": "Nom d'utilisateur",
+      "username_placeholder": "root",
+      "auth_method": "Méthode d'authentification",
+      "auth_agent": "Agent SSH",
+      "auth_key": "Clé SSH",
+      "auth_password": "Mot de passe",
+      "agent_desc": "S'authentifier en utilisant l'agent SSH système.",
+      "agent_hint": "Assurez-vous que votre agent SSH est en cours d'exécution et que les clés requises sont chargées.",
+      "key_path": "Chemin de la clé",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Parcourir",
+      "passphrase": "Phrase secrète de la clé (optionnel)",
+      "password": "Mot de passe",
+      "cancel": "Annuler",
+      "connect": "Connecter",
+      "connecting": "Connexion en cours...",
+      "parent_not_ready": "Le nœud parent n’est pas connecté"
     }
   }
 }

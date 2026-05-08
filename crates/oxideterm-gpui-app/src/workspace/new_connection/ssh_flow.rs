@@ -2,9 +2,9 @@ use std::{future::Future, pin::Pin, result::Result as StdResult, sync::Arc, sync
 
 use gpui::{Context, Window};
 use oxideterm_ssh::{
-    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, ProxyChainPreflightChallenge,
-    ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler, SshTransportClient,
-    check_host_key,
+    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, NodeId, NodeReadiness,
+    ProxyChainPreflightChallenge, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
+    SshTransportClient, check_host_key,
 };
 use tokio::sync::oneshot;
 
@@ -29,6 +29,7 @@ pub(in crate::workspace) enum SshConnectionIntent {
     Test,
     Connect,
     ConnectSaved(String),
+    DrillDown(NodeId),
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {
@@ -95,6 +96,46 @@ impl WorkspaceApp {
             group: self.i18n.t("ssh.form.ungrouped"),
             ..NewConnectionForm::default()
         });
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
+        self.open_new_connection_select = None;
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_drill_down_form(
+        &mut self,
+        parent_node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let parent_ready = self
+            .node_runtime_store
+            .snapshot(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+        if !parent_ready {
+            self.session_manager.status = Some(format!(
+                "{}: {}",
+                self.i18n.t("sessions.tree.actions.drill_in"),
+                self.i18n.t("ssh.drill_down.parent_not_ready")
+            ));
+            cx.notify();
+            return;
+        }
+
+        let mut form = NewConnectionForm {
+            auth_tab: SshAuthTab::Agent,
+            focused_field: super::form_state::NewConnectionField::Host,
+            save_connection: false,
+            group: self.i18n.t("ssh.form.ungrouped"),
+            ..NewConnectionForm::default()
+        };
+        form.username = String::new();
+        self.new_connection_form = Some(form);
+        self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.open_new_connection_select = None;
@@ -110,6 +151,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.new_connection_form = None;
+        self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.open_new_connection_select = None;
@@ -124,6 +166,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
+            self.start_new_connection_flow(SshConnectionIntent::DrillDown(parent_id), window, cx);
+            return;
+        }
         match new_connection_form_mode(
             self.editing_saved_connection_id.as_deref(),
             self.saved_connection_prompt_action,
@@ -163,6 +209,20 @@ impl WorkspaceApp {
         };
         if intent == SshConnectionIntent::Test {
             self.start_ssh_test_flow(config, title, cx);
+            return;
+        }
+        if let SshConnectionIntent::DrillDown(parent_id) = intent {
+            // Tauri DrillDownDialog calls tree_drill_down and then
+            // connect_tree_node; it does not run a local direct host-key
+            // preflight because the child may only be reachable through the
+            // parent tunnel. Native keeps that node-only path here.
+            self.continue_verified_ssh_flow(
+                config,
+                title,
+                SshConnectionIntent::DrillDown(parent_id),
+                _window,
+                cx,
+            );
             return;
         }
         if let Some(form) = self.new_connection_form.as_mut() {
@@ -699,6 +759,44 @@ impl WorkspaceApp {
                 let _ = self.connection_store.mark_used(&id);
                 self.session_manager.status = None;
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
+            }
+            SshConnectionIntent::DrillDown(parent_id) => {
+                self.host_key_challenge = None;
+                let child_id = match self
+                    .node_router
+                    .drill_down_node(parent_id.clone(), config.clone())
+                {
+                    Ok(child_id) => child_id,
+                    Err(error) => {
+                        if let Some(form) = self.new_connection_form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(error.to_string());
+                        } else {
+                            self.session_manager.status = Some(error.to_string());
+                        }
+                        cx.notify();
+                        return;
+                    }
+                };
+                self.ssh_nodes.insert(
+                    child_id.clone(),
+                    crate::workspace::WorkspaceSshNode {
+                        saved_connection_id: None,
+                        config,
+                        title,
+                        terminal_ids: Vec::new(),
+                        readiness: NodeReadiness::Connecting,
+                    },
+                );
+                self.expanded_ssh_nodes.insert(parent_id);
+                self.expanded_ssh_nodes.insert(child_id.clone());
+                self.active_ssh_node_id = Some(child_id.clone());
+                self.new_connection_form = None;
+                self.drill_down_parent_node_id = None;
+                self.open_new_connection_select = None;
+                self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
+                self.ensure_node_connection_started(&child_id);
+                self.persist_session_tree_snapshot();
             }
             SshConnectionIntent::Test => self.start_ssh_test(config, cx),
         }

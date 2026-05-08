@@ -94,6 +94,30 @@
       "title": "鍵盤互動認證",
       "continue": "繼續",
       "cancelled": "鍵盤互動認證已取消。"
+    },
+    "drill_down": {
+      "title": "深入連線至新伺服器",
+      "description": "從 <host>{{host}}</host> 建立隧道連線",
+      "target_host": "目標主機",
+      "target_host_placeholder": "192.168.1.100 或 internal-server",
+      "port": "連接埠",
+      "username": "使用者名稱",
+      "username_placeholder": "root",
+      "auth_method": "驗證方式",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH 金鑰",
+      "auth_password": "密碼",
+      "agent_desc": "使用系統 SSH agent 進行驗證。",
+      "agent_hint": "請確保 SSH agent 正在執行且已載入所需的金鑰。",
+      "key_path": "金鑰路徑",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "瀏覽",
+      "passphrase": "金鑰密碼短語（選填）",
+      "password": "密碼",
+      "cancel": "取消",
+      "connect": "連線",
+      "connecting": "連線中...",
+      "parent_not_ready": "父節點尚未連線"
     }
   }
 }

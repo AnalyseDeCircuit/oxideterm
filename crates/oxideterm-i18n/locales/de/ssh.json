@@ -94,6 +94,30 @@
       "title": "Keyboard-Interactive-Authentifizierung",
       "continue": "Fortfahren",
       "cancelled": "Keyboard-Interactive-Authentifizierung wurde abgebrochen."
+    },
+    "drill_down": {
+      "title": "In neuen Server hineinnavigieren",
+      "description": "Getunnelte Verbindung von <host>{{host}}</host> herstellen",
+      "target_host": "Ziel-Host",
+      "target_host_placeholder": "192.168.1.100 oder interner-server",
+      "port": "Port",
+      "username": "Benutzername",
+      "username_placeholder": "root",
+      "auth_method": "Authentifizierungsmethode",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH-Schlüssel",
+      "auth_password": "Passwort",
+      "agent_desc": "Mit dem System-SSH-Agent authentifizieren.",
+      "agent_hint": "Stellen Sie sicher, dass Ihr SSH Agent läuft und die erforderlichen Schlüssel geladen sind.",
+      "key_path": "Schlüsselpfad",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Durchsuchen",
+      "passphrase": "Schlüssel-Passphrase (optional)",
+      "password": "Passwort",
+      "cancel": "Abbrechen",
+      "connect": "Verbinden",
+      "connecting": "Verbindung wird hergestellt...",
+      "parent_not_ready": "Der übergeordnete Knoten ist nicht verbunden"
     }
   }
 }

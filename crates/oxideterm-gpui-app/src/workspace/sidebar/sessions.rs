@@ -1,8 +1,14 @@
 impl WorkspaceApp {
     fn render_active_sessions_sidebar_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut node_views = self
+        let mut tree_nodes = self.node_router.flatten_tree();
+        let tree_node_ids = tree_nodes
+            .iter()
+            .map(|node| NodeId::new(node.id.clone()))
+            .collect::<std::collections::HashSet<_>>();
+        let mut orphan_node_views = self
             .ssh_nodes
             .iter()
+            .filter(|(node_id, _)| !tree_node_ids.contains(*node_id))
             .map(|(node_id, node)| ActiveSessionNode {
                 id: node_id.0.clone(),
                 title: node.title.clone(),
@@ -11,12 +17,11 @@ impl WorkspaceApp {
                 readiness: active_session_readiness(&node.readiness),
             })
             .collect::<Vec<_>>();
-        sort_active_session_nodes(&mut node_views);
+        sort_active_session_nodes(&mut orphan_node_views);
 
-        if node_views.is_empty() {
+        if tree_nodes.is_empty() && orphan_node_views.is_empty() {
             return self.render_empty_sessions_sidebar_content();
         }
-        let node_count = node_views.len();
 
         div()
             .id("active-sessions-sidebar-scroll")
@@ -25,17 +30,40 @@ impl WorkspaceApp {
             .w_full()
             .overflow_y_scroll()
             .px_1()
-            .children(
-                node_views
+            .children(tree_nodes.drain(..).filter_map(|flat_node| {
+                let node_id = NodeId::new(flat_node.id.clone());
+                let node = self.ssh_nodes.get(&node_id)?.clone();
+                let node_view = ActiveSessionNode {
+                    id: flat_node.id,
+                    title: node.title.clone(),
+                    port: flat_node.port,
+                    terminal_ids: node.terminal_ids.clone(),
+                    readiness: active_session_readiness(&node.readiness),
+                };
+                Some(self.render_active_session_node(
+                    node_id,
+                    node,
+                    node_view,
+                    flat_node.depth as usize,
+                    flat_node.is_last_child,
+                    cx,
+                ))
+            }))
+            .children({
+                let orphan_count = orphan_node_views.len();
+                orphan_node_views
                     .into_iter()
                     .enumerate()
                     .filter_map(|(index, node_view)| {
                         let node_id = NodeId::new(node_view.id.clone());
                         let node = self.ssh_nodes.get(&node_id)?.clone();
-                        let is_last = index + 1 == node_count;
-                        Some(self.render_active_session_node(node_id, node, node_view, is_last, cx))
-                    }),
-            )
+                        let is_last = index + 1 == orphan_count;
+                        Some(self.render_active_session_node(
+                            node_id, node, node_view, 0, is_last, cx,
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            })
             .into_any_element()
     }
 
@@ -44,6 +72,7 @@ impl WorkspaceApp {
         node_id: NodeId,
         node: WorkspaceSshNode,
         node_view: ActiveSessionNode,
+        node_depth: usize,
         is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -59,7 +88,7 @@ impl WorkspaceApp {
                 ActiveSessionStatus::Active | ActiveSessionStatus::Connected
             ) {
                 children.push(self.render_session_action_item(
-                    1,
+                    node_depth + 1,
                     false,
                     LucideIcon::Plus,
                     self.i18n.t("sessions.tree.actions.new_terminal"),
@@ -83,9 +112,9 @@ impl WorkspaceApp {
                     }),
                 ));
                 children.push(self.render_session_action_item(
-                    1,
+                    node_depth + 1,
                     false,
-                    LucideIcon::FolderInput,
+                    LucideIcon::FolderOpen,
                     self.i18n.t("sessions.tree.actions.sftp"),
                     SessionActionVariant::Primary,
                     cx.listener({
@@ -97,7 +126,7 @@ impl WorkspaceApp {
                     }),
                 ));
                 children.push(self.render_session_action_item(
-                    1,
+                    node_depth + 1,
                     false,
                     LucideIcon::ArrowLeftRight,
                     self.i18n.t("sessions.tree.actions.port_forwarding"),
@@ -112,7 +141,7 @@ impl WorkspaceApp {
                 ));
                 for (index, session_id) in terminal_ids.iter().copied().enumerate() {
                     children.push(self.render_session_terminal_item(
-                        1,
+                        node_depth + 1,
                         false,
                         session_id,
                         index + 1,
@@ -120,8 +149,8 @@ impl WorkspaceApp {
                     ));
                 }
                 children.push(self.render_session_action_item(
-                    1,
-                    is_last,
+                    node_depth + 1,
+                    false,
                     LucideIcon::WifiOff,
                     self.i18n.t("sessions.tree.actions.disconnect"),
                     SessionActionVariant::Danger,
@@ -133,12 +162,26 @@ impl WorkspaceApp {
                         }
                     }),
                 ));
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    is_last,
+                    LucideIcon::ArrowDownRight,
+                    self.i18n.t("sessions.tree.actions.drill_in"),
+                    SessionActionVariant::Primary,
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_drill_down_form(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ));
             } else if matches!(
                 node_view.status(),
                 ActiveSessionStatus::Error | ActiveSessionStatus::Idle
             ) {
                 children.push(self.render_session_action_item(
-                    1,
+                    node_depth + 1,
                     is_last,
                     LucideIcon::Play,
                     self.i18n.t("sessions.tree.actions.reconnect"),
@@ -164,13 +207,25 @@ impl WorkspaceApp {
             }
         }
 
+        let header = self.render_session_node_header(
+            node_id,
+            node_view,
+            expanded,
+            selected,
+            status,
+            cx,
+        );
+        let header = if node_depth == 0 {
+            header
+        } else {
+            self.render_session_tree_child(node_depth, is_last && children.is_empty(), header)
+        };
+
         div()
             .w_full()
             .flex()
             .flex_col()
-            .child(
-                self.render_session_node_header(node_id, node_view, expanded, selected, status, cx),
-            )
+            .child(header)
             .children(children)
             .into_any_element()
     }

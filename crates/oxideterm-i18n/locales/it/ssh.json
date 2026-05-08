@@ -94,6 +94,30 @@
       "title": "Autenticazione interattiva da tastiera",
       "continue": "Continua",
       "cancelled": "L'autenticazione interattiva da tastiera è stata annullata."
+    },
+    "drill_down": {
+      "title": "Drill Down in Nuovo Server",
+      "description": "Stabilisci una connessione tunnellizzata da <host>{{host}}</host>",
+      "target_host": "Host Destinazione",
+      "target_host_placeholder": "192.168.1.100 o internal-server",
+      "port": "Porta",
+      "username": "Nome utente",
+      "username_placeholder": "root",
+      "auth_method": "Metodo di Autenticazione",
+      "auth_agent": "SSH Agent",
+      "auth_key": "Chiave SSH",
+      "auth_password": "Password",
+      "agent_desc": "Autentica usando il SSH agent di sistema.",
+      "agent_hint": "Assicurati che il SSH agent sia in esecuzione e abbia le chiavi richieste caricate.",
+      "key_path": "Percorso Chiave",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Sfoglia",
+      "passphrase": "Passphrase Chiave (opzionale)",
+      "password": "Password",
+      "cancel": "Annulla",
+      "connect": "Connetti",
+      "connecting": "Connessione...",
+      "parent_not_ready": "Il nodo padre non è connesso"
     }
   }
 }

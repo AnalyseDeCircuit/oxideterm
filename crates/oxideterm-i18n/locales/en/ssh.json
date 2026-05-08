@@ -94,6 +94,30 @@
       "title": "Keyboard-Interactive Authentication",
       "continue": "Continue",
       "cancelled": "Keyboard-interactive authentication was cancelled."
+    },
+    "drill_down": {
+      "title": "Drill Down into New Server",
+      "description": "Establish a tunneled connection from <host>{{host}}</host>",
+      "target_host": "Target Host",
+      "target_host_placeholder": "192.168.1.100 or internal-server",
+      "port": "Port",
+      "username": "Username",
+      "username_placeholder": "root",
+      "auth_method": "Authentication Method",
+      "auth_agent": "SSH Agent",
+      "auth_key": "SSH Key",
+      "auth_password": "Password",
+      "agent_desc": "Authenticate using the system SSH agent.",
+      "agent_hint": "Ensure your SSH agent is running and has the required key(s) loaded.",
+      "key_path": "Key Path",
+      "key_path_placeholder": "~/.ssh/id_rsa",
+      "browse": "Browse",
+      "passphrase": "Key Passphrase (optional)",
+      "password": "Password",
+      "cancel": "Cancel",
+      "connect": "Connect",
+      "connecting": "Connecting...",
+      "parent_not_ready": "Parent node is not connected"
     }
   }
 }
