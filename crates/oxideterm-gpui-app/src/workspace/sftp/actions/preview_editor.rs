@@ -1,0 +1,392 @@
+impl WorkspaceApp {
+    fn open_or_preview_sftp_file(&mut self, pane: SftpPane, file: &SftpFileEntry) {
+        self.sftp_view.active_pane = pane;
+        self.sftp_view.context_menu = None;
+        if file.file_type == SftpFileType::Directory {
+            let base = match pane {
+                SftpPane::Local => self.sftp_view.local_path.clone(),
+                SftpPane::Remote => self.sftp_view.remote_path.clone(),
+            };
+            self.set_sftp_path(pane, join_sftp_path(&base, &file.name));
+        } else if pane == SftpPane::Remote {
+            self.stop_sftp_preview_media();
+            self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
+            let generation = self.sftp_view.preview_generation;
+            self.reset_sftp_preview_editor();
+            self.sftp_view.preview_pane = Some(pane);
+            self.sftp_view.preview_path = Some(file.path.clone());
+            self.sftp_view.preview_content = None;
+            self.sftp_view.preview_asset_owner = None;
+            self.sftp_view.preview_session = PreviewSession::loading();
+            self.sftp_view.preview_code_scroll = UniformListScrollHandle::new();
+            self.sftp_view.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+            self.sftp_view.preview_error = None;
+            self.sftp_view.preview_loading = pane == SftpPane::Remote;
+            self.sftp_view.preview_hex_loading_more = false;
+            self.sftp_view.preview_markdown_source_mode = false;
+            self.sftp_view.preview_font_family = None;
+            self.sftp_view.preview_font_error = None;
+            self.sftp_view.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;
+            self.sftp_view.dialog = Some(SftpDialog::Preview {
+                name: file.name.clone(),
+            });
+            self.spawn_remote_sftp_preview(file.path.clone(), generation);
+        }
+    }
+
+    fn can_compare_sftp_preview(&self, name: &str) -> bool {
+        if self.sftp_view.preview_pane != Some(SftpPane::Remote) {
+            return false;
+        }
+        matches!(
+            self.sftp_view.preview_content.as_ref(),
+            Some(PreviewContent::Text { .. })
+        ) && self
+            .sftp_view
+            .local_files
+            .iter()
+            .any(|file| file.name == name && file.file_type == SftpFileType::File)
+    }
+
+    fn can_edit_sftp_preview(&self) -> bool {
+        self.sftp_view.preview_pane == Some(SftpPane::Remote)
+            && matches!(
+                self.sftp_view.preview_content.as_ref(),
+                Some(PreviewContent::Text { .. })
+            )
+    }
+
+    fn sftp_preview_is_markdown_content(&self) -> bool {
+        matches!(
+            self.sftp_view.preview_content.as_ref(),
+            Some(PreviewContent::Text {
+                language,
+                mime_type,
+                ..
+            }) if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref())
+        )
+    }
+
+    fn open_sftp_preview_editor(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sftp_view.preview_pane != Some(SftpPane::Remote) {
+            return;
+        }
+        let Some(PreviewContent::Text {
+            data,
+            language,
+            encoding,
+            ..
+        }) = self.sftp_view.preview_content.clone()
+        else {
+            return;
+        };
+
+        self.stop_sftp_preview_media();
+        let editor_language = sftp_editor_language(language.as_deref(), name);
+        let editor = cx.new(|cx| {
+            CodeEditorInputState::new(window, cx)
+                .code_editor(editor_language.clone())
+                .default_value(data.clone())
+        });
+        editor.update(cx, |state, cx| state.focus(window, cx));
+        let subscription = cx.subscribe(
+            &editor,
+            |this: &mut WorkspaceApp, input, event: &CodeEditorInputEvent, cx| {
+                if matches!(event, CodeEditorInputEvent::Change) {
+                    let value = input.read(cx).value().to_string();
+                    this.sftp_view.preview_editor_dirty =
+                        value != this.sftp_view.preview_editor_initial_content;
+                    this.sftp_view.preview_editor_save_error = None;
+                    this.sftp_view.preview_editor_network_error = false;
+                    this.sftp_view.preview_editor_last_atomic_write = None;
+                    cx.notify();
+                }
+            },
+        );
+
+        self.sftp_view.preview_editor_input = Some(editor);
+        self.sftp_view.preview_editor_subscription = Some(subscription);
+        self.sftp_view.preview_editor_initial_content = data;
+        self.sftp_view.preview_editor_language = Some(editor_language);
+        self.sftp_view.preview_editor_encoding = encoding;
+        self.sftp_view.preview_editor_dirty = false;
+        self.sftp_view.preview_editor_saving = false;
+        self.sftp_view.preview_editor_save_error = None;
+        self.sftp_view.preview_editor_network_error = false;
+        self.sftp_view.preview_editor_retry_count = 0;
+        self.sftp_view.preview_editor_last_saved_mtime = None;
+        self.sftp_view.preview_editor_last_atomic_write = None;
+        self.sftp_view.dialog = Some(SftpDialog::Editor {
+            name: name.to_string(),
+        });
+    }
+
+    fn save_sftp_preview_editor(&mut self, cx: &mut Context<Self>) {
+        if self.sftp_view.preview_editor_saving {
+            return;
+        }
+        if !self.sftp_view.preview_editor_dirty {
+            return;
+        }
+        let Some(path) = self.sftp_view.preview_path.clone() else {
+            return;
+        };
+        let Some(editor) = self.sftp_view.preview_editor_input.clone() else {
+            return;
+        };
+        let can_spawn = self
+            .active_tab_id
+            .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+            .is_some();
+        if !can_spawn {
+            self.sftp_view.preview_editor_save_error =
+                Some(self.i18n.t("sftp.errors.connection_lost"));
+            return;
+        }
+        let content = editor.read(cx).value().to_string();
+        let encoding = self.sftp_view.preview_editor_encoding.clone();
+        self.sftp_view.preview_editor_saving = true;
+        self.sftp_view.preview_editor_save_error = None;
+        self.sftp_view.preview_editor_network_error = false;
+        self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
+        let generation = self.sftp_view.preview_generation;
+        self.spawn_remote_sftp_preview_save(path, content, encoding, generation);
+    }
+
+    fn retry_sftp_preview_editor_save(&mut self, cx: &mut Context<Self>) {
+        if self.sftp_view.preview_editor_saving {
+            return;
+        }
+        self.sftp_view.preview_editor_retry_count =
+            self.sftp_view.preview_editor_retry_count.saturating_add(1);
+        self.sftp_view.preview_editor_network_error = false;
+        self.sftp_view.preview_editor_save_error = None;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(500))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.save_sftp_preview_editor(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_close_sftp_editor(&mut self) {
+        let name = match self.sftp_view.dialog.clone() {
+            Some(SftpDialog::Editor { name }) => name,
+            Some(SftpDialog::EditorCloseConfirm { name }) => name,
+            _ => return,
+        };
+        if self.sftp_view.preview_editor_dirty {
+            self.sftp_view.dialog = Some(SftpDialog::EditorCloseConfirm { name });
+        } else {
+            self.close_sftp_dialog();
+        }
+    }
+
+    fn cancel_sftp_editor_close_confirm(&mut self, name: String) {
+        self.sftp_view.dialog = Some(SftpDialog::Editor { name });
+    }
+
+    fn discard_sftp_editor_changes(&mut self) {
+        self.close_sftp_dialog();
+    }
+
+    fn download_sftp_preview(&mut self, name: &str) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let Some(remote_path) = self.sftp_view.preview_path.clone() else {
+            return;
+        };
+        let local_path = join_local_path(&self.sftp_view.local_path, name);
+        let size = self
+            .sftp_view
+            .remote_files
+            .iter()
+            .find(|file| file.path == remote_path)
+            .map(|file| file.size)
+            .unwrap_or_default()
+            .max(1);
+        let id = self.sftp_view.next_transfer_id;
+        self.sftp_view.next_transfer_id += 1;
+        let transfer_id = id.to_string();
+        self.sftp_view.transfers.push(SftpTransferItem {
+            id,
+            transfer_id: transfer_id.clone(),
+            name: name.to_string(),
+            local_path: local_path.clone(),
+            remote_path: remote_path.clone(),
+            direction: SftpTransferDirection::Download,
+            size,
+            transferred: 0,
+            state: SftpTransferState::Pending,
+            error: None,
+        });
+        self.spawn_sftp_transfer_task(
+            id,
+            transfer_id,
+            node_id,
+            SftpTransferDirection::Download,
+            false,
+            local_path,
+            remote_path,
+            None,
+        );
+    }
+
+    fn open_sftp_preview_compare(&mut self, name: &str) {
+        if !self.can_compare_sftp_preview(name) {
+            return;
+        }
+        let Some(PreviewContent::Text { data, .. }) = self.sftp_view.preview_content.clone() else {
+            return;
+        };
+        let Some(local_file) = self
+            .sftp_view
+            .local_files
+            .iter()
+            .find(|file| file.name == name && file.file_type == SftpFileType::File)
+            .cloned()
+        else {
+            self.sftp_view.preview_error = Some(format!(
+                "{}: {}",
+                self.i18n.t("sftp.toast.compare_failed"),
+                self.i18n.t("sftp.toast.compare_no_local")
+            ));
+            return;
+        };
+
+        match std::fs::read_to_string(&local_file.path) {
+            Ok(local_content) => {
+                let remote_path = self.sftp_view.preview_path.clone().unwrap_or_default();
+                self.sftp_view.diff_scroll = UniformListScrollHandle::new();
+                self.sftp_view.dialog = Some(SftpDialog::Diff {
+                    local_path: local_file.path,
+                    local_content,
+                    remote_path,
+                    remote_content: data,
+                });
+            }
+            Err(error) => {
+                self.sftp_view.preview_error = Some(format!(
+                    "{}: {}",
+                    self.i18n.t("sftp.toast.compare_failed"),
+                    error
+                ));
+            }
+        }
+    }
+
+    fn open_sftp_preview_external(&mut self, path: &str) {
+        if let Err(error) = open_path_in_external_app(path) {
+            self.sftp_view.preview_error = Some(format!(
+                "{}: {}",
+                self.i18n.t("sftp.toast.open_external_failed"),
+                error
+            ));
+        }
+    }
+
+    fn spawn_remote_sftp_preview(&self, path: String, generation: u64) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let router = self.node_router.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = load_remote_sftp_preview(router, &node_id, &path).await;
+            let _ = tx.send(SftpWorkerResult::PreviewLoaded {
+                generation,
+                path,
+                result,
+            });
+        });
+    }
+
+    fn load_more_sftp_preview_hex(&mut self) {
+        if self.sftp_view.preview_loading || self.sftp_view.preview_hex_loading_more {
+            return;
+        }
+        let Some(path) = self.sftp_view.preview_path.clone() else {
+            return;
+        };
+        let Some(PreviewContent::Hex {
+            offset, has_more, ..
+        }) = self.sftp_view.preview_content.as_ref()
+        else {
+            return;
+        };
+        if !*has_more {
+            return;
+        }
+        let next_offset = offset.saturating_add(SFTP_HEX_PREVIEW_CHUNK_SIZE);
+        self.sftp_view.preview_hex_loading_more = true;
+        self.sftp_view.preview_error = None;
+        self.spawn_remote_sftp_preview_hex(path, next_offset, self.sftp_view.preview_generation);
+    }
+
+    fn spawn_remote_sftp_preview_hex(&self, path: String, offset: u64, generation: u64) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let router = self.node_router.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result = load_remote_sftp_preview_hex(router, &node_id, &path, offset).await;
+            let _ = tx.send(SftpWorkerResult::PreviewHexLoaded {
+                generation,
+                path,
+                offset,
+                result,
+            });
+        });
+    }
+
+    fn spawn_remote_sftp_preview_save(
+        &self,
+        path: String,
+        content: String,
+        encoding: String,
+        generation: u64,
+    ) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let router = self.node_router.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let result =
+                save_remote_sftp_preview(router, &node_id, &path, &content, &encoding).await;
+            let _ = tx.send(SftpWorkerResult::PreviewSaved {
+                generation,
+                path,
+                content,
+                encoding,
+                result,
+            });
+        });
+    }
+}
