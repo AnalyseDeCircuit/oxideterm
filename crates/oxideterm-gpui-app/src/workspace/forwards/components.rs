@@ -29,7 +29,7 @@ impl WorkspaceApp {
             ForwardStatus::Stopped => (self.tokens.ui.text_muted, self.tokens.ui.text_muted),
             ForwardStatus::Suspended => (TW_ORANGE_500, TW_ORANGE_400),
             ForwardStatus::Starting => (TW_BLUE_500, self.tokens.ui.text_muted),
-            ForwardStatus::Error(_) => (TW_RED_500, self.tokens.ui.text_muted),
+            ForwardStatus::Error => (TW_RED_500, self.tokens.ui.text_muted),
         };
         div()
             .flex()

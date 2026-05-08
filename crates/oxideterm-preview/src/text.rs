@@ -53,8 +53,13 @@ pub fn generate_hex_dump(data: &[u8], offset: u64) -> String {
 
 pub fn extension_to_language(ext: &str) -> Option<String> {
     let language = match ext.to_ascii_lowercase().as_str() {
-        "sh" | "bash" | "zsh" | "fish" | "bashrc" | "zshrc" | "profile" | "env" | "envrc" => "bash",
-        "conf" | "cfg" | "ini" | "properties" | "editorconfig" => "ini",
+        // Mirrors Tauri's SFTP `extension_to_language` table so remote
+        // preview badges and syntax highlighting do not drift by frontend.
+        "sh" | "bash" | "zsh" | "fish" => "bash",
+        "bashrc" | "bash_profile" | "bash_login" | "bash_logout" | "bash_aliases" => "bash",
+        "zshrc" | "zprofile" | "zshenv" | "zlogin" | "zlogout" => "bash",
+        "profile" | "cshrc" | "tcshrc" | "kshrc" => "bash",
+        "conf" | "cfg" | "ini" | "properties" => "ini",
         "yaml" | "yml" => "yaml",
         "toml" => "toml",
         "json" | "jsonc" | "json5" => "json",
@@ -70,7 +75,7 @@ pub fn extension_to_language(ext: &str) -> Option<String> {
         "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => "cpp",
         "java" => "java",
         "go" => "go",
-        "rb" | "rake" => "ruby",
+        "rb" | "rake" | "gemspec" => "ruby",
         "php" => "php",
         "swift" => "swift",
         "kt" | "kts" => "kotlin",
@@ -86,8 +91,12 @@ pub fn extension_to_language(ext: &str) -> Option<String> {
         "dockerfile" => "docker",
         "makefile" | "mk" => "makefile",
         "cmake" => "cmake",
+        "nginx" => "nginx",
         "diff" | "patch" => "diff",
         "log" => "log",
+        "env" | "envrc" => "bash",
+        "gitignore" | "dockerignore" => "gitignore",
+        "editorconfig" => "ini",
         _ => return None,
     };
     Some(language.to_string())
@@ -95,6 +104,26 @@ pub fn extension_to_language(ext: &str) -> Option<String> {
 
 pub fn detect_and_decode(bytes: &[u8]) -> (String, String, f32, bool) {
     detect_and_decode_with_hint(bytes, None)
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::extension_to_language;
+
+    #[test]
+    fn sftp_preview_language_table_matches_tauri_special_cases() {
+        assert_eq!(extension_to_language("zprofile").as_deref(), Some("bash"));
+        assert_eq!(extension_to_language("gemspec").as_deref(), Some("ruby"));
+        assert_eq!(extension_to_language("nginx").as_deref(), Some("nginx"));
+        assert_eq!(
+            extension_to_language("dockerignore").as_deref(),
+            Some("gitignore")
+        );
+        assert_eq!(
+            extension_to_language("editorconfig").as_deref(),
+            Some("ini")
+        );
+    }
 }
 
 pub fn detect_and_decode_with_hint(

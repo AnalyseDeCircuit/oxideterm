@@ -584,6 +584,13 @@ fn format_file_size(bytes: u64) -> String {
     }
 }
 
+fn format_transfer_speed(bytes_per_second: u64) -> String {
+    if bytes_per_second == 0 {
+        return "-".to_string();
+    }
+    format!("{}/s", format_file_size(bytes_per_second))
+}
+
 fn format_modified(modified: Option<i64>) -> String {
     let Some(modified) = modified.filter(|modified| *modified > 0) else {
         return "-".to_string();

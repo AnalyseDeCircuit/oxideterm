@@ -118,9 +118,14 @@ impl WorkspaceApp {
             }
             "enter" => {
                 if let Some(file) = self.single_selected_sftp_file(self.sftp_view.active_pane) {
-                    self.open_or_preview_sftp_file(self.sftp_view.active_pane, &file);
-                    cx.notify();
-                    true
+                    // Tauri SFTP only opens directories on Enter; file quick-look is
+                    // intentionally bound to Space and double-click.
+                    if file.file_type == SftpFileType::Directory {
+                        self.open_or_preview_sftp_file(self.sftp_view.active_pane, &file);
+                        cx.notify();
+                        return true;
+                    }
+                    false
                 } else {
                     false
                 }
@@ -437,6 +442,19 @@ impl WorkspaceApp {
                 self.sftp_view.remote_selected.insert(name.clone());
                 self.sftp_view.remote_last_selected = Some(name);
             }
+        }
+        // Tauri calls `scrollIntoView({ block: 'nearest' })` after keyboard
+        // movement. GPUI's uniform list exposes the same deferred "reveal if
+        // needed" behavior through a non-strict scroll request.
+        match pane {
+            SftpPane::Local => self
+                .sftp_view
+                .local_file_scroll
+                .scroll_to_item(next, ScrollStrategy::Center),
+            SftpPane::Remote => self
+                .sftp_view
+                .remote_file_scroll
+                .scroll_to_item(next, ScrollStrategy::Center),
         }
     }
 

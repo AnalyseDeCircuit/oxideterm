@@ -6,6 +6,7 @@ use gpui::{AssetSource, SharedString};
 #[derive(Clone, Copy)]
 pub(crate) enum LucideIcon {
     Activity,
+    AlertCircle,
     AlertTriangle,
     ArrowDown,
     ArrowDownAZ,
@@ -79,6 +80,7 @@ impl LucideIcon {
     pub(crate) fn path(self) -> &'static str {
         match self {
             Self::Activity => "lucide/activity.svg",
+            Self::AlertCircle => "lucide/alert-circle.svg",
             Self::AlertTriangle => "lucide/alert-triangle.svg",
             Self::ArrowDown => "lucide/arrow-down.svg",
             Self::ArrowDownAZ => "lucide/arrow-down-a-z.svg",
@@ -156,6 +158,7 @@ impl AssetSource for NativeAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         let svg = match path {
             "lucide/activity.svg" => ACTIVITY,
+            "lucide/alert-circle.svg" => ALERT_CIRCLE,
             "lucide/alert-triangle.svg" => ALERT_TRIANGLE,
             "lucide/arrow-down.svg" => ARROW_DOWN,
             "lucide/arrow-down-a-z.svg" => ARROW_DOWN_A_Z,
@@ -234,6 +237,7 @@ impl AssetSource for NativeAssets {
         if path == "lucide" {
             return Ok([
                 "activity.svg",
+                "alert-circle.svg",
                 "alert-triangle.svg",
                 "arrow-down.svg",
                 "arrow-down-a-z.svg",
@@ -314,6 +318,7 @@ impl AssetSource for NativeAssets {
 // Lucide icons are from lucide, licensed ISC. Settings navigation icons match
 // the lucide-react v0.577.0 package used by the Tauri frontend.
 const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>"#;
+const ALERT_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>"#;
 const ALERT_TRIANGLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>"#;
 const ARROW_DOWN_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;

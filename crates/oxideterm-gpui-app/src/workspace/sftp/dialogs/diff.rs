@@ -16,7 +16,8 @@ impl WorkspaceApp {
         let diff_scroll = self.sftp_view.diff_scroll.clone();
         div()
             .w_full()
-            .h(px(480.0))
+            .flex_1()
+            .min_h(px(0.0))
             .flex()
             .flex_col()
             .bg(rgb(theme.bg_sunken))

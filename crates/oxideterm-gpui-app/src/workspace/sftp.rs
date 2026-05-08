@@ -1,9 +1,9 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, SharedString,
-    StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle, anchored,
-    deferred, prelude::*, uniform_list,
+    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, ScrollStrategy,
+    SharedString, StatefulInteractiveElement, StyledText, Subscription, UniformListScrollHandle,
+    anchored, deferred, prelude::*, uniform_list,
 };
 use oxideterm_code_editor::backend::input::{
     Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
@@ -22,7 +22,8 @@ use oxideterm_preview::{
     font_family_name_from_bytes,
 };
 use oxideterm_sftp::{
-    AssetFileKind, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
+    AssetFileKind, BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
+    BackgroundTransferState, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession,
     SortOrder as RemoteSortOrder, StoredTransferProgress, TransferProgress,
     TransferState as RemoteTransferState, TransferStrategy as RemoteTransferStrategy,
@@ -61,6 +62,12 @@ const SFTP_PANEL_80_ALPHA: u32 = 0xcc; // Tauri bg-theme-bg-panel/80
 const SFTP_ACTIVE_BORDER_ALPHA: u32 = 0x80; // Tauri border-oxide-accent/50
 const SFTP_HEADER_ACTIVE_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-hover/50
 const SFTP_HEADER_ACTIVE_BORDER_ALPHA: u32 = 0x4d; // Tauri border-oxide-accent/30
+const SFTP_TRANSFER_DEFAULT_BORDER_ALPHA: u32 = 0x00; // Tauri border-transparent until hover
+const SFTP_TRANSFER_ERROR_BORDER_ALPHA: u32 = 0x80; // Tauri border-red-500/50
+const SFTP_TRANSFER_CANCELLED_BORDER_ALPHA: u32 = 0x4d; // Tauri border-yellow-500/30
+const SFTP_TRANSFER_INCOMPLETE_BORDER_ALPHA: u32 = 0x4d; // Tauri border-yellow-500/30
+const SFTP_TRANSFER_INCOMPLETE_HOVER_BORDER_ALPHA: u32 = 0x80; // Tauri hover:border-yellow-500/50
+const SFTP_TRANSFER_CONTROL_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-*-500/10
 #[allow(dead_code)]
 const SFTP_DRAG_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10
 #[allow(dead_code)]
@@ -77,6 +84,7 @@ const SFTP_CONTEXT_MENU_WIDTH: f32 = 180.0; // Tauri min-w-[180px]
 const SFTP_CONTEXT_MENU_MAX_HEIGHT: f32 = 252.0; // 7 items + separators, clamped like fixed portal menu
 const SFTP_CONTEXT_MENU_PADDING: f32 = 4.0; // Tauri py-1
 const SFTP_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0; // Tauri px-3 py-1.5 text-xs
+const SFTP_BUTTON_TRANSPARENT_ALPHA: u32 = 0x00; // Tauri Button border-transparent/bg-transparent
 const SFTP_DIALOG_OVERLAY_ALPHA: u32 = 0x99; // Tauri Dialog overlay opacity
 const SFTP_DIALOG_SHADOW_ALPHA: u32 = 0x40; // Tauri shadow-lg-ish overlay shadow
 const SFTP_DIALOG_BORDER_SUBTLE_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
@@ -97,6 +105,8 @@ const SFTP_DIALOG_WIDTH_LG: f32 = 512.0; // Tauri max-w-lg
 const SFTP_DIALOG_WIDTH_4XL: f32 = 896.0; // Tauri max-w-4xl
 const SFTP_DIALOG_WIDTH_5XL: f32 = 1024.0; // Tauri max-w-5xl
 const SFTP_EDITOR_DIALOG_WIDTH_6XL: f32 = 1152.0; // Tauri max-w-6xl
+const SFTP_PREVIEW_DIALOG_HEIGHT_RATIO: f32 = 0.85; // Tauri SFTP preview/editor h-[85vh]
+const SFTP_DIFF_DIALOG_HEIGHT_RATIO: f32 = 0.80; // Tauri FileDiffDialog h-[80vh]
 const SFTP_HEX_PREVIEW_CHUNK_SIZE: u64 = 16 * 1024; // Tauri nodeSftpPreviewHex load-more step
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -132,6 +142,13 @@ enum SftpFileType {
     Directory,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SftpButtonVariant {
+    Default,
+    Secondary,
+    Ghost,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SftpFileEntry {
     name: String,
@@ -159,6 +176,7 @@ pub(super) enum SftpWorkerResult {
         id: u64,
         transferred: u64,
         total: u64,
+        speed: u64,
         state: SftpTransferState,
         error: Option<String>,
     },
@@ -294,6 +312,7 @@ struct SftpTransferItem {
     direction: SftpTransferDirection,
     size: u64,
     transferred: u64,
+    speed: u64,
     state: SftpTransferState,
     error: Option<String>,
 }

@@ -1,22 +1,14 @@
 impl WorkspaceApp {
     fn sftp_conflict_description(&self) -> String {
-        let mut description = self.i18n.t("sftp.conflict.description");
-        if let Some(state) = self.sftp_view.conflict_state.as_ref() {
-            let remaining = state
-                .conflicts
-                .len()
-                .saturating_sub(state.current_index + 1);
-            if remaining > 0 {
-                description.push(' ');
-                description.push_str(
-                    &self
-                        .i18n
-                        .t("sftp.conflict.remaining")
-                        .replace("{{count}}", &remaining.to_string()),
-                );
-            }
-        }
-        description
+        self.i18n.t("sftp.conflict.description")
+    }
+
+    fn sftp_conflict_remaining_count(&self) -> usize {
+        self.sftp_view
+            .conflict_state
+            .as_ref()
+            .map(|state| state.conflicts.len().saturating_sub(state.current_index + 1))
+            .unwrap_or(0)
     }
 
     fn render_sftp_conflict_body(

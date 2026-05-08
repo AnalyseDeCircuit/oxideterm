@@ -45,7 +45,9 @@ impl DynamicForward {
         let bound_addr = listener.local_addr()?;
         rule.bind_address = bound_addr.ip().to_string();
         rule.bind_port = bound_addr.port();
-        rule.target_host = "0.0.0.0".to_string();
+        // Tauri leaves dynamic forwards targetless in the rule model; the
+        // SOCKS5 request supplies the per-connection destination at runtime.
+        rule.target_host.clear();
         rule.target_port = 0;
         rule.status = ForwardStatus::Active;
 

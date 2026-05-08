@@ -138,7 +138,8 @@ impl WorkspaceApp {
             .bg(sftp_bg(theme.bg, has_background))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
+                    window.focus(&this.focus_handle);
                     this.sftp_view.active_pane = pane;
                     cx.notify();
                 }),
@@ -895,8 +896,9 @@ impl WorkspaceApp {
                                 )
                                 .on_mouse_down(MouseButton::Left, {
                                     let workspace = row_workspace.clone();
-                                    move |event: &MouseDownEvent, _window, cx| {
+                                    move |event: &MouseDownEvent, window, cx| {
                                         let _ = workspace.update(cx, |this, cx| {
+                                            window.focus(&this.focus_handle);
                                             this.sftp_view.context_menu = None;
                                             if event.click_count >= 2 {
                                                 this.open_or_preview_sftp_file(pane, &row_file);
@@ -914,8 +916,9 @@ impl WorkspaceApp {
                                 })
                                 .on_mouse_down(MouseButton::Right, {
                                     let workspace = row_workspace.clone();
-                                    move |event: &MouseDownEvent, _window, cx| {
+                                    move |event: &MouseDownEvent, window, cx| {
                                         let _ = workspace.update(cx, |this, cx| {
+                                            window.focus(&this.focus_handle);
                                             this.open_sftp_context_menu(
                                                 pane,
                                                 Some(context_file.clone()),
@@ -944,7 +947,8 @@ impl WorkspaceApp {
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
+                    window.focus(&this.focus_handle);
                     this.sftp_view.context_menu = None;
                     this.clear_sftp_selection(pane);
                     cx.notify();
@@ -952,7 +956,8 @@ impl WorkspaceApp {
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
                     this.open_sftp_context_menu(
                         pane,
                         None,

@@ -12,7 +12,8 @@ impl WorkspaceApp {
         };
         let uses_virtual_text = self.sftp_preview_uses_virtual_text();
         div()
-            .h(px(520.0))
+            .flex_1()
+            .min_h(px(0.0))
             .flex()
             .flex_col()
             .bg(rgb(theme.bg_sunken))
@@ -62,7 +63,8 @@ impl WorkspaceApp {
         };
 
         div()
-            .h(px(600.0))
+            .flex_1()
+            .min_h(px(0.0))
             .flex()
             .flex_col()
             .bg(rgb(theme.bg_sunken))

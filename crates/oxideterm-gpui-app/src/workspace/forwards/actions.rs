@@ -391,8 +391,8 @@ impl WorkspaceApp {
                             self.forwarding_view.error =
                                 Some(self.i18n.t("forwards.toast.suspended_desc"));
                         }
-                        ForwardStatus::Error(message) => {
-                            self.forwarding_view.error = Some(error.unwrap_or(message));
+                        ForwardStatus::Error => {
+                            self.forwarding_view.error = error;
                         }
                         _ => {}
                     }

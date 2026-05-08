@@ -16,12 +16,11 @@ impl WorkspaceApp {
                 )
             })
             .count();
-        let has_completed = self.sftp_view.transfers.iter().any(|item| {
-            matches!(
-                item.state,
-                SftpTransferState::Completed | SftpTransferState::Cancelled
-            )
-        });
+        let has_completed = self
+            .sftp_view
+            .transfers
+            .iter()
+            .any(|item| item.state == SftpTransferState::Completed);
         let incomplete_count = self.sftp_view.incomplete_transfers.len();
         let has_incomplete = incomplete_count > 0;
 
@@ -101,13 +100,9 @@ impl WorkspaceApp {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.sftp_view.transfers.retain(|item| {
-                                            !matches!(
-                                                item.state,
-                                                SftpTransferState::Completed
-                                                    | SftpTransferState::Cancelled
-                                            )
-                                        });
+                                        this.sftp_view
+                                            .transfers
+                                            .retain(|item| item.state != SftpTransferState::Completed);
                                         cx.stop_propagation();
                                         cx.notify();
                                     }),
@@ -171,6 +166,9 @@ impl WorkspaceApp {
                     .max_h(px(128.0))
                     .overflow_y_scroll()
                     .p(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
                     .children(
                         self.sftp_view
                             .incomplete_transfers
@@ -232,6 +230,7 @@ impl WorkspaceApp {
                 size: transfer.total_bytes,
                 transferred: transfer.transferred_bytes,
                 state: SftpTransferState::Active,
+                speed: 0,
                 error: None,
             }),
             oxideterm_sftp::TransferStatus::Completed => self.i18n.t("sftp.queue.status_completed"),
@@ -245,12 +244,19 @@ impl WorkspaceApp {
             .p(px(8.0))
             .rounded(px(self.tokens.radii.sm))
             .border_1()
-            .border_color(rgba((SFTP_YELLOW << 8) | 0x4d))
+            .border_color(rgba(
+                (SFTP_YELLOW << 8) | SFTP_TRANSFER_INCOMPLETE_BORDER_ALPHA,
+            ))
             .bg(sftp_panel_bg(
                 theme.bg_panel,
                 has_background,
                 SFTP_PANEL_80_ALPHA,
             ))
+            .hover(|row| {
+                row.border_color(rgba(
+                    (SFTP_YELLOW << 8) | SFTP_TRANSFER_INCOMPLETE_HOVER_BORDER_ALPHA,
+                ))
+            })
             .text_size(px(SFTP_TEXT_XS))
             .child(
                 div()
@@ -309,7 +315,11 @@ impl WorkspaceApp {
                         .justify_center()
                         .rounded(px(self.tokens.radii.sm))
                         .text_color(rgb(SFTP_YELLOW))
-                        .hover(|button| button.bg(rgba((SFTP_YELLOW << 8) | 0x1a)))
+                        .hover(|button| {
+                            button.bg(rgba(
+                                (SFTP_YELLOW << 8) | SFTP_TRANSFER_CONTROL_HOVER_ALPHA,
+                            ))
+                        })
                         .cursor_pointer()
                         .child(Self::render_lucide_icon(
                             LucideIcon::RotateCcw,
@@ -344,6 +354,8 @@ impl WorkspaceApp {
         } else {
             (transfer.transferred as f32 / transfer.size as f32).clamp(0.0, 1.0)
         };
+        let indeterminate =
+            transfer.size == 0 && matches!(transfer.state, SftpTransferState::Active);
         let status_color = match transfer.state {
             SftpTransferState::Error => SFTP_RED,
             SftpTransferState::Cancelled => SFTP_YELLOW,
@@ -358,9 +370,11 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .border_1()
             .border_color(match transfer.state {
-                SftpTransferState::Error => rgba((SFTP_RED << 8) | 0x80),
-                SftpTransferState::Cancelled => rgba((SFTP_YELLOW << 8) | 0x4d),
-                _ => rgba(theme.border << 8),
+                SftpTransferState::Error => rgba((SFTP_RED << 8) | SFTP_TRANSFER_ERROR_BORDER_ALPHA),
+                SftpTransferState::Cancelled => {
+                    rgba((SFTP_YELLOW << 8) | SFTP_TRANSFER_CANCELLED_BORDER_ALPHA)
+                }
+                _ => rgba((theme.border << 8) | SFTP_TRANSFER_DEFAULT_BORDER_ALPHA),
             })
             .bg(sftp_panel_bg(
                 theme.bg_panel,
@@ -403,7 +417,15 @@ impl WorkspaceApp {
                             .border_1()
                             .border_color(rgb(theme.border))
                             .bg(rgb(theme.bg_panel))
-                            .child(div().h_full().w(relative(progress)).bg(rgb(theme.accent))),
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(relative(if indeterminate { 0.35 } else { progress }))
+                                    .bg(rgba(
+                                        (theme.accent << 8)
+                                            | if indeterminate { 0x80 } else { 0xff },
+                                    )),
+                            ),
                     )
                     .child(
                         div()
@@ -411,12 +433,18 @@ impl WorkspaceApp {
                             .justify_between()
                             .text_size(px(SFTP_TEXT_10))
                             .text_color(rgb(theme.text_muted))
-                            .child(format!(
-                                "{} / {}",
-                                format_file_size(transfer.transferred),
-                                format_file_size(transfer.size)
-                            ))
-                            .child(format!("{}%", (progress * 100.0).round() as u32)),
+                            .child(if indeterminate {
+                                format_file_size(transfer.transferred)
+                            } else {
+                                format!(
+                                    "{} / {}",
+                                    format_file_size(transfer.transferred),
+                                    format_file_size(transfer.size)
+                                )
+                            })
+                            .when(!indeterminate, |row| {
+                                row.child(format!("{}%", (progress * 100.0).round() as u32))
+                            }),
                     ),
             )
             .child(
@@ -439,7 +467,7 @@ impl WorkspaceApp {
                         }
                         SftpTransferState::Cancelled | SftpTransferState::Error => {
                             Self::render_lucide_icon(
-                                LucideIcon::ShieldQuestion,
+                                LucideIcon::AlertCircle,
                                 16.0,
                                 rgb(status_color),
                             )
