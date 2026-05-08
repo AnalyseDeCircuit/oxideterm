@@ -115,7 +115,7 @@ fn forward_status_key(status: &ForwardStatus) -> &'static str {
         ForwardStatus::Starting => "forwards.status.starting",
         ForwardStatus::Active => "forwards.status.active",
         ForwardStatus::Stopped => "forwards.status.stopped",
-        ForwardStatus::Error(_) => "forwards.status.error",
+        ForwardStatus::Error => "forwards.status.error",
         ForwardStatus::Suspended => "forwards.status.suspended",
     }
 }

@@ -133,7 +133,38 @@ impl WorkspaceApp {
         primary: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
+        let variant = if primary {
+            SftpButtonVariant::Default
+        } else {
+            SftpButtonVariant::Secondary
+        };
+        self.render_sftp_button_variant(label, variant, listener)
+    }
+
+    fn render_sftp_button_variant(
+        &self,
+        label: String,
+        variant: SftpButtonVariant,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        // Mirrors the Tauri Button variants used by SFTP dialogs:
+        // default = bg-theme-text, secondary = bg-theme-bg-panel, ghost = no border.
+        let (bg, border, text) = match variant {
+            SftpButtonVariant::Default => (
+                rgb(theme.text),
+                rgba((theme.text << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
+                rgb(theme.bg),
+            ),
+            SftpButtonVariant::Secondary => {
+                (rgb(theme.bg_panel), rgb(theme.border), rgb(theme.text))
+            }
+            SftpButtonVariant::Ghost => (
+                rgba((theme.bg << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
+                rgba((theme.border << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
+                rgb(theme.text),
+            ),
+        };
         div()
             .h(px(32.0))
             .px(px(12.0))
@@ -142,28 +173,17 @@ impl WorkspaceApp {
             .justify_center()
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(if primary {
-                rgba(theme.text << 8)
-            } else {
-                rgb(theme.border)
-            })
-            .bg(if primary {
-                rgb(theme.text)
-            } else {
-                rgba(theme.bg << 8)
-            })
-            .text_color(if primary {
-                rgb(theme.bg)
-            } else {
-                rgb(theme.text)
-            })
+            .border_color(border)
+            .bg(bg)
+            .text_color(text)
             .text_size(px(SFTP_TEXT_XS))
             .font_weight(gpui::FontWeight::MEDIUM)
             .hover(move |button| {
-                if primary {
-                    button.opacity(0.9)
-                } else {
-                    button.bg(rgb(theme.bg_hover))
+                match variant {
+                    SftpButtonVariant::Default => button.opacity(0.9),
+                    SftpButtonVariant::Secondary | SftpButtonVariant::Ghost => {
+                        button.bg(rgb(theme.bg_hover))
+                    }
                 }
             })
             .cursor_pointer()
@@ -189,7 +209,7 @@ impl WorkspaceApp {
     fn transfer_status_text(&self, transfer: &SftpTransferItem) -> String {
         match transfer.state {
             SftpTransferState::Pending => self.i18n.t("sftp.queue.status_waiting"),
-            SftpTransferState::Active => "1.2 MB/s".to_string(),
+            SftpTransferState::Active => format_transfer_speed(transfer.speed),
             SftpTransferState::Paused => self.i18n.t("sftp.queue.status_paused"),
             SftpTransferState::Completed => self.i18n.t("sftp.queue.status_completed"),
             SftpTransferState::Cancelled => self.i18n.t("sftp.queue.status_cancelled"),

@@ -162,8 +162,9 @@ impl WorkspaceApp {
                     id,
                     transferred,
                     total,
-                    state,
-                    error,
+                    speed,
+                    state: _state,
+                    error: _error,
                 } => {
                     if let Some(item) = self
                         .sftp_view
@@ -171,11 +172,7 @@ impl WorkspaceApp {
                         .iter_mut()
                         .find(|item| item.id == id)
                     {
-                        item.transferred = transferred;
-                        item.size = total.max(item.size);
-                        item.state = state;
-                        item.error = error;
-                        changed = true;
+                        changed |= apply_tauri_transfer_progress(item, transferred, total, speed);
                     }
                 }
                 SftpWorkerResult::TransferComplete {
@@ -184,28 +181,22 @@ impl WorkspaceApp {
                     refresh_remote,
                     refresh_local,
                 } => {
-                    if let Some(item) = self
+                    let should_refresh = if let Some(item) = self
                         .sftp_view
                         .transfers
                         .iter_mut()
                         .find(|item| item.id == id)
                     {
-                        match result {
-                            Ok(()) => {
-                                item.transferred = item.size;
-                                item.state = SftpTransferState::Completed;
-                                item.error = None;
-                            }
-                            Err(error) => {
-                                item.state = SftpTransferState::Error;
-                                item.error = Some(error);
-                            }
-                        }
-                    }
-                    if refresh_remote {
+                        apply_tauri_transfer_completion(item, &result)
+                    } else {
+                        result.is_ok()
+                    };
+                    if should_refresh && refresh_remote {
                         self.sftp_view.remote_load_pending = true;
                     }
-                    if refresh_local && let Ok(files) = list_local_files(&self.sftp_view.local_path)
+                    if should_refresh
+                        && refresh_local
+                        && let Ok(files) = list_local_files(&self.sftp_view.local_path)
                     {
                         self.sftp_view.local_files = files;
                     }
@@ -472,5 +463,130 @@ impl WorkspaceApp {
             self.sftp_view.remote_path = cwd.clone();
             self.sftp_view.remote_path_input = cwd;
         }
+    }
+}
+
+fn apply_tauri_transfer_progress(
+    item: &mut SftpTransferItem,
+    transferred: u64,
+    total: u64,
+    speed: u64,
+) -> bool {
+    if matches!(
+        item.state,
+        SftpTransferState::Completed | SftpTransferState::Cancelled | SftpTransferState::Error
+    ) {
+        return false;
+    }
+
+    item.transferred = transferred;
+    // Tauri's transferStore.updateProgress preserves the original size for
+    // indeterminate tar/streaming progress where total=0; completion arrives
+    // through sftp:complete instead of this progress event.
+    if total > 0 {
+        item.size = total;
+    }
+    item.speed = speed;
+    item.state = if item.state == SftpTransferState::Paused {
+        SftpTransferState::Paused
+    } else if total > 0 && transferred >= total {
+        SftpTransferState::Completed
+    } else {
+        SftpTransferState::Active
+    };
+    true
+}
+
+fn apply_tauri_transfer_completion(
+    item: &mut SftpTransferItem,
+    result: &Result<(), String>,
+) -> bool {
+    match result {
+        Ok(()) => {
+            item.transferred = item.size;
+            item.state = SftpTransferState::Completed;
+            item.error = None;
+            true
+        }
+        Err(_error) if item.state == SftpTransferState::Cancelled => {
+            // resolveTransferCompletionUpdate() in the Tauri SFTP view drops a
+            // late failure for a user-cancelled transfer so the queue does not
+            // flicker back to "error" after the cancellation wins.
+            false
+        }
+        Err(error) => {
+            item.state = SftpTransferState::Error;
+            item.error = Some(error.clone());
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn transfer_item(state: SftpTransferState) -> SftpTransferItem {
+        SftpTransferItem {
+            id: 1,
+            transfer_id: "tx-1".to_string(),
+            name: "file.txt".to_string(),
+            local_path: "/tmp/file.txt".to_string(),
+            remote_path: "/home/file.txt".to_string(),
+            direction: SftpTransferDirection::Upload,
+            size: 500,
+            transferred: 0,
+            speed: 0,
+            state,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn transfer_progress_preserves_paused_state_like_tauri_store() {
+        let mut item = transfer_item(SftpTransferState::Paused);
+
+        assert!(apply_tauri_transfer_progress(&mut item, 250, 500, 42));
+
+        assert_eq!(item.state, SftpTransferState::Paused);
+        assert_eq!(item.transferred, 250);
+        assert_eq!(item.speed, 42);
+    }
+
+    #[test]
+    fn transfer_progress_ignores_terminal_state_like_tauri_store() {
+        let mut item = transfer_item(SftpTransferState::Completed);
+        item.transferred = 500;
+
+        assert!(!apply_tauri_transfer_progress(&mut item, 250, 500, 42));
+
+        assert_eq!(item.state, SftpTransferState::Completed);
+        assert_eq!(item.transferred, 500);
+        assert_eq!(item.speed, 0);
+    }
+
+    #[test]
+    fn transfer_progress_keeps_indeterminate_size_until_complete_event() {
+        let mut item = transfer_item(SftpTransferState::Pending);
+        item.size = 0;
+
+        assert!(apply_tauri_transfer_progress(&mut item, 2048, 0, 512));
+
+        assert_eq!(item.state, SftpTransferState::Active);
+        assert_eq!(item.size, 0);
+        assert_eq!(item.transferred, 2048);
+    }
+
+    #[test]
+    fn transfer_completion_preserves_cancelled_late_failure_like_tauri_view() {
+        let mut item = transfer_item(SftpTransferState::Cancelled);
+
+        assert!(!apply_tauri_transfer_completion(
+            &mut item,
+            &Err("late failure".to_string())
+        ));
+
+        assert_eq!(item.state, SftpTransferState::Cancelled);
+        assert_eq!(item.error, None);
     }
 }

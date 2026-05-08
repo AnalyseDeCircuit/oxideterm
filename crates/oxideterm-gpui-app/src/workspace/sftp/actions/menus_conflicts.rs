@@ -173,6 +173,7 @@ impl WorkspaceApp {
             direction,
             size,
             transferred: 0,
+            speed: 0,
             state: SftpTransferState::Pending,
             error: None,
         });

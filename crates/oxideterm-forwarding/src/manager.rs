@@ -104,11 +104,9 @@ impl ForwardingManager {
             Ok(active_rule) => {
                 self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None)
             }
-            Err(error) => self.emit_status_changed(
-                &rule_id,
-                ForwardStatus::Error(error.to_string()),
-                Some(error.to_string()),
-            ),
+            Err(error) => {
+                self.emit_status_changed(&rule_id, ForwardStatus::Error, Some(error.to_string()))
+            }
         }
         result
     }
@@ -125,18 +123,14 @@ impl ForwardingManager {
             {
                 Ok(true) => {}
                 Ok(false) => {
-                    return Err(ForwardingError::InvalidRule(format!(
-                        "Target port {}:{} is not reachable. Please ensure the service is running on the remote server.\n\nTroubleshooting:\n- Check if service is running: ss -tlnp | grep {}\n- Verify the port number is correct\n- Try connecting manually: nc -zv {} {}",
-                        rule.target_host,
+                    return Err(ForwardingError::InvalidRule(build_unreachable_port_error(
+                        &rule.target_host,
                         rule.target_port,
-                        rule.target_port,
-                        rule.target_host,
-                        rule.target_port
                     )));
                 }
                 Err(error) => {
-                    return Err(ForwardingError::Ssh(format!(
-                        "Failed to check port availability: {error}\n\nYou can skip this check with the 'Skip port availability check' option."
+                    return Err(ForwardingError::Ssh(build_health_check_error_message(
+                        &error.to_string(),
                     )));
                 }
             }
@@ -167,10 +161,7 @@ impl ForwardingManager {
             self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
             return Ok(stopped);
         }
-        self.stopped_forwards
-            .get(rule_id)
-            .map(|rule| rule.clone())
-            .ok_or_else(|| ForwardingError::NotFound(rule_id.to_string()))
+        Err(ForwardingError::NotFound(rule_id.to_string()))
     }
 
     pub async fn restart_forward(&self, rule_id: &str) -> Result<ForwardRule, ForwardingError> {
@@ -599,5 +590,39 @@ impl std::fmt::Debug for ForwardingManager {
             .field("dynamic_forwards", &self.dynamic_forwards.len())
             .field("stopped_forwards", &self.stopped_forwards.len())
             .finish()
+    }
+}
+
+fn build_unreachable_port_error(target_host: &str, target_port: u16) -> String {
+    format!(
+        "Target port {}:{} is not reachable. Please ensure the service is running on the remote server.\n\nTroubleshooting:\n• Check if service is running: ss -tlnp | grep {}\n• Verify the port number is correct\n• Try connecting manually: nc -zv {} {}",
+        target_host, target_port, target_port, target_host, target_port
+    )
+}
+
+fn build_health_check_error_message(error: &str) -> String {
+    format!(
+        "Failed to check port availability: {}\n\nYou can skip this check with the 'Skip port availability check' option.",
+        error
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_check_messages_match_tauri_node_forwarding() {
+        let unreachable = build_unreachable_port_error("service.internal", 3000);
+        assert!(unreachable.contains("Target port service.internal:3000 is not reachable"));
+        assert!(unreachable.contains("• Check if service is running: ss -tlnp | grep 3000"));
+        assert!(unreachable.contains("• Verify the port number is correct"));
+        assert!(unreachable.contains("• Try connecting manually: nc -zv service.internal 3000"));
+
+        let failed = build_health_check_error_message("timeout");
+        assert_eq!(
+            failed,
+            "Failed to check port availability: timeout\n\nYou can skip this check with the 'Skip port availability check' option."
+        );
     }
 }

@@ -85,6 +85,18 @@ impl WorkspaceApp {
             SftpDialog::Editor { .. } => SFTP_EDITOR_DIALOG_WIDTH_6XL,
             SftpDialog::EditorCloseConfirm { .. } => unreachable!(),
         };
+        let height_ratio = match dialog {
+            SftpDialog::Diff { .. } => Some(SFTP_DIFF_DIALOG_HEIGHT_RATIO),
+            SftpDialog::Preview { .. } | SftpDialog::Editor { .. } => {
+                Some(SFTP_PREVIEW_DIALOG_HEIGHT_RATIO)
+            }
+            _ => None,
+        };
+        let header_py = match dialog {
+            SftpDialog::Preview { .. } => 8.0,
+            _ => 12.0,
+        };
+        let show_description = !description.is_empty() && !matches!(dialog, SftpDialog::Preview { .. });
 
         div()
             .absolute()
@@ -105,6 +117,7 @@ impl WorkspaceApp {
                     .w(px(width))
                     .max_w(relative(0.9))
                     .max_h(relative(0.9))
+                    .when_some(height_ratio, |dialog, ratio| dialog.h(relative(ratio)))
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -123,7 +136,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .px(px(16.0))
-                            .py(px(12.0))
+                            .py(px(header_py))
                             .border_b_1()
                             .border_color(rgb(theme.border))
                             // Mirrors DialogHeader bg-theme-bg-panel, not the tab background alpha path.
@@ -150,15 +163,45 @@ impl WorkspaceApp {
                                             rgb(theme.accent),
                                         ))
                                     })
+                                    .when(matches!(dialog, SftpDialog::Preview { .. }), |row| {
+                                        row.font_family(settings_mono_font_family(
+                                            self.settings_store.settings(),
+                                        ))
+                                    })
                                     .child(title),
                             )
-                            .when(!description.is_empty(), |header| {
+                            .when(show_description, |header| {
                                 header.child(
-                                div()
-                                    .mt(px(6.0))
-                                    .text_size(px(SFTP_TEXT_SM))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(description),
+                                    div()
+                                        .mt(px(6.0))
+                                        .text_size(px(if matches!(dialog, SftpDialog::Diff { .. }) {
+                                            SFTP_TEXT_XS
+                                        } else {
+                                            SFTP_TEXT_SM
+                                        }))
+                                        .text_color(rgb(theme.text_muted))
+                                        .when(matches!(dialog, SftpDialog::Conflict), |desc| {
+                                            let remaining = self.sftp_conflict_remaining_count();
+                                            desc.flex()
+                                                .items_center()
+                                                .gap(px(4.0))
+                                                .child(description.clone())
+                                                .when(remaining > 0, |desc| {
+                                                    desc.child(
+                                                        div().text_color(rgb(SFTP_ORANGE)).child(
+                                                            self.i18n
+                                                                .t("sftp.conflict.remaining")
+                                                                .replace(
+                                                                    "{{count}}",
+                                                                    &remaining.to_string(),
+                                                                ),
+                                                        ),
+                                                    )
+                                                })
+                                        })
+                                        .when(!matches!(dialog, SftpDialog::Conflict), |desc| {
+                                            desc.child(description)
+                                        }),
                                 )
                             }),
                     )
@@ -181,9 +224,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let (footer_px, footer_py) = match dialog {
+            SftpDialog::Preview { .. } | SftpDialog::Editor { .. } | SftpDialog::Diff { .. } => {
+                (8.0, 8.0)
+            }
+            _ => (16.0, 12.0),
+        };
         let footer = div()
-            .px(px(16.0))
-            .py(px(12.0))
+            .px(px(footer_px))
+            .py(px(footer_py))
             .border_t_1()
             .border_color(rgb(theme.border))
             // Mirrors DialogFooter bg-theme-bg-panel, not the tab background alpha path.
@@ -422,9 +471,9 @@ impl WorkspaceApp {
                     div()
                         .flex()
                         .gap(px(8.0))
-                        .child(self.render_sftp_text_button(
+                        .child(self.render_sftp_button_variant(
                             self.i18n.t("sftp.conflict.skip"),
-                            false,
+                            SftpButtonVariant::Ghost,
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(SftpConflictResolution::Skip);
                                 cx.stop_propagation();
@@ -432,9 +481,9 @@ impl WorkspaceApp {
                             }),
                         ))
                         .when(source_newer.is_some(), |actions| {
-                            actions.child(self.render_sftp_text_button(
+                            actions.child(self.render_sftp_button_variant(
                                 self.i18n.t("sftp.conflict.skip_older"),
-                                false,
+                                SftpButtonVariant::Ghost,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.resolve_sftp_transfer_conflict(
                                         SftpConflictResolution::SkipOlder,
@@ -449,18 +498,18 @@ impl WorkspaceApp {
                     div()
                         .flex()
                         .gap(px(8.0))
-                        .child(self.render_sftp_text_button(
+                        .child(self.render_sftp_button_variant(
                             self.i18n.t("sftp.conflict.keep_both"),
-                            false,
+                            SftpButtonVariant::Secondary,
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(SftpConflictResolution::Rename);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
                         ))
-                        .child(self.render_sftp_text_button(
+                        .child(self.render_sftp_button_variant(
                             self.i18n.t("sftp.conflict.overwrite"),
-                            true,
+                            SftpButtonVariant::Default,
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(
                                     SftpConflictResolution::Overwrite,

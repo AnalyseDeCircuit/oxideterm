@@ -82,6 +82,7 @@ impl WorkspaceApp {
             direction,
             size: progress.total_bytes.max(1),
             transferred: progress.transferred_bytes,
+            speed: 0,
             state: SftpTransferState::Pending,
             error: None,
         });
@@ -147,10 +148,66 @@ impl WorkspaceApp {
             if let Some(progress) = directory_progress.as_ref() {
                 let _ = progress_store.save(progress).await;
             }
+            if is_directory {
+                let name_path = match direction {
+                    SftpTransferDirection::Upload => &local_path,
+                    SftpTransferDirection::Download => &remote_path,
+                };
+                let name = std::path::Path::new(name_path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or(name_path)
+                    .to_string();
+                let name = if name.ends_with('/') {
+                    name
+                } else {
+                    format!("{name}/")
+                };
+                let (background_direction, strategy, transferred, total) =
+                    if let Some(progress) = directory_progress.as_ref() {
+                        (
+                            match progress.transfer_type {
+                                RemoteTransferType::Upload => BackgroundTransferDirection::Upload,
+                                RemoteTransferType::Download => {
+                                    BackgroundTransferDirection::Download
+                                }
+                            },
+                            progress.strategy.clone(),
+                            progress.transferred_bytes,
+                            progress.total_bytes,
+                        )
+                    } else {
+                        (
+                            match direction {
+                                SftpTransferDirection::Upload => BackgroundTransferDirection::Upload,
+                                SftpTransferDirection::Download => {
+                                    BackgroundTransferDirection::Download
+                                }
+                            },
+                            RemoteTransferStrategy::DirectoryRecursive,
+                            0,
+                            0,
+                        )
+                    };
+                manager.register_background_transfer(BackgroundTransferSnapshot::new(
+                    transfer_id.clone(),
+                    node_id.0.clone(),
+                    name,
+                    local_path.clone(),
+                    remote_path.clone(),
+                    background_direction,
+                    BackgroundTransferKind::Directory,
+                    strategy,
+                    total,
+                    transferred,
+                ));
+            }
             let _ = tx.send(SftpWorkerResult::TransferProgress {
                 id,
                 transferred: 0,
                 total: 0,
+                speed: 0,
                 state: SftpTransferState::Active,
                 error: None,
             });
@@ -158,6 +215,8 @@ impl WorkspaceApp {
                 tokio::sync::mpsc::channel::<TransferProgress>(100);
             let progress_ui_tx = tx.clone();
             let progress_store_for_task = progress_store.clone();
+            let progress_manager = manager.clone();
+            let progress_transfer_id = transfer_id.clone();
             tokio::spawn(async move {
                 let mut accumulator = DirectoryProgressAccumulator::default();
                 while let Some(progress) = progress_rx.recv().await {
@@ -171,10 +230,19 @@ impl WorkspaceApp {
                         stored.update_progress(progress.transferred_bytes);
                         let _ = progress_store_for_task.save(stored).await;
                     }
+                    if is_directory {
+                        progress_manager.update_background_transfer_progress(
+                            &progress_transfer_id,
+                            progress.transferred_bytes,
+                            progress.total_bytes,
+                            progress.speed,
+                        );
+                    }
                     let _ = progress_ui_tx.send(SftpWorkerResult::TransferProgress {
                         id,
                         transferred: progress.transferred_bytes,
                         total: progress.total_bytes,
+                        speed: progress.speed,
                         state: sftp_transfer_state_from_remote(progress.state),
                         error: progress.error,
                     });
@@ -183,11 +251,14 @@ impl WorkspaceApp {
 
             let result = async {
                 let _permit = manager.acquire_permit().await;
+                if is_directory {
+                    manager.mark_background_transfer_active(&transfer_id);
+                }
                 let sftp = router
                     .acquire_transfer_sftp(&node_id)
                     .await
                     .map_err(|error| error.to_string())?;
-                match (direction, is_directory) {
+                let item_count = match (direction, is_directory) {
                     (SftpTransferDirection::Upload, true) => {
                         let resolved = router
                             .resolve_connection(&node_id)
@@ -204,6 +275,10 @@ impl WorkspaceApp {
                                 }
                             }
                             let compression = probe_tar_compression(&resolved.handle).await;
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryTar,
+                            );
                             let tar_result = tar_upload_directory(
                                 &resolved.handle,
                                 &local_path,
@@ -215,12 +290,16 @@ impl WorkspaceApp {
                             )
                             .await;
                             match tar_result {
-                                Ok(_) => {}
+                                Ok(count) => count,
                                 Err(error)
                                     if !manager
                                         .get_control(&transfer_id)
                                         .is_some_and(|control| control.is_cancelled()) =>
                                 {
+                                    manager.update_background_transfer_strategy(
+                                        &transfer_id,
+                                        RemoteTransferStrategy::DirectoryRecursive,
+                                    );
                                     sftp.upload_dir(
                                         &local_path,
                                         &remote_path,
@@ -233,11 +312,15 @@ impl WorkspaceApp {
                                         format!(
                                             "tar upload failed ({error}); recursive fallback failed ({fallback_error})"
                                         )
-                                    })?;
+                                    })?
                                 }
                                 Err(error) => return Err(error.to_string()),
                             }
                         } else {
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryRecursive,
+                            );
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -246,7 +329,7 @@ impl WorkspaceApp {
                                 Some(manager.clone()),
                             )
                             .await
-                            .map_err(|error| error.to_string())?;
+                            .map_err(|error| error.to_string())?
                         }
                     }
                     (SftpTransferDirection::Upload, false) => {
@@ -260,6 +343,7 @@ impl WorkspaceApp {
                         )
                         .await
                         .map_err(|error| error.to_string())?;
+                        0
                     }
                     (SftpTransferDirection::Download, true) => {
                         let resolved = router
@@ -267,6 +351,10 @@ impl WorkspaceApp {
                             .map_err(|error| error.to_string())?;
                         if probe_tar_support(&resolved.handle).await {
                             let compression = probe_tar_compression(&resolved.handle).await;
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryTar,
+                            );
                             let tar_result = tar_download_directory(
                                 &resolved.handle,
                                 &remote_path,
@@ -278,12 +366,16 @@ impl WorkspaceApp {
                             )
                             .await;
                             match tar_result {
-                                Ok(_) => {}
+                                Ok(count) => count,
                                 Err(error)
                                     if !manager
                                         .get_control(&transfer_id)
                                         .is_some_and(|control| control.is_cancelled()) =>
                                 {
+                                    manager.update_background_transfer_strategy(
+                                        &transfer_id,
+                                        RemoteTransferStrategy::DirectoryRecursive,
+                                    );
                                     sftp.download_dir(
                                         &remote_path,
                                         &local_path,
@@ -296,11 +388,15 @@ impl WorkspaceApp {
                                         format!(
                                             "tar download failed ({error}); recursive fallback failed ({fallback_error})"
                                         )
-                                    })?;
+                                    })?
                                 }
                                 Err(error) => return Err(error.to_string()),
                             }
                         } else {
+                            manager.update_background_transfer_strategy(
+                                &transfer_id,
+                                RemoteTransferStrategy::DirectoryRecursive,
+                            );
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -309,7 +405,7 @@ impl WorkspaceApp {
                                 Some(manager.clone()),
                             )
                             .await
-                            .map_err(|error| error.to_string())?;
+                            .map_err(|error| error.to_string())?
                         }
                     }
                     (SftpTransferDirection::Download, false) => {
@@ -323,33 +419,52 @@ impl WorkspaceApp {
                         )
                         .await
                         .map_err(|error| error.to_string())?;
+                        0
                     }
-                }
-                Ok::<(), String>(())
+                };
+                Ok::<u64, String>(item_count)
             }
             .await
             .map_err(|error| error.to_string());
 
             if is_directory {
                 match &result {
-                    Ok(()) => {
+                    Ok(item_count) => {
                         let _ = progress_store.delete(&transfer_id).await;
+                        let _ = manager.finish_background_transfer(
+                            &transfer_id,
+                            BackgroundTransferState::Completed,
+                            None,
+                            Some(*item_count),
+                        );
                     }
                     Err(error) if error.to_ascii_lowercase().contains("cancel") => {
                         let _ = progress_store.delete(&transfer_id).await;
+                        let _ = manager.finish_background_transfer(
+                            &transfer_id,
+                            BackgroundTransferState::Cancelled,
+                            None,
+                            None,
+                        );
                     }
                     Err(error) => {
                         if let Ok(Some(mut progress)) = progress_store.load(&transfer_id).await {
                             progress.mark_failed(error.clone());
                             let _ = progress_store.save(&progress).await;
                         }
+                        let _ = manager.finish_background_transfer(
+                            &transfer_id,
+                            BackgroundTransferState::Error,
+                            Some(error.clone()),
+                            None,
+                        );
                     }
                 }
             }
 
             let _ = tx.send(SftpWorkerResult::TransferComplete {
                 id,
-                result,
+                result: result.map(|_| ()),
                 refresh_remote: matches!(direction, SftpTransferDirection::Upload),
                 refresh_local: matches!(direction, SftpTransferDirection::Download),
             });

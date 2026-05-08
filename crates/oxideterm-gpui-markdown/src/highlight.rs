@@ -9,7 +9,7 @@
 use gpui::{Font, FontStyle, FontWeight, Hsla, Rgba, SharedString, TextRun};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle as SyntectFontStyle, Style as SyntectStyle, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::options::MarkdownOptions;
 use crate::style;
@@ -53,7 +53,7 @@ pub fn highlight_code(
     opts: &MarkdownOptions,
 ) -> Option<Vec<HighlightedRun>> {
     let ss = syntax_set();
-    let syntax = ss.find_syntax_by_token(language)?;
+    let syntax = syntax_for_tauri_language(ss, language)?;
 
     let ts = theme_set();
     let theme = ts.themes.get(SYNTECT_THEME)?;
@@ -141,6 +141,46 @@ fn syntect_font(syn_style: SyntectStyle, opts: &MarkdownOptions) -> Font {
     }
 }
 
+fn syntax_for_tauri_language<'a>(
+    syntax_set: &'a SyntaxSet,
+    language: &str,
+) -> Option<&'a SyntaxReference> {
+    let language = language.trim();
+    if language.is_empty() {
+        return None;
+    }
+    if let Some(syntax) = syntax_set.find_syntax_by_token(language) {
+        return Some(syntax);
+    }
+
+    // SFTP preview languages come from the Tauri table, where Prism accepts
+    // canonical names like `typescript` while syntect often ships extension or
+    // syntax-name aliases. Keep that translation here so highlighting parity
+    // stays shared by markdown and raw text previews.
+    let aliases: &[&str] = match language.to_ascii_lowercase().as_str() {
+        "javascript" => &["js", "JavaScript"],
+        // syntect's bundled defaults do not always include TypeScript/TSX;
+        // JavaScript still gives useful Prism-like keyword/string colouring.
+        "typescript" | "tsx" | "jsx" => &["ts", "TypeScript", "js", "JavaScript"],
+        "python" => &["py", "Python"],
+        "rust" => &["rs", "Rust"],
+        "cpp" => &["cc", "c++", "C++"],
+        "docker" => &["Dockerfile", "sh", "Shell-Unix-Generic"],
+        "makefile" => &["Makefile", "sh", "Shell-Unix-Generic"],
+        "markdown" => &["md", "Markdown"],
+        "latex" => &["tex", "LaTeX"],
+        "gitignore" => &["gitignore", "Git Ignore"],
+        "bash" => &["sh", "Shell-Unix-Generic", "Bourne Again Shell (bash)"],
+        _ => &[],
+    };
+
+    aliases.iter().find_map(|alias| {
+        syntax_set
+            .find_syntax_by_token(alias)
+            .or_else(|| syntax_set.find_syntax_by_name(alias))
+    })
+}
+
 // ─── tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -166,6 +206,14 @@ mod tests {
         let opts = MarkdownOptions::default();
         let runs = highlight_code("not_a_real_language_xyz", "hello", &opts);
         assert!(runs.is_none());
+    }
+
+    #[test]
+    fn highlights_tauri_sftp_language_aliases() {
+        let opts = MarkdownOptions::default();
+        assert!(highlight_code("typescript", "const value: number = 1;\n", &opts).is_some());
+        assert!(highlight_code("docker", "FROM alpine\n", &opts).is_some());
+        assert!(highlight_code("makefile", "all:\n\techo ok\n", &opts).is_some());
     }
 
     #[test]

@@ -28,7 +28,8 @@ pub use tar_transfer::{
     tar_download_directory, tar_upload_directory,
 };
 pub use transfer_manager::{
-    DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM,
+    BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
+    BackgroundTransferState, DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM,
     MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpTransferControl,
     SftpTransferGuard, SftpTransferManager, SftpTransferPermit, SftpTransferRuntimeSettings,
 };

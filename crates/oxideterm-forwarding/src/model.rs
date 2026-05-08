@@ -17,7 +17,7 @@ pub enum ForwardStatus {
     Starting,
     Active,
     Stopped,
-    Error(String),
+    Error,
     Suspended,
 }
 
@@ -96,10 +96,10 @@ impl ForwardRule {
             forward_type: ForwardType::Dynamic,
             bind_address: bind_address.into(),
             bind_port,
-            target_host: "0.0.0.0".to_string(),
+            target_host: String::new(),
             target_port: 0,
             status: ForwardStatus::Starting,
-            description: String::new(),
+            description: "SOCKS5 Proxy".to_string(),
         }
     }
 
@@ -134,8 +134,9 @@ mod tests {
         let rule = ForwardRule::dynamic("localhost", 8080);
 
         assert_eq!(rule.forward_type, ForwardType::Dynamic);
-        assert_eq!(rule.target_host, "0.0.0.0");
+        assert_eq!(rule.target_host, "");
         assert_eq!(rule.target_port, 0);
         assert_eq!(rule.status, ForwardStatus::Starting);
+        assert_eq!(rule.description, "SOCKS5 Proxy");
     }
 }
