@@ -20,6 +20,7 @@ members = [
   "crates/oxideterm-terminal-graphics",
   "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
+  "crates/oxideterm-trzsz",
   "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
   "crates/russh",
@@ -59,6 +60,7 @@ thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs"] }
 tracing = "0.1"
 unicode-bidi = "0.3"
+unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 windows = "0.61"

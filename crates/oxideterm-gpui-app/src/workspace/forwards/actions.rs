@@ -146,7 +146,7 @@ impl WorkspaceApp {
             "forwards.messages.updated",
             move |manager| {
                 Box::pin(async move {
-                    let updated = manager.update_stopped_forward(&forward_id, update)?;
+                    let updated = manager.update_forward(&forward_id, update)?;
                     if let Some((session_id, owner_connection_id)) = persist {
                         let forward_id = updated.id.clone();
                         let _ = registry.sync_persisted_forward_rule(

@@ -228,6 +228,18 @@ impl ForwardingManager {
         Ok(updated)
     }
 
+    pub fn update_forward(
+        &self,
+        rule_id: &str,
+        update: ForwardUpdate,
+    ) -> Result<ForwardRule, ForwardingError> {
+        // Tauri exposes this as update_forward/node_update_forward, but the
+        // backend contract is still stopped-only. Keep the public name aligned
+        // with Tauri while retaining the explicit native helper for call sites
+        // that need to document the stopped-rule constraint.
+        self.update_stopped_forward(rule_id, update)
+    }
+
     pub fn list_forwards(&self) -> Vec<ForwardRule> {
         let mut rules = Vec::new();
         rules.extend(self.local_forwards.iter().map(|entry| entry.rule()));

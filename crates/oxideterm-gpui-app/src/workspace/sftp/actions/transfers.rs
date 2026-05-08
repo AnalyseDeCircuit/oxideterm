@@ -260,10 +260,7 @@ impl WorkspaceApp {
                     .map_err(|error| error.to_string())?;
                 let item_count = match (direction, is_directory) {
                     (SftpTransferDirection::Upload, true) => {
-                        let resolved = router
-                            .resolve_connection(&node_id)
-                            .map_err(|error| error.to_string())?;
-                        if probe_tar_support(&resolved.handle).await {
+                        if sftp_tar_probe_for_node(&router, &node_id).await? {
                             {
                                 let shared = router
                                     .acquire_sftp(&node_id)
@@ -274,11 +271,15 @@ impl WorkspaceApp {
                                     let _ = shared.mkdir(&prefix).await;
                                 }
                             }
-                            let compression = probe_tar_compression(&resolved.handle).await;
+                            let compression =
+                                sftp_tar_compression_probe_for_node(&router, &node_id).await?;
                             manager.update_background_transfer_strategy(
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryTar,
                             );
+                            let resolved = router
+                                .resolve_connection(&node_id)
+                                .map_err(|error| error.to_string())?;
                             let tar_result = tar_upload_directory(
                                 &resolved.handle,
                                 &local_path,
@@ -346,15 +347,16 @@ impl WorkspaceApp {
                         0
                     }
                     (SftpTransferDirection::Download, true) => {
-                        let resolved = router
-                            .resolve_connection(&node_id)
-                            .map_err(|error| error.to_string())?;
-                        if probe_tar_support(&resolved.handle).await {
-                            let compression = probe_tar_compression(&resolved.handle).await;
+                        if sftp_tar_probe_for_node(&router, &node_id).await? {
+                            let compression =
+                                sftp_tar_compression_probe_for_node(&router, &node_id).await?;
                             manager.update_background_transfer_strategy(
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryTar,
                             );
+                            let resolved = router
+                                .resolve_connection(&node_id)
+                                .map_err(|error| error.to_string())?;
                             let tar_result = tar_download_directory(
                                 &resolved.handle,
                                 &remote_path,
@@ -537,4 +539,21 @@ impl WorkspaceApp {
             }
         }
     }
+}
+
+async fn sftp_tar_probe_for_node(router: &NodeRouter, node_id: &NodeId) -> Result<bool, String> {
+    let resolved = router
+        .resolve_connection(node_id)
+        .map_err(|error| error.to_string())?;
+    Ok(probe_tar_support(&resolved.handle).await)
+}
+
+async fn sftp_tar_compression_probe_for_node(
+    router: &NodeRouter,
+    node_id: &NodeId,
+) -> Result<TarCompression, String> {
+    let resolved = router
+        .resolve_connection(node_id)
+        .map_err(|error| error.to_string())?;
+    Ok(probe_tar_compression(&resolved.handle).await)
 }

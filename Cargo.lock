@@ -6724,6 +6724,24 @@ name = "oxideterm-theme"
 version = "0.1.0"
 
 [[package]]
+name = "oxideterm-trzsz"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "flate2",
+ "md5",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "unicode-normalization",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "oxideterm-webview"
 version = "0.1.0"
 dependencies = [

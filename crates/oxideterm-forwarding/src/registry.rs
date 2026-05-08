@@ -80,6 +80,13 @@ impl ForwardingRegistry {
         manager.suspend_all_and_save_rules().await
     }
 
+    pub async fn pause_port_forwards(&self, session_id: &str) -> Vec<ForwardRule> {
+        // Tauri names this command pause_port_forwards even though the rules are
+        // stored as Suspended for reconnect restoration. Preserve that command
+        // vocabulary at the native API boundary.
+        self.suspend_session(session_id).await
+    }
+
     pub async fn restore_session(
         &self,
         session_id: impl Into<String>,
@@ -88,6 +95,20 @@ impl ForwardingRegistry {
         let session_id = session_id.into();
         let manager = self.register(session_id, ssh_connection.clone());
         manager.restore_saved_forwards(ssh_connection).await
+    }
+
+    pub async fn restore_port_forwards(
+        &self,
+        session_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+    ) -> Vec<Result<ForwardRule, crate::ForwardingError>> {
+        self.restore_session(session_id, ssh_connection).await
+    }
+
+    pub async fn stop_all_forwards_for_session(&self, session_id: &str) {
+        if let Some(manager) = self.get(session_id) {
+            manager.stop_all().await;
+        }
     }
 
     pub async fn stop_all(&self) {
@@ -135,6 +156,10 @@ impl ForwardingRegistry {
         store.delete_persisted_forward(forward_id)
     }
 
+    pub fn delete_saved_forward(&self, forward_id: &str) -> Result<(), SavedForwardError> {
+        self.delete_persisted_forward(forward_id)
+    }
+
     pub fn update_auto_start(
         &self,
         forward_id: &str,
@@ -144,6 +169,14 @@ impl ForwardingRegistry {
             return Ok(());
         };
         store.update_auto_start(forward_id, auto_start)
+    }
+
+    pub fn set_forward_auto_start(
+        &self,
+        forward_id: &str,
+        auto_start: bool,
+    ) -> Result<(), SavedForwardError> {
+        self.update_auto_start(forward_id, auto_start)
     }
 
     pub fn load_owned_forwards(&self, owner_connection_id: &str) -> Vec<PersistedForward> {
@@ -157,6 +190,17 @@ impl ForwardingRegistry {
         self.saved_store
             .as_ref()
             .map(|store| store.load_persisted_forwards(session_id))
+            .unwrap_or_default()
+    }
+
+    pub fn list_saved_forwards(&self, session_id: &str) -> Vec<PersistedForward> {
+        self.load_persisted_forwards(session_id)
+    }
+
+    pub fn list_all_saved_forwards(&self) -> Vec<PersistedForward> {
+        self.saved_store
+            .as_ref()
+            .map(|store| store.load_syncable_forwards())
             .unwrap_or_default()
     }
 

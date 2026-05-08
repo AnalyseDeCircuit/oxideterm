@@ -449,8 +449,30 @@ async fn load_remote_sftp_preview(
         .acquire_sftp(node_id)
         .await
         .map_err(|error| error.to_string())?;
+    match load_remote_sftp_preview_once(&sftp, path).await {
+        Ok(preview) => Ok(preview),
+        Err(error) if error.is_channel_recoverable() => {
+            // Tauri wraps node_sftp_preview in sftp_with_retry!, so stale shared
+            // SFTP channels are invalidated and rebuilt once before surfacing an
+            // error. Keep preview on that same silent-rebuild path as listing.
+            let sftp = router
+                .invalidate_and_reacquire_sftp(node_id)
+                .await
+                .map_err(|route_error| route_error.to_string())?;
+            load_remote_sftp_preview_once(&sftp, path)
+                .await
+                .map_err(|retry_error| retry_error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+async fn load_remote_sftp_preview_once(
+    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    path: &str,
+) -> Result<PreviewContent, SftpError> {
     let sftp = sftp.lock().await;
-    sftp.preview(path).await.map_err(|error| error.to_string())
+    sftp.preview(path).await
 }
 
 async fn load_remote_sftp_preview_hex(
@@ -463,10 +485,30 @@ async fn load_remote_sftp_preview_hex(
         .acquire_sftp(node_id)
         .await
         .map_err(|error| error.to_string())?;
+    match load_remote_sftp_preview_hex_once(&sftp, path, offset).await {
+        Ok(preview) => Ok(preview),
+        Err(error) if error.is_channel_recoverable() => {
+            // Mirrors Tauri node_sftp_preview_hex: retry once after rebuilding
+            // the shared SFTP owner when the channel itself is stale.
+            let sftp = router
+                .invalidate_and_reacquire_sftp(node_id)
+                .await
+                .map_err(|route_error| route_error.to_string())?;
+            load_remote_sftp_preview_hex_once(&sftp, path, offset)
+                .await
+                .map_err(|retry_error| retry_error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+async fn load_remote_sftp_preview_hex_once(
+    sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
+    path: &str,
+    offset: u64,
+) -> Result<PreviewContent, SftpError> {
     let sftp = sftp.lock().await;
-    sftp.preview_with_offset(path, offset)
-        .await
-        .map_err(|error| error.to_string())
+    sftp.preview_with_offset(path, offset).await
 }
 
 async fn save_remote_sftp_preview(

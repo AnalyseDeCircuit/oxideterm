@@ -124,6 +124,13 @@ pub struct SftpTransferRuntimeSettings {
     pub directory_parallelism: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SftpTransferStats {
+    pub active: usize,
+    pub queued: usize,
+    pub completed: usize,
+}
+
 impl Default for SftpTransferRuntimeSettings {
     fn default() -> Self {
         Self {
@@ -309,6 +316,18 @@ impl SftpTransferManager {
 
     pub fn registered_count(&self) -> usize {
         self.controls.read().len()
+    }
+
+    pub fn transfer_stats(&self) -> SftpTransferStats {
+        let active = self.active_count();
+        let registered = self.registered_count();
+        SftpTransferStats {
+            active,
+            queued: registered.saturating_sub(active),
+            // Matches Tauri sftp_transfer_stats: completed is intentionally
+            // reserved and currently not tracked by TransferManager.
+            completed: 0,
+        }
     }
 
     pub fn register(&self, transfer_id: &str) -> Arc<SftpTransferControl> {
@@ -529,6 +548,21 @@ mod tests {
         assert_eq!(manager.max_concurrent(), 5);
         assert_eq!(manager.speed_limit_bps(), 256 * 1024);
         assert_eq!(manager.directory_parallelism(), 8);
+    }
+
+    #[test]
+    fn transfer_stats_match_tauri_command_shape() {
+        let manager = SftpTransferManager::new();
+        manager.register("queued-transfer");
+
+        assert_eq!(
+            manager.transfer_stats(),
+            SftpTransferStats {
+                active: 0,
+                queued: 1,
+                completed: 0,
+            }
+        );
     }
 
     #[test]

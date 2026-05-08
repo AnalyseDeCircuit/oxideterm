@@ -25,7 +25,7 @@ use oxideterm_sftp::{
     AssetFileKind, BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
     BackgroundTransferState, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession,
-    SortOrder as RemoteSortOrder, StoredTransferProgress, TransferProgress,
+    SortOrder as RemoteSortOrder, StoredTransferProgress, TarCompression, TransferProgress,
     TransferState as RemoteTransferState, TransferStrategy as RemoteTransferStrategy,
     TransferType as RemoteTransferType, encode_to_encoding, probe_tar_compression,
     probe_tar_support, tar_download_directory, tar_upload_directory,

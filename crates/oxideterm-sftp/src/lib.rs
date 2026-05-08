@@ -32,6 +32,7 @@ pub use transfer_manager::{
     BackgroundTransferState, DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM,
     MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpTransferControl,
     SftpTransferGuard, SftpTransferManager, SftpTransferPermit, SftpTransferRuntimeSettings,
+    SftpTransferStats,
 };
 pub use types::{
     AssetFileKind, FileInfo, FileType, ListFilter, PreviewContent, SortOrder, TransferDirection,
