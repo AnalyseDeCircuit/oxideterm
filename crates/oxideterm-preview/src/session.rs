@@ -224,7 +224,7 @@ async fn load_local_path(
     });
     let kind = classify_preview_path(&path);
     match kind {
-        PreviewKind::Image | PreviewKind::Pdf | PreviewKind::Office => {
+        PreviewKind::Image | PreviewKind::Pdf | PreviewKind::Office | PreviewKind::Font => {
             let asset_kind = preview_asset_kind(kind);
             load_local_asset(path, mime_type, asset_kind, size, options.max_preview_size)
         }
@@ -394,6 +394,7 @@ fn preview_asset_kind(kind: PreviewKind) -> PreviewAssetKind {
         PreviewKind::Audio => PreviewAssetKind::Audio,
         PreviewKind::Video => PreviewAssetKind::Video,
         PreviewKind::Office => PreviewAssetKind::Office,
+        PreviewKind::Font => PreviewAssetKind::Font,
         _ => PreviewAssetKind::Office,
     }
 }

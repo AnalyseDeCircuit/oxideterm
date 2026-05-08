@@ -9,13 +9,15 @@
 use std::path::PathBuf;
 
 use gpui::{
-    AnyElement, Font, FontStyle, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
-    StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, div, image_cache, img, px,
-    relative, retain_all,
+    AnyElement, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, IntoElement, ParentElement,
+    Render, SharedString, StrikethroughStyle, Styled, StyledText, TextRun, UnderlineStyle, div,
+    image_cache, img, px, relative, retain_all,
 };
+use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
 
 use crate::highlight;
+use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
 use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument};
 use crate::options::MarkdownOptions;
@@ -43,6 +45,51 @@ pub fn render_document(
             .into_any_element()
     } else {
         content.into_any_element()
+    }
+}
+
+/// Render a complete markdown document through a block-level virtual list.
+pub fn render_document_virtual<V>(
+    view: Entity<V>,
+    id: impl Into<ElementId>,
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    scroll_handle: &VirtualListScrollHandle,
+) -> AnyElement
+where
+    V: Render,
+{
+    let layout = MarkdownBlockLayout::from_document(document, opts);
+    let items = layout.items();
+    let item_sizes = layout.item_sizes();
+    let tokens = *tokens;
+    let opts = opts.clone();
+    let block_gap = opts.block_gap;
+    let enable_async_images = opts.enable_async_images;
+    let image_cache_id = opts.image_cache_id;
+
+    let content = v_virtual_list(view, id, item_sizes, move |_this, range, _window, _cx| {
+        range
+            .filter_map(|index| match items.get(index) {
+                Some(MarkdownLayoutItem::Block(block)) => Some(render_block(block, &tokens, &opts)),
+                Some(MarkdownLayoutItem::Footnotes(footnotes)) => {
+                    Some(render_footnotes(footnotes, &tokens, &opts))
+                }
+                None => None,
+            })
+            .collect::<Vec<AnyElement>>()
+    })
+    .gap(px(block_gap))
+    .track_scroll(scroll_handle)
+    .into_any_element();
+
+    if enable_async_images {
+        image_cache(retain_all(image_cache_id))
+            .child(content)
+            .into_any_element()
+    } else {
+        content
     }
 }
 

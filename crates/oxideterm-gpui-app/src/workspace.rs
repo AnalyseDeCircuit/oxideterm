@@ -755,7 +755,19 @@ impl Render for WorkspaceApp {
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
                 {
-                    if keystroke_commits_platform_text(&event.keystroke) {
+                    let sftp_quick_look_space = event.keystroke.key.as_str() == "space"
+                        && this.sftp_view.focused_input.is_none()
+                        && this.sftp_view.dialog.is_none();
+                    let sftp_markdown_preview_toggle = event.keystroke.key.as_str() == "u"
+                        && this.sftp_view.focused_input.is_none()
+                        && matches!(
+                            this.sftp_view.dialog.as_ref(),
+                            Some(sftp::SftpDialog::Preview { .. })
+                        );
+                    if keystroke_commits_platform_text(&event.keystroke)
+                        && !sftp_quick_look_space
+                        && !sftp_markdown_preview_toggle
+                    {
                         return;
                     }
                     let _ = this.handle_sftp_key(event, cx);

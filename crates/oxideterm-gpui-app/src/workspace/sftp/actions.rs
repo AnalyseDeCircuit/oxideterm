@@ -49,6 +49,16 @@ impl WorkspaceApp {
                     cx.notify();
                     return true;
                 }
+                "u" => {
+                    if matches!(self.sftp_view.dialog, Some(SftpDialog::Preview { .. }))
+                        && self.sftp_preview_is_markdown_content()
+                    {
+                        self.sftp_view.preview_markdown_source_mode =
+                            !self.sftp_view.preview_markdown_source_mode;
+                        cx.notify();
+                        return true;
+                    }
+                }
                 "enter" => {
                     if matches!(
                         self.sftp_view.dialog,
@@ -63,6 +73,7 @@ impl WorkspaceApp {
                 }
                 _ => {}
             }
+            return false;
         }
         if let Some(input) = self.sftp_view.focused_input {
             match key {
@@ -115,7 +126,8 @@ impl WorkspaceApp {
                 }
             }
             "space" | " " => {
-                if let Some(file) = self.single_selected_sftp_file(self.sftp_view.active_pane)
+                if self.sftp_view.active_pane == SftpPane::Remote
+                    && let Some(file) = self.single_selected_sftp_file(self.sftp_view.active_pane)
                     && file.file_type != SftpFileType::Directory
                 {
                     self.open_or_preview_sftp_file(self.sftp_view.active_pane, &file);
@@ -440,7 +452,7 @@ impl WorkspaceApp {
                 SftpPane::Remote => self.sftp_view.remote_path.clone(),
             };
             self.set_sftp_path(pane, join_sftp_path(&base, &file.name));
-        } else {
+        } else if pane == SftpPane::Remote {
             self.stop_sftp_preview_media();
             self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
             let generation = self.sftp_view.preview_generation;
@@ -450,18 +462,19 @@ impl WorkspaceApp {
             self.sftp_view.preview_content = None;
             self.sftp_view.preview_asset_owner = None;
             self.sftp_view.preview_session = PreviewSession::loading();
+            self.sftp_view.preview_code_scroll = UniformListScrollHandle::new();
+            self.sftp_view.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
             self.sftp_view.preview_error = None;
             self.sftp_view.preview_loading = pane == SftpPane::Remote;
             self.sftp_view.preview_hex_loading_more = false;
+            self.sftp_view.preview_markdown_source_mode = false;
+            self.sftp_view.preview_font_family = None;
+            self.sftp_view.preview_font_error = None;
+            self.sftp_view.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;
             self.sftp_view.dialog = Some(SftpDialog::Preview {
                 name: file.name.clone(),
             });
-            if pane == SftpPane::Remote {
-                self.spawn_remote_sftp_preview(file.path.clone(), generation);
-            } else {
-                self.sftp_view.preview_loading = true;
-                self.spawn_local_sftp_preview(file.path.clone(), generation);
-            }
+            self.spawn_remote_sftp_preview(file.path.clone(), generation);
         }
     }
 
@@ -485,6 +498,17 @@ impl WorkspaceApp {
                 self.sftp_view.preview_content.as_ref(),
                 Some(PreviewContent::Text { .. })
             )
+    }
+
+    fn sftp_preview_is_markdown_content(&self) -> bool {
+        matches!(
+            self.sftp_view.preview_content.as_ref(),
+            Some(PreviewContent::Text {
+                language,
+                mime_type,
+                ..
+            }) if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref())
+        )
     }
 
     fn open_sftp_preview_editor(
@@ -776,19 +800,6 @@ impl WorkspaceApp {
                 generation,
                 path,
                 offset,
-                result,
-            });
-        });
-    }
-
-    fn spawn_local_sftp_preview(&self, path: String, generation: u64) {
-        let tx = self.sftp_worker_tx.clone();
-        let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
-            let result = load_local_sftp_preview(&path).await;
-            let _ = tx.send(SftpWorkerResult::PreviewLoaded {
-                generation,
-                path,
                 result,
             });
         });
@@ -1547,6 +1558,11 @@ impl WorkspaceApp {
         self.sftp_view.preview_asset_owner = None;
         self.sftp_view.preview_session = PreviewSession::default();
         self.sftp_view.preview_hex_loading_more = false;
+        self.sftp_view.preview_markdown_source_mode = false;
+        self.sftp_view.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.sftp_view.preview_font_family = None;
+        self.sftp_view.preview_font_error = None;
+        self.sftp_view.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;
         self.reset_sftp_preview_editor();
         self.sftp_view.focused_input = None;
         self.ime_marked_text = None;

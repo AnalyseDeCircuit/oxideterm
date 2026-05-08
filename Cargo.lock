@@ -6529,6 +6529,7 @@ name = "oxideterm-gpui-markdown"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "gpui-component",
  "oxideterm-theme",
  "pulldown-cmark",
  "ratex-layout",
@@ -6610,6 +6611,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "ttf-parser 0.25.1",
 ]
 
 [[package]]

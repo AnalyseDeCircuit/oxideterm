@@ -516,58 +516,6 @@ fn sftp_preview_editor_is_network_error(error: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
-async fn load_local_sftp_preview(path: &str) -> Result<PreviewContent, String> {
-    let metadata = tokio::fs::metadata(path)
-        .await
-        .map_err(|error| error.to_string())?;
-    let size = metadata.len();
-    const MAX_LOCAL_TEXT_PREVIEW: u64 = 2 * 1024 * 1024;
-    if size > MAX_LOCAL_TEXT_PREVIEW {
-        return Ok(PreviewContent::TooLarge {
-            size,
-            max_size: MAX_LOCAL_TEXT_PREVIEW,
-            recommend_download: false,
-        });
-    }
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|error| error.to_string())?;
-    match String::from_utf8(bytes.clone()) {
-        Ok(data) => Ok(PreviewContent::Text {
-            data,
-            mime_type: None,
-            language: None,
-            encoding: "UTF-8".to_string(),
-            confidence: 1.0,
-            has_bom: false,
-        }),
-        Err(_) => Ok(PreviewContent::Hex {
-            data: local_hex_dump(&bytes, 0),
-            total_size: size,
-            offset: 0,
-            chunk_size: bytes.len() as u64,
-            has_more: false,
-        }),
-    }
-}
-
-fn local_hex_dump(data: &[u8], offset: u64) -> String {
-    use std::fmt::Write;
-    let mut output = String::new();
-    for (index, chunk) in data.chunks(16).enumerate() {
-        let address = offset + (index * 16) as u64;
-        let _ = write!(output, "{address:08X}  ");
-        for (column, byte) in chunk.iter().enumerate() {
-            if column == 8 {
-                output.push(' ');
-            }
-            let _ = write!(output, "{byte:02X} ");
-        }
-        output.push('\n');
-    }
-    output
-}
-
 async fn list_remote_sftp_once(
     sftp: &std::sync::Arc<tokio::sync::Mutex<SftpSession>>,
     path: &str,

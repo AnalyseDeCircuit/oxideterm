@@ -286,6 +286,36 @@ impl WorkspaceApp {
                                     AssetFileKind::Audio => {
                                         let _ = self.sftp_view.preview_audio.load(owner.path());
                                     }
+                                    AssetFileKind::Font => {
+                                        match std::fs::read(owner.path()) {
+                                            Ok(bytes) => {
+                                                let family = font_family_name_from_bytes(&bytes)
+                                                    .or_else(|| {
+                                                        owner
+                                                            .path()
+                                                            .file_stem()
+                                                            .and_then(|name| name.to_str())
+                                                            .map(str::to_string)
+                                                    });
+                                                match cx.text_system().add_fonts(vec![Cow::Owned(bytes)]) {
+                                                    Ok(()) => {
+                                                        self.sftp_view.preview_font_family = family;
+                                                        self.sftp_view.preview_font_error = None;
+                                                    }
+                                                    Err(error) => {
+                                                        self.sftp_view.preview_font_family = None;
+                                                        self.sftp_view.preview_font_error =
+                                                            Some(error.to_string());
+                                                    }
+                                                }
+                                            }
+                                            Err(error) => {
+                                                self.sftp_view.preview_font_family = None;
+                                                self.sftp_view.preview_font_error =
+                                                    Some(error.to_string());
+                                            }
+                                        }
+                                    }
                                     AssetFileKind::Image
                                     | AssetFileKind::Video
                                     | AssetFileKind::Pdf

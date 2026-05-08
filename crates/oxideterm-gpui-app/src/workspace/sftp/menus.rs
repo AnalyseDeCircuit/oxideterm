@@ -55,7 +55,7 @@ impl WorkspaceApp {
                 ))
             })
             .when_some(menu.file.clone(), |menu_el, file| {
-                if file.file_type == SftpFileType::Directory {
+                if menu.pane != SftpPane::Remote || file.file_type == SftpFileType::Directory {
                     menu_el
                 } else {
                     menu_el.child(self.render_sftp_context_menu_item(
