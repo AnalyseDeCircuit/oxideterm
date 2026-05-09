@@ -35,6 +35,9 @@ pub trait TerminalSessionBackend: Send {
     fn kind(&self) -> TerminalSessionKind;
     fn title(&self) -> Option<String>;
     fn lifecycle(&self) -> TerminalLifecycle;
+    fn is_interactive(&self) -> bool {
+        self.lifecycle().is_running()
+    }
     fn process_info(&self) -> TerminalProcessInfo;
     fn refresh_process_info(&mut self);
     fn read_pending(&mut self) -> bool;

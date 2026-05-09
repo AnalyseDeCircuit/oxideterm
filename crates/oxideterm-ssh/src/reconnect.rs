@@ -59,6 +59,9 @@ pub struct ReconnectSnapshot {
     pub terminal_pane_ids: Vec<String>,
     pub old_terminal_session_ids: Vec<String>,
     pub terminal_sessions_by_node: Vec<ReconnectNodeTerminalSnapshot>,
+    pub forward_rules: Vec<ReconnectForwardRuleSnapshot>,
+    /// Legacy summary retained for existing diagnostics. Reconnect restore uses
+    /// `forward_rules`, matching Tauri's rule snapshot semantics.
     pub active_port_forward_ids: Vec<String>,
     pub inflight_sftp_transfer_ids: Vec<String>,
     pub incomplete_sftp_transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
@@ -83,6 +86,26 @@ pub struct ReconnectIdeSnapshot {
 pub struct ReconnectNodeTerminalSnapshot {
     pub node_id: String,
     pub old_terminal_session_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectForwardRuleSnapshot {
+    pub node_id: String,
+    pub rules: Vec<ReconnectForwardRule>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectForwardRule {
+    pub id: String,
+    pub forward_type: String,
+    pub bind_address: String,
+    pub bind_port: u16,
+    pub target_host: String,
+    pub target_port: u16,
+    pub status: String,
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -348,5 +371,29 @@ mod tests {
             ide_snapshot.dirty_contents.get("/home/demo/main.rs"),
             Some(&"dirty".to_string())
         );
+    }
+
+    #[test]
+    fn reconnect_snapshot_carries_forward_rules_like_tauri() {
+        let snapshot = ReconnectSnapshot {
+            forward_rules: vec![ReconnectForwardRuleSnapshot {
+                node_id: "node-a".to_string(),
+                rules: vec![ReconnectForwardRule {
+                    id: "forward-1".to_string(),
+                    forward_type: "local".to_string(),
+                    bind_address: "localhost".to_string(),
+                    bind_port: 8080,
+                    target_host: "localhost".to_string(),
+                    target_port: 8080,
+                    status: "active".to_string(),
+                    description: "web".to_string(),
+                }],
+            }],
+            ..ReconnectSnapshot::default()
+        };
+
+        assert_eq!(snapshot.forward_rules[0].node_id, "node-a");
+        assert_eq!(snapshot.forward_rules[0].rules[0].forward_type, "local");
+        assert_eq!(snapshot.forward_rules[0].rules[0].status, "active");
     }
 }

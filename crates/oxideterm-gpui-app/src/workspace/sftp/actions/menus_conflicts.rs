@@ -39,24 +39,33 @@ impl WorkspaceApp {
     }
 
     fn queue_sftp_transfers(&mut self, pane: SftpPane, direction: SftpTransferDirection) {
+        let selected = match pane {
+            SftpPane::Local => self.sftp_view.local_selected.clone(),
+            SftpPane::Remote => self.sftp_view.remote_selected.clone(),
+        };
+        self.queue_sftp_named_transfers(pane, direction, selected.into_iter().collect());
+    }
+
+    fn queue_sftp_named_transfers(
+        &mut self,
+        pane: SftpPane,
+        direction: SftpTransferDirection,
+        selected_names: Vec<String>,
+    ) {
         let Some(tab_id) = self.active_tab_id else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
             return;
         };
-        let selected = match pane {
-            SftpPane::Local => self.sftp_view.local_selected.clone(),
-            SftpPane::Remote => self.sftp_view.remote_selected.clone(),
-        };
-        if selected.is_empty() {
+        if selected_names.is_empty() {
             return;
         }
         let source_files = match pane {
             SftpPane::Local => self.sftp_view.local_files.clone(),
             SftpPane::Remote => self.sftp_view.remote_files.clone(),
         };
-        let pending_transfers = selected
+        let pending_transfers = selected_names
             .into_iter()
             .filter_map(|name| {
                 source_files
@@ -104,6 +113,85 @@ impl WorkspaceApp {
         self.clear_sftp_selection(pane);
     }
 
+    fn queue_sftp_external_upload_paths(&mut self, paths: &[std::path::PathBuf]) {
+        let Some(tab_id) = self.active_tab_id else {
+            return;
+        };
+        let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
+            return;
+        };
+        let pending_transfers = paths
+            .iter()
+            .filter_map(|path| {
+                let normalized = normalize_external_dropped_path(path)?;
+                let metadata = std::fs::symlink_metadata(&normalized).ok()?;
+                let name = normalized.file_name()?.to_string_lossy().to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_secs() as i64);
+                let source = SftpFileEntry {
+                    name: name.clone(),
+                    path: normalized.to_string_lossy().to_string(),
+                    file_type: if metadata.is_dir() {
+                        SftpFileType::Directory
+                    } else {
+                        SftpFileType::File
+                    },
+                    size: metadata.len(),
+                    modified,
+                    permissions: None,
+                    owner: None,
+                    group: None,
+                    is_symlink: metadata.file_type().is_symlink(),
+                    symlink_target: std::fs::read_link(&normalized)
+                        .ok()
+                        .map(|target| target.to_string_lossy().to_string()),
+                };
+                Some(SftpPendingTransfer {
+                    name,
+                    direction: SftpTransferDirection::Upload,
+                    source,
+                })
+            })
+            .collect::<Vec<_>>();
+        if pending_transfers.is_empty() {
+            return;
+        }
+        let conflicts = sftp_transfer_conflicts(&pending_transfers, &self.sftp_view.remote_files);
+        if !conflicts.is_empty()
+            && self.settings_store.settings().sftp.conflict_action
+                == oxideterm_settings::ConflictAction::Ask
+        {
+            self.sftp_view.conflict_state = Some(SftpConflictState {
+                conflicts,
+                current_index: 0,
+                pending_transfers,
+                resolved_actions: HashMap::new(),
+                apply_to_all: false,
+            });
+            self.sftp_view.dialog = Some(SftpDialog::Conflict);
+            self.sftp_view.context_menu = None;
+            return;
+        }
+
+        let conflict_action = self.settings_store.settings().sftp.conflict_action;
+        let resolved_actions = conflicts
+            .into_iter()
+            .map(|conflict| {
+                (
+                    conflict.file_name,
+                    sftp_conflict_resolution_from_settings(conflict_action),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions);
+    }
+
     fn sftp_target_files_for_direction(&self, direction: SftpTransferDirection) -> Vec<SftpFileEntry> {
         match direction {
             SftpTransferDirection::Upload => self.sftp_view.remote_files.clone(),
@@ -121,14 +209,26 @@ impl WorkspaceApp {
             return;
         };
         let target_files = self.sftp_target_files_for_direction(direction);
+        let batch_id = self.sftp_view.next_transfer_batch_id;
+        self.sftp_view.next_transfer_batch_id += 1;
+        let mut batch = SftpTransferBatch {
+            direction,
+            total: 0,
+            success: 0,
+            failed: 0,
+            skipped: 0,
+            queued: 0,
+        };
         for transfer in pending_transfers {
             let resolution = resolved_actions.get(&transfer.name).copied();
             if resolution == Some(SftpConflictResolution::Skip) {
+                batch.skipped += 1;
                 continue;
             }
             if resolution == Some(SftpConflictResolution::SkipOlder)
                 && sftp_source_not_newer_than_target(&transfer, &target_files)
             {
+                batch.skipped += 1;
                 continue;
             }
             let target_name = if resolution == Some(SftpConflictResolution::Rename) {
@@ -136,7 +236,14 @@ impl WorkspaceApp {
             } else {
                 transfer.name.clone()
             };
-            self.queue_sftp_pending_transfer(node_id.clone(), transfer, target_name);
+            if transfer.source.file_type == SftpFileType::Directory {
+                batch.queued += 1;
+            }
+            batch.total += 1;
+            self.queue_sftp_pending_transfer(node_id.clone(), transfer, target_name, Some(batch_id));
+        }
+        if batch.total > 0 {
+            self.sftp_view.transfer_batches.insert(batch_id, batch);
         }
     }
 
@@ -145,12 +252,13 @@ impl WorkspaceApp {
         node_id: NodeId,
         transfer: SftpPendingTransfer,
         target_name: String,
+        batch_id: Option<u64>,
     ) {
         let direction = transfer.direction;
         let is_directory = transfer.source.file_type == SftpFileType::Directory;
         let id = self.sftp_view.next_transfer_id;
         self.sftp_view.next_transfer_id += 1;
-        let transfer_id = id.to_string();
+        let transfer_id = new_sftp_transfer_id(&node_id, &transfer.name);
         let size = transfer.source.size.max(1);
         let local_path = match direction {
             SftpTransferDirection::Upload => transfer.source.path.clone(),
@@ -163,6 +271,8 @@ impl WorkspaceApp {
         self.sftp_view.transfers.push(SftpTransferItem {
             id,
             transfer_id: transfer_id.clone(),
+            batch_id,
+            node_id: node_id.clone(),
             name: if is_directory {
                 format!("{target_name}/")
             } else {
@@ -255,4 +365,96 @@ impl WorkspaceApp {
         self.sftp_view.conflict_state = None;
         self.close_sftp_dialog();
     }
+
+    fn update_sftp_transfer_batch_toast(&mut self, batch_id: u64, state: SftpTransferState) {
+        let Some(batch) = self.sftp_view.transfer_batches.get_mut(&batch_id) else {
+            return;
+        };
+        match state {
+            SftpTransferState::Completed => batch.success += 1,
+            SftpTransferState::Error => batch.failed += 1,
+            _ => return,
+        }
+
+        if batch.success + batch.failed < batch.total {
+            return;
+        }
+
+        let Some(batch) = self.sftp_view.transfer_batches.remove(&batch_id) else {
+            return;
+        };
+        let is_upload = batch.direction == SftpTransferDirection::Upload;
+        let only_queued_directory_transfers =
+            batch.queued > 0 && batch.queued == batch.success && batch.failed == 0;
+        if only_queued_directory_transfers {
+            return;
+        }
+
+        if batch.success > 0 && batch.failed == 0 {
+            let description = if batch.skipped > 0 {
+                sftp_i18n_transferred_skipped(
+                    self.i18n.t("sftp.toast.transferred_skipped"),
+                    batch.success,
+                    batch.skipped,
+                )
+            } else {
+                sftp_i18n_count(self.i18n.t("sftp.toast.transferred_count"), batch.success)
+            };
+            self.push_sftp_toast(
+                if is_upload {
+                    self.i18n.t("sftp.toast.upload_complete")
+                } else {
+                    self.i18n.t("sftp.toast.download_complete")
+                },
+                Some(description),
+                TerminalNoticeVariant::Success,
+            );
+        } else if batch.failed > 0 && batch.success == 0 {
+            self.push_sftp_toast(
+                if is_upload {
+                    self.i18n.t("sftp.toast.upload_failed")
+                } else {
+                    self.i18n.t("sftp.toast.download_failed")
+                },
+                Some(sftp_i18n_count(
+                    self.i18n.t("sftp.toast.failed_count"),
+                    batch.failed,
+                )),
+                TerminalNoticeVariant::Error,
+            );
+        } else if batch.success > 0 || batch.failed > 0 {
+            self.push_sftp_toast(
+                if is_upload {
+                    self.i18n.t("sftp.toast.upload_partial")
+                } else {
+                    self.i18n.t("sftp.toast.download_partial")
+                },
+                Some(sftp_i18n_partial_detail(
+                    self.i18n.t("sftp.toast.partial_detail"),
+                    batch.success,
+                    batch.failed,
+                    batch.skipped,
+                )),
+                TerminalNoticeVariant::Error,
+            );
+        }
+    }
+}
+
+fn sftp_i18n_transferred_skipped(template: String, count: usize, skipped: usize) -> String {
+    template
+        .replace("{{count}}", &count.to_string())
+        .replace("{{skipped}}", &skipped.to_string())
+}
+
+fn sftp_i18n_partial_detail(
+    template: String,
+    success: usize,
+    failed: usize,
+    skipped: usize,
+) -> String {
+    template
+        .replace("{{success}}", &success.to_string())
+        .replace("{{failed}}", &failed.to_string())
+        .replace("{{skipped}}", &skipped.to_string())
 }

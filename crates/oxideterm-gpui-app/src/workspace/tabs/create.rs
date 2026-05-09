@@ -161,6 +161,7 @@ impl WorkspaceApp {
         let session_config = SshSessionConfig::from(config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
+            .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(&node_id, session_id, shared_session.clone());
@@ -291,6 +292,7 @@ impl WorkspaceApp {
         let session_config = SshSessionConfig::from(node.config)
             .with_registry(self.ssh_registry.clone(), consumer)
             .with_prompt_handler(prompt_handler)
+            .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone());

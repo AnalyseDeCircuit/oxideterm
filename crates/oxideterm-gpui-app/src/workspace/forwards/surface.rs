@@ -36,7 +36,7 @@ impl WorkspaceApp {
         self.active_ssh_node_id = Some(node_id.clone());
         self.ensure_node_connection_started(&node_id);
         self.forwarding_view.error = None;
-        self.start_port_scan_for_forwards_tab(tab_id, cx);
+        self.start_port_profiler_for_node(node_id, cx);
         cx.notify();
     }
 
@@ -295,15 +295,6 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let forward_count = forwards.len();
-        let has_running_forwards = forwards.iter().any(|rule| {
-            matches!(
-                rule.status,
-                ForwardStatus::Active | ForwardStatus::Starting | ForwardStatus::Error
-            )
-        });
-        let has_suspended_forwards = forwards
-            .iter()
-            .any(|rule| matches!(rule.status, ForwardStatus::Suspended));
         div()
             .flex()
             .flex_col()
@@ -327,81 +318,6 @@ impl WorkspaceApp {
                                     cx.stop_propagation();
                                 }),
                             ))
-                            .when(has_running_forwards, |actions| {
-                                actions.child(
-                                    self.render_forward_button(
-                                        self.i18n.t("forwards.actions.stop_all"),
-                                        Some(LucideIcon::Square),
-                                        ForwardButtonVariant::Secondary,
-                                        true,
-                                        has_background,
-                                        cx.listener({
-                                            let node_id = node_id.clone();
-                                            move |this, _event, _window, cx| {
-                                                this.stop_all_forward_rules(
-                                                    tab_id,
-                                                    node_id.clone(),
-                                                    cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        }),
-                                    )
-                                    .h(px(32.0))
-                                    .px_3()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs)),
-                                )
-                            })
-                            .when(has_running_forwards, |actions| {
-                                actions.child(
-                                    self.render_forward_button(
-                                        self.i18n.t("forwards.actions.suspend_all"),
-                                        Some(LucideIcon::Pause),
-                                        ForwardButtonVariant::Secondary,
-                                        true,
-                                        has_background,
-                                        cx.listener({
-                                            let node_id = node_id.clone();
-                                            move |this, _event, _window, cx| {
-                                                this.suspend_all_forward_rules(
-                                                    tab_id,
-                                                    node_id.clone(),
-                                                    cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        }),
-                                    )
-                                    .h(px(32.0))
-                                    .px_3()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs)),
-                                )
-                            })
-                            .when(has_suspended_forwards, |actions| {
-                                actions.child(
-                                    self.render_forward_button(
-                                        self.i18n.t("forwards.actions.restore_suspended"),
-                                        Some(LucideIcon::Play),
-                                        ForwardButtonVariant::Secondary,
-                                        true,
-                                        has_background,
-                                        cx.listener({
-                                            let node_id = node_id.clone();
-                                            move |this, _event, _window, cx| {
-                                                this.restore_suspended_forward_rules(
-                                                    tab_id,
-                                                    node_id.clone(),
-                                                    cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        }),
-                                    )
-                                    .h(px(32.0))
-                                    .px_3()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs)),
-                                )
-                            })
                             .child(
                                 self.render_forward_button(
                                     self.i18n.t("forwards.actions.new_forward"),

@@ -75,6 +75,8 @@ impl WorkspaceApp {
             next_pane_id: 1,
             next_session_id: 1,
             search: SearchBarState::default(),
+            terminal_command_bar_focused: false,
+            terminal_command_bar_draft: String::new(),
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
@@ -123,6 +125,7 @@ impl WorkspaceApp {
             reconnect_worker_rx,
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_totals: HashMap::new(),
+            reconnect_forward_restore_totals: HashMap::new(),
             terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
@@ -132,7 +135,13 @@ impl WorkspaceApp {
             next_ssh_node_id: 1,
             forward_tab_nodes: HashMap::new(),
             forwarding_view: forwards::ForwardsViewState::default(),
+            forwarding_port_detection_by_node: HashMap::new(),
+            forwarding_port_profiler_nodes: HashSet::new(),
             sftp_tab_nodes: HashMap::new(),
+            sftp_view_node: None,
+            sftp_local_path_memory: HashMap::new(),
+            sftp_path_memory: HashMap::new(),
+            sftp_remote_home_by_node: HashMap::new(),
             ide_tab_surfaces: HashMap::new(),
             ide_surface_subscriptions: HashMap::new(),
             ide_tab_nodes: HashMap::new(),
@@ -183,6 +192,7 @@ impl WorkspaceApp {
                             workspace.poll_forwarding_events(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
                             workspace.maybe_start_forwards_port_scan(cx);
+                            workspace.maybe_refresh_forwards_stats(cx);
                             if workspace.new_connection_form.is_some()
                                 || workspace.keyboard_interactive_challenge.is_some()
                                 || workspace.focused_settings_input.is_some()
@@ -277,6 +287,7 @@ impl WorkspaceApp {
                 SettingsCursorStyle::Bar => TerminalCursorShape::Bar,
             },
             cursor_blink: terminal.cursor_blink,
+            scrollback_lines: terminal.scrollback.clamp(500, 20_000) as usize,
             paste_protection: terminal.paste_protection,
             smart_copy: terminal.smart_copy,
             osc52_clipboard: terminal.osc52_clipboard,

@@ -212,6 +212,71 @@ pub struct SshPtyHandle {
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
 }
 
+pub struct SshShellChannel {
+    channel: Channel<client::Msg>,
+}
+
+impl SshShellChannel {
+    pub async fn sample_until(
+        &mut self,
+        command: &str,
+        end_marker: &str,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<String, SshTransportError> {
+        self.channel
+            .data(command.as_bytes())
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+
+        let mut output = Vec::new();
+        tokio::time::timeout(timeout, async {
+            loop {
+                match self.channel.wait().await {
+                    Some(ChannelMsg::Data { data }) => {
+                        output.extend_from_slice(&data);
+                        if output.len() > max_output_size {
+                            output.truncate(max_output_size);
+                            break;
+                        }
+                        if let Ok(text) = std::str::from_utf8(&output)
+                            && text.contains(end_marker)
+                        {
+                            break;
+                        }
+                    }
+                    Some(ChannelMsg::ExtendedData { .. }) => {}
+                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => {
+                        return Err(SshTransportError::Channel(
+                            "persistent shell channel closed".to_string(),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        return Err(SshTransportError::Channel(
+                            "persistent shell channel ended".to_string(),
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| SshTransportError::Timeout)??;
+
+        String::from_utf8(output).map_err(|error| {
+            SshTransportError::Channel(format!("remote shell output was not UTF-8: {error}"))
+        })
+    }
+
+    pub async fn close(&mut self) -> Result<(), SshTransportError> {
+        self.channel
+            .close()
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))
+    }
+}
+
 impl SshPtyHandle {
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.ssh_connection.clone()
@@ -460,6 +525,25 @@ impl SshConnectionHandle {
             .channel_open_session()
             .await
             .map_err(|error| SshTransportError::Channel(error.to_string()))
+    }
+
+    pub async fn open_persistent_shell_channel(
+        &self,
+        init_command: &str,
+    ) -> Result<SshShellChannel, SshTransportError> {
+        let channel = self.open_session_channel().await?;
+        channel
+            .request_shell(false)
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        if !init_command.is_empty() {
+            channel
+                .data(init_command.as_bytes())
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        Ok(SshShellChannel { channel })
     }
 
     pub fn set_remote_forward_handler(
@@ -1200,34 +1284,106 @@ impl SshTransportClient {
                 .await
                 .map_err(|error| SshTransportError::Channel(error.to_string()))?
         };
-        channel
-            .request_pty(
-                false,
-                "xterm-256color",
-                self.config.cols,
-                self.config.rows,
-                0,
-                0,
-                DEFAULT_PTY_MODES,
-            )
-            .await
-            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
-        if self.config.agent_forwarding {
-            let _ = channel.agent_forward(true).await;
-        }
-        channel
-            .request_shell(false)
-            .await
-            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
-
         let session_id = uuid::Uuid::new_v4().to_string();
         let (command_tx, mut command_rx) =
             mpsc::channel::<SshTransportCommand>(SSH_COMMAND_CHANNEL_CAPACITY);
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(SSH_OUTPUT_CHANNEL_CAPACITY);
         let task_session_id = session_id.clone();
+        let agent_forwarding = self.config.agent_forwarding;
+        let deferred_pty = self.config.cols == 0 || self.config.rows == 0;
+        let initial_cols = self.config.cols.clamp(1, 500);
+        let initial_rows = self.config.rows.clamp(1, 200);
+
+        if !deferred_pty {
+            channel
+                .request_pty(
+                    false,
+                    "xterm-256color",
+                    initial_cols,
+                    initial_rows,
+                    0,
+                    0,
+                    DEFAULT_PTY_MODES,
+                )
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+            if agent_forwarding {
+                let _ = channel.agent_forward(true).await;
+            }
+            channel
+                .request_shell(false)
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        }
 
         tokio::spawn(async move {
             let mut output_batcher = SshOutputBatcher::new();
+            if deferred_pty {
+                let (pty_cols, pty_rows) = tokio::select! {
+                    command = command_rx.recv() => {
+                        match command {
+                            Some(SshTransportCommand::Resize { cols, rows }) => {
+                                ((cols as u32).clamp(1, 500), (rows as u32).clamp(1, 200))
+                            }
+                            Some(SshTransportCommand::Close) => {
+                                let _ = channel.eof().await;
+                                let _ = output_tx
+                                    .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes())
+                                    .await;
+                                return;
+                            }
+                            Some(SshTransportCommand::Data(_)) => {
+                                tracing::warn!(
+                                    "data arrived before deferred SSH PTY resize for session {}, using fallback 120x40",
+                                    task_session_id
+                                );
+                                (120, 40)
+                            }
+                            None => {
+                                let _ = channel.eof().await;
+                                let _ = output_tx
+                                    .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes())
+                                    .await;
+                                return;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {
+                        tracing::warn!(
+                            "deferred SSH PTY resize timed out for session {}, using fallback 120x40",
+                            task_session_id
+                        );
+                        (120, 40)
+                    }
+                };
+
+                if let Err(error) = channel
+                    .request_pty(
+                        false,
+                        "xterm-256color",
+                        pty_cols,
+                        pty_rows,
+                        0,
+                        0,
+                        DEFAULT_PTY_MODES,
+                    )
+                    .await
+                {
+                    let _ = output_tx
+                        .send(format!("\r\nFailed to request PTY: {error}\r\n").into_bytes())
+                        .await;
+                    return;
+                }
+                if agent_forwarding {
+                    let _ = channel.agent_forward(true).await;
+                }
+                if let Err(error) = channel.request_shell(false).await {
+                    let _ = output_tx
+                        .send(format!("\r\nFailed to request shell: {error}\r\n").into_bytes())
+                        .await;
+                    return;
+                }
+            }
             loop {
                 let flush_deadline = output_batcher.flush_due();
                 tokio::select! {

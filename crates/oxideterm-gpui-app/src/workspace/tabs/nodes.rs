@@ -2,7 +2,7 @@ impl WorkspaceApp {
     pub(super) fn sync_ssh_node_lifecycle(&mut self, cx: &mut Context<Self>) {
         let terminal_nodes = self.terminal_ssh_nodes.clone();
         let mut changed = false;
-        let mut sessions_to_suspend = Vec::new();
+        let mut forwarding_to_suspend = Vec::new();
         let mut nodes_to_restore = Vec::new();
         let mut nodes_to_grace = Vec::new();
         for (session_id, node_id) in terminal_nodes {
@@ -41,6 +41,7 @@ impl WorkspaceApp {
                 .and_then(|node| self.readiness_for_ssh_node_connection(node));
             let readiness = registry_readiness.unwrap_or(terminal_readiness);
             let forwarding_session_id = self.forwarding_session_id_for_node(&node_id);
+            let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
             if let Some(node) = self.ssh_nodes.get_mut(&node_id)
                 && node.readiness != readiness
             {
@@ -50,7 +51,7 @@ impl WorkspaceApp {
                         NodeReadiness::Error | NodeReadiness::Disconnected
                     )
                 {
-                    sessions_to_suspend.push(forwarding_session_id);
+                    forwarding_to_suspend.push((forwarding_session_id, forwarding_connection_id));
                     if matches!(readiness, NodeReadiness::Error) {
                         nodes_to_grace.push(node_id.clone());
                     }
@@ -64,11 +65,14 @@ impl WorkspaceApp {
                 changed = true;
             }
         }
-        if !sessions_to_suspend.is_empty() {
+        if !forwarding_to_suspend.is_empty() {
             let forwarding_registry = self.forwarding_registry.clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             forwarding_runtime.spawn(async move {
-                for session_id in sessions_to_suspend {
+                for (session_id, connection_id) in forwarding_to_suspend {
+                    if let Some(connection_id) = connection_id {
+                        forwarding_registry.stop_port_profiler(&connection_id);
+                    }
                     let _ = forwarding_registry.suspend_session(&session_id).await;
                 }
             });
@@ -150,29 +154,35 @@ impl WorkspaceApp {
                         self.emit_node_event(event);
                     }
                     self.persist_session_tree_snapshot();
-                    self.restore_forwarding_session_for_node(&node_id);
+                    self.restore_forwarding_rules_for_reconnect(&node_id);
                     if self
                         .reconnect_orchestrator
                         .job(&node_id.0)
                         .is_some_and(|job| job.ended_at.is_none())
                     {
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some("restored forwarding after reconnect".to_string()),
-                        );
-                        let _ = self
+                        let has_forward_snapshot = self
                             .reconnect_orchestrator
-                            .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
-                        let queued = self.resume_sftp_transfers_for_reconnect(&node_id);
-                        if queued == 0 {
-                            self.finish_reconnect_after_transfer_resume(
-                                &node_id,
+                            .job(&node_id.0)
+                            .is_some_and(|job| !job.snapshot.forward_rules.is_empty());
+                        if !has_forward_snapshot {
+                            let _ = self.reconnect_orchestrator.complete_phase(
+                                &node_id.0,
                                 PhaseResult::Skipped,
-                                "no incomplete transfers in snapshot".to_string(),
-                                0,
-                                cx,
+                                Some("no forward rules in snapshot".to_string()),
                             );
+                            let _ = self
+                                .reconnect_orchestrator
+                                .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
+                            let queued = self.resume_sftp_transfers_for_reconnect(&node_id);
+                            if queued == 0 {
+                                self.finish_reconnect_after_transfer_resume(
+                                    &node_id,
+                                    PhaseResult::Skipped,
+                                    "no incomplete transfers in snapshot".to_string(),
+                                    0,
+                                    cx,
+                                );
+                            }
                         }
                     }
                     let children_to_start = self
@@ -306,6 +316,38 @@ impl WorkspaceApp {
                     }
                     changed = true;
                 }
+                ReconnectWorkerResult::ForwardRulesRestored {
+                    node_id,
+                    result,
+                    restored,
+                    detail,
+                } => {
+                    self.reconnect_forward_restore_totals
+                        .insert(node_id.clone(), restored);
+                    if self
+                        .reconnect_orchestrator
+                        .job(&node_id.0)
+                        .is_some_and(|job| job.ended_at.is_none())
+                    {
+                        let _ =
+                            self.reconnect_orchestrator
+                                .complete_phase(&node_id.0, result, Some(detail));
+                        let _ = self
+                            .reconnect_orchestrator
+                            .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
+                        let queued = self.resume_sftp_transfers_for_reconnect(&node_id);
+                        if queued == 0 {
+                            self.finish_reconnect_after_transfer_resume(
+                                &node_id,
+                                PhaseResult::Skipped,
+                                "no incomplete transfers in snapshot".to_string(),
+                                0,
+                                cx,
+                            );
+                        }
+                    }
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -339,10 +381,28 @@ impl WorkspaceApp {
                     node.readiness = state.clone();
                 }
                 if matches!(previous, Some(NodeReadiness::Ready))
-                    && matches!(state, NodeReadiness::Error)
-                    && reason.to_ascii_lowercase().contains("link")
+                    && matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
                 {
-                    self.schedule_grace_period_reconnect(&node_id, cx);
+                    let message = if matches!(state, NodeReadiness::Disconnected) {
+                        "Connection closed".to_string()
+                    } else {
+                        self.i18n.t("sftp.errors.connection_lost")
+                    };
+                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
+                    let session_id = self.forwarding_session_id_for_node(&node_id);
+                    let connection_id = self.forwarding_connection_id_for_node(&node_id);
+                    let forwarding_registry = self.forwarding_registry.clone();
+                    self.forwarding_runtime.spawn(async move {
+                        if let Some(connection_id) = connection_id {
+                            forwarding_registry.stop_port_profiler(&connection_id);
+                        }
+                        let _ = forwarding_registry.suspend_session(&session_id).await;
+                    });
+                    if matches!(state, NodeReadiness::Error)
+                        && reason.to_ascii_lowercase().contains("link")
+                    {
+                        self.schedule_grace_period_reconnect(&node_id, cx);
+                    }
                 }
                 true
             }
@@ -562,11 +622,15 @@ impl WorkspaceApp {
         let _ = self.reconnect_orchestrator.complete_phase(
             &node_id.0,
             PhaseResult::Ok,
-            Some("native node reconnect verified".to_string()),
+            Some(self.verify_forward_rules_for_reconnect(node_id)),
         );
+        let restored_forwards = self
+            .reconnect_forward_restore_totals
+            .remove(node_id)
+            .unwrap_or_default();
         let _ = self
             .reconnect_orchestrator
-            .finish(&node_id.0, Ok(1 + restored_transfers));
+            .finish(&node_id.0, Ok(1 + restored_forwards + restored_transfers));
     }
 
     fn schedule_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
@@ -611,10 +675,17 @@ impl WorkspaceApp {
             .iter()
             .filter_map(|affected_node_id| self.node_router.connection_id_for_node(affected_node_id))
             .collect::<Vec<_>>();
+        let forward_rules = self.forward_rules_snapshot_for_nodes(&affected_nodes);
+        let active_port_forward_ids = forward_rules
+            .iter()
+            .flat_map(|entry| entry.rules.iter().map(|rule| rule.id.clone()))
+            .collect::<Vec<_>>();
         let ide_snapshot = self.ide_snapshot_for_node(node_id, cx);
         let snapshot = ReconnectSnapshot {
             old_terminal_session_ids,
             terminal_sessions_by_node,
+            forward_rules,
+            active_port_forward_ids,
             old_connection_ids: old_connection_ids.clone(),
             ide_snapshot,
             ..ReconnectSnapshot::default()
@@ -895,6 +966,166 @@ impl WorkspaceApp {
         });
     }
 
+    fn restore_forwarding_rules_for_reconnect(&mut self, node_id: &NodeId) {
+        let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
+            return;
+        };
+        if job.snapshot.forward_rules.is_empty() {
+            return;
+        }
+
+        let snapshots = job.snapshot.forward_rules.clone();
+        let owner_connection_ids = snapshots
+            .iter()
+            .map(|entry| {
+                let entry_node_id = NodeId::new(entry.node_id.clone());
+                let owner = self
+                    .ssh_nodes
+                    .get(&entry_node_id)
+                    .and_then(|node| node.saved_connection_id.clone());
+                (entry.node_id.clone(), owner)
+            })
+            .collect::<HashMap<_, _>>();
+        let router = self.node_router.clone();
+        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_worker_tx = self.forwarding_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let tx = self.reconnect_worker_tx.clone();
+        let root_node_id = node_id.clone();
+        runtime.spawn(async move {
+            let mut restored = 0_u32;
+            let mut failures = 0_u32;
+            for entry in snapshots {
+                let entry_node_id = NodeId::new(entry.node_id.clone());
+                let session_id = format!("{}{}", crate::workspace::forwards::FORWARDS_NODE_SESSION_PREFIX, entry.node_id);
+                let consumer = ConnectionConsumer::PortForward(session_id.clone());
+                let resolved = match router
+                    .acquire_connection_wait(&entry_node_id, consumer.clone(), Duration::from_secs(15))
+                    .await
+                {
+                    Ok(resolved) => resolved,
+                    Err(_) => {
+                        failures += entry.rules.len() as u32;
+                        continue;
+                    }
+                };
+                let _ = forwarding_worker_tx.send(ForwardingWorkerResult::Binding {
+                    binding: Some((
+                        session_id.clone(),
+                        resolved.connection_id.clone(),
+                        consumer.clone(),
+                    )),
+                });
+                let manager = forwarding_registry.register(session_id.clone(), resolved.handle);
+                let live_keys = manager
+                    .list_forwards()
+                    .into_iter()
+                    .map(|rule| forward_restore_key_for_rule(&rule))
+                    .collect::<HashSet<_>>();
+                let mut live_keys = live_keys;
+                for snapshot_rule in entry.rules {
+                    let key = forward_restore_key_for_snapshot_rule(&snapshot_rule);
+                    for live_rule in manager.list_forwards() {
+                        live_keys.insert(forward_restore_key_for_rule(&live_rule));
+                    }
+                    if live_keys.contains(&key) {
+                        continue;
+                    }
+                    let Some(rule) = forward_rule_from_reconnect_snapshot(&snapshot_rule) else {
+                        failures += 1;
+                        continue;
+                    };
+                    match manager.create_forward_with_health_check(rule, true).await {
+                        Ok(created) => {
+                            live_keys.insert(forward_restore_key_for_rule(&created));
+                            restored += 1;
+                            if let Some(owner_connection_id) =
+                                owner_connection_ids.get(&entry.node_id).cloned().flatten()
+                            {
+                                let created_id = created.id.clone();
+                                let _ = forwarding_registry.sync_persisted_forward_rule(
+                                    &created_id,
+                                    &session_id,
+                                    Some(owner_connection_id),
+                                    created,
+                                );
+                            }
+                        }
+                        Err(_) => failures += 1,
+                    }
+                }
+            }
+            let detail = if failures == 0 {
+                format!("restored {restored} forward(s)")
+            } else {
+                format!("restored {restored} forward(s), {failures} failed")
+            };
+            let _ = tx.send(ReconnectWorkerResult::ForwardRulesRestored {
+                node_id: root_node_id,
+                result: PhaseResult::Ok,
+                restored,
+                detail,
+            });
+        });
+    }
+
+    fn forward_rules_snapshot_for_nodes(
+        &self,
+        affected_nodes: &[NodeId],
+    ) -> Vec<ReconnectForwardRuleSnapshot> {
+        affected_nodes
+            .iter()
+            .filter_map(|affected_node_id| {
+                let manager = self
+                    .forwarding_registry
+                    .get(&self.forwarding_session_id_for_node(affected_node_id))?;
+                let rules = manager
+                    .list_forwards()
+                    .into_iter()
+                    .filter(|rule| rule.status != ForwardStatus::Stopped)
+                    .map(reconnect_forward_rule_from_rule)
+                    .collect::<Vec<_>>();
+                (!rules.is_empty()).then_some(ReconnectForwardRuleSnapshot {
+                    node_id: affected_node_id.0.clone(),
+                    rules,
+                })
+            })
+            .collect()
+    }
+
+    fn verify_forward_rules_for_reconnect(&self, node_id: &NodeId) -> String {
+        let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
+            return "native node reconnect verified".to_string();
+        };
+        let mut drifts = Vec::new();
+        for entry in job.snapshot.forward_rules {
+            let entry_node_id = NodeId::new(entry.node_id.clone());
+            let expected = entry.rules.len();
+            let live = self
+                .forwarding_registry
+                .get(&self.forwarding_session_id_for_node(&entry_node_id))
+                .map(|manager| {
+                    manager
+                        .list_forwards()
+                        .into_iter()
+                        .filter(|rule| rule.status == ForwardStatus::Active)
+                        .count()
+                })
+                .unwrap_or_default();
+            if expected > 0 && live < expected {
+                drifts.push(format!(
+                    "{} forwards: live={}, snapshotExpected={}",
+                    entry.node_id, live, expected
+                ));
+            }
+        }
+        if drifts.is_empty() {
+            "native node reconnect verified".to_string()
+        } else {
+            format!("native node reconnect verified with drift: {}", drifts.join("; "))
+        }
+    }
+
     fn readiness_for_ssh_node_connection(&self, node: &WorkspaceSshNode) -> Option<NodeReadiness> {
         let connection_key = node.config.connection_key();
         self.ssh_registry
@@ -902,5 +1133,136 @@ impl WorkspaceApp {
             .into_iter()
             .find(|connection| connection.key == connection_key)
             .map(|connection| readiness_for_connection_state(&connection.state))
+    }
+}
+
+fn reconnect_forward_rule_from_rule(rule: ForwardRule) -> ReconnectForwardRule {
+    ReconnectForwardRule {
+        id: rule.id,
+        forward_type: forward_type_to_snapshot(rule.forward_type).to_string(),
+        bind_address: rule.bind_address,
+        bind_port: rule.bind_port,
+        target_host: rule.target_host,
+        target_port: rule.target_port,
+        status: forward_status_to_snapshot(&rule.status).to_string(),
+        description: rule.description,
+    }
+}
+
+fn forward_rule_from_reconnect_snapshot(rule: &ReconnectForwardRule) -> Option<ForwardRule> {
+    let mut restored = match rule.forward_type.as_str() {
+        "local" => ForwardRule::local(
+            rule.bind_address.clone(),
+            rule.bind_port,
+            rule.target_host.clone(),
+            rule.target_port,
+        ),
+        "remote" => ForwardRule::remote(
+            rule.bind_address.clone(),
+            rule.bind_port,
+            rule.target_host.clone(),
+            rule.target_port,
+        ),
+        "dynamic" => ForwardRule {
+            target_host: rule.target_host.clone(),
+            target_port: rule.target_port,
+            ..ForwardRule::dynamic(rule.bind_address.clone(), rule.bind_port)
+        },
+        _ => return None,
+    };
+    // Tauri restore calls nodeCreateForward, which allocates a fresh id and
+    // starts from Starting. Preserve that instead of resurrecting stale ids.
+    restored.description = rule.description.clone();
+    restored.status = ForwardStatus::Starting;
+    Some(restored)
+}
+
+fn forward_restore_key_for_rule(rule: &ForwardRule) -> String {
+    [
+        forward_type_to_snapshot(rule.forward_type).to_string(),
+        rule.bind_address.clone(),
+        rule.bind_port.to_string(),
+        rule.target_host.clone(),
+        rule.target_port.to_string(),
+    ]
+    .join(":")
+}
+
+fn forward_restore_key_for_snapshot_rule(rule: &ReconnectForwardRule) -> String {
+    [
+        rule.forward_type.clone(),
+        rule.bind_address.clone(),
+        rule.bind_port.to_string(),
+        rule.target_host.clone(),
+        rule.target_port.to_string(),
+    ]
+    .join(":")
+}
+
+fn forward_type_to_snapshot(forward_type: ForwardType) -> &'static str {
+    match forward_type {
+        ForwardType::Local => "local",
+        ForwardType::Remote => "remote",
+        ForwardType::Dynamic => "dynamic",
+    }
+}
+
+fn forward_status_to_snapshot(status: &ForwardStatus) -> &'static str {
+    match status {
+        ForwardStatus::Starting => "starting",
+        ForwardStatus::Active => "active",
+        ForwardStatus::Stopped => "stopped",
+        ForwardStatus::Error => "error",
+        ForwardStatus::Suspended => "suspended",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_forward_restore_key_keeps_distinct_targets() {
+        let service_a = ReconnectForwardRule {
+            forward_type: "local".to_string(),
+            bind_address: "127.0.0.1".to_string(),
+            bind_port: 8080,
+            target_host: "service-a".to_string(),
+            target_port: 3000,
+            ..ReconnectForwardRule::default()
+        };
+        let service_b = ReconnectForwardRule {
+            target_host: "service-b".to_string(),
+            target_port: 4000,
+            ..service_a.clone()
+        };
+
+        assert_ne!(
+            forward_restore_key_for_snapshot_rule(&service_a),
+            forward_restore_key_for_snapshot_rule(&service_b)
+        );
+    }
+
+    #[test]
+    fn reconnect_forward_restore_allocates_fresh_starting_rule() {
+        let snapshot = ReconnectForwardRule {
+            id: "old-forward-id".to_string(),
+            forward_type: "dynamic".to_string(),
+            bind_address: "127.0.0.1".to_string(),
+            bind_port: 1080,
+            target_host: "0.0.0.0".to_string(),
+            target_port: 0,
+            status: "active".to_string(),
+            description: "socks".to_string(),
+        };
+
+        let restored = forward_rule_from_reconnect_snapshot(&snapshot)
+            .expect("dynamic snapshot should restore");
+
+        assert_ne!(restored.id, snapshot.id);
+        assert_eq!(restored.status, ForwardStatus::Starting);
+        assert_eq!(restored.target_host, "0.0.0.0");
+        assert_eq!(restored.target_port, 0);
+        assert_eq!(restored.description, "socks");
     }
 }

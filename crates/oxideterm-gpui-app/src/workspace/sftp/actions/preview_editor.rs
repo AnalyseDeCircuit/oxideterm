@@ -220,10 +220,12 @@ impl WorkspaceApp {
             .max(1);
         let id = self.sftp_view.next_transfer_id;
         self.sftp_view.next_transfer_id += 1;
-        let transfer_id = id.to_string();
+        let transfer_id = new_sftp_transfer_id(&node_id, name);
         self.sftp_view.transfers.push(SftpTransferItem {
             id,
             transfer_id: transfer_id.clone(),
+            batch_id: None,
+            node_id: node_id.clone(),
             name: name.to_string(),
             local_path: local_path.clone(),
             remote_path: remote_path.clone(),

@@ -14,7 +14,7 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .overflow_hidden()
-                    .children(mock_drives().into_iter().map(|drive| {
+                    .children(local_drives().into_iter().map(|drive| {
                         let path = drive.path.clone();
                         div()
                             .w_full()

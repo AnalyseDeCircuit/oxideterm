@@ -14,6 +14,7 @@ pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
 
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
+pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
 pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
@@ -42,6 +43,7 @@ pub struct TerminalUiPreferences {
     pub line_height: f32,
     pub cursor_shape: TerminalCursorShape,
     pub cursor_blink: bool,
+    pub scrollback_lines: usize,
     pub paste_protection: bool,
     pub smart_copy: bool,
     pub osc52_clipboard: bool,
@@ -68,6 +70,7 @@ impl Default for TerminalUiPreferences {
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
             cursor_shape: TerminalCursorShape::Block,
             cursor_blink: true,
+            scrollback_lines: DEFAULT_SCROLLBACK_LINES,
             paste_protection: TERMINAL_PASTE_PROTECTION,
             smart_copy: TERMINAL_SMART_COPY,
             osc52_clipboard: TERMINAL_OSC52_CLIPBOARD,

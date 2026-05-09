@@ -30,7 +30,8 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    PhaseEvent, PhaseResult, ReconnectIdeSnapshot, ReconnectJob, ReconnectNodeTerminalSnapshot,
+    PhaseEvent, PhaseResult, ReconnectForwardRule, ReconnectForwardRuleSnapshot,
+    ReconnectIdeSnapshot, ReconnectJob, ReconnectNodeTerminalSnapshot,
     ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
     ReconnectTiming,
 };
@@ -43,6 +44,6 @@ pub use router::{
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
     ProxyChainPreflightChallenge, RemoteForwardHandler, RemoteForwardedTcpIp, SshForwardStream,
-    SshPromptError, SshPromptHandler, SshPtyHandle, SshTransportClient, SshTransportCommand,
-    SshTransportError,
+    SshPromptError, SshPromptHandler, SshPtyHandle, SshShellChannel, SshTransportClient,
+    SshTransportCommand, SshTransportError,
 };

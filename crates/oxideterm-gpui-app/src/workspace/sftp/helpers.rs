@@ -29,8 +29,17 @@ fn is_sftp_incomplete_store_compat_error(error: &str) -> bool {
         || error.contains("not found")
 }
 
-fn home_path_mock() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| "/Users/lipsc".to_string())
+fn home_path() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| {
+        #[cfg(windows)]
+        {
+            "C:\\".to_string()
+        }
+        #[cfg(not(windows))]
+        {
+            "/".to_string()
+        }
+    })
 }
 
 fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
@@ -73,25 +82,180 @@ fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
     Ok(entries)
 }
 
-fn mock_drives() -> Vec<SftpDrive> {
-    vec![
-        SftpDrive {
-            name: "Macintosh HD".to_string(),
-            path: "/".to_string(),
+fn local_drives() -> Vec<SftpDrive> {
+    let mut drives = platform_local_drives();
+    drives.sort_by(|left, right| {
+        let left_system = if left.drive_type == "system" { 0 } else { 1 };
+        let right_system = if right.drive_type == "system" { 0 } else { 1 };
+        left_system
+            .cmp(&right_system)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if drives.is_empty() {
+        drives.push(SftpDrive {
+            name: "System".to_string(),
+            path: home_path_root(),
             drive_type: "system",
-            total_space: 512 * 1024 * 1024 * 1024,
-            available_space: 128 * 1024 * 1024 * 1024,
+            total_space: 0,
+            available_space: 0,
             read_only: false,
-        },
-        SftpDrive {
-            name: "Network Share".to_string(),
-            path: "/Volumes/share".to_string(),
-            drive_type: "network",
-            total_space: 1024 * 1024 * 1024 * 1024,
-            available_space: 620 * 1024 * 1024 * 1024,
-            read_only: false,
-        },
-    ]
+        });
+    }
+    drives
+}
+
+fn home_path_root() -> String {
+    #[cfg(windows)]
+    {
+        "C:\\".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        "/".to_string()
+    }
+}
+
+fn platform_local_drives() -> Vec<SftpDrive> {
+    use sysinfo::Disks;
+
+    let disks = Disks::new_with_refreshed_list();
+    let mut drives: Vec<SftpDrive> = Vec::new();
+
+    #[cfg(unix)]
+    let mut seen_dev_ids: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    #[cfg(not(unix))]
+    let mut seen_mount_points: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for disk in disks.list() {
+        let mount_point = disk.mount_point().to_path_buf();
+
+        #[cfg(unix)]
+        let unix_dev_id = {
+            use std::os::unix::fs::MetadataExt;
+            match std::fs::metadata(&mount_point) {
+                Ok(metadata) => {
+                    let dev = metadata.dev();
+                    if let Some(&existing_idx) = seen_dev_ids.get(&dev) {
+                        if mount_point.as_os_str().len() < drives[existing_idx].path.len() {
+                            drives[existing_idx].path = mount_point.to_string_lossy().to_string();
+                            drives[existing_idx].name = drive_display_name(disk, &mount_point);
+                        }
+                        continue;
+                    }
+                    Some(dev)
+                }
+                Err(_) => None,
+            }
+        };
+        #[cfg(not(unix))]
+        {
+            let canonical = mount_point
+                .canonicalize()
+                .unwrap_or_else(|_| mount_point.clone());
+            if !seen_mount_points.insert(canonical) {
+                continue;
+            }
+        }
+
+        let mount = mount_point.to_string_lossy();
+        if is_pseudo_mount(&mount) {
+            continue;
+        }
+
+        #[cfg(unix)]
+        if let Some(dev) = unix_dev_id {
+            seen_dev_ids.insert(dev, drives.len());
+        }
+
+        let read_only = if cfg!(target_os = "macos") && mount == "/" {
+            !std::fs::metadata("/Users")
+                .map(|metadata| !metadata.permissions().readonly())
+                .unwrap_or(false)
+        } else {
+            disk.is_read_only()
+        };
+
+        drives.push(SftpDrive {
+            name: drive_display_name(disk, &mount_point),
+            path: mount.to_string(),
+            drive_type: classify_disk(disk),
+            total_space: disk.total_space(),
+            available_space: disk.available_space(),
+            read_only,
+        });
+    }
+    drives
+}
+
+fn is_pseudo_mount(mount: &str) -> bool {
+    mount.starts_with("/proc")
+        || mount.starts_with("/sys")
+        || mount.starts_with("/dev")
+        || mount.starts_with("/snap")
+        || mount == "/boot"
+        || mount == "/boot/efi"
+        || is_blocked_run_mount(mount)
+}
+
+fn is_blocked_run_mount(mount: &str) -> bool {
+    if !mount.starts_with("/run") {
+        return false;
+    }
+    if mount.starts_with("/run/media/") || mount.starts_with("/run/mount/") {
+        return false;
+    }
+    mount.starts_with("/run/user/") && !mount.contains("/gvfs/")
+        || (!mount.starts_with("/run/user/"))
+}
+
+fn drive_display_name(disk: &sysinfo::Disk, mount_point: &std::path::Path) -> String {
+    let raw_name = disk.name().to_string_lossy().to_string();
+    if !raw_name.is_empty() {
+        return raw_name;
+    }
+    let mount = mount_point.to_string_lossy();
+    mount_point
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            if mount == "/" {
+                "System".to_string()
+            } else {
+                mount.to_string()
+            }
+        })
+}
+
+fn classify_disk(disk: &sysinfo::Disk) -> &'static str {
+    use sysinfo::DiskKind;
+
+    let mount = disk.mount_point().to_string_lossy();
+    #[cfg(not(windows))]
+    if mount == "/" {
+        return "system";
+    }
+    #[cfg(windows)]
+    if mount.to_uppercase().starts_with("C:") {
+        return "system";
+    }
+
+    if disk.is_removable() {
+        return "removable";
+    }
+
+    let fs_type = disk.file_system().to_string_lossy().to_lowercase();
+    if matches!(
+        fs_type.as_str(),
+        "nfs" | "cifs" | "smb" | "smbfs" | "afpfs" | "9p" | "fuse.sshfs"
+    ) {
+        return "network";
+    }
+
+    match disk.kind() {
+        DiskKind::SSD | DiskKind::HDD => "system",
+        _ => "removable",
+    }
 }
 
 fn sftp_file_entry(
@@ -241,6 +405,32 @@ fn join_local_path(base: &str, name: &str) -> String {
     path.to_string_lossy().to_string()
 }
 
+fn normalize_external_dropped_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let raw = path.to_string_lossy();
+    if raw.trim().is_empty() {
+        return None;
+    }
+    if raw.len() >= 2
+        && raw.as_bytes()[1] == b':'
+        && raw.chars().skip(2).all(|ch| ch == '/' || ch == '\\')
+    {
+        return Some(std::path::PathBuf::from(format!("{}:\\", &raw[..1])));
+    }
+    if raw.chars().all(|ch| ch == '/' || ch == '\\') {
+        return raw.chars().next().map(|root| std::path::PathBuf::from(root.to_string()));
+    }
+    Some(std::path::PathBuf::from(raw.trim_end_matches(['/', '\\'])))
+}
+
+fn new_sftp_transfer_id(node_id: &NodeId, name: &str) -> String {
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    let safe_name = name.replace(['/', '\\', ':'], "_");
+    format!("{}-{timestamp_ms}-{safe_name}", node_id.0)
+}
+
 fn unique_sftp_conflict_name(name: &str, existing_files: &[SftpFileEntry]) -> String {
     let existing_names = existing_files
         .iter()
@@ -319,6 +509,17 @@ fn sftp_transfer_state_from_remote(state: RemoteTransferState) -> SftpTransferSt
         RemoteTransferState::Completed => SftpTransferState::Completed,
         RemoteTransferState::Failed => SftpTransferState::Error,
         RemoteTransferState::Cancelled => SftpTransferState::Cancelled,
+    }
+}
+
+fn sftp_transfer_state_from_background(state: BackgroundTransferState) -> SftpTransferState {
+    match state {
+        BackgroundTransferState::Pending => SftpTransferState::Pending,
+        BackgroundTransferState::Active => SftpTransferState::Active,
+        BackgroundTransferState::Paused => SftpTransferState::Paused,
+        BackgroundTransferState::Completed => SftpTransferState::Completed,
+        BackgroundTransferState::Cancelled => SftpTransferState::Cancelled,
+        BackgroundTransferState::Error => SftpTransferState::Error,
     }
 }
 

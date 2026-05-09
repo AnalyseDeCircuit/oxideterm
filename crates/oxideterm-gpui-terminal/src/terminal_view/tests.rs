@@ -1086,6 +1086,9 @@ fn copy_policy_defaults_keep_current_terminal_behavior() {
     assert!(!settings.copy_on_select);
     assert!(settings.keep_selection_on_copy);
     assert_eq!(settings.blink_mode, TerminalBlinkMode::On);
+
+    let preferences = TerminalUiPreferences::default();
+    assert_eq!(preferences.scrollback_lines, DEFAULT_SCROLLBACK_LINES);
 }
 
 #[test]

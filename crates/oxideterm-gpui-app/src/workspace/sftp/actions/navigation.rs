@@ -221,6 +221,9 @@ impl WorkspaceApp {
                 self.sftp_view.local_path_scroll_x = 0.0;
                 self.sftp_view.local_path = path.clone();
                 self.sftp_view.local_path_input = path.clone();
+                if let Some(node_id) = self.sftp_view_node.clone() {
+                    self.sftp_local_path_memory.insert(node_id, path.clone());
+                }
                 self.sftp_view.editing_local_path = false;
                 self.sftp_view.local_files = list_local_files(&path).unwrap_or_else(|error| {
                     vec![sftp_file_entry(
@@ -317,8 +320,13 @@ impl WorkspaceApp {
 
     fn navigate_sftp_path(&mut self, pane: SftpPane, target: &str) {
         let next = match (pane, target) {
-            (SftpPane::Local, "~") => home_path_mock(),
-            (SftpPane::Remote, "~") => "/home/lipsc".to_string(),
+            (SftpPane::Local, "~") => home_path(),
+            (SftpPane::Remote, "~") => self
+                .active_tab_id
+                .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+                .and_then(|node_id| self.sftp_remote_home_by_node.get(node_id))
+                .cloned()
+                .unwrap_or_else(|| "/".to_string()),
             (SftpPane::Local, "..") => parent_path(&self.sftp_view.local_path, false),
             (SftpPane::Remote, "..") => parent_path(&self.sftp_view.remote_path, true),
             _ => target.to_string(),
@@ -384,6 +392,64 @@ impl WorkspaceApp {
             selected.insert(name.clone());
         }
         *last_selected = Some(name);
+    }
+
+    fn start_sftp_drag_candidate(&mut self, pane: SftpPane, x: f32, y: f32) {
+        let names = self.sftp_selected_names(pane);
+        if names.is_empty() {
+            self.sftp_view.drag_state = None;
+            return;
+        }
+        self.sftp_view.drag_state = Some(SftpDragState {
+            source_pane: pane,
+            names,
+            start_x: x,
+            start_y: y,
+            active: false,
+        });
+        self.sftp_view.drag_over_pane = None;
+    }
+
+    fn update_sftp_drag(&mut self, pane: SftpPane, x: f32, y: f32) {
+        let Some(drag) = self.sftp_view.drag_state.as_mut() else {
+            return;
+        };
+        let dx = x - drag.start_x;
+        let dy = y - drag.start_y;
+        if !drag.active && (dx * dx + dy * dy).sqrt() >= 5.0 {
+            drag.active = true;
+        }
+        if drag.active {
+            self.sftp_view.drag_over_pane = Some(pane);
+        }
+    }
+
+    fn finish_sftp_drag(&mut self, pane: SftpPane) {
+        let Some(drag) = self.sftp_view.drag_state.take() else {
+            self.sftp_view.drag_over_pane = None;
+            return;
+        };
+        self.sftp_view.drag_over_pane = None;
+        if !drag.active || drag.source_pane == pane {
+            return;
+        }
+        match (drag.source_pane, pane) {
+            (SftpPane::Local, SftpPane::Remote) => {
+                self.queue_sftp_named_transfers(
+                    SftpPane::Local,
+                    SftpTransferDirection::Upload,
+                    drag.names,
+                );
+            }
+            (SftpPane::Remote, SftpPane::Local) => {
+                self.queue_sftp_named_transfers(
+                    SftpPane::Remote,
+                    SftpTransferDirection::Download,
+                    drag.names,
+                );
+            }
+            _ => {}
+        }
     }
 
     fn clear_sftp_selection(&mut self, pane: SftpPane) {

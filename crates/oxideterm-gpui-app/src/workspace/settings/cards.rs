@@ -351,6 +351,11 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
+        if self.terminal_command_bar_focused {
+            self.terminal_command_bar_focused = false;
+            self.ime_marked_text = None;
+            changed = true;
+        }
         if self.session_manager.focused_input.take().is_some() {
             self.ime_marked_text = None;
             changed = true;

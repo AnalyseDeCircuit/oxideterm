@@ -16,6 +16,7 @@ use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum WorkspaceImeTarget {
     Search,
+    TerminalCommandBar,
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
     Forwards(ForwardInput),
@@ -28,6 +29,7 @@ impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
             Self::Search => 1,
+            Self::TerminalCommandBar => 2,
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
             Self::Forwards(input) => 1_700 + input.anchor_key(),
@@ -327,6 +329,10 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
+        if self.terminal_command_bar_focused && self.active_tab().is_some_and(is_terminal_tab) {
+            return Some(WorkspaceImeTarget::TerminalCommandBar);
+        }
+
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
@@ -344,6 +350,9 @@ impl WorkspaceApp {
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {
         match target {
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
+            WorkspaceImeTarget::TerminalCommandBar => self
+                .terminal_command_bar_focused
+                .then(|| self.terminal_command_bar_draft.clone()),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
@@ -443,6 +452,17 @@ impl WorkspaceApp {
                 replace_utf16(&mut self.search.query, replacement_range, text);
                 self.update_search_query(cx);
             }
+            WorkspaceImeTarget::TerminalCommandBar => {
+                if self.terminal_command_bar_focused {
+                    replace_utf16(
+                        &mut self.terminal_command_bar_draft,
+                        replacement_range,
+                        text,
+                    );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
                     replace_utf16(&mut self.settings_input_draft, replacement_range, text);
@@ -527,6 +547,13 @@ impl WorkspaceApp {
             }
         }
     }
+}
+
+fn is_terminal_tab(tab: &oxideterm_workspace::Tab) -> bool {
+    matches!(
+        tab.kind,
+        oxideterm_workspace::TabKind::LocalTerminal | oxideterm_workspace::TabKind::SshTerminal
+    )
 }
 
 fn connection_field_accepts_ime(field: NewConnectionField) -> bool {
