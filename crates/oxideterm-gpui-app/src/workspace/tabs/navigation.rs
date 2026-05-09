@@ -38,6 +38,15 @@ impl WorkspaceApp {
                     self.expanded_ssh_nodes.insert(node_id.clone());
                 }
             }
+            Some(TabKind::Ide) => {
+                self.active_surface = ActiveSurface::Terminal;
+                if let Some(active_tab_id) = self.active_tab_id
+                    && let Some(node_id) = self.ide_tab_nodes.get(&active_tab_id)
+                {
+                    self.active_ssh_node_id = Some(node_id.clone());
+                    self.expanded_ssh_nodes.insert(node_id.clone());
+                }
+            }
             Some(TabKind::SessionManager) => {
                 self.active_surface = ActiveSurface::Terminal;
             }
@@ -284,6 +293,8 @@ impl WorkspaceApp {
         if let Some(node_id) = self.sftp_tab_nodes.remove(&tab.id) {
             self.release_sftp_session_for_node(&node_id);
         }
+        self.ide_tab_surfaces.remove(&tab.id);
+        self.ide_tab_nodes.remove(&tab.id);
         self.forward_tab_nodes.remove(&tab.id);
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
@@ -337,6 +348,9 @@ impl WorkspaceApp {
 
     fn tab_belongs_to_node(&self, tab: &Tab, node_id: &NodeId) -> bool {
         if self.sftp_tab_nodes.get(&tab.id) == Some(node_id) {
+            return true;
+        }
+        if self.ide_tab_nodes.get(&tab.id) == Some(node_id) {
             return true;
         }
         if self.forward_tab_nodes.get(&tab.id) == Some(node_id) {

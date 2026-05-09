@@ -3,6 +3,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
         TabKind::Sftp => "sftp",
+        TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
         TabKind::SessionManager => "session_manager",
         TabKind::Settings => "settings",

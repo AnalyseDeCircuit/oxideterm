@@ -10,15 +10,19 @@
 
 mod filesystem;
 mod model;
+mod tree;
 mod workspace;
+#[cfg(test)]
+mod workspace_tests;
 
 pub use filesystem::{
-    FileStat, FileSystemCapabilities, IdeFileData, IdeFileError, IdeFileErrorKind, IdeFileSystem,
-    WriteMode,
+    AsyncIdeFileSystem, FileStat, FileSystemCapabilities, IdeFileCheck, IdeFileData, IdeFileError,
+    IdeFileErrorKind, IdeFileSystem, IdeFsFuture, IdePathStat, IdeProjectInfo, WriteMode,
 };
 pub use model::{
     BufferSnapshot, CloseRequestId, DirtyCloseDecision, DirtyCloseRequest, EditorBuffer, EditorTab,
     EditorTabId, FileKind, FileTreeEntry, IdeLocation, OpenFileOutcome, ProjectId, ProjectSnapshot,
     ReloadError, RestoreSkipReason, RestoreSnapshotResult, SavedFileVersion, WorkspaceSnapshot,
 };
-pub use workspace::{IdeWorkspace, WorkspaceError};
+pub use tree::{FileTreeDirectorySnapshot, FileTreeSnapshot, FileTreeState};
+pub use workspace::{IdeWorkspace, SaveError, WorkspaceError};

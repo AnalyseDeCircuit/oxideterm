@@ -38,6 +38,7 @@ impl Render for WorkspaceApp {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
+                (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
                 (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
@@ -80,6 +81,15 @@ impl Render for WorkspaceApp {
                     }
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.auto_route_modal.open {
+                    if this.active_ime_target().is_some()
+                        && keystroke_commits_platform_text(&event.keystroke)
+                    {
+                        return;
+                    }
+                    let _ = this.handle_auto_route_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.new_connection_form.is_some() {
                     if this.active_ime_target().is_some()
                         && keystroke_commits_platform_text(&event.keystroke)
@@ -97,7 +107,7 @@ impl Render for WorkspaceApp {
                     if keystroke_commits_platform_text(&event.keystroke) {
                         return;
                     }
-                    let _ = this.handle_session_manager_key(event, cx);
+                    let _ = this.handle_session_manager_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
@@ -316,6 +326,9 @@ impl Render for WorkspaceApp {
             )
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
+            })
+            .when(self.auto_route_modal.open, |root| {
+                root.child(self.render_auto_route_modal(window, cx))
             })
             .when(
                 self.new_connection_form

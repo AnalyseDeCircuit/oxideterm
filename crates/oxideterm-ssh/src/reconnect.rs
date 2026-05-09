@@ -59,6 +59,7 @@ pub struct ReconnectSnapshot {
     pub active_port_forward_ids: Vec<String>,
     pub inflight_sftp_transfer_ids: Vec<String>,
     pub incomplete_sftp_transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
+    pub ide_project_path: Option<String>,
     pub open_ide_file_paths: Vec<String>,
     pub old_connection_ids: Vec<String>,
     pub snapshot_at: Option<SystemTime>,

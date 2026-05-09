@@ -178,7 +178,7 @@ impl WorkspaceApp {
                     refresh_remote,
                     refresh_local,
                 } => {
-                    self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id);
+                    self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id, cx);
                     let should_refresh = if let Some(item) = self
                         .sftp_view
                         .transfers
@@ -227,11 +227,16 @@ impl WorkspaceApp {
                                 self.on_sftp_transfer_finished_for_reconnect(
                                     &node_id,
                                     &transfer_id,
+                                    cx,
                                 );
                             }
                         }
                         Ok(_) | Err(_) => {
-                            self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id);
+                            self.on_sftp_transfer_finished_for_reconnect(
+                                &node_id,
+                                &transfer_id,
+                                cx,
+                            );
                         }
                     }
                     changed = true;

@@ -68,9 +68,9 @@ impl WorkspaceApp {
             );
         if self.active_sidebar_section != SidebarSection::Connections {
             header = header
-                .child(self.render_sidebar_action(LucideIcon::Folder, false, cx))
-                .child(self.render_sidebar_action(LucideIcon::Network, false, cx))
-                .child(self.render_sidebar_action(LucideIcon::Plus, true, cx));
+                .child(self.render_sidebar_action(LucideIcon::Folder, SidebarActionKind::None, cx))
+                .child(self.render_sidebar_action(LucideIcon::Network, SidebarActionKind::AutoRoute, cx))
+                .child(self.render_sidebar_action(LucideIcon::Plus, SidebarActionKind::NewConnection, cx));
         }
         header.into_any_element()
     }
@@ -78,7 +78,7 @@ impl WorkspaceApp {
     pub(super) fn render_sidebar_action(
         &self,
         icon: LucideIcon,
-        opens_connection_form: bool,
+        action: SidebarActionKind,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -97,14 +97,23 @@ impl WorkspaceApp {
                 rgb(theme.text),
             ));
 
-        if opens_connection_form {
-            button = button.on_mouse_down(
+        button = match action {
+            SidebarActionKind::NewConnection => button.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     this.open_new_connection_form(window, cx);
+                    cx.stop_propagation();
                 }),
-            );
-        }
+            ),
+            SidebarActionKind::AutoRoute => button.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    this.open_auto_route_modal(window, cx);
+                    cx.stop_propagation();
+                }),
+            ),
+            SidebarActionKind::None => button,
+        };
 
         button.into_any_element()
     }
@@ -162,4 +171,11 @@ impl WorkspaceApp {
             )
             .into_any_element()
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SidebarActionKind {
+    None,
+    AutoRoute,
+    NewConnection,
 }

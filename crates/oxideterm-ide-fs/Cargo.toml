@@ -1,0 +1,12 @@
+[package]
+name = "oxideterm-ide-fs"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+futures-util = "0.3"
+tokio.workspace = true

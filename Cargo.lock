@@ -6465,6 +6465,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-editor-core"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "oxideterm-editor-syntax"
+version = "0.1.0"
+dependencies = [
+ "oxideterm-editor-core",
+ "thiserror 2.0.18",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "oxideterm-forwarding"
 version = "0.1.0"
 dependencies = [
@@ -6500,6 +6518,7 @@ dependencies = [
  "oxideterm-code-editor",
  "oxideterm-connections",
  "oxideterm-forwarding",
+ "oxideterm-gpui-ide",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-settings-view",
@@ -6520,8 +6539,34 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
  "windows 0.61.3",
  "x11-dl",
+]
+
+[[package]]
+name = "oxideterm-gpui-editor"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "oxideterm-editor-core",
+ "oxideterm-editor-syntax",
+ "oxideterm-theme",
+]
+
+[[package]]
+name = "oxideterm-gpui-ide"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "oxideterm-editor-syntax",
+ "oxideterm-gpui-editor",
+ "oxideterm-gpui-ui",
+ "oxideterm-ide-core",
+ "oxideterm-ide-fs",
+ "oxideterm-ssh",
+ "oxideterm-theme",
+ "tokio",
 ]
 
 [[package]]
@@ -6603,6 +6648,17 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "oxideterm-ide-fs"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "oxideterm-ide-core",
+ "oxideterm-sftp",
+ "oxideterm-ssh",
+ "tokio",
 ]
 
 [[package]]

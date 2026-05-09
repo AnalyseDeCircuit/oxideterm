@@ -110,6 +110,38 @@
       "save": "儲存",
       "saving": "儲存中...",
       "passphrase_hint": "金鑰路徑未變時，留空會保留已儲存的密碼短語。"
+    },
+    "auto_route": {
+      "title": "自動路由連線",
+      "description": "從儲存的連線中選擇目標伺服器。系統將自動計算最佳跳板機路徑。",
+      "loading": "正在載入拓撲...",
+      "select_target": "選擇目標伺服器",
+      "display_name": "顯示名稱",
+      "connection_info": "連線資訊",
+      "cancel": "取消",
+      "connect": "連線",
+      "empty": {
+        "title": "未找到儲存的連線",
+        "description": "請先儲存一些連線。拓撲圖會根據儲存的連線及其代理鏈設定自動產生。"
+      },
+      "auth": {
+        "label": "認證",
+        "password": "密碼",
+        "key": "SSH 金鑰",
+        "certificate": "憑證",
+        "agent": "Agent",
+        "password_warning": "密碼認證需要密碼，但拓撲中不會儲存密碼。請改用金鑰或 Agent 認證。"
+      },
+      "errors": {
+        "target_not_found": "未找到目標節點",
+        "invalid_route_node": "路由節點 {{id}} 無效",
+        "password_auth": "密碼認證需要密碼，但拓撲中不會儲存密碼",
+        "key_path_required": "金鑰認證需要金鑰路徑",
+        "unsupported_auth": "拓撲鑽取不支援認證類型 {{type}}"
+      },
+      "status": {
+        "connecting": "正在連線 {{name}}..."
+      }
     }
   }
 }

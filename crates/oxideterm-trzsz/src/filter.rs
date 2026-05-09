@@ -88,6 +88,12 @@ impl TrzszFilter {
         if handshake.direction == TrzszTransferDirection::Upload {
             self.upload_init_pending = false;
         }
+        // Tauri clears detectTail immediately after accepting a magic key.
+        // Without this, the completed transfer's next shell prompt can be
+        // concatenated with the old magic tail and reopen the system file
+        // chooser as a second, phantom transfer.
+        self.detect_tail.clear();
+        self.pending_detect_buffers.clear();
         self.transfer_active = true;
     }
 
@@ -392,6 +398,20 @@ mod tests {
 
         let _ = filter.process_server_output(b"::TRZSZ:TRANSFER:R:1.1.6:9\r\n");
         assert!(filter.drain_detected_handshakes(false).is_empty());
+    }
+
+    #[test]
+    fn accepted_magic_tail_is_not_reused_after_transfer_finishes() {
+        let mut filter = TrzszFilter::default();
+        let _ = filter.process_server_output(b"::TRZSZ:TRANSFER:R:1.1.6\r\n");
+        assert_eq!(filter.drain_detected_handshakes(false).len(), 1);
+        filter.finish_transfer();
+
+        let _ = filter.process_server_output(b"\r\n$ ");
+        assert!(
+            filter.drain_detected_handshakes(false).is_empty(),
+            "the previous transfer magic must not reopen the file chooser"
+        );
     }
 
     #[test]

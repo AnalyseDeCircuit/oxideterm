@@ -1,0 +1,16 @@
+[package]
+name = "oxideterm-gpui-ide"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+tokio.workspace = true

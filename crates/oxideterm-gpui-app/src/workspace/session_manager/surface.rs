@@ -64,6 +64,7 @@ impl WorkspaceApp {
     pub(super) fn handle_session_manager_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(input) = self.session_manager.focused_input else {
@@ -75,9 +76,17 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.session_manager.focused_input = None;
+                if input == SessionManagerInput::AutoRouteDisplayName {
+                    self.close_auto_route_modal(cx);
+                } else {
+                    self.session_manager.focused_input = None;
+                }
                 self.ime_marked_text = None;
                 cx.notify();
+                true
+            }
+            "enter" if input == SessionManagerInput::AutoRouteDisplayName => {
+                self.connect_auto_route(window, cx);
                 true
             }
             "enter" if input == SessionManagerInput::NewGroup => {
@@ -91,6 +100,9 @@ impl WorkspaceApp {
                         self.session_manager.saved_search_query.pop()
                     }
                     SessionManagerInput::NewGroup => self.session_manager.new_group_name.pop(),
+                    SessionManagerInput::AutoRouteDisplayName => {
+                        self.auto_route_modal.display_name.pop()
+                    }
                 };
                 if input == SessionManagerInput::Search {
                     self.clear_session_selection_for_invisible_rows();

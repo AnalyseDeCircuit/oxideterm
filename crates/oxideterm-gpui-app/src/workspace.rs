@@ -1,5 +1,6 @@
 mod actions;
 mod forwards;
+mod ide;
 mod ime;
 mod new_connection;
 mod pane_tree;
@@ -26,6 +27,7 @@ use gpui::{
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{ForwardEvent, ForwardingRegistry, SavedForwardStore};
+use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
     vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
@@ -79,7 +81,7 @@ use self::new_connection::{
     NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
-use self::session_manager::SessionManagerState;
+use self::session_manager::{AutoRouteModalState, SessionManagerState};
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
 use crate::{
@@ -163,6 +165,8 @@ pub(crate) struct WorkspaceApp {
     forward_tab_nodes: HashMap<TabId, NodeId>,
     forwarding_view: forwards::ForwardsViewState,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
+    ide_tab_surfaces: HashMap<TabId, gpui::Entity<IdeSurface>>,
+    ide_tab_nodes: HashMap<TabId, NodeId>,
     sftp_view: sftp::SftpViewState,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
@@ -179,6 +183,7 @@ pub(crate) struct WorkspaceApp {
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
     session_manager: SessionManagerState,
+    auto_route_modal: AutoRouteModalState,
     settings_connection_new_group: String,
     settings_selected_ssh_hosts: HashSet<String>,
     settings_connection_status: Option<String>,

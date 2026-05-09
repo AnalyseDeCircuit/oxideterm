@@ -13,6 +13,7 @@ const EN_PARTS: &[&str] = &[
     include_str!("../locales/en/sftp.json"),
     include_str!("../locales/en/ssh.json"),
     include_str!("../locales/en/terminal.json"),
+    include_str!("../locales/en/ide.json"),
 ];
 const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/common.json"),
@@ -25,6 +26,7 @@ const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/sftp.json"),
     include_str!("../locales/de/ssh.json"),
     include_str!("../locales/de/terminal.json"),
+    include_str!("../locales/de/ide.json"),
 ];
 const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/common.json"),
@@ -37,6 +39,7 @@ const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/sftp.json"),
     include_str!("../locales/es-ES/ssh.json"),
     include_str!("../locales/es-ES/terminal.json"),
+    include_str!("../locales/es-ES/ide.json"),
 ];
 const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/common.json"),
@@ -49,6 +52,7 @@ const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/sftp.json"),
     include_str!("../locales/fr-FR/ssh.json"),
     include_str!("../locales/fr-FR/terminal.json"),
+    include_str!("../locales/fr-FR/ide.json"),
 ];
 const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/common.json"),
@@ -61,6 +65,7 @@ const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/sftp.json"),
     include_str!("../locales/it/ssh.json"),
     include_str!("../locales/it/terminal.json"),
+    include_str!("../locales/it/ide.json"),
 ];
 const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/common.json"),
@@ -73,6 +78,7 @@ const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/sftp.json"),
     include_str!("../locales/ja/ssh.json"),
     include_str!("../locales/ja/terminal.json"),
+    include_str!("../locales/ja/ide.json"),
 ];
 const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/common.json"),
@@ -85,6 +91,7 @@ const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/sftp.json"),
     include_str!("../locales/ko/ssh.json"),
     include_str!("../locales/ko/terminal.json"),
+    include_str!("../locales/ko/ide.json"),
 ];
 const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/common.json"),
@@ -97,6 +104,7 @@ const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/sftp.json"),
     include_str!("../locales/pt-BR/ssh.json"),
     include_str!("../locales/pt-BR/terminal.json"),
+    include_str!("../locales/pt-BR/ide.json"),
 ];
 const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/common.json"),
@@ -109,6 +117,7 @@ const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/sftp.json"),
     include_str!("../locales/vi/ssh.json"),
     include_str!("../locales/vi/terminal.json"),
+    include_str!("../locales/vi/ide.json"),
 ];
 const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/common.json"),
@@ -121,6 +130,7 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/sftp.json"),
     include_str!("../locales/zh-CN/ssh.json"),
     include_str!("../locales/zh-CN/terminal.json"),
+    include_str!("../locales/zh-CN/ide.json"),
 ];
 const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/common.json"),
@@ -133,6 +143,7 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/sftp.json"),
     include_str!("../locales/zh-TW/ssh.json"),
     include_str!("../locales/zh-TW/terminal.json"),
+    include_str!("../locales/zh-TW/ide.json"),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -555,6 +566,46 @@ mod tests {
             "forwards.detection.scanning",
             "forwards.detection.noPorts",
             "forwards.detection.alreadyForwarded",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn ide_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "ide.loading_project",
+            "ide.open_failed",
+            "ide.retry",
+            "ide.disconnected_overlay",
+            "ide.no_open_files",
+            "ide.click_to_open",
+            "ide.loading_file",
+            "ide.save_failed",
+            "ide.unsaved_changes",
+            "ide.unsaved_changes_desc",
+            "ide.save",
+            "ide.discard",
+            "ide.cancel",
+            "ide.agent_status_sftp",
         ];
 
         for locale in locales {

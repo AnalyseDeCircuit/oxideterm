@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::filesystem::IdeFileError;
+use crate::tree::FileTreeSnapshot;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ProjectId(pub Uuid);
 
@@ -191,6 +194,7 @@ pub struct WorkspaceSnapshot {
     pub tabs: Vec<EditorTab>,
     pub active_tab: Option<EditorTabId>,
     pub buffers: Vec<BufferSnapshot>,
+    pub tree: FileTreeSnapshot,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -214,9 +218,11 @@ pub struct DirtyCloseRequest {
     pub location: IdeLocation,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReloadError {
     DirtyBuffer,
+    UnknownTab,
+    File(IdeFileError),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

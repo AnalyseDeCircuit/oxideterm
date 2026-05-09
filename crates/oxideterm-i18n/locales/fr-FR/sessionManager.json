@@ -110,6 +110,38 @@
       "save": "Enregistrer",
       "saving": "Enregistrement...",
       "passphrase_hint": "Laissez vide pour conserver la phrase secrète enregistrée lorsque le chemin de la clé ne change pas."
+    },
+    "auto_route": {
+      "title": "Auto-Route Connection",
+      "description": "Select a target server from saved connections. The system will automatically calculate the best jump host path.",
+      "loading": "Loading topology...",
+      "select_target": "Select target server",
+      "display_name": "Display name",
+      "connection_info": "Connection info",
+      "cancel": "Cancel",
+      "connect": "Connect",
+      "empty": {
+        "title": "No saved connections found",
+        "description": "Please save some connections first. The topology graph is automatically generated from saved connections and their proxy chain settings."
+      },
+      "auth": {
+        "label": "Auth",
+        "password": "Password",
+        "key": "SSH Key",
+        "certificate": "Certificate",
+        "agent": "Agent",
+        "password_warning": "Password authentication requires a password, which is not stored in topology. Use key or Agent authentication instead."
+      },
+      "errors": {
+        "target_not_found": "Target node not found",
+        "invalid_route_node": "Invalid route node {{id}}",
+        "password_auth": "Password authentication requires a password which is not stored in topology",
+        "key_path_required": "Key path is required for key authentication",
+        "unsupported_auth": "Unsupported auth type for topology drill-down: {{type}}"
+      },
+      "status": {
+        "connecting": "Connecting {{name}}..."
+      }
     }
   }
 }

@@ -74,7 +74,7 @@ impl WorkspaceApp {
             });
         }
         for node_id in nodes_to_grace {
-            self.schedule_grace_period_reconnect(&node_id);
+            self.schedule_grace_period_reconnect(&node_id, cx);
         }
         for node_id in nodes_to_restore {
             self.restore_forwarding_session_for_node(&node_id);
@@ -171,6 +171,7 @@ impl WorkspaceApp {
                                 PhaseResult::Skipped,
                                 "no incomplete transfers in snapshot".to_string(),
                                 0,
+                                cx,
                             );
                         }
                     }
@@ -341,7 +342,7 @@ impl WorkspaceApp {
                     && matches!(state, NodeReadiness::Error)
                     && reason.to_ascii_lowercase().contains("link")
                 {
-                    self.schedule_grace_period_reconnect(&node_id);
+                    self.schedule_grace_period_reconnect(&node_id, cx);
                 }
                 true
             }
@@ -484,6 +485,7 @@ impl WorkspaceApp {
         &mut self,
         _transfer_node_id: &NodeId,
         transfer_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let roots = self
             .pending_reconnect_transfer_resumes
@@ -512,6 +514,7 @@ impl WorkspaceApp {
                 PhaseResult::Ok,
                 format!("resumed {total} transfer(s)"),
                 total as u32,
+                cx,
             );
         }
     }
@@ -522,6 +525,7 @@ impl WorkspaceApp {
         transfer_result: PhaseResult,
         transfer_detail: String,
         restored_transfers: u32,
+        cx: &mut Context<Self>,
     ) {
         if !self
             .reconnect_orchestrator
@@ -538,10 +542,19 @@ impl WorkspaceApp {
         let _ = self
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::RestoreIde);
+        let restored_ide = self.restore_ide_for_reconnect(node_id, cx);
         let _ = self.reconnect_orchestrator.complete_phase(
             &node_id.0,
-            PhaseResult::Skipped,
-            Some("native IDE restore is not part of this workspace yet".to_string()),
+            if restored_ide {
+                PhaseResult::Ok
+            } else {
+                PhaseResult::Skipped
+            },
+            Some(if restored_ide {
+                "restored IDE project and open files".to_string()
+            } else {
+                "no IDE snapshot for node".to_string()
+            }),
         );
         let _ = self
             .reconnect_orchestrator
@@ -556,7 +569,7 @@ impl WorkspaceApp {
             .finish(&node_id.0, Ok(1 + restored_transfers));
     }
 
-    fn schedule_grace_period_reconnect(&mut self, node_id: &NodeId) {
+    fn schedule_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return;
         };
@@ -597,10 +610,13 @@ impl WorkspaceApp {
             .iter()
             .filter_map(|affected_node_id| self.node_router.connection_id_for_node(affected_node_id))
             .collect::<Vec<_>>();
+        let (ide_project_path, open_ide_file_paths) = self.ide_snapshot_for_node(node_id, cx);
         let snapshot = ReconnectSnapshot {
             old_terminal_session_ids,
             terminal_sessions_by_node,
             old_connection_ids: old_connection_ids.clone(),
+            ide_project_path,
+            open_ide_file_paths,
             ..ReconnectSnapshot::default()
         };
         let _ =

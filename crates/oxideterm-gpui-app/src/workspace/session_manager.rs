@@ -5,14 +5,14 @@ use gpui::{StatefulInteractiveElement, prelude::*};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SecretString, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
+    SavedProxyHop, SecretString, SshConfigHost, list_ssh_config_hosts, resolve_ssh_config_alias,
     save_request_from_draft, saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_ui::{
     IconBadgeMetrics, TauriTableCellOptions, TauriTableCellStyle, TauriTableColors,
     TauriTableMetrics,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
-    checkbox, icon_badge,
+    checkbox, icon_badge, modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
     tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header, tauri_table_row,
     tauri_table_sort_header, tauri_table_spacer_cell,
@@ -22,9 +22,6 @@ use oxideterm_ssh::{AuthMethod, ProxyHopConfig};
 
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
-
-#[cfg(test)]
-use oxideterm_connections::SavedProxyHop;
 
 const UNGROUPED_FILTER: &str = "__ungrouped__";
 const RECENT_FILTER: &str = "__recent__";
@@ -67,6 +64,7 @@ pub(super) enum SessionManagerInput {
     Search,
     SavedSearch,
     NewGroup,
+    AutoRouteDisplayName,
 }
 
 impl SessionManagerInput {
@@ -75,6 +73,7 @@ impl SessionManagerInput {
             Self::Search => 1,
             Self::SavedSearch => 2,
             Self::NewGroup => 3,
+            Self::AutoRouteDisplayName => 4,
         }
     }
 }
@@ -165,4 +164,5 @@ include!("session_manager/controls.rs");
 include!("session_manager/dialogs.rs");
 include!("session_manager/actions.rs");
 include!("session_manager/helpers.rs");
+include!("session_manager/auto_route.rs");
 include!("session_manager/tests.rs");

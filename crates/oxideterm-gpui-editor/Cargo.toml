@@ -1,0 +1,11 @@
+[package]
+name = "oxideterm-gpui-editor"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
+oxideterm-theme = { path = "../oxideterm-theme" }

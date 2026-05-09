@@ -110,6 +110,38 @@
       "save": "保存",
       "saving": "保存中...",
       "passphrase_hint": "密钥路径未变时，留空会保留已保存的口令。"
+    },
+    "auto_route": {
+      "title": "自动路由连接",
+      "description": "从保存的连接中选择目标服务器。系统将自动计算最优跳板机路径。",
+      "loading": "正在加载拓扑...",
+      "select_target": "选择目标服务器",
+      "display_name": "显示名称",
+      "connection_info": "连接信息",
+      "cancel": "取消",
+      "connect": "连接",
+      "empty": {
+        "title": "未找到保存的连接",
+        "description": "请先保存一些连接。拓扑图基于保存的连接及其代理链设置自动生成。"
+      },
+      "auth": {
+        "label": "认证",
+        "password": "密码",
+        "key": "SSH 密钥",
+        "certificate": "证书",
+        "agent": "Agent",
+        "password_warning": "密码认证需要密码，但拓扑中不会保存密码。请改用密钥或 Agent 认证。"
+      },
+      "errors": {
+        "target_not_found": "未找到目标节点",
+        "invalid_route_node": "路由节点 {{id}} 无效",
+        "password_auth": "密码认证需要密码，但拓扑中不会保存密码",
+        "key_path_required": "密钥认证需要密钥路径",
+        "unsupported_auth": "拓扑钻取不支持认证类型 {{type}}"
+      },
+      "status": {
+        "connecting": "正在连接 {{name}}..."
+      }
     }
   }
 }

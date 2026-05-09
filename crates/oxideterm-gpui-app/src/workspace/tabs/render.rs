@@ -33,6 +33,7 @@ impl WorkspaceApp {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
                 TabKind::Sftp => LucideIcon::FolderInput,
+                TabKind::Ide => LucideIcon::Code2,
                 TabKind::Forwards => LucideIcon::ArrowLeftRight,
                 TabKind::SessionManager => LucideIcon::LayoutList,
                 TabKind::Settings => LucideIcon::Settings,

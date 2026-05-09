@@ -59,7 +59,10 @@ impl WorkspaceApp {
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|_this, _event, _window, cx| cx.stop_propagation()),
+                    cx.listener(|this, _event, window, cx| {
+                        this.open_auto_route_modal(window, cx);
+                        cx.stop_propagation();
+                    }),
                 ),
             )
             .child(
