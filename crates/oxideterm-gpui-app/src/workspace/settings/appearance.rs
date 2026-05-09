@@ -104,7 +104,7 @@ impl WorkspaceApp {
                 ),
                 self.appearance_row(
                     "settings_view.appearance.frosted_glass",
-                    "settings_view.appearance.frosted_glass_native_hint",
+                    "settings_view.appearance.frosted_glass_hint",
                     self.appearance_select_control(
                         SettingsSelect::AppearanceFrostedGlass,
                         frosted_glass_label(settings.appearance.frosted_glass, &self.i18n),

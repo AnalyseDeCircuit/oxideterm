@@ -441,6 +441,16 @@ impl WorkspaceApp {
         match input {
             SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
             SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
+            SettingsInput::IdeFontSize => settings
+                .ide
+                .font_size
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            SettingsInput::IdeLineHeight => settings
+                .ide
+                .line_height
+                .map(compact_decimal)
+                .unwrap_or_default(),
             SettingsInput::AppearanceUiFont => settings.appearance.ui_font_family.clone(),
             SettingsInput::LocalDefaultCwd => settings
                 .local_terminal
@@ -521,6 +531,29 @@ impl WorkspaceApp {
                 if let Ok(value) = self.settings_input_draft.parse::<f64>() {
                     self.edit_settings(
                         |settings| settings.terminal.line_height = value.clamp(0.8, 2.0),
+                        cx,
+                    );
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::IdeFontSize => {
+                let value = self.settings_input_draft.trim();
+                if value.is_empty() {
+                    self.edit_settings(|settings| settings.ide.font_size = None, cx);
+                } else if let Ok(value) = value.parse::<i64>() {
+                    self.edit_settings(|settings| settings.ide.font_size = Some(value.clamp(8, 32)), cx);
+                } else {
+                    cx.notify();
+                }
+            }
+            SettingsInput::IdeLineHeight => {
+                let value = self.settings_input_draft.trim();
+                if value.is_empty() {
+                    self.edit_settings(|settings| settings.ide.line_height = None, cx);
+                } else if let Ok(value) = value.parse::<f64>() {
+                    self.edit_settings(
+                        |settings| settings.ide.line_height = Some(value.clamp(0.8, 3.0)),
                         cx,
                     );
                 } else {

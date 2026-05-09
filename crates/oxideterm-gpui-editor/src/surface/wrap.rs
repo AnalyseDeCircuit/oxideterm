@@ -3,7 +3,7 @@
 
 use gpui::Pixels;
 
-use super::TextEditorView;
+use super::{DisplayRowsCache, TextEditorView};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct DisplayRow {
@@ -27,6 +27,24 @@ impl TextEditorView {
 
     pub(super) fn display_rows(&self) -> Vec<DisplayRow> {
         let wrap_column = self.wrap_column();
+        let buffer_version = self.buffer.version();
+        if let Some(cache) = self.display_rows_cache.borrow().as_ref()
+            && cache.buffer_version == buffer_version
+            && cache.wrap_column == wrap_column
+        {
+            return cache.rows.clone();
+        }
+
+        let rows = self.compute_display_rows(wrap_column);
+        *self.display_rows_cache.borrow_mut() = Some(DisplayRowsCache {
+            buffer_version,
+            wrap_column,
+            rows: rows.clone(),
+        });
+        rows
+    }
+
+    fn compute_display_rows(&self, wrap_column: Option<usize>) -> Vec<DisplayRow> {
         let mut rows = Vec::new();
         for line in 0..self.buffer.line_count() {
             let line_text = self.buffer.line_text(line).unwrap_or_default();

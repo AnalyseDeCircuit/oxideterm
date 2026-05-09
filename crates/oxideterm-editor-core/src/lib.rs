@@ -4,11 +4,11 @@
 //! UI-independent editor core for OxideTerm.
 //!
 //! This crate deliberately owns the public text, cursor, selection, and undo
-//! types used by later GPUI/SFTP/IDE layers. The first storage backend is a
-//! simple `String` plus line index; callers must not rely on that detail so we
-//! can swap in a rope without changing the outer editor architecture.
+//! types used by later GPUI/SFTP/IDE layers. The public API stays byte-offset
+//! based while the internal storage uses a piece table so edits do not mutate a
+//! single monolithic `String`.
 
-use std::{cmp::Ordering, ops::Range};
+use std::{cell::RefCell, cmp::Ordering, ops::Range};
 
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
@@ -228,10 +228,230 @@ struct HistoryEntry {
     after_revision: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PieceSource {
+    Original,
+    Add,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Piece {
+    source: PieceSource,
+    start: usize,
+    len: usize,
+}
+
+impl Piece {
+    fn new(source: PieceSource, start: usize, len: usize) -> Option<Self> {
+        (len > 0).then_some(Self { source, start, len })
+    }
+
+    fn slice(self, offset: usize, len: usize) -> Option<Self> {
+        debug_assert!(offset <= self.len);
+        debug_assert!(offset + len <= self.len);
+        Self::new(self.source, self.start + offset, len)
+    }
+
+    fn end(self) -> usize {
+        self.start + self.len
+    }
+}
+
+/// Piece-table storage inspired by Monaco/VS Code's buffer model.
+///
+/// `original` never changes after construction. Inserted text is appended to
+/// `add`, and `pieces` describes the visible document as byte spans into those
+/// two buffers. `TextBuffer` now materializes the full document only for
+/// boundary APIs such as save, syntax, search, and IME; edits themselves keep
+/// the piece table as the source of truth.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PieceTableTextBuffer {
+    original: String,
+    add: String,
+    pieces: Vec<Piece>,
+    len: usize,
+}
+
+impl PieceTableTextBuffer {
+    fn new(original: String) -> Self {
+        let len = original.len();
+        let pieces = Piece::new(PieceSource::Original, 0, len)
+            .into_iter()
+            .collect();
+        Self {
+            original,
+            add: String::new(),
+            pieces,
+            len,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn source_text(&self, source: PieceSource) -> &str {
+        match source {
+            PieceSource::Original => &self.original,
+            PieceSource::Add => &self.add,
+        }
+    }
+
+    fn to_text(&self) -> String {
+        let mut text = String::with_capacity(self.len);
+        for piece in self.pieces.iter().copied() {
+            let source = self.source_text(piece.source);
+            text.push_str(&source[piece.start..piece.end()]);
+        }
+        text
+    }
+
+    fn slice_to_string(&self, range: Range<usize>) -> String {
+        debug_assert!(range.start <= range.end);
+        debug_assert!(range.end <= self.len);
+        if range.is_empty() {
+            return String::new();
+        }
+
+        let mut text = String::with_capacity(range.end - range.start);
+        let mut position = 0;
+        for piece in self.pieces.iter().copied() {
+            let piece_start = position;
+            let piece_end = position + piece.len;
+            position = piece_end;
+            if piece_end <= range.start {
+                continue;
+            }
+            if piece_start >= range.end {
+                break;
+            }
+            let local_start = range.start.max(piece_start) - piece_start;
+            let local_end = range.end.min(piece_end) - piece_start;
+            let source = self.source_text(piece.source);
+            text.push_str(&source[piece.start + local_start..piece.start + local_end]);
+        }
+        text
+    }
+
+    fn is_char_boundary(&self, offset: usize) -> bool {
+        if offset > self.len {
+            return false;
+        }
+        if offset == self.len {
+            return true;
+        }
+
+        let mut position = 0;
+        for piece in self.pieces.iter().copied() {
+            let piece_start = position;
+            let piece_end = position + piece.len;
+            position = piece_end;
+            if offset < piece_start {
+                break;
+            }
+            if offset == piece_start || offset == piece_end {
+                return true;
+            }
+            if offset < piece_end {
+                let source_offset = piece.start + (offset - piece_start);
+                return self
+                    .source_text(piece.source)
+                    .is_char_boundary(source_offset);
+            }
+        }
+        false
+    }
+
+    fn replace(&mut self, range: Range<usize>, replacement: &str) {
+        debug_assert!(range.start <= range.end);
+        debug_assert!(range.end <= self.len);
+
+        let replacement_piece = self.append_add_piece(replacement);
+        let mut next =
+            Vec::with_capacity(self.pieces.len() + usize::from(replacement_piece.is_some()));
+        let mut position = 0;
+        let mut inserted = false;
+
+        for piece in self.pieces.iter().copied() {
+            let piece_start = position;
+            let piece_end = position + piece.len;
+            position = piece_end;
+
+            if piece_end <= range.start {
+                push_piece(&mut next, piece);
+                continue;
+            }
+
+            if piece_start >= range.end {
+                if !inserted {
+                    if let Some(piece) = replacement_piece {
+                        push_piece(&mut next, piece);
+                    }
+                    inserted = true;
+                }
+                push_piece(&mut next, piece);
+                continue;
+            }
+
+            if !inserted {
+                if range.start > piece_start {
+                    let left_len = range.start - piece_start;
+                    if let Some(left) = piece.slice(0, left_len) {
+                        push_piece(&mut next, left);
+                    }
+                }
+                if let Some(piece) = replacement_piece {
+                    push_piece(&mut next, piece);
+                }
+                inserted = true;
+            }
+
+            if range.end < piece_end {
+                let right_offset = range.end - piece_start;
+                let right_len = piece_end - range.end;
+                if let Some(right) = piece.slice(right_offset, right_len) {
+                    push_piece(&mut next, right);
+                }
+            }
+        }
+
+        if !inserted {
+            if let Some(piece) = replacement_piece {
+                push_piece(&mut next, piece);
+            }
+        }
+
+        self.pieces = next;
+        self.len = self.len - (range.end - range.start) + replacement.len();
+    }
+
+    fn append_add_piece(&mut self, text: &str) -> Option<Piece> {
+        let start = self.add.len();
+        self.add.push_str(text);
+        Piece::new(PieceSource::Add, start, text.len())
+    }
+}
+
+fn push_piece(pieces: &mut Vec<Piece>, piece: Piece) {
+    if let Some(previous) = pieces.last_mut()
+        && previous.source == piece.source
+        && previous.end() == piece.start
+    {
+        previous.len += piece.len;
+        return;
+    }
+    pieces.push(piece);
+}
+
 /// Editable text buffer with line lookup, transactions, undo/redo, and dirty state.
 #[derive(Clone, Debug)]
 pub struct TextBuffer {
-    text: String,
+    storage: PieceTableTextBuffer,
+    text_cache: RefCell<Option<String>>,
     line_starts: Vec<usize>,
     version: u64,
     content_revision: u64,
@@ -245,8 +465,10 @@ impl TextBuffer {
     pub fn new(text: impl Into<String>) -> Self {
         let text = text.into();
         let line_starts = compute_line_starts(&text);
+        let storage = PieceTableTextBuffer::new(text.clone());
         Self {
-            text,
+            storage,
+            text_cache: RefCell::new(Some(text)),
             line_starts,
             version: 0,
             content_revision: 0,
@@ -257,16 +479,26 @@ impl TextBuffer {
         }
     }
 
-    pub fn text(&self) -> &str {
-        &self.text
+    pub fn text(&self) -> String {
+        self.with_text(str::to_string)
+    }
+
+    pub fn with_text<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        if self.text_cache.borrow().is_none() {
+            *self.text_cache.borrow_mut() = Some(self.storage.to_text());
+        }
+        let cache = self.text_cache.borrow();
+        f(cache
+            .as_deref()
+            .expect("text cache should be materialized before callback"))
     }
 
     pub fn len(&self) -> usize {
-        self.text.len()
+        self.storage.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.storage.is_empty()
     }
 
     pub fn version(&self) -> u64 {
@@ -285,15 +517,15 @@ impl TextBuffer {
         self.saved_revision = self.content_revision;
     }
 
-    pub fn slice(&self, range: TextRange) -> Result<&str, EditorError> {
+    pub fn slice(&self, range: TextRange) -> Result<String, EditorError> {
         self.validate_range(range)?;
-        Ok(&self.text[range.as_range()])
+        Ok(self.storage.slice_to_string(range.as_range()))
     }
 
-    pub fn line_text(&self, line: usize) -> Option<&str> {
+    pub fn line_text(&self, line: usize) -> Option<String> {
         let start = *self.line_starts.get(line)?;
         let end = self.line_end_offset(line)?.0;
-        Some(&self.text[start..end])
+        Some(self.storage.slice_to_string(start..end))
     }
 
     pub fn offset_to_line_col(&self, offset: BufferOffset) -> Result<LineCol, EditorError> {
@@ -341,30 +573,34 @@ impl TextBuffer {
         let next_start = self.line_starts.get(line + 1).copied();
         let end = next_start
             .map(|next| next.saturating_sub(1))
-            .unwrap_or_else(|| self.text.len());
+            .unwrap_or_else(|| self.storage.len());
         Some(BufferOffset(end.max(start)))
     }
 
     pub fn next_grapheme_offset(&self, offset: BufferOffset) -> BufferOffset {
-        if self.validate_offset(offset).is_err() || offset.0 >= self.text.len() {
-            return BufferOffset(self.text.len());
+        if self.validate_offset(offset).is_err() || offset.0 >= self.storage.len() {
+            return BufferOffset(self.storage.len());
         }
-        let remaining = &self.text[offset.0..];
-        let next_len = remaining.graphemes(true).next().map(str::len).unwrap_or(0);
-        BufferOffset((offset.0 + next_len).min(self.text.len()))
+        self.with_text(|text| {
+            let remaining = &text[offset.0..];
+            let next_len = remaining.graphemes(true).next().map(str::len).unwrap_or(0);
+            BufferOffset((offset.0 + next_len).min(text.len()))
+        })
     }
 
     pub fn previous_grapheme_offset(&self, offset: BufferOffset) -> BufferOffset {
         if self.validate_offset(offset).is_err() || offset.0 == 0 {
             return BufferOffset::ZERO;
         }
-        let prefix = &self.text[..offset.0];
-        let previous_len = prefix
-            .graphemes(true)
-            .next_back()
-            .map(str::len)
-            .unwrap_or(0);
-        BufferOffset(offset.0.saturating_sub(previous_len))
+        self.with_text(|text| {
+            let prefix = &text[..offset.0];
+            let previous_len = prefix
+                .graphemes(true)
+                .next_back()
+                .map(str::len)
+                .unwrap_or(0);
+            BufferOffset(offset.0.saturating_sub(previous_len))
+        })
     }
 
     pub fn apply_transaction(&mut self, transaction: EditTransaction) -> Result<(), EditorError> {
@@ -437,12 +673,12 @@ impl TextBuffer {
     }
 
     fn apply_edits_internal(&mut self, edits: Vec<TextEdit>) -> Result<Vec<TextEdit>, EditorError> {
-        let edits = normalize_edits(edits, &self.text)?;
+        let edits = normalize_edits_for_storage(edits, &self.storage)?;
         let mut inverse = Vec::with_capacity(edits.len());
         let mut delta: isize = 0;
 
         for edit in &edits {
-            let original = self.text[edit.range.as_range()].to_string();
+            let original = self.storage.slice_to_string(edit.range.as_range());
             let start_after = apply_delta(edit.range.start.0, delta)?;
             let end_after = start_after + edit.replacement.len();
             inverse.push(TextEdit::new(
@@ -452,23 +688,29 @@ impl TextBuffer {
             delta += edit.replacement.len() as isize - edit.range.len() as isize;
         }
 
+        let next_line_starts = update_line_starts_after_edits(&self.line_starts, &edits);
+
         for edit in edits.iter().rev() {
-            self.text
-                .replace_range(edit.range.as_range(), &edit.replacement);
+            self.storage
+                .replace(edit.range.as_range(), &edit.replacement);
         }
-        self.line_starts = compute_line_starts(&self.text);
+        // Syntax, save, search, and IME still require contiguous text at their
+        // API boundary. Keep that as an explicit on-demand cache instead of
+        // forcing every edit through full-document materialization.
+        *self.text_cache.borrow_mut() = None;
+        self.line_starts = next_line_starts;
         self.version = self.version.saturating_add(1);
         Ok(inverse)
     }
 
     fn validate_offset(&self, offset: BufferOffset) -> Result<(), EditorError> {
-        if offset.0 > self.text.len() {
+        if offset.0 > self.storage.len() {
             return Err(EditorError::OffsetOutOfBounds {
                 offset: offset.0,
-                len: self.text.len(),
+                len: self.storage.len(),
             });
         }
-        if !self.text.is_char_boundary(offset.0) {
+        if !self.storage.is_char_boundary(offset.0) {
             return Err(EditorError::InvalidUtf8Boundary { offset: offset.0 });
         }
         Ok(())
@@ -519,7 +761,75 @@ fn compute_line_starts(text: &str) -> Vec<usize> {
     starts
 }
 
-fn normalize_edits(edits: Vec<TextEdit>, text: &str) -> Result<Vec<TextEdit>, EditorError> {
+fn update_line_starts_after_edits(old_starts: &[usize], edits: &[TextEdit]) -> Vec<usize> {
+    if edits.is_empty() {
+        return old_starts.to_vec();
+    }
+
+    let mut starts = Vec::with_capacity(old_starts.len());
+    starts.push(0);
+
+    let mut previous_old_offset = 0;
+    let mut shift: isize = 0;
+    let mut old_start_index = 1;
+
+    for edit in edits {
+        while let Some(&line_start) = old_starts.get(old_start_index) {
+            if line_start > edit.range.start.0 {
+                break;
+            }
+            if line_start > previous_old_offset {
+                push_line_start(&mut starts, apply_line_shift(line_start, shift));
+            }
+            old_start_index += 1;
+        }
+
+        let replacement_base = apply_line_shift(edit.range.start.0, shift);
+        for (index, byte) in edit.replacement.bytes().enumerate() {
+            if byte == b'\n' {
+                push_line_start(&mut starts, replacement_base + index + 1);
+            }
+        }
+
+        while let Some(&line_start) = old_starts.get(old_start_index) {
+            if line_start > edit.range.end.0 {
+                break;
+            }
+            old_start_index += 1;
+        }
+
+        shift += edit.replacement.len() as isize - edit.range.len() as isize;
+        previous_old_offset = edit.range.end.0;
+    }
+
+    while let Some(&line_start) = old_starts.get(old_start_index) {
+        if line_start > previous_old_offset {
+            push_line_start(&mut starts, apply_line_shift(line_start, shift));
+        }
+        old_start_index += 1;
+    }
+
+    starts
+}
+
+fn push_line_start(starts: &mut Vec<usize>, offset: usize) {
+    if starts.last().copied() != Some(offset) {
+        starts.push(offset);
+    }
+}
+
+fn apply_line_shift(offset: usize, shift: isize) -> usize {
+    if shift < 0 {
+        offset.saturating_sub(shift.unsigned_abs())
+    } else {
+        offset.saturating_add(shift as usize)
+    }
+}
+
+fn normalize_edits_for_storage(
+    edits: Vec<TextEdit>,
+    storage: &PieceTableTextBuffer,
+) -> Result<Vec<TextEdit>, EditorError> {
     let mut edits = edits;
     edits.sort_by(|left, right| {
         left.range
@@ -530,8 +840,8 @@ fn normalize_edits(edits: Vec<TextEdit>, text: &str) -> Result<Vec<TextEdit>, Ed
 
     let mut previous_end = BufferOffset::ZERO;
     for edit in &edits {
-        validate_offset_for_text(text, edit.range.start)?;
-        validate_offset_for_text(text, edit.range.end)?;
+        validate_offset_for_storage(storage, edit.range.start)?;
+        validate_offset_for_storage(storage, edit.range.end)?;
         if edit.range.start > edit.range.end {
             return Err(EditorError::InvalidRange {
                 start: edit.range.start.0,
@@ -549,14 +859,17 @@ fn normalize_edits(edits: Vec<TextEdit>, text: &str) -> Result<Vec<TextEdit>, Ed
     Ok(edits)
 }
 
-fn validate_offset_for_text(text: &str, offset: BufferOffset) -> Result<(), EditorError> {
-    if offset.0 > text.len() {
+fn validate_offset_for_storage(
+    storage: &PieceTableTextBuffer,
+    offset: BufferOffset,
+) -> Result<(), EditorError> {
+    if offset.0 > storage.len() {
         return Err(EditorError::OffsetOutOfBounds {
             offset: offset.0,
-            len: text.len(),
+            len: storage.len(),
         });
     }
-    if !text.is_char_boundary(offset.0) {
+    if !storage.is_char_boundary(offset.0) {
         return Err(EditorError::InvalidUtf8Boundary { offset: offset.0 });
     }
     Ok(())
@@ -595,7 +908,7 @@ mod tests {
             BufferOffset(7)
         );
         assert_eq!(buffer.line_count(), 3);
-        assert_eq!(buffer.line_text(1), Some("你b"));
+        assert_eq!(buffer.line_text(1), Some("你b".to_string()));
     }
 
     #[test]
@@ -603,8 +916,8 @@ mod tests {
         let buffer = TextBuffer::new("one\n");
 
         assert_eq!(buffer.line_count(), 2);
-        assert_eq!(buffer.line_text(0), Some("one"));
-        assert_eq!(buffer.line_text(1), Some(""));
+        assert_eq!(buffer.line_text(0), Some("one".to_string()));
+        assert_eq!(buffer.line_text(1), Some(String::new()));
         assert_eq!(
             buffer.line_col_to_offset(LineCol::new(1, 0)).unwrap(),
             BufferOffset(4)
@@ -619,8 +932,9 @@ mod tests {
         let end = buffer.next_grapheme_offset(after_flag);
 
         assert_eq!(after_a, BufferOffset(1));
-        assert_eq!(&buffer.text()[after_a.0..after_flag.0], "🇨🇳");
-        assert_eq!(&buffer.text()[after_flag.0..end.0], "é");
+        let text = buffer.text();
+        assert_eq!(&text[after_a.0..after_flag.0], "🇨🇳");
+        assert_eq!(&text[after_flag.0..end.0], "é");
         assert_eq!(buffer.previous_grapheme_offset(end), after_flag);
     }
 
@@ -637,8 +951,74 @@ mod tests {
 
         assert_eq!(buffer.text(), "one\n2\nII\nthree");
         assert_eq!(buffer.line_count(), 4);
-        assert_eq!(buffer.line_text(2), Some("II"));
+        assert_eq!(buffer.line_text(2), Some("II".to_string()));
         assert!(buffer.is_dirty());
+    }
+
+    #[test]
+    fn updates_line_index_across_deleted_and_inserted_newlines() {
+        let mut buffer = TextBuffer::new("alpha\nbravo\ncharlie\ndelta");
+
+        buffer
+            .apply_transaction(EditTransaction::single(TextEdit::new(
+                TextRange::new(BufferOffset(8), BufferOffset(20)),
+                "R\nS\nT\n",
+            )))
+            .unwrap();
+
+        assert_eq!(buffer.text(), "alpha\nbrR\nS\nT\ndelta");
+        assert_eq!(buffer.line_count(), 5);
+        assert_eq!(buffer.line_text(1), Some("brR".to_string()));
+        assert_eq!(buffer.line_text(2), Some("S".to_string()));
+        assert_eq!(buffer.line_text(3), Some("T".to_string()));
+        assert_eq!(buffer.line_text(4), Some("delta".to_string()));
+        assert_eq!(
+            buffer
+                .offset_to_line_col(BufferOffset(buffer.len()))
+                .unwrap(),
+            LineCol::new(4, 5)
+        );
+    }
+
+    #[test]
+    fn stores_edits_as_piece_table_appends() {
+        let mut buffer = TextBuffer::new("hello world");
+
+        buffer
+            .apply_transaction(EditTransaction::new(vec![
+                TextEdit::new(TextRange::new(BufferOffset(0), BufferOffset(5)), "hi"),
+                TextEdit::insert(BufferOffset(11), "!"),
+            ]))
+            .unwrap();
+
+        assert_eq!(buffer.text(), "hi world!");
+        assert_eq!(buffer.storage.original, "hello world");
+        assert!(buffer.storage.add.contains("hi"));
+        assert!(buffer.storage.add.contains('!'));
+        assert!(
+            buffer
+                .storage
+                .pieces
+                .iter()
+                .any(|piece| piece.source == PieceSource::Add)
+        );
+    }
+
+    #[test]
+    fn piece_table_handles_middle_replacement_without_touching_original() {
+        let mut buffer = TextBuffer::new("alpha\nbeta\ngamma");
+
+        buffer
+            .apply_transaction(EditTransaction::single(TextEdit::new(
+                TextRange::new(BufferOffset(6), BufferOffset(10)),
+                "BETA\nextra",
+            )))
+            .unwrap();
+
+        assert_eq!(buffer.text(), "alpha\nBETA\nextra\ngamma");
+        assert_eq!(buffer.storage.original, "alpha\nbeta\ngamma");
+        assert_eq!(buffer.line_count(), 4);
+        assert_eq!(buffer.line_text(2), Some("extra".to_string()));
     }
 
     #[test]

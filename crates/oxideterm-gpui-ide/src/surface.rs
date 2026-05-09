@@ -2,15 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::Arc,
+    time::Duration,
 };
 
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement,
-    Render, SharedString, Styled, Window, div, prelude::*, px, rgb, rgba, svg,
+    AnchoredPositionMode, AnyElement, App, AppContext, ClipboardItem, Context, Corner, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, Render, SharedString, Styled, Timer, Window, anchored, deferred, div, prelude::*, px,
+    rgb, rgba, svg,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::TextEditorView;
@@ -24,11 +27,11 @@ use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
     IdeFileCheck, IdeLocation, IdeWorkspace, SavedFileVersion, WorkspaceSnapshot, WriteMode,
 };
-use oxideterm_ide_fs::NodeSftpIdeFileSystem;
-use oxideterm_ssh::NodeRouter;
+use oxideterm_ide_fs::{AgentStatus, NodeAgentIdeFileSystem, NodeAgentMode};
+use oxideterm_ssh::{NodeRouter, ReconnectIdeSnapshot};
 use oxideterm_theme::ThemeTokens;
 
-use crate::labels::IdeLabels;
+use crate::{file_icons, labels::IdeLabels};
 
 // Tauri IdeWorkspace.tsx uses a 280px default with 200px/500px resize bounds.
 const IDE_TREE_DEFAULT_WIDTH: f32 = 280.0;
@@ -39,7 +42,9 @@ const IDE_TAB_PADDING_X: f32 = 12.0;
 const IDE_TAB_PADDING_Y: f32 = 6.0;
 const IDE_ICON_SIZE: f32 = 16.0;
 const IDE_EMPTY_ICON_SIZE: f32 = 64.0;
-const IDE_ROW_HEIGHT: f32 = 26.0;
+const IDE_ROW_HEIGHT: f32 = 22.0;
+const IDE_TREE_INDENT_STEP: f32 = 12.0;
+const IDE_FILE_ICON_SIZE: f32 = 14.0;
 const IDE_TREE_TOOLBAR_BUTTON_SIZE: f32 = 24.0;
 const IDE_TREE_TOOLBAR_ICON_SIZE: f32 = 14.0;
 
@@ -47,10 +52,12 @@ const IDE_TREE_TOOLBAR_ICON_SIZE: f32 = 14.0;
 // bg-theme-bg/50, hover:bg-theme-bg-hover/30, border-theme-border/50,
 // and the disconnected overlay's bg-black/50.
 const IDE_BG_HALF_ALPHA: u32 = 0x80;
+const IDE_BG_ACTIVE_THEME_ALPHA: u32 = 0x66;
 const IDE_HOVER_ALPHA: u32 = 0x4d;
 const IDE_BORDER_HALF_ALPHA: u32 = 0x80;
 const IDE_OVERLAY_ALPHA: u32 = 0x80;
 const IDE_MODAL_BACKDROP_ALPHA: u32 = 0xcc;
+const IDE_TREE_SELECTED_ALPHA: u32 = 0x1a;
 
 // Tauri `IdeRemoteFolderDialog.tsx` source classes translated to named
 // constants: sm:max-w-lg, px-4, space-y-4, h-64, p-1, px-2 py-1.5,
@@ -64,6 +71,50 @@ const IDE_FOLDER_DIALOG_ROW_PADDING_X: f32 = 8.0;
 const IDE_FOLDER_DIALOG_ROW_PADDING_Y: f32 = 6.0;
 const IDE_FOLDER_DIALOG_ICON_SIZE: f32 = 16.0;
 const IDE_FOLDER_DIALOG_SELECTED_ALPHA: u32 = 0x33;
+const IDE_TAB_CONTEXT_MENU_WIDTH: f32 = 140.0;
+const IDE_TAB_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
+const IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
+const IDE_TAB_CONTEXT_MENU_Z: usize = 50;
+const IDE_TAB_REORDER_ACTIVATION_PX: f32 = 5.0;
+const IDE_TREE_CONTEXT_MENU_WIDTH: f32 = 180.0;
+const IDE_TREE_CONTEXT_MENU_MAX_HEIGHT: f32 = 280.0;
+const IDE_TREE_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
+const IDE_TREE_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
+const IDE_TREE_CONTEXT_MENU_Z: usize = 100;
+const IDE_TREE_CONTEXT_MENU_SHORTCUT_SIZE: f32 = 10.0;
+const IDE_TREE_CONTEXT_MENU_ICON_ALPHA: u32 = 0xb3;
+const IDE_TREE_CONTEXT_MENU_DANGER_BG_ALPHA: u32 = 0x1a;
+const IDE_AGENT_MENU_WIDTH: f32 = 180.0;
+const IDE_AGENT_MENU_MANUAL_WIDTH: f32 = 300.0;
+const IDE_AGENT_MENU_PADDING_Y: f32 = 4.0;
+const IDE_AGENT_MENU_DESCRIPTION_PADDING_X: f32 = 8.0;
+const IDE_AGENT_MENU_DESCRIPTION_PADDING_Y: f32 = 6.0;
+const IDE_AGENT_MENU_ITEM_HEIGHT: f32 = 28.0;
+const IDE_AGENT_MENU_Z: usize = 110;
+const IDE_AGENT_OPT_IN_WIDTH: f32 = 384.0;
+const IDE_AGENT_OPT_IN_ICON_SIZE: f32 = 48.0;
+const IDE_AGENT_OPT_IN_ICON_INNER_SIZE: f32 = 24.0;
+const IDE_AGENT_OPT_IN_BODY_PADDING_X: f32 = 24.0;
+const IDE_AGENT_OPT_IN_BODY_PADDING_TOP: f32 = 24.0;
+const IDE_AGENT_OPT_IN_BODY_PADDING_BOTTOM: f32 = 16.0;
+const IDE_AGENT_OPT_IN_GAP: f32 = 12.0;
+const IDE_AGENT_OPT_IN_ACTION_PADDING_Y: f32 = 10.0;
+const IDE_AGENT_OPT_IN_BORDER_ALPHA: u32 = 0x99;
+const IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA: u32 = 0x1a;
+const IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA: u32 = 0x33;
+const IDE_AGENT_POLL_READY_SECS: u64 = 5;
+const IDE_AGENT_POLL_DEPLOYING_SECS: u64 = 2;
+const IDE_AGENT_POLL_MANUAL_SECS: u64 = 10;
+const TAILWIND_RED_400: u32 = 0xf87171;
+const TAILWIND_RED_500: u32 = 0xef4444;
+const TAILWIND_EMERALD_400: u32 = 0x34d399;
+const TAILWIND_AMBER_400: u32 = 0xfbbf24;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IdeSurfaceEvent {
+    RememberAgentMode(NodeAgentMode),
+    ProjectOpened,
+}
 
 #[derive(Clone, Debug, Default)]
 struct FolderPickerState {
@@ -88,6 +139,29 @@ pub enum IdeLoadState {
     Disconnected,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IdeRuntimeSettings {
+    pub auto_save: bool,
+    pub editor_font_size: f32,
+    pub editor_line_height: f32,
+    pub word_wrap: bool,
+    pub background_active: bool,
+    pub agent_mode: NodeAgentMode,
+}
+
+impl Default for IdeRuntimeSettings {
+    fn default() -> Self {
+        Self {
+            auto_save: false,
+            editor_font_size: 14.0,
+            editor_line_height: 1.2,
+            word_wrap: false,
+            background_active: false,
+            agent_mode: NodeAgentMode::Ask,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ProjectOpenResult {
     node_id: String,
@@ -104,6 +178,57 @@ struct FileOpenResult {
     version: SavedFileVersion,
 }
 
+#[derive(Clone, Debug)]
+struct TreeRenderRow {
+    entry: FileTreeEntry,
+    depth: usize,
+    expanded: bool,
+}
+
+#[derive(Clone, Debug)]
+struct TreeRowsCache {
+    root_key: String,
+    tree_revision: u64,
+    rows: Arc<Vec<TreeRenderRow>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TabContextMenu {
+    tab_id: EditorTabId,
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TreeContextMenu {
+    location: IdeLocation,
+    is_directory: bool,
+    name: String,
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AgentStatusMenu {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentActionKind {
+    Deploy,
+    Remove,
+    Refresh,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TabDrag {
+    tab_id: EditorTabId,
+    start_position: Point<Pixels>,
+    over_tab_id: EditorTabId,
+    activated: bool,
+}
+
 /// GPUI IDE owner.
 ///
 /// This is the native equivalent of Tauri's `IdeWorkspace` + `ideStore` owner:
@@ -112,9 +237,10 @@ struct FileOpenResult {
 /// terminal tab, so reconnect restore has a real IDE surface to target.
 pub struct IdeSurface {
     workspace: IdeWorkspace,
-    fs: NodeSftpIdeFileSystem,
+    fs: NodeAgentIdeFileSystem,
     tokens: ThemeTokens,
     labels: IdeLabels,
+    runtime_settings: IdeRuntimeSettings,
     focus_handle: FocusHandle,
     backend_runtime: Arc<tokio::runtime::Runtime>,
     load_state: IdeLoadState,
@@ -128,9 +254,20 @@ pub struct IdeSurface {
     saving_tabs: HashSet<EditorTabId>,
     save_after_close: Option<CloseRequestId>,
     pending_restore_files: Vec<String>,
+    pending_restore_dirty_contents: BTreeMap<String, String>,
     last_error: Option<String>,
     folder_picker: FolderPickerState,
     folder_switch_confirm_open: bool,
+    tree_rows_cache: Option<TreeRowsCache>,
+    tab_context_menu: Option<TabContextMenu>,
+    tree_context_menu: Option<TreeContextMenu>,
+    tab_drag: Option<TabDrag>,
+    agent_opt_in_open: bool,
+    agent_opt_in_remember: bool,
+    agent_status_menu: Option<AgentStatusMenu>,
+    agent_remove_confirm_open: bool,
+    agent_action: Option<AgentActionKind>,
+    agent_poll_generation: u64,
 }
 
 impl IdeSurface {
@@ -138,14 +275,16 @@ impl IdeSurface {
         router: NodeRouter,
         tokens: ThemeTokens,
         labels: IdeLabels,
+        runtime_settings: IdeRuntimeSettings,
         backend_runtime: Arc<tokio::runtime::Runtime>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             workspace: IdeWorkspace::new(),
-            fs: NodeSftpIdeFileSystem::new(router),
+            fs: NodeAgentIdeFileSystem::new(router, runtime_settings.agent_mode),
             tokens,
             labels,
+            runtime_settings,
             focus_handle: cx.focus_handle(),
             backend_runtime,
             load_state: IdeLoadState::Empty,
@@ -159,9 +298,20 @@ impl IdeSurface {
             saving_tabs: HashSet::new(),
             save_after_close: None,
             pending_restore_files: Vec::new(),
+            pending_restore_dirty_contents: BTreeMap::new(),
             last_error: None,
             folder_picker: FolderPickerState::default(),
             folder_switch_confirm_open: false,
+            tree_rows_cache: None,
+            tab_context_menu: None,
+            tree_context_menu: None,
+            tab_drag: None,
+            agent_opt_in_open: false,
+            agent_opt_in_remember: false,
+            agent_status_menu: None,
+            agent_remove_confirm_open: false,
+            agent_action: None,
+            agent_poll_generation: 0,
         }
     }
 
@@ -169,9 +319,62 @@ impl IdeSurface {
         &self.load_state
     }
 
+    pub fn set_visual_and_runtime_settings(
+        &mut self,
+        tokens: ThemeTokens,
+        runtime_settings: IdeRuntimeSettings,
+        cx: &mut Context<Self>,
+    ) {
+        self.tokens = tokens;
+        self.runtime_settings = runtime_settings;
+        self.fs.set_mode(runtime_settings.agent_mode);
+        if runtime_settings.agent_mode != NodeAgentMode::Ask {
+            self.agent_opt_in_open = false;
+        }
+        for editor in self.editors.values() {
+            apply_editor_runtime_settings(editor, self.tokens, self.runtime_settings, cx);
+        }
+        cx.notify();
+    }
+
     pub fn snapshot(&mut self, cx: &mut Context<Self>) -> Option<WorkspaceSnapshot> {
         self.sync_all_editors(cx);
         self.workspace.snapshot().ok()
+    }
+
+    pub fn reconnect_snapshot(&mut self, cx: &mut Context<Self>) -> Option<ReconnectIdeSnapshot> {
+        self.sync_all_editors(cx);
+        let snapshot = self.workspace.snapshot().ok()?;
+        let (connection_id, project_path) = match &snapshot.project.root {
+            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
+            IdeLocation::Local { .. } => return None,
+        };
+        let tab_paths = snapshot
+            .tabs
+            .iter()
+            .filter_map(|tab| match &tab.location {
+                IdeLocation::Remote { path, .. } => Some(path.clone()),
+                IdeLocation::Local { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        let dirty_contents = snapshot
+            .buffers
+            .iter()
+            .filter(|buffer| {
+                buffer.revision != buffer.saved_revision || buffer.text != buffer.saved_text
+            })
+            .filter_map(|buffer| match &buffer.location {
+                IdeLocation::Remote { path, .. } => Some((path.clone(), buffer.text.clone())),
+                IdeLocation::Local { .. } => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        Some(ReconnectIdeSnapshot {
+            project_path,
+            tab_paths,
+            connection_id,
+            dirty_contents,
+        })
     }
 
     pub fn open_remote_project(
@@ -182,6 +385,9 @@ impl IdeSurface {
     ) {
         let node_id = node_id.into();
         let root_path = root_path.into();
+        if self.pending_restore_files.is_empty() {
+            self.pending_restore_dirty_contents.clear();
+        }
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.node_id = Some(node_id.clone());
@@ -224,7 +430,36 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         self.pending_restore_files = file_paths;
+        self.pending_restore_dirty_contents.clear();
         self.open_remote_project(node_id, root_path, cx);
+    }
+
+    pub fn restore_reconnect_snapshot(
+        &mut self,
+        snapshot: ReconnectIdeSnapshot,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.sync_all_editors(cx);
+        let same_project_open = self.root_path.as_deref() == Some(snapshot.project_path.as_str())
+            && self.node_id.as_deref() == Some(snapshot.connection_id.as_str());
+
+        if self.root_path.is_some() && !same_project_open {
+            return false;
+        }
+
+        self.pending_restore_dirty_contents = snapshot.dirty_contents;
+        if same_project_open {
+            for path in snapshot.tab_paths {
+                self.open_remote_file(
+                    IdeLocation::remote(snapshot.connection_id.clone(), path),
+                    cx,
+                );
+            }
+        } else {
+            self.pending_restore_files = snapshot.tab_paths;
+            self.open_remote_project(snapshot.connection_id, snapshot.project_path, cx);
+        }
+        true
     }
 
     pub fn open_remote_folder_picker_for_node(
@@ -466,6 +701,8 @@ impl IdeSurface {
         for buffer in buffers {
             self.create_editor(buffer.tab_id, &buffer.location, buffer.text, cx);
         }
+        self.refresh_agent_status(cx);
+        self.schedule_next_agent_status_poll(cx);
         cx.notify();
     }
 
@@ -477,6 +714,10 @@ impl IdeSurface {
         self.node_id = Some(result.node_id);
         self.git_branch = result.git_branch;
         self.load_state = IdeLoadState::Ready;
+        self.agent_opt_in_open = self.runtime_settings.agent_mode == NodeAgentMode::Ask;
+        self.refresh_agent_status(cx);
+        self.schedule_next_agent_status_poll(cx);
+        cx.emit(IdeSurfaceEvent::ProjectOpened);
         let node_id = self.node_id.clone();
         for path in std::mem::take(&mut self.pending_restore_files) {
             if let Some(node_id) = node_id.clone() {
@@ -551,6 +792,7 @@ impl IdeSurface {
             .map(|tab| tab.id)
         {
             let _ = self.workspace.set_active_tab(tab_id);
+            self.apply_pending_reconnect_dirty_for_tab(tab_id, cx);
             cx.notify();
             return;
         }
@@ -577,6 +819,8 @@ impl IdeSurface {
                 this.loading_paths.remove(&key);
                 match result {
                     Ok(result) => {
+                        let dirty_text = remote_path(&result.location)
+                            .and_then(|path| this.pending_restore_dirty_contents.remove(path));
                         match this.workspace.open_file(
                             result.location.clone(),
                             result.text.clone(),
@@ -588,6 +832,9 @@ impl IdeSurface {
                                     | oxideterm_ide_core::OpenFileOutcome::Reused(tab_id) => tab_id,
                                 };
                                 this.create_editor(tab_id, &result.location, result.text, cx);
+                                if let Some(dirty_text) = dirty_text {
+                                    this.apply_reconnect_dirty_text(tab_id, dirty_text, cx);
+                                }
                             }
                             Err(error) => this.last_error = Some(error.to_string()),
                         }
@@ -608,13 +855,83 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         let tokens = self.tokens;
+        let runtime_settings = self.runtime_settings;
         let language = language_for_location(location, &text);
         let editor = cx.new(|cx| {
             let mut editor = TextEditorView::new(text, &tokens, cx);
+            editor.apply_ide_runtime_settings(
+                &tokens,
+                runtime_settings.editor_font_size,
+                runtime_settings.editor_line_height,
+                runtime_settings.word_wrap,
+                runtime_settings.background_active,
+                cx,
+            );
             editor.set_language(language, cx);
             editor
         });
         self.editors.insert(tab_id, editor);
+    }
+
+    fn apply_pending_reconnect_dirty_for_tab(
+        &mut self,
+        tab_id: EditorTabId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = self
+            .workspace
+            .buffer(tab_id)
+            .and_then(|buffer| remote_path(&buffer.location).map(ToOwned::to_owned))
+        else {
+            return;
+        };
+        let Some(dirty_text) = self.pending_restore_dirty_contents.remove(&path) else {
+            return;
+        };
+        self.apply_reconnect_dirty_text(tab_id, dirty_text, cx);
+    }
+
+    fn apply_reconnect_dirty_text(
+        &mut self,
+        tab_id: EditorTabId,
+        dirty_text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(buffer) = self.workspace.buffer(tab_id).cloned() else {
+            return;
+        };
+        if buffer.is_dirty() || dirty_text == buffer.saved_text {
+            return;
+        }
+
+        // Tauri only writes snapshot dirtyContents back into clean tabs. Native
+        // keeps the same user-intent rule so edits made after the snapshot win.
+        let _ = self
+            .workspace
+            .replace_buffer_text(tab_id, dirty_text.clone());
+        if let Some(editor) = self.editors.get(&tab_id) {
+            editor.update(cx, |editor, cx| {
+                editor.replace_text_external(dirty_text, cx);
+            });
+        }
+    }
+
+    fn activate_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+        let previous = self.workspace.active_tab();
+        if previous == Some(tab_id) {
+            return;
+        }
+        // Tauri auto-saves the previously active dirty tab when activeTabId
+        // changes. Window-blur save-all still needs a GPUI focus-loss hook.
+        if self.runtime_settings.auto_save
+            && let Some(previous_tab_id) = previous
+            && self.is_tab_dirty(previous_tab_id, cx)
+            && !self.saving_tabs.contains(&previous_tab_id)
+        {
+            self.save_tab(previous_tab_id, cx);
+        }
+        let _ = self.workspace.set_active_tab(tab_id);
+        cx.notify();
     }
 
     fn close_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
@@ -629,6 +946,60 @@ impl IdeSurface {
                 self.last_error = Some(error.to_string());
                 cx.notify();
             }
+        }
+    }
+
+    fn toggle_tab_pin(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+        if let Err(error) = self.workspace.toggle_tab_pin(tab_id) {
+            self.last_error = Some(error.to_string());
+        }
+        cx.notify();
+    }
+
+    fn start_tab_drag(&mut self, tab_id: EditorTabId, position: Point<Pixels>) {
+        self.tab_drag = Some(TabDrag {
+            tab_id,
+            start_position: position,
+            over_tab_id: tab_id,
+            activated: false,
+        });
+    }
+
+    fn update_tab_drag(
+        &mut self,
+        target_tab_id: EditorTabId,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut drag) = self.tab_drag else {
+            return;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        let distance = f32::from(event.position.x - drag.start_position.x).abs();
+        if !drag.activated && distance < IDE_TAB_REORDER_ACTIVATION_PX {
+            return;
+        }
+        drag.activated = true;
+        drag.over_tab_id = target_tab_id;
+        self.tab_drag = Some(drag);
+        cx.notify();
+    }
+
+    fn finish_tab_drag(&mut self, cx: &mut Context<Self>) {
+        if let Some(drag) = self.tab_drag.take() {
+            if drag.activated
+                && drag.tab_id != drag.over_tab_id
+                && let Some(target_index) = self
+                    .workspace
+                    .tabs()
+                    .iter()
+                    .position(|tab| tab.id == drag.over_tab_id)
+            {
+                let _ = self.workspace.move_tab_to_index(drag.tab_id, target_index);
+            }
+            cx.notify();
         }
     }
 
@@ -713,7 +1084,7 @@ impl IdeSurface {
         let Some(editor) = self.editors.get(&tab_id) else {
             return;
         };
-        let text = editor.read(cx).buffer().text().to_string();
+        let text = editor.read(cx).buffer().text();
         let _ = self.workspace.replace_buffer_text(tab_id, text);
     }
 
@@ -756,11 +1127,27 @@ impl Render for IdeSurface {
             .font_family(SharedString::from(font_family))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(theme.text))
-            .bg(rgb(theme.bg))
+            .bg(if self.runtime_settings.background_active {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseDownEvent, window, _cx| {
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle);
+                    let closed_tab_menu = this.tab_context_menu.take().is_some();
+                    let closed_tree_menu = this.tree_context_menu.take().is_some();
+                    let closed_agent_menu = this.agent_status_menu.take().is_some();
+                    if closed_tab_menu || closed_tree_menu || closed_agent_menu {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.finish_tab_drag(cx);
                 }),
             )
             .on_key_down(cx.listener(|this, event, window, cx| {
@@ -787,6 +1174,21 @@ impl Render for IdeSurface {
         if self.folder_picker.open {
             root = root.child(self.render_folder_picker_dialog(cx));
         }
+        if let Some(menu) = self.tab_context_menu {
+            root = root.child(self.render_tab_context_menu(menu, _window, cx));
+        }
+        if let Some(menu) = self.tree_context_menu.clone() {
+            root = root.child(self.render_tree_context_menu(menu, _window, cx));
+        }
+        if let Some(menu) = self.agent_status_menu {
+            root = root.child(self.render_agent_status_menu(menu, _window, cx));
+        }
+        if self.agent_remove_confirm_open {
+            root = root.child(self.render_agent_remove_confirm_dialog(cx));
+        }
+        if self.agent_opt_in_open {
+            root = root.child(self.render_agent_opt_in_dialog(cx));
+        }
         root
     }
 }
@@ -796,6 +1198,8 @@ impl Focusable for IdeSurface {
         self.focus_handle.clone()
     }
 }
+
+impl EventEmitter<IdeSurfaceEvent> for IdeSurface {}
 
 impl IdeSurface {
     fn render_empty_project(&self, _cx: &mut Context<Self>) -> AnyElement {
@@ -890,11 +1294,13 @@ impl IdeSurface {
             .flex_col()
             .border_r_1()
             .border_color(rgba((self.tokens.ui.border << 8) | IDE_BORDER_HALF_ALPHA))
-            .bg(rgba((self.tokens.ui.bg << 8) | IDE_BG_HALF_ALPHA));
+            .bg(self.ide_bg(self.tokens.ui.bg, IDE_BG_HALF_ALPHA));
 
         let Some(snapshot) = self.workspace.snapshot().ok() else {
             return tree.into_any_element();
         };
+        let root_location = snapshot.project.root.clone();
+        let root_title = snapshot.project.title.clone();
         tree = tree
             .child(
                 div()
@@ -920,35 +1326,76 @@ impl IdeSurface {
                             .child(div().truncate().child(snapshot.project.title.clone())),
                     )
                     .child({
-                        let disabled = self.workspace.has_dirty_buffers()
+                        let folder_disabled = self.workspace.has_dirty_buffers()
                             || matches!(self.load_state, IdeLoadState::Loading);
+                        let refresh_disabled = matches!(self.load_state, IdeLoadState::Loading);
                         div()
-                            .size(px(IDE_TREE_TOOLBAR_BUTTON_SIZE))
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .opacity(if disabled { 0.5 } else { 1.0 })
-                            .hover(|style| {
-                                if disabled {
-                                    style
-                                } else {
-                                    style.bg(rgba((self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA))
-                                }
-                            })
-                            .child(self.icon(
-                                "lucide/folder-input.svg",
-                                IDE_TREE_TOOLBAR_ICON_SIZE,
-                                self.tokens.ui.text_muted,
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    if !disabled {
-                                        this.request_open_folder_picker(cx);
-                                    }
-                                    cx.stop_propagation();
-                                }),
+                            .gap_1()
+                            .child(
+                                div()
+                                    .size(px(IDE_TREE_TOOLBAR_BUTTON_SIZE))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .opacity(if folder_disabled { 0.5 } else { 1.0 })
+                                    .hover(|style| {
+                                        if folder_disabled {
+                                            style
+                                        } else {
+                                            style.bg(rgba(
+                                                (self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA,
+                                            ))
+                                        }
+                                    })
+                                    .child(self.icon(
+                                        "lucide/folder-input.svg",
+                                        IDE_TREE_TOOLBAR_ICON_SIZE,
+                                        self.tokens.ui.text_muted,
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            if !folder_disabled {
+                                                this.request_open_folder_picker(cx);
+                                            }
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .size(px(IDE_TREE_TOOLBAR_BUTTON_SIZE))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .opacity(if refresh_disabled { 0.5 } else { 1.0 })
+                                    .hover(|style| {
+                                        if refresh_disabled {
+                                            style
+                                        } else {
+                                            style.bg(rgba(
+                                                (self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA,
+                                            ))
+                                        }
+                                    })
+                                    .child(self.icon(
+                                        "lucide/refresh-cw.svg",
+                                        IDE_TREE_TOOLBAR_ICON_SIZE,
+                                        self.tokens.ui.text_muted,
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            if !refresh_disabled {
+                                                this.retry_open_project(cx);
+                                            }
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
                             )
                     }),
             )
@@ -957,34 +1404,97 @@ impl IdeSurface {
                     .id("ide-tree-scroll")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
                     .py_1()
-                    .child(self.render_directory_children(snapshot.project.root, 0, cx)),
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.open_tree_context_menu(
+                                root_location.clone(),
+                                true,
+                                root_title.clone(),
+                                event.position,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    // Tauri's tree renders the loaded root files directly with
+                    // `rootFiles.map(...)`; keep the same concrete row list so
+                    // SFTP listings cannot disappear behind GPUI list sizing.
+                    .child(self.render_tree_rows(snapshot.project.root, cx)),
             );
         tree.into_any_element()
     }
 
-    fn render_directory_children(
-        &mut self,
+    fn render_tree_rows(&mut self, root: IdeLocation, cx: &mut Context<Self>) -> AnyElement {
+        let rows = self.flatten_tree_rows(root);
+        let mut list = div()
+            .id("ide-tree-scroll-content")
+            .size_full()
+            .overflow_y_scroll();
+        if rows.is_empty() {
+            list = list.child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.labels.no_subfolders.clone()),
+            );
+        }
+        for row in rows.iter().cloned() {
+            list = list.child(self.render_tree_row(row.entry, row.depth, row.expanded, cx));
+        }
+        list.into_any_element()
+    }
+
+    fn flatten_tree_rows(&mut self, root: IdeLocation) -> Arc<Vec<TreeRenderRow>> {
+        let root_key = root.stable_key();
+        let tree_revision = self.workspace.file_tree().revision();
+        if let Some(cache) = self.tree_rows_cache.as_ref()
+            && cache.root_key == root_key
+            && cache.tree_revision == tree_revision
+        {
+            return cache.rows.clone();
+        }
+
+        let mut rows = Vec::new();
+        self.push_flattened_tree_rows(root, 0, &mut rows);
+        // FileTreeState owns a revision counter, so the GPUI surface can keep
+        // the expensive flattened tree stable across renders while selection
+        // and loading state continue to resolve live per row.
+        let rows = Arc::new(rows);
+        self.tree_rows_cache = Some(TreeRowsCache {
+            root_key,
+            tree_revision,
+            rows: rows.clone(),
+        });
+        rows
+    }
+
+    fn push_flattened_tree_rows(
+        &self,
         directory: IdeLocation,
         depth: usize,
-        cx: &mut Context<Self>,
-    ) -> Div {
+        rows: &mut Vec<TreeRenderRow>,
+    ) {
         let children = self
             .workspace
             .file_tree()
             .children(&directory)
             .map(|children| children.to_vec())
             .unwrap_or_default();
-        let mut list = div().flex().flex_col();
         for entry in children {
             let expanded = self.workspace.file_tree().is_expanded(&entry.location);
-            list = list.child(self.render_tree_row(entry.clone(), depth, expanded, cx));
+            rows.push(TreeRenderRow {
+                entry: entry.clone(),
+                depth,
+                expanded,
+            });
             if expanded && matches!(entry.kind, FileKind::Directory) {
-                list = list.child(self.render_directory_children(entry.location, depth + 1, cx));
+                self.push_flattened_tree_rows(entry.location, depth + 1, rows);
             }
         }
-        list
     }
 
     fn render_tree_row(
@@ -998,30 +1508,57 @@ impl IdeSurface {
         let is_dir = matches!(entry.kind, FileKind::Directory);
         let path_key = entry.location.stable_key();
         let loading = self.loading_paths.contains(&path_key);
+        let icon = if is_dir {
+            file_icons::folder_icon(expanded, entry.name == ".git", &self.tokens)
+        } else {
+            file_icons::file_icon(&entry.name, &self.tokens)
+        };
         let row_bg = if selected {
-            rgba((self.tokens.ui.bg_active << 8) | 0xff)
+            // Tauri tree open state is `bg-theme-accent/10 text-theme-accent`.
+            rgba((self.tokens.ui.accent << 8) | IDE_TREE_SELECTED_ALPHA)
         } else {
             rgba(0x00000000)
         };
         div()
             .h(px(IDE_ROW_HEIGHT))
-            .px_2()
+            .px_1()
             .flex()
             .items_center()
             .gap_1()
             .cursor_pointer()
             .bg(row_bg)
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
                     let entry = entry.clone();
                     move |this, _event, _window, cx| {
+                        this.tree_context_menu = None;
                         this.open_tree_entry(entry.clone(), cx);
                     }
                 }),
             )
-            .child(div().w(px((depth as f32) * 14.0)))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let entry = entry.clone();
+                    move |this, event: &MouseDownEvent, _window, cx| {
+                        let _ = this
+                            .workspace
+                            .select_tree_entry(Some(entry.location.clone()));
+                        this.open_tree_context_menu(
+                            entry.location.clone(),
+                            matches!(entry.kind, FileKind::Directory),
+                            entry.name.clone(),
+                            event.position,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .child(div().w(px((depth as f32) * IDE_TREE_INDENT_STEP)))
             .child(if is_dir {
                 if expanded {
                     self.icon(
@@ -1046,15 +1583,21 @@ impl IdeSurface {
                     self.tokens.ui.accent,
                 )
             } else if is_dir {
-                self.icon("lucide/folder.svg", IDE_ICON_SIZE, self.tokens.ui.info)
+                self.icon(icon.path, IDE_ICON_SIZE, icon.color)
             } else {
-                self.icon("lucide/file.svg", IDE_ICON_SIZE, self.tokens.ui.info)
+                self.icon(icon.path, IDE_FILE_ICON_SIZE, icon.color)
             })
             .child(
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_color(rgb(self.tokens.ui.text))
+                    .text_color(rgb(if selected {
+                        self.tokens.ui.accent
+                    } else if is_dir {
+                        self.tokens.ui.text
+                    } else {
+                        self.tokens.ui.text_muted
+                    }))
                     .child(entry.name),
             )
             .into_any_element()
@@ -1067,7 +1610,7 @@ impl IdeSurface {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgba((self.tokens.ui.bg << 8) | IDE_BG_HALF_ALPHA))
+            .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
             .child(self.render_tabs(cx))
             .child(div().flex_1().min_h_0().child(match self.active_editor() {
                 Some(editor) => editor.into_any_element(),
@@ -1087,12 +1630,16 @@ impl IdeSurface {
             .overflow_x_scroll()
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgba((self.tokens.ui.bg << 8) | IDE_BG_HALF_ALPHA));
+            .bg(self.ide_bg(self.tokens.ui.bg, IDE_BG_HALF_ALPHA));
 
         for tab in tabs {
             let active = Some(tab.id) == active_tab;
             let dirty = self.is_tab_dirty(tab.id, cx);
             let tab_id = tab.id;
+            let is_dragging = self
+                .tab_drag
+                .is_some_and(|drag| drag.activated && drag.tab_id == tab_id);
+            let file_icon = file_icons::file_icon(&tab.title, &self.tokens);
             row = row.child(
                 div()
                     .h_full()
@@ -1101,26 +1648,77 @@ impl IdeSurface {
                     .flex()
                     .items_center()
                     .gap_1()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .border_r_1()
                     .border_color(rgba((self.tokens.ui.border << 8) | IDE_BORDER_HALF_ALPHA))
                     .relative()
                     .bg(if active {
                         rgb(self.tokens.ui.bg_hover)
                     } else {
-                        rgba((self.tokens.ui.bg << 8) | IDE_BG_HALF_ALPHA)
+                        self.ide_bg(self.tokens.ui.bg, IDE_BG_HALF_ALPHA)
+                    })
+                    .opacity(if is_dragging { 0.7 } else { 1.0 })
+                    .when(is_dragging, |this| {
+                        this.shadow_lg().rounded(px(self.tokens.radii.sm))
                     })
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.tab_context_menu = None;
+                            this.tree_context_menu = None;
+                            this.start_tab_drag(tab_id, event.position);
+                            if event.click_count >= 2 {
+                                this.toggle_tab_pin(tab_id, cx);
+                            } else {
+                                this.activate_tab(tab_id, cx);
+                            }
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Middle,
                         cx.listener(move |this, _event, _window, cx| {
-                            let _ = this.workspace.set_active_tab(tab_id);
+                            this.close_tab(tab_id, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_move(
+                        cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.update_tab_drag(tab_id, event, cx);
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                            this.finish_tab_drag(cx);
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.tab_context_menu = Some(TabContextMenu {
+                                tab_id,
+                                x: f32::from(event.position.x),
+                                y: f32::from(event.position.y),
+                            });
+                            this.tree_context_menu = None;
+                            cx.stop_propagation();
                             cx.notify();
                         }),
                     )
+                    .when(tab.is_pinned, |this| {
+                        this.child(self.icon("lucide/pin.svg", 12.0, self.tokens.ui.accent))
+                    })
+                    .child(self.icon(file_icon.path, IDE_FILE_ICON_SIZE, file_icon.color))
                     .child(
                         div()
-                            .max_w(px(180.0))
+                            .max_w(px(120.0))
                             .truncate()
+                            .text_color(rgb(if active {
+                                self.tokens.ui.text
+                            } else {
+                                self.tokens.ui.text_muted
+                            }))
                             .when(dirty, |this| this.italic())
                             .child(tab.title.clone()),
                     )
@@ -1166,6 +1764,290 @@ impl IdeSurface {
         row.into_any_element()
     }
 
+    fn render_tab_context_menu(
+        &self,
+        menu: TabContextMenu,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let x = menu
+            .x
+            .min(f32::from(viewport.width) - IDE_TAB_CONTEXT_MENU_WIDTH - 8.0)
+            .max(8.0);
+        let y = menu
+            .y
+            .min(f32::from(viewport.height) - IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT * 2.0 - 16.0)
+            .max(8.0);
+        let pinned = self
+            .workspace
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == menu.tab_id)
+            .map(|tab| tab.is_pinned)
+            .unwrap_or(false);
+
+        // Tauri `IdeEditorTabs.tsx` uses a fixed z-50 elevated menu with
+        // min-w-[140px], rounded-md, py-1, and two text-xs actions.
+        let popup = div()
+            .w(px(IDE_TAB_CONTEXT_MENU_WIDTH))
+            .py(px(IDE_TAB_CONTEXT_MENU_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg_elevated))
+            .shadow_lg()
+            .child(self.render_tab_context_menu_item(
+                "lucide/pin.svg",
+                if pinned {
+                    self.labels.unpin_tab.clone()
+                } else {
+                    self.labels.pin_tab.clone()
+                },
+                cx.listener(move |this, _event, _window, cx| {
+                    this.toggle_tab_pin(menu.tab_id, cx);
+                    this.tab_context_menu = None;
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(self.render_tab_context_menu_item(
+                "lucide/x.svg",
+                self.labels.close_tab.clone(),
+                cx.listener(move |this, _event, _window, cx| {
+                    this.close_tab(menu.tab_id, cx);
+                    this.tab_context_menu = None;
+                    cx.stop_propagation();
+                }),
+            ))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_this, _event, _window, cx| {
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element();
+
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(x), px(y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(popup),
+        )
+        .with_priority(IDE_TAB_CONTEXT_MENU_Z)
+        .into_any_element()
+    }
+
+    fn render_tab_context_menu_item(
+        &self,
+        icon: &'static str,
+        label: String,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        div()
+            .h(px(IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text))
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+            .child(self.icon(icon, 12.0, self.tokens.ui.text))
+            .child(div().truncate().child(label))
+            .on_mouse_down(MouseButton::Left, listener)
+            .into_any_element()
+    }
+
+    fn open_tree_context_menu(
+        &mut self,
+        location: IdeLocation,
+        is_directory: bool,
+        name: String,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.tab_context_menu = None;
+        self.tree_context_menu = Some(TreeContextMenu {
+            location,
+            is_directory,
+            name,
+            x: f32::from(position.x),
+            y: f32::from(position.y),
+        });
+        cx.notify();
+    }
+
+    fn render_tree_context_menu(
+        &self,
+        menu: TreeContextMenu,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let x = menu
+            .x
+            .min(f32::from(viewport.width) - IDE_TREE_CONTEXT_MENU_WIDTH - 8.0)
+            .max(8.0);
+        let y = menu
+            .y
+            .min(f32::from(viewport.height) - IDE_TREE_CONTEXT_MENU_MAX_HEIGHT - 8.0)
+            .max(8.0);
+
+        let popup = div()
+            .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
+            .py(px(IDE_TREE_CONTEXT_MENU_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg))
+            .shadow_lg()
+            .child(self.render_tree_context_menu_item(
+                "lucide/file-plus.svg",
+                self.labels.context_new_file.clone(),
+                None,
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_tree_context_menu_item(
+                "lucide/folder-plus.svg",
+                self.labels.context_new_folder.clone(),
+                None,
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_tree_context_menu_divider())
+            .child(self.render_tree_context_menu_item(
+                "lucide/edit-3.svg",
+                self.labels.context_rename.clone(),
+                Some("F2"),
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_tree_context_menu_item(
+                "lucide/trash-2.svg",
+                self.labels.context_delete.clone(),
+                None,
+                true,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_tree_context_menu_divider())
+            .child(self.render_tree_context_menu_item(
+                "lucide/copy.svg",
+                self.labels.context_copy_path.clone(),
+                None,
+                false,
+                cx.listener({
+                    let path = location_path(menu.location.clone());
+                    move |this, _event, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }),
+            ))
+            .child(self.render_tree_context_menu_item(
+                "lucide/terminal.svg",
+                self.labels.context_open_in_terminal.clone(),
+                None,
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .into_any_element();
+
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(x), px(y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(popup),
+        )
+        .with_priority(IDE_TREE_CONTEXT_MENU_Z)
+        .into_any_element()
+    }
+
+    fn render_tree_context_menu_item(
+        &self,
+        icon: &'static str,
+        label: String,
+        shortcut: Option<&'static str>,
+        danger: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let text_color = if danger {
+            TAILWIND_RED_400
+        } else {
+            self.tokens.ui.text
+        };
+        let hover_bg = if danger {
+            rgba((TAILWIND_RED_500 << 8) | IDE_TREE_CONTEXT_MENU_DANGER_BG_ALPHA)
+        } else {
+            rgb(self.tokens.ui.bg_hover)
+        };
+        div()
+            .h(px(IDE_TREE_CONTEXT_MENU_ITEM_HEIGHT))
+            .w_full()
+            .flex()
+            .items_center()
+            .px_3()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(text_color))
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover_bg))
+            .child(
+                svg()
+                    .path(icon)
+                    .size(px(12.0))
+                    .text_color(rgba((text_color << 8) | IDE_TREE_CONTEXT_MENU_ICON_ALPHA)),
+            )
+            .child(div().w(px(8.0)))
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .when_some(shortcut, |this, shortcut| {
+                this.child(
+                    div()
+                        .ml_4()
+                        .text_size(px(IDE_TREE_CONTEXT_MENU_SHORTCUT_SIZE))
+                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
+                        .child(shortcut),
+                )
+            })
+            .on_mouse_down(MouseButton::Left, listener)
+            .into_any_element()
+    }
+
+    fn render_tree_context_menu_divider(&self) -> AnyElement {
+        div()
+            .h(px(1.0))
+            .my(px(IDE_TREE_CONTEXT_MENU_PADDING_Y))
+            .bg(rgb(self.tokens.ui.border))
+            .into_any_element()
+    }
+
     fn render_empty_editor(&self, _cx: &mut Context<Self>) -> AnyElement {
         div()
             .size_full()
@@ -1174,7 +2056,7 @@ impl IdeSurface {
             .items_center()
             .justify_center()
             .gap_3()
-            .bg(rgba((self.tokens.ui.bg << 8) | IDE_BG_HALF_ALPHA))
+            .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.icon(
                 "lucide/code-2.svg",
@@ -1216,7 +2098,11 @@ impl IdeSurface {
             .justify_between()
             .border_t_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .bg(if self.runtime_settings.background_active {
+                rgba((self.tokens.ui.bg_panel << 8) | IDE_BG_ACTIVE_THEME_ALPHA)
+            } else {
+                rgb(self.tokens.ui.bg_panel)
+            })
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(
@@ -1224,7 +2110,7 @@ impl IdeSurface {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(self.labels.sftp_mode.clone())
+                    .child(self.render_agent_status_trigger(cx))
                     .when_some(self.git_branch.clone(), |this, branch| {
                         this.child(format!("git: {branch}"))
                     })
@@ -1234,6 +2120,742 @@ impl IdeSurface {
             )
             .child(div().truncate().child(active_path))
             .into_any_element()
+    }
+
+    fn render_agent_status_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
+        let status = self.fs.status();
+        let (icon, label, color, opacity) = self.agent_status_trigger_parts(&status);
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .mr_4()
+            .px(px(6.0))
+            .py(px(2.0))
+            .rounded(px(self.tokens.radii.xs))
+            .text_color(rgb(color))
+            .opacity(opacity)
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+            .child(self.icon(icon, 12.0, color))
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.agent_status_menu = Some(AgentStatusMenu {
+                        x: f32::from(event.position.x),
+                        y: f32::from(event.position.y),
+                    });
+                    this.tab_context_menu = None;
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn agent_status_trigger_parts(&self, status: &AgentStatus) -> (&'static str, String, u32, f32) {
+        if self.agent_action == Some(AgentActionKind::Refresh) {
+            return (
+                "lucide/hard-drive.svg",
+                "...".to_string(),
+                self.tokens.ui.text_muted,
+                0.5,
+            );
+        }
+        match status {
+            AgentStatus::Ready { .. } => (
+                "lucide/cpu.svg",
+                "Agent".to_string(),
+                TAILWIND_EMERALD_400,
+                1.0,
+            ),
+            AgentStatus::Deploying => (
+                "lucide/hard-drive.svg",
+                "Agent...".to_string(),
+                TAILWIND_AMBER_400,
+                1.0,
+            ),
+            AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. } => {
+                (
+                    "lucide/hard-drive.svg",
+                    "SFTP".to_string(),
+                    TAILWIND_AMBER_400,
+                    1.0,
+                )
+            }
+            AgentStatus::Failed { .. }
+            | AgentStatus::UnsupportedArch { .. }
+            | AgentStatus::NotDeployed
+            | AgentStatus::SftpFallback => (
+                "lucide/hard-drive.svg",
+                "SFTP".to_string(),
+                self.tokens.ui.text_muted,
+                1.0,
+            ),
+        }
+    }
+
+    fn render_agent_status_menu(
+        &self,
+        menu: AgentStatusMenu,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let status = self.fs.status();
+        let manual = matches!(
+            status,
+            AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. }
+        );
+        let width = if manual {
+            IDE_AGENT_MENU_MANUAL_WIDTH
+        } else {
+            IDE_AGENT_MENU_WIDTH
+        };
+        let height = self.agent_status_menu_height(&status);
+        let x = menu.x.max(8.0);
+        let y = (menu.y - height).max(8.0);
+        let popup = div()
+            .w(px(width))
+            .py(px(IDE_AGENT_MENU_PADDING_Y))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg_panel))
+            .shadow_lg()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text))
+            .occlude()
+            .child(
+                div()
+                    .px(px(IDE_AGENT_MENU_DESCRIPTION_PADDING_X))
+                    .py(px(IDE_AGENT_MENU_DESCRIPTION_PADDING_Y))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.agent_status_description(&status)),
+            )
+            .when(manual, |this| {
+                this.child(self.render_agent_manual_body(&status))
+            })
+            .child(self.render_agent_status_menu_divider())
+            .when(self.agent_can_deploy(&status), |this| {
+                this.child(self.render_agent_status_menu_item(
+                    if self.agent_action == Some(AgentActionKind::Deploy) {
+                        "lucide/loader-circle.svg"
+                    } else {
+                        "lucide/rocket.svg"
+                    },
+                    if matches!(
+                        status,
+                        AgentStatus::ManualUploadRequired { .. }
+                            | AgentStatus::ManualUpdateRequired { .. }
+                    ) {
+                        self.labels.agent_retry_btn.clone()
+                    } else {
+                        self.labels.agent_deploy_btn.clone()
+                    },
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.agent_status_menu = None;
+                        this.start_deploy_agent(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+            })
+            .when(matches!(status, AgentStatus::Ready { .. }), |this| {
+                this.child(self.render_agent_status_menu_item(
+                    if self.agent_action == Some(AgentActionKind::Remove) {
+                        "lucide/loader-circle.svg"
+                    } else {
+                        "lucide/trash-2.svg"
+                    },
+                    self.labels.agent_remove_btn.clone(),
+                    true,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.agent_status_menu = None;
+                        this.agent_remove_confirm_open = true;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ))
+            })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .into_any_element();
+
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(x), px(y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(popup),
+        )
+        .with_priority(IDE_AGENT_MENU_Z)
+        .into_any_element()
+    }
+
+    fn agent_status_menu_height(&self, status: &AgentStatus) -> f32 {
+        let action_rows =
+            if matches!(status, AgentStatus::Ready { .. }) || self.agent_can_deploy(status) {
+                1.0
+            } else {
+                0.0
+            };
+        let manual_body = if matches!(
+            status,
+            AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. }
+        ) {
+            116.0
+        } else {
+            0.0
+        };
+        8.0 + 28.0 + manual_body + 1.0 + action_rows * IDE_AGENT_MENU_ITEM_HEIGHT
+    }
+
+    fn agent_can_deploy(&self, status: &AgentStatus) -> bool {
+        !matches!(status, AgentStatus::Ready { .. } | AgentStatus::Deploying)
+    }
+
+    fn agent_status_description(&self, status: &AgentStatus) -> String {
+        if self.agent_action == Some(AgentActionKind::Refresh) {
+            return self.labels.agent_checking.clone();
+        }
+        match status {
+            AgentStatus::Ready { version, .. } => {
+                format!("{} (v{version})", self.labels.agent_ready)
+            }
+            AgentStatus::Deploying => self.labels.agent_deploying.clone(),
+            AgentStatus::ManualUploadRequired { .. } => self.labels.agent_manual_upload.clone(),
+            AgentStatus::ManualUpdateRequired { .. } => self.labels.agent_manual_update.clone(),
+            AgentStatus::Failed { reason } => format!("{}: {reason}", self.labels.sftp_mode),
+            AgentStatus::UnsupportedArch { arch } => format!("{} ({arch})", self.labels.sftp_mode),
+            AgentStatus::NotDeployed | AgentStatus::SftpFallback => self.labels.sftp_mode.clone(),
+        }
+    }
+
+    fn render_agent_manual_body(&self, status: &AgentStatus) -> AnyElement {
+        let mut body = div()
+            .max_w(px(IDE_AGENT_MENU_MANUAL_WIDTH))
+            .px(px(IDE_AGENT_MENU_DESCRIPTION_PADDING_X))
+            .pb(px(IDE_AGENT_MENU_DESCRIPTION_PADDING_Y))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text_muted));
+
+        match status {
+            AgentStatus::ManualUploadRequired { arch, remote_path } => {
+                body = body
+                    .child(
+                        self.render_agent_manual_hint(self.labels.agent_manual_upload_hint.clone()),
+                    )
+                    .child(
+                        self.render_agent_manual_code(
+                            self.labels.agent_upload_to.clone(),
+                            remote_path,
+                        ),
+                    )
+                    .child(
+                        self.labels
+                            .agent_manual_upload_arch
+                            .replace("{{arch}}", arch),
+                    );
+            }
+            AgentStatus::ManualUpdateRequired {
+                arch: _,
+                remote_path,
+                current_agent_version,
+                current_compatibility_version,
+                expected_compatibility_version,
+            } => {
+                body = body
+                    .child(
+                        self.render_agent_manual_hint(self.labels.agent_manual_update_hint.clone()),
+                    )
+                    .child(
+                        self.render_agent_manual_code(
+                            self.labels.agent_upload_to.clone(),
+                            remote_path,
+                        ),
+                    )
+                    .child(
+                        self.labels
+                            .agent_manual_update_current_agent_version
+                            .replace("{{version}}", current_agent_version),
+                    )
+                    .child(
+                        self.labels
+                            .agent_manual_update_current_compatibility_version
+                            .replace("{{version}}", &current_compatibility_version.to_string()),
+                    )
+                    .child(
+                        self.labels
+                            .agent_manual_update_expected_compatibility_version
+                            .replace("{{version}}", &expected_compatibility_version.to_string()),
+                    );
+            }
+            _ => {}
+        }
+        body.into_any_element()
+    }
+
+    fn render_agent_manual_hint(&self, text: String) -> AnyElement {
+        div()
+            .flex()
+            .items_start()
+            .gap_2()
+            .child(self.icon("lucide/info.svg", 14.0, TAILWIND_AMBER_400))
+            .child(div().flex_1().child(text))
+            .into_any_element()
+    }
+
+    fn render_agent_manual_code(&self, label: String, path: &str) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(label)
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .rounded(px(self.tokens.radii.xs))
+                    .font_family(SharedString::from(
+                        self.tokens.metrics.markdown_code_font_family,
+                    ))
+                    .bg(rgb(self.tokens.ui.bg_sunken))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(path.to_string()),
+            )
+            .into_any_element()
+    }
+
+    fn render_agent_status_menu_item(
+        &self,
+        icon: &'static str,
+        label: String,
+        danger: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let text_color = if danger {
+            TAILWIND_RED_400
+        } else {
+            self.tokens.ui.text
+        };
+        div()
+            .h(px(IDE_AGENT_MENU_ITEM_HEIGHT))
+            .w_full()
+            .flex()
+            .items_center()
+            .px_2()
+            .gap_2()
+            .cursor_pointer()
+            .text_color(rgb(text_color))
+            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+            .child(self.icon(icon, 12.0, text_color))
+            .child(div().flex_1().truncate().child(label))
+            .on_mouse_down(MouseButton::Left, listener)
+            .into_any_element()
+    }
+
+    fn render_agent_status_menu_divider(&self) -> AnyElement {
+        div()
+            .h(px(1.0))
+            .my(px(IDE_AGENT_MENU_PADDING_Y))
+            .bg(rgb(self.tokens.ui.border))
+            .into_any_element()
+    }
+
+    fn render_agent_remove_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let dialog = dialog_content(tokens)
+            .child(
+                dialog_header(tokens)
+                    .child(dialog_title(
+                        tokens,
+                        self.labels.agent_remove_confirm_title.clone(),
+                    ))
+                    .child(dialog_description(
+                        tokens,
+                        self.labels.agent_remove_confirm_desc.clone(),
+                    )),
+            )
+            .child(
+                dialog_footer(tokens)
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.cancel.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.agent_remove_confirm_open = false;
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.agent_remove_confirm_btn.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Destructive,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: self.agent_action == Some(AgentActionKind::Remove),
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.start_remove_agent(cx);
+                            }),
+                        ),
+                    ),
+            );
+        self.render_modal_overlay(dialog)
+    }
+
+    fn render_agent_opt_in_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let dialog = div()
+            .w(px(IDE_AGENT_OPT_IN_WIDTH))
+            .overflow_hidden()
+            .rounded(px(tokens.radii.lg))
+            .border_1()
+            .border_color(rgba(
+                (tokens.ui.border << 8) | IDE_AGENT_OPT_IN_BORDER_ALPHA,
+            ))
+            .bg(rgb(tokens.ui.bg_panel))
+            .shadow_lg()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(IDE_AGENT_OPT_IN_GAP))
+                    .px(px(IDE_AGENT_OPT_IN_BODY_PADDING_X))
+                    .pt(px(IDE_AGENT_OPT_IN_BODY_PADDING_TOP))
+                    .pb(px(IDE_AGENT_OPT_IN_BODY_PADDING_BOTTOM))
+                    .child(
+                        div()
+                            .size(px(IDE_AGENT_OPT_IN_ICON_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(rgba(
+                                (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA,
+                            ))
+                            .bg(rgba(
+                                (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA,
+                            ))
+                            .child(self.icon(
+                                "lucide/bot.svg",
+                                IDE_AGENT_OPT_IN_ICON_INNER_SIZE,
+                                tokens.ui.accent,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(tokens.ui.text))
+                            .text_align(gpui::TextAlign::Center)
+                            .child(self.labels.agent_optin_title.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .text_align(gpui::TextAlign::Center)
+                            .line_height(px(tokens.metrics.ui_text_sm * 1.45))
+                            .child(self.labels.agent_optin_desc.clone()),
+                    )
+                    .child(self.render_agent_opt_in_benefits())
+                    .child(self.render_agent_opt_in_remember(cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .border_t_1()
+                    .border_color(rgba((tokens.ui.border << 8) | IDE_HOVER_ALPHA))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap_1()
+                            .py(px(IDE_AGENT_OPT_IN_ACTION_PADDING_Y))
+                            .border_r_1()
+                            .border_color(rgba((tokens.ui.border << 8) | IDE_HOVER_ALPHA))
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .cursor_pointer()
+                            .hover(|style| {
+                                style
+                                    .bg(rgb(tokens.ui.bg_hover))
+                                    .text_color(rgb(tokens.ui.text))
+                            })
+                            .child(self.icon("lucide/folder-sync.svg", 14.0, tokens.ui.text_muted))
+                            .child(self.labels.agent_optin_sftp_only.clone())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.choose_agent_opt_in(NodeAgentMode::Disabled, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap_1()
+                            .py(px(IDE_AGENT_OPT_IN_ACTION_PADDING_Y))
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(tokens.ui.accent))
+                            .cursor_pointer()
+                            .hover(|style| {
+                                style.bg(rgba(
+                                    (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA,
+                                ))
+                            })
+                            .child(self.icon("lucide/bot.svg", 14.0, tokens.ui.accent))
+                            .child(self.labels.agent_optin_enable.clone())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.choose_agent_opt_in(NodeAgentMode::Enabled, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+        self.render_modal_overlay(dialog)
+    }
+
+    fn render_agent_opt_in_benefits(&self) -> AnyElement {
+        let mut benefits = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(rgb(self.tokens.ui.text_muted));
+        for text in [
+            self.labels.agent_optin_benefit_watch.clone(),
+            self.labels.agent_optin_benefit_git.clone(),
+            self.labels.agent_optin_benefit_atomic.clone(),
+        ] {
+            benefits = benefits.child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .child(self.icon("lucide/check.svg", 12.0, TAILWIND_EMERALD_400))
+                    .child(div().flex_1().child(text)),
+            );
+        }
+        benefits.into_any_element()
+    }
+
+    fn render_agent_opt_in_remember(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .mt_1()
+            .cursor_pointer()
+            .child(
+                div()
+                    .size(px(14.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.xs))
+                    .border_1()
+                    .border_color(if self.agent_opt_in_remember {
+                        rgb(self.tokens.ui.accent)
+                    } else {
+                        rgb(self.tokens.ui.border)
+                    })
+                    .bg(if self.agent_opt_in_remember {
+                        rgb(self.tokens.ui.accent)
+                    } else {
+                        rgb(self.tokens.ui.bg_sunken)
+                    })
+                    .when(self.agent_opt_in_remember, |this| {
+                        this.child(self.icon("lucide/check.svg", 10.0, self.tokens.ui.bg))
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.labels.agent_optin_remember.clone()),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.agent_opt_in_remember = !this.agent_opt_in_remember;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn choose_agent_opt_in(&mut self, mode: NodeAgentMode, cx: &mut Context<Self>) {
+        self.agent_opt_in_open = false;
+        if self.agent_opt_in_remember {
+            cx.emit(IdeSurfaceEvent::RememberAgentMode(mode));
+        } else {
+            self.runtime_settings.agent_mode = mode;
+            self.fs.set_mode(mode);
+        }
+        if mode == NodeAgentMode::Enabled {
+            self.start_deploy_agent(cx);
+        } else {
+            self.refresh_agent_status(cx);
+        }
+        cx.notify();
+    }
+
+    fn start_deploy_agent(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.agent_action, Some(AgentActionKind::Deploy)) {
+            return;
+        }
+        let Some(node_id) = self.node_id.clone() else {
+            return;
+        };
+        self.agent_action = Some(AgentActionKind::Deploy);
+        self.runtime_settings.agent_mode = NodeAgentMode::Enabled;
+        self.fs.set_mode(NodeAgentMode::Enabled);
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        cx.notify();
+        cx.spawn(async move |weak, cx| {
+            let status = backend_runtime
+                .spawn(async move { fs.deploy_agent_for_node(node_id).await })
+                .await
+                .unwrap_or_else(|error| AgentStatus::Failed {
+                    reason: error.to_string(),
+                });
+            let _ = weak.update(cx, |this, cx| {
+                this.agent_action = None;
+                let _ = status;
+                this.schedule_next_agent_status_poll(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn start_remove_agent(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.agent_action, Some(AgentActionKind::Remove)) {
+            return;
+        }
+        let Some(node_id) = self.node_id.clone() else {
+            return;
+        };
+        self.agent_action = Some(AgentActionKind::Remove);
+        self.agent_remove_confirm_open = false;
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        cx.notify();
+        cx.spawn(async move |weak, cx| {
+            let result = await_ide_backend(
+                backend_runtime.spawn(async move { fs.remove_agent_for_node(node_id).await }),
+            )
+            .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.agent_action = None;
+                if let Err(error) = result {
+                    this.last_error = Some(error.message);
+                }
+                this.refresh_agent_status(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_agent_status(&mut self, cx: &mut Context<Self>) {
+        if !matches!(
+            self.load_state,
+            IdeLoadState::Ready | IdeLoadState::Disconnected
+        ) || self.agent_action.is_some()
+        {
+            return;
+        }
+        let Some(node_id) = self.node_id.clone() else {
+            return;
+        };
+        self.agent_action = Some(AgentActionKind::Refresh);
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        cx.notify();
+        cx.spawn(async move |weak, cx| {
+            let _ = backend_runtime
+                .spawn(async move { fs.refresh_agent_status(node_id).await })
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.agent_action == Some(AgentActionKind::Refresh) {
+                    this.agent_action = None;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn schedule_next_agent_status_poll(&mut self, cx: &mut Context<Self>) {
+        if self.node_id.is_none()
+            || !matches!(
+                self.load_state,
+                IdeLoadState::Ready | IdeLoadState::Disconnected
+            )
+        {
+            return;
+        }
+        self.agent_poll_generation = self.agent_poll_generation.wrapping_add(1);
+        let generation = self.agent_poll_generation;
+        let delay = self.agent_poll_delay();
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.agent_poll_generation != generation {
+                    return;
+                }
+                this.refresh_agent_status(cx);
+                this.schedule_next_agent_status_poll(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn agent_poll_delay(&self) -> Duration {
+        match self.fs.status() {
+            AgentStatus::Deploying => Duration::from_secs(IDE_AGENT_POLL_DEPLOYING_SECS),
+            AgentStatus::ManualUploadRequired { .. } | AgentStatus::ManualUpdateRequired { .. } => {
+                Duration::from_secs(IDE_AGENT_POLL_MANUAL_SECS)
+            }
+            _ => Duration::from_secs(IDE_AGENT_POLL_READY_SECS),
+        }
     }
 
     fn render_disconnected_overlay(&self) -> AnyElement {
@@ -1707,9 +3329,14 @@ impl IdeSurface {
             .p(px(IDE_FOLDER_DIALOG_LIST_PADDING))
             .flex()
             .flex_col();
-        for folder in &self.folder_picker.folders {
+        for folder in self.folder_picker.folders.iter().cloned() {
             let selected = self.folder_picker.selected_folder.as_ref() == Some(&folder.name);
             let folder_name = folder.name.clone();
+            // Tauri `IdeRemoteFolderDialog.tsx` renders `folders.map(...)`
+            // directly inside the fixed-height scroller. The picker list is
+            // small and variable-height, so native keeps the same direct rows;
+            // uniform_list needs stricter row sizing and made loaded folders
+            // look like an empty panel.
             rows = rows.child(
                 div()
                     .flex()
@@ -1799,6 +3426,25 @@ impl IdeSurface {
             .into_any_element()
     }
 
+    fn ide_bg(&self, color: u32, fallback_alpha: u32) -> gpui::Rgba {
+        if self.runtime_settings.background_active {
+            // Tauri `[data-bg-active]` remaps theme backgrounds to 40% alpha.
+            rgba((color << 8) | IDE_BG_ACTIVE_THEME_ALPHA)
+        } else {
+            rgba((color << 8) | fallback_alpha)
+        }
+    }
+
+    fn ide_editor_content_bg(&self, color: u32) -> gpui::Rgba {
+        if self.runtime_settings.background_active {
+            // Tauri IDE leaves CodeMirror's scroller transparent when the tab
+            // background is active; the tab strip/status/tree keep the 40% tint.
+            rgba((color << 8) | 0x00)
+        } else {
+            rgb(color)
+        }
+    }
+
     fn icon(&self, path: &'static str, size: f32, color: u32) -> AnyElement {
         svg()
             .path(path)
@@ -1808,8 +3454,26 @@ impl IdeSurface {
     }
 }
 
+fn apply_editor_runtime_settings(
+    editor: &Entity<TextEditorView>,
+    tokens: ThemeTokens,
+    runtime_settings: IdeRuntimeSettings,
+    cx: &mut Context<IdeSurface>,
+) {
+    editor.update(cx, |editor, cx| {
+        editor.apply_ide_runtime_settings(
+            &tokens,
+            runtime_settings.editor_font_size,
+            runtime_settings.editor_line_height,
+            runtime_settings.word_wrap,
+            runtime_settings.background_active,
+            cx,
+        );
+    });
+}
+
 async fn open_project_with_root_listing(
-    fs: NodeSftpIdeFileSystem,
+    fs: NodeAgentIdeFileSystem,
     node_id: String,
     root_path: String,
 ) -> Result<ProjectOpenResult, oxideterm_ide_core::IdeFileError> {
@@ -1826,7 +3490,7 @@ async fn open_project_with_root_listing(
 }
 
 async fn open_text_file(
-    fs: NodeSftpIdeFileSystem,
+    fs: NodeAgentIdeFileSystem,
     location: IdeLocation,
 ) -> Result<FileOpenResult, oxideterm_ide_core::IdeFileError> {
     let (node_id, path) = match &location {
@@ -1882,6 +3546,20 @@ fn sort_tree_entries(mut entries: Vec<FileTreeEntry>) -> Vec<FileTreeEntry> {
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
     entries
+}
+
+fn location_path(location: IdeLocation) -> String {
+    match location {
+        IdeLocation::Remote { path, .. } => path,
+        IdeLocation::Local { path } => path.display().to_string(),
+    }
+}
+
+fn remote_path(location: &IdeLocation) -> Option<&str> {
+    match location {
+        IdeLocation::Remote { path, .. } => Some(path.as_str()),
+        IdeLocation::Local { .. } => None,
+    }
 }
 
 fn folder_picker_dirs(entries: Vec<FileTreeEntry>) -> Vec<FileTreeEntry> {

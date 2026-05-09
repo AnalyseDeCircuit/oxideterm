@@ -30,7 +30,7 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    PhaseEvent, PhaseResult, ReconnectJob, ReconnectNodeTerminalSnapshot,
+    PhaseEvent, PhaseResult, ReconnectIdeSnapshot, ReconnectJob, ReconnectNodeTerminalSnapshot,
     ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
     ReconnectTiming,
 };

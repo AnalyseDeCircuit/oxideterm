@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::time::{Duration, SystemTime};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, SystemTime},
+};
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -59,10 +62,20 @@ pub struct ReconnectSnapshot {
     pub active_port_forward_ids: Vec<String>,
     pub inflight_sftp_transfer_ids: Vec<String>,
     pub incomplete_sftp_transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
-    pub ide_project_path: Option<String>,
-    pub open_ide_file_paths: Vec<String>,
+    pub ide_snapshot: Option<ReconnectIdeSnapshot>,
     pub old_connection_ids: Vec<String>,
     pub snapshot_at: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconnectIdeSnapshot {
+    pub project_path: String,
+    pub tab_paths: Vec<String>,
+    /// Tauri stores nodeId in the ideSnapshot.connectionId slot during
+    /// reconnect; keep the field name for parity with its restore phase.
+    pub connection_id: String,
+    pub dirty_contents: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -313,5 +326,27 @@ mod tests {
 
         assert_eq!(first.job_id, second.job_id);
         assert_eq!(store.jobs().len(), 1);
+    }
+
+    #[test]
+    fn reconnect_snapshot_carries_ide_dirty_contents() {
+        let mut dirty_contents = BTreeMap::new();
+        dirty_contents.insert("/home/demo/main.rs".to_string(), "dirty".to_string());
+        let snapshot = ReconnectSnapshot {
+            ide_snapshot: Some(ReconnectIdeSnapshot {
+                project_path: "/home/demo".to_string(),
+                tab_paths: vec!["/home/demo/main.rs".to_string()],
+                connection_id: "node-a".to_string(),
+                dirty_contents,
+            }),
+            ..ReconnectSnapshot::default()
+        };
+
+        let ide_snapshot = snapshot.ide_snapshot.expect("IDE snapshot should exist");
+        assert_eq!(ide_snapshot.connection_id, "node-a");
+        assert_eq!(
+            ide_snapshot.dirty_contents.get("/home/demo/main.rs"),
+            Some(&"dirty".to_string())
+        );
     }
 }

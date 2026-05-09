@@ -141,7 +141,7 @@ impl TextEditorView {
 
     fn after_history_change(&mut self, cx: &mut Context<Self>) {
         if let Some(syntax) = self.syntax.as_mut() {
-            let _ = syntax.reparse(self.buffer.text());
+            let _ = self.buffer.with_text(|text| syntax.reparse(text));
         }
         self.refresh_highlights();
         self.refresh_find_matches();
@@ -166,7 +166,7 @@ impl TextEditorView {
             .chars()
             .take_while(|ch| matches!(ch, ' ' | '\t'))
             .collect::<String>();
-        let before_cursor = &line[..floor_char_boundary(line, position.column)];
+        let before_cursor = &line[..floor_char_boundary(&line, position.column)];
         if before_cursor.trim_end().ends_with(['{', '[', '(']) {
             indent.push_str(&self.settings.indentation_unit());
         }

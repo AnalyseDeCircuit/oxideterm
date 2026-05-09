@@ -294,7 +294,15 @@ impl WorkspaceApp {
             self.release_sftp_session_for_node(&node_id);
         }
         self.ide_tab_surfaces.remove(&tab.id);
-        self.ide_tab_nodes.remove(&tab.id);
+        self.ide_surface_subscriptions.remove(&tab.id);
+        if let Some(node_id) = self.ide_tab_nodes.remove(&tab.id) {
+            // Tauri appStore.closeTab() calls ideStore.closeProject(true) when
+            // the IDE tab goes away, and closeProject records lastClosedAt so
+            // reconnect does not resurrect a project the user intentionally
+            // closed after the snapshot.
+            self.ide_last_closed_at_by_node
+                .insert(node_id, SystemTime::now());
+        }
         self.forward_tab_nodes.remove(&tab.id);
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();

@@ -90,12 +90,9 @@ impl TextEditorView {
             return;
         }
         let replacement = replacement.into();
-        let transaction = replace_all_transaction(
-            self.buffer.text(),
-            &self.find_query,
-            &replacement,
-            self.find_options(),
-        );
+        let transaction = self.buffer.with_text(|text| {
+            replace_all_transaction(text, &self.find_query, &replacement, self.find_options())
+        });
         if transaction.is_empty() {
             return;
         }
@@ -114,7 +111,9 @@ impl TextEditorView {
     }
 
     pub(super) fn refresh_find_matches(&mut self) {
-        self.find_matches = find_all(self.buffer.text(), &self.find_query, self.find_options());
+        self.find_matches = self
+            .buffer
+            .with_text(|text| find_all(text, &self.find_query, self.find_options()));
         if self
             .active_find_index
             .is_some_and(|index| index >= self.find_matches.len())
@@ -131,12 +130,9 @@ impl TextEditorView {
     pub(super) fn select_current_word_for_find(&mut self, cx: &mut Context<Self>) {
         let selection = self.cursor.selection();
         let query = if selection.is_caret() {
-            word_at(self.buffer.text(), selection.head)
+            self.buffer.with_text(|text| word_at(text, selection.head))
         } else {
-            self.buffer
-                .slice(selection.range())
-                .map(str::to_string)
-                .unwrap_or_default()
+            self.buffer.slice(selection.range()).unwrap_or_default()
         };
         if !query.is_empty() {
             self.set_find_query(query, cx);

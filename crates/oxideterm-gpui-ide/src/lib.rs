@@ -6,10 +6,12 @@
 //! This crate is the first real UI owner for `oxideterm-ide-core`: it owns the
 //! project tree, opened editor tabs, save dispatch, and reconnect snapshot
 //! restore surface. It is deliberately transport-agnostic except for the
-//! `NodeSftpIdeFileSystem` adapter passed in from the app layer.
+//! node-first IDE file-system adapter passed in from the app layer.
 
+mod file_icons;
 mod labels;
 mod surface;
 
 pub use labels::IdeLabels;
-pub use surface::{IdeLoadState, IdeSurface};
+pub use oxideterm_ide_fs::NodeAgentMode;
+pub use surface::{IdeLoadState, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent};

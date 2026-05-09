@@ -184,6 +184,7 @@ impl IdeWorkspace {
             id: tab_id,
             location: location.clone(),
             title,
+            is_pinned: false,
         });
         self.buffers
             .insert(tab_id, EditorBuffer::new(location.clone(), text, version));
@@ -198,11 +199,15 @@ impl IdeWorkspace {
         tab_id: EditorTabId,
         text: impl Into<String>,
     ) -> Result<(), WorkspaceError> {
+        let text = text.into();
         let buffer = self
             .buffers
             .get_mut(&tab_id)
             .ok_or(WorkspaceError::UnknownTab)?;
-        buffer.text = text.into();
+        if buffer.text == text {
+            return Ok(());
+        }
+        buffer.text = text;
         buffer.revision += 1;
         Ok(())
     }
@@ -364,6 +369,57 @@ impl IdeWorkspace {
         };
         self.pending_close = Some(request.clone());
         Ok(Some(request))
+    }
+
+    pub fn toggle_tab_pin(&mut self, tab_id: EditorTabId) -> Result<bool, WorkspaceError> {
+        let tab = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == tab_id)
+            .ok_or(WorkspaceError::UnknownTab)?;
+        tab.is_pinned = !tab.is_pinned;
+        Ok(tab.is_pinned)
+    }
+
+    pub fn move_tab_before(
+        &mut self,
+        tab_id: EditorTabId,
+        before_tab_id: EditorTabId,
+    ) -> Result<(), WorkspaceError> {
+        self.ensure_project()?;
+        if tab_id == before_tab_id {
+            return Ok(());
+        }
+        let Some(from) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(WorkspaceError::UnknownTab);
+        };
+        let Some(mut to) = self.tabs.iter().position(|tab| tab.id == before_tab_id) else {
+            return Err(WorkspaceError::UnknownTab);
+        };
+        let tab = self.tabs.remove(from);
+        if from < to {
+            to = to.saturating_sub(1);
+        }
+        self.tabs.insert(to, tab);
+        Ok(())
+    }
+
+    pub fn move_tab_to_index(
+        &mut self,
+        tab_id: EditorTabId,
+        target_index: usize,
+    ) -> Result<(), WorkspaceError> {
+        self.ensure_project()?;
+        let Some(from) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(WorkspaceError::UnknownTab);
+        };
+        let target_index = target_index.min(self.tabs.len().saturating_sub(1));
+        if from == target_index {
+            return Ok(());
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(target_index.min(self.tabs.len()), tab);
+        Ok(())
     }
 
     pub fn request_close_all_tabs(&mut self) -> Result<Option<DirtyCloseRequest>, WorkspaceError> {

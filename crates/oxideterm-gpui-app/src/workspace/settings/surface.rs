@@ -51,6 +51,9 @@ impl WorkspaceApp {
                         div()
                             .w_full()
                             .min_w(px(0.0))
+                            // Tauri SettingsView uses max-w-4xl mx-auto p-10 for the content rail.
+                            .max_w(px(self.tokens.metrics.settings_content_max_width))
+                            .mx_auto()
                             .p(px(self.tokens.metrics.settings_content_padding))
                             .child(self.render_settings_tab_content(cx)),
                     ),
@@ -255,6 +258,10 @@ impl WorkspaceApp {
                 pane.set_preferences(preferences, cx);
             });
         }
+        // Tauri's IDE reads Settings.ide live from settingsStore. Native IDE
+        // surfaces keep their own GPUI owners, so push typography/wrap/autosave
+        // changes into each open surface after the settings store changes.
+        self.apply_ide_runtime_settings_to_surfaces(cx);
         let _ = self.settings_store.save();
         self.sync_tab_titles(cx);
         cx.notify();

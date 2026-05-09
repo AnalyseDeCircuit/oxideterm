@@ -172,13 +172,16 @@ impl WorkspaceApp {
             }
             (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for &native_mode in oxideterm_gpui_platform::vibrancy::available_modes() {
-                    let mode = frosted_glass_mode_from_native(native_mode);
+                for mode in [
+                    FrostedGlassMode::Off,
+                    FrostedGlassMode::Css,
+                    FrostedGlassMode::Native,
+                ] {
                     popup = popup.child(
                         select_option(
                             &self.tokens,
                             frosted_glass_label(mode, &self.i18n),
-                            native_vibrancy_mode(settings.appearance.frosted_glass) == native_mode,
+                            settings.appearance.frosted_glass == mode,
                         )
                         .on_mouse_down(
                             MouseButton::Left,
@@ -308,6 +311,31 @@ impl WorkspaceApp {
                                     |settings| settings.terminal.cursor_style = style,
                                     cx,
                                 );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ide, SettingsSelect::IdeAgentMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for mode in [
+                    IdeAgentMode::Ask,
+                    IdeAgentMode::Enabled,
+                    IdeAgentMode::Disabled,
+                ] {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            ide_agent_label(mode, &self.i18n),
+                            mode == settings.ide.agent_mode,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(|settings| settings.ide.agent_mode = mode, cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -609,11 +637,10 @@ impl WorkspaceApp {
         setter: fn(&mut PersistedSettings, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let label = self.i18n.t(label_key);
         self.setting_row(
             label_key,
             hint_key,
-            checkbox(&self.tokens, label, checked)
+            checkbox(&self.tokens, String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

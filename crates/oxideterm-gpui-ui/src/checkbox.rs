@@ -30,11 +30,11 @@ pub fn checkbox_with(
     options: CheckboxOptions,
 ) -> Div {
     let theme = tokens.ui;
-    div()
+    let has_label = !label.is_empty();
+    let checkbox = div()
         .flex()
         .flex_row()
         .items_center()
-        .gap_2()
         .cursor(if options.disabled {
             CursorStyle::OperationNotAllowed
         } else {
@@ -74,13 +74,18 @@ pub fn checkbox_with(
                             .text_color(rgb(CHECKBOX_CHECKED_TEXT)),
                     )
                 }),
-        )
-        .child(
+        );
+
+    if has_label {
+        checkbox.gap_2().child(
             div()
                 .text_size(px(tokens.metrics.ui_text_sm))
                 .text_color(rgb(theme.text))
                 .child(label),
         )
+    } else {
+        checkbox
+    }
 }
 
 fn checkbox_focus_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {

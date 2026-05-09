@@ -1,10 +1,12 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::{cell::RefCell, ops::Range};
+
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
     FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    ParentElement, Pixels, ScrollWheelEvent, Window, div, point, prelude::*, px, rgb,
+    ParentElement, Pixels, Point, ScrollWheelEvent, Window, div, point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
@@ -24,6 +26,7 @@ mod wrap;
 
 pub use commands::EditorCommand;
 use coords::{byte_column_for_visual_column, visual_column_for_byte_column};
+use wrap::DisplayRow;
 
 pub type SaveCallback =
     Box<dyn FnMut(&str, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
@@ -140,6 +143,18 @@ struct MarkedText {
     range: TextRange,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DisplayRowsCache {
+    buffer_version: u64,
+    wrap_column: Option<usize>,
+    rows: Vec<DisplayRow>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SelectionDrag {
+    anchor: BufferOffset,
+}
+
 /// GPUI editor view for local text buffers.
 pub struct TextEditorView {
     buffer: TextBuffer,
@@ -153,6 +168,7 @@ pub struct TextEditorView {
     save_status: EditorSaveStatus,
     syntax: Option<SyntaxSession>,
     highlight_spans: Vec<HighlightSpan>,
+    highlight_line_spans: Vec<Range<usize>>,
     bracket_pairs: Vec<BracketPair>,
     content_bounds: Option<Bounds<Pixels>>,
     marked_text: Option<MarkedText>,
@@ -161,6 +177,9 @@ pub struct TextEditorView {
     find_query: String,
     find_matches: Vec<FindMatch>,
     active_find_index: Option<usize>,
+    display_rows_cache: RefCell<Option<DisplayRowsCache>>,
+    selection_drag: Option<SelectionDrag>,
+    transparent_background: bool,
 }
 
 impl TextEditorView {
@@ -178,6 +197,7 @@ impl TextEditorView {
             save_status: EditorSaveStatus::Clean,
             syntax: None,
             highlight_spans: Vec::new(),
+            highlight_line_spans: Vec::new(),
             bracket_pairs: Vec::new(),
             content_bounds: None,
             marked_text: None,
@@ -186,6 +206,9 @@ impl TextEditorView {
             find_query: String::new(),
             find_matches: Vec::new(),
             active_find_index: None,
+            display_rows_cache: RefCell::new(None),
+            selection_drag: None,
+            transparent_background: false,
         }
     }
 
@@ -216,6 +239,30 @@ impl TextEditorView {
         cx.notify();
     }
 
+    pub fn replace_text_external(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
+        let text = text.into();
+        if self.buffer.text() == text {
+            return;
+        }
+        let range = TextRange::new(BufferOffset::ZERO, BufferOffset(self.buffer.len()));
+        if self
+            .buffer
+            .apply_transaction(EditTransaction::single(TextEdit::new(range, text)))
+            .is_ok()
+        {
+            self.cursor
+                .set_selection(Selection::caret(BufferOffset::ZERO));
+            self.secondary_selections.clear();
+            self.marked_text = None;
+            self.save_status = EditorSaveStatus::Dirty;
+            self.reparse_syntax();
+            self.refresh_find_matches();
+            self.viewport
+                .clamp(self.document_row_count(), self.metrics.line_height);
+            cx.notify();
+        }
+    }
+
     pub fn set_read_only(&mut self, read_only: bool) {
         self.read_only = read_only;
     }
@@ -232,9 +279,32 @@ impl TextEditorView {
         cx.notify();
     }
 
+    pub fn apply_ide_runtime_settings(
+        &mut self,
+        tokens: &ThemeTokens,
+        font_size: f32,
+        line_height: f32,
+        word_wrap: bool,
+        background_active: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.appearance = EditorAppearance::from_theme(tokens);
+        self.metrics =
+            EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
+        self.transparent_background = background_active;
+        // Tauri wires Settings.ide.wordWrap into CodeMirror's lineWrapping
+        // compartment. Keep that as editor settings, not a one-off render flag.
+        self.settings.soft_wrap = word_wrap;
+        self.viewport
+            .clamp(self.document_row_count(), self.metrics.line_height);
+        cx.notify();
+    }
+
     pub fn set_language(&mut self, language: Option<LanguageId>, cx: &mut Context<Self>) {
-        self.syntax =
-            language.and_then(|language| SyntaxSession::parse(language, self.buffer.text()).ok());
+        self.syntax = language.and_then(|language| {
+            self.buffer
+                .with_text(|text| SyntaxSession::parse(language, text).ok())
+        });
         self.refresh_highlights();
         cx.notify();
     }
@@ -330,10 +400,10 @@ impl TextEditorView {
             return;
         }
         let caret = BufferOffset(range.start.0 + replacement.len());
-        let syntax_edit = self
-            .syntax
-            .as_ref()
-            .map(|_| SyntaxEdit::replace(self.buffer.text(), range, &replacement));
+        let syntax_edit = self.syntax.as_ref().map(|_| {
+            self.buffer
+                .with_text(|text| SyntaxEdit::replace(text, range, &replacement))
+        });
         if self
             .buffer
             .apply_transaction(EditTransaction::single(TextEdit::new(range, replacement)))
@@ -417,7 +487,8 @@ impl TextEditorView {
             cx.notify();
             return;
         };
-        match on_save(self.buffer.text(), window, cx) {
+        let result = self.buffer.with_text(|text| on_save(text, window, cx));
+        match result {
             Ok(()) => {
                 self.buffer.mark_saved();
                 self.save_status = EditorSaveStatus::Saved;
@@ -432,35 +503,81 @@ impl TextEditorView {
 
     fn apply_syntax_edit(&mut self, edit: Option<SyntaxEdit>) {
         if let (Some(syntax), Some(edit)) = (self.syntax.as_mut(), edit)
-            && syntax.apply_edit(self.buffer.text(), edit).is_err()
+            && self
+                .buffer
+                .with_text(|text| syntax.apply_edit(text, edit))
+                .is_err()
         {
             let language = syntax.language_id();
-            self.syntax = SyntaxSession::parse(language, self.buffer.text()).ok();
+            self.syntax = self
+                .buffer
+                .with_text(|text| SyntaxSession::parse(language, text).ok());
         }
         self.refresh_highlights();
     }
 
     fn reparse_syntax(&mut self) {
         if let Some(syntax) = self.syntax.as_mut()
-            && syntax.reparse(self.buffer.text()).is_err()
+            && self.buffer.with_text(|text| syntax.reparse(text)).is_err()
         {
             let language = syntax.language_id();
-            self.syntax = SyntaxSession::parse(language, self.buffer.text()).ok();
+            self.syntax = self
+                .buffer
+                .with_text(|text| SyntaxSession::parse(language, text).ok());
         }
         self.refresh_highlights();
     }
 
     fn refresh_highlights(&mut self) {
-        self.highlight_spans = self
-            .syntax
-            .as_ref()
-            .map(|syntax| syntax.highlight_spans(self.buffer.text()))
-            .unwrap_or_default();
-        self.bracket_pairs = self
-            .syntax
-            .as_ref()
-            .map(|syntax| syntax.bracket_pairs(self.buffer.text()))
-            .unwrap_or_default();
+        self.highlight_spans = self.buffer.with_text(|text| {
+            self.syntax
+                .as_ref()
+                .map(|syntax| syntax.highlight_spans(text))
+                .unwrap_or_default()
+        });
+        self.highlight_spans
+            .sort_by_key(|span| (span.range.start.0, span.range.end.0));
+        self.highlight_line_spans = self.build_highlight_line_spans();
+        self.bracket_pairs = self.buffer.with_text(|text| {
+            self.syntax
+                .as_ref()
+                .map(|syntax| syntax.bracket_pairs(text))
+                .unwrap_or_default()
+        });
+    }
+
+    fn build_highlight_line_spans(&self) -> Vec<Range<usize>> {
+        let mut ranges = Vec::with_capacity(self.buffer.line_count());
+        let mut first_span = 0;
+        let mut last_span = 0;
+
+        for line in 0..self.buffer.line_count() {
+            let Some(line_start) = self.buffer.line_start_offset(line).map(|offset| offset.0)
+            else {
+                ranges.push(0..0);
+                continue;
+            };
+            let line_end = self
+                .buffer
+                .line_end_offset(line)
+                .map(|offset| offset.0)
+                .unwrap_or(line_start);
+
+            while first_span < self.highlight_spans.len()
+                && self.highlight_spans[first_span].range.end.0 <= line_start
+            {
+                first_span += 1;
+            }
+            last_span = last_span.max(first_span);
+            while last_span < self.highlight_spans.len()
+                && self.highlight_spans[last_span].range.start.0 < line_end
+            {
+                last_span += 1;
+            }
+            ranges.push(first_span..last_span);
+        }
+
+        ranges
     }
 
     fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
@@ -497,12 +614,66 @@ impl TextEditorView {
         }
     }
 
+    fn measure_code_metrics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // CodeMirror measures actual font advances through the browser layout
+        // engine. GPUI needs the same explicit measurement; the old 0.62 ratio
+        // is only a startup fallback before the first render has a Window.
+        if self
+            .metrics
+            .measure_code_cell_width(window, &self.appearance.font_family)
+        {
+            self.viewport
+                .clamp(self.document_row_count(), self.metrics.line_height);
+            cx.notify();
+        }
+    }
+
+    fn offset_for_window_point(&self, point: Point<Pixels>) -> Option<BufferOffset> {
+        let display_row = self.display_row_for_window_y(point.y)?;
+        let column = display_row.start_col + self.visual_column_for_window_x(point.x);
+        let line_text = self.buffer.line_text(display_row.line).unwrap_or_default();
+        let byte_column = byte_column_for_visual_column(&line_text, column);
+        self.buffer
+            .line_col_to_offset(LineCol::new(display_row.line, byte_column))
+            .ok()
+    }
+
+    fn start_selection_drag(
+        &mut self,
+        anchor: BufferOffset,
+        head: BufferOffset,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection_drag = Some(SelectionDrag { anchor });
+        self.cursor.set_selection(Selection::new(anchor, head));
+        self.secondary_selections.clear();
+        self.marked_text = None;
+        cx.notify();
+    }
+
+    fn drag_selection_to_point(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.selection_drag else {
+            return;
+        };
+        let Some(head) = self.offset_for_window_point(point) else {
+            return;
+        };
+        self.cursor.set_selection(Selection::new(drag.anchor, head));
+        cx.notify();
+    }
+
+    fn finish_selection_drag(&mut self, cx: &mut Context<Self>) {
+        if self.selection_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn place_cursor_on_line(&mut self, line: usize, visual_column: usize, cx: &mut Context<Self>) {
         let Some(start) = self.buffer.line_start_offset(line) else {
             return;
         };
         let line_text = self.buffer.line_text(line).unwrap_or_default();
-        let byte_column = byte_column_for_visual_column(line_text, visual_column);
+        let byte_column = byte_column_for_visual_column(&line_text, visual_column);
         if let Ok(offset) = self
             .buffer
             .line_col_to_offset(LineCol::new(line, byte_column))
@@ -540,7 +711,7 @@ impl TextEditorView {
             .offset_to_line_col(offset)
             .unwrap_or_else(|_| LineCol::new(0, 0));
         let line_text = self.buffer.line_text(position.line).unwrap_or_default();
-        let visual_column = visual_column_for_byte_column(line_text, position.column);
+        let visual_column = visual_column_for_byte_column(&line_text, position.column);
         Bounds {
             origin: bounds.origin
                 + point(

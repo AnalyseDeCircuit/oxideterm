@@ -8,5 +8,13 @@ version.workspace = true
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
+base64.workspace = true
+dashmap.workspace = true
 futures-util = "0.3"
+russh = { path = "../russh" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+zstd = "0.13"

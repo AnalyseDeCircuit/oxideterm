@@ -4,8 +4,9 @@
 use std::ops::Range;
 
 use gpui::{
-    Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
-    Render, ScrollWheelEvent, SharedString, Styled, Window, div, px, rgb, rgba,
+    Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString, Styled, Window, div, px,
+    rgb, rgba,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::SyntaxScope;
@@ -18,8 +19,20 @@ use super::{
     wrap::DisplayRow,
 };
 
+// Tauri `useCodeMirrorEditor.ts` paints these with color-mix against
+// `--theme-accent`: active line 7%, selection 20/25%, search match 25% with a
+// 50% outline, and focused cursor width 2px.
+const CM_ACTIVE_LINE_ACCENT_ALPHA: u32 = 0x12;
+const CM_ACTIVE_GUTTER_ACCENT_ALPHA: u32 = 0xcc;
+const CM_SELECTION_ACCENT_ALPHA: u32 = 0x40;
+const CM_SEARCH_MATCH_ACCENT_ALPHA: u32 = 0x40;
+const CM_SEARCH_MATCH_OUTLINE_ALPHA: u32 = 0x80;
+const CM_SELECTION_RADIUS: f32 = 2.0;
+const CM_CURSOR_WIDTH: f32 = 2.0;
+
 impl Render for TextEditorView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.measure_code_metrics(window, cx);
         let display_rows = self.display_rows();
         let visible = self
             .viewport
@@ -45,22 +58,33 @@ impl Render for TextEditorView {
 
         rows = rows.child(div().h(px(visible.bottom_spacer_px as f32)));
 
-        let body = div()
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                this.handle_scroll(event, cx);
-            }))
-            .child(EditorBoundsProbe::new(
-                rows,
-                view.clone(),
-                self.focus_handle.clone(),
-                move |bounds, window, app| {
-                    let _ =
-                        view.update(app, |this, cx| this.set_viewport_bounds(bounds, window, cx));
-                },
-            ));
+        // Capture the viewport container, not the absolute row stack. Otherwise
+        // long files report their full document height as the visible height and
+        // GPUI/Monaco-style virtual scrolling clamps to zero.
+        let body = EditorBoundsProbe::new(
+            div()
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                    this.handle_scroll(event, cx);
+                }))
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                    this.drag_selection_to_point(event.position, cx);
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                        this.finish_selection_drag(cx);
+                    }),
+                )
+                .child(rows),
+            view.clone(),
+            self.focus_handle.clone(),
+            move |bounds, window, app| {
+                let _ = view.update(app, |this, cx| this.set_viewport_bounds(bounds, window, cx));
+            },
+        );
 
         div()
             .id("oxideterm-gpui-editor")
@@ -70,7 +94,7 @@ impl Render for TextEditorView {
             .text_size(px(self.metrics.font_size))
             .line_height(px(self.metrics.line_height))
             .text_color(rgb(self.appearance.text_hex))
-            .bg(rgb(self.appearance.background_hex))
+            .bg(self.editor_background(self.appearance.background_hex))
             .border_1()
             .border_color(rgb(self.appearance.border_hex))
             .on_mouse_down(
@@ -138,7 +162,7 @@ impl TextEditorView {
             .flex()
             .items_center()
             .bg(if is_current_line {
-                rgba((self.appearance.current_line_hex << 8) | 0x99)
+                rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_LINE_ACCENT_ALPHA)
             } else {
                 rgba((self.appearance.background_hex << 8) | 0x00)
             })
@@ -146,9 +170,22 @@ impl TextEditorView {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle);
-                    let raw_column =
-                        row_display.start_col + this.visual_column_for_window_x(event.position.x);
-                    this.place_cursor_on_line(row_display.line, raw_column, cx);
+                    if let Some(offset) = this.offset_for_window_point(event.position) {
+                        if event.modifiers.alt {
+                            this.add_cursor_at(offset, cx);
+                        } else {
+                            let anchor = if event.modifiers.shift {
+                                this.cursor.selection().anchor
+                            } else {
+                                offset
+                            };
+                            this.start_selection_drag(anchor, offset, cx);
+                        }
+                    } else {
+                        let raw_column = row_display.start_col
+                            + this.visual_column_for_window_x(event.position.x);
+                        this.place_cursor_on_line(row_display.line, raw_column, cx);
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -163,8 +200,16 @@ impl TextEditorView {
                     .items_center()
                     .justify_end()
                     .pr(px(self.metrics.gutter_padding_x))
-                    .bg(rgb(self.appearance.gutter_background_hex))
-                    .text_color(rgb(self.appearance.muted_text_hex))
+                    .bg(if is_current_line && display_row.is_first {
+                        rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
+                    } else {
+                        self.editor_panel_background(self.appearance.gutter_background_hex)
+                    })
+                    .text_color(rgb(if is_current_line && display_row.is_first {
+                        self.appearance.background_hex
+                    } else {
+                        self.appearance.muted_text_hex
+                    }))
                     .child(if display_row.is_first {
                         (line + 1).to_string()
                     } else {
@@ -182,7 +227,14 @@ impl TextEditorView {
                     .left(px(left))
                     .w(px(width))
                     .h(px(line_height * 0.68))
-                    .bg(rgba((self.appearance.current_line_hex << 8) | 0xaa)),
+                    .rounded(px(CM_SELECTION_RADIUS))
+                    .bg(rgba(
+                        (self.appearance.accent_hex << 8) | CM_SEARCH_MATCH_ACCENT_ALPHA,
+                    ))
+                    .border_1()
+                    .border_color(rgba(
+                        (self.appearance.accent_hex << 8) | CM_SEARCH_MATCH_OUTLINE_ALPHA,
+                    )),
             );
         }
 
@@ -196,7 +248,10 @@ impl TextEditorView {
                     .left(px(left))
                     .w(px(width))
                     .h(px(line_height * 0.76))
-                    .bg(rgba((self.appearance.selection_hex << 8) | 0xcc)),
+                    .rounded(px(CM_SELECTION_RADIUS))
+                    .bg(rgba(
+                        (self.appearance.accent_hex << 8) | CM_SELECTION_ACCENT_ALPHA,
+                    )),
             );
         }
 
@@ -210,6 +265,7 @@ impl TextEditorView {
                     .left(px(left))
                     .w(px(width))
                     .h(px(line_height * 0.76))
+                    .rounded(px(CM_SELECTION_RADIUS))
                     .border_1()
                     .border_color(rgb(self.appearance.accent_hex)),
             );
@@ -224,6 +280,7 @@ impl TextEditorView {
                 .flex()
                 .items_center()
                 .child(self.render_line_text(
+                    line,
                     &segment_text,
                     segment_range,
                     cursor_column,
@@ -235,6 +292,7 @@ impl TextEditorView {
 
     fn render_line_text(
         &self,
+        line: usize,
         line_text: &str,
         line_range: Range<usize>,
         cursor_column: usize,
@@ -245,7 +303,7 @@ impl TextEditorView {
         let mut row = div().flex().items_center();
         let mut cursor_drawn = false;
 
-        for chunk in self.highlighted_line_chunks(line_text, line_range) {
+        for chunk in self.highlighted_line_chunks(line, line_text, line_range) {
             if show_cursor && !cursor_drawn && byte_column <= chunk.end {
                 let split = byte_column.saturating_sub(chunk.start);
                 let split = split.min(chunk.text.len());
@@ -333,12 +391,35 @@ impl TextEditorView {
 
     fn render_cursor(&self) -> Div {
         div()
-            .w(px(1.0))
+            .w(px(CM_CURSOR_WIDTH))
             .h(px(self.metrics.line_height * 0.78))
             .bg(rgb(self.appearance.accent_hex))
     }
 
-    fn highlighted_line_chunks(&self, line_text: &str, line_range: Range<usize>) -> Vec<LineChunk> {
+    fn editor_background(&self, color: u32) -> gpui::Rgba {
+        if self.transparent_background {
+            rgba((color << 8) | 0x00)
+        } else {
+            rgb(color)
+        }
+    }
+
+    fn editor_panel_background(&self, color: u32) -> gpui::Rgba {
+        if self.transparent_background {
+            // Tauri `[data-bg-active]` leaves CodeMirror's main scroller
+            // transparent and keeps chrome at theme-bg-panel/40.
+            rgba((color << 8) | 0x66)
+        } else {
+            rgb(color)
+        }
+    }
+
+    fn highlighted_line_chunks(
+        &self,
+        line: usize,
+        line_text: &str,
+        line_range: Range<usize>,
+    ) -> Vec<LineChunk> {
         if line_text.is_empty() {
             return vec![LineChunk {
                 start: 0,
@@ -350,7 +431,12 @@ impl TextEditorView {
 
         let mut chunks = Vec::new();
         let mut cursor = 0;
-        for span in self.highlight_spans.iter().filter(|span| {
+        let span_range = self
+            .highlight_line_spans
+            .get(line)
+            .cloned()
+            .unwrap_or(0..self.highlight_spans.len());
+        for span in self.highlight_spans[span_range].iter().filter(|span| {
             span.range.start.0 < line_range.end && span.range.end.0 > line_range.start
         }) {
             let start = span.range.start.0.max(line_range.start) - line_range.start;

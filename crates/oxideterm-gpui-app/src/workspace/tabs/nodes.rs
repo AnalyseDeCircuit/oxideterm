@@ -573,6 +573,7 @@ impl WorkspaceApp {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return;
         };
+        let node_title = node.title.clone();
         let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
             return;
         };
@@ -610,18 +611,17 @@ impl WorkspaceApp {
             .iter()
             .filter_map(|affected_node_id| self.node_router.connection_id_for_node(affected_node_id))
             .collect::<Vec<_>>();
-        let (ide_project_path, open_ide_file_paths) = self.ide_snapshot_for_node(node_id, cx);
+        let ide_snapshot = self.ide_snapshot_for_node(node_id, cx);
         let snapshot = ReconnectSnapshot {
             old_terminal_session_ids,
             terminal_sessions_by_node,
             old_connection_ids: old_connection_ids.clone(),
-            ide_project_path,
-            open_ide_file_paths,
+            ide_snapshot,
             ..ReconnectSnapshot::default()
         };
-        let _ =
-            self.reconnect_orchestrator
-                .schedule(node_id.0.clone(), node.title.clone(), snapshot);
+        let _ = self
+            .reconnect_orchestrator
+            .schedule(node_id.0.clone(), node_title, snapshot);
         let _ = self
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::Snapshot);

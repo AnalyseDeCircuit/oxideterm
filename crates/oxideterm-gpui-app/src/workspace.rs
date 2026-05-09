@@ -15,7 +15,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::Result;
@@ -23,7 +23,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, CursorStyle, FocusHandle, Focusable, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
     ParentElement, Pixels, Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled,
-    StyledImage, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
+    StyledImage, Subscription, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{ForwardEvent, ForwardingRegistry, SavedForwardStore};
@@ -166,7 +166,9 @@ pub(crate) struct WorkspaceApp {
     forwarding_view: forwards::ForwardsViewState,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     ide_tab_surfaces: HashMap<TabId, gpui::Entity<IdeSurface>>,
+    ide_surface_subscriptions: HashMap<TabId, Subscription>,
     ide_tab_nodes: HashMap<TabId, NodeId>,
+    ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
     sftp_view: sftp::SftpViewState,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,

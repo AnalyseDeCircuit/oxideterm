@@ -3,8 +3,8 @@ use gpui::{
     StyledImage, anchored, deferred, point,
 };
 use oxideterm_settings::{
-    HighlightRule, Language, MAX_HIGHLIGHT_RULES, PersistedSettings, create_default_highlight_rule,
-    reindex_highlight_rules,
+    FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
+    PersistedSettings, create_default_highlight_rule, reindex_highlight_rules,
 };
 use oxideterm_theme::BUILT_IN_THEMES;
 

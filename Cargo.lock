@@ -6479,7 +6479,27 @@ dependencies = [
  "oxideterm-editor-core",
  "thiserror 2.0.18",
  "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c-sharp",
+ "tree-sitter-css",
+ "tree-sitter-diff",
+ "tree-sitter-elixir",
+ "tree-sitter-go",
+ "tree-sitter-html",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-make",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
  "tree-sitter-rust",
+ "tree-sitter-scala",
+ "tree-sitter-sequel",
+ "tree-sitter-swift",
+ "tree-sitter-toml-ng",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+ "tree-sitter-zig",
 ]
 
 [[package]]
@@ -6654,11 +6674,19 @@ dependencies = [
 name = "oxideterm-ide-fs"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "dashmap",
  "futures-util",
  "oxideterm-ide-core",
  "oxideterm-sftp",
  "oxideterm-ssh",
+ "russh",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "zstd",
 ]
 
 [[package]]

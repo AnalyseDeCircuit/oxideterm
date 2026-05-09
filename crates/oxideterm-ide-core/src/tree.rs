@@ -25,6 +25,9 @@ pub struct FileTreeState {
     expanded: HashSet<String>,
     selected: Option<IdeLocation>,
     directories: HashMap<String, DirectoryState>,
+    // Structural revision for GPUI virtualization caches. Selection is not
+    // included because rows resolve selected state live during rendering.
+    revision: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,11 +42,15 @@ impl FileTreeState {
     }
 
     pub fn expand(&mut self, location: &IdeLocation) {
-        self.expanded.insert(location.stable_key());
+        if self.expanded.insert(location.stable_key()) {
+            self.bump_revision();
+        }
     }
 
     pub fn collapse(&mut self, location: &IdeLocation) {
-        self.expanded.remove(&location.stable_key());
+        if self.expanded.remove(&location.stable_key()) {
+            self.bump_revision();
+        }
     }
 
     pub fn is_expanded(&self, location: &IdeLocation) -> bool {
@@ -59,13 +66,23 @@ impl FileTreeState {
     }
 
     pub fn set_children(&mut self, directory: IdeLocation, children: Vec<FileTreeEntry>) {
-        self.directories.insert(
-            directory.stable_key(),
-            DirectoryState {
-                location: directory,
-                children,
-            },
-        );
+        let key = directory.stable_key();
+        let next = DirectoryState {
+            location: directory,
+            children,
+        };
+        if self.directories.get(&key) != Some(&next) {
+            self.directories.insert(key, next);
+            self.bump_revision();
+        }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn children(&self, directory: &IdeLocation) -> Option<&[FileTreeEntry]> {
@@ -75,9 +92,13 @@ impl FileTreeState {
     }
 
     pub fn clear(&mut self) {
+        if self.expanded.is_empty() && self.selected.is_none() && self.directories.is_empty() {
+            return;
+        }
         self.expanded.clear();
         self.selected = None;
         self.directories.clear();
+        self.bump_revision();
     }
 
     pub fn snapshot(&self) -> FileTreeSnapshot {
@@ -118,6 +139,7 @@ impl FileTreeState {
             expanded: snapshot.expanded.into_iter().collect(),
             selected: snapshot.selected,
             directories,
+            revision: 1,
         }
     }
 }
@@ -139,6 +161,7 @@ mod tests {
         };
         let mut tree = FileTreeState::new();
 
+        let initial_revision = tree.revision();
         tree.expand(&root);
         tree.set_selected(Some(child.location.clone()));
         tree.set_children(root.clone(), vec![child.clone()]);
@@ -146,5 +169,6 @@ mod tests {
         assert!(tree.is_expanded(&root));
         assert_eq!(tree.selected(), Some(&child.location));
         assert_eq!(tree.children(&root), Some([child].as_slice()));
+        assert!(tree.revision() > initial_revision);
     }
 }

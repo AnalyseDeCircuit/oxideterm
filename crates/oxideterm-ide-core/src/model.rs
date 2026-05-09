@@ -175,6 +175,8 @@ pub struct EditorTab {
     pub id: EditorTabId,
     pub location: IdeLocation,
     pub title: String,
+    #[serde(default)]
+    pub is_pinned: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

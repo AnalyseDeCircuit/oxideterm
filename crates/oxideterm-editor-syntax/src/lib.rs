@@ -16,13 +16,97 @@ use tree_sitter::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum LanguageId {
+    Bash,
+    CSharp,
+    Css,
+    Diff,
+    Elixir,
+    Go,
+    Html,
+    Java,
+    Javascript,
+    Json,
+    Make,
+    Python,
+    Ruby,
     Rust,
+    Scala,
+    Sql,
+    Swift,
+    Toml,
+    Tsx,
+    TypeScript,
+    Yaml,
+    Zig,
 }
+
+/// Keep the IDE language surface explicit so adding or removing grammars is a
+/// conscious product decision instead of an accidental dependency side effect.
+pub const SUPPORTED_LANGUAGES: &[LanguageId] = &[
+    LanguageId::Bash,
+    LanguageId::CSharp,
+    LanguageId::Css,
+    LanguageId::Diff,
+    LanguageId::Elixir,
+    LanguageId::Go,
+    LanguageId::Html,
+    LanguageId::Java,
+    LanguageId::Javascript,
+    LanguageId::Json,
+    LanguageId::Make,
+    LanguageId::Python,
+    LanguageId::Ruby,
+    LanguageId::Rust,
+    LanguageId::Scala,
+    LanguageId::Sql,
+    LanguageId::Swift,
+    LanguageId::Toml,
+    LanguageId::Tsx,
+    LanguageId::TypeScript,
+    LanguageId::Yaml,
+    LanguageId::Zig,
+];
 
 impl LanguageId {
     pub fn from_path(path: impl AsRef<Path>) -> Option<Self> {
-        match path.as_ref().extension().and_then(|ext| ext.to_str()) {
+        let path = path.as_ref();
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_ascii_lowercase());
+        if matches!(
+            file_name.as_deref(),
+            Some("makefile" | "gnumakefile" | "bsdmakefile")
+        ) {
+            return Some(Self::Make);
+        }
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase());
+        match extension.as_deref() {
+            Some("bash" | "sh" | "zsh") => Some(Self::Bash),
+            Some("cs") => Some(Self::CSharp),
+            Some("css") => Some(Self::Css),
+            Some("diff" | "patch") => Some(Self::Diff),
+            Some("ex" | "exs") => Some(Self::Elixir),
+            Some("go") => Some(Self::Go),
+            Some("html" | "htm") => Some(Self::Html),
+            Some("java") => Some(Self::Java),
+            Some("js" | "mjs" | "cjs" | "jsx") => Some(Self::Javascript),
+            Some("json" | "jsonc") => Some(Self::Json),
+            Some("mk") => Some(Self::Make),
+            Some("py" | "pyw") => Some(Self::Python),
+            Some("rb" | "rake") => Some(Self::Ruby),
             Some("rs") => Some(Self::Rust),
+            Some("scala" | "sc") => Some(Self::Scala),
+            Some("sql") => Some(Self::Sql),
+            Some("swift") => Some(Self::Swift),
+            Some("toml") => Some(Self::Toml),
+            Some("ts" | "mts" | "cts") => Some(Self::TypeScript),
+            Some("tsx") => Some(Self::Tsx),
+            Some("yaml" | "yml") => Some(Self::Yaml),
+            Some("zig") => Some(Self::Zig),
             _ => None,
         }
     }
@@ -34,16 +118,137 @@ impl LanguageId {
 
     fn tree_sitter_language(self) -> Language {
         match self {
+            Self::Bash => tree_sitter_bash::LANGUAGE.into(),
+            Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+            Self::Css => tree_sitter_css::LANGUAGE.into(),
+            Self::Diff => tree_sitter_diff::LANGUAGE.into(),
+            Self::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
+            Self::Html => tree_sitter_html::LANGUAGE.into(),
+            Self::Java => tree_sitter_java::LANGUAGE.into(),
+            Self::Javascript => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Json => tree_sitter_json::LANGUAGE.into(),
+            Self::Make => tree_sitter_make::LANGUAGE.into(),
+            Self::Python => tree_sitter_python::LANGUAGE.into(),
+            Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Scala => tree_sitter_scala::LANGUAGE.into(),
+            Self::Sql => tree_sitter_sequel::LANGUAGE.into(),
+            Self::Swift => tree_sitter_swift::LANGUAGE.into(),
+            Self::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
+            Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Self::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+            Self::Zig => tree_sitter_zig::LANGUAGE.into(),
         }
     }
 
     fn highlight_query(self) -> &'static str {
         match self {
+            Self::Bash => BASH_HIGHLIGHTS_QUERY,
+            Self::CSharp => tree_sitter_c_sharp::HIGHLIGHTS_QUERY,
+            Self::Css => tree_sitter_css::HIGHLIGHTS_QUERY,
+            Self::Diff => tree_sitter_diff::HIGHLIGHTS_QUERY,
+            Self::Elixir => tree_sitter_elixir::HIGHLIGHTS_QUERY,
+            Self::Go => tree_sitter_go::HIGHLIGHTS_QUERY,
+            Self::Html => tree_sitter_html::HIGHLIGHTS_QUERY,
+            Self::Java => tree_sitter_java::HIGHLIGHTS_QUERY,
+            Self::Javascript => JAVASCRIPT_HIGHLIGHTS_QUERY,
+            Self::Json => tree_sitter_json::HIGHLIGHTS_QUERY,
+            Self::Make => tree_sitter_make::HIGHLIGHTS_QUERY,
+            Self::Python => tree_sitter_python::HIGHLIGHTS_QUERY,
+            Self::Ruby => tree_sitter_ruby::HIGHLIGHTS_QUERY,
             Self::Rust => tree_sitter_rust::HIGHLIGHTS_QUERY,
+            Self::Scala => tree_sitter_scala::HIGHLIGHTS_QUERY,
+            Self::Sql => tree_sitter_sequel::HIGHLIGHTS_QUERY,
+            Self::Swift => tree_sitter_swift::HIGHLIGHTS_QUERY,
+            Self::Toml => tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+            Self::Tsx | Self::TypeScript => tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            Self::Yaml => tree_sitter_yaml::HIGHLIGHTS_QUERY,
+            Self::Zig => tree_sitter_zig::HIGHLIGHTS_QUERY,
         }
     }
 }
+
+// `tree-sitter-bash` ships a query file but does not export it from the Rust
+// crate. Keep a deliberately small OxideTerm-local query so common remote
+// shell files get real tree-sitter spans instead of falling back to plain text.
+const BASH_HIGHLIGHTS_QUERY: &str = r#"
+[
+  "if"
+  "then"
+  "else"
+  "elif"
+  "fi"
+  "for"
+  "while"
+  "do"
+  "done"
+  "case"
+  "esac"
+  "function"
+  "in"
+] @keyword
+(comment) @comment
+(string) @string
+(raw_string) @string
+(command_name) @function
+(variable_name) @variable
+"#;
+
+// `tree-sitter-javascript` also ships query files without exporting them from
+// the crate. This local query intentionally covers the common scopes used by
+// the editor color mapper while staying small enough to keep compile failures
+// obvious when the grammar changes.
+const JAVASCRIPT_HIGHLIGHTS_QUERY: &str = r#"
+[
+  "async"
+  "await"
+  "break"
+  "case"
+  "catch"
+  "class"
+  "const"
+  "continue"
+  "debugger"
+  "default"
+  "delete"
+  "do"
+  "else"
+  "export"
+  "extends"
+  "finally"
+  "for"
+  "from"
+  "function"
+  "if"
+  "import"
+  "in"
+  "instanceof"
+  "let"
+  "new"
+  "of"
+  "return"
+  "switch"
+  "throw"
+  "try"
+  "typeof"
+  "var"
+  "void"
+  "while"
+  "with"
+  "yield"
+] @keyword
+(comment) @comment
+(string) @string
+(template_string) @string
+(number) @number
+(identifier) @variable
+(property_identifier) @property
+(function_declaration name: (identifier) @function)
+(method_definition name: (property_identifier) @function)
+(pair key: (property_identifier) @property)
+"#;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SyntaxScope {
@@ -245,11 +450,26 @@ pub enum SyntaxError {
 
 fn language_from_shebang(source: &str) -> Option<LanguageId> {
     let first = source.lines().next()?;
-    if first.starts_with("#!") && first.contains("rust-script") {
-        Some(LanguageId::Rust)
-    } else {
-        None
+    if !first.starts_with("#!") {
+        return None;
     }
+    let lower = first.to_ascii_lowercase();
+    if lower.contains("rust-script") {
+        return Some(LanguageId::Rust);
+    }
+    if lower.contains("bash") || lower.contains("/sh") || lower.contains("zsh") {
+        return Some(LanguageId::Bash);
+    }
+    if lower.contains("python") {
+        return Some(LanguageId::Python);
+    }
+    if lower.contains("ruby") {
+        return Some(LanguageId::Ruby);
+    }
+    if lower.contains("node") || lower.contains("deno") {
+        return Some(LanguageId::Javascript);
+    }
+    None
 }
 
 fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
@@ -390,12 +610,155 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_rust_from_extension_and_shebang() {
+    fn exposes_at_least_twenty_supported_languages() {
+        assert!(SUPPORTED_LANGUAGES.len() >= 20);
+    }
+
+    #[test]
+    fn detects_supported_language_extensions_and_shebangs() {
         assert_eq!(LanguageId::from_path("src/main.rs"), Some(LanguageId::Rust));
+        assert_eq!(LanguageId::from_path("install.sh"), Some(LanguageId::Bash));
+        assert_eq!(
+            LanguageId::from_path("PROGRAM.CS"),
+            Some(LanguageId::CSharp)
+        );
+        assert_eq!(LanguageId::from_path("style.css"), Some(LanguageId::Css));
+        assert_eq!(
+            LanguageId::from_path("changes.patch"),
+            Some(LanguageId::Diff)
+        );
+        assert_eq!(LanguageId::from_path("mix.exs"), Some(LanguageId::Elixir));
+        assert_eq!(LanguageId::from_path("main.go"), Some(LanguageId::Go));
+        assert_eq!(LanguageId::from_path("index.html"), Some(LanguageId::Html));
+        assert_eq!(LanguageId::from_path("Main.java"), Some(LanguageId::Java));
+        assert_eq!(
+            LanguageId::from_path("app.jsx"),
+            Some(LanguageId::Javascript)
+        );
+        assert_eq!(
+            LanguageId::from_path("package.json"),
+            Some(LanguageId::Json)
+        );
+        assert_eq!(LanguageId::from_path("Makefile"), Some(LanguageId::Make));
+        assert_eq!(LanguageId::from_path("main.py"), Some(LanguageId::Python));
+        assert_eq!(LanguageId::from_path("task.rake"), Some(LanguageId::Ruby));
+        assert_eq!(LanguageId::from_path("Main.scala"), Some(LanguageId::Scala));
+        assert_eq!(LanguageId::from_path("schema.sql"), Some(LanguageId::Sql));
+        assert_eq!(LanguageId::from_path("App.swift"), Some(LanguageId::Swift));
+        assert_eq!(LanguageId::from_path("Cargo.toml"), Some(LanguageId::Toml));
+        assert_eq!(
+            LanguageId::from_path("app.ts"),
+            Some(LanguageId::TypeScript)
+        );
+        assert_eq!(LanguageId::from_path("app.tsx"), Some(LanguageId::Tsx));
+        assert_eq!(LanguageId::from_path("compose.yml"), Some(LanguageId::Yaml));
+        assert_eq!(LanguageId::from_path("main.zig"), Some(LanguageId::Zig));
         assert_eq!(
             LanguageId::detect(None, "#!/usr/bin/env rust-script\nfn main() {}"),
             Some(LanguageId::Rust)
         );
+        assert_eq!(
+            LanguageId::detect(None, "#!/usr/bin/env python3\nprint('hi')"),
+            Some(LanguageId::Python)
+        );
+        assert_eq!(
+            LanguageId::detect(None, "#!/usr/bin/env node\nconsole.log('hi')"),
+            Some(LanguageId::Javascript)
+        );
+    }
+
+    #[test]
+    fn parses_and_highlights_all_supported_languages() {
+        let samples = [
+            (
+                LanguageId::Bash,
+                "if command -v cargo; then\n  echo \"ok\"\nfi\n",
+            ),
+            (
+                LanguageId::CSharp,
+                "class Demo { static void Main() { var x = 1; } }\n",
+            ),
+            (LanguageId::Css, ".root { color: #fff; display: flex; }\n"),
+            (
+                LanguageId::Diff,
+                "diff --git a/a b/a\n@@ -1 +1 @@\n-old\n+new\n",
+            ),
+            (
+                LanguageId::Elixir,
+                "defmodule Demo do\n  def hello(name), do: \"hi #{name}\"\nend\n",
+            ),
+            (
+                LanguageId::Go,
+                "package main\nfunc main() { println(\"hi\") }\n",
+            ),
+            (
+                LanguageId::Html,
+                "<main class=\"root\"><h1>Hello</h1></main>\n",
+            ),
+            (
+                LanguageId::Java,
+                "class Demo { int add(int a, int b) { return a + b; } }\n",
+            ),
+            (
+                LanguageId::Javascript,
+                "function demo(value) { const x = value + 1; return x; }\n",
+            ),
+            (
+                LanguageId::Json,
+                "{\"scripts\": {\"build\": \"cargo build\"}}\n",
+            ),
+            (LanguageId::Make, "build:\n\tcargo build\n"),
+            (
+                LanguageId::Python,
+                "def hello(name):\n    return f\"hi {name}\"\n",
+            ),
+            (
+                LanguageId::Ruby,
+                "class Demo\n  def hello\n    puts \"hi\"\n  end\nend\n",
+            ),
+            (
+                LanguageId::Rust,
+                "fn main() {\n    let message = \"hi\";\n}\n",
+            ),
+            (
+                LanguageId::Scala,
+                "object Demo { def main(args: Array[String]): Unit = println(\"hi\") }\n",
+            ),
+            (
+                LanguageId::Sql,
+                "select id, name from users where active = 1;\n",
+            ),
+            (LanguageId::Swift, "struct Demo { let value: Int }\n"),
+            (LanguageId::Toml, "[package]\nname = \"demo\"\n"),
+            (
+                LanguageId::Tsx,
+                "export function App() { return <div className=\"x\">Hi</div>; }\n",
+            ),
+            (
+                LanguageId::TypeScript,
+                "type User = { name: string };\nconst user: User = { name: \"Ada\" };\n",
+            ),
+            (LanguageId::Yaml, "name: demo\nitems:\n  - one\n"),
+            (
+                LanguageId::Zig,
+                "pub fn main() void { const x: i32 = 1; }\n",
+            ),
+        ];
+
+        for (language, source) in samples {
+            let session = SyntaxSession::parse(language, source)
+                .unwrap_or_else(|error| panic!("{language:?} query failed: {error}"));
+            let spans = session.highlight_spans(source);
+
+            assert!(
+                !spans.is_empty(),
+                "{language:?} should produce highlight spans"
+            );
+            assert!(
+                spans.iter().all(|span| span.range.end.0 <= source.len()),
+                "{language:?} produced an out-of-bounds span"
+            );
+        }
     }
 
     #[test]
@@ -410,6 +773,24 @@ mod tests {
         assert!(spans.iter().any(|span| span.scope == SyntaxScope::Function));
         assert!(spans.iter().any(|span| span.scope == SyntaxScope::String));
         assert!(spans.iter().all(|span| span.range.end.0 <= source.len()));
+    }
+
+    #[test]
+    fn parses_and_highlights_common_remote_files() {
+        let json = "{\"scripts\": {\"build\": \"cargo build\"}}";
+        let json_session = SyntaxSession::parse(LanguageId::Json, json).unwrap();
+        assert!(
+            json_session
+                .highlight_spans(json)
+                .iter()
+                .any(|span| span.scope == SyntaxScope::String)
+        );
+
+        let bash = "if command -v cargo; then\n  echo \"ok\"\nfi\n";
+        let bash_session = SyntaxSession::parse(LanguageId::Bash, bash).unwrap();
+        let spans = bash_session.highlight_spans(bash);
+        assert!(spans.iter().any(|span| span.scope == SyntaxScope::Keyword));
+        assert!(spans.iter().any(|span| span.scope == SyntaxScope::String));
     }
 
     #[test]

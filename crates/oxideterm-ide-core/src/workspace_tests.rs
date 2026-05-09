@@ -141,6 +141,22 @@ fn edits_mark_dirty_and_save_clears_dirty() {
 }
 
 #[test]
+fn replacing_buffer_with_identical_text_keeps_dirty_state() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(tab_id) = workspace
+        .open_file(local_file("clean.txt"), "same", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+
+    workspace.replace_buffer_text(tab_id, "same").unwrap();
+
+    assert!(!workspace.buffer(tab_id).unwrap().is_dirty());
+}
+
+#[test]
 fn save_tab_with_clears_dirty_only_after_success() {
     let mut workspace = IdeWorkspace::new();
     workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
@@ -391,4 +407,107 @@ fn restore_skips_when_current_project_has_dirty_edits() {
         target.restore_snapshot(snapshot),
         RestoreSnapshotResult::Skipped(RestoreSkipReason::ExistingDirtyBuffers)
     );
+}
+
+#[test]
+fn tab_pin_state_round_trips_through_snapshot() {
+    let mut source = IdeWorkspace::new();
+    source.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(tab_id) = source
+        .open_file(
+            local_file("pinned.rs"),
+            "fn main() {}",
+            SavedFileVersion::unknown(),
+        )
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+
+    assert!(source.toggle_tab_pin(tab_id).unwrap());
+    let snapshot = source.snapshot().unwrap();
+    assert!(
+        snapshot
+            .tabs
+            .iter()
+            .any(|tab| tab.id == tab_id && tab.is_pinned)
+    );
+
+    let mut restored = IdeWorkspace::new();
+    assert_eq!(
+        restored.restore_snapshot(snapshot),
+        RestoreSnapshotResult::Restored { tab_count: 1 }
+    );
+    assert!(
+        restored
+            .tabs()
+            .iter()
+            .any(|tab| tab.id == tab_id && tab.is_pinned)
+    );
+}
+
+#[test]
+fn reorders_tabs_before_target() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(first) = workspace
+        .open_file(local_file("a.rs"), "a", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    let OpenFileOutcome::Opened(second) = workspace
+        .open_file(local_file("b.rs"), "b", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    let OpenFileOutcome::Opened(third) = workspace
+        .open_file(local_file("c.rs"), "c", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+
+    workspace.move_tab_before(third, first).unwrap();
+
+    let order = workspace
+        .tabs()
+        .iter()
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
+    assert_eq!(order, vec![third, first, second]);
+}
+
+#[test]
+fn reorders_tabs_to_dnd_target_index() {
+    let mut workspace = IdeWorkspace::new();
+    workspace.open_project(IdeLocation::local("/tmp/oxideterm"), "OxideTerm");
+    let OpenFileOutcome::Opened(first) = workspace
+        .open_file(local_file("a.rs"), "a", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    let OpenFileOutcome::Opened(second) = workspace
+        .open_file(local_file("b.rs"), "b", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+    let OpenFileOutcome::Opened(third) = workspace
+        .open_file(local_file("c.rs"), "c", SavedFileVersion::unknown())
+        .unwrap()
+    else {
+        panic!("file should open");
+    };
+
+    workspace.move_tab_to_index(first, 2).unwrap();
+
+    let order = workspace
+        .tabs()
+        .iter()
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
+    assert_eq!(order, vec![second, third, first]);
 }

@@ -31,8 +31,9 @@ impl EntityInputHandler for TextEditorView {
     ) -> Option<UTF16Selection> {
         let selection = self.cursor.selection();
         let range = selection.range();
+        let text = self.buffer.text();
         Some(UTF16Selection {
-            range: byte_range_to_utf16_range(self.buffer.text(), range.start.0..range.end.0),
+            range: byte_range_to_utf16_range(&text, range.start.0..range.end.0),
             reversed: selection.anchor > selection.head,
         })
     }
@@ -43,7 +44,8 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
         let marked = self.marked_text.as_ref()?;
-        let start = byte_to_utf16_index(self.buffer.text(), marked.range.start.0);
+        let text = self.buffer.text();
+        let start = byte_to_utf16_index(&text, marked.range.start.0);
         let end = start + marked.text.encode_utf16().count();
         Some(start..end)
     }
@@ -102,7 +104,8 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let index = range_utf16.start;
-        let byte = utf16_index_to_byte(self.buffer.text(), index);
+        let text = self.buffer.text();
+        let byte = utf16_index_to_byte(&text, index);
         Some(self.bounds_for_byte_offset(BufferOffset(byte), element_bounds))
     }
 
@@ -115,21 +118,22 @@ impl EntityInputHandler for TextEditorView {
         let display_row = self.display_row_for_window_y(point.y)?;
         let column = display_row.start_col + self.visual_column_for_window_x(point.x);
         let line_text = self.buffer.line_text(display_row.line).unwrap_or_default();
-        let byte_column = super::byte_column_for_visual_column(line_text, column);
+        let byte_column = super::byte_column_for_visual_column(&line_text, column);
         let offset = self
             .buffer
             .line_col_to_offset(LineCol::new(display_row.line, byte_column))
             .ok()?;
-        Some(byte_to_utf16_index(self.buffer.text(), offset.0))
+        let text = self.buffer.text();
+        Some(byte_to_utf16_index(&text, offset.0))
     }
 }
 
 impl TextEditorView {
     pub(super) fn text_with_marked(&self) -> String {
         let Some(marked) = self.marked_text.as_ref() else {
-            return self.buffer.text().to_string();
+            return self.buffer.text();
         };
-        let mut text = self.buffer.text().to_string();
+        let mut text = self.buffer.text();
         let start = marked.range.start.0;
         let end = marked.range.end.0;
         if start <= end
@@ -147,16 +151,17 @@ impl TextEditorView {
         range_utf16: Option<Range<usize>>,
     ) -> Option<TextRange> {
         let range_utf16 = range_utf16?;
+        let text = self.buffer.text();
         if let Some(marked) = self.marked_text.as_ref() {
-            let marked_start = byte_to_utf16_index(self.buffer.text(), marked.range.start.0);
+            let marked_start = byte_to_utf16_index(&text, marked.range.start.0);
             let marked_end = marked_start + marked.text.encode_utf16().count();
             if ranges_overlap(&range_utf16, &(marked_start..marked_end)) {
                 return Some(marked.range);
             }
         }
 
-        let start = utf16_index_to_byte(self.buffer.text(), range_utf16.start);
-        let end = utf16_index_to_byte(self.buffer.text(), range_utf16.end);
+        let start = utf16_index_to_byte(&text, range_utf16.start);
+        let end = utf16_index_to_byte(&text, range_utf16.end);
         Some(TextRange::new(BufferOffset(start), BufferOffset(end)))
     }
 }

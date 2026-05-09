@@ -62,3 +62,4 @@ name = "OxideTerm"
 osx_minimum_system_version = "13.0"
 osx_info_plist_exts = ["resources/info/*"]
 osx_entitlements = "resources/OxideTerm.entitlements"
+resources = ["resources/agents"]

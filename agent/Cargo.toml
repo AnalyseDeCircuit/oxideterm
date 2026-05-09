@@ -1,0 +1,23 @@
+[package]
+name = "oxideterm-agent"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+
+# Keep the remote agent out of the root OxideTerm workspace. It is built as a
+# standalone release artifact and then copied into app resources.
+[workspace]
+
+[dependencies]
+regex = "1.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+walkdir = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3

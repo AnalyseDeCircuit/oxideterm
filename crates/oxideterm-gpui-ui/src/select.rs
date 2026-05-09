@@ -23,6 +23,7 @@ pub enum SelectAnchorId {
     SettingsTerminalEncoding,
     SettingsTerminalAdaptiveRenderer,
     SettingsTerminalCursorStyle,
+    SettingsIdeAgentMode,
     SettingsLocalShell,
     SettingsConnectionIdleTimeout,
     SettingsSftpConcurrent,
