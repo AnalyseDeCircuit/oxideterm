@@ -116,6 +116,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.sftp_view.active_pane == pane;
+        let drag_over = self.sftp_view.drag_over_pane == Some(pane);
+        let drag_bg = rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA);
+        let drag_border = rgba((theme.accent << 8) | SFTP_DRAG_RING_ALPHA);
         let filtered = sorted_sftp_files(files, filter, sort_field, sort_direction);
         let transfer_direction = if pane == SftpPane::Local {
             SftpTransferDirection::Upload
@@ -130,12 +133,21 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .border_1()
-            .border_color(if active {
+            .border_color(if drag_over {
+                drag_border
+            } else if active {
                 rgba((theme.accent << 8) | SFTP_ACTIVE_BORDER_ALPHA)
             } else {
                 sftp_border(theme.border, has_background)
             })
-            .bg(sftp_bg(theme.bg, has_background))
+            .bg(if drag_over {
+                drag_bg
+            } else {
+                sftp_bg(theme.bg, has_background)
+            })
+            .drag_over::<gpui::ExternalPaths>(move |style, _paths, _window, _cx| {
+                style.bg(drag_bg).border_color(drag_border)
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
@@ -736,11 +748,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let drag_over = self.sftp_view.drag_over_pane == Some(pane);
         let list = div()
             .id(("sftp-file-list-scroll", pane as u64))
             .flex_1()
             .min_h(px(0.0))
-            .bg(sftp_bg(theme.bg, has_background));
+            .bg(if drag_over {
+                rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA)
+            } else {
+                sftp_bg(theme.bg, has_background)
+            });
 
         if loading {
             return list
@@ -908,6 +925,11 @@ impl WorkspaceApp {
                                                     name.clone(),
                                                     event.modifiers,
                                                 );
+                                                this.start_sftp_drag_candidate(
+                                                    pane,
+                                                    f32::from(event.position.x),
+                                                    f32::from(event.position.y),
+                                                );
                                             }
                                             cx.stop_propagation();
                                             cx.notify();
@@ -938,6 +960,32 @@ impl WorkspaceApp {
             .track_scroll(scroll_handle)
             .size_full()
             .bg(sftp_bg(theme.bg, has_background))
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                this.update_sftp_drag(
+                    pane,
+                    f32::from(event.position.x),
+                    f32::from(event.position.y),
+                );
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.finish_sftp_drag(pane);
+                    cx.notify();
+                }),
+            )
+            .when(pane == SftpPane::Remote, |list| {
+                list.can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
+                    .on_drop(cx.listener(
+                        |this, paths: &gpui::ExternalPaths, _window, cx| {
+                            this.queue_sftp_external_upload_paths(paths.paths());
+                            this.sftp_view.drag_over_pane = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ))
+            })
             .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                 // The menu is positioned in window coordinates, so any scroll invalidates
                 // the row that produced the coordinates.
@@ -950,6 +998,8 @@ impl WorkspaceApp {
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle);
                     this.sftp_view.context_menu = None;
+                    this.sftp_view.drag_state = None;
+                    this.sftp_view.drag_over_pane = None;
                     this.clear_sftp_selection(pane);
                     cx.notify();
                 }),

@@ -26,7 +26,9 @@ use gpui::{
     StyledImage, Subscription, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
-use oxideterm_forwarding::{ForwardEvent, ForwardingRegistry, SavedForwardStore};
+use oxideterm_forwarding::{
+    ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
+};
 use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
@@ -59,9 +61,9 @@ use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeOrigin,
     NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeExpansion,
     NodeTreeSnapshot, NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig,
-    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, SshConfig, SshConnectionRegistry, SshTransportClient,
-    TerminalEndpoint,
+    ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
+    SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
@@ -109,6 +111,8 @@ pub(crate) struct WorkspaceApp {
     next_pane_id: u64,
     next_session_id: u64,
     search: SearchBarState,
+    terminal_command_bar_focused: bool,
+    terminal_command_bar_draft: String,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,
@@ -155,6 +159,7 @@ pub(crate) struct WorkspaceApp {
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
+    reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
@@ -164,7 +169,13 @@ pub(crate) struct WorkspaceApp {
     next_ssh_node_id: u64,
     forward_tab_nodes: HashMap<TabId, NodeId>,
     forwarding_view: forwards::ForwardsViewState,
+    forwarding_port_detection_by_node: HashMap<NodeId, forwards::PortDetectionViewState>,
+    forwarding_port_profiler_nodes: HashSet<NodeId>,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
+    sftp_view_node: Option<NodeId>,
+    sftp_local_path_memory: HashMap<NodeId, String>,
+    sftp_path_memory: HashMap<NodeId, String>,
+    sftp_remote_home_by_node: HashMap<NodeId, String>,
     ide_tab_surfaces: HashMap<TabId, gpui::Entity<IdeSurface>>,
     ide_surface_subscriptions: HashMap<TabId, Subscription>,
     ide_tab_nodes: HashMap<TabId, NodeId>,

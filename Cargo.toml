@@ -62,6 +62,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 signature = "2"
 ssh-encoding = "0.2"
+sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs"] }
 tracing = "0.1"

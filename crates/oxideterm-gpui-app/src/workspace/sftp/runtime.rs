@@ -34,9 +34,54 @@ impl WorkspaceApp {
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
+        self.activate_sftp_view_for_node(&node_id);
         self.ensure_node_connection_started(&node_id);
         self.sftp_view.remote_load_pending = true;
         cx.notify();
+    }
+
+    pub(super) fn activate_sftp_view_for_node(&mut self, node_id: &NodeId) {
+        if self.sftp_view_node.as_ref() == Some(node_id) {
+            return;
+        }
+
+        if let Some(previous_node_id) = self.sftp_view_node.clone() {
+            self.sftp_local_path_memory
+                .insert(previous_node_id.clone(), self.sftp_view.local_path.clone());
+            if !self.sftp_view.remote_path.is_empty() {
+                self.sftp_path_memory
+                    .insert(previous_node_id, self.sftp_view.remote_path.clone());
+            }
+        }
+
+        self.sftp_view_node = Some(node_id.clone());
+        let local_path = self
+            .sftp_local_path_memory
+            .get(node_id)
+            .cloned()
+            .unwrap_or_else(home_path);
+        self.sftp_view.local_path = local_path.clone();
+        self.sftp_view.local_path_input = local_path.clone();
+        self.sftp_view.local_files = list_local_files(&local_path).unwrap_or_default();
+        self.sftp_view.local_selected.clear();
+        self.sftp_view.local_last_selected = None;
+        self.sftp_view.local_path_scroll_x = 0.0;
+
+        let remembered_remote = self
+            .sftp_path_memory
+            .get(node_id)
+            .cloned()
+            .unwrap_or_default();
+        self.sftp_view.remote_path = remembered_remote.clone();
+        self.sftp_view.remote_path_input = remembered_remote;
+        self.sftp_view.remote_files.clear();
+        self.sftp_view.remote_selected.clear();
+        self.sftp_view.remote_last_selected = None;
+        self.sftp_view.remote_path_scroll_x = 0.0;
+        self.sftp_view.remote_load_pending = true;
+        self.sftp_view.remote_load_inflight = false;
+        self.sftp_view.remote_load_retry_count = 0;
+        self.sftp_view.init_error = None;
     }
 
     pub(super) fn maybe_start_sftp_remote_load(&mut self, cx: &mut Context<Self>) {
@@ -116,6 +161,11 @@ impl WorkspaceApp {
                         match result {
                             Ok(listing) => {
                                 let cwd = listing.cwd;
+                                self.sftp_path_memory.insert(node_id.clone(), cwd.clone());
+                                self.sftp_remote_home_by_node
+                                    .entry(node_id.clone())
+                                    .or_insert_with(|| cwd.clone());
+                                self.sftp_view.remote_load_retry_count = 0;
                                 self.sftp_view.remote_path = cwd.clone();
                                 self.sftp_view.remote_path_input = cwd.clone();
                                 self.sftp_view.remote_files = listing.files;
@@ -131,20 +181,49 @@ impl WorkspaceApp {
                                 ) {
                                     self.emit_node_event(event);
                                 }
+                                self.spawn_sftp_background_transfer_load(node_id.clone());
                                 self.spawn_sftp_incomplete_load(node_id);
                             }
                             Err(error) => {
-                                if sftp_error_needs_node_reconnect(&error) {
+                                if sftp_error_should_retry_init(&error)
+                                    && self.sftp_view.remote_load_retry_count < 3
+                                {
                                     // Tauri retries node SFTP through the
                                     // connection entry owner. When native sees
                                     // stale Active state from an old terminal
                                     // shell, rebuild the node connection and
                                     // queue the list again instead of leaving
                                     // the tab stuck on a closed channel.
+                                    self.sftp_view.remote_load_retry_count += 1;
+                                    let attempt = self.sftp_view.remote_load_retry_count;
                                     self.ensure_node_connection_started(&node_id);
-                                    self.sftp_view.remote_load_pending = true;
+                                    self.schedule_sftp_remote_load_retry(
+                                        tab_id,
+                                        node_id.clone(),
+                                        path.clone(),
+                                        attempt,
+                                        cx,
+                                    );
+                                    self.sftp_view.remote_loading = true;
                                     self.sftp_view.init_error = None;
                                 } else {
+                                    self.sftp_view.remote_load_retry_count = 0;
+                                    if sftp_error_is_permission_denied(&error) {
+                                        if let Some(previous_path) =
+                                            self.sftp_path_memory.get(&node_id).cloned()
+                                        {
+                                            self.sftp_view.remote_path = previous_path.clone();
+                                            self.sftp_view.remote_path_input = previous_path;
+                                        }
+                                    } else if sftp_error_is_not_found(&error) {
+                                        self.sftp_view.remote_path = "/".to_string();
+                                        self.sftp_view.remote_path_input = "/".to_string();
+                                        self.sftp_path_memory
+                                            .insert(node_id.clone(), "/".to_string());
+                                        if path != "/" {
+                                            self.sftp_view.remote_load_pending = true;
+                                        }
+                                    }
                                     self.sftp_view.init_error =
                                         Some(format!("{}: {error}", path));
                                 }
@@ -179,16 +258,22 @@ impl WorkspaceApp {
                     refresh_local,
                 } => {
                     self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id, cx);
+                    let mut batch_update = None;
                     let should_refresh = if let Some(item) = self
                         .sftp_view
                         .transfers
                         .iter_mut()
                         .find(|item| item.id == id)
                     {
-                        apply_tauri_transfer_completion(item, &result)
+                        let should_refresh = apply_tauri_transfer_completion(item, &result);
+                        batch_update = item.batch_id.map(|batch_id| (batch_id, item.state));
+                        should_refresh
                     } else {
                         result.is_ok()
                     };
+                    if let Some((batch_id, state)) = batch_update {
+                        self.update_sftp_transfer_batch_toast(batch_id, state);
+                    }
                     let active_sftp_node = self
                         .active_tab_id
                         .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
@@ -245,9 +330,29 @@ impl WorkspaceApp {
                     result,
                     refresh_remote,
                     refresh_local,
+                    toast,
                 } => {
-                    if let Err(error) = result {
-                        self.sftp_view.init_error = Some(error);
+                    match result {
+                        Ok(()) => {
+                            if let Some(toast) = toast {
+                                self.push_sftp_toast(
+                                    toast.success_title,
+                                    toast.success_description,
+                                    TerminalNoticeVariant::Success,
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            if let Some(toast) = toast {
+                                self.push_sftp_toast(
+                                    toast.error_title,
+                                    Some(error),
+                                    TerminalNoticeVariant::Error,
+                                );
+                            } else {
+                                self.sftp_view.init_error = Some(error);
+                            }
+                        }
                     }
                     if refresh_remote {
                         self.sftp_view.remote_load_pending = true;
@@ -283,6 +388,26 @@ impl WorkspaceApp {
                             }
                             self.sftp_view.incomplete_transfers.clear();
                             self.sftp_view.show_incomplete = false;
+                        }
+                    }
+                    changed = true;
+                }
+                SftpWorkerResult::BackgroundTransfersLoaded { node_id, result } => {
+                    if self
+                        .active_tab_id
+                        .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
+                        != Some(&node_id)
+                    {
+                        continue;
+                    }
+                    match result {
+                        Ok(snapshots) => {
+                            for snapshot in snapshots {
+                                self.upsert_sftp_background_transfer_snapshot(snapshot);
+                            }
+                        }
+                        Err(error) => {
+                            self.sftp_view.init_error = Some(error);
                         }
                     }
                     changed = true;
@@ -477,6 +602,37 @@ impl WorkspaceApp {
         }
     }
 
+    fn schedule_sftp_remote_load_retry(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        path: String,
+        attempt: u8,
+        cx: &mut Context<Self>,
+    ) {
+        let delay_secs = 2_u64.saturating_pow(attempt as u32);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(delay_secs))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.active_tab_id == Some(tab_id)
+                    && this
+                        .sftp_tab_nodes
+                        .get(&tab_id)
+                        .is_some_and(|active_node_id| active_node_id == &node_id)
+                    && this.sftp_view.remote_path == path
+                    && !this.sftp_view.remote_load_inflight
+                {
+                    this.sftp_view.remote_load_pending = true;
+                    this.sftp_view.remote_loading = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn apply_sftp_ready_event(
         &mut self,
         node_id: &NodeId,
@@ -572,6 +728,24 @@ fn sftp_error_needs_node_reconnect(error: &str) -> bool {
         || lower.contains("no active ssh connection")
 }
 
+fn sftp_error_should_retry_init(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    sftp_error_needs_node_reconnect(error)
+        || lower.contains("not connected")
+        || lower.contains("connection timeout")
+        || lower.contains("timeout")
+}
+
+fn sftp_error_is_permission_denied(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("permission denied") || lower.contains("permissiondenied")
+}
+
+fn sftp_error_is_not_found(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("not found") || lower.contains("no such file") || lower.contains("notfound")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,6 +754,8 @@ mod tests {
         SftpTransferItem {
             id: 1,
             transfer_id: "tx-1".to_string(),
+            batch_id: None,
+            node_id: NodeId::new("node-1"),
             name: "file.txt".to_string(),
             local_path: "/tmp/file.txt".to_string(),
             remote_path: "/home/file.txt".to_string(),

@@ -31,4 +31,10 @@ pub(super) enum ReconnectWorkerResult {
         transfers_by_node: Vec<ReconnectNodeTransferSnapshot>,
         detail: String,
     },
+    ForwardRulesRestored {
+        node_id: NodeId,
+        result: PhaseResult,
+        restored: u32,
+        detail: String,
+    },
 }

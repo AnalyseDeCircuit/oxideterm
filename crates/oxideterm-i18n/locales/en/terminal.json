@@ -1,6 +1,11 @@
 {
   "terminal": {
     "local_terminal": "Local Terminal",
+    "command_bar": {
+      "command_placeholder": "Run commands",
+      "local_shell": "Local shell",
+      "remote_shell": "Remote shell"
+    },
     "paste": {
       "title": "Multiple lines detected ({{count}} lines)",
       "more_lines": "... {{count}} more lines",

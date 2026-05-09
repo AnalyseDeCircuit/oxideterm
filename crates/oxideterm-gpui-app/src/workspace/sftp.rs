@@ -164,6 +164,13 @@ pub(super) struct SftpFileEntry {
 }
 
 #[derive(Debug)]
+pub(super) struct SftpMutationToast {
+    success_title: String,
+    success_description: Option<String>,
+    error_title: String,
+}
+
+#[derive(Debug)]
 pub(super) enum SftpWorkerResult {
     RemoteList {
         tab_id: TabId,
@@ -197,10 +204,15 @@ pub(super) enum SftpWorkerResult {
         result: Result<(), String>,
         refresh_remote: bool,
         refresh_local: bool,
+        toast: Option<SftpMutationToast>,
     },
     IncompleteTransfersLoaded {
         node_id: NodeId,
         result: Result<Vec<StoredTransferProgress>, String>,
+    },
+    BackgroundTransfersLoaded {
+        node_id: NodeId,
+        result: Result<Vec<BackgroundTransferSnapshot>, String>,
     },
     PreviewLoaded {
         generation: u64,
@@ -297,6 +309,15 @@ struct SftpConflictState {
     apply_to_all: bool,
 }
 
+#[derive(Clone, Debug)]
+struct SftpDragState {
+    source_pane: SftpPane,
+    names: Vec<String>,
+    start_x: f32,
+    start_y: f32,
+    active: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SftpTransferState {
@@ -313,6 +334,8 @@ pub(super) enum SftpTransferState {
 struct SftpTransferItem {
     id: u64,
     transfer_id: String,
+    batch_id: Option<u64>,
+    node_id: NodeId,
     name: String,
     local_path: String,
     remote_path: String,
@@ -322,6 +345,16 @@ struct SftpTransferItem {
     speed: u64,
     state: SftpTransferState,
     error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct SftpTransferBatch {
+    direction: SftpTransferDirection,
+    total: usize,
+    success: usize,
+    failed: usize,
+    skipped: usize,
+    queued: usize,
 }
 
 #[derive(Default)]
@@ -442,6 +475,7 @@ pub(super) struct SftpViewState {
     remote_loading: bool,
     remote_load_pending: bool,
     remote_load_inflight: bool,
+    remote_load_retry_count: u8,
     init_error: Option<String>,
     pub(super) focused_input: Option<SftpInput>,
     editing_local_path: bool,
@@ -478,16 +512,20 @@ pub(super) struct SftpViewState {
     preview_editor_last_saved_mtime: Option<u64>,
     preview_editor_last_atomic_write: Option<bool>,
     transfers: Vec<SftpTransferItem>,
+    transfer_batches: HashMap<u64, SftpTransferBatch>,
     incomplete_transfers: Vec<StoredTransferProgress>,
     incomplete_load_inflight: bool,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
+    drag_state: Option<SftpDragState>,
+    drag_over_pane: Option<SftpPane>,
     next_transfer_id: u64,
+    next_transfer_batch_id: u64,
 }
 
 impl Default for SftpViewState {
     fn default() -> Self {
-        let local_path = home_path_mock();
+        let local_path = home_path();
         let remote_path = String::new();
         Self {
             active_pane: SftpPane::Remote,
@@ -517,6 +555,7 @@ impl Default for SftpViewState {
             remote_loading: false,
             remote_load_pending: false,
             remote_load_inflight: false,
+            remote_load_retry_count: 0,
             init_error: None,
             focused_input: None,
             editing_local_path: false,
@@ -553,11 +592,15 @@ impl Default for SftpViewState {
             preview_editor_last_saved_mtime: None,
             preview_editor_last_atomic_write: None,
             transfers: Vec::new(),
+            transfer_batches: HashMap::new(),
             incomplete_transfers: Vec::new(),
             incomplete_load_inflight: false,
             show_incomplete: false,
             context_menu: None,
+            drag_state: None,
+            drag_over_pane: None,
             next_transfer_id: 1,
+            next_transfer_batch_id: 1,
         }
     }
 }

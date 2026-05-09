@@ -69,8 +69,6 @@ impl ForwardingManager {
             return Err(ForwardingError::AlreadyExists(rule.id));
         }
 
-        self.emit_status_changed(&rule.id, ForwardStatus::Starting, None);
-        let rule_id = rule.id.clone();
         let result = match rule.forward_type {
             ForwardType::Local => LocalForward::start(rule, self.current_ssh_connection())
                 .await
@@ -100,13 +98,8 @@ impl ForwardingManager {
             }),
         };
 
-        match &result {
-            Ok(active_rule) => {
-                self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None)
-            }
-            Err(error) => {
-                self.emit_status_changed(&rule_id, ForwardStatus::Error, Some(error.to_string()))
-            }
+        if let Ok(active_rule) = &result {
+            self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None);
         }
         result
     }
@@ -444,56 +437,116 @@ impl ForwardingManager {
     }
 
     pub async fn stop_all(&self) {
-        let local_ids: Vec<String> = self
+        // Tauri `stop_all` drains active handles without preserving them in
+        // `stopped_forwards`; only explicit per-rule stop keeps a restartable
+        // stopped row. Keep native's bulk stop destructive in the same way.
+        let local_forwards: Vec<LocalForward> = self
             .local_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.local_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
-        let dynamic_ids: Vec<String> = self
+        let dynamic_forwards: Vec<DynamicForward> = self
             .dynamic_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.dynamic_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
-        let remote_ids: Vec<String> = self
+        let remote_forwards: Vec<RemoteForward> = self
             .remote_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.remote_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
 
-        for rule_id in local_ids.into_iter().chain(dynamic_ids).chain(remote_ids) {
-            let _ = self.stop_forward(&rule_id).await;
+        for forward in local_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in dynamic_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in remote_forwards {
+            let _ = forward.stop().await;
         }
     }
 
     pub async fn suspend_all_and_save_rules(&self) -> Vec<ForwardRule> {
         let mut suspended = Vec::new();
-        let local_ids: Vec<String> = self
+        let local_forwards: Vec<LocalForward> = self
             .local_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.local_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
-        let dynamic_ids: Vec<String> = self
+        let dynamic_forwards: Vec<DynamicForward> = self
             .dynamic_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.dynamic_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
-        let remote_ids: Vec<String> = self
+        let remote_forwards: Vec<RemoteForward> = self
             .remote_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .filter_map(|rule_id| {
+                self.remote_forwards
+                    .remove(&rule_id)
+                    .map(|(_, forward)| forward)
+            })
             .collect();
 
-        for rule_id in local_ids.into_iter().chain(dynamic_ids).chain(remote_ids) {
-            if let Ok(mut rule) = self.stop_forward(&rule_id).await {
-                rule.status = ForwardStatus::Suspended;
-                self.stopped_forwards.insert(rule.id.clone(), rule.clone());
-                self.emit_status_changed(&rule.id, ForwardStatus::Suspended, None);
-                suspended.push(rule);
-            }
+        for forward in local_forwards {
+            let mut rule = forward.stop().await;
+            rule.status = ForwardStatus::Suspended;
+            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
+            self.emit_status_changed(
+                &rule.id,
+                ForwardStatus::Suspended,
+                Some("SSH connection lost".to_string()),
+            );
+            suspended.push(rule);
         }
-
-        if !suspended.is_empty() {
-            self.emit_session_suspended(suspended.iter().map(|rule| rule.id.clone()).collect());
+        for forward in dynamic_forwards {
+            let mut rule = forward.stop().await;
+            rule.status = ForwardStatus::Suspended;
+            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
+            self.emit_status_changed(
+                &rule.id,
+                ForwardStatus::Suspended,
+                Some("SSH connection lost".to_string()),
+            );
+            suspended.push(rule);
+        }
+        for forward in remote_forwards {
+            let mut rule = forward.stop().await;
+            rule.status = ForwardStatus::Suspended;
+            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
+            self.emit_status_changed(
+                &rule.id,
+                ForwardStatus::Suspended,
+                Some("SSH connection lost".to_string()),
+            );
+            suspended.push(rule);
         }
         suspended
     }
@@ -561,19 +614,16 @@ impl ForwardingManager {
             .clone()
     }
 
+    pub fn ssh_connection_handle(&self) -> SshConnectionHandle {
+        self.current_ssh_connection()
+    }
+
     fn emit_status_changed(&self, forward_id: &str, status: ForwardStatus, error: Option<String>) {
         self.emit(ForwardEvent::StatusChanged {
             forward_id: forward_id.to_string(),
             session_id: self.session_id.clone(),
             status,
             error,
-        });
-    }
-
-    fn emit_session_suspended(&self, forward_ids: Vec<String>) {
-        self.emit(ForwardEvent::SessionSuspended {
-            session_id: self.session_id.clone(),
-            forward_ids,
         });
     }
 

@@ -23,6 +23,19 @@ impl WorkspaceApp {
         });
     }
 
+    fn spawn_sftp_background_transfer_load(&mut self, node_id: NodeId) {
+        let manager = self.sftp_transfer_manager.clone();
+        let tx = self.sftp_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            let snapshots = manager.list_background_transfers(Some(&node_id.0));
+            let _ = tx.send(SftpWorkerResult::BackgroundTransfersLoaded {
+                node_id,
+                result: Ok(snapshots),
+            });
+        });
+    }
+
     fn resume_sftp_incomplete_transfer(&mut self, transfer_id: String) {
         let Some(tab_id) = self.active_tab_id else {
             return;
@@ -76,6 +89,8 @@ impl WorkspaceApp {
         self.sftp_view.transfers.push(SftpTransferItem {
             id,
             transfer_id: transfer_id.clone(),
+            batch_id: None,
+            node_id: node_id.clone(),
             name: if is_directory { format!("{name}/") } else { name },
             local_path: local_path.clone(),
             remote_path: remote_path.clone(),
@@ -170,6 +185,8 @@ impl WorkspaceApp {
             self.sftp_view.transfers.push(SftpTransferItem {
                 id,
                 transfer_id: progress.transfer_id.clone(),
+                batch_id: None,
+                node_id: node_id.clone(),
                 name: if is_directory { format!("{name}/") } else { name },
                 local_path: local_path.clone(),
                 remote_path: remote_path.clone(),
@@ -762,6 +779,80 @@ impl WorkspaceApp {
                 self.sftp_view.transfers.remove(index);
             }
         }
+    }
+
+    fn upsert_sftp_background_transfer_snapshot(
+        &mut self,
+        snapshot: BackgroundTransferSnapshot,
+    ) {
+        let node_id = NodeId::new(snapshot.node_id.clone());
+        let direction = match snapshot.direction {
+            BackgroundTransferDirection::Upload => SftpTransferDirection::Upload,
+            BackgroundTransferDirection::Download => SftpTransferDirection::Download,
+        };
+        let state = sftp_transfer_state_from_background(snapshot.state);
+        let size = snapshot.size.max(1);
+        if let Some(item) = self
+            .sftp_view
+            .transfers
+            .iter_mut()
+            .find(|item| item.transfer_id == snapshot.id)
+        {
+            item.node_id = node_id;
+            item.name = snapshot.name;
+            item.local_path = snapshot.local_path;
+            item.remote_path = snapshot.remote_path;
+            item.direction = direction;
+            if snapshot.size > 0 {
+                item.size = snapshot.size;
+            } else if item.size == 0 {
+                item.size = size;
+            }
+            item.transferred = snapshot.transferred;
+            item.speed = snapshot.backend_speed.unwrap_or(item.speed);
+            item.state = state;
+            item.error = snapshot.error;
+            return;
+        }
+
+        let id = self.sftp_view.next_transfer_id;
+        self.sftp_view.next_transfer_id += 1;
+        self.sftp_view.transfers.push(SftpTransferItem {
+            id,
+            transfer_id: snapshot.id,
+            batch_id: None,
+            node_id,
+            name: snapshot.name,
+            local_path: snapshot.local_path,
+            remote_path: snapshot.remote_path,
+            direction,
+            size,
+            transferred: snapshot.transferred,
+            speed: snapshot.backend_speed.unwrap_or_default(),
+            state,
+            error: snapshot.error,
+        });
+    }
+
+    pub(super) fn interrupt_sftp_transfers_by_node(
+        &mut self,
+        node_id: &NodeId,
+        error: String,
+    ) -> bool {
+        let mut changed = false;
+        for transfer in &mut self.sftp_view.transfers {
+            if &transfer.node_id == node_id
+                && matches!(
+                    transfer.state,
+                    SftpTransferState::Active | SftpTransferState::Pending
+                )
+            {
+                transfer.state = SftpTransferState::Error;
+                transfer.error = Some(error.clone());
+                changed = true;
+            }
+        }
+        changed
     }
 }
 

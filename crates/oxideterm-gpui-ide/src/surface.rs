@@ -25,7 +25,8 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
-    IdeFileCheck, IdeLocation, IdeWorkspace, SavedFileVersion, WorkspaceSnapshot, WriteMode,
+    IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdeWorkspace, SavedFileVersion,
+    WorkspaceSnapshot, WriteMode,
 };
 use oxideterm_ide_fs::{AgentStatus, NodeAgentIdeFileSystem, NodeAgentMode};
 use oxideterm_ssh::{NodeRouter, ReconnectIdeSnapshot};
@@ -214,6 +215,15 @@ struct AgentStatusMenu {
     y: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ConflictState {
+    tab_id: EditorTabId,
+    title: String,
+    local_mtime: Option<i64>,
+    remote_mtime: Option<i64>,
+    close_request: Option<CloseRequestId>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AgentActionKind {
     Deploy,
@@ -253,6 +263,7 @@ pub struct IdeSurface {
     loading_paths: HashSet<String>,
     saving_tabs: HashSet<EditorTabId>,
     save_after_close: Option<CloseRequestId>,
+    conflict_state: Option<ConflictState>,
     pending_restore_files: Vec<String>,
     pending_restore_dirty_contents: BTreeMap<String, String>,
     last_error: Option<String>,
@@ -297,6 +308,7 @@ impl IdeSurface {
             loading_paths: HashSet::new(),
             saving_tabs: HashSet::new(),
             save_after_close: None,
+            conflict_state: None,
             pending_restore_files: Vec::new(),
             pending_restore_dirty_contents: BTreeMap::new(),
             last_error: None,
@@ -395,6 +407,7 @@ impl IdeSurface {
         self.git_branch = None;
         self.load_state = IdeLoadState::Loading;
         self.last_error = None;
+        self.conflict_state = None;
         self.editors.clear();
         self.workspace = IdeWorkspace::new();
         cx.notify();
@@ -939,6 +952,13 @@ impl IdeSurface {
         match self.workspace.request_close_tab(tab_id) {
             Ok(None) => {
                 self.editors.remove(&tab_id);
+                if self
+                    .conflict_state
+                    .as_ref()
+                    .is_some_and(|conflict| conflict.tab_id == tab_id)
+                {
+                    self.conflict_state = None;
+                }
                 cx.notify();
             }
             Ok(Some(_)) => cx.notify(),
@@ -1017,6 +1037,13 @@ impl IdeSurface {
                 let resolved = self.workspace.resolve_dirty_close(request.id, decision);
                 if matches!(resolved, Ok(None)) && decision == DirtyCloseDecision::Discard {
                     self.editors.remove(&closing_tab);
+                    if self
+                        .conflict_state
+                        .as_ref()
+                        .is_some_and(|conflict| conflict.tab_id == closing_tab)
+                    {
+                        self.conflict_state = None;
+                    }
                 }
                 cx.notify();
             }
@@ -1028,6 +1055,14 @@ impl IdeSurface {
         let Some(buffer) = self.workspace.buffer(tab_id).cloned() else {
             return;
         };
+        let title = self
+            .workspace
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| tab.title.clone())
+            .unwrap_or_else(|| buffer.location.display_name());
+        let local_mtime = buffer.version.modified_millis.map(|millis| millis / 1000);
         if self.saving_tabs.contains(&tab_id) {
             return;
         }
@@ -1043,11 +1078,34 @@ impl IdeSurface {
             } else {
                 WriteMode::CreateOrReplace
             };
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                fs.write_file(&buffer.location, &buffer.text, Some(&buffer.version), mode)
-                    .await
-            }))
-            .await;
+            let result = backend_runtime
+                .spawn(async move {
+                    match fs
+                        .write_file(&buffer.location, &buffer.text, Some(&buffer.version), mode)
+                        .await
+                    {
+                        Ok(version) => Ok(version),
+                        Err(error) if error.kind == IdeFileErrorKind::Conflict => {
+                            let remote_version = fs
+                                .stat(&buffer.location)
+                                .await
+                                .ok()
+                                .map(|stat| stat.version);
+                            Err((error, remote_version))
+                        }
+                        Err(error) => Err((error, None)),
+                    }
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    Err((
+                        IdeFileError::new(
+                            IdeFileErrorKind::Other,
+                            format!("IDE backend task failed: {error}"),
+                        ),
+                        None,
+                    ))
+                });
             let _ = weak.update(cx, |this, cx| {
                 this.saving_tabs.remove(&tab_id);
                 match result {
@@ -1064,7 +1122,26 @@ impl IdeSurface {
                             editor.update(cx, |editor, cx| editor.mark_saved_external(cx));
                         }
                     }
-                    Err(error) => {
+                    Err((error, remote_version)) if error.kind == IdeFileErrorKind::Conflict => {
+                        this.conflict_state = Some(ConflictState {
+                            tab_id,
+                            title,
+                            local_mtime,
+                            remote_mtime: remote_version
+                                .and_then(|version| version.modified_millis)
+                                .map(|millis| millis / 1000),
+                            close_request,
+                        });
+                        if let Some(editor) = this.editors.get(&tab_id) {
+                            editor.update(cx, |editor, cx| {
+                                editor.mark_save_failed_external(
+                                    this.labels.conflict_title.clone(),
+                                    cx,
+                                )
+                            });
+                        }
+                    }
+                    Err((error, _)) => {
                         let message = format!("{}: {}", this.labels.save_failed, error.message);
                         this.last_error = Some(message.clone());
                         if let Some(editor) = this.editors.get(&tab_id) {
@@ -1072,6 +1149,118 @@ impl IdeSurface {
                                 editor.mark_save_failed_external(message, cx)
                             });
                         }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn clear_conflict(&mut self, cx: &mut Context<Self>) {
+        self.conflict_state = None;
+        cx.notify();
+    }
+
+    fn overwrite_conflict(&mut self, cx: &mut Context<Self>) {
+        let Some(conflict) = self.conflict_state.clone() else {
+            return;
+        };
+        let Some(buffer) = self.workspace.buffer(conflict.tab_id).cloned() else {
+            self.conflict_state = None;
+            cx.notify();
+            return;
+        };
+        if self.saving_tabs.contains(&conflict.tab_id) {
+            return;
+        }
+        self.saving_tabs.insert(conflict.tab_id);
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        cx.notify();
+
+        cx.spawn(async move |weak, cx| {
+            let mode = if fs.capabilities().atomic_write {
+                WriteMode::AtomicReplace
+            } else {
+                WriteMode::CreateOrReplace
+            };
+            let result = await_ide_backend(backend_runtime.spawn(async move {
+                // Tauri resolveConflict('overwrite') force-saves without the
+                // agent hash / SFTP mtime expectation after the user confirms.
+                fs.write_file(&buffer.location, &buffer.text, None, mode)
+                    .await
+            }))
+            .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.saving_tabs.remove(&conflict.tab_id);
+                match result {
+                    Ok(version) => {
+                        this.conflict_state = None;
+                        if let Some(request_id) = conflict.close_request {
+                            let _ = this
+                                .workspace
+                                .complete_dirty_close_after_save(request_id, version.clone());
+                            this.editors.remove(&conflict.tab_id);
+                        } else {
+                            let _ = this.workspace.mark_saved(conflict.tab_id, version);
+                        }
+                        if let Some(editor) = this.editors.get(&conflict.tab_id) {
+                            editor.update(cx, |editor, cx| editor.mark_saved_external(cx));
+                        }
+                    }
+                    Err(error) => {
+                        let message = format!("{}: {}", this.labels.save_failed, error.message);
+                        this.last_error = Some(message.clone());
+                        if let Some(editor) = this.editors.get(&conflict.tab_id) {
+                            editor.update(cx, |editor, cx| {
+                                editor.mark_save_failed_external(message, cx)
+                            });
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn reload_conflict(&mut self, cx: &mut Context<Self>) {
+        let Some(conflict) = self.conflict_state.clone() else {
+            return;
+        };
+        let Some(buffer) = self.workspace.buffer(conflict.tab_id).cloned() else {
+            self.conflict_state = None;
+            cx.notify();
+            return;
+        };
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        cx.notify();
+
+        cx.spawn(async move |weak, cx| {
+            let result = await_ide_backend(
+                backend_runtime.spawn(async move { fs.read_file(&buffer.location).await }),
+            )
+            .await;
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(data) => {
+                        this.conflict_state = None;
+                        let _ = this
+                            .workspace
+                            .replace_buffer_text(conflict.tab_id, data.text.clone());
+                        let _ = this.workspace.mark_saved(conflict.tab_id, data.version);
+                        if let Some(editor) = this.editors.get(&conflict.tab_id) {
+                            editor.update(cx, |editor, cx| {
+                                editor.replace_text_external(data.text, cx);
+                                editor.mark_saved_external(cx);
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        this.last_error =
+                            Some(format!("{}: {}", this.labels.open_failed, error.message));
                     }
                 }
                 cx.notify();
@@ -1167,6 +1356,9 @@ impl Render for IdeSurface {
         }
         if self.workspace.pending_close().is_some() {
             root = root.child(self.render_dirty_close_dialog(cx));
+        }
+        if self.conflict_state.is_some() {
+            root = root.child(self.render_conflict_dialog(cx));
         }
         if self.folder_switch_confirm_open {
             root = root.child(self.render_folder_switch_confirm_dialog(cx));
@@ -2968,6 +3160,135 @@ impl IdeSurface {
             .into_any_element()
     }
 
+    fn render_conflict_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(conflict) = self.conflict_state.as_ref() else {
+            return div().into_any_element();
+        };
+        let tokens = &self.tokens;
+        let dialog = dialog_content(tokens)
+            .child(
+                dialog_header(tokens)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(self.icon("lucide/alert-triangle.svg", 20.0, 0xeab308))
+                            .child(dialog_title(tokens, self.labels.conflict_title.clone())),
+                    )
+                    .child(dialog_description(
+                        tokens,
+                        self.labels
+                            .conflict_desc
+                            .replace("{{fileName}}", &conflict.title),
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .child(self.render_conflict_time_row(
+                        self.labels.your_version.clone(),
+                        format_conflict_mtime(conflict.local_mtime),
+                        false,
+                    ))
+                    .child(self.render_conflict_time_row(
+                        self.labels.remote_version.clone(),
+                        format_conflict_mtime(conflict.remote_mtime),
+                        true,
+                    )),
+            )
+            .child(
+                dialog_footer(tokens)
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.cancel.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.clear_conflict(cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.reload_remote.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                        )
+                        .text_color(rgb(self.tokens.ui.info))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.reload_conflict(cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            tokens,
+                            self.labels.overwrite.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Destructive,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.overwrite_conflict(cx);
+                            }),
+                        ),
+                    ),
+            );
+        self.render_modal_overlay(dialog)
+    }
+
+    fn render_conflict_time_row(&self, label: String, value: String, accent: bool) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .px_3()
+            .py_2()
+            .rounded(px(self.tokens.radii.sm))
+            .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x80))
+            .child(
+                div()
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(label),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_family(SharedString::from("monospace"))
+                    .text_color(rgb(if accent {
+                        self.tokens.ui.accent
+                    } else {
+                        self.tokens.ui.text
+                    }))
+                    .child(value),
+            )
+            .into_any_element()
+    }
+
     fn render_folder_switch_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let tokens = &self.tokens;
         let dialog = dialog_content(tokens)
@@ -3560,6 +3881,13 @@ fn remote_path(location: &IdeLocation) -> Option<&str> {
         IdeLocation::Remote { path, .. } => Some(path.as_str()),
         IdeLocation::Local { .. } => None,
     }
+}
+
+fn format_conflict_mtime(mtime: Option<i64>) -> String {
+    mtime
+        .filter(|mtime| *mtime > 0)
+        .map(|mtime| mtime.to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn folder_picker_dirs(entries: Vec<FileTreeEntry>) -> Vec<FileTreeEntry> {

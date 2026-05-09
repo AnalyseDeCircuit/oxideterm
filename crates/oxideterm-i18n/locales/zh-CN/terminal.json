@@ -1,6 +1,11 @@
 {
   "terminal": {
     "local_terminal": "本地终端",
+    "command_bar": {
+      "command_placeholder": "输入命令...",
+      "local_shell": "本地 Shell",
+      "remote_shell": "远程 Shell"
+    },
     "paste": {
       "title": "检测到多行内容 ({{count}} 行)",
       "more_lines": "... 还有 {{count}} 行",

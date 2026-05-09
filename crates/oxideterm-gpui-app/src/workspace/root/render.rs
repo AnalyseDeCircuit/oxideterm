@@ -41,7 +41,7 @@ impl Render for WorkspaceApp {
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
                 (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
-                (_, Some(root_pane)) => self.render_pane_tree(root_pane, cx),
+                (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }
         } else {

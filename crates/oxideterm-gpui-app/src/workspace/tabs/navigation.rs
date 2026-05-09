@@ -28,14 +28,22 @@ impl WorkspaceApp {
             }
             Some(TabKind::Forwards) => {
                 self.active_surface = ActiveSurface::Terminal;
+                if let Some(active_tab_id) = self.active_tab_id
+                    && let Some(node_id) = self.forward_tab_nodes.get(&active_tab_id).cloned()
+                {
+                    self.active_ssh_node_id = Some(node_id.clone());
+                    self.expanded_ssh_nodes.insert(node_id.clone());
+                    self.start_port_profiler_for_node_without_notify(node_id);
+                }
             }
             Some(TabKind::Sftp) => {
                 self.active_surface = ActiveSurface::Terminal;
                 if let Some(active_tab_id) = self.active_tab_id
-                    && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id)
+                    && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned()
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
                     self.expanded_ssh_nodes.insert(node_id.clone());
+                    self.activate_sftp_view_for_node(&node_id);
                 }
             }
             Some(TabKind::Ide) => {
@@ -222,6 +230,8 @@ impl WorkspaceApp {
             nodes_to_disconnect.push(node_id.clone());
         }
         for affected_node_id in &nodes_to_disconnect {
+            self.forwarding_port_profiler_nodes.remove(affected_node_id);
+            self.forwarding_port_detection_by_node.remove(affected_node_id);
             let forwarding_registry = self.forwarding_registry.clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
@@ -229,6 +239,7 @@ impl WorkspaceApp {
                 .forwarding_connection_consumers
                 .remove(&forwarding_session_id)
             {
+                forwarding_registry.stop_port_profiler(&connection_id);
                 self.ssh_registry.release(&connection_id, &consumer);
             }
             forwarding_runtime.spawn(async move {

@@ -223,6 +223,8 @@ impl WorkspaceApp {
             oxideterm_sftp::TransferStatus::Active => self.transfer_status_text(&SftpTransferItem {
                 id: 0,
                 transfer_id: transfer.transfer_id.clone(),
+                batch_id: None,
+                node_id: NodeId::new(String::new()),
                 name: name.clone(),
                 local_path: String::new(),
                 remote_path: String::new(),

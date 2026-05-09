@@ -4,6 +4,7 @@ pub struct SshSessionConfig {
     consumer: Option<ConnectionConsumer>,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     trzsz_policy: Option<TrzszTransferPolicy>,
+    defer_pty_until_resize: bool,
 }
 
 impl SshSessionConfig {
@@ -14,6 +15,7 @@ impl SshSessionConfig {
             consumer: None,
             prompt_handler: None,
             trzsz_policy: None,
+            defer_pty_until_resize: false,
         }
     }
 
@@ -49,6 +51,15 @@ impl SshSessionConfig {
         self
     }
 
+    pub fn with_deferred_pty(mut self, defer_pty_until_resize: bool) -> Self {
+        self.defer_pty_until_resize = defer_pty_until_resize;
+        self
+    }
+
+    pub fn defer_pty_until_resize(&self) -> bool {
+        self.defer_pty_until_resize
+    }
+
     pub fn trzsz_policy(&self) -> Option<TrzszTransferPolicy> {
         self.trzsz_policy.clone()
     }
@@ -62,6 +73,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             consumer: None,
             prompt_handler: None,
             trzsz_policy: None,
+            defer_pty_until_resize: false,
         }
     }
 }
@@ -74,6 +86,7 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("consumer", &self.consumer)
             .field("prompt_handler", &self.prompt_handler.is_some())
             .field("trzsz_policy", &self.trzsz_policy)
+            .field("defer_pty_until_resize", &self.defer_pty_until_resize)
             .finish()
     }
 }

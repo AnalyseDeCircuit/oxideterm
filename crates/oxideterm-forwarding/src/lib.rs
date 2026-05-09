@@ -15,6 +15,7 @@ mod events;
 mod local;
 mod manager;
 mod model;
+mod profiler;
 mod registry;
 mod remote;
 mod saved;
@@ -28,6 +29,7 @@ pub use error::ForwardingError;
 pub use events::ForwardEvent;
 pub use manager::ForwardingManager;
 pub use model::{ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate};
+pub use profiler::PortDetectionProfiler;
 pub use registry::ForwardingRegistry;
 pub use saved::{
     ApplySavedForwardsSyncSnapshotResult, DeletedPersistedForwardTombstone,

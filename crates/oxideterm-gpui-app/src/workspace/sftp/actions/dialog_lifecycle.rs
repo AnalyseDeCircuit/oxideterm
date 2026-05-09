@@ -1,5 +1,5 @@
 impl WorkspaceApp {
-    fn spawn_remote_sftp_mutation<F>(&self, operation: F)
+    fn spawn_remote_sftp_mutation<F>(&self, operation: F, toast: Option<SftpMutationToast>)
     where
         F: FnOnce(
                 SftpSession,
@@ -30,7 +30,23 @@ impl WorkspaceApp {
                 result,
                 refresh_remote: true,
                 refresh_local: false,
+                toast,
             });
+        });
+    }
+
+    fn push_sftp_toast(
+        &self,
+        title: String,
+        description: Option<String>,
+        variant: TerminalNoticeVariant,
+    ) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title,
+            description,
+            status_text: None,
+            progress: None,
+            variant,
         });
     }
 
@@ -136,9 +152,29 @@ impl WorkspaceApp {
                         SftpPane::Local => {
                             let old_path = join_local_path(&self.sftp_view.local_path, &old_name);
                             let new_path = join_local_path(&self.sftp_view.local_path, &new_name);
-                            let _ = std::fs::rename(old_path, new_path);
-                            if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
-                                self.sftp_view.local_files = files;
+                            match std::fs::rename(old_path, new_path) {
+                                Ok(()) => {
+                                    if let Ok(files) = list_local_files(&self.sftp_view.local_path)
+                                    {
+                                        self.sftp_view.local_files = files;
+                                    }
+                                    self.push_sftp_toast(
+                                        self.i18n.t("sftp.toast.renamed"),
+                                        Some(sftp_i18n_rename_detail(
+                                            self.i18n.t("sftp.toast.renamed_detail"),
+                                            &old_name,
+                                            &new_name,
+                                        )),
+                                        TerminalNoticeVariant::Success,
+                                    );
+                                }
+                                Err(error) => {
+                                    self.push_sftp_toast(
+                                        self.i18n.t("sftp.toast.rename_failed"),
+                                        Some(error.to_string()),
+                                        TerminalNoticeVariant::Error,
+                                    );
+                                }
                             }
                         }
                         SftpPane::Remote => {
@@ -152,13 +188,25 @@ impl WorkspaceApp {
                                     join_sftp_path(&self.sftp_view.remote_path, &old_name)
                                 });
                             let new_path = join_sftp_path(&parent_path(&old_path, true), &new_name);
-                            self.spawn_remote_sftp_mutation(move |sftp| {
-                                Box::pin(async move {
-                                    sftp.rename(&old_path, &new_path)
-                                        .await
-                                        .map_err(|error| error.to_string())
-                                })
-                            });
+                            let toast = SftpMutationToast {
+                                success_title: self.i18n.t("sftp.toast.renamed"),
+                                success_description: Some(sftp_i18n_rename_detail(
+                                    self.i18n.t("sftp.toast.renamed_detail"),
+                                    &old_name,
+                                    &new_name,
+                                )),
+                                error_title: self.i18n.t("sftp.toast.rename_failed"),
+                            };
+                            self.spawn_remote_sftp_mutation(
+                                move |sftp| {
+                                    Box::pin(async move {
+                                        sftp.rename(&old_path, &new_path)
+                                            .await
+                                            .map_err(|error| error.to_string())
+                                    })
+                                },
+                                Some(toast),
+                            );
                         }
                     }
                 }
@@ -169,18 +217,42 @@ impl WorkspaceApp {
                     match pane {
                         SftpPane::Local => {
                             let path = join_local_path(&self.sftp_view.local_path, &name);
-                            let _ = std::fs::create_dir_all(path);
-                            if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
-                                self.sftp_view.local_files = files;
+                            match std::fs::create_dir_all(path) {
+                                Ok(()) => {
+                                    if let Ok(files) = list_local_files(&self.sftp_view.local_path)
+                                    {
+                                        self.sftp_view.local_files = files;
+                                    }
+                                    self.push_sftp_toast(
+                                        self.i18n.t("sftp.toast.folder_created"),
+                                        Some(name),
+                                        TerminalNoticeVariant::Success,
+                                    );
+                                }
+                                Err(error) => {
+                                    self.push_sftp_toast(
+                                        self.i18n.t("sftp.toast.create_folder_failed"),
+                                        Some(error.to_string()),
+                                        TerminalNoticeVariant::Error,
+                                    );
+                                }
                             }
                         }
                         SftpPane::Remote => {
                             let path = join_sftp_path(&self.sftp_view.remote_path, &name);
-                            self.spawn_remote_sftp_mutation(move |sftp| {
-                                Box::pin(async move {
-                                    sftp.mkdir(&path).await.map_err(|error| error.to_string())
-                                })
-                            });
+                            let toast = SftpMutationToast {
+                                success_title: self.i18n.t("sftp.toast.folder_created"),
+                                success_description: Some(name),
+                                error_title: self.i18n.t("sftp.toast.create_folder_failed"),
+                            };
+                            self.spawn_remote_sftp_mutation(
+                                move |sftp| {
+                                    Box::pin(async move {
+                                        sftp.mkdir(&path).await.map_err(|error| error.to_string())
+                                    })
+                                },
+                                Some(toast),
+                            );
                         }
                     }
                 }
@@ -188,16 +260,40 @@ impl WorkspaceApp {
             SftpDialog::Delete { pane, files } => {
                 match pane {
                     SftpPane::Local => {
+                        let count = files.len();
+                        let mut result = Ok(());
                         for name in files {
                             let path = join_local_path(&self.sftp_view.local_path, &name);
-                            if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-                                let _ = std::fs::remove_dir_all(path);
+                            result = if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+                                std::fs::remove_dir_all(path)
                             } else {
-                                let _ = std::fs::remove_file(path);
+                                std::fs::remove_file(path)
+                            };
+                            if result.is_err() {
+                                break;
                             }
                         }
-                        if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
-                            self.sftp_view.local_files = files;
+                        match result {
+                            Ok(()) => {
+                                if let Ok(files) = list_local_files(&self.sftp_view.local_path) {
+                                    self.sftp_view.local_files = files;
+                                }
+                                self.push_sftp_toast(
+                                    self.i18n.t("sftp.toast.deleted"),
+                                    Some(sftp_i18n_count(
+                                        self.i18n.t("sftp.toast.deleted_count"),
+                                        count,
+                                    )),
+                                    TerminalNoticeVariant::Success,
+                                );
+                            }
+                            Err(error) => {
+                                self.push_sftp_toast(
+                                    self.i18n.t("sftp.toast.delete_failed"),
+                                    Some(error.to_string()),
+                                    TerminalNoticeVariant::Error,
+                                );
+                            }
                         }
                     }
                     SftpPane::Remote => {
@@ -211,16 +307,28 @@ impl WorkspaceApp {
                                     .map(|file| file.path.clone())
                             })
                             .collect::<Vec<_>>();
-                        self.spawn_remote_sftp_mutation(move |sftp| {
-                            Box::pin(async move {
-                                for path in targets {
-                                    sftp.delete_recursive(&path)
-                                        .await
-                                        .map_err(|error| error.to_string())?;
-                                }
-                                Ok(())
-                            })
-                        });
+                        let count = targets.len();
+                        let toast = SftpMutationToast {
+                            success_title: self.i18n.t("sftp.toast.deleted"),
+                            success_description: Some(sftp_i18n_count(
+                                self.i18n.t("sftp.toast.deleted_count"),
+                                count,
+                            )),
+                            error_title: self.i18n.t("sftp.toast.delete_failed"),
+                        };
+                        self.spawn_remote_sftp_mutation(
+                            move |sftp| {
+                                Box::pin(async move {
+                                    for path in targets {
+                                        sftp.delete_recursive(&path)
+                                            .await
+                                            .map_err(|error| error.to_string())?;
+                                    }
+                                    Ok(())
+                                })
+                            },
+                            Some(toast),
+                        );
                     }
                 }
                 self.clear_sftp_selection(pane);
@@ -233,4 +341,14 @@ impl WorkspaceApp {
         }
         self.close_sftp_dialog();
     }
+}
+
+fn sftp_i18n_count(template: String, count: usize) -> String {
+    template.replace("{{count}}", &count.to_string())
+}
+
+fn sftp_i18n_rename_detail(template: String, old_name: &str, new_name: &str) -> String {
+    template
+        .replace("{{old}}", old_name)
+        .replace("{{new}}", new_name)
 }

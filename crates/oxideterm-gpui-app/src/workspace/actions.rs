@@ -1,6 +1,6 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use oxideterm_gpui_ui::text_input_anchor_probe;
+use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
 
 #[derive(Default)]
 pub(super) struct SearchBarState {
@@ -108,6 +108,11 @@ impl WorkspaceApp {
             return;
         }
 
+        if self.terminal_command_bar_focused {
+            self.handle_terminal_command_bar_key(event, window, cx);
+            return;
+        }
+
         if self.active_surface == ActiveSurface::Settings && key == "escape" && !modifiers.platform
         {
             self.close_settings(window, cx);
@@ -126,6 +131,74 @@ impl WorkspaceApp {
             }
             return;
         }
+    }
+
+    pub(super) fn handle_terminal_command_bar_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform {
+            return;
+        }
+
+        match key {
+            "escape" => {
+                self.terminal_command_bar_focused = false;
+                self.ime_marked_text = None;
+                self.focus_active_pane(window, cx);
+                cx.notify();
+            }
+            "enter" => self.submit_terminal_command_bar(window, cx),
+            "backspace" => {
+                self.terminal_command_bar_draft.pop();
+                self.ime_marked_text = None;
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn submit_terminal_command_bar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let command = self.terminal_command_bar_draft.trim().to_string();
+        if command.is_empty() {
+            return;
+        }
+
+        if let Some(pane) = self.active_pane() {
+            let _ = pane.update(cx, |pane, cx| {
+                pane.send_command_line(&command, cx);
+            });
+        }
+
+        self.terminal_command_bar_draft.clear();
+        self.ime_marked_text = None;
+        if self.terminal_command_should_handoff_focus(&command) {
+            self.terminal_command_bar_focused = false;
+            self.focus_active_pane(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn terminal_command_should_handoff_focus(&self, command: &str) -> bool {
+        let Some(first_token) = command.split_whitespace().next() else {
+            return false;
+        };
+        let command_name = first_token.rsplit('/').next().unwrap_or(first_token);
+        self.settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .focus_handoff_commands
+            .iter()
+            .any(|candidate| candidate == command_name)
     }
 
     pub(super) fn switch_locale(
@@ -251,6 +324,141 @@ impl WorkspaceApp {
                             this.close_search(window, cx);
                         }),
                     ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_terminal_surface(
+        &self,
+        root_pane: &PaneNode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let terminal = self.render_pane_tree(root_pane, cx);
+        if !self.settings_store.settings().terminal.command_bar.enabled {
+            return terminal;
+        }
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(div().flex_1().min_h(px(0.0)).child(terminal))
+            .child(self.render_terminal_command_bar(cx))
+            .into_any_element()
+    }
+
+    fn render_terminal_command_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        const COMMAND_BAR_BG_ALPHA: u32 = 0xf2; // Tauri bg-theme-bg/95
+        const COMMAND_BAR_BORDER_ALPHA: u32 = 0xb3; // Tauri border-theme-border/70
+        const COMMAND_BAR_INPUT_BORDER_ALPHA: u32 = 0x73; // Tauri border-theme-border/45
+        const COMMAND_BAR_FOCUSED_BORDER_ALPHA: u32 = 0x73; // Tauri border-theme-accent/45
+
+        let theme = self.tokens.ui;
+        let target = WorkspaceImeTarget::TerminalCommandBar;
+        let workspace = cx.entity();
+        let focused = self.terminal_command_bar_focused;
+        let command_text = if self.terminal_command_bar_draft.is_empty() {
+            self.i18n.t("terminal.command_bar.command_placeholder")
+        } else {
+            self.terminal_command_bar_draft.clone()
+        };
+        let target_label = self
+            .active_tab()
+            .map(|tab| match tab.kind {
+                TabKind::LocalTerminal => self.i18n.t("terminal.command_bar.local_shell"),
+                TabKind::SshTerminal => tab.title.clone(),
+                _ => tab.title.clone(),
+            })
+            .unwrap_or_else(|| self.i18n.t("terminal.command_bar.remote_shell"));
+
+        div()
+            .relative()
+            .flex_none()
+            .border_t_1()
+            .border_color(rgba((theme.border << 8) | COMMAND_BAR_BORDER_ALPHA))
+            .bg(rgba((theme.bg << 8) | COMMAND_BAR_BG_ALPHA))
+            .px(px(12.0))
+            .py(px(4.0))
+            .shadow_lg()
+            .child(
+                div()
+                    .min_h(px(24.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(11.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(target_label),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(2.0))
+                    .pt(px(4.0))
+                    .border_t_1()
+                    .border_color(if focused {
+                        rgba((theme.accent << 8) | COMMAND_BAR_FOCUSED_BORDER_ALPHA)
+                    } else {
+                        rgba((theme.border << 8) | COMMAND_BAR_INPUT_BORDER_ALPHA)
+                    })
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_text()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, window, cx| {
+                            this.terminal_command_bar_focused = true;
+                            this.ime_marked_text = None;
+                            window.focus(&this.focus_handle);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ChevronRight,
+                        16.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(text_input_anchor_probe(
+                        target.anchor_id(),
+                        div()
+                            .h(px(24.0))
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .overflow_hidden()
+                            .text_size(px(13.0))
+                            .text_color(if self.terminal_command_bar_draft.is_empty() {
+                                rgb(theme.text_muted)
+                            } else {
+                                rgb(theme.text)
+                            })
+                            .child(command_text)
+                            .when_some(self.marked_text_for_target(target), |input, marked| {
+                                input.child(
+                                    div()
+                                        .underline()
+                                        .text_color(rgb(theme.text))
+                                        .child(marked.to_string()),
+                                )
+                            })
+                            .when(focused, |input| {
+                                input.child(text_caret(
+                                    &self.tokens,
+                                    self.new_connection_caret_visible,
+                                ))
+                            }),
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_text_input_anchor(anchor, cx);
+                            });
+                        },
+                    )),
             )
             .into_any_element()
     }

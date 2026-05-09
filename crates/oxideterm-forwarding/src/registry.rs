@@ -8,12 +8,14 @@ use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
     ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingManager,
-    PersistedForward, SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
+    PersistedForward, PortDetectionProfiler, PortDetectionSnapshot, SavedForwardError,
+    SavedForwardStore, SavedForwardsSyncSnapshot,
 };
 
 #[derive(Clone, Debug, Default)]
 pub struct ForwardingRegistry {
     managers: Arc<DashMap<String, Arc<ForwardingManager>>>,
+    port_profilers: Arc<DashMap<String, Arc<PortDetectionProfiler>>>,
     event_tx: Option<Sender<ForwardEvent>>,
     saved_store: Option<Arc<SavedForwardStore>>,
 }
@@ -26,6 +28,7 @@ impl ForwardingRegistry {
     pub fn new_with_event_sender(event_tx: Sender<ForwardEvent>) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),
+            port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
             saved_store: None,
         }
@@ -37,6 +40,7 @@ impl ForwardingRegistry {
     ) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),
+            port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
             saved_store: Some(Arc::new(saved_store)),
         }
@@ -69,8 +73,74 @@ impl ForwardingRegistry {
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<ForwardingManager>> {
         let (_, manager) = self.managers.remove(session_id)?;
+        self.stop_port_profiler(manager.ssh_connection_handle().connection_id());
         manager.stop_all().await;
         Some(manager)
+    }
+
+    pub fn start_port_profiler(
+        &self,
+        connection_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+    ) -> Option<Arc<PortDetectionProfiler>> {
+        self.start_port_profiler_inner(connection_id, ssh_connection, false)
+    }
+
+    pub fn restart_degraded_port_profiler(
+        &self,
+        connection_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+    ) -> Option<Arc<PortDetectionProfiler>> {
+        self.start_port_profiler_inner(connection_id, ssh_connection, true)
+    }
+
+    fn start_port_profiler_inner(
+        &self,
+        connection_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+        restart_degraded: bool,
+    ) -> Option<Arc<PortDetectionProfiler>> {
+        let event_tx = self.event_tx.clone()?;
+        let connection_id = connection_id.into();
+        if self
+            .port_profilers
+            .get(&connection_id)
+            .is_some_and(|profiler| {
+                profiler.is_stopped() || (restart_degraded && profiler.is_degraded())
+            })
+        {
+            self.port_profilers.remove(&connection_id);
+        }
+        Some(
+            self.port_profilers
+                .entry(connection_id.clone())
+                .or_insert_with(|| {
+                    Arc::new(PortDetectionProfiler::spawn(
+                        connection_id,
+                        ssh_connection,
+                        event_tx,
+                    ))
+                })
+                .clone(),
+        )
+    }
+
+    pub fn stop_port_profiler(&self, connection_id: &str) {
+        if let Some((_, profiler)) = self.port_profilers.remove(connection_id) {
+            profiler.stop();
+        }
+    }
+
+    pub fn detected_ports(&self, connection_id: &str) -> Option<PortDetectionSnapshot> {
+        self.port_profilers
+            .get(connection_id)
+            .map(|profiler| profiler.snapshot())
+    }
+
+    pub fn ignore_detected_port(&self, connection_id: &str, port: u16) {
+        if let Some(profiler) = self.port_profilers.get(connection_id) {
+            profiler.ignore_port(port);
+        }
     }
 
     pub async fn suspend_session(&self, session_id: &str) -> Vec<ForwardRule> {
@@ -112,6 +182,16 @@ impl ForwardingRegistry {
     }
 
     pub async fn stop_all(&self) {
+        let profilers: Vec<Arc<PortDetectionProfiler>> = self
+            .port_profilers
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect();
+        for profiler in profilers {
+            profiler.stop();
+        }
+        self.port_profilers.clear();
+
         let managers: Vec<Arc<ForwardingManager>> = self
             .managers
             .iter()

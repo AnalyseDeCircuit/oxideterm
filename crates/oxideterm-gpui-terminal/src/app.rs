@@ -102,6 +102,7 @@ impl TerminalPane {
                 DEFAULT_ROWS,
                 graphics_options_from_preferences(&preferences),
                 preferences.terminal_encoding,
+                preferences.scrollback_lines,
             )?,
         ));
         Self::from_session(terminal, preferences, window, cx)
@@ -120,6 +121,7 @@ impl TerminalPane {
                 config,
                 graphics_options_from_preferences(&preferences),
                 preferences.terminal_encoding,
+                preferences.scrollback_lines,
             )?,
         ));
         Self::from_session(terminal, preferences, window, cx)
@@ -153,6 +155,7 @@ impl TerminalPane {
             DEFAULT_ROWS,
             graphics_options_from_preferences(preferences),
             preferences.terminal_encoding,
+            preferences.scrollback_lines,
         )))
     }
 
@@ -330,6 +333,15 @@ impl TerminalPane {
             self.reset_cursor_blink();
             cx.notify();
         }
+    }
+
+    pub fn send_command_line(&mut self, command: &str, cx: &mut Context<Self>) {
+        if command.trim().is_empty() {
+            return;
+        }
+        let mut input = command.to_string();
+        input.push('\r');
+        self.send_text(&input, cx);
     }
 
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -820,7 +832,7 @@ impl TerminalPane {
     }
 
     fn terminal_accepts_input(&self) -> bool {
-        !self.terminal_exited && self.terminal.lock().lifecycle().is_running()
+        !self.terminal_exited && self.terminal.lock().is_interactive()
     }
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {

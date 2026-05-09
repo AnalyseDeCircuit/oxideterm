@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ForwardStats, ForwardStatus};
+use crate::{DetectedPort, ForwardStats, ForwardStatus};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -23,6 +23,12 @@ pub enum ForwardEvent {
     SessionSuspended {
         session_id: String,
         forward_ids: Vec<String>,
+    },
+    PortDetected {
+        connection_id: String,
+        new_ports: Vec<DetectedPort>,
+        closed_ports: Vec<DetectedPort>,
+        all_ports: Vec<DetectedPort>,
     },
 }
 

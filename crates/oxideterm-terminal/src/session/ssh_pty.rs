@@ -29,6 +29,7 @@ impl SshPtySession {
         rows: usize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Self {
         let resize = TerminalResize::new(cols, rows, 0, 0);
         let size = TerminalSize {
@@ -41,7 +42,7 @@ impl SshPtySession {
         let listener = LocalEventListener { tx: event_tx };
 
         let mut term_config = Config::default();
-        term_config.scrolling_history = 10000;
+        term_config.scrolling_history = scrollback_lines;
         term_config.kitty_keyboard = true;
         let term = Arc::new(FairMutex::new(Term::new(
             term_config,
@@ -53,8 +54,13 @@ impl SshPtySession {
         let (connect_tx, connect_rx) = unbounded();
         if let Some(runtime) = runtime.as_ref() {
             let mut ssh_config = config.config.clone();
-            ssh_config.cols = resize.cols as u32;
-            ssh_config.rows = resize.rows as u32;
+            if config.defer_pty_until_resize() {
+                ssh_config.cols = 0;
+                ssh_config.rows = 0;
+            } else {
+                ssh_config.cols = resize.cols as u32;
+                ssh_config.rows = resize.rows as u32;
+            }
             let registry = config.registry.clone();
             let consumer = config.consumer.clone();
             let prompt_handler = config.prompt_handler.clone();
@@ -377,6 +383,10 @@ impl TerminalSessionBackend for SshPtySession {
 
     fn lifecycle(&self) -> TerminalLifecycle {
         self.lifecycle.clone()
+    }
+
+    fn is_interactive(&self) -> bool {
+        self.lifecycle.is_running() && self.handle.is_some()
     }
 
     fn process_info(&self) -> TerminalProcessInfo {

@@ -26,6 +26,7 @@ impl LocalPtySession {
             rows,
             GraphicsOptions::default(),
             TerminalEncoding::Utf8,
+            1000,
         )
     }
 
@@ -34,7 +35,13 @@ impl LocalPtySession {
         rows: usize,
         graphics_options: GraphicsOptions,
     ) -> Result<Self> {
-        Self::spawn_with_graphics_and_encoding(cols, rows, graphics_options, TerminalEncoding::Utf8)
+        Self::spawn_with_graphics_and_encoding(
+            cols,
+            rows,
+            graphics_options,
+            TerminalEncoding::Utf8,
+            1000,
+        )
     }
 
     pub fn spawn_with_graphics_and_encoding(
@@ -42,6 +49,7 @@ impl LocalPtySession {
         rows: usize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Result<Self> {
         Self::spawn_with_config_graphics_and_encoding(
             cols,
@@ -49,6 +57,7 @@ impl LocalPtySession {
             LocalPtyConfig::default(),
             graphics_options,
             encoding,
+            scrollback_lines,
         )
     }
 
@@ -58,6 +67,7 @@ impl LocalPtySession {
         local_config: LocalPtyConfig,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Result<Self> {
         let size = TerminalSize {
             cols: cols.max(2),
@@ -81,7 +91,7 @@ impl LocalPtySession {
         let (stats_tx, stats_rx) = unbounded();
 
         let mut terminal_config = Config::default();
-        terminal_config.scrolling_history = 10000;
+        terminal_config.scrolling_history = scrollback_lines;
         terminal_config.kitty_keyboard = true;
 
         let listener = LocalEventListener {

@@ -57,6 +57,23 @@ mod tests {
         assert_eq!(config.host(), "example.com");
         assert_eq!(config.port(), 2222);
         assert_eq!(config.username(), "alice");
+        assert!(!config.defer_pty_until_resize());
+        assert!(config.with_deferred_pty(true).defer_pty_until_resize());
+    }
+
+    #[test]
+    fn ssh_terminal_is_not_interactive_until_shell_channel_is_ready() {
+        let session = SshPtySession::new(
+            SshSessionConfig::new("127.0.0.1", 9, "nobody"),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            1000,
+        );
+
+        assert!(session.lifecycle().is_running());
+        assert!(!session.is_interactive());
     }
 
     #[test]

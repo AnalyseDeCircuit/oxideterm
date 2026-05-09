@@ -31,6 +31,7 @@ const FORWARDS_TABLE_HEADER_H: f32 = 34.0; // Tauri px-4 py-2 text-sm
 const FORWARDS_TABLE_ROW_H: f32 = 42.0;
 const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
 const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
+const FORWARDS_STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const FORWARDS_BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] theme bg/panel/card 40%
 const FORWARDS_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] bg-hover 50%
 const FORWARDS_BG_ACTIVE_SUNKEN_ALPHA: u32 = 0x59; // Tauri [data-bg-active] bg-sunken 35%
@@ -43,7 +44,7 @@ const FORWARDS_TW_ALPHA_50: u32 = 0x80; // Tauri /50
 const FORWARDS_ALPHA_TRANSPARENT: u32 = 0x00; // Tauri transparent root when tab background is active
 const FORWARDS_DEFAULT_BIND_ADDRESS: &str = "localhost"; // Tauri create form default bindAddress
 const FORWARDS_DEFAULT_TARGET_HOST: &str = "localhost"; // Tauri create form default targetHost
-const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";
+pub(crate) const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";
 // Tailwind palette literals used by the Tauri ForwardsView source.
 const TW_BLACK: u32 = 0x000000;
 const TW_BLUE_300: u32 = 0x93c5fd;
@@ -119,6 +120,18 @@ pub(super) struct ForwardsViewState {
     port_scan_pending: bool,
     port_scan_error: Option<String>,
     last_port_scan_started: Option<Instant>,
+    last_stats_refresh: Option<Instant>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct PortDetectionViewState {
+    connection_id: Option<String>,
+    detected_ports: Vec<DetectedPort>,
+    new_ports: Vec<DetectedPort>,
+    has_scanned_ports: bool,
+    port_scan_pending: bool,
+    port_scan_error: Option<String>,
+    last_port_scan_started: Option<Instant>,
 }
 
 impl Default for ForwardsViewState {
@@ -147,6 +160,7 @@ impl Default for ForwardsViewState {
             port_scan_pending: false,
             port_scan_error: None,
             last_port_scan_started: None,
+            last_stats_refresh: None,
         }
     }
 }
@@ -162,7 +176,8 @@ pub(super) enum ForwardingWorkerResult {
         binding: Option<(String, String, ConnectionConsumer)>,
     },
     PortScan {
-        tab_id: TabId,
+        node_id: NodeId,
+        connection_id: Option<String>,
         binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<PortDetectionSnapshot, String>,
     },

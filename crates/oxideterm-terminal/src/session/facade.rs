@@ -12,7 +12,13 @@ impl TerminalSession {
         rows: usize,
         graphics_options: GraphicsOptions,
     ) -> Result<Self> {
-        Self::local_with_graphics_and_encoding(cols, rows, graphics_options, TerminalEncoding::Utf8)
+        Self::local_with_graphics_and_encoding(
+            cols,
+            rows,
+            graphics_options,
+            TerminalEncoding::Utf8,
+            1000,
+        )
     }
 
     pub fn local_with_graphics_and_encoding(
@@ -20,6 +26,7 @@ impl TerminalSession {
         rows: usize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Result<Self> {
         Ok(Self {
             backend: Box::new(LocalPtySession::spawn_with_graphics_and_encoding(
@@ -27,6 +34,7 @@ impl TerminalSession {
                 rows,
                 graphics_options,
                 encoding,
+                scrollback_lines,
             )?),
         })
     }
@@ -37,6 +45,7 @@ impl TerminalSession {
         config: LocalPtyConfig,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Result<Self> {
         Ok(Self {
             backend: Box::new(LocalPtySession::spawn_with_config_graphics_and_encoding(
@@ -45,6 +54,7 @@ impl TerminalSession {
                 config,
                 graphics_options,
                 encoding,
+                scrollback_lines,
             )?),
         })
     }
@@ -65,6 +75,7 @@ impl TerminalSession {
             rows,
             graphics_options,
             TerminalEncoding::Utf8,
+            1000,
         )
     }
 
@@ -74,6 +85,7 @@ impl TerminalSession {
         rows: usize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        scrollback_lines: usize,
     ) -> Self {
         Self {
             backend: Box::new(SshPtySession::new(
@@ -82,6 +94,7 @@ impl TerminalSession {
                 rows,
                 graphics_options,
                 encoding,
+                scrollback_lines,
             )),
         }
     }
@@ -152,6 +165,10 @@ impl TerminalSession {
 
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.backend.lifecycle()
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        self.backend.is_interactive()
     }
 
     pub fn process_info(&self) -> TerminalProcessInfo {
