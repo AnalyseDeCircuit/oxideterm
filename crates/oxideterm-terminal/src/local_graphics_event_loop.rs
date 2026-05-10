@@ -42,6 +42,7 @@ use crate::{
         TerminalMagicKind, Utf8ResidualGuard,
     },
     graphics_cursor_from_term,
+    shell_integration::TerminalShellIntegration,
 };
 #[cfg(windows)]
 const PTY_READ_WRITE_TOKEN: usize = 2;
@@ -140,7 +141,20 @@ where
                 }
                 let decoded = state.output_decoder.decode_to_utf8_bytes(terminal_bytes);
                 parsed_bytes += terminal_bytes.len();
-                state.parser.advance(terminal, decoded.as_ref());
+                if !decoded.is_empty() {
+                    // Tauri feeds decoded display text into TerminalRecorder after xterm
+                    // receives it. Keep the native recorder on the same side of encoding
+                    // detection instead of recording raw PTY bytes.
+                    let _ = event_tx.send(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                }
+                state.shell_integration.advance(
+                    &mut state.parser,
+                    terminal,
+                    decoded.as_ref(),
+                    |event| {
+                        let _ = event_tx.send(event);
+                    },
+                );
                 cursor.set(graphics_cursor_from_term(terminal, size));
             },
             || cursor.get(),
@@ -542,6 +556,7 @@ struct LocalGraphicsState {
     magic_scan: MagicScanWindow,
     output_decoder: TerminalOutputDecoder,
     encoding_detector: EncodingMismatchDetector,
+    shell_integration: TerminalShellIntegration,
 }
 
 impl LocalGraphicsState {
@@ -555,6 +570,7 @@ impl LocalGraphicsState {
             magic_scan: MagicScanWindow::default(),
             output_decoder: TerminalOutputDecoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
+            shell_integration: TerminalShellIntegration::default(),
         }
     }
 

@@ -33,6 +33,7 @@ mod local_shell;
 mod process;
 mod search;
 mod session;
+mod shell_integration;
 
 pub use alacritty_terminal::term::TermMode;
 pub use data::{
@@ -51,6 +52,12 @@ pub use session::{
     SshPtySession, SshSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
     TerminalResize, TerminalSession, TerminalSessionBackend, TerminalSessionKind,
     TerminalSessionStatus,
+};
+pub use shell_integration::{
+    ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,
+    ShellIntegrationSource, ShellIntegrationStatus, TerminalCommandMark,
+    TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
+    TerminalCommandMarkEvent,
 };
 
 use color::{

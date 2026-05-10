@@ -321,6 +321,11 @@ impl WorkspaceApp {
                     cx.notify();
                     return true;
                 }
+                if settings_input_accepts_newline(input) {
+                    self.settings_input_draft.push('\n');
+                    self.apply_settings_input_draft(input, cx);
+                    return true;
+                }
                 self.focused_settings_input = None;
                 self.settings_input_draft.clear();
                 self.new_connection_caret_visible = true;
@@ -354,6 +359,18 @@ impl WorkspaceApp {
         if self.terminal_command_bar_focused {
             self.terminal_command_bar_focused = false;
             self.ime_marked_text = None;
+            changed = true;
+        }
+        if let Some(player) = self.terminal_cast_player.as_mut()
+            && player.search_focused
+        {
+            player.search_focused = false;
+            self.ime_marked_text = None;
+            changed = true;
+        }
+        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
+            self.terminal_quick_commands_open = false;
+            self.terminal_quick_command_pending = None;
             changed = true;
         }
         if self.session_manager.focused_input.take().is_some() {
@@ -489,6 +506,11 @@ impl WorkspaceApp {
                 .in_band_transfer
                 .max_total_bytes
                 .to_string(),
+            SettingsInput::TerminalCommandBarFocusHandoff => settings
+                .terminal
+                .command_bar
+                .focus_handoff_commands
+                .join("\n"),
             SettingsInput::HighlightLabel(index) => settings
                 .terminal
                 .highlight_rules
@@ -660,6 +682,13 @@ impl WorkspaceApp {
                 } else {
                     cx.notify();
                 }
+            }
+            SettingsInput::TerminalCommandBarFocusHandoff => {
+                let commands = parse_focus_handoff_command_list(&self.settings_input_draft);
+                self.edit_settings(
+                    move |settings| settings.terminal.command_bar.focus_handoff_commands = commands,
+                    cx,
+                );
             }
             SettingsInput::HighlightLabel(index) => {
                 let value = self.settings_input_draft.trim().to_string();
@@ -845,4 +874,25 @@ impl WorkspaceApp {
             cx.notify();
         }
     }
+}
+
+fn settings_input_accepts_newline(input: SettingsInput) -> bool {
+    matches!(input, SettingsInput::TerminalCommandBarFocusHandoff)
+}
+
+fn parse_focus_handoff_command_list(input: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    for token in input.split(|ch: char| ch.is_whitespace() || ch == ',') {
+        let token = token.trim().to_lowercase();
+        if token.is_empty()
+            || !token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '+' | '-'))
+            || commands.iter().any(|existing| existing == &token)
+        {
+            continue;
+        }
+        commands.push(token);
+    }
+    commands
 }

@@ -11,6 +11,7 @@ impl EventListener for LocalEventListener {
 
 #[derive(Clone)]
 pub enum TerminalEvent {
+    Output(Vec<u8>),
     TitleChanged(String),
     TitleReset,
     Bell,
@@ -23,6 +24,8 @@ pub enum TerminalEvent {
         selection: TrzszTransferSelection,
         remote_is_windows: bool,
     },
+    ShellIntegration(ShellIntegrationEvent),
+    CommandMark(TerminalCommandMarkEvent),
     EncodingHint(EncodingHint),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),

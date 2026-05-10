@@ -880,21 +880,6 @@ impl AgentRegistry {
     }
 }
 
-impl Drop for AgentRegistry {
-    fn drop(&mut self) {
-        for session in self
-            .sessions
-            .iter()
-            .map(|entry| entry.value().clone())
-            .collect::<Vec<_>>()
-        {
-            tokio::spawn(async move {
-                session.shutdown().await;
-            });
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 enum AgentError {
     #[error("Agent channel closed")]
@@ -1324,6 +1309,35 @@ mod tests {
         let mapped = file_tree_entry_from_sftp(&node_id, entry);
         assert_eq!(mapped.kind, FileKind::File);
         assert_eq!(mapped.version.modified_millis, Some(7000));
+    }
+
+    #[test]
+    fn drops_agent_registry_without_tokio_reactor() {
+        let registry = AgentRegistry::default();
+        let (write_tx, _write_rx) = mpsc::channel::<String>(1);
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let transport = AgentTransport {
+            write_tx,
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_tx,
+            alive: Arc::new(AtomicBool::new(false)),
+        };
+        registry.register(
+            "conn-1".to_string(),
+            AgentSession::new(
+                transport,
+                SysInfoResult {
+                    version: "0.12.1".to_string(),
+                    compatibility_version: CURRENT_AGENT_COMPATIBILITY_VERSION,
+                    arch: "x86_64".to_string(),
+                    os: "linux".to_string(),
+                    pid: 42,
+                    capabilities: Vec::new(),
+                },
+            ),
+        );
+
+        drop(registry);
     }
 
     #[test]

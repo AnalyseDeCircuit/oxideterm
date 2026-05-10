@@ -91,6 +91,11 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::search_matches(self, query)
     }
 
+    fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
+        let term = self.term.lock();
+        command_output_text_from_term(&term, mark)
+    }
+
     fn snapshot(&self) -> TerminalSnapshot {
         LocalPtySession::snapshot(self)
     }
@@ -107,4 +112,3 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::shutdown(self);
     }
 }
-

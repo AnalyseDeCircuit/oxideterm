@@ -7,9 +7,15 @@ pub(crate) struct TerminalPoint {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TerminalGridPoint {
+    pub(crate) line: i32,
+    pub(crate) col: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalSelection {
-    pub(crate) anchor: TerminalPoint,
-    pub(crate) head: TerminalPoint,
+    pub(crate) anchor: TerminalGridPoint,
+    pub(crate) head: TerminalGridPoint,
     pub(crate) mode: TerminalSelectionMode,
 }
 
@@ -26,26 +32,51 @@ impl TerminalSelection {
         self.anchor == self.head && self.mode == TerminalSelectionMode::Simple
     }
 
-    pub(crate) fn normalized(self) -> (TerminalPoint, TerminalPoint) {
-        if (self.anchor.row, self.anchor.col) <= (self.head.row, self.head.col) {
+    pub(crate) fn normalized(self) -> (TerminalGridPoint, TerminalGridPoint) {
+        if (self.anchor.line, self.anchor.col) <= (self.head.line, self.head.col) {
             (self.anchor, self.head)
         } else {
             (self.head, self.anchor)
         }
     }
 
-    pub(crate) fn contains(self, row: usize, col: usize) -> bool {
+    pub(crate) fn contains_viewport_cell(
+        self,
+        row: usize,
+        col: usize,
+        display_offset: usize,
+    ) -> bool {
+        let line = grid_line_for_viewport_row(row, display_offset);
         if self.mode == TerminalSelectionMode::Block {
-            let row_start = self.anchor.row.min(self.head.row);
-            let row_end = self.anchor.row.max(self.head.row);
+            let row_start = self.anchor.line.min(self.head.line);
+            let row_end = self.anchor.line.max(self.head.line);
             let col_start = self.anchor.col.min(self.head.col);
             let col_end = self.anchor.col.max(self.head.col);
-            return row >= row_start && row <= row_end && col >= col_start && col <= col_end;
+            return line >= row_start && line <= row_end && col >= col_start && col <= col_end;
         }
 
         let (start, end) = self.normalized();
-        (row, col) >= (start.row, start.col) && (row, col) <= (end.row, end.col)
+        (line, col) >= (start.line, start.col) && (line, col) <= (end.line, end.col)
     }
+}
+
+pub(crate) fn grid_point_for_viewport_point(
+    snapshot: &TerminalSnapshot,
+    point: TerminalPoint,
+) -> Option<TerminalGridPoint> {
+    (point.row < snapshot.rows).then_some(TerminalGridPoint {
+        line: grid_line_for_viewport_row(point.row, snapshot.display_offset),
+        col: point.col.min(snapshot.cols.saturating_sub(1)),
+    })
+}
+
+fn grid_line_for_viewport_row(row: usize, display_offset: usize) -> i32 {
+    row as i32 - display_offset as i32
+}
+
+fn viewport_row_for_grid_line(snapshot: &TerminalSnapshot, line: i32) -> Option<usize> {
+    let row = line + snapshot.display_offset as i32;
+    usize::try_from(row).ok().filter(|row| *row < snapshot.rows)
 }
 
 pub(crate) fn word_selection_at_point(
@@ -80,8 +111,8 @@ pub(crate) fn word_selection_at_point(
     }
 
     Some(TerminalSelection {
-        anchor: start,
-        head: end,
+        anchor: grid_point_for_viewport_point(snapshot, start)?,
+        head: grid_point_for_viewport_point(snapshot, end)?,
         mode: TerminalSelectionMode::Semantic,
     })
 }
@@ -164,14 +195,20 @@ pub(crate) fn line_selection_at_point(
         .unwrap_or_else(|| snapshot.cols.saturating_sub(1));
 
     Some(TerminalSelection {
-        anchor: TerminalPoint {
-            row: start_row,
-            col: 0,
-        },
-        head: TerminalPoint {
-            row: end_row,
-            col: end.min(snapshot.cols.saturating_sub(1)),
-        },
+        anchor: grid_point_for_viewport_point(
+            snapshot,
+            TerminalPoint {
+                row: start_row,
+                col: 0,
+            },
+        )?,
+        head: grid_point_for_viewport_point(
+            snapshot,
+            TerminalPoint {
+                row: end_row,
+                col: end.min(snapshot.cols.saturating_sub(1)),
+            },
+        )?,
         mode: TerminalSelectionMode::Lines,
     })
 }
@@ -190,10 +227,11 @@ pub(crate) fn selected_text_for_selection(
 
     let (start, end) = selection.normalized();
     let mut text = String::new();
-    for row_index in start.row..=end.row {
+    for line in start.line..=end.line {
+        let row_index = viewport_row_for_grid_line(snapshot, line)?;
         let row = snapshot.lines.get(row_index)?;
-        let line_start = if row_index == start.row { start.col } else { 0 };
-        let line_end = if row_index == end.row {
+        let line_start = if line == start.line { start.col } else { 0 };
+        let line_end = if line == end.line {
             (end.col + 1).min(snapshot.cols)
         } else {
             snapshot.cols
@@ -205,14 +243,13 @@ pub(crate) fn selected_text_for_selection(
             .take(line_end.saturating_sub(line_start))
             .map(cell_text)
             .collect::<String>();
-        let continues_without_newline =
-            row.wrapped && row_index < end.row && line_end >= snapshot.cols;
+        let continues_without_newline = row.wrapped && line < end.line && line_end >= snapshot.cols;
 
         if continues_without_newline {
             text.push_str(&selected);
         } else {
             text.push_str(selected.trim_end());
-            if row_index < end.row {
+            if line < end.line {
                 text.push('\n');
             }
         }
@@ -229,13 +266,14 @@ pub(crate) fn selected_text_for_block_selection(
     snapshot: &TerminalSnapshot,
     selection: TerminalSelection,
 ) -> Option<String> {
-    let row_start = selection.anchor.row.min(selection.head.row);
-    let row_end = selection.anchor.row.max(selection.head.row);
+    let row_start = selection.anchor.line.min(selection.head.line);
+    let row_end = selection.anchor.line.max(selection.head.line);
     let col_start = selection.anchor.col.min(selection.head.col);
     let col_end = (selection.anchor.col.max(selection.head.col) + 1).min(snapshot.cols);
     let mut text = String::new();
 
-    for row_index in row_start..=row_end {
+    for line in row_start..=row_end {
+        let row_index = viewport_row_for_grid_line(snapshot, line)?;
         let row = snapshot.lines.get(row_index)?;
         let selected = row
             .cells
@@ -245,7 +283,7 @@ pub(crate) fn selected_text_for_block_selection(
             .map(cell_text)
             .collect::<String>();
         text.push_str(selected.trim_end());
-        if row_index < row_end {
+        if line < row_end {
             text.push('\n');
         }
     }

@@ -3,8 +3,8 @@ use std::path::Path;
 
 use gpui::{Bounds, FontFeatures, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
-    TermMode, TerminalCell, TerminalColor, TerminalCursorShape, TerminalSearchMatch,
-    TerminalSnapshot,
+    TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkConfidence,
+    TerminalCommandMarkDetectionSource, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 
 use crate::terminal_ui::*;
@@ -309,8 +309,8 @@ fn double_click_word_selection_uses_terminal_semantic_word_boundaries() {
     assert_eq!(
         selection.normalized(),
         (
-            TerminalPoint { row: 0, col: 11 },
-            TerminalPoint { row: 0, col: 37 }
+            TerminalGridPoint { line: 0, col: 11 },
+            TerminalGridPoint { line: 0, col: 37 }
         )
     );
 }
@@ -331,8 +331,8 @@ fn triple_click_line_selection_selects_trimmed_visual_line() {
     assert_eq!(
         selection.normalized(),
         (
-            TerminalPoint { row: 0, col: 0 },
-            TerminalPoint { row: 0, col: 2 }
+            TerminalGridPoint { line: 0, col: 0 },
+            TerminalGridPoint { line: 0, col: 2 }
         )
     );
 }
@@ -349,8 +349,8 @@ fn triple_click_line_selection_expands_across_wrapped_visual_rows() {
     assert_eq!(
         selection.normalized(),
         (
-            TerminalPoint { row: 0, col: 0 },
-            TerminalPoint { row: 1, col: 4 }
+            TerminalGridPoint { line: 0, col: 0 },
+            TerminalGridPoint { line: 1, col: 4 }
         )
     );
 }
@@ -361,8 +361,8 @@ fn selected_text_joins_soft_wrapped_rows_without_newline() {
     snapshot.cols = 5;
     snapshot.lines[0].wrapped = true;
     let selection = TerminalSelection {
-        anchor: TerminalPoint { row: 0, col: 0 },
-        head: TerminalPoint { row: 1, col: 4 },
+        anchor: TerminalGridPoint { line: 0, col: 0 },
+        head: TerminalGridPoint { line: 1, col: 4 },
         mode: TerminalSelectionMode::Simple,
     };
 
@@ -376,8 +376,8 @@ fn selected_text_joins_soft_wrapped_rows_without_newline() {
 fn selected_text_keeps_newline_between_hard_wrapped_rows() {
     let snapshot = multirow_snapshot(&["hello", "world"]);
     let selection = TerminalSelection {
-        anchor: TerminalPoint { row: 0, col: 0 },
-        head: TerminalPoint { row: 1, col: 4 },
+        anchor: TerminalGridPoint { line: 0, col: 0 },
+        head: TerminalGridPoint { line: 1, col: 4 },
         mode: TerminalSelectionMode::Simple,
     };
 
@@ -391,8 +391,8 @@ fn selected_text_keeps_newline_between_hard_wrapped_rows() {
 fn line_selection_copy_appends_terminal_line_newline() {
     let snapshot = selection_snapshot("pwd   ");
     let selection = TerminalSelection {
-        anchor: TerminalPoint { row: 0, col: 0 },
-        head: TerminalPoint { row: 0, col: 2 },
+        anchor: TerminalGridPoint { line: 0, col: 0 },
+        head: TerminalGridPoint { line: 0, col: 2 },
         mode: TerminalSelectionMode::Lines,
     };
 
@@ -406,8 +406,8 @@ fn line_selection_copy_appends_terminal_line_newline() {
 fn block_selection_copies_rectangular_columns() {
     let snapshot = multirow_snapshot(&["abcdef", "ghijkl", "mnopqr"]);
     let selection = TerminalSelection {
-        anchor: TerminalPoint { row: 0, col: 1 },
-        head: TerminalPoint { row: 2, col: 3 },
+        anchor: TerminalGridPoint { line: 0, col: 1 },
+        head: TerminalGridPoint { line: 2, col: 3 },
         mode: TerminalSelectionMode::Block,
     };
 
@@ -418,12 +418,39 @@ fn block_selection_copies_rectangular_columns() {
 }
 
 #[test]
+fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
+    let mut snapshot = multirow_snapshot(&["row0", "row1", "row2", "row3"]);
+    snapshot.display_offset = 2;
+    snapshot.scrollback_lines = 4;
+    let layout = TerminalElement::new(
+        snapshot,
+        Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 1, col: 0 },
+            head: TerminalGridPoint { line: 1, col: 3 },
+            mode: TerminalSelectionMode::Simple,
+        }),
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout_for_bounds(visible_layout_bounds(4));
+
+    assert_eq!(layout.selections.len(), 1);
+    assert_eq!(layout.selections[0].row, 3);
+}
+
+#[test]
 fn selected_text_preserves_zero_width_marks() {
     let mut snapshot = selection_snapshot("e");
     snapshot.lines[0].cells[0].zerowidth = "\u{301}".to_string();
     let selection = TerminalSelection {
-        anchor: TerminalPoint { row: 0, col: 0 },
-        head: TerminalPoint { row: 0, col: 0 },
+        anchor: TerminalGridPoint { line: 0, col: 0 },
+        head: TerminalGridPoint { line: 0, col: 0 },
         mode: TerminalSelectionMode::Lines,
     };
 
@@ -445,8 +472,8 @@ fn semantic_word_selection_crosses_soft_wrapped_rows() {
     assert_eq!(
         selection.normalized(),
         (
-            TerminalPoint { row: 0, col: 0 },
-            TerminalPoint { row: 1, col: 4 }
+            TerminalGridPoint { line: 0, col: 0 },
+            TerminalGridPoint { line: 1, col: 4 }
         )
     );
 }
@@ -909,8 +936,8 @@ fn terminal_element_prepaint_clips_layout_to_visible_rows() {
     let layout = TerminalElement::new(
         snapshot,
         Some(TerminalSelection {
-            anchor: TerminalPoint { row: 3, col: 0 },
-            head: TerminalPoint { row: 3, col: 5 },
+            anchor: TerminalGridPoint { line: 3, col: 0 },
+            head: TerminalGridPoint { line: 3, col: 5 },
             mode: TerminalSelectionMode::Simple,
         }),
         test_metrics(),
@@ -1138,6 +1165,58 @@ fn oxideterm_terminal_scroll_actions_match_terminal_keymap() {
         ..Default::default()
     });
     assert_eq!(shift_pagedown, Some(TerminalScrollAction::PageDown));
+}
+
+#[test]
+fn open_command_mark_overlay_uses_transient_prompt_boundary() {
+    let mut snapshot = test_snapshot(0, 0);
+    snapshot.rows = 5;
+    snapshot.cols = 80;
+    snapshot.cursor_row = 4;
+    snapshot.lines = vec![
+        row_from_text("❯ ls", snapshot.cols),
+        row_from_text("file-a", snapshot.cols),
+        row_from_text("file-b", snapshot.cols),
+        row_from_text("   ~ ··············· lips@host 15:16:05", snapshot.cols),
+        row_from_text("❯", snapshot.cols),
+    ];
+    let mark = TerminalCommandMark {
+        command_id: "cmd-1".to_string(),
+        command: Some("ls".to_string()),
+        start_line: 0,
+        command_line: 0,
+        end_line: None,
+        is_closed: false,
+        closed_by: None,
+        exit_code: None,
+        duration_ms: None,
+        detection_source: TerminalCommandMarkDetectionSource::CommandBar,
+        submitted_by: None,
+        confidence: TerminalCommandMarkConfidence::High,
+        output_confidence: TerminalCommandMarkConfidence::Unknown,
+        stale: false,
+        started_at: 1,
+        finished_at: None,
+    };
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .command_marks(vec![mark], Some("cmd-1".to_string()))
+    .layout();
+
+    assert_eq!(layout.command_mark_overlays.len(), 1);
+    assert_eq!(layout.command_mark_overlays[0].start_row, 0);
+    assert_eq!(layout.command_mark_overlays[0].end_row, 2);
 }
 
 #[test]

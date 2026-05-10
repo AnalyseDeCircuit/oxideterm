@@ -9,7 +9,7 @@ pub fn tauri_cjk_ui_font_family(configured_family: &str) -> SharedString {
         .split(',')
         .map(|family| family.trim().trim_matches(['"', '\'']))
         .find(|family| is_cjk_ui_font(family))
-        .map(|family| SharedString::from(family.to_string()))
+        .map(gpui_font_family_name)
         .unwrap_or_else(tauri_default_cjk_ui_font_family)
 }
 
@@ -18,7 +18,24 @@ pub fn css_font_family_head(configured_family: &str) -> Option<SharedString> {
         .split(',')
         .map(|family| family.trim().trim_matches(['"', '\'']))
         .find(|family| !family.is_empty())
-        .map(|family| SharedString::from(family.to_string()))
+        .map(gpui_font_family_name)
+}
+
+pub fn gpui_font_family_name(family: &str) -> SharedString {
+    SharedString::from(normalize_font_family_name(family))
+}
+
+fn normalize_font_family_name(family: &str) -> String {
+    match family.trim() {
+        // Browsers resolve localized Windows font names in CSS. GPUI/CoreText
+        // is more reliable with the canonical family name.
+        "等线" => "DengXian".to_string(),
+        "微软雅黑" => "Microsoft YaHei".to_string(),
+        "黑体" => "SimHei".to_string(),
+        "苹方" => "PingFang SC".to_string(),
+        "思源黑体" => "Source Han Sans SC".to_string(),
+        trimmed => trimmed.to_string(),
+    }
 }
 
 #[cfg(target_os = "macos")]

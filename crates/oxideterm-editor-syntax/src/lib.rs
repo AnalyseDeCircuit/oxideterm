@@ -27,6 +27,7 @@ pub enum LanguageId {
     Javascript,
     Json,
     Make,
+    Markdown,
     Python,
     Ruby,
     Rust,
@@ -54,6 +55,7 @@ pub const SUPPORTED_LANGUAGES: &[LanguageId] = &[
     LanguageId::Javascript,
     LanguageId::Json,
     LanguageId::Make,
+    LanguageId::Markdown,
     LanguageId::Python,
     LanguageId::Ruby,
     LanguageId::Rust,
@@ -96,6 +98,7 @@ impl LanguageId {
             Some("js" | "mjs" | "cjs" | "jsx") => Some(Self::Javascript),
             Some("json" | "jsonc") => Some(Self::Json),
             Some("mk") => Some(Self::Make),
+            Some("md" | "mdx" | "markdown") => Some(Self::Markdown),
             Some("py" | "pyw") => Some(Self::Python),
             Some("rb" | "rake") => Some(Self::Ruby),
             Some("rs") => Some(Self::Rust),
@@ -129,6 +132,7 @@ impl LanguageId {
             Self::Javascript => tree_sitter_javascript::LANGUAGE.into(),
             Self::Json => tree_sitter_json::LANGUAGE.into(),
             Self::Make => tree_sitter_make::LANGUAGE.into(),
+            Self::Markdown => tree_sitter_md::LANGUAGE.into(),
             Self::Python => tree_sitter_python::LANGUAGE.into(),
             Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -156,6 +160,7 @@ impl LanguageId {
             Self::Javascript => JAVASCRIPT_HIGHLIGHTS_QUERY,
             Self::Json => tree_sitter_json::HIGHLIGHTS_QUERY,
             Self::Make => tree_sitter_make::HIGHLIGHTS_QUERY,
+            Self::Markdown => tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
             Self::Python => tree_sitter_python::HIGHLIGHTS_QUERY,
             Self::Ruby => tree_sitter_ruby::HIGHLIGHTS_QUERY,
             Self::Rust => tree_sitter_rust::HIGHLIGHTS_QUERY,
@@ -338,6 +343,7 @@ pub struct SyntaxSession {
     language: Language,
     parser: Parser,
     highlight_query: Query,
+    markdown_inline_query: Option<Query>,
     tree: Tree,
 }
 
@@ -347,6 +353,15 @@ impl SyntaxSession {
         let mut parser = Parser::new();
         parser.set_language(&language)?;
         let highlight_query = Query::new(&language, language_id.highlight_query())?;
+        let markdown_inline_query = if language_id == LanguageId::Markdown {
+            let inline_language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
+            Some(Query::new(
+                &inline_language,
+                tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
+            )?)
+        } else {
+            None
+        };
         let tree = parser
             .parse(source, None)
             .ok_or(SyntaxError::ParseCancelled)?;
@@ -356,6 +371,7 @@ impl SyntaxSession {
             language,
             parser,
             highlight_query,
+            markdown_inline_query,
             tree,
         })
     }
@@ -424,6 +440,17 @@ impl SyntaxSession {
             }
         }
 
+        if self.language_id == LanguageId::Markdown
+            && let Some(inline_query) = &self.markdown_inline_query
+        {
+            collect_markdown_inline_highlights(
+                self.tree.root_node(),
+                source,
+                inline_query,
+                &mut spans,
+            );
+        }
+
         normalize_highlight_spans(spans)
     }
 
@@ -476,6 +503,18 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
     if matches!(node_kind, "integer_literal" | "float_literal") {
         return Some(SyntaxScope::Number);
     }
+    match capture {
+        // Tauri loads `@codemirror/lang-markdown`, whose Lezer tags include
+        // heading/link/literal punctuation. The native editor maps those
+        // Markdown-specific captures onto the existing syntax palette so `.md`
+        // files are highlighted without adding a parallel color system.
+        "text.title" => return Some(SyntaxScope::Keyword),
+        "text.uri" => return Some(SyntaxScope::Function),
+        "text.literal" => return Some(SyntaxScope::String),
+        "text.reference" => return Some(SyntaxScope::Type),
+        "text.emphasis" | "text.strong" => return Some(SyntaxScope::Variable),
+        _ => {}
+    }
 
     let root = capture.split('.').next().unwrap_or(capture);
     match root {
@@ -493,6 +532,79 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
         "type" | "constructor" => Some(SyntaxScope::Type),
         "variable" | "parameter" => Some(SyntaxScope::Variable),
         _ => None,
+    }
+}
+
+fn collect_markdown_inline_highlights(
+    node: Node<'_>,
+    source: &str,
+    inline_query: &Query,
+    spans: &mut Vec<HighlightSpan>,
+) {
+    if node.kind() == "inline" {
+        collect_markdown_inline_node_highlights(node, source, inline_query, spans);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_markdown_inline_highlights(child, source, inline_query, spans);
+    }
+}
+
+fn collect_markdown_inline_node_highlights(
+    node: Node<'_>,
+    source: &str,
+    inline_query: &Query,
+    spans: &mut Vec<HighlightSpan>,
+) {
+    let range = node.byte_range();
+    if range.start >= range.end || range.end > source.len() {
+        return;
+    }
+    let inline_language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
+    let mut parser = Parser::new();
+    if parser.set_language(&inline_language).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(&source[range.clone()], None) else {
+        return;
+    };
+
+    let mut query_cursor = QueryCursor::new();
+    let mut captures = query_cursor.captures(
+        inline_query,
+        tree.root_node(),
+        source[range.clone()].as_bytes(),
+    );
+    let names = inline_query.capture_names();
+
+    while {
+        captures.advance();
+        captures.get().is_some()
+    } {
+        let Some((query_match, capture_index)) = captures.get() else {
+            continue;
+        };
+        let Some(capture) = query_match.captures.get(*capture_index).copied() else {
+            continue;
+        };
+        let Some(capture_name) = names.get(capture.index as usize).copied() else {
+            continue;
+        };
+        let Some(scope) = scope_for_capture(capture_name, capture.node.kind()) else {
+            continue;
+        };
+        let capture_range = capture.node.byte_range();
+        let start = range.start + capture_range.start;
+        let end = range.start + capture_range.end;
+        if start < end && end <= source.len() {
+            spans.push(HighlightSpan {
+                range: TextRange::new(BufferOffset(start), BufferOffset(end)),
+                scope,
+                capture: capture_name.to_string(),
+            });
+        }
     }
 }
 
@@ -640,6 +752,18 @@ mod tests {
             Some(LanguageId::Json)
         );
         assert_eq!(LanguageId::from_path("Makefile"), Some(LanguageId::Make));
+        assert_eq!(
+            LanguageId::from_path("README.md"),
+            Some(LanguageId::Markdown)
+        );
+        assert_eq!(
+            LanguageId::from_path("guide.markdown"),
+            Some(LanguageId::Markdown)
+        );
+        assert_eq!(
+            LanguageId::from_path("page.mdx"),
+            Some(LanguageId::Markdown)
+        );
         assert_eq!(LanguageId::from_path("main.py"), Some(LanguageId::Python));
         assert_eq!(LanguageId::from_path("task.rake"), Some(LanguageId::Ruby));
         assert_eq!(LanguageId::from_path("Main.scala"), Some(LanguageId::Scala));
@@ -708,6 +832,10 @@ mod tests {
                 "{\"scripts\": {\"build\": \"cargo build\"}}\n",
             ),
             (LanguageId::Make, "build:\n\tcargo build\n"),
+            (
+                LanguageId::Markdown,
+                "# Title\n\nSome `code` and [link](https://example.com).\n\n```rust\nfn main() {}\n```\n",
+            ),
             (
                 LanguageId::Python,
                 "def hello(name):\n    return f\"hi {name}\"\n",
@@ -791,6 +919,25 @@ mod tests {
         let spans = bash_session.highlight_spans(bash);
         assert!(spans.iter().any(|span| span.scope == SyntaxScope::Keyword));
         assert!(spans.iter().any(|span| span.scope == SyntaxScope::String));
+
+        let markdown = "# Title\n\nSee [docs](https://example.com).\n\n```sh\necho ok\n```\n";
+        let markdown_session = SyntaxSession::parse(LanguageId::Markdown, markdown).unwrap();
+        let markdown_spans = markdown_session.highlight_spans(markdown);
+        assert!(
+            markdown_spans
+                .iter()
+                .any(|span| span.scope == SyntaxScope::Keyword)
+        );
+        assert!(
+            markdown_spans
+                .iter()
+                .any(|span| span.scope == SyntaxScope::Function)
+        );
+        assert!(
+            markdown_spans
+                .iter()
+                .any(|span| span.scope == SyntaxScope::String)
+        );
     }
 
     #[test]

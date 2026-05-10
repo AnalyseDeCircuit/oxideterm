@@ -39,10 +39,20 @@ impl EditorViewport {
         true
     }
 
-    pub fn scroll_by(&mut self, dx_px: f32, dy_px: f32, line_count: usize, line_height: f32) {
+    pub fn scroll_by(
+        &mut self,
+        dx_px: f32,
+        dy_px: f32,
+        line_count: usize,
+        line_height: f32,
+    ) -> bool {
+        let old_x = self.scroll_x_px;
+        let old_y = self.scroll_y_px;
         self.scroll_x_px = (self.scroll_x_px + dx_px).max(0.0);
         self.scroll_y_px = (self.scroll_y_px + dy_px)
             .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
+        (self.scroll_x_px - old_x).abs() > f32::EPSILON
+            || (self.scroll_y_px - old_y).abs() > f32::EPSILON
     }
 
     pub fn clamp(&mut self, line_count: usize, line_height: f32) {

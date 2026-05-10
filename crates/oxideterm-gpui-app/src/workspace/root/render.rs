@@ -153,6 +153,26 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this
+                    .terminal_cast_player
+                    .as_ref()
+                    .is_some_and(|player| player.search_focused)
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    this.handle_terminal_cast_search_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.terminal_quick_commands_open
+                    && this.quick_commands.focused_input.is_some()
+                {
+                    if keystroke_commits_platform_text(&event.keystroke) {
+                        return;
+                    }
+                    this.handle_quick_commands_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
                 }
             }))
             .on_key_down(cx.listener(|this, event, window, cx| {
@@ -162,6 +182,7 @@ impl Render for WorkspaceApp {
                 this.update_sidebar_resize(event, cx);
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
+                this.update_terminal_cast_seek_drag(event, cx);
             }))
             .on_mouse_down(
                 MouseButton::Left,
@@ -175,6 +196,7 @@ impl Render for WorkspaceApp {
                     this.finish_sidebar_resize(cx);
                     this.finish_split_drag(cx);
                     this.finish_settings_slider_drag(cx);
+                    this.finish_terminal_cast_seek_drag(cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
@@ -361,6 +383,23 @@ impl Render for WorkspaceApp {
                     }
                 },
             )
+            .when(
+                self.terminal_broadcast_menu_open
+                    && !self.settings_store.settings().terminal.command_bar.enabled,
+                |root| {
+                    root.child(self.render_terminal_broadcast_menu(
+                        actions::TerminalBroadcastMenuPlacement::Top(
+                            self.tokens.metrics.titlebar_height
+                                + self.tokens.metrics.tabbar_height
+                                + 6.0,
+                        ),
+                        cx,
+                    ))
+                },
+            )
+            .when_some(self.render_terminal_cast_player(cx), |root, player| {
+                root.child(player)
+            })
             .when_some(toast_layer, |root, layer| root.child(layer))
             .child(WorkspaceImeElement::new(
                 cx.entity(),

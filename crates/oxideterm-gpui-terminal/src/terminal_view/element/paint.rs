@@ -6,7 +6,8 @@ use oxideterm_terminal::TerminalCursorShape;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
-    BatchedTextRun, TerminalCursor, TerminalImageLayout, TerminalRect, TerminalScrollbar,
+    BatchedTextRun, TerminalCommandMarkOverlay, TerminalCursor, TerminalImageLayout, TerminalRect,
+    TerminalScrollbar,
 };
 use crate::terminal_view::element::{
     PowerlineDirection, PowerlineShape, PowerlineWeight, powerline_separator,
@@ -72,6 +73,58 @@ pub(crate) fn paint_terminal_outline(
         ),
     ] {
         window.paint_quad(fill(bounds, rect.color));
+    }
+}
+
+pub(crate) fn paint_command_mark_overlay(
+    overlay: &TerminalCommandMarkOverlay,
+    origin: gpui::Point<Pixels>,
+    cols: usize,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+) {
+    let x = 0.0;
+    let y = overlay.start_row as f32 * metrics.line_height_f32();
+    let width = cols as f32 * metrics.cell_width_f32();
+    let height =
+        (overlay.end_row.saturating_sub(overlay.start_row) + 1) as f32 * metrics.line_height_f32();
+    let accent = if overlay.stale {
+        rgba(0x94a3b8b8)
+    } else {
+        rgba(0x12cfd0ff)
+    };
+    let fill_color = if overlay.stale {
+        rgba(0x94a3b80a)
+    } else {
+        rgba(0x12cfd009)
+    };
+    let bounds = Bounds::new(origin + point(px(x), px(y)), size(px(width), px(height)));
+    window.paint_quad(fill(bounds, fill_color));
+    window.paint_quad(fill(
+        Bounds::new(origin + point(px(x), px(y)), size(px(1.0), px(height))),
+        accent,
+    ));
+    window.paint_quad(fill(
+        Bounds::new(
+            origin + point(px((width - 1.0).max(0.0)), px(y)),
+            size(px(1.0), px(height)),
+        ),
+        accent,
+    ));
+    if overlay.has_top {
+        window.paint_quad(fill(
+            Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
+            accent,
+        ));
+    }
+    if overlay.has_bottom {
+        window.paint_quad(fill(
+            Bounds::new(
+                origin + point(px(x), px((y + height - 1.0).max(y))),
+                size(px(width), px(1.0)),
+            ),
+            accent,
+        ));
     }
 }
 

@@ -20,6 +20,7 @@ pub struct SshPtySession {
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     trzsz_consumer: Option<TrzszConsumer>,
+    shell_integration: TerminalShellIntegration,
 }
 
 impl SshPtySession {
@@ -106,6 +107,7 @@ impl SshPtySession {
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             trzsz_consumer,
+            shell_integration: TerminalShellIntegration::default(),
         }
     }
 
@@ -168,7 +170,18 @@ impl SshPtySession {
                     self.pending_events.push(TerminalEvent::EncodingHint(hint));
                 }
                 let decoded = self.output_decoder.decode_to_utf8_bytes(terminal_bytes);
-                self.parser.advance(&mut *term, decoded.as_ref());
+                if !decoded.is_empty() {
+                    // Match the Tauri hook boundary: recording observes UTF-8 display
+                    // output after terminal decoding, not the SSH transport bytes.
+                    self.pending_events
+                        .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                }
+                self.shell_integration.advance(
+                    &mut self.parser,
+                    &mut *term,
+                    decoded.as_ref(),
+                    |event| self.pending_events.push(event),
+                );
                 cursor.set(graphics_cursor_from_term(&term, size));
             },
             || cursor.get(),
@@ -239,8 +252,15 @@ impl SshPtySession {
     }
 
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            self.pending_events
+                .push(TerminalEvent::Output(bytes.to_vec()));
+        }
         let mut term = self.term.lock();
-        self.parser.advance(&mut *term, bytes);
+        self.shell_integration
+            .advance(&mut self.parser, &mut *term, bytes, |event| {
+                self.pending_events.push(event);
+            });
     }
 
     fn drain_transport_output(&mut self) -> TerminalDrainReport {
@@ -623,6 +643,11 @@ impl TerminalSessionBackend for SshPtySession {
         }
 
         matches
+    }
+
+    fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
+        let term = self.term.lock();
+        command_output_text_from_term(&term, mark)
     }
 
     fn snapshot(&self) -> TerminalSnapshot {

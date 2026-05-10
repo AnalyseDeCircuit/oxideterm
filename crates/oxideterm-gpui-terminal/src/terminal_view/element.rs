@@ -6,7 +6,7 @@ use gpui::{
     Window, fill, point, px, relative, rgb,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+    TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
 
@@ -37,6 +37,8 @@ pub(crate) struct TerminalElement {
     search_query: Option<String>,
     search_matches: Vec<TerminalSearchMatch>,
     selected_search_match: Option<usize>,
+    command_marks: Vec<TerminalCommandMark>,
+    selected_command_mark_id: Option<String>,
     highlight_rules: Vec<TerminalHighlightRule>,
     hovered_link: Option<TerminalLinkRange>,
     bidi_enabled: bool,
@@ -57,6 +59,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) highlight_underlines: Vec<TerminalRect>,
     pub(crate) highlight_outlines: Vec<TerminalRect>,
     pub(crate) search_matches: Vec<TerminalRect>,
+    pub(crate) command_mark_overlays: Vec<TerminalCommandMarkOverlay>,
     pub(crate) selections: Vec<TerminalRect>,
     pub(crate) images: Vec<TerminalImageLayout>,
     pub(crate) text_runs: Vec<BatchedTextRun>,
@@ -86,6 +89,15 @@ pub(crate) struct BatchedTextRun {
 #[derive(Clone)]
 pub(crate) struct TerminalImageLayout {
     pub(crate) image: TerminalRenderedImage,
+}
+
+#[derive(Clone)]
+pub(crate) struct TerminalCommandMarkOverlay {
+    pub(crate) start_row: usize,
+    pub(crate) end_row: usize,
+    pub(crate) has_top: bool,
+    pub(crate) has_bottom: bool,
+    pub(crate) stale: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,6 +200,8 @@ impl TerminalElement {
             search_query,
             search_matches,
             selected_search_match,
+            command_marks: Vec::new(),
+            selected_command_mark_id: None,
             highlight_rules: Vec::new(),
             hovered_link,
             bidi_enabled,
@@ -198,6 +212,16 @@ impl TerminalElement {
 
     pub(crate) fn highlight_rules(mut self, rules: Vec<TerminalHighlightRule>) -> Self {
         self.highlight_rules = rules;
+        self
+    }
+
+    pub(crate) fn command_marks(
+        mut self,
+        marks: Vec<TerminalCommandMark>,
+        selected_command_mark_id: Option<String>,
+    ) -> Self {
+        self.command_marks = marks;
+        self.selected_command_mark_id = selected_command_mark_id;
         self
     }
 
@@ -239,6 +263,11 @@ impl TerminalElement {
                     self.selected_search_match,
                 )
             },
+        );
+        let command_mark_overlays = command_mark_overlays_for_rows(
+            &self.snapshot,
+            &self.command_marks,
+            self.selected_command_mark_id.as_deref(),
         );
         let mut selections = Vec::new();
         let images = self
@@ -320,10 +349,13 @@ impl TerminalElement {
                     backgrounds.push(rect);
                 }
 
-                if self
-                    .selection
-                    .is_some_and(|selection| selection.contains(row_index, col_index))
-                {
+                if self.selection.is_some_and(|selection| {
+                    selection.contains_viewport_cell(
+                        row_index,
+                        col_index,
+                        self.snapshot.display_offset,
+                    )
+                }) {
                     extend_or_push_rect(
                         &mut current_selection,
                         &mut selections,
@@ -436,6 +468,7 @@ impl TerminalElement {
                 highlight_layout.outlines,
             ),
             search_matches,
+            command_mark_overlays,
             selections,
             images,
             text_runs,
@@ -473,6 +506,140 @@ fn visual_line_for_row_with_bidi(
     } else {
         TerminalVisualLine::identity(row)
     }
+}
+
+fn command_mark_overlays_for_rows(
+    snapshot: &TerminalSnapshot,
+    marks: &[TerminalCommandMark],
+    selected_command_mark_id: Option<&str>,
+) -> Vec<TerminalCommandMarkOverlay> {
+    let Some(selected_id) = selected_command_mark_id else {
+        return Vec::new();
+    };
+    let Some(mark) = marks.iter().find(|mark| mark.command_id == selected_id) else {
+        return Vec::new();
+    };
+    let start_line = mark.start_line;
+    let end_line = mark.end_line.unwrap_or_else(|| {
+        snapshot_prompt_block_start_line(snapshot, snapshot_absolute_cursor_line(snapshot))
+            .saturating_sub(1)
+            .max(mark.start_line)
+    });
+    if end_line < start_line {
+        return Vec::new();
+    }
+
+    let viewport_start = snapshot
+        .scrollback_lines
+        .saturating_sub(snapshot.display_offset);
+    let viewport_end = viewport_start.saturating_add(snapshot.rows.saturating_sub(1));
+    if end_line < viewport_start || start_line > viewport_end {
+        return Vec::new();
+    }
+
+    let visible_start_line = start_line.max(viewport_start);
+    let visible_end_line = end_line.min(viewport_end);
+    vec![TerminalCommandMarkOverlay {
+        start_row: visible_start_line.saturating_sub(viewport_start),
+        end_row: visible_end_line.saturating_sub(viewport_start),
+        has_top: start_line >= viewport_start,
+        has_bottom: end_line <= viewport_end,
+        stale: mark.stale,
+    }]
+}
+
+fn snapshot_absolute_cursor_line(snapshot: &TerminalSnapshot) -> usize {
+    snapshot
+        .scrollback_lines
+        .saturating_add(snapshot.cursor_row)
+        .saturating_sub(snapshot.display_offset)
+}
+
+fn snapshot_prompt_block_start_line(snapshot: &TerminalSnapshot, command_line: usize) -> usize {
+    if !snapshot_line_text(snapshot, command_line).is_some_and(is_likely_prompt_input_line) {
+        return command_line;
+    }
+
+    let mut start_line = command_line;
+    let min_line = command_line.saturating_sub(3);
+    for line in (min_line..command_line).rev() {
+        if !snapshot_line_text(snapshot, line).is_some_and(is_likely_prompt_preamble_line) {
+            break;
+        }
+        start_line = line;
+    }
+    start_line
+}
+
+fn snapshot_line_text(snapshot: &TerminalSnapshot, absolute_line: usize) -> Option<String> {
+    let viewport_start = snapshot
+        .scrollback_lines
+        .saturating_sub(snapshot.display_offset);
+    let row = absolute_line.checked_sub(viewport_start)?;
+    snapshot.lines.get(row).map(|line| line.text())
+}
+
+fn is_likely_prompt_input_line(text: String) -> bool {
+    let trimmed = text.trim();
+    trimmed.is_empty()
+        || trimmed.chars().next().is_some_and(|ch| {
+            matches!(
+                ch,
+                '❯' | '➜' | 'λ' | '>' | '$' | '#' | '%' | '❮' | '›' | '»'
+            )
+        })
+}
+
+fn is_likely_prompt_preamble_line(text: String) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let has_private_use_glyph = trimmed
+        .chars()
+        .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch));
+    let has_powerline_glyph = trimmed
+        .chars()
+        .any(|ch| matches!(ch, '' | '' | '' | ''));
+    let has_ruler = has_repeated_ruler(trimmed);
+    let has_clock = has_clock_like_text(trimmed);
+    let has_prompt_context = trimmed.contains('@')
+        || trimmed.contains('~')
+        || trimmed.contains('/')
+        || trimmed.contains('$');
+
+    has_powerline_glyph
+        || (has_private_use_glyph && (has_clock || has_ruler || has_prompt_context))
+        || (has_ruler && (has_clock || has_prompt_context))
+}
+
+fn has_repeated_ruler(text: &str) -> bool {
+    let mut count = 0;
+    for ch in text.chars() {
+        if matches!(ch, '·' | '•' | '∙' | '.') {
+            count += 1;
+            if count >= 6 {
+                return true;
+            }
+        } else {
+            count = 0;
+        }
+    }
+    false
+}
+
+fn has_clock_like_text(text: &str) -> bool {
+    text.split(|ch: char| !ch.is_ascii_digit() && ch != ':')
+        .any(|part| {
+            let pieces = part.split(':').collect::<Vec<_>>();
+            match pieces.as_slice() {
+                [hour, minute] | [hour, minute, ..] => {
+                    (1..=2).contains(&hour.len()) && minute.len() == 2
+                }
+                _ => false,
+            }
+        })
 }
 
 fn push_visual_text_runs(
@@ -681,6 +848,15 @@ impl Element for TerminalElement {
             }
             for rect in &layout.search_matches {
                 paint_terminal_rect(rect, origin, &self.metrics, window);
+            }
+            for overlay in &layout.command_mark_overlays {
+                paint_command_mark_overlay(
+                    overlay,
+                    origin,
+                    self.snapshot.cols,
+                    &self.metrics,
+                    window,
+                );
             }
             for rect in &layout.selections {
                 paint_terminal_rect(rect, origin, &self.metrics, window);

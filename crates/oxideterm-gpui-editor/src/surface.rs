@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{cell::RefCell, ops::Range};
+use std::{cell::RefCell, ops::Range, sync::Arc};
 
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
@@ -147,7 +147,7 @@ struct MarkedText {
 struct DisplayRowsCache {
     buffer_version: u64,
     wrap_column: Option<usize>,
-    rows: Vec<DisplayRow>,
+    rows: Arc<Vec<DisplayRow>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -592,10 +592,13 @@ impl TextEditorView {
         } else {
             -f32::from(delta.y)
         };
-        self.viewport
-            .scroll_by(dx, dy, self.document_row_count(), self.metrics.line_height);
+        let scrolled =
+            self.viewport
+                .scroll_by(dx, dy, self.document_row_count(), self.metrics.line_height);
         cx.stop_propagation();
-        cx.notify();
+        if scrolled {
+            cx.notify();
+        }
     }
 
     fn set_viewport_bounds(

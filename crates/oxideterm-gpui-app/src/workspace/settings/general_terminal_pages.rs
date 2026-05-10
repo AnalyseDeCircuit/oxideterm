@@ -309,15 +309,7 @@ impl WorkspaceApp {
                         cx,
                     ),
                     self.card_separator(),
-                    self.value_row(
-                        "settings_view.terminal.command_bar_focus_handoff",
-                        "settings_view.terminal.command_bar_focus_handoff_hint",
-                        settings
-                            .terminal
-                            .command_bar
-                            .focus_handoff_commands
-                            .join("\n"),
-                    ),
+                    self.focus_handoff_commands_row(settings, cx),
                     self.card_separator(),
                     self.bool_row(
                         "settings_view.terminal.quick_commands",
@@ -455,6 +447,124 @@ impl WorkspaceApp {
         }
 
         rows
+    }
+
+    fn focus_handoff_commands_row(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = SettingsInput::TerminalCommandBarFocusHandoff;
+        let focused = self.focused_settings_input == Some(input);
+        let value = if focused {
+            self.settings_input_draft.clone()
+        } else {
+            settings
+                .terminal
+                .command_bar
+                .focus_handoff_commands
+                .join("\n")
+        };
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        let theme = self.tokens.ui;
+        let mut textarea = div()
+            .w_full()
+            .min_h(px(96.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if focused {
+                rgba((theme.accent << 8) | 0x99)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(rgb(theme.bg))
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(2.0))
+            .cursor(CursorStyle::IBeam)
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(rgb(theme.text))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                }),
+            );
+
+        if value.is_empty() {
+            for placeholder in ["vim", "nvim", "lazygit"] {
+                textarea = textarea.child(
+                    div()
+                        .min_h(px(18.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(placeholder),
+                );
+            }
+        } else {
+            for line in value.split('\n') {
+                textarea = textarea.child(div().min_h(px(18.0)).child(line.to_string()));
+            }
+        }
+
+        if let Some(marked) = self.marked_text_for_target(target) {
+            textarea = textarea.child(
+                div()
+                    .underline()
+                    .text_color(rgb(theme.text))
+                    .child(marked.to_string()),
+            );
+        }
+
+        if focused {
+            textarea = textarea.child(text_caret(
+                &self.tokens,
+                self.new_connection_caret_visible,
+            ));
+        }
+
+        let control = text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
+            let _ = workspace.update(cx, |this, cx| {
+                this.update_text_input_anchor(anchor, cx);
+            });
+        });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("settings_view.terminal.command_bar_focus_handoff")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.terminal.command_bar_focus_handoff_hint"),
+                            ),
+                    ),
+            )
+            .child(control)
+            .into_any_element()
     }
 
     fn in_band_transfer_number_row(

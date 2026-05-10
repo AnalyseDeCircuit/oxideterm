@@ -32,6 +32,8 @@ pub enum SelectAnchorId {
     SettingsHighlightPreset,
     SettingsHighlightRenderMode(usize),
     NewConnectionGroup,
+    IdeAgentStatus,
+    TerminalCastSeekbar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

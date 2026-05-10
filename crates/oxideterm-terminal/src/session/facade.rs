@@ -59,6 +59,22 @@ impl TerminalSession {
         })
     }
 
+    pub fn recording_playback(
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        scrollback_lines: usize,
+    ) -> Self {
+        Self {
+            backend: Box::new(PlaybackTerminalSession::new(
+                cols,
+                rows,
+                graphics_options,
+                scrollback_lines,
+            )),
+        }
+    }
+
     pub fn ssh(config: SshSessionConfig, cols: usize, rows: usize) -> Self {
         Self::ssh_with_graphics_options(config, cols, rows, GraphicsOptions::default())
     }
@@ -155,6 +171,14 @@ impl TerminalSession {
         self.backend.feed_trzsz_terminal_output(bytes);
     }
 
+    pub fn feed_recording_output(&mut self, bytes: &[u8]) {
+        self.backend.feed_recording_output(bytes);
+    }
+
+    pub fn reset_recording_playback(&mut self, cols: usize, rows: usize) {
+        self.backend.reset_recording_playback(cols, rows);
+    }
+
     pub fn interrupt_trzsz_transfer(&mut self) {
         self.backend.interrupt_trzsz_transfer();
     }
@@ -232,6 +256,10 @@ impl TerminalSession {
 
     pub fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
         self.backend.search_matches(query)
+    }
+
+    pub fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
+        self.backend.command_output_text(mark)
     }
 
     pub fn snapshot(&self) -> TerminalSnapshot {
