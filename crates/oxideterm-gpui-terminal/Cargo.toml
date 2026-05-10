@@ -11,6 +11,7 @@ image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true

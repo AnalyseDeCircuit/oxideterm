@@ -10,6 +10,8 @@ mod settings;
 mod sftp;
 mod sidebar;
 mod tabs;
+mod terminal_cast;
+mod terminal_command_bar;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -80,7 +82,7 @@ use oxideterm_workspace::{
     adjusted_split_sizes, balanced_sizes, sort_active_session_nodes,
 };
 
-use self::actions::{SearchBarState, TerminalCastPlayerState};
+use self::actions::SearchBarState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
@@ -90,6 +92,7 @@ use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
 use self::sidebar::SidebarSection;
+use self::terminal_cast::TerminalCastPlayerState;
 use crate::assets::LucideIcon;
 use crate::{
     ClosePane, CloseSearch, CloseTab, Copy, Find, FindNext, FindPrev, GoToTab1, GoToTab2, GoToTab3,

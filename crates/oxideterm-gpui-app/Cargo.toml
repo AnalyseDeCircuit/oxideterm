@@ -29,6 +29,7 @@ oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 parking_lot.workspace = true

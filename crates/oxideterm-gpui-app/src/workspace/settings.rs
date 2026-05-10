@@ -38,6 +38,9 @@ include!("settings/terminal_controls.rs");
 include!("settings/local_terminal.rs");
 include!("settings/general_terminal_pages.rs");
 include!("settings/appearance.rs");
+include!("settings/connections_page.rs");
+include!("settings/sftp_page.rs");
+include!("settings/ide_page.rs");
 include!("settings/pages.rs");
 
 fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {

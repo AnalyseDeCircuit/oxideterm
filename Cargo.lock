@@ -6552,6 +6552,7 @@ dependencies = [
  "oxideterm-sftp",
  "oxideterm-ssh",
  "oxideterm-terminal",
+ "oxideterm-terminal-recording",
  "oxideterm-theme",
  "oxideterm-workspace",
  "parking_lot",
@@ -6641,6 +6642,7 @@ dependencies = [
  "oxideterm-render-policy",
  "oxideterm-ssh",
  "oxideterm-terminal",
+ "oxideterm-terminal-recording",
  "oxideterm-terminal-unicode",
  "oxideterm-trzsz",
  "parking_lot",
@@ -6806,6 +6808,13 @@ dependencies = [
  "icy_sixel",
  "image",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "oxideterm-terminal-recording"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

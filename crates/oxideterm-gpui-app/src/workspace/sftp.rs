@@ -607,6 +607,7 @@ impl Default for SftpViewState {
 
 include!("sftp/runtime.rs");
 include!("sftp/surface.rs");
+include!("sftp/file_list.rs");
 include!("sftp/transfers.rs");
 include!("sftp/menus.rs");
 include!("sftp/dialogs.rs");

@@ -22,6 +22,7 @@ members = [
   "crates/oxideterm-sftp",
   "crates/oxideterm-ssh",
   "crates/oxideterm-terminal",
+  "crates/oxideterm-terminal-recording",
   "crates/oxideterm-terminal-encoding",
   "crates/oxideterm-terminal-graphics",
   "crates/oxideterm-terminal-unicode",
