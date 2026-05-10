@@ -1,12 +1,26 @@
-use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, div, px, rgb, rgba};
+use gpui::{
+    AnyElement, Div, IntoElement, MouseButton, ParentElement, Rgba, Styled, div, prelude::*, px,
+    rgb, rgba,
+};
 use oxideterm_theme::ThemeTokens;
+
+const TW_BLACK: u32 = 0x000000;
+const DIALOG_BACKDROP_ALPHA: u32 = 0x99; // Tauri DialogOverlay bg-black/60.
+const QUICKLOOK_BACKDROP_ALPHA: u32 = 0xcc; // Tauri QuickLook bg-black/80.
+
+pub fn dialog_backdrop_color() -> Rgba {
+    rgba((TW_BLACK << 8) | DIALOG_BACKDROP_ALPHA)
+}
+
+pub fn quicklook_backdrop_color() -> Rgba {
+    rgba((TW_BLACK << 8) | QUICKLOOK_BACKDROP_ALPHA)
+}
 
 pub fn modal_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
     dialog_overlay(tokens, dialog)
 }
 
-pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
-    let theme = tokens.ui;
+pub fn dialog_overlay(_tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
     div()
         .absolute()
         .top_0()
@@ -16,7 +30,11 @@ pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElem
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgba((theme.bg << 8) | 0xcc))
+        .bg(dialog_backdrop_color())
+        .occlude()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .child(dialog)
         .into_any_element()
 }

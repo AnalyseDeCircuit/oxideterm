@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -133,6 +134,12 @@ pub struct LocalPreviewMetadata {
     pub is_symlink: bool,
     pub mode: Option<u32>,
     pub mime_type: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalChecksumResult {
+    pub md5: String,
+    pub sha256: String,
 }
 
 pub fn home_path() -> String {
@@ -648,6 +655,30 @@ pub fn local_preview_metadata(path: &str) -> Option<LocalPreviewMetadata> {
             .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| mime_type_for_extension(&ext.to_lowercase())),
+    })
+}
+
+pub fn calculate_local_checksum(path: &str) -> Result<LocalChecksumResult, String> {
+    use sha2::{Digest, Sha256};
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("Failed to open file for checksum: {error}"))?;
+    let mut md5_context = md5::Context::new();
+    let mut sha256 = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to read file for checksum: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        md5_context.consume(&buffer[..read]);
+        sha256.update(&buffer[..read]);
+    }
+    Ok(LocalChecksumResult {
+        md5: format!("{:x}", md5_context.compute()),
+        sha256: format!("{:x}", sha256.finalize()),
     })
 }
 

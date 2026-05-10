@@ -259,6 +259,7 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                         cx.notify();
                     }),
+                    cx.entity(),
                 ))
                 .child(self.render_sftp_icon_button(
                     LucideIcon::FolderOpen,
@@ -267,6 +268,7 @@ impl WorkspaceApp {
                         this.browse_sftp_local_folder(cx);
                         cx.stop_propagation();
                     }),
+                    cx.entity(),
                 ));
         }
 

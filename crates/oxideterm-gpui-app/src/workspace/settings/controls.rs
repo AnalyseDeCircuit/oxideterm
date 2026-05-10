@@ -172,11 +172,7 @@ impl WorkspaceApp {
             }
             (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for mode in [
-                    FrostedGlassMode::Off,
-                    FrostedGlassMode::Css,
-                    FrostedGlassMode::Native,
-                ] {
+                for mode in [FrostedGlassMode::Off, FrostedGlassMode::Native] {
                     popup = popup.child(
                         select_option(
                             &self.tokens,

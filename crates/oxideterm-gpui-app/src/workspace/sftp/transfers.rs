@@ -493,6 +493,7 @@ impl WorkspaceApp {
                                         cx.notify();
                                     }
                                 }),
+                                cx.entity(),
                             ))
                         },
                     )
@@ -508,6 +509,7 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }),
+                            cx.entity(),
                         ))
                     })
                     .child(self.render_sftp_icon_button(
@@ -532,6 +534,7 @@ impl WorkspaceApp {
                                 cx.notify();
                             }
                         }),
+                        cx.entity(),
                     )),
             )
             .into_any_element()

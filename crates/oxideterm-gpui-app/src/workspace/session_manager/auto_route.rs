@@ -126,6 +126,7 @@ impl PartialOrd for DijkstraState {
 
 impl WorkspaceApp {
     pub(super) fn open_auto_route_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prepare_modal_interaction_boundary();
         self.auto_route_modal = AutoRouteModalState {
             open: true,
             loading: true,

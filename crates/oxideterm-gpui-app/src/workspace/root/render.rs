@@ -155,11 +155,23 @@ impl Render for WorkspaceApp {
                     .is_some_and(|tab| tab.kind == TabKind::FileManager)
                 {
                     let key = event.keystroke.key.as_str();
+                    let file_manager_preview_open = matches!(
+                        this.file_manager.dialog,
+                        Some(crate::workspace::file_manager::FileManagerDialog::Preview { .. })
+                    );
                     let file_manager_quick_look_space = matches!(key, "space" | " ")
                         && this.file_manager.focused_input.is_none()
-                        && this.file_manager.dialog.is_none();
+                        && (this.file_manager.dialog.is_none() || file_manager_preview_open);
+                    let file_manager_preview_info_toggle = key == "i"
+                        && this.file_manager.focused_input.is_none()
+                        && file_manager_preview_open;
+                    let file_manager_markdown_preview_toggle = key == "u"
+                        && this.file_manager.focused_input.is_none()
+                        && file_manager_preview_open;
                     if keystroke_commits_platform_text(&event.keystroke)
                         && !file_manager_quick_look_space
+                        && !file_manager_preview_info_toggle
+                        && !file_manager_markdown_preview_toggle
                     {
                         return;
                     }
@@ -406,6 +418,23 @@ impl Render for WorkspaceApp {
                 },
             )
             .when(
+                self.active_tab()
+                    .is_some_and(|tab| matches!(tab.kind, TabKind::FileManager)),
+                |root| {
+                    if self.file_manager.dialog.is_some() {
+                        // Tauri QuickLook and file manager dialogs are portaled to
+                        // document.body, so native must not center them inside only
+                        // the file-manager pane.
+                        let has_background = self
+                            .terminal_background_preferences("file_manager")
+                            .is_some();
+                        root.child(self.render_file_manager_dialog(window, has_background, cx))
+                    } else {
+                        root
+                    }
+                },
+            )
+            .when(
                 self.terminal_broadcast_menu_open
                     && !self.settings_store.settings().terminal.command_bar.enabled,
                 |root| {
@@ -422,6 +451,9 @@ impl Render for WorkspaceApp {
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })
+            .when_some(self.workspace_tooltip.clone(), |root, tooltip| {
+                root.child(self.render_workspace_tooltip(tooltip))
+            })
             .when_some(toast_layer, |root, layer| root.child(layer))
             .child(WorkspaceImeElement::new(
                 cx.entity(),
@@ -431,6 +463,107 @@ impl Render for WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    pub(super) fn queue_workspace_tooltip(
+        &mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        const TOOLTIP_DELAY: Duration = Duration::from_millis(550);
+
+        let id = id.into();
+        let label = label.into();
+        if let Some(tooltip) = self.workspace_tooltip.as_mut()
+            && self
+                .workspace_tooltip_pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == id)
+        {
+            tooltip.x = x;
+            tooltip.y = y;
+            return;
+        }
+        if let Some(pending) = self.workspace_tooltip_pending.as_mut()
+            && pending.id == id
+        {
+            pending.x = x;
+            pending.y = y;
+            return;
+        }
+
+        self.workspace_tooltip = None;
+        self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+        let generation = self.workspace_tooltip_generation;
+        self.workspace_tooltip_pending = Some(WorkspaceTooltipPending {
+            id,
+            label,
+            x,
+            y,
+            generation,
+        });
+        cx.spawn(async move |weak, cx| {
+            Timer::after(TOOLTIP_DELAY).await;
+            let _ = weak.update(cx, move |workspace, cx| {
+                let Some(pending) = workspace.workspace_tooltip_pending.as_ref() else {
+                    return;
+                };
+                if pending.generation != generation {
+                    return;
+                }
+                workspace.workspace_tooltip = Some(WorkspaceTooltip {
+                    label: pending.label.clone(),
+                    x: pending.x,
+                    y: pending.y,
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn clear_workspace_tooltip(&mut self, id: &str, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if self
+            .workspace_tooltip_pending
+            .as_ref()
+            .is_some_and(|pending| pending.id == id)
+        {
+            self.workspace_tooltip_pending = None;
+            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+            changed = true;
+        }
+        if self
+            .workspace_tooltip
+            .as_ref()
+            .is_some_and(|tooltip| tooltip.label == id)
+        {
+            self.workspace_tooltip = None;
+            changed = true;
+        } else if self.workspace_tooltip.is_some()
+            && self.workspace_tooltip_pending.is_none()
+        {
+            self.workspace_tooltip = None;
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn render_workspace_tooltip(&self, tooltip: WorkspaceTooltip) -> AnyElement {
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(tooltip.x), px(tooltip.y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(tooltip_content(&self.tokens, tooltip.label, None)),
+        )
+        .with_priority(300)
+        .into_any_element()
+    }
+
     fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) {
         const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
 

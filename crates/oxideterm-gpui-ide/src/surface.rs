@@ -20,7 +20,10 @@ use oxideterm_gpui_editor::TextEditorView;
 use oxideterm_gpui_ui::{
     button::ButtonVariant,
     button::{ButtonOptions, ButtonRadius, ButtonSize, button_with},
-    modal::{dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title},
+    modal::{
+        dialog_backdrop_color, dialog_content, dialog_description, dialog_footer, dialog_header,
+        dialog_title,
+    },
     select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,
 };
@@ -58,7 +61,6 @@ const IDE_BG_ACTIVE_THEME_ALPHA: u32 = 0x66;
 const IDE_HOVER_ALPHA: u32 = 0x4d;
 const IDE_BORDER_HALF_ALPHA: u32 = 0x80;
 const IDE_OVERLAY_ALPHA: u32 = 0x80;
-const IDE_MODAL_BACKDROP_ALPHA: u32 = 0xcc;
 const IDE_TREE_SELECTED_ALPHA: u32 = 0x1a;
 
 // Tauri `IdeRemoteFolderDialog.tsx` source classes translated to named

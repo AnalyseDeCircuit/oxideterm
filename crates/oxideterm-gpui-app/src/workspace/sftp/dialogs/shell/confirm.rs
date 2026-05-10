@@ -14,7 +14,10 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgba(SFTP_DIALOG_OVERLAY_ALPHA))
+            .bg(dialog_backdrop_color())
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()

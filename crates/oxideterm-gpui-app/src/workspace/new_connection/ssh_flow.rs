@@ -92,6 +92,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(NewConnectionForm {
             group: self.i18n.t("ssh.form.ungrouped"),
             ..NewConnectionForm::default()
@@ -126,6 +127,7 @@ impl WorkspaceApp {
             return;
         }
 
+        self.prepare_modal_interaction_boundary();
         let mut form = NewConnectionForm {
             auth_tab: SshAuthTab::Agent,
             focused_field: super::form_state::NewConnectionField::Host,
@@ -281,6 +283,7 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
+        self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = Some(action);
@@ -301,6 +304,7 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
+        self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.saved_connection_prompt_action = None;
@@ -586,6 +590,7 @@ impl WorkspaceApp {
                 self.continue_verified_ssh_flow(config, title, intent, window, cx)
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
+                self.prepare_modal_interaction_boundary();
                 let host = config.host.clone();
                 let port = config.port;
                 self.host_key_challenge = Some(HostKeyChallenge {
@@ -665,6 +670,7 @@ impl WorkspaceApp {
                 self.continue_verified_ssh_flow(plan.config, plan.title, plan.intent, window, cx)
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
+                self.prepare_modal_interaction_boundary();
                 plan.current_index = challenge.step_index;
                 self.host_key_challenge = Some(HostKeyChallenge {
                     config: plan.config.clone(),

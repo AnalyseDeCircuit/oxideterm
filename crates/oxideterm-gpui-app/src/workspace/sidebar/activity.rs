@@ -1,3 +1,5 @@
+use gpui::StatefulInteractiveElement;
+
 impl WorkspaceApp {
     pub(super) fn render_activity_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -33,6 +35,7 @@ impl WorkspaceApp {
         bar = bar
             .child(
                 div()
+                    .id("activity-sidebar-toggle")
                     .size(px(self.tokens.metrics.activity_icon_size))
                     .flex()
                     .items_center()
@@ -48,6 +51,27 @@ impl WorkspaceApp {
                         self.tokens.metrics.activity_icon_glyph_size,
                         rgb(theme.text_heading),
                     ))
+                    .on_mouse_move(cx.listener({
+                        let label = self.i18n.t(if self.sidebar_collapsed {
+                            "sidebar.actions.expand"
+                        } else {
+                            "sidebar.actions.collapse"
+                        });
+                        move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.queue_workspace_tooltip(
+                                "activity-sidebar-toggle",
+                                label.clone(),
+                                f32::from(event.position.x) + 12.0,
+                                f32::from(event.position.y) + 16.0,
+                                cx,
+                            );
+                        }
+                    }))
+                    .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                        if !*hovered {
+                            this.clear_workspace_tooltip("activity-sidebar-toggle", cx);
+                        }
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
@@ -90,6 +114,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.active_sidebar_section == section;
+        let tooltip = self.activity_icon_tooltip(section);
+        let tooltip_id = format!("activity-icon-{}", section.as_settings_key());
+        let tooltip_id_for_move = tooltip_id.clone();
         div()
             .id(("activity-icon", section as u64))
             .relative()
@@ -132,6 +159,23 @@ impl WorkspaceApp {
                     rgb(theme.text)
                 },
             ))
+            .on_mouse_move(cx.listener({
+                let tooltip = tooltip.clone();
+                move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id_for_move.clone(),
+                        tooltip.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
@@ -153,6 +197,24 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element()
+    }
+
+    fn activity_icon_tooltip(&self, section: SidebarSection) -> String {
+        match section {
+            SidebarSection::Sessions => self.i18n.t("sidebar.panels.sessions"),
+            SidebarSection::Connections => self.i18n.t("sidebar.panels.open_session_manager"),
+            SidebarSection::Terminal => self.i18n.t("terminal.local_terminal"),
+            SidebarSection::Activity => self.i18n.t("sidebar.panels.activity"),
+            SidebarSection::Network => self.i18n.t("sidebar.panels.forwards"),
+            SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
+            SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),
+            SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
+            SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
+            SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
+            SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
+            SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),
+            SidebarSection::Settings => self.i18n.t("sidebar.tooltips.settings"),
+        }
     }
 
     pub(super) fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {

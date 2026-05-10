@@ -1,13 +1,15 @@
 use gpui::{
     AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
-    px, rgb, rgba,
+    px, rgb,
 };
 use oxideterm_ssh::{KeyboardInteractivePromptRequest, SshPromptError};
 use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
-use oxideterm_gpui_ui::{TextInputView, form_field, text_input, text_input_anchor_probe};
+use oxideterm_gpui_ui::{
+    TextInputView, form_field, modal::dialog_backdrop_color, text_input, text_input_anchor_probe,
+};
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
     request: KeyboardInteractivePromptRequest,
@@ -39,6 +41,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.prepare_modal_interaction_boundary();
         self.keyboard_interactive_challenge =
             Some(KeyboardInteractiveChallenge::new(request, response_tx));
         self.new_connection_caret_visible = true;
@@ -229,7 +232,11 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgba((theme.bg << 8) | 0xcc))
+            .bg(dialog_backdrop_color())
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .w(px(self.tokens.metrics.modal_width))

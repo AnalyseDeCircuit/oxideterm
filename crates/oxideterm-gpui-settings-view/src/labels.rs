@@ -63,8 +63,9 @@ pub fn frosted_glass_mode_from_native(mode: NativeVibrancyMode) -> FrostedGlassM
 
 pub fn frosted_glass_label(mode: FrostedGlassMode, i18n: &I18n) -> String {
     match mode {
-        FrostedGlassMode::Off => i18n.t("settings_view.appearance.frosted_glass_off"),
-        FrostedGlassMode::Css => i18n.t("settings_view.appearance.frosted_glass_css"),
+        FrostedGlassMode::Off | FrostedGlassMode::Css => {
+            i18n.t("settings_view.appearance.frosted_glass_off")
+        }
         FrostedGlassMode::Native | FrostedGlassMode::System => {
             i18n.t("settings_view.appearance.frosted_glass_native")
         }

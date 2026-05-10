@@ -6715,7 +6715,9 @@ name = "oxideterm-local-files"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "md5",
  "serde",
+ "sha2 0.10.9",
  "sysinfo 0.33.1",
  "walkdir",
  "zip",

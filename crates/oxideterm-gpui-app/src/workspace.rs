@@ -24,11 +24,11 @@ use std::{
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, CursorStyle, FocusHandle, Focusable, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
-    ParentElement, PathPromptOptions, Pixels, Render, RenderImage, Rgba, ScrollWheelEvent,
-    SharedString, Styled, StyledImage, Subscription, Timer, Window, div, prelude::*, px, relative,
-    rgb, rgba, svg,
+    AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
+    FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, RenderImage, Rgba,
+    ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Timer, Window, anchored,
+    deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{
@@ -49,6 +49,7 @@ use oxideterm_gpui_terminal::{
 use oxideterm_gpui_ui::{
     toast::{ToastVariant, ToastView},
     toaster::toaster,
+    tooltip::tooltip_content,
 };
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_render_policy::{
@@ -226,12 +227,31 @@ pub(crate) struct WorkspaceApp {
     terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     workspace_toasts: Vec<WorkspaceToast>,
+    workspace_tooltip: Option<WorkspaceTooltip>,
+    workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
+    workspace_tooltip_generation: u64,
 }
 
 #[derive(Clone, Debug)]
 struct WorkspaceToast {
     notice: TerminalNotice,
     expires_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTooltip {
+    label: String,
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTooltipPending {
+    id: String,
+    label: String,
+    x: f32,
+    y: f32,
+    generation: u64,
 }
 
 #[derive(Clone)]

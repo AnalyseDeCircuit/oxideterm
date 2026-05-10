@@ -46,8 +46,7 @@ impl WorkspaceApp {
         div()
             .flex()
             .flex_col()
-            .min_h(px(420.0))
-            .max_h(px(760.0))
+            .size_full()
             .child(
                 div()
                     .h(px(48.0))
@@ -65,7 +64,7 @@ impl WorkspaceApp {
                     .when(can_navigate, |header| {
                         header
                             .child(self.render_file_manager_preview_button(
-                                LucideIcon::ChevronRight,
+                                LucideIcon::ChevronLeft,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.navigate_file_manager_preview(-1, cx);
@@ -173,6 +172,15 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                             cx.notify();
                         }),
+                    ))
+                    .child(self.render_file_manager_preview_button(
+                        LucideIcon::X,
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.close_file_manager_dialog();
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
                     )),
             )
             .child(
@@ -222,13 +230,22 @@ impl WorkspaceApp {
                 has_background,
                 cx,
             ),
-            Some(LocalPreview::Text { content, language }) => {
-                self.render_file_manager_preview_code(content, language.as_deref(), has_background)
-            }
+            Some(LocalPreview::Text { content, language }) => self
+                .render_file_manager_preview_code(
+                    content,
+                    language.as_deref(),
+                    &entry.name,
+                    has_background,
+                ),
             Some(LocalPreview::Markdown { content })
                 if self.file_manager.preview_markdown_source =>
             {
-                self.render_file_manager_preview_code(content, Some("markdown"), has_background)
+                self.render_file_manager_preview_code(
+                    content,
+                    Some("markdown"),
+                    &entry.name,
+                    has_background,
+                )
             }
             Some(LocalPreview::Markdown { content }) => {
                 self.render_file_manager_preview_markdown(content, cx)
@@ -802,6 +819,7 @@ impl WorkspaceApp {
         &self,
         content: &str,
         language: Option<&str>,
+        filename: &str,
         has_background: bool,
     ) -> AnyElement {
         if content.is_empty() {
@@ -812,74 +830,82 @@ impl WorkspaceApp {
         let opts = MarkdownOptions::from_theme(&self.tokens);
         let language = language
             .filter(|language| !language.trim().is_empty())
-            .unwrap_or("text")
+            .map(str::to_string)
+            .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
             .to_ascii_lowercase();
         let lines = Arc::new(file_manager_preview_visual_lines(content));
         let row_count = lines.len();
         let list_lines = lines.clone();
         let font_family = settings_mono_font_family(self.settings_store.settings());
+        let font_size = self.settings_store.settings().terminal.font_size as f32;
+        let row_height = font_size * 1.5;
         let scroll = self.file_manager.preview_code_scroll.clone();
         div()
             .size_full()
             .bg(file_manager_bg(theme.bg_sunken, has_background))
             .child(
-                uniform_list(
-                    "file-manager-preview-code-virtual",
-                    row_count,
-                    move |range, _window, _cx| {
-                        let opts = opts.clone();
-                        let language = language.clone();
-                        let font_family = font_family.clone();
-                        range
-                            .map(|index| {
-                                let line = &list_lines[index];
-                                let content: AnyElement = if language != "text"
-                                    && let Some(runs) =
-                                        highlight::highlight_code(&language, &line.content, &opts)
-                                {
-                                    let (text, text_runs) =
-                                        highlight::highlighted_runs_to_text_runs(&runs);
-                                    StyledText::new(text)
-                                        .with_runs(text_runs)
+                div().size_full().p(px(16.0)).child(
+                    uniform_list(
+                        "file-manager-preview-code-virtual",
+                        row_count,
+                        move |range, _window, _cx| {
+                            let opts = opts.clone();
+                            let language = language.clone();
+                            let font_family = font_family.clone();
+                            range
+                                .map(|index| {
+                                    let line = &list_lines[index];
+                                    let content: AnyElement = if language != "text"
+                                        && language != "plain"
+                                        && let Some(runs) = highlight::highlight_code(
+                                            &language,
+                                            &line.content,
+                                            &opts,
+                                        ) {
+                                        let (text, text_runs) =
+                                            highlight::highlighted_runs_to_text_runs(&runs);
+                                        StyledText::new(text)
+                                            .with_runs(text_runs)
+                                            .into_any_element()
+                                    } else {
+                                        SharedString::from(line.content.clone()).into_any_element()
+                                    };
+                                    div()
+                                        .h(px(row_height))
+                                        .w_full()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .font_family(font_family.clone())
+                                        .text_size(px(font_size))
+                                        .line_height(px(row_height))
+                                        .text_color(rgb(theme.text))
+                                        .child(
+                                            div()
+                                                .w(px(48.0))
+                                                .flex_none()
+                                                .pr(px(12.0))
+                                                .text_align(gpui::TextAlign::Right)
+                                                .text_color(rgba(
+                                                    (theme.text_muted << 8)
+                                                        | FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA,
+                                                ))
+                                                .child(
+                                                    line.line_number
+                                                        .map(|line_number| line_number.to_string())
+                                                        .unwrap_or_default(),
+                                                ),
+                                        )
+                                        .child(div().flex_1().min_w(px(0.0)).child(content))
                                         .into_any_element()
-                                } else {
-                                    SharedString::from(line.content.clone()).into_any_element()
-                                };
-                                div()
-                                    .h(px(FILE_MANAGER_PREVIEW_CODE_LINE_HEIGHT))
-                                    .w_full()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .font_family(font_family.clone())
-                                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                                    .line_height(px(FILE_MANAGER_PREVIEW_CODE_LINE_HEIGHT))
-                                    .text_color(rgb(theme.text))
-                                    .child(
-                                        div()
-                                            .w(px(48.0))
-                                            .flex_none()
-                                            .pr(px(12.0))
-                                            .text_align(gpui::TextAlign::Right)
-                                            .text_color(rgba(
-                                                (theme.text_muted << 8)
-                                                    | FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA,
-                                            ))
-                                            .child(
-                                                line.line_number
-                                                    .map(|line_number| line_number.to_string())
-                                                    .unwrap_or_default(),
-                                            ),
-                                    )
-                                    .child(div().flex_1().min_w(px(0.0)).child(content))
-                                    .into_any_element()
-                            })
-                            .collect::<Vec<_>>()
-                    },
-                )
-                .track_scroll(scroll)
-                .size_full()
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                                })
+                                .collect::<Vec<_>>()
+                        },
+                    )
+                    .track_scroll(scroll)
+                    .size_full()
+                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                ),
             )
             .into_any_element()
     }
@@ -1070,9 +1096,67 @@ impl WorkspaceApp {
         let Some(metadata) = self.file_manager.preview_metadata.as_ref() else {
             return div().into_any_element();
         };
-        let mut row = div()
+        let mut grid = div()
+            .grid()
+            .grid_cols(4)
+            .gap_x(px(24.0))
+            .gap_y(px(8.0))
+            .text_size(px(FILE_MANAGER_TEXT_XS));
+        grid = grid.child(self.render_file_manager_metadata_item(
+            LucideIcon::HardDrive,
+            self.i18n.t("fileManager.size"),
+            format_file_size(metadata.size),
+            false,
+        ));
+        grid = grid.child(self.render_file_manager_metadata_item(
+            LucideIcon::Clock,
+            self.i18n.t("fileManager.modified"),
+            self.format_file_manager_quicklook_timestamp(metadata.modified),
+            false,
+        ));
+        if let Some(created) = metadata.created {
+            grid = grid.child(self.render_file_manager_metadata_item(
+                LucideIcon::Clock,
+                self.i18n.t("fileManager.created"),
+                self.format_file_manager_quicklook_timestamp(Some(created)),
+                false,
+            ));
+        }
+        let permissions = metadata
+            .mode
+            .map(format_unix_permission_bits)
+            .unwrap_or_else(|| {
+                if metadata.readonly {
+                    self.i18n.t("fileManager.readonly")
+                } else {
+                    self.i18n.t("fileManager.readwrite")
+                }
+            });
+        grid = grid.child(self.render_file_manager_metadata_item(
+            LucideIcon::Shield,
+            self.i18n.t("fileManager.permissions"),
+            permissions,
+            metadata.mode.is_some(),
+        ));
+        if let Some(mime_type) = metadata.mime_type.as_ref() {
+            grid = grid.child(self.render_file_manager_metadata_item(
+                LucideIcon::FileText,
+                self.i18n.t("fileManager.type"),
+                mime_type.clone(),
+                false,
+            ));
+        }
+        if metadata.is_symlink {
+            grid = grid.child(self.render_file_manager_metadata_item(
+                LucideIcon::Link2,
+                self.i18n.t("fileManager.symlink"),
+                self.i18n.t("fileManager.symlink"),
+                false,
+            ));
+        }
+        div()
             .px(px(16.0))
-            .py(px(10.0))
+            .py(px(12.0))
             .border_t_1()
             .border_color(file_manager_border(self.tokens.ui.border, has_background))
             .bg(file_manager_panel_bg(
@@ -1080,72 +1164,8 @@ impl WorkspaceApp {
                 has_background,
                 FILE_MANAGER_PANEL_80_ALPHA,
             ))
-            .flex()
-            .flex_wrap()
-            .gap(px(10.0));
-        row = row.child(self.render_file_manager_metadata_item(
-            LucideIcon::HardDrive,
-            self.i18n.t("fileManager.size"),
-            format_file_size(metadata.size),
-        ));
-        row = row.child(self.render_file_manager_metadata_item(
-            LucideIcon::Clock,
-            self.i18n.t("fileManager.modified"),
-            format_modified(metadata.modified),
-        ));
-        if let Some(created) = metadata.created {
-            row = row.child(self.render_file_manager_metadata_item(
-                LucideIcon::Clock,
-                self.i18n.t("fileManager.created"),
-                format_modified(Some(created)),
-            ));
-        }
-        if let Some(accessed) = metadata.accessed {
-            row = row.child(self.render_file_manager_metadata_item(
-                LucideIcon::Clock,
-                self.i18n.t("fileManager.propAccessed"),
-                format_modified(Some(accessed)),
-            ));
-        }
-        row = row.child(self.render_file_manager_metadata_item(
-            LucideIcon::File,
-            self.i18n.t("fileManager.type"),
-            if metadata.is_dir {
-                self.i18n.t("fileManager.propTypeFolder")
-            } else {
-                self.i18n.t("fileManager.propTypeFile")
-            },
-        ));
-        let permissions = metadata
-            .mode
-            .map(format_unix_permissions)
-            .unwrap_or_else(|| {
-                if metadata.readonly {
-                    self.i18n.t("fileManager.readOnly")
-                } else {
-                    self.i18n.t("fileManager.readwrite")
-                }
-            });
-        row = row.child(self.render_file_manager_metadata_item(
-            LucideIcon::Shield,
-            self.i18n.t("fileManager.permissions"),
-            permissions,
-        ));
-        if let Some(mime_type) = metadata.mime_type.as_ref() {
-            row = row.child(self.render_file_manager_metadata_item(
-                LucideIcon::FileText,
-                self.i18n.t("fileManager.type"),
-                mime_type.clone(),
-            ));
-        }
-        if metadata.is_symlink {
-            row = row.child(self.render_file_manager_metadata_item(
-                LucideIcon::Link2,
-                self.i18n.t("fileManager.symlink"),
-                self.i18n.t("fileManager.symlink"),
-            ));
-        }
-        row.into_any_element()
+            .child(grid)
+            .into_any_element()
     }
 
     fn render_file_manager_metadata_item(
@@ -1153,15 +1173,25 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label: String,
         value: String,
+        mono_value: bool,
     ) -> AnyElement {
+        let mut value_el = div()
+            .min_w(px(0.0))
+            .truncate()
+            .text_color(rgb(self.tokens.ui.text))
+            .child(value);
+        if mono_value {
+            value_el =
+                value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
+        }
         div()
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .text_size(px(FILE_MANAGER_TEXT_XS))
+            .gap(px(8.0))
+            .min_w(px(0.0))
             .child(Self::render_lucide_icon(
                 icon,
-                FILE_MANAGER_ICON_SM,
+                FILE_MANAGER_ICON_MD,
                 rgb(self.tokens.ui.text_muted),
             ))
             .child(
@@ -1169,14 +1199,22 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(format!("{label}:")),
             )
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(value),
-            )
+            .child(value_el)
             .into_any_element()
+    }
+
+    fn format_file_manager_quicklook_timestamp(&self, timestamp: Option<i64>) -> String {
+        let Some(timestamp) = timestamp.filter(|timestamp| *timestamp > 0) else {
+            return "-".to_string();
+        };
+        let Some(datetime) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+            return "-".to_string();
+        };
+        let datetime = datetime.with_timezone(&chrono::Local);
+        match self.i18n.locale() {
+            Locale::ZhCn | Locale::ZhTw => datetime.format("%Y年%-m月%-d日").to_string(),
+            _ => datetime.format("%b %-d, %Y").to_string(),
+        }
     }
 
     fn render_file_manager_preview_button(
@@ -1327,9 +1365,8 @@ fn format_file_manager_media_time(duration: std::time::Duration) -> String {
     format!("{minutes}:{seconds:02}")
 }
 
-fn format_unix_permissions(mode: u32) -> String {
-    let mut output = String::with_capacity(10);
-    output.push(if mode & 0o040000 != 0 { 'd' } else { '-' });
+fn format_unix_permission_bits(mode: u32) -> String {
+    let mut output = String::with_capacity(9);
     for bit in [
         0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001,
     ] {
@@ -1358,4 +1395,57 @@ fn format_unix_permissions(mode: u32) -> String {
         });
     }
     output
+}
+
+fn file_manager_preview_language_for_name(filename: &str) -> String {
+    let lower = filename.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        ".bashrc" | ".bash_profile" | ".zshrc" | ".zprofile" | ".profile" | ".env" | ".gitignore"
+    ) || lower.ends_with("rc")
+    {
+        return "bash".to_string();
+    }
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "js" => "javascript",
+        "jsx" => "jsx",
+        "ts" => "typescript",
+        "tsx" => "tsx",
+        "py" => "python",
+        "rs" => "rust",
+        "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "hpp" | "cc" | "cxx" => "cpp",
+        "cs" => "csharp",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+        "kt" => "kotlin",
+        "scala" => "scala",
+        "sh" | "bash" | "zsh" => "bash",
+        "fish" => "fish",
+        "ps1" | "psm1" => "powershell",
+        "bat" | "cmd" => "batch",
+        "sql" => "sql",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "scss" | "sass" => "scss",
+        "less" => "less",
+        "json" | "json5" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "xml" => "xml",
+        "md" | "mdx" => "markdown",
+        "ini" | "editorconfig" | "terminal" => "ini",
+        "diff" | "patch" => "diff",
+        "log" => "log",
+        _ => "plain",
+    }
+    .to_string()
 }

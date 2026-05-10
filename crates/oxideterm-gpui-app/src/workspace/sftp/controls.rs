@@ -42,11 +42,18 @@ impl WorkspaceApp {
     fn render_sftp_icon_button(
         &self,
         icon: LucideIcon,
-        _title: String,
+        title: String,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        workspace: gpui::Entity<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let title_for_move = title.clone();
+        let title_element_id = title.clone();
+        let title_request_id = title.clone();
+        let tooltip_workspace = workspace.clone();
+        let clear_workspace = workspace;
         div()
+            .id((gpui::ElementId::from("sftp-icon-button"), title_element_id))
             .size(px(SFTP_TOOL_BUTTON))
             .flex_none()
             .flex()
@@ -61,6 +68,24 @@ impl WorkspaceApp {
                 SFTP_ICON_SM,
                 rgb(theme.text),
             ))
+            .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
+                let _ = tooltip_workspace.update(cx, |this, cx| {
+                    this.queue_workspace_tooltip(
+                        title_request_id.clone(),
+                        title_for_move.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                });
+            })
+            .on_hover(move |hovered: &bool, _window, cx| {
+                if !*hovered {
+                    let _ = clear_workspace.update(cx, |this, cx| {
+                        this.clear_workspace_tooltip(&title, cx);
+                    });
+                }
+            })
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }
@@ -81,6 +106,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
                 cx.notify();
             }),
+            cx.entity(),
         )
     }
 
@@ -96,6 +122,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
                 cx.notify();
             }),
+            cx.entity(),
         )
     }
 

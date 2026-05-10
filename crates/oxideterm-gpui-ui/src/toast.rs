@@ -1,4 +1,4 @@
-use gpui::{Div, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{Div, FontWeight, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,6 +15,22 @@ pub struct ToastView {
     pub status_text: Option<String>,
     pub progress: Option<f32>,
     pub variant: ToastVariant,
+}
+
+fn toast_content_width(tokens: &ThemeTokens) -> f32 {
+    // Tauri toast root is 420px wide with p-4 and pr-8. Keep the text column
+    // inside that same usable width so GPUI's line wrapper can wrap long text.
+    (tokens.metrics.ui_toast_width - tokens.metrics.ui_toast_padding * 3.0).max(0.0)
+}
+
+fn toast_text(tokens: &ThemeTokens, text: String) -> Div {
+    div()
+        .w_full()
+        .max_w(px(toast_content_width(tokens)))
+        .min_w_0()
+        .whitespace_normal()
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .child(text)
 }
 
 pub fn toast(tokens: &ThemeTokens, view: ToastView) -> Div {
@@ -51,30 +67,17 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> Div {
         .child(
             div()
                 .grid()
+                .w_full()
+                .max_w(px(toast_content_width(tokens)))
                 .min_w_0()
                 .flex_1()
                 .gap(px(tokens.spacing.one))
-                .child(
-                    div()
-                        .text_size(px(tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(view.title),
-                )
+                .child(toast_text(tokens, view.title).font_weight(FontWeight::SEMIBOLD))
                 .when_some(view.description, |content, description| {
-                    content.child(
-                        div()
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .opacity(0.9)
-                            .child(description),
-                    )
+                    content.child(toast_text(tokens, description).opacity(0.9))
                 })
                 .when_some(view.status_text, |content, status_text| {
-                    content.child(
-                        div()
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .opacity(0.9)
-                            .child(status_text),
-                    )
+                    content.child(toast_text(tokens, status_text).opacity(0.9))
                 })
                 .when_some(view.progress, |content, progress| {
                     content.child(

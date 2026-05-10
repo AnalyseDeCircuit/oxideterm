@@ -107,10 +107,12 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgba(SFTP_DIALOG_OVERLAY_ALPHA))
+            .bg(dialog_backdrop_color())
             // Matches Radix DialogOverlay's modal behavior: the backdrop is the top
             // hitbox, so file rows and scroll containers behind preview cannot react.
             .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()

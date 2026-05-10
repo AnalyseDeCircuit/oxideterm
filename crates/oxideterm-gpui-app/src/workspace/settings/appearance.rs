@@ -225,21 +225,22 @@ impl WorkspaceApp {
     }
 
     fn appearance_card_title(&self, title: String, icon: Option<LucideIcon>) -> AnyElement {
-        div()
+        let mut title_el = div()
             .flex()
             .flex_row()
             .items_center()
             .gap(px(8.0))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .child(match icon {
-                Some(icon) => Self::render_lucide_icon(icon, 16.0, rgb(self.tokens.ui.text))
-                    .into_any_element(),
-                None => div().into_any_element(),
-            })
-            .child(title.to_uppercase())
-            .into_any_element()
+            .text_color(rgb(self.tokens.ui.text));
+        if let Some(icon) = icon {
+            title_el = title_el.child(Self::render_lucide_icon(
+                icon,
+                16.0,
+                rgb(self.tokens.ui.text),
+            ));
+        }
+        title_el.child(title.to_uppercase()).into_any_element()
     }
 
     fn appearance_action_button(&self, icon: LucideIcon, label: String) -> Div {

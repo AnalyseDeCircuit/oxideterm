@@ -179,6 +179,9 @@ impl WorkspaceApp {
             terminal_notice_tx,
             terminal_notice_rx,
             workspace_toasts: Vec::new(),
+            workspace_tooltip: None,
+            workspace_tooltip_pending: None,
+            workspace_tooltip_generation: 0,
         };
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);

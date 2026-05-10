@@ -21,6 +21,7 @@ pub(crate) enum LucideIcon {
     Bot,
     Check,
     ChevronDown,
+    ChevronLeft,
     ChevronRight,
     Circle,
     Clock,
@@ -44,10 +45,12 @@ pub(crate) enum LucideIcon {
     FileTerminal,
     FileText,
     FileVideo,
+    FolderArchive,
     FolderInput,
     Folder,
     FolderPlus,
     FolderOpen,
+    Hash,
     HardDrive,
     HelpCircle,
     History,
@@ -114,6 +117,7 @@ impl LucideIcon {
             Self::Bot => "lucide/bot.svg",
             Self::Check => "lucide/check.svg",
             Self::ChevronDown => "lucide/chevron-down.svg",
+            Self::ChevronLeft => "lucide/chevron-left.svg",
             Self::ChevronRight => "lucide/chevron-right.svg",
             Self::Circle => "lucide/circle.svg",
             Self::Clock => "lucide/clock.svg",
@@ -137,10 +141,12 @@ impl LucideIcon {
             Self::FileTerminal => "lucide/file-terminal.svg",
             Self::FileText => "lucide/file-text.svg",
             Self::FileVideo => "lucide/file-video.svg",
+            Self::FolderArchive => "lucide/folder-archive.svg",
             Self::FolderInput => "lucide/folder-input.svg",
             Self::Folder => "lucide/folder.svg",
             Self::FolderPlus => "lucide/folder-plus.svg",
             Self::FolderOpen => "lucide/folder-open.svg",
+            Self::Hash => "lucide/hash.svg",
             Self::HardDrive => "lucide/hard-drive.svg",
             Self::HelpCircle => "lucide/help-circle.svg",
             Self::History => "lucide/history.svg",
@@ -211,6 +217,7 @@ impl AssetSource for NativeAssets {
             "lucide/bot.svg" => BOT,
             "lucide/check.svg" => CHECK,
             "lucide/chevron-down.svg" => CHEVRON_DOWN,
+            "lucide/chevron-left.svg" => CHEVRON_LEFT,
             "lucide/chevron-right.svg" => CHEVRON_RIGHT,
             "lucide/circle.svg" => CIRCLE,
             "lucide/clock.svg" => CLOCK,
@@ -239,6 +246,7 @@ impl AssetSource for NativeAssets {
             "lucide/file-terminal.svg" => FILE_TERMINAL,
             "lucide/file-text.svg" => FILE_TEXT,
             "lucide/file-video.svg" => FILE_VIDEO,
+            "lucide/folder-archive.svg" => FOLDER_ARCHIVE,
             "lucide/folder-sync.svg" => FOLDER_SYNC,
             "lucide/folder-input.svg" => FOLDER_INPUT,
             "lucide/folder.svg" => FOLDER,
@@ -246,6 +254,7 @@ impl AssetSource for NativeAssets {
             "lucide/folder-git-2.svg" => FOLDER_GIT_2,
             "lucide/folder-open.svg" => FOLDER_OPEN,
             "lucide/folder-plus.svg" => FOLDER_PLUS,
+            "lucide/hash.svg" => HASH,
             "lucide/hard-drive.svg" => HARD_DRIVE,
             "lucide/help-circle.svg" => HELP_CIRCLE,
             "lucide/history.svg" => HISTORY,
@@ -317,6 +326,7 @@ impl AssetSource for NativeAssets {
                 "bot.svg",
                 "check.svg",
                 "chevron-down.svg",
+                "chevron-left.svg",
                 "chevron-right.svg",
                 "clock.svg",
                 "code-2.svg",
@@ -343,6 +353,7 @@ impl AssetSource for NativeAssets {
                 "file-terminal.svg",
                 "file-text.svg",
                 "file-video.svg",
+                "folder-archive.svg",
                 "folder-sync.svg",
                 "folder-input.svg",
                 "folder.svg",
@@ -350,6 +361,7 @@ impl AssetSource for NativeAssets {
                 "folder-git-2.svg",
                 "folder-open.svg",
                 "folder-plus.svg",
+                "hash.svg",
                 "hard-drive.svg",
                 "help-circle.svg",
                 "history.svg",
@@ -424,6 +436,7 @@ const BOOK_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" he
 const BOT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>"#;
 const CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"#;
 const CHEVRON_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
+const CHEVRON_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"#;
 const CHEVRON_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>"#;
 const CLOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>"#;
@@ -452,6 +465,7 @@ const FILE_SPREADSHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width=
 const FILE_TERMINAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="m8 16 2-2-2-2"/><path d="M12 18h4"/></svg>"#;
 const FILE_TEXT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>"#;
 const FILE_VIDEO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M15.033 13.44a.647.647 0 0 1 0 1.12l-4.065 2.352a.645.645 0 0 1-.968-.56v-4.704a.645.645 0 0 1 .967-.56z"/></svg>"#;
+const FOLDER_ARCHIVE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="15" cy="19" r="2"/><path d="M20.9 19.8A2 2 0 0 0 22 18V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h5.1"/><path d="M15 11v-1"/><path d="M15 17v-2"/></svg>"#;
 const FOLDER_SYNC: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v.5"/><path d="M12 10v4h4"/><path d="m12 14 1.535-1.605a5 5 0 0 1 8 1.5"/><path d="M22 22v-4h-4"/><path d="m22 18-1.535 1.605a5 5 0 0 1-8-1.5"/></svg>"#;
 const FOLDER_INPUT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2A2 2 0 0 0 12.07 6H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/></svg>"#;
 const FOLDER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
@@ -459,6 +473,7 @@ const FOLDER_GIT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" h
 const FOLDER_GIT_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 19a5 5 0 0 1-5-5v8"/><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5"/><circle cx="13" cy="12" r="2"/><circle cx="20" cy="19" r="2"/></svg>"#;
 const FOLDER_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>"#;
 const FOLDER_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
+const HASH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></svg>"#;
 const HARD_DRIVE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16h.01"/><path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M21.946 12.013H2.054"/><path d="M6 16h.01"/></svg>"#;
 const HELP_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"#;
 const HISTORY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>"#;

@@ -172,7 +172,7 @@ impl WorkspaceApp {
                         .is_some_and(|file| can_extract_archive(&file.name)),
                 |menu_el| {
                     menu_el.child(self.render_file_manager_context_menu_item(
-                        LucideIcon::FileArchive,
+                        LucideIcon::FolderArchive,
                         self.i18n.t("fileManager.extract"),
                         false,
                         has_background,
@@ -377,7 +377,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_file_manager_dialog(
+    pub(in crate::workspace) fn render_file_manager_dialog(
         &self,
         window: &mut Window,
         has_background: bool,
@@ -386,6 +386,23 @@ impl WorkspaceApp {
         let Some(dialog) = self.file_manager.dialog.clone() else {
             return div().into_any_element();
         };
+        if let FileManagerDialog::Preview { entry } = &dialog {
+            return self.render_file_manager_preview_modal(
+                entry.clone(),
+                window,
+                has_background,
+                cx,
+            );
+        }
+        if let FileManagerDialog::Properties { entry, details } = &dialog {
+            return self.render_file_manager_properties_modal(
+                entry.clone(),
+                details.clone(),
+                window,
+                has_background,
+                cx,
+            );
+        }
         let title = match &dialog {
             FileManagerDialog::Drives => self.i18n.t("fileManager.selectDrive"),
             FileManagerDialog::NewFolder => self.i18n.t("fileManager.newFolder"),
@@ -394,7 +411,9 @@ impl WorkspaceApp {
             FileManagerDialog::Delete { .. } => self.i18n.t("fileManager.confirmDelete"),
             FileManagerDialog::EditBookmark { .. } => self.i18n.t("fileManager.editBookmark"),
             FileManagerDialog::Properties { .. } => self.i18n.t("fileManager.propTitleGetInfo"),
-            FileManagerDialog::Preview { entry } => entry.name.clone(),
+            FileManagerDialog::Preview { .. } => {
+                unreachable!("preview uses dedicated QuickLook modal")
+            }
         };
         let body = match dialog {
             FileManagerDialog::Drives => self.render_file_manager_drives_dialog(has_background, cx),
@@ -410,17 +429,13 @@ impl WorkspaceApp {
                 self.render_file_manager_delete_dialog(files, has_background, cx)
             }
             FileManagerDialog::Properties { entry, details } => {
-                self.render_file_manager_properties_dialog(entry, details, has_background)
+                self.render_file_manager_properties_dialog(entry, details, has_background, cx)
             }
-            FileManagerDialog::Preview { entry } => {
-                self.render_file_manager_preview_dialog(entry, has_background, cx)
+            FileManagerDialog::Preview { .. } => {
+                unreachable!("preview uses dedicated QuickLook modal")
             }
         };
-        let width = match self.file_manager.dialog {
-            Some(FileManagerDialog::Preview { .. }) => 1000.0,
-            Some(FileManagerDialog::Properties { .. }) => FILE_MANAGER_DIALOG_WIDTH_LG,
-            _ => FILE_MANAGER_DIALOG_WIDTH_SM,
-        };
+        let width = FILE_MANAGER_DIALOG_WIDTH_SM;
         div()
             .absolute()
             .top_0()
@@ -430,9 +445,11 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgba(
-                (self.tokens.ui.bg << 8) | FILE_MANAGER_DIALOG_OVERLAY_ALPHA,
-            ))
+            .bg(dialog_backdrop_color())
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
@@ -499,6 +516,213 @@ impl WorkspaceApp {
                             ),
                     )
                     .child(body),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_manager_preview_modal(
+        &self,
+        entry: LocalFileEntry,
+        window: &mut Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        let viewport_width = f32::from(viewport.width);
+        let viewport_height = f32::from(viewport.height);
+        // Tauri QuickLook uses width/height min(90vw/vh, fixed cap), with 95vw/vh
+        // min/max guards so very small windows still leave a little backdrop visible.
+        let max_width = viewport_width * 0.95;
+        let max_height = viewport_height * 0.95;
+        let min_width = FILE_MANAGER_QUICKLOOK_MIN_WIDTH.min(max_width);
+        let min_height = FILE_MANAGER_QUICKLOOK_MIN_HEIGHT.min(max_height);
+        let width = (viewport_width * 0.9)
+            .min(FILE_MANAGER_QUICKLOOK_WIDTH)
+            .max(min_width)
+            .min(max_width);
+        let height = (viewport_height * 0.9)
+            .min(FILE_MANAGER_QUICKLOOK_HEIGHT)
+            .max(min_height)
+            .min(max_height);
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(quicklook_backdrop_color())
+            .occlude()
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_file_manager_dialog();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .w(px(width))
+                    .h(px(height))
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
+                    ))
+                    .bg(file_manager_panel_bg(
+                        self.tokens.ui.bg_panel,
+                        has_background,
+                        0xf2,
+                    ))
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(self.render_file_manager_preview_dialog(entry, has_background, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_manager_properties_modal(
+        &self,
+        entry: LocalFileEntry,
+        details: FileManagerProperties,
+        window: &mut Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let width =
+            FILE_MANAGER_DIALOG_WIDTH_SM.min(f32::from(window.viewport_size().width) - 32.0);
+        let (icon, icon_color) = file_icon_for_entry(&entry);
+        let icon_color = if icon_color == 0 {
+            theme.text_muted
+        } else {
+            icon_color
+        };
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(dialog_backdrop_color())
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .w(px(width.max(280.0)))
+                    .max_h(px(
+                        (f32::from(window.viewport_size().height) * 0.86).max(240.0)
+                    ))
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA))
+                    .bg(file_manager_panel_bg(
+                        theme.bg_elevated,
+                        has_background,
+                        0xf2,
+                    ))
+                    .shadow_lg()
+                    .child(
+                        div()
+                            .px(px(16.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .border_b_1()
+                            .border_color(file_manager_border(theme.border, has_background))
+                            .child(Self::render_lucide_icon(
+                                icon,
+                                FILE_MANAGER_ICON_MD,
+                                rgb(icon_color),
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .truncate()
+                                    .text_size(px(FILE_MANAGER_TEXT_SM))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text))
+                                    .child(entry.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .size(px(28.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .cursor_pointer()
+                                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::X,
+                                        FILE_MANAGER_ICON_MD,
+                                        rgb(theme.text_muted),
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.close_file_manager_dialog();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                            ),
+                    )
+                    .child(self.render_file_manager_properties_dialog(
+                        entry,
+                        details,
+                        has_background,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .px(px(16.0))
+                            .py(px(10.0))
+                            .border_t_1()
+                            .border_color(file_manager_border(theme.border, has_background))
+                            .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
+                            .flex()
+                            .justify_end()
+                            .child(
+                                div()
+                                    .px(px(12.0))
+                                    .py(px(5.0))
+                                    .rounded(px(self.tokens.radii.sm))
+                                    .bg(file_manager_hover_bg(theme.bg_hover, has_background))
+                                    .text_size(px(FILE_MANAGER_TEXT_XS))
+                                    .text_color(rgb(theme.text))
+                                    .cursor_pointer()
+                                    .hover(move |button| button.bg(rgb(theme.text_muted)))
+                                    .child("OK")
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.close_file_manager_dialog();
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    ),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -675,7 +899,7 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .cursor_pointer()
-                    .child(self.i18n.t("common.cancel"))
+                    .child(self.i18n.t("common.actions.cancel"))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
@@ -801,67 +1025,309 @@ impl WorkspaceApp {
         &self,
         entry: LocalFileEntry,
         details: FileManagerProperties,
-        _has_background: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = vec![
-            (self.i18n.t("fileManager.name"), entry.name),
-            (
-                self.i18n.t("fileManager.propKind"),
-                self.i18n.t(&details.kind_label),
-            ),
-            (self.i18n.t("fileManager.propLocation"), details.location),
-            (
-                self.i18n.t("fileManager.size"),
-                format_file_size(details.total_size.unwrap_or(details.size)),
-            ),
-            (
-                self.i18n.t("fileManager.modified"),
-                format_modified(details.modified),
-            ),
-            (
-                self.i18n.t("fileManager.propAccessed"),
-                format_modified(details.accessed),
-            ),
-            (
-                self.i18n.t("fileManager.propAccess"),
-                if details.readonly {
-                    self.i18n.t("fileManager.readonly")
-                } else {
-                    self.i18n.t("fileManager.readwrite")
-                },
-            ),
-        ];
-        if let Some(target) = details.symlink_target {
-            rows.push((self.i18n.t("fileManager.symlink"), target));
-        }
-        if let (Some(files), Some(dirs)) = (details.dir_files, details.dir_dirs) {
-            rows.push((
-                self.i18n.t("fileManager.propContents"),
-                self.i18n
-                    .t("fileManager.propDirSummary")
-                    .replace("{{files}}", &files.to_string())
-                    .replace("{{dirs}}", &dirs.to_string()),
-            ));
-        }
-        div()
-            .p(px(16.0))
+        let is_dir = entry.file_type == LocalFileType::Directory;
+        let file_type = if is_dir || entry.file_type == LocalFileType::Symlink {
+            self.i18n.t(&details.kind_label)
+        } else {
+            details
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| self.i18n.t(&details.kind_label))
+        };
+        let mut body = div()
+            .px(px(16.0))
+            .py(px(12.0))
             .flex()
             .flex_col()
-            .gap(px(8.0))
-            .children(rows.into_iter().map(|(label, value)| {
+            .gap(px(2.0));
+
+        body = body
+            .child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.propKind"),
+                file_type,
+                false,
+            ))
+            .child(self.render_file_manager_property_row_value(
+                self.i18n.t("fileManager.size"),
+                self.render_file_manager_property_size(details.size),
+            ))
+            .child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.propLocation"),
+                details.location.clone(),
+                false,
+            ))
+            .child(self.render_file_manager_property_separator(has_background));
+
+        if let Some(created) = details.created {
+            body = body.child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.created"),
+                format_full_timestamp(Some(created)),
+                false,
+            ));
+        }
+        body = body.child(self.render_file_manager_property_row_text(
+            self.i18n.t("fileManager.modified"),
+            format_full_timestamp(details.modified),
+            false,
+        ));
+        if let Some(accessed) = details.accessed {
+            body = body.child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.propAccessed"),
+                format_full_timestamp(Some(accessed)),
+                false,
+            ));
+        }
+
+        body = body
+            .child(self.render_file_manager_property_separator(has_background))
+            .child(if let Some(mode) = details.mode {
+                self.render_file_manager_property_row_value(
+                    self.i18n.t("fileManager.permissions"),
+                    self.render_file_manager_property_permissions(mode),
+                )
+            } else {
+                self.render_file_manager_property_row_text(
+                    self.i18n.t("fileManager.propAccess"),
+                    if details.readonly {
+                        self.i18n.t("fileManager.readonly")
+                    } else {
+                        self.i18n.t("fileManager.readwrite")
+                    },
+                    false,
+                )
+            });
+
+        if details.is_symlink {
+            body = body.child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.symlink"),
+                self.i18n.t("fileManager.propYes"),
+                false,
+            ));
+        }
+        if !is_dir && let Some(mime_type) = details.mime_type.clone() {
+            body = body.child(self.render_file_manager_property_row_text(
+                self.i18n.t("fileManager.mimeType"),
+                mime_type,
+                true,
+            ));
+        }
+
+        if is_dir {
+            body = body.child(self.render_file_manager_property_separator(has_background));
+            if let (Some(files), Some(dirs)) = (details.dir_files, details.dir_dirs) {
+                body = body.child(
+                    self.render_file_manager_property_row_text(
+                        self.i18n.t("fileManager.propContents"),
+                        self.i18n
+                            .t("fileManager.propDirSummary")
+                            .replace("{{files}}", &files.to_string())
+                            .replace("{{dirs}}", &dirs.to_string()),
+                        false,
+                    ),
+                );
+            }
+            if let Some(total_size) = details.total_size {
+                body = body.child(self.render_file_manager_property_row_value(
+                    self.i18n.t("fileManager.propTotalSize"),
+                    self.render_file_manager_property_size(total_size),
+                ));
+            }
+        } else {
+            body = body.child(self.render_file_manager_property_separator(has_background));
+            if let Some(checksum) = self.file_manager.properties_checksum.clone() {
+                body = body
+                    .child(self.render_file_manager_property_row_text("MD5", checksum.md5, true))
+                    .child(self.render_file_manager_property_row_text(
+                        "SHA-256",
+                        checksum.sha256,
+                        true,
+                    ));
+            } else {
+                body = body.child(self.render_file_manager_checksum_row(cx));
+            }
+        }
+
+        body.into_any_element()
+    }
+
+    fn render_file_manager_property_row_text(
+        &self,
+        label: impl Into<String>,
+        value: impl Into<String>,
+        mono: bool,
+    ) -> AnyElement {
+        let mut value_el = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .text_color(rgb(self.tokens.ui.text))
+            .child(value.into());
+        if mono {
+            value_el =
+                value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
+        }
+        self.render_file_manager_property_row_value(label, value_el.into_any_element())
+    }
+
+    fn render_file_manager_property_row_value(
+        &self,
+        label: impl Into<String>,
+        value: AnyElement,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_start()
+            .gap(px(12.0))
+            .py(px(6.0))
+            .text_size(px(FILE_MANAGER_TEXT_XS))
+            .child(
                 div()
-                    .flex()
-                    .gap(px(12.0))
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .child(
-                        div()
-                            .w(px(120.0))
-                            .flex_none()
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(label),
-                    )
-                    .child(div().flex_1().min_w(px(0.0)).truncate().child(value))
-            }))
+                    .min_w(px(104.0))
+                    .max_w(px(128.0))
+                    .flex_none()
+                    .text_align(gpui::TextAlign::Right)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(label.into()),
+            )
+            .child(value)
             .into_any_element()
     }
+
+    fn render_file_manager_property_separator(&self, has_background: bool) -> AnyElement {
+        div()
+            .h(px(1.0))
+            .my(px(6.0))
+            .bg(file_manager_border(self.tokens.ui.border, has_background))
+            .into_any_element()
+    }
+
+    fn render_file_manager_property_size(&self, size: u64) -> AnyElement {
+        let mut value = div()
+            .flex()
+            .items_baseline()
+            .gap(px(4.0))
+            .flex_wrap()
+            .text_color(rgb(self.tokens.ui.text))
+            .child(format_file_size(size));
+        if size >= 1024 {
+            value = value.child(
+                div()
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(format!(
+                        "({} {})",
+                        format_number_with_separators(size),
+                        self.i18n.t("fileManager.propBytes")
+                    )),
+            );
+        }
+        value.into_any_element()
+    }
+
+    fn render_file_manager_property_permissions(&self, mode: u32) -> AnyElement {
+        let perms = format_permission_bits(mode);
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap(px(1.0))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(rgb(self.tokens.ui.text));
+        for ch in perms.chars() {
+            let color = match ch {
+                'r' => 0x34d399,
+                'w' => 0xfbbf24,
+                'x' => 0x38bdf8,
+                _ => self.tokens.ui.text_muted,
+            };
+            row = row.child(div().text_color(rgb(color)).child(ch.to_string()));
+        }
+        row.child(
+            div()
+                .ml(px(6.0))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(format!("({:04o})", mode & 0o777)),
+        )
+        .into_any_element()
+    }
+
+    fn render_file_manager_checksum_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let loading = self.file_manager.properties_checksum_loading;
+        let theme = self.tokens.ui;
+        self.render_file_manager_property_row_value(
+            self.i18n.t("fileManager.propChecksum"),
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_color(rgb(FILE_MANAGER_BLUE))
+                .cursor_pointer()
+                .opacity(if loading { 0.5 } else { 1.0 })
+                .child(Self::render_lucide_icon(
+                    if loading {
+                        LucideIcon::LoaderCircle
+                    } else {
+                        LucideIcon::Hash
+                    },
+                    FILE_MANAGER_ICON_SM,
+                    rgb(FILE_MANAGER_BLUE),
+                ))
+                .child(if loading {
+                    self.i18n.t("fileManager.propCalculating")
+                } else {
+                    self.i18n.t("fileManager.propCalcChecksum")
+                })
+                .hover(move |row| row.text_color(rgb(theme.accent_hover)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.calculate_file_manager_properties_checksum(cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
+fn format_number_with_separators(value: u64) -> String {
+    let raw = value.to_string();
+    let mut out = String::with_capacity(raw.len() + raw.len() / 3);
+    for (index, ch) in raw.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+fn format_full_timestamp(timestamp: Option<i64>) -> String {
+    let Some(timestamp) = timestamp.filter(|timestamp| *timestamp > 0) else {
+        return "-".to_string();
+    };
+    let Some(datetime) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+        return "-".to_string();
+    };
+    datetime
+        .with_timezone(&chrono::Local)
+        .format("%Y/%-m/%-d %H:%M:%S")
+        .to_string()
+}
+
+fn format_permission_bits(mode: u32) -> String {
+    let bits = [
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
+    ];
+    bits.iter()
+        .map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' })
+        .collect()
 }

@@ -13,6 +13,7 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
+    modal::dialog_backdrop_color,
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{text_caret, text_input_anchor_probe},
 };
@@ -85,7 +86,6 @@ const SFTP_CONTEXT_MENU_MAX_HEIGHT: f32 = 252.0; // 7 items + separators, clampe
 const SFTP_CONTEXT_MENU_PADDING: f32 = 4.0; // Tauri py-1
 const SFTP_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0; // Tauri px-3 py-1.5 text-xs
 const SFTP_BUTTON_TRANSPARENT_ALPHA: u32 = 0x00; // Tauri Button border-transparent/bg-transparent
-const SFTP_DIALOG_OVERLAY_ALPHA: u32 = 0x99; // Tauri Dialog overlay opacity
 const SFTP_DIALOG_SHADOW_ALPHA: u32 = 0x40; // Tauri shadow-lg-ish overlay shadow
 const SFTP_DIALOG_BORDER_SUBTLE_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
 const SFTP_DIALOG_BORDER_HALF_ALPHA: u32 = 0x80; // Tauri border-theme-border/50

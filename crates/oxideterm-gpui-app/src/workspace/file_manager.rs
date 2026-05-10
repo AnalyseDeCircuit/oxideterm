@@ -11,13 +11,14 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
+    modal::{dialog_backdrop_color, quicklook_backdrop_color},
     surface::{color_for_background, color_with_background_scaled_alpha},
-    text_input::{TextInputView, text_input, text_input_anchor_probe},
+    text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
 use oxideterm_local_files::{
     BOOKMARKS_FILENAME as FILE_MANAGER_BOOKMARKS_FILENAME, LocalArchiveEntry, LocalArchiveInfo,
-    LocalBookmark, LocalClipboardMode, LocalFileEntry, LocalFileType, LocalPreview,
-    LocalPreviewMetadata, LocalSortDirection, LocalSortField,
+    LocalBookmark, LocalChecksumResult, LocalClipboardMode, LocalFileEntry, LocalFileType,
+    LocalPreview, LocalPreviewMetadata, LocalSortDirection, LocalSortField,
 };
 use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PdfPreviewBackend,
@@ -37,7 +38,6 @@ const FILE_MANAGER_ROOT_PADDING: f32 = 8.0; // Tauri LocalFileManager/FileList p
 const FILE_MANAGER_GAP: f32 = 8.0; // Tauri gap-2.
 const FILE_MANAGER_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10.
 const FILE_MANAGER_ROW_HEIGHT: f32 = 25.0; // Tauri FileList row px-2 py-1 text-xs.
-const FILE_MANAGER_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal.
 const FILE_MANAGER_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // Virtual rows pre-wrap long `whitespace-pre` lines.
 const FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%.
 const FILE_MANAGER_SIDEBAR_WIDTH: f32 = 220.0; // Tauri favorites sidebar column.
@@ -53,14 +53,18 @@ const FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT: f32 = 520.0; // Tauri max-h-[80vh], 
 const FILE_MANAGER_CONTEXT_MENU_PADDING: f32 = 4.0;
 const FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0;
 const FILE_MANAGER_DIALOG_WIDTH_SM: f32 = 384.0;
-const FILE_MANAGER_DIALOG_WIDTH_LG: f32 = 640.0;
+const FILE_MANAGER_QUICKLOOK_WIDTH: f32 = 1000.0; // Tauri QuickLook width: min(90vw, 1000px).
+const FILE_MANAGER_QUICKLOOK_HEIGHT: f32 = 800.0; // Tauri QuickLook height: min(90vh, 800px).
+const FILE_MANAGER_QUICKLOOK_MIN_WIDTH: f32 = 400.0; // Tauri QuickLook minWidth: min(400px, 95vw).
+const FILE_MANAGER_QUICKLOOK_MIN_HEIGHT: f32 = 300.0; // Tauri QuickLook minHeight: min(300px, 95vh).
 const FILE_MANAGER_BG_ACTIVE_BG_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg 40%.
 const FILE_MANAGER_BG_ACTIVE_PANEL_ALPHA: u32 = 0x66; // [data-bg-active] --color-theme-bg-panel 40%.
 const FILE_MANAGER_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // [data-bg-active] --color-theme-bg-hover 50%.
 const FILE_MANAGER_PANEL_80_ALPHA: u32 = 0xcc; // Tauri bg-theme-bg-panel/80.
 const FILE_MANAGER_ACTIVE_BORDER_ALPHA: u32 = 0x80; // Tauri border-oxide-accent/50.
 const FILE_MANAGER_SELECTED_BG_ALPHA: u32 = 0x33; // Tauri bg-theme-accent/20.
-const FILE_MANAGER_DIALOG_OVERLAY_ALPHA: u32 = 0x99;
+const FILE_MANAGER_BREADCRUMB_ACTIVE_ALPHA: u32 = 0x4d; // Tauri bg-theme-bg-hover/30.
+const FILE_MANAGER_BREADCRUMB_HOVER_ALPHA: u32 = 0x80; // Tauri hover:bg-theme-bg-hover/50.
 const FILE_MANAGER_DIALOG_BORDER_ALPHA: u32 = 0x99;
 const FILE_MANAGER_RED: u32 = 0xf87171; // Tauri text-red-400.
 const FILE_MANAGER_BLUE: u32 = 0x60a5fa; // Tauri text-blue-400.
@@ -131,10 +135,13 @@ pub(super) struct FileManagerProperties {
     modified: Option<i64>,
     accessed: Option<i64>,
     readonly: bool,
-    symlink_target: Option<String>,
     dir_files: Option<u64>,
     dir_dirs: Option<u64>,
     total_size: Option<u64>,
+    created: Option<i64>,
+    mode: Option<u32>,
+    mime_type: Option<String>,
+    is_symlink: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -186,6 +193,11 @@ pub(super) struct FileManagerState {
     pub(super) operation_progress: Option<FileManagerOperationProgress>,
     pub(super) operation_rx: Option<std::sync::mpsc::Receiver<FileManagerOperationEvent>>,
     pub(super) operation_poll_active: bool,
+    pub(super) properties_checksum: Option<LocalChecksumResult>,
+    pub(super) properties_checksum_loading: bool,
+    pub(super) properties_checksum_rx:
+        Option<std::sync::mpsc::Receiver<Result<LocalChecksumResult, String>>>,
+    pub(super) properties_checksum_poll_active: bool,
 }
 
 impl Default for FileManagerState {
@@ -226,6 +238,10 @@ impl Default for FileManagerState {
             operation_progress: None,
             operation_rx: None,
             operation_poll_active: false,
+            properties_checksum: None,
+            properties_checksum_loading: false,
+            properties_checksum_rx: None,
+            properties_checksum_poll_active: false,
         }
     }
 }

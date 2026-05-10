@@ -146,6 +146,18 @@ fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
 }
 
 impl WorkspaceApp {
+    pub(super) fn prepare_modal_interaction_boundary(&mut self) {
+        // Tauri dialogs are Radix modal roots: opening one dismisses background
+        // popovers and input focus before the overlay starts trapping events.
+        self.open_settings_select = None;
+        self.focused_settings_input = None;
+        self.settings_slider_drag = None;
+        self.ime_marked_text = None;
+        self.workspace_tooltip = None;
+        self.workspace_tooltip_pending = None;
+        self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+    }
+
     fn restore_session_tree_snapshot(&mut self) {
         let path = default_session_tree_path();
         let Ok(bytes) = fs::read(&path) else {

@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
     px, rgb, rgba,
 };
+use oxideterm_gpui_ui::modal::dialog_backdrop_color;
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
 use super::ssh_flow::SshConnectionIntent;
@@ -204,7 +205,11 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgba(0x000000cc))
+            .bg(dialog_backdrop_color())
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .w(px(480.0))

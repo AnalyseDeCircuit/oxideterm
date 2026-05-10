@@ -82,7 +82,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let label = match action {
+            SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
+            SidebarActionKind::AutoRoute => self.i18n.t("sidebar.tooltips.auto_route"),
+            SidebarActionKind::None => self.i18n.t("sidebar.panels.sftp"),
+        };
+        let tooltip_id = format!("sidebar-action-{:?}", action);
+        let tooltip_id_for_move = tooltip_id.clone();
         let mut button = div()
+            .id((gpui::ElementId::from("sidebar-action"), tooltip_id.clone()))
             .size(px(self.tokens.metrics.sidebar_action_size))
             .ml_1()
             .flex()
@@ -95,7 +103,24 @@ impl WorkspaceApp {
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
                 rgb(theme.text),
-            ));
+            ))
+            .on_mouse_move(cx.listener({
+                let label = label.clone();
+                move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id_for_move.clone(),
+                        label.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                }
+            }));
 
         button = match action {
             SidebarActionKind::NewConnection => button.on_mouse_down(
