@@ -77,6 +77,14 @@ impl WorkspaceApp {
             search: SearchBarState::default(),
             terminal_command_bar_focused: false,
             terminal_command_bar_draft: String::new(),
+            terminal_broadcast_enabled: false,
+            terminal_broadcast_targets: HashSet::new(),
+            terminal_broadcast_menu_open: false,
+            terminal_quick_commands_open: false,
+            terminal_quick_command_pending: None,
+            terminal_cast_player: None,
+            terminal_cast_seek_dragging: false,
+            quick_commands: QuickCommandsState::load(settings_store.path()),
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
@@ -193,6 +201,9 @@ impl WorkspaceApp {
                             workspace.sync_ssh_node_lifecycle(cx);
                             workspace.maybe_start_forwards_port_scan(cx);
                             workspace.maybe_refresh_forwards_stats(cx);
+                            if workspace.any_terminal_recording_active(cx) {
+                                cx.notify();
+                            }
                             if workspace.new_connection_form.is_some()
                                 || workspace.keyboard_interactive_challenge.is_some()
                                 || workspace.focused_settings_input.is_some()
@@ -295,6 +306,10 @@ impl WorkspaceApp {
             middle_click_paste: terminal.middle_click_paste,
             selection_requires_shift: terminal.selection_requires_shift,
             bidi_enabled: terminal.unicode.bidi_enabled,
+            command_marks_enabled: terminal.command_marks.enabled,
+            command_marks_user_input_observed: terminal.command_marks.user_input_observed,
+            command_marks_heuristic_detection: terminal.command_marks.heuristic_detection,
+            command_marks_show_hover_actions: terminal.command_marks.show_hover_actions,
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             render_policy: self.render_policy.clone(),
             background: self.terminal_background_preferences(background_key),
@@ -304,6 +319,11 @@ impl WorkspaceApp {
                 confirm: self.i18n.t("terminal.paste.confirm"),
                 cancel: self.i18n.t("terminal.paste.cancel"),
                 paste: self.i18n.t("terminal.paste.paste"),
+            },
+            command_selection_labels: TerminalCommandSelectionLabels {
+                actions: self.i18n.t("terminal.command_selection.actions"),
+                copy: self.i18n.t("terminal.command_selection.copy"),
+                copy_title: self.i18n.t("terminal.command_selection.copy_title"),
             },
             trzsz_labels: TerminalTrzszLabels {
                 select_upload_directory_title: self

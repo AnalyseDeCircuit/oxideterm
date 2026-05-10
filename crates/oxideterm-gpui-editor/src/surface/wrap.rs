@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::Arc;
+
 use gpui::Pixels;
 
 use super::{DisplayRowsCache, TextEditorView};
@@ -25,7 +27,7 @@ impl TextEditorView {
         self.display_rows().len().max(1)
     }
 
-    pub(super) fn display_rows(&self) -> Vec<DisplayRow> {
+    pub(super) fn display_rows(&self) -> Arc<Vec<DisplayRow>> {
         let wrap_column = self.wrap_column();
         let buffer_version = self.buffer.version();
         if let Some(cache) = self.display_rows_cache.borrow().as_ref()
@@ -35,7 +37,7 @@ impl TextEditorView {
             return cache.rows.clone();
         }
 
-        let rows = self.compute_display_rows(wrap_column);
+        let rows = Arc::new(self.compute_display_rows(wrap_column));
         *self.display_rows_cache.borrow_mut() = Some(DisplayRowsCache {
             buffer_version,
             wrap_column,

@@ -300,6 +300,97 @@ mod tests {
     }
 
     #[test]
+    fn shell_integration_osc633_creates_and_closes_command_mark() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]633;A\x07$ \x1b]633;B\x07echo hi\r\n\x1b]633;E;echo%20hi\x07hi\r\n\x1b]633;D;0\x07",
+            |event| events.push(event),
+        );
+
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("echo hi"));
+        assert!(marks[0].is_closed);
+        assert_eq!(
+            marks[0].closed_by,
+            Some(TerminalCommandMarkClosedBy::ShellIntegration)
+        );
+        assert_eq!(marks[0].exit_code, Some(0));
+        assert!(matches!(
+            integration.status().state,
+            ShellIntegrationLifecycleState::Closed
+        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Created(_))
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(_))
+        )));
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!visible_text.contains("633;"));
+        assert!(!visible_text.contains("echo%20hi"));
+    }
+
+    #[test]
+    fn shell_integration_scanner_waits_for_split_osc_terminator() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(&mut parser, &mut term, b"\x1b]633;A\x07$ \x1b]633;B\x07", |event| {
+            events.push(event)
+        });
+        integration.advance(&mut parser, &mut term, b"\x1b]633;E;pwd", |event| {
+            events.push(event)
+        });
+        assert!(integration.command_marks().is_empty());
+        integration.advance(&mut parser, &mut term, b"\x07/home\r\n", |event| {
+            events.push(event)
+        });
+
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("pwd"));
+        assert!(!marks[0].is_closed);
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!visible_text.contains("633;"));
+        assert!(!visible_text.contains("pwd\x07"));
+    }
+
+    #[test]
     fn color_request_uses_oxideterm_terminal_palette_indices() {
         let dim_background = color_for_alacritty_request_with_override(268, None);
         assert_eq!(dim_background.r, OXIDETERM_DARK_THEME.ansi[0].r);

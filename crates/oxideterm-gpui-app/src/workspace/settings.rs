@@ -26,7 +26,7 @@ use oxideterm_gpui_ui::{
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider},
-    text_input::{TextInputView, text_input, text_input_anchor_probe},
+    text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
 
 include!("settings/surface.rs");

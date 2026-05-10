@@ -77,7 +77,7 @@ impl TerminalPane {
         if let Some(sequence) =
             oxideterm_key_escape_sequence(&event.keystroke, &mode, false, key_event_type)
         {
-            self.send_protocol_bytes(sequence.as_bytes(), cx);
+            self.send_user_protocol_bytes(sequence.as_bytes(), cx);
         }
     }
 
@@ -189,7 +189,7 @@ impl TerminalPane {
             return;
         }
 
-        self.send_protocol_bytes(&[0x03], cx);
+        self.send_user_protocol_bytes(&[0x03], cx);
     }
 
     fn copy_selection_after_select_if_configured(&mut self, cx: &mut Context<Self>) {
@@ -326,6 +326,9 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let point = self.terminal_point_for_position(position);
+        let Some(point) = grid_point_for_viewport_point(&self.snapshot, point) else {
+            return;
+        };
         self.selection = Some(TerminalSelection {
             anchor: point,
             head: point,
@@ -364,7 +367,9 @@ impl TerminalPane {
 
         let point = self.terminal_point_for_position(position);
         if let Some(selection) = &mut self.selection {
-            selection.head = point;
+            if let Some(point) = grid_point_for_viewport_point(&self.snapshot, point) {
+                selection.head = point;
+            }
         }
         cx.notify();
     }
@@ -572,6 +577,11 @@ impl TerminalPane {
             }
         } else if self.selection_allowed(event.modifiers.shift) {
             self.finish_selection(event.position, cx);
+            if event.button == MouseButton::Left
+                && self.selection.is_some_and(|selection| selection.is_empty())
+            {
+                self.select_command_mark_at_position(event.position, cx);
+            }
             self.last_mouse_report_point = None;
         } else {
             self.selecting = false;
@@ -581,6 +591,35 @@ impl TerminalPane {
 
     fn selection_allowed(&self, shift: bool) -> bool {
         !self.settings.selection_requires_shift || shift
+    }
+
+    fn select_command_mark_at_position(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings.command_marks_enabled {
+            return;
+        }
+        let point = self.terminal_point_for_position(position);
+        let absolute_line = self
+            .snapshot
+            .scrollback_lines
+            .saturating_add(point.row)
+            .saturating_sub(self.snapshot.display_offset);
+        let selected = self
+            .command_marks
+            .iter()
+            .rev()
+            .find(|mark| {
+                let end_line = self.selectable_command_mark_end_line(mark);
+                absolute_line >= mark.start_line && absolute_line <= end_line
+            })
+            .map(|mark| mark.command_id.clone());
+        if self.selected_command_mark_id != selected {
+            self.selected_command_mark_id = selected;
+            cx.notify();
+        }
     }
 }
 

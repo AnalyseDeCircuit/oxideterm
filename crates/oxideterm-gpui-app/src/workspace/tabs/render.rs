@@ -125,8 +125,171 @@ impl WorkspaceApp {
             );
         }
 
-        bar = bar.child(tabs_row);
+        bar = bar
+            .child(tabs_row)
+            .child(div().flex_1().min_w(px(0.0)))
+            .when_some(self.render_legacy_terminal_actions(cx), |bar, actions| {
+                bar.child(actions)
+            });
         bar.into_any_element()
+    }
+
+    fn render_legacy_terminal_actions(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let active_tab = self.active_tab()?;
+        if !matches!(active_tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+            return None;
+        }
+        let command_bar = &self.settings_store.settings().terminal.command_bar;
+        if command_bar.enabled && !command_bar.show_legacy_toolbar {
+            return None;
+        }
+
+        let theme = self.tokens.ui;
+        let is_local_terminal = active_tab.kind == TabKind::LocalTerminal;
+        let can_split = is_local_terminal
+            && active_tab
+                .root_pane
+                .as_ref()
+                .is_some_and(|root| root.pane_count() < MAX_PANES_PER_TAB);
+        let pane_count = active_tab
+            .root_pane
+            .as_ref()
+            .map(|root| root.pane_count())
+            .unwrap_or(1);
+        let active_pane_id = self.active_pane_id();
+        let broadcast_targets =
+            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)));
+        let broadcast_label = if self.terminal_broadcast_enabled {
+            if self.terminal_broadcast_targets.is_empty() {
+                self.i18n.t("terminal.command_bar.all_targets")
+            } else {
+                broadcast_targets.len().to_string()
+            }
+        } else {
+            String::new()
+        };
+
+        Some(
+            div()
+                .h_full()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .px(px(8.0))
+                .border_l_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg))
+                .when(
+                    self.terminal_broadcast_enabled && !broadcast_label.is_empty(),
+                    |actions| {
+                        actions.child(
+                            div()
+                                .h(px(20.0))
+                                .px(px(6.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .rounded_md()
+                                .border_1()
+                                .border_color(rgba(0xf973164d))
+                                .bg(rgba(0xf973161a))
+                                .text_size(px(11.0))
+                                .text_color(rgba(0xfdba74ff))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::Radio,
+                                    12.0,
+                                    rgba(0xfdba74ff),
+                                ))
+                                .child(broadcast_label),
+                        )
+                    },
+                )
+                .when(is_local_terminal, |actions| {
+                    actions
+                        .child(
+                            terminal_legacy_icon_button(
+                                &self.tokens,
+                                LucideIcon::ArrowLeftRight,
+                                can_split,
+                            )
+                            .when(can_split, |button| {
+                                button.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, window, cx| {
+                                        this.split_active_pane(
+                                            SplitDirection::Horizontal,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            }),
+                        )
+                        .child(
+                            terminal_legacy_icon_button(
+                                &self.tokens,
+                                LucideIcon::PanelLeft,
+                                can_split,
+                            )
+                            .when(can_split, |button| {
+                                button.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, window, cx| {
+                                        this.split_active_pane(SplitDirection::Vertical, window, cx);
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            }),
+                        )
+                        .when(pane_count > 1, |actions| {
+                            actions.child(
+                                div()
+                                    .h(px(20.0))
+                                    .min_w(px(20.0))
+                                    .px(px(5.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .bg(rgba((theme.bg_panel << 8) | 0xcc))
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(pane_count.to_string()),
+                            )
+                        })
+                })
+                .child(
+                    terminal_legacy_icon_button(&self.tokens, LucideIcon::Radio, true)
+                        .bg(if self.terminal_broadcast_enabled {
+                            rgba(0xf9731626)
+                        } else {
+                            rgba(0x00000000)
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.terminal_broadcast_menu_open =
+                                    !this.terminal_broadcast_menu_open;
+                                this.terminal_quick_commands_open = false;
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(terminal_legacy_icon_button(
+                    &self.tokens,
+                    LucideIcon::Square,
+                    false,
+                ))
+                .child(terminal_legacy_icon_button(
+                    &self.tokens,
+                    LucideIcon::Play,
+                    false,
+                ))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn render_empty_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -303,4 +466,30 @@ impl WorkspaceApp {
             .child(self.i18n.t(label_key))
             .into_any_element()
     }
+}
+
+fn terminal_legacy_icon_button(
+    tokens: &ThemeTokens,
+    icon: LucideIcon,
+    enabled: bool,
+) -> gpui::Div {
+    let theme = tokens.ui;
+    let color = if enabled {
+        rgb(theme.text_muted)
+    } else {
+        rgba((theme.text_muted << 8) | 0x59)
+    };
+    div()
+        .size(px(24.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .text_color(color)
+        .when(enabled, |button| {
+            button
+                .cursor_pointer()
+                .hover(move |style| style.bg(rgb(theme.bg_hover)))
+        })
+        .child(WorkspaceApp::render_lucide_icon(icon, 14.0, color))
 }

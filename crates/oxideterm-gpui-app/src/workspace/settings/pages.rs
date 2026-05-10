@@ -1375,14 +1375,14 @@ impl WorkspaceApp {
             .gap(px(IDE_SETTINGS_TOGGLE_CARD_GAP))
             .child(self.ide_label_block(label_key, hint_key))
             .child(
-                checkbox(&self.tokens, String::new(), checked)
-                    .on_mouse_down(
+                div().flex_none().child(
+                    checkbox(&self.tokens, String::new(), checked).on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
                             this.edit_settings(|settings| setter(settings, !checked), cx);
                         }),
-                    )
-                    .into_any_element(),
+                    ),
+                ),
             )
             .into_any_element()
     }
@@ -1595,6 +1595,9 @@ impl WorkspaceApp {
 
     fn ide_label_block(&self, label_key: &str, hint_key: &str) -> AnyElement {
         div()
+            // Tauri flex rows leave this copy column to take the remaining
+            // width. Without flex_1 GPUI can shrink CJK labels to one glyph.
+            .flex_1()
             .min_w(px(0.0))
             .flex()
             .flex_col()
@@ -1624,7 +1627,7 @@ impl WorkspaceApp {
             .justify_between()
             .gap(px(16.0))
             .child(self.ide_label_block(label_key, hint_key))
-            .child(control)
+            .child(div().flex_none().child(control))
             .into_any_element()
     }
 
@@ -1636,15 +1639,18 @@ impl WorkspaceApp {
         suffix: Option<&'static str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut control = div().flex().items_center().gap(px(4.0)).child(
-            self.settings_text_input_control(
+        let mut control = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(self.settings_text_input_control(
                 input,
                 value,
                 placeholder,
                 IDE_SETTINGS_INPUT_WIDTH,
                 cx,
-            ),
-        );
+            ));
         if let Some(suffix) = suffix {
             control = control.child(
                 div()
@@ -1684,6 +1690,7 @@ impl WorkspaceApp {
         div()
             .relative()
             .w(px(width))
+            .flex_none()
             .child(select_anchor_probe(
                 anchor_id,
                 trigger,
@@ -1707,16 +1714,23 @@ impl WorkspaceApp {
         self.ide_dot_row(
             IDE_SETTINGS_BLUE_400,
             div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
-                .flex_wrap()
-                .gap(px(4.0))
+                .flex_col()
+                .gap(px(2.0))
                 .child(
                     div()
                         .text_color(rgb(self.tokens.ui.text))
                         .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.i18n.t(label_key)),
+                        .child(format!("{}:", self.i18n.t(label_key))),
                 )
-                .child(div().child(self.i18n.t(detail_key)))
+                .child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .child(self.i18n.t(detail_key)),
+                )
                 .into_any_element(),
         )
     }
@@ -1735,7 +1749,7 @@ impl WorkspaceApp {
                     .bg(rgb(color))
                     .flex_none(),
             )
-            .child(content)
+            .child(div().flex_1().min_w(px(0.0)).child(content))
             .into_any_element()
     }
 

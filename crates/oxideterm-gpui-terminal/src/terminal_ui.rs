@@ -35,6 +35,8 @@ pub(crate) const TERMINAL_MIDDLE_CLICK_PASTE: bool = false;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
 pub(crate) const TERMINAL_SELECTION_REQUIRES_SHIFT: bool = false;
 pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
+pub(crate) const TERMINAL_COMMAND_MARKS_ENABLED: bool = true;
+pub(crate) const TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS: bool = true;
 
 #[derive(Clone)]
 pub struct TerminalUiPreferences {
@@ -51,11 +53,16 @@ pub struct TerminalUiPreferences {
     pub middle_click_paste: bool,
     pub selection_requires_shift: bool,
     pub bidi_enabled: bool,
+    pub command_marks_enabled: bool,
+    pub command_marks_user_input_observed: bool,
+    pub command_marks_heuristic_detection: bool,
+    pub command_marks_show_hover_actions: bool,
     pub terminal_encoding: TerminalEncoding,
     pub theme: TerminalUiTheme,
     pub render_policy: EffectiveRenderPolicy,
     pub background: Option<TerminalBackgroundPreferences>,
     pub paste_labels: TerminalPasteLabels,
+    pub command_selection_labels: TerminalCommandSelectionLabels,
     pub trzsz_labels: TerminalTrzszLabels,
     pub notice_sink: Option<Arc<dyn Fn(TerminalNotice) + Send + Sync + 'static>>,
     pub highlight_rules: Vec<TerminalHighlightRule>,
@@ -78,11 +85,16 @@ impl Default for TerminalUiPreferences {
             middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
+            command_marks_enabled: TERMINAL_COMMAND_MARKS_ENABLED,
+            command_marks_user_input_observed: false,
+            command_marks_heuristic_detection: false,
+            command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
             terminal_encoding: TerminalEncoding::Utf8,
             theme: TerminalUiTheme::default(),
             render_policy: EffectiveRenderPolicy::quality(),
             background: None,
             paste_labels: TerminalPasteLabels::default(),
+            command_selection_labels: TerminalCommandSelectionLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
             notice_sink: None,
             highlight_rules: Vec::new(),
@@ -106,6 +118,23 @@ pub struct TerminalNotice {
     pub status_text: Option<String>,
     pub progress: Option<f32>,
     pub variant: TerminalNoticeVariant,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalCommandSelectionLabels {
+    pub actions: String,
+    pub copy: String,
+    pub copy_title: String,
+}
+
+impl Default for TerminalCommandSelectionLabels {
+    fn default() -> Self {
+        Self {
+            actions: "Command selection actions".to_string(),
+            copy: "Copy".to_string(),
+            copy_title: "Copy command output".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -273,6 +302,9 @@ pub(crate) struct TerminalUiSettings {
     pub(crate) keep_selection_on_copy: bool,
     pub(crate) selection_requires_shift: bool,
     pub(crate) bidi_enabled: bool,
+    pub(crate) command_marks_enabled: bool,
+    pub(crate) command_marks_user_input_observed: bool,
+    pub(crate) command_marks_show_hover_actions: bool,
 }
 
 impl Default for TerminalUiSettings {
@@ -287,6 +319,9 @@ impl Default for TerminalUiSettings {
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
+            command_marks_enabled: TERMINAL_COMMAND_MARKS_ENABLED,
+            command_marks_user_input_observed: false,
+            command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
         }
     }
 }
@@ -307,6 +342,12 @@ impl TerminalUiSettings {
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
             selection_requires_shift: preferences.selection_requires_shift,
             bidi_enabled: preferences.bidi_enabled,
+            command_marks_enabled: preferences.command_marks_enabled,
+            // Tauri wires manual input through an autosuggest recorder fallback;
+            // GPUI enables the same user-visible fallback whenever marks are on.
+            command_marks_user_input_observed: preferences.command_marks_user_input_observed
+                || preferences.command_marks_enabled,
+            command_marks_show_hover_actions: preferences.command_marks_show_hover_actions,
         }
     }
 }

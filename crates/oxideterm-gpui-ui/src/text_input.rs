@@ -119,8 +119,10 @@ pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
     let theme = tokens.ui;
     let empty = view.value.is_empty();
     let marked = view.marked_text.unwrap_or_default();
-    let display = if empty {
+    let display = if empty && marked.is_empty() {
         view.placeholder
+    } else if empty {
+        String::new()
     } else if view.secret {
         "•".repeat(view.value.chars().count())
     } else {

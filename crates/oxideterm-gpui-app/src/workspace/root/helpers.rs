@@ -137,12 +137,11 @@ fn alpha_byte(alpha: f32) -> u32 {
 }
 
 fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
-    SharedString::from(
-        settings
-            .terminal
-            .font_family
-            .terminal_family_name(&settings.terminal.custom_font_family),
-    )
+    let family = settings
+        .terminal
+        .font_family
+        .terminal_family_name(&settings.terminal.custom_font_family);
+    settings_css_font_family_head(&family).unwrap_or_else(|| gpui_font_family_name(&family))
 }
 
 impl WorkspaceApp {

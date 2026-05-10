@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Context, FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ObjectFit, Render, RenderImage, SharedString, StyledImage,
-    Window, div, prelude::*, px, rgb, rgba,
+    AnyElement, App, ClipboardItem, Context, FocusHandle, Focusable, FontWeight, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Render, RenderImage, SharedString,
+    StyledImage, Window, div, prelude::*, px, rgb, rgba,
 };
-use oxideterm_terminal::TerminalSnapshot;
+use oxideterm_terminal::{TerminalCommandMark, TerminalSnapshot};
 
 use super::TerminalPane;
 use crate::terminal_ui::*;
@@ -65,6 +65,14 @@ impl Render for TerminalPane {
                 focus_handle: self.focus_handle.clone(),
                 view: cx.entity(),
             }),
+        )
+        .command_marks(
+            if self.settings.command_marks_enabled {
+                self.command_marks.clone()
+            } else {
+                Vec::new()
+            },
+            self.selected_command_mark_id.clone(),
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
         .transparent_background(background.is_some());
@@ -145,10 +153,105 @@ impl Render for TerminalPane {
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
+            .when(
+                self.settings.command_marks_enabled
+                    && self.settings.command_marks_show_hover_actions,
+                |pane| {
+                    pane.when_some(self.selected_command_mark(), |pane, mark| {
+                        pane.child(self.render_command_mark_actions(mark, cx))
+                    })
+                },
+            )
     }
 }
 
 impl TerminalPane {
+    fn selected_command_mark(&self) -> Option<TerminalCommandMark> {
+        let selected_id = self.selected_command_mark_id.as_deref()?;
+        self.command_marks
+            .iter()
+            .find(|mark| mark.command_id == selected_id)
+            .cloned()
+    }
+
+    fn render_command_mark_actions(
+        &self,
+        mark: TerminalCommandMark,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let action_top = self.command_mark_action_top(&mark);
+        let copy_label = self.preferences.command_selection_labels.copy.clone();
+        let _copy_title = self.preferences.command_selection_labels.copy_title.clone();
+
+        div()
+            .absolute()
+            .top(px(action_top))
+            .right(px(10.0))
+            .flex()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(rgba(0x60a5fa59))
+                    .bg(rgba(0x0f172aeb))
+                    .px(px(7.0))
+                    .py(px(3.0))
+                    .text_size(px(10.0))
+                    .line_height(px(10.0))
+                    .text_color(rgb(0xbfdbfe))
+                    .cursor_pointer()
+                    .child(copy_label)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.copy_command_mark_output_to_clipboard(&mark, cx);
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn command_mark_action_top(&self, mark: &TerminalCommandMark) -> f32 {
+        let Some(bounds) = self.bounds else {
+            return 0.0;
+        };
+        let viewport_start = self
+            .snapshot
+            .scrollback_lines
+            .saturating_sub(self.snapshot.display_offset);
+        let end_line = self.selectable_command_mark_end_line(mark);
+        let visible_start = mark.start_line.max(viewport_start);
+        let visible_end =
+            end_line.min(viewport_start.saturating_add(self.snapshot.rows.saturating_sub(1)));
+        let start_row = visible_start.saturating_sub(viewport_start);
+        let end_row = visible_end.saturating_sub(viewport_start);
+        let overlay_top = start_row as f32 * self.metrics.line_height_f32();
+        let overlay_bottom = (end_row + 1) as f32 * self.metrics.line_height_f32();
+        let actions_height = 22.0;
+        let gap = 5.0;
+        let viewport_height = f32::from(bounds.size.height);
+        let space_above = overlay_top;
+        let space_below = viewport_height - overlay_bottom;
+        let top = if space_above >= actions_height + gap || space_below < actions_height + gap {
+            overlay_top - actions_height - gap
+        } else {
+            overlay_bottom + gap
+        };
+        top.clamp(0.0, (viewport_height - actions_height).max(0.0))
+    }
+
+    fn copy_command_mark_output_to_clipboard(
+        &mut self,
+        mark: &TerminalCommandMark,
+        cx: &mut Context<Self>,
+    ) {
+        let output = self.terminal.lock().command_output_text(mark);
+        cx.write_to_clipboard(ClipboardItem::new_string(output));
+    }
+
     fn render_paste_confirm_overlay(&self, content: &str, cx: &mut Context<Self>) -> AnyElement {
         const PREVIEW_MAX_LINES: usize = 5;
 

@@ -52,6 +52,8 @@ pub trait TerminalSessionBackend: Send {
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {
         None
     }
+    fn feed_recording_output(&mut self, _bytes: &[u8]) {}
+    fn reset_recording_playback(&mut self, _cols: usize, _rows: usize) {}
     fn feed_trzsz_terminal_output(&mut self, _bytes: &[u8]) {}
     fn interrupt_trzsz_transfer(&mut self) {}
     fn finish_trzsz_transfer(&mut self) {}
@@ -65,6 +67,9 @@ pub trait TerminalSessionBackend: Send {
     fn scroll_to_bottom(&mut self);
     fn scroll_to_display_offset(&mut self, offset: usize);
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch>;
+    fn command_output_text(&self, _mark: &TerminalCommandMark) -> String {
+        String::new()
+    }
     fn snapshot(&self) -> TerminalSnapshot;
     fn terminate_active_task(&mut self) -> Result<()>;
     fn kill_active_task(&mut self) -> Result<()>;

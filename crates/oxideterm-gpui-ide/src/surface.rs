@@ -9,11 +9,11 @@ use std::{
 };
 
 use gpui::{
-    AnchoredPositionMode, AnyElement, App, AppContext, ClipboardItem, Context, Corner, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
+    AnchoredPositionMode, AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Corner,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Render, SharedString, Styled, Timer, Window, anchored, deferred, div, prelude::*, px,
-    rgb, rgba, svg,
+    Point, Render, SharedString, Styled, Timer, UniformListScrollHandle, Window, anchored,
+    deferred, div, prelude::*, px, rgb, rgba, svg, uniform_list,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::TextEditorView;
@@ -21,6 +21,7 @@ use oxideterm_gpui_ui::{
     button::ButtonVariant,
     button::{ButtonOptions, ButtonRadius, ButtonSize, button_with},
     modal::{dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title},
+    select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,
 };
 use oxideterm_ide_core::{
@@ -211,8 +212,7 @@ struct TreeContextMenu {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AgentStatusMenu {
-    x: f32,
-    y: f32,
+    trigger_bounds: Bounds<Pixels>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,12 +270,14 @@ pub struct IdeSurface {
     folder_picker: FolderPickerState,
     folder_switch_confirm_open: bool,
     tree_rows_cache: Option<TreeRowsCache>,
+    tree_scroll_handle: UniformListScrollHandle,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,
     tab_drag: Option<TabDrag>,
     agent_opt_in_open: bool,
     agent_opt_in_remember: bool,
     agent_status_menu: Option<AgentStatusMenu>,
+    agent_status_trigger_bounds: Option<Bounds<Pixels>>,
     agent_remove_confirm_open: bool,
     agent_action: Option<AgentActionKind>,
     agent_poll_generation: u64,
@@ -315,12 +317,14 @@ impl IdeSurface {
             folder_picker: FolderPickerState::default(),
             folder_switch_confirm_open: false,
             tree_rows_cache: None,
+            tree_scroll_handle: UniformListScrollHandle::new(),
             tab_context_menu: None,
             tree_context_menu: None,
             tab_drag: None,
             agent_opt_in_open: false,
             agent_opt_in_remember: false,
             agent_status_menu: None,
+            agent_status_trigger_bounds: None,
             agent_remove_confirm_open: false,
             agent_action: None,
             agent_poll_generation: 0,
@@ -1610,9 +1614,9 @@ impl IdeSurface {
                             cx.stop_propagation();
                         }),
                     )
-                    // Tauri's tree renders the loaded root files directly with
-                    // `rootFiles.map(...)`; keep the same concrete row list so
-                    // SFTP listings cannot disappear behind GPUI list sizing.
+                    // Tauri's tree is a native browser scroller over fixed-height
+                    // rows. GPUI needs `uniform_list` here to keep the same
+                    // trackpad feel without laying out every file on each frame.
                     .child(self.render_tree_rows(snapshot.project.root, cx)),
             );
         tree.into_any_element()
@@ -1620,24 +1624,49 @@ impl IdeSurface {
 
     fn render_tree_rows(&mut self, root: IdeLocation, cx: &mut Context<Self>) -> AnyElement {
         let rows = self.flatten_tree_rows(root);
-        let mut list = div()
-            .id("ide-tree-scroll-content")
-            .size_full()
-            .overflow_y_scroll();
         if rows.is_empty() {
-            list = list.child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.labels.no_subfolders.clone()),
-            );
+            return div()
+                .id("ide-tree-scroll-content")
+                .size_full()
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.labels.no_subfolders.clone()),
+                )
+                .into_any_element();
         }
-        for row in rows.iter().cloned() {
-            list = list.child(self.render_tree_row(row.entry, row.depth, row.expanded, cx));
-        }
-        list.into_any_element()
+
+        let row_count = rows.len();
+        let selected = self.workspace.file_tree().selected().cloned();
+        let loading_paths = Arc::new(self.loading_paths.clone());
+        let tokens = self.tokens.clone();
+        let entity = cx.entity();
+
+        uniform_list(
+            "ide-tree-scroll-content",
+            row_count,
+            move |range, _window, _cx| {
+                range
+                    .filter_map(|index| rows.get(index).cloned())
+                    .map(|row| {
+                        render_tree_row_virtual(
+                            row,
+                            selected.as_ref(),
+                            loading_paths.as_ref(),
+                            &tokens,
+                            entity.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .track_scroll(self.tree_scroll_handle.clone())
+        .size_full()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .into_any_element()
     }
 
     fn flatten_tree_rows(&mut self, root: IdeLocation) -> Arc<Vec<TreeRenderRow>> {
@@ -1687,112 +1716,6 @@ impl IdeSurface {
                 self.push_flattened_tree_rows(entry.location, depth + 1, rows);
             }
         }
-    }
-
-    fn render_tree_row(
-        &mut self,
-        entry: FileTreeEntry,
-        depth: usize,
-        expanded: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selected = self.workspace.file_tree().selected() == Some(&entry.location);
-        let is_dir = matches!(entry.kind, FileKind::Directory);
-        let path_key = entry.location.stable_key();
-        let loading = self.loading_paths.contains(&path_key);
-        let icon = if is_dir {
-            file_icons::folder_icon(expanded, entry.name == ".git", &self.tokens)
-        } else {
-            file_icons::file_icon(&entry.name, &self.tokens)
-        };
-        let row_bg = if selected {
-            // Tauri tree open state is `bg-theme-accent/10 text-theme-accent`.
-            rgba((self.tokens.ui.accent << 8) | IDE_TREE_SELECTED_ALPHA)
-        } else {
-            rgba(0x00000000)
-        };
-        div()
-            .h(px(IDE_ROW_HEIGHT))
-            .px_1()
-            .flex()
-            .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .bg(row_bg)
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener({
-                    let entry = entry.clone();
-                    move |this, _event, _window, cx| {
-                        this.tree_context_menu = None;
-                        this.open_tree_entry(entry.clone(), cx);
-                    }
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener({
-                    let entry = entry.clone();
-                    move |this, event: &MouseDownEvent, _window, cx| {
-                        let _ = this
-                            .workspace
-                            .select_tree_entry(Some(entry.location.clone()));
-                        this.open_tree_context_menu(
-                            entry.location.clone(),
-                            matches!(entry.kind, FileKind::Directory),
-                            entry.name.clone(),
-                            event.position,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }
-                }),
-            )
-            .child(div().w(px((depth as f32) * IDE_TREE_INDENT_STEP)))
-            .child(if is_dir {
-                if expanded {
-                    self.icon(
-                        "lucide/chevron-down.svg",
-                        14.0,
-                        self.tokens.ui.text_secondary,
-                    )
-                } else {
-                    self.icon(
-                        "lucide/chevron-right.svg",
-                        14.0,
-                        self.tokens.ui.text_secondary,
-                    )
-                }
-            } else {
-                div().w(px(14.0)).into_any_element()
-            })
-            .child(if loading {
-                self.icon(
-                    "lucide/loader-circle.svg",
-                    IDE_ICON_SIZE,
-                    self.tokens.ui.accent,
-                )
-            } else if is_dir {
-                self.icon(icon.path, IDE_ICON_SIZE, icon.color)
-            } else {
-                self.icon(icon.path, IDE_FILE_ICON_SIZE, icon.color)
-            })
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(rgb(if selected {
-                        self.tokens.ui.accent
-                    } else if is_dir {
-                        self.tokens.ui.text
-                    } else {
-                        self.tokens.ui.text_muted
-                    }))
-                    .child(entry.name),
-            )
-            .into_any_element()
     }
 
     fn render_editor_area(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -2317,7 +2240,8 @@ impl IdeSurface {
     fn render_agent_status_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
         let status = self.fs.status();
         let (icon, label, color, opacity) = self.agent_status_trigger_parts(&status);
-        div()
+        let entity = cx.entity();
+        let trigger = div()
             .flex()
             .items_center()
             .gap_1()
@@ -2333,18 +2257,36 @@ impl IdeSurface {
             .child(label)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    this.agent_status_menu = Some(AgentStatusMenu {
-                        x: f32::from(event.position.x),
-                        y: f32::from(event.position.y),
-                    });
+                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                    let Some(trigger_bounds) = this.agent_status_trigger_bounds else {
+                        return;
+                    };
+                    this.agent_status_menu = Some(AgentStatusMenu { trigger_bounds });
                     this.tab_context_menu = None;
                     this.tree_context_menu = None;
                     cx.stop_propagation();
                     cx.notify();
                 }),
-            )
-            .into_any_element()
+            );
+
+        select_anchor_probe(
+            SelectAnchorId::IdeAgentStatus,
+            trigger,
+            move |anchor, _window, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    if this.agent_status_trigger_bounds != Some(anchor.bounds) {
+                        this.agent_status_trigger_bounds = Some(anchor.bounds);
+                        if this.agent_status_menu.is_some() {
+                            this.agent_status_menu = Some(AgentStatusMenu {
+                                trigger_bounds: anchor.bounds,
+                            });
+                            cx.notify();
+                        }
+                    }
+                });
+            },
+        )
+        .into_any_element()
     }
 
     fn agent_status_trigger_parts(&self, status: &AgentStatus) -> (&'static str, String, u32, f32) {
@@ -2406,8 +2348,10 @@ impl IdeSurface {
             IDE_AGENT_MENU_WIDTH
         };
         let height = self.agent_status_menu_height(&status);
-        let x = menu.x.max(8.0);
-        let y = (menu.y - height).max(8.0);
+        let x = f32::from(menu.trigger_bounds.left())
+            .min(f32::from(_window.viewport_size().width) - width - 8.0)
+            .max(8.0);
+        let y = (f32::from(menu.trigger_bounds.top()) - height - 6.0).max(8.0);
         let popup = div()
             .w(px(width))
             .py(px(IDE_AGENT_MENU_PADDING_Y))
@@ -3773,6 +3717,111 @@ impl IdeSurface {
             .text_color(rgb(color))
             .into_any_element()
     }
+}
+
+fn render_tree_row_virtual(
+    row: TreeRenderRow,
+    selected_location: Option<&IdeLocation>,
+    loading_paths: &HashSet<String>,
+    tokens: &ThemeTokens,
+    entity: Entity<IdeSurface>,
+) -> AnyElement {
+    let entry = row.entry;
+    let selected = selected_location == Some(&entry.location);
+    let is_dir = matches!(entry.kind, FileKind::Directory);
+    let path_key = entry.location.stable_key();
+    let loading = loading_paths.contains(&path_key);
+    let icon = if is_dir {
+        file_icons::folder_icon(row.expanded, entry.name == ".git", tokens)
+    } else {
+        file_icons::file_icon(&entry.name, tokens)
+    };
+    let row_bg = if selected {
+        rgba((tokens.ui.accent << 8) | IDE_TREE_SELECTED_ALPHA)
+    } else {
+        rgba(0x00000000)
+    };
+    let left_entry = entry.clone();
+    let right_entry = entry.clone();
+
+    div()
+        .h(px(IDE_ROW_HEIGHT))
+        .w_full()
+        .px_1()
+        .flex()
+        .items_center()
+        .gap_1()
+        .cursor_pointer()
+        .bg(row_bg)
+        .text_size(px(tokens.metrics.ui_text_xs))
+        .hover(|style| style.bg(rgba((tokens.ui.bg_hover << 8) | IDE_HOVER_ALPHA)))
+        .on_mouse_down(MouseButton::Left, {
+            let entity = entity.clone();
+            move |_event: &MouseDownEvent, _window, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.tree_context_menu = None;
+                    this.open_tree_entry(left_entry.clone(), cx);
+                    cx.stop_propagation();
+                });
+            }
+        })
+        .on_mouse_down(MouseButton::Right, {
+            let entity = entity.clone();
+            move |event: &MouseDownEvent, _window, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    let _ = this
+                        .workspace
+                        .select_tree_entry(Some(right_entry.location.clone()));
+                    this.open_tree_context_menu(
+                        right_entry.location.clone(),
+                        matches!(right_entry.kind, FileKind::Directory),
+                        right_entry.name.clone(),
+                        event.position,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                });
+            }
+        })
+        .child(div().w(px((row.depth as f32) * IDE_TREE_INDENT_STEP)))
+        .child(if is_dir {
+            if row.expanded {
+                tree_svg_icon("lucide/chevron-down.svg", 14.0, tokens.ui.text_secondary)
+            } else {
+                tree_svg_icon("lucide/chevron-right.svg", 14.0, tokens.ui.text_secondary)
+            }
+        } else {
+            div().w(px(14.0)).into_any_element()
+        })
+        .child(if loading {
+            tree_svg_icon("lucide/loader-circle.svg", IDE_ICON_SIZE, tokens.ui.accent)
+        } else if is_dir {
+            tree_svg_icon(icon.path, IDE_ICON_SIZE, icon.color)
+        } else {
+            tree_svg_icon(icon.path, IDE_FILE_ICON_SIZE, icon.color)
+        })
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_color(rgb(if selected {
+                    tokens.ui.accent
+                } else if is_dir {
+                    tokens.ui.text
+                } else {
+                    tokens.ui.text_muted
+                }))
+                .child(entry.name),
+        )
+        .into_any_element()
+}
+
+fn tree_svg_icon(path: &'static str, size: f32, color: u32) -> AnyElement {
+    svg()
+        .path(path)
+        .size(px(size))
+        .text_color(rgb(color))
+        .into_any_element()
 }
 
 fn apply_editor_runtime_settings(

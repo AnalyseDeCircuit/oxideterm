@@ -4,6 +4,7 @@ mod ide;
 mod ime;
 mod new_connection;
 mod pane_tree;
+mod quick_commands;
 mod session_manager;
 mod settings;
 mod sftp;
@@ -22,8 +23,9 @@ use anyhow::Result;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, CursorStyle, FocusHandle, Focusable, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
-    ParentElement, Pixels, Render, RenderImage, Rgba, ScrollWheelEvent, SharedString, Styled,
-    StyledImage, Subscription, Timer, Window, div, prelude::*, px, relative, rgb, rgba, svg,
+    ParentElement, PathPromptOptions, Pixels, Render, RenderImage, Rgba, ScrollWheelEvent,
+    SharedString, Styled, StyledImage, Subscription, Timer, Window, div, prelude::*, px, relative,
+    rgb, rgba, svg,
 };
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{
@@ -36,9 +38,10 @@ use oxideterm_gpui_platform::{
 };
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, SharedTerminalSession, TerminalBackgroundFit,
-    TerminalBackgroundPreferences, TerminalHighlightRenderMode,
+    TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalHighlightRenderMode,
     TerminalHighlightRule as UiHighlightRule, TerminalNotice, TerminalNoticeVariant, TerminalPane,
-    TerminalPasteLabels, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
+    TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalTrzszLabels,
+    TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
     toast::{ToastVariant, ToastView},
@@ -65,6 +68,7 @@ use oxideterm_ssh::{
     ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
     SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
 };
+use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
     TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
@@ -76,13 +80,14 @@ use oxideterm_workspace::{
     adjusted_split_sizes, balanced_sizes, sort_active_session_nodes,
 };
 
-use self::actions::SearchBarState;
+use self::actions::{SearchBarState, TerminalCastPlayerState};
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
     NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
 };
 use self::pane_tree::SplitDrag;
+use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
 use self::sidebar::SidebarSection;
 use crate::assets::LucideIcon;
@@ -97,9 +102,12 @@ use crate::{
 use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab, TerminalSettingsPage,
 };
-use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
+use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_probe};
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
-use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
+use oxideterm_gpui_ui::typography::{
+    css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
+    tauri_ui_font_family as settings_ui_font_family,
+};
 
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
@@ -113,6 +121,14 @@ pub(crate) struct WorkspaceApp {
     search: SearchBarState,
     terminal_command_bar_focused: bool,
     terminal_command_bar_draft: String,
+    terminal_broadcast_enabled: bool,
+    terminal_broadcast_targets: HashSet<PaneId>,
+    terminal_broadcast_menu_open: bool,
+    terminal_quick_commands_open: bool,
+    terminal_quick_command_pending: Option<String>,
+    terminal_cast_player: Option<TerminalCastPlayerState>,
+    terminal_cast_seek_dragging: bool,
+    quick_commands: QuickCommandsState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,

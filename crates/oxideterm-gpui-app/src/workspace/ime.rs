@@ -8,6 +8,7 @@ use gpui::{
 use super::WorkspaceApp;
 use super::forwards::ForwardInput;
 use super::new_connection::NewConnectionField;
+use super::quick_commands::QuickCommandInput;
 use super::session_manager::SessionManagerInput;
 use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
@@ -17,6 +18,8 @@ use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
 pub(super) enum WorkspaceImeTarget {
     Search,
     TerminalCommandBar,
+    TerminalCastSearch,
+    QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
     Forwards(ForwardInput),
@@ -30,6 +33,8 @@ impl WorkspaceImeTarget {
         let id = match self {
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
+            Self::TerminalCastSearch => 3,
+            Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
             Self::Forwards(input) => 1_700 + input.anchor_key(),
@@ -297,6 +302,12 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
+        if self.terminal_quick_commands_open
+            && let Some(input) = self.quick_commands.focused_input
+        {
+            return Some(WorkspaceImeTarget::QuickCommand(input));
+        }
+
         if self.auto_route_modal.open
             && self.session_manager.focused_input == Some(SessionManagerInput::AutoRouteDisplayName)
         {
@@ -333,6 +344,14 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalCommandBar);
         }
 
+        if self
+            .terminal_cast_player
+            .as_ref()
+            .is_some_and(|player| player.search_focused)
+        {
+            return Some(WorkspaceImeTarget::TerminalCastSearch);
+        }
+
         self.search.visible.then_some(WorkspaceImeTarget::Search)
     }
 
@@ -353,6 +372,12 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
                 .then(|| self.terminal_command_bar_draft.clone()),
+            WorkspaceImeTarget::TerminalCastSearch => self
+                .terminal_cast_player
+                .as_ref()
+                .filter(|player| player.search_focused)
+                .map(|player| player.search_query.clone()),
+            WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
@@ -456,6 +481,27 @@ impl WorkspaceApp {
                 if self.terminal_command_bar_focused {
                     replace_utf16(
                         &mut self.terminal_command_bar_draft,
+                        replacement_range,
+                        text,
+                    );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalCastSearch => {
+                if let Some(player) = self.terminal_cast_player.as_mut()
+                    && player.search_focused
+                {
+                    replace_utf16(&mut player.search_query, replacement_range, text);
+                    self.update_terminal_cast_search(cx);
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::QuickCommand(input) => {
+                if self.quick_commands.focused_input == Some(input) {
+                    replace_utf16(
+                        self.quick_command_input_value_mut(input),
                         replacement_range,
                         text,
                     );
