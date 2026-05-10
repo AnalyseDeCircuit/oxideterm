@@ -430,6 +430,9 @@
       "save_connection_hint": "首次使用預設關閉，之後將記住您的選擇。",
       "agent_forwarding": "啟用 SSH Agent 轉發",
       "agent_forwarding_hint": "僅在受信任的伺服器上啟用。惡意伺服器可能利用你本地的 SSH Agent 認證到其他主機。",
+      "post_connect_command": "連線後執行",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "可選。互動式 Shell 開啟後自動執行一次。",
       "proxy_chain": {
         "title": "代理鏈",
         "add_jump": "新增跳板伺服器",

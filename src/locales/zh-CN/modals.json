@@ -430,6 +430,9 @@
       "save_connection_hint": "首次使用默认关闭，之后将记住您的选择。",
       "agent_forwarding": "启用 SSH Agent 转发",
       "agent_forwarding_hint": "仅在受信任的服务器上启用。恶意服务器可能利用你本地的 SSH Agent 认证到其他主机。",
+      "post_connect_command": "连接后执行",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "可选。交互式 Shell 打开后自动执行一次。",
       "proxy_chain": {
         "title": "代理链",
         "add_jump": "添加跳板机",

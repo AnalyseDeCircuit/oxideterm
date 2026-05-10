@@ -430,6 +430,9 @@
       "save_connection_hint": "初回はオフ。次回以降は選択が記憶されます。",
       "agent_forwarding": "SSH Agent 転送を有効にする",
       "agent_forwarding_hint": "信頼できるサーバーでのみ有効にしてください。悪意のあるサーバーがローカルの SSH Agent を使用して他のホストに認証する可能性があります。",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "プロキシチェーン",
         "add_jump": "ジャンプサーバーを追加",

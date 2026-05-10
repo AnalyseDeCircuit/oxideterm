@@ -430,6 +430,9 @@
       "save_connection_hint": "Desactivado por defecto en el primer uso. Su elección se recordará.",
       "agent_forwarding": "Habilitar reenvío de agente SSH",
       "agent_forwarding_hint": "Habilitar solo en servidores de confianza. Un servidor malicioso podría usar tu agente SSH local para autenticarse en otros hosts.",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "Cadena de proxy",
         "add_jump": "Añadir servidor de salto",

@@ -394,6 +394,7 @@ export type SavedConnectionSnapshot = Readonly<{
   color: ConnectionInfo['color'];
   tags: ReadonlyArray<string>;
   agent_forwarding: boolean;
+  post_connect_command?: string | null;
   proxy_chain: ReadonlyArray<NonNullable<ConnectionInfo['proxy_chain']>[number]>;
 }>;
 

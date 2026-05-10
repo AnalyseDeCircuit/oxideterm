@@ -31,6 +31,7 @@ export type ConnectToSavedResult = {
 export type PendingSavedConnectionPlan = {
   connectionId: string;
   plan: SessionTreeConnectPlan;
+  postConnectCommand?: string | null;
 };
 
 export type ConnectToSavedHostKeyChallenge = {
@@ -44,6 +45,7 @@ async function finalizeConnectedSavedNode(
   connectionId: string,
   nodeId: string,
   options: ConnectToSavedOptions,
+  postConnectCommand?: string | null,
 ): Promise<ConnectToSavedResult> {
   const { createTab } = options;
   let sessionId: string;
@@ -61,13 +63,23 @@ async function finalizeConnectedSavedNode(
     }
   } else {
     const { createTerminalForNode } = useSessionTreeStore.getState();
-    const terminalId = await createTerminalForNode(nodeId);
+    const normalizedPostConnectCommand = normalizePostConnectCommand(postConnectCommand);
+    const terminalId = normalizedPostConnectCommand
+      ? await createTerminalForNode(nodeId, undefined, undefined, {
+        postConnectCommand: normalizedPostConnectCommand,
+      })
+      : await createTerminalForNode(nodeId);
     createTab('terminal', terminalId);
     sessionId = terminalId;
   }
 
   await api.markConnectionUsed(connectionId);
   return { nodeId, sessionId };
+}
+
+function normalizePostConnectCommand(command?: string | null): string | null {
+  const trimmed = command?.trim();
+  return trimmed ? trimmed : null;
 }
 
 async function runSavedConnectionPlan(
@@ -94,7 +106,12 @@ async function runSavedConnectionPlan(
     });
   }
 
-  return finalizeConnectedSavedNode(pendingPlan.connectionId, pendingPlan.plan.targetNodeId, options);
+  return finalizeConnectedSavedNode(
+    pendingPlan.connectionId,
+    pendingPlan.plan.targetNodeId,
+    options,
+    pendingPlan.postConnectCommand,
+  );
 }
 
 function shouldSuppressSavedConnectionError(errorMsg: string) {
@@ -243,6 +260,7 @@ export async function connectToSaved(
 
       return continueConnectToSavedPlan({
         connectionId,
+        postConnectCommand: savedConn.post_connect_command,
         plan: {
           targetNodeId: expandResult.targetNodeId,
           cleanupNodeId: expandResult.targetNodeId,
@@ -284,6 +302,7 @@ export async function connectToSaved(
       if (existingNode.runtime.status === 'idle' || existingNode.runtime.status === 'error') {
         return continueConnectToSavedPlan({
           connectionId,
+          postConnectCommand: savedConn.post_connect_command,
           plan: {
             targetNodeId: nodeId,
             currentIndex: 0,
@@ -307,6 +326,7 @@ export async function connectToSaved(
 
       return continueConnectToSavedPlan({
         connectionId,
+        postConnectCommand: savedConn.post_connect_command,
         plan: {
           targetNodeId: nodeId,
           cleanupNodeId: nodeId,
@@ -316,7 +336,7 @@ export async function connectToSaved(
       }, options);
     }
 
-    return finalizeConnectedSavedNode(connectionId, nodeId, options);
+    return finalizeConnectedSavedNode(connectionId, nodeId, options, savedConn.post_connect_command);
   } catch (error) {
     return handleSavedConnectionFailure(connectionId, error, options);
   }

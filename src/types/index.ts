@@ -336,6 +336,7 @@ export interface CreateTerminalRequest {
   cols?: number;
   rows?: number;
   maxBufferLines?: number;
+  postConnectCommand?: string | null;
 }
 
 /**
@@ -549,6 +550,7 @@ export interface ConnectionInfo {
   color: string | null;
   tags: string[];
   agent_forwarding?: boolean;
+  post_connect_command?: string | null;
   proxy_chain?: ProxyHopInfo[];
 }
 
@@ -696,6 +698,7 @@ export interface SaveConnectionRequest {
   color?: string;
   tags?: string[];
   agent_forwarding?: boolean;
+  post_connect_command?: string | null;
   proxy_chain?: SaveProxyHopRequest[];
 }
 

@@ -430,6 +430,9 @@
       "save_connection_hint": "Disattivato per impostazione predefinita al primo utilizzo. La scelta verrà ricordata.",
       "agent_forwarding": "Abilita inoltro agente SSH",
       "agent_forwarding_hint": "Abilitare solo per server affidabili. Un server malevolo potrebbe utilizzare il tuo agente SSH locale per autenticarsi su altri host.",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "Catena Proxy",
         "add_jump": "Aggiungi Jump Server",

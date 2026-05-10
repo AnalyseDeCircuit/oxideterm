@@ -430,6 +430,9 @@
       "save_connection_hint": "Mặc định tắt khi sử dụng lần đầu. Lựa chọn của bạn sẽ được ghi nhớ.",
       "agent_forwarding": "Bật chuyển tiếp SSH Agent",
       "agent_forwarding_hint": "Chỉ bật cho các máy chủ đáng tin cậy. Máy chủ độc hại có thể sử dụng SSH Agent cục bộ của bạn để xác thực với các máy chủ khác.",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "Proxy Chain",
         "add_jump": "Thêm Jump Server",

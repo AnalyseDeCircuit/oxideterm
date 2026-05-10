@@ -430,6 +430,9 @@
       "save_connection_hint": "Off by default on first use. Your choice will be remembered for next time.",
       "agent_forwarding": "Enable SSH Agent Forwarding",
       "agent_forwarding_hint": "Only enable for trusted servers. A malicious server could use your local SSH agent to authenticate to other hosts.",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "Proxy Chain",
         "add_jump": "Add Jump Server",

@@ -41,6 +41,7 @@ const OUTPUT_BATCH_MAX_BYTES: usize = 64 * 1024;
 const OUTPUT_BATCH_FLUSH_MS: u64 = 4;
 const OUTPUT_BATCH_INTERACTIVE_FLUSH_MS: u64 = 1;
 const OUTPUT_INTERACTIVE_WINDOW_MS: u64 = 120;
+const POST_CONNECT_COMMAND_MAX_BYTES: usize = 8192;
 
 async fn flush_pending_terminal_output(
     pending_output: &mut Vec<u8>,
@@ -78,6 +79,29 @@ struct TerminalPumpConfig {
     deferred_pty: Option<DeferredPtyConfig>,
     resize_debounce: Option<Duration>,
     terminal_ready_connection: Option<(Arc<SshConnectionRegistry>, String)>,
+    post_connect_input: Option<Vec<u8>>,
+}
+
+fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8>>, String> {
+    let Some(command) = command.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let mut normalized = command.replace("\r\n", "\n").replace('\r', "\n");
+    normalized = normalized.replace('\n', "\r");
+    if !normalized.ends_with('\r') {
+        normalized.push('\r');
+    }
+
+    let bytes = normalized.into_bytes();
+    if bytes.len() > POST_CONNECT_COMMAND_MAX_BYTES {
+        return Err(format!(
+            "Post-connect command is too long (max {} bytes)",
+            POST_CONNECT_COMMAND_MAX_BYTES
+        ));
+    }
+
+    Ok(Some(bytes))
 }
 
 fn auth_banner_prelude_bytes(banners: Vec<String>) -> Vec<u8> {
@@ -198,6 +222,14 @@ async fn run_terminal_channel_pump(
             "Deferred PTY allocated at {}x{} for session {}",
             pty_cols, pty_rows, session_id
         );
+    }
+
+    if let Some(post_connect_input) = pump_config.post_connect_input {
+        if let Err(e) = channel.data(&post_connect_input[..]).await {
+            tracing::error!("Failed to send post-connect command to SSH channel: {}", e);
+            let _ = channel.eof().await;
+            return;
+        }
     }
 
     let mut pending_resize: Option<(u16, u16)> = None;
@@ -437,6 +469,8 @@ pub struct CreateTerminalRequest {
     pub rows: u32,
     /// 缓冲区最大行数
     pub max_buffer_lines: Option<usize>,
+    /// Command to run after the shell has been opened.
+    pub post_connect_command: Option<String>,
 }
 
 fn default_cols() -> u32 {
@@ -475,6 +509,9 @@ pub async fn create_terminal(
         "Create terminal request for connection: {}",
         request.connection_id
     );
+
+    let post_connect_input =
+        normalize_post_connect_command(request.post_connect_command.as_deref())?;
 
     // 检查连接状态 - 如果正在重连则拒绝创建
     let connection_info = connection_registry
@@ -703,6 +740,7 @@ pub async fn create_terminal(
                 connection_registry.inner().clone(),
                 request.connection_id.clone(),
             )),
+            post_connect_input,
         },
     ));
 
@@ -1115,6 +1153,7 @@ pub async fn recreate_terminal_pty(
             deferred_pty: None,
             resize_debounce: None,
             terminal_ready_connection: None,
+            post_connect_input: None,
         },
     ));
 
@@ -1399,5 +1438,27 @@ mod tests {
             next_output_flush_delay(interactive_until),
             Duration::from_millis(OUTPUT_BATCH_FLUSH_MS)
         );
+    }
+
+    #[test]
+    fn normalize_post_connect_command_trims_and_adds_enter() {
+        assert_eq!(
+            normalize_post_connect_command(Some("  cd /srv/app  ")).unwrap(),
+            Some(b"cd /srv/app\r".to_vec())
+        );
+    }
+
+    #[test]
+    fn normalize_post_connect_command_preserves_multiline_as_enter_keys() {
+        assert_eq!(
+            normalize_post_connect_command(Some("cd /srv/app\nls")).unwrap(),
+            Some(b"cd /srv/app\rls\r".to_vec())
+        );
+    }
+
+    #[test]
+    fn normalize_post_connect_command_ignores_blank_values() {
+        assert_eq!(normalize_post_connect_command(Some("   ")).unwrap(), None);
+        assert_eq!(normalize_post_connect_command(None).unwrap(), None);
     }
 }

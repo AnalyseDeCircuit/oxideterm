@@ -294,6 +294,7 @@ function toSavedConnectionSnapshot(connection: {
   color: string | null;
   tags: ReadonlyArray<string>;
   agent_forwarding?: boolean;
+  post_connect_command?: string | null;
   proxy_chain?: ReadonlyArray<{
     host: string;
     port: number;
@@ -319,6 +320,7 @@ function toSavedConnectionSnapshot(connection: {
     color: connection.color,
     tags: [...connection.tags],
     agent_forwarding: connection.agent_forwarding ?? false,
+    post_connect_command: connection.post_connect_command ?? null,
     proxy_chain: (connection.proxy_chain ?? []).map((hop) => ({
       ...hop,
       agent_forwarding: hop.agent_forwarding ?? false,

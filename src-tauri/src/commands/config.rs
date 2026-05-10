@@ -546,6 +546,8 @@ pub struct ConnectionInfo {
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<ProxyHopInfo>,
 }
@@ -732,9 +734,17 @@ impl From<&SavedConnection> for ConnectionInfo {
             color: conn.color.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
+            post_connect_command: conn.options.post_connect_command.clone(),
             proxy_chain,
         }
     }
+}
+
+fn normalize_optional_post_connect_command(command: Option<&str>) -> Option<String> {
+    command
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn build_saved_auth_from_paths(
@@ -1087,6 +1097,7 @@ fn build_saved_connection_from_sync_payload(
         auth,
         options: crate::config::ConnectionOptions {
             agent_forwarding: payload.agent_forwarding,
+            post_connect_command: payload.post_connect_command.clone(),
             ..Default::default()
         },
         created_at: chrono::DateTime::parse_from_rfc3339(&payload.created_at)
@@ -1263,6 +1274,8 @@ pub struct SaveConnectionRequest {
     pub jump_host: Option<String>, // Legacy jump host for backward compatibility
     #[serde(default)]
     pub agent_forwarding: Option<bool>,
+    #[serde(default)]
+    pub post_connect_command: Option<String>,
     pub proxy_chain: Option<Vec<ProxyHopRequest>>, // Multi-hop proxy chain
 }
 
@@ -1796,6 +1809,10 @@ pub async fn save_connection(
             if let Some(agent_forwarding) = request.agent_forwarding {
                 conn.options.agent_forwarding = agent_forwarding;
             }
+            if let Some(ref post_connect_command) = request.post_connect_command {
+                conn.options.post_connect_command =
+                    normalize_optional_post_connect_command(Some(post_connect_command));
+            }
 
             conn.auth = build_saved_auth_for_update(
                 &conn.auth,
@@ -1944,6 +1961,9 @@ pub async fn save_connection(
                 auth,
                 options: crate::config::ConnectionOptions {
                     agent_forwarding: request.agent_forwarding.unwrap_or(false),
+                    post_connect_command: normalize_optional_post_connect_command(
+                        request.post_connect_command.as_deref(),
+                    ),
                     ..Default::default()
                 },
                 created_at: chrono::Utc::now(),
@@ -2247,6 +2267,7 @@ mod tests {
         let mut connection =
             SavedConnection::new_key("Prod", "prod.example.com", 22, "root", "/tmp/id_ed25519");
         connection.options.agent_forwarding = true;
+        connection.options.post_connect_command = Some("cd /srv/prod".to_string());
         connection.proxy_chain.push(ProxyHopConfig {
             host: "jump.example.com".to_string(),
             port: 22,
@@ -2261,6 +2282,10 @@ mod tests {
 
         assert!(!snapshot.revision.is_empty());
         assert!(payload.agent_forwarding);
+        assert_eq!(
+            payload.post_connect_command.as_deref(),
+            Some("cd /srv/prod")
+        );
         assert!(payload.proxy_chain[0].agent_forwarding);
     }
 
@@ -2313,6 +2338,7 @@ mod tests {
                     color: Some("#ff0000".to_string()),
                     tags: vec!["prod".to_string()],
                     agent_forwarding: true,
+                    post_connect_command: Some("cd /srv/prod".to_string()),
                     proxy_chain: Vec::new(),
                 }),
             }],
@@ -2332,6 +2358,10 @@ mod tests {
         assert_eq!(updated.port, 2222);
         assert_eq!(updated.username, "deploy");
         assert!(updated.options.agent_forwarding);
+        assert_eq!(
+            updated.options.post_connect_command.as_deref(),
+            Some("cd /srv/prod")
+        );
         assert_eq!(
             updated.auth,
             SavedAuth::Password {
@@ -2403,6 +2433,7 @@ mod tests {
                     color: None,
                     tags: Vec::new(),
                     agent_forwarding: false,
+                    post_connect_command: None,
                     proxy_chain: vec![ProxyHopInfo {
                         host: "jump-a.example.com".to_string(),
                         port: 22,
@@ -2458,6 +2489,7 @@ mod tests {
                     color: None,
                     tags: Vec::new(),
                     agent_forwarding: false,
+                    post_connect_command: None,
                     proxy_chain: vec![ProxyHopInfo {
                         host: "jump.example.com".to_string(),
                         port: 22,
@@ -2541,6 +2573,7 @@ mod tests {
                     color: None,
                     tags: Vec::new(),
                     agent_forwarding: false,
+                    post_connect_command: None,
                     proxy_chain: Vec::new(),
                 }),
             }],
@@ -2996,6 +3029,7 @@ pub struct SavedConnectionForConnect {
     pub passphrase: Option<String>,
     pub name: String,
     pub agent_forwarding: bool,
+    pub post_connect_command: Option<String>,
     pub proxy_chain: Vec<ProxyHopForConnect>,
 }
 
@@ -3059,6 +3093,7 @@ pub async fn get_saved_connection_for_connect(
         passphrase,
         name: conn.name.clone(),
         agent_forwarding: conn.options.agent_forwarding,
+        post_connect_command: conn.options.post_connect_command.clone(),
         proxy_chain,
     })
 }

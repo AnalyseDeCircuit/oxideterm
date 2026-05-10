@@ -62,6 +62,7 @@ export const EditConnectionPropertiesModal = ({
   const [passwordError, setPasswordError] = useState('');
   const [group, setGroup] = useState('');
   const [color, setColor] = useState('');
+  const [postConnectCommand, setPostConnectCommand] = useState('');
   const [groups, setGroups] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -87,6 +88,7 @@ export const EditConnectionPropertiesModal = ({
       setPasswordError('');
       setGroup(connection.group || 'Ungrouped');
       setColor(connection.color || '');
+      setPostConnectCommand(connection.post_connect_command || '');
       api.getGroups().then(setGroups).catch(() => setGroups([]));
     }
   }, [isOpen, connection]);
@@ -174,6 +176,7 @@ export const EditConnectionPropertiesModal = ({
         passphrase: (authType === 'key' || authType === 'certificate') && passphrase ? passphrase : undefined,
         color: color || undefined,
         tags: conn.tags,
+        post_connect_command: postConnectCommand.trim(),
       });
       onOpenChange(false);
       onSaved?.();
@@ -374,6 +377,21 @@ export const EditConnectionPropertiesModal = ({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="edit-post-connect-command">
+              {t('modals.new_connection.post_connect_command')}
+            </Label>
+            <Input
+              id="edit-post-connect-command"
+              value={postConnectCommand}
+              onChange={(e) => setPostConnectCommand(e.target.value)}
+              placeholder={t('modals.new_connection.post_connect_command_placeholder')}
+            />
+            <p className="text-xs text-theme-text-muted">
+              {t('modals.new_connection.post_connect_command_hint')}
+            </p>
           </div>
 
           {/* Color */}

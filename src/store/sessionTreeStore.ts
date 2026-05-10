@@ -290,7 +290,12 @@ interface SessionTreeStore {
   
   // ========== Terminal Management (新增) ==========
   /** 为节点创建新终端 */
-  createTerminalForNode: (nodeId: string, cols?: number, rows?: number) => Promise<string>;
+  createTerminalForNode: (
+    nodeId: string,
+    cols?: number,
+    rows?: number,
+    options?: { postConnectCommand?: string | null },
+  ) => Promise<string>;
   /** 关闭节点的指定终端 */
   closeTerminalForNode: (nodeId: string, terminalId: string) => Promise<void>;
   /** 本地清理终端映射（不调用后端） */
@@ -1421,7 +1426,12 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
     
     // ========== Terminal Management ==========
     
-    createTerminalForNode: async (nodeId: string, cols?: number, rows?: number) => {
+    createTerminalForNode: async (
+      nodeId: string,
+      cols?: number,
+      rows?: number,
+      options?: { postConnectCommand?: string | null },
+    ) => {
       const node = get().getNode(nodeId);
       if (!node) throw new Error(`Node ${nodeId} not found`);
       const connectionId = node.runtime.connectionId;
@@ -1438,6 +1448,7 @@ export const useSessionTreeStore = create<SessionTreeStore>()(
         cols,
         rows,
         maxBufferLines,
+        postConnectCommand: options?.postConnectCommand ?? undefined,
       });
       const terminalId = response.sessionId;
       

@@ -65,6 +65,7 @@ type ConnectFormRequest = {
   certPath?: string;
   passphrase?: string;
   agentForwarding?: boolean;
+  postConnectCommand?: string;
 };
 
 export const NewConnectionModal = () => {
@@ -111,6 +112,7 @@ export const NewConnectionModal = () => {
   const [proxyChainExpanded, setProxyChainExpanded] = useState(false);
   const [agentAvailable, setAgentAvailable] = useState<boolean | null>(null);
   const [agentForwarding, setAgentForwarding] = useState(false);
+  const [postConnectCommand, setPostConnectCommand] = useState('');
   const [connectHostKeyStatus, setConnectHostKeyStatus] = useState<HostKeyStatus | null>(null);
   const [pendingConnectRequest, setPendingConnectRequest] = useState<ConnectFormRequest | null>(null);
   const [pendingProxyConnectPlan, setPendingProxyConnectPlan] = useState<SessionTreeConnectPlan | null>(null);
@@ -146,7 +148,12 @@ export const NewConnectionModal = () => {
   }, [formatTestFailure, t, toastError, toastSuccess]);
 
   const finalizeConnectedNode = useCallback(async (request: ConnectFormRequest, nodeId: string) => {
-    const terminalId = await createTerminalForNode(nodeId, 120, 40);
+    const normalizedPostConnectCommand = request.postConnectCommand?.trim();
+    const terminalId = normalizedPostConnectCommand
+      ? await createTerminalForNode(nodeId, 120, 40, {
+        postConnectCommand: normalizedPostConnectCommand,
+      })
+      : await createTerminalForNode(nodeId, 120, 40);
     createTab('terminal', terminalId);
 
     setConnectHostKeyStatus(null);
@@ -171,6 +178,7 @@ export const NewConnectionModal = () => {
             : undefined,
           tags: [],
           agent_forwarding: request.agentForwarding,
+          post_connect_command: normalizedPostConnectCommand || null,
           proxy_chain: proxyServers.length > 0 ? proxyServers : undefined,
         });
         window.dispatchEvent(new CustomEvent('saved-connections-changed'));
@@ -193,6 +201,7 @@ export const NewConnectionModal = () => {
     keyPath,
     name,
     password,
+    postConnectCommand,
     proxyServers,
     saveConnection,
     savePassword,
@@ -390,6 +399,7 @@ export const NewConnectionModal = () => {
         certPath: authType === 'certificate' ? certPath : undefined,
         passphrase: (authType === 'key' || authType === 'default_key' || authType === 'certificate') && passphrase ? passphrase : undefined,
         agentForwarding,
+        postConnectCommand,
       };
 
       if (proxyServers.length > 0) {
@@ -1007,6 +1017,21 @@ export const NewConnectionModal = () => {
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="post-connect-command">
+                {t('modals.new_connection.post_connect_command')}
+              </Label>
+              <Input
+                id="post-connect-command"
+                value={postConnectCommand}
+                onChange={(e) => setPostConnectCommand(e.target.value)}
+                placeholder={t('modals.new_connection.post_connect_command_placeholder')}
+              />
+              <p className="text-xs text-theme-text-muted">
+                {t('modals.new_connection.post_connect_command_hint')}
+              </p>
             </div>
 
             <div className="flex items-center space-x-2">

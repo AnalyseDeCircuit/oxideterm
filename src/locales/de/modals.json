@@ -430,6 +430,9 @@
       "save_connection_hint": "Beim ersten Mal standardmäßig deaktiviert. Ihre Auswahl wird gespeichert.",
       "agent_forwarding": "SSH-Agent-Weiterleitung aktivieren",
       "agent_forwarding_hint": "Nur bei vertrauenswürdigen Servern aktivieren. Ein bösartiger Server könnte Ihren lokalen SSH-Agent verwenden, um sich bei anderen Hosts zu authentifizieren.",
+      "post_connect_command": "Run after connect",
+      "post_connect_command_placeholder": "cd /srv/app",
+      "post_connect_command_hint": "Optional. Runs once after the interactive shell opens.",
       "proxy_chain": {
         "title": "Proxy-Kette",
         "add_jump": "Jump-Server hinzufügen",

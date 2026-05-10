@@ -19,6 +19,7 @@ const connection: ConnectionInfo = {
   color: null,
   tags: ['team:red'],
   agent_forwarding: true,
+  post_connect_command: 'cd /srv/prod',
   proxy_chain: [],
 };
 
@@ -32,6 +33,7 @@ const saved: SavedConnectionForConnect = {
   cert_path: '/tmp/id_ed25519-cert.pub',
   passphrase: 'secret',
   agent_forwarding: true,
+  post_connect_command: 'cd /srv/prod',
   proxy_chain: [],
 };
 
@@ -52,5 +54,11 @@ describe('buildSaveConnectionRequestFromSaved', () => {
     });
 
     expect(request.group).toBeNull();
+  });
+
+  it('preserves the saved post-connect command', () => {
+    const request = buildSaveConnectionRequestFromSaved(connection, saved);
+
+    expect(request.post_connect_command).toBe('cd /srv/prod');
   });
 });

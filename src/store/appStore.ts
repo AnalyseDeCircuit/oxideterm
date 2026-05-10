@@ -1561,7 +1561,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         }
 
         // Step 4: 为目标节点创建终端并打开标签页
-        const terminalId = await treeStore.createTerminalForNode(expandResult.targetNodeId);
+        const postConnectCommand = savedConn.post_connect_command?.trim();
+        const terminalId = postConnectCommand
+          ? await treeStore.createTerminalForNode(expandResult.targetNodeId, undefined, undefined, {
+            postConnectCommand,
+          })
+          : await treeStore.createTerminalForNode(expandResult.targetNodeId);
         get().createTab('terminal', terminalId);
 
         useToastStore.getState().addToast({

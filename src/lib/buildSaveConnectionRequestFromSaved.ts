@@ -3,7 +3,16 @@ import type { ConnectionInfo, SaveConnectionRequest } from '@/types';
 
 type SaveableConnectionMetadata = Pick<
   ConnectionInfo,
-  'id' | 'name' | 'group' | 'host' | 'port' | 'username' | 'color' | 'tags' | 'agent_forwarding'
+  | 'id'
+  | 'name'
+  | 'group'
+  | 'host'
+  | 'port'
+  | 'username'
+  | 'color'
+  | 'tags'
+  | 'agent_forwarding'
+  | 'post_connect_command'
 >;
 
 type SaveConnectionOverrides = Partial<Omit<SaveConnectionRequest, 'proxy_chain'>>;
@@ -39,6 +48,9 @@ export function buildSaveConnectionRequestFromSaved(
     agent_forwarding: hasOverride(overrides, 'agent_forwarding')
       ? overrides.agent_forwarding
       : connection.agent_forwarding ?? saved.agent_forwarding,
+    post_connect_command: hasOverride(overrides, 'post_connect_command')
+      ? overrides.post_connect_command
+      : connection.post_connect_command ?? saved.post_connect_command ?? null,
     proxy_chain: saved.proxy_chain.length
       ? saved.proxy_chain.map((hop) => ({
           host: hop.host,

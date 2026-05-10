@@ -319,6 +319,7 @@ export type SavedConnectionForConnect = {
   passphrase?: string;
   name: string;
   agent_forwarding: boolean;
+  post_connect_command?: string | null;
   proxy_chain: SavedConnectionProxyHopForConnect[];
 };
 
@@ -652,6 +653,7 @@ export const api = {
         password: 'mock-password',
         name: 'Mock Connection',
         agent_forwarding: false,
+        post_connect_command: null,
         proxy_chain: [],
       };
     }

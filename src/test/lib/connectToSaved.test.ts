@@ -173,6 +173,35 @@ describe('connectToSaved', () => {
     expect(sessionTreeState.connectNode).toHaveBeenCalledWith('node-forwarded');
   });
 
+  it('passes a saved post-connect command when creating a fresh terminal', async () => {
+    apiMocks.getSavedConnectionForConnect.mockResolvedValue({
+      name: 'Project Box',
+      host: 'project.example.com',
+      port: 22,
+      username: 'alice',
+      auth_type: 'agent',
+      agent_forwarding: false,
+      post_connect_command: '  cd /srv/project  ',
+      proxy_chain: [],
+    });
+    sessionTreeState.addRootNode.mockResolvedValue('node-project');
+    sessionTreeState.connectNode.mockResolvedValue(undefined);
+    sessionTreeState.createTerminalForNode.mockResolvedValue('term-project');
+
+    await connectToSaved('saved-project', {
+      createTab: vi.fn(),
+      toast: vi.fn(),
+      t: (key: string) => key,
+    });
+
+    expect(sessionTreeState.createTerminalForNode).toHaveBeenCalledWith(
+      'node-project',
+      undefined,
+      undefined,
+      { postConnectCommand: 'cd /srv/project' },
+    );
+  });
+
   it('activates an existing direct terminal tab instead of opening a duplicate', async () => {
     sessionTreeState.nodes = [
       {

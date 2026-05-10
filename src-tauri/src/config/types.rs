@@ -79,6 +79,10 @@ pub struct ConnectionOptions {
     /// Enable SSH agent forwarding for the target connection
     #[serde(default)]
     pub agent_forwarding: bool,
+
+    /// Command to run once after an interactive shell is opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_connect_command: Option<String>,
 }
 
 /// A saved connection configuration
@@ -494,6 +498,16 @@ mod tests {
 
         assert_eq!(value["options"]["agent_forwarding"], true);
         assert_eq!(value["proxy_chain"][0]["agent_forwarding"], true);
+    }
+
+    #[test]
+    fn test_saved_connection_serializes_post_connect_command() {
+        let mut conn = SavedConnection::new_password("Test", "example.com", 22, "user", "kc-123");
+        conn.options.post_connect_command = Some("cd /srv/app".to_string());
+
+        let value = serde_json::to_value(&conn).unwrap();
+
+        assert_eq!(value["options"]["post_connect_command"], "cd /srv/app");
     }
 
     #[test]
