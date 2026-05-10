@@ -16,6 +16,7 @@ members = [
   "crates/oxideterm-forwarding",
   "crates/oxideterm-preview",
   "crates/oxideterm-i18n",
+  "crates/oxideterm-local-files",
   "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",
   "crates/oxideterm-settings",

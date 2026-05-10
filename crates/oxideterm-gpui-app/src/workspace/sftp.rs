@@ -32,7 +32,7 @@ use oxideterm_sftp::{
 };
 use std::borrow::Cow;
 
-mod native_video;
+pub(super) mod native_video;
 
 use native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
 

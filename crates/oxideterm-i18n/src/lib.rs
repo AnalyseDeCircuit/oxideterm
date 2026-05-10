@@ -14,6 +14,7 @@ const EN_PARTS: &[&str] = &[
     include_str!("../locales/en/ssh.json"),
     include_str!("../locales/en/terminal.json"),
     include_str!("../locales/en/ide.json"),
+    include_str!("../locales/en/fileManager.json"),
 ];
 const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/common.json"),
@@ -27,6 +28,7 @@ const DE_PARTS: &[&str] = &[
     include_str!("../locales/de/ssh.json"),
     include_str!("../locales/de/terminal.json"),
     include_str!("../locales/de/ide.json"),
+    include_str!("../locales/de/fileManager.json"),
 ];
 const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/common.json"),
@@ -40,6 +42,7 @@ const ES_ES_PARTS: &[&str] = &[
     include_str!("../locales/es-ES/ssh.json"),
     include_str!("../locales/es-ES/terminal.json"),
     include_str!("../locales/es-ES/ide.json"),
+    include_str!("../locales/es-ES/fileManager.json"),
 ];
 const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/common.json"),
@@ -53,6 +56,7 @@ const FR_FR_PARTS: &[&str] = &[
     include_str!("../locales/fr-FR/ssh.json"),
     include_str!("../locales/fr-FR/terminal.json"),
     include_str!("../locales/fr-FR/ide.json"),
+    include_str!("../locales/fr-FR/fileManager.json"),
 ];
 const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/common.json"),
@@ -66,6 +70,7 @@ const IT_PARTS: &[&str] = &[
     include_str!("../locales/it/ssh.json"),
     include_str!("../locales/it/terminal.json"),
     include_str!("../locales/it/ide.json"),
+    include_str!("../locales/it/fileManager.json"),
 ];
 const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/common.json"),
@@ -79,6 +84,7 @@ const JA_PARTS: &[&str] = &[
     include_str!("../locales/ja/ssh.json"),
     include_str!("../locales/ja/terminal.json"),
     include_str!("../locales/ja/ide.json"),
+    include_str!("../locales/ja/fileManager.json"),
 ];
 const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/common.json"),
@@ -92,6 +98,7 @@ const KO_PARTS: &[&str] = &[
     include_str!("../locales/ko/ssh.json"),
     include_str!("../locales/ko/terminal.json"),
     include_str!("../locales/ko/ide.json"),
+    include_str!("../locales/ko/fileManager.json"),
 ];
 const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/common.json"),
@@ -105,6 +112,7 @@ const PT_BR_PARTS: &[&str] = &[
     include_str!("../locales/pt-BR/ssh.json"),
     include_str!("../locales/pt-BR/terminal.json"),
     include_str!("../locales/pt-BR/ide.json"),
+    include_str!("../locales/pt-BR/fileManager.json"),
 ];
 const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/common.json"),
@@ -118,6 +126,7 @@ const VI_PARTS: &[&str] = &[
     include_str!("../locales/vi/ssh.json"),
     include_str!("../locales/vi/terminal.json"),
     include_str!("../locales/vi/ide.json"),
+    include_str!("../locales/vi/fileManager.json"),
 ];
 const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/common.json"),
@@ -131,6 +140,7 @@ const ZH_CN_PARTS: &[&str] = &[
     include_str!("../locales/zh-CN/ssh.json"),
     include_str!("../locales/zh-CN/terminal.json"),
     include_str!("../locales/zh-CN/ide.json"),
+    include_str!("../locales/zh-CN/fileManager.json"),
 ];
 const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/common.json"),
@@ -144,6 +154,7 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/ssh.json"),
     include_str!("../locales/zh-TW/terminal.json"),
     include_str!("../locales/zh-TW/ide.json"),
+    include_str!("../locales/zh-TW/fileManager.json"),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -667,6 +678,46 @@ mod tests {
             "sftp.queue.status_error",
             "sftp.queue.empty",
             "sftp.errors.connection_lost",
+        ];
+
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                assert_ne!(i18n.t(key), key, "{locale:?} missing {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn file_manager_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "fileManager.title",
+            "fileManager.pathPlaceholder",
+            "fileManager.showDrives",
+            "fileManager.newFolder",
+            "fileManager.newFile",
+            "fileManager.openTerminalHere",
+            "fileManager.compress",
+            "fileManager.extract",
+            "fileManager.favorites",
+            "fileManager.addBookmark",
+            "fileManager.removeBookmark",
+            "fileManager.properties",
+            "fileManager.confirmDelete",
+            "fileManager.preview",
         ];
 
         for locale in locales {

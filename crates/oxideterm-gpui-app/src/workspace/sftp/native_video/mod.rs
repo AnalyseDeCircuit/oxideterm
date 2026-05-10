@@ -7,10 +7,10 @@ use gpui::{
 use oxideterm_preview::{PlatformVideoSnapshot, PlatformVideoState};
 
 #[derive(Clone, Default)]
-pub(super) struct SharedSftpNativeVideoSurface(Rc<RefCell<SftpNativeVideoSurface>>);
+pub(in crate::workspace) struct SharedSftpNativeVideoSurface(Rc<RefCell<SftpNativeVideoSurface>>);
 
 impl SharedSftpNativeVideoSurface {
-    pub(super) fn sync(
+    pub(in crate::workspace) fn sync(
         &self,
         path: &str,
         bounds: Bounds<Pixels>,
@@ -21,22 +21,22 @@ impl SharedSftpNativeVideoSurface {
     }
 
     #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub(super) fn snapshot(&self) -> PlatformVideoSnapshot {
+    pub(in crate::workspace) fn snapshot(&self) -> PlatformVideoSnapshot {
         self.0.borrow().snapshot()
     }
 
-    pub(super) fn detach(&self) {
+    pub(in crate::workspace) fn detach(&self) {
         self.0.borrow_mut().detach();
     }
 }
 
-pub(super) struct SftpNativeVideoElement {
+pub(in crate::workspace) struct SftpNativeVideoElement {
     path: String,
     surface: SharedSftpNativeVideoSurface,
     child: Option<AnyElement>,
 }
 
-pub(super) fn sftp_native_video_element(
+pub(in crate::workspace) fn sftp_native_video_element(
     path: String,
     surface: SharedSftpNativeVideoSurface,
     child: impl IntoElement,

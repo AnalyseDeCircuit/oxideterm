@@ -145,6 +145,7 @@ impl WorkspaceApp {
             forwarding_view: forwards::ForwardsViewState::default(),
             forwarding_port_detection_by_node: HashMap::new(),
             forwarding_port_profiler_nodes: HashSet::new(),
+            file_manager: FileManagerState::load(settings_store.path()),
             sftp_tab_nodes: HashMap::new(),
             sftp_view_node: None,
             sftp_local_path_memory: HashMap::new(),

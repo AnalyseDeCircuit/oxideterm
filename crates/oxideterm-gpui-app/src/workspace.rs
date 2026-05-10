@@ -1,4 +1,5 @@
 mod actions;
+mod file_manager;
 mod forwards;
 mod ide;
 mod ime;
@@ -83,6 +84,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
+use self::file_manager::FileManagerState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
@@ -190,6 +192,7 @@ pub(crate) struct WorkspaceApp {
     forwarding_view: forwards::ForwardsViewState,
     forwarding_port_detection_by_node: HashMap<NodeId, forwards::PortDetectionViewState>,
     forwarding_port_profiler_nodes: HashSet<NodeId>,
+    file_manager: FileManagerState,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     sftp_view_node: Option<NodeId>,
     sftp_local_path_memory: HashMap<NodeId, String>,

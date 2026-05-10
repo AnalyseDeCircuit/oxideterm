@@ -144,6 +144,8 @@ impl WorkspaceApp {
                         // not as a sidebar content section. Keep the current sidebar
                         // selection unchanged when it opens a terminal tab.
                         let _ = this.create_local_terminal_tab(window, cx);
+                    } else if section == SidebarSection::Files {
+                        this.open_file_manager_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

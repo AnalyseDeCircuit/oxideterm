@@ -23,6 +23,7 @@ oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-preview = { path = "../oxideterm-preview", features = ["pdfium"] }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
@@ -39,6 +40,8 @@ serde_json.workspace = true
 sysinfo.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+walkdir = "2"
+zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true

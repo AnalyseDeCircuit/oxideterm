@@ -23,7 +23,12 @@ impl Render for WorkspaceApp {
         if self.needs_active_pane_focus
             && self
                 .active_tab()
-                .is_some_and(|tab| !matches!(tab.kind, TabKind::Settings | TabKind::SessionManager))
+                .is_some_and(|tab| {
+                    !matches!(
+                        tab.kind,
+                        TabKind::Settings | TabKind::SessionManager | TabKind::FileManager
+                    )
+                })
             && !self.search.visible
             && self.new_connection_form.is_none()
             && let Some(pane) = self.active_pane()
@@ -37,6 +42,7 @@ impl Render for WorkspaceApp {
         let content = if let Some(tab) = self.active_tab() {
             match (&tab.kind, &tab.root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),
@@ -142,6 +148,22 @@ impl Render for WorkspaceApp {
                         return;
                     }
                     let _ = this.handle_sftp_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this
+                    .active_tab()
+                    .is_some_and(|tab| tab.kind == TabKind::FileManager)
+                {
+                    let key = event.keystroke.key.as_str();
+                    let file_manager_quick_look_space = matches!(key, "space" | " ")
+                        && this.file_manager.focused_input.is_none()
+                        && this.file_manager.dialog.is_none();
+                    if keystroke_commits_platform_text(&event.keystroke)
+                        && !file_manager_quick_look_space
+                    {
+                        return;
+                    }
+                    let _ = this.handle_file_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.active_surface == ActiveSurface::Settings

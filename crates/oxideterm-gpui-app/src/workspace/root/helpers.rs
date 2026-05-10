@@ -2,6 +2,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
     match kind {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
+        TabKind::FileManager => "file_manager",
         TabKind::Sftp => "sftp",
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
