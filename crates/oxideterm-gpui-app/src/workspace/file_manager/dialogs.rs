@@ -325,15 +325,34 @@ impl WorkspaceApp {
             )
             .into_any_element();
 
-        deferred(
-            anchored()
-                .anchor(Corner::TopLeft)
-                .position(gpui::point(px(x), px(y)))
-                .position_mode(AnchoredPositionMode::Window)
-                .child(popup),
-        )
-        .with_priority(100)
-        .into_any_element()
+        popover_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.file_manager.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, _window, cx| {
+                    this.file_manager.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(x), px(y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(popup),
+                )
+                .with_priority(100),
+            )
+            .into_any_element()
     }
 
     fn render_file_manager_context_menu_item(
@@ -436,20 +455,7 @@ impl WorkspaceApp {
             }
         };
         let width = FILE_MANAGER_DIALOG_WIDTH_SM;
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(dialog_backdrop_color())
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(
                 div()
                     .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
@@ -545,18 +551,7 @@ impl WorkspaceApp {
             .max(min_height)
             .min(max_height);
 
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(quicklook_backdrop_color())
-            .occlude()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        quicklook_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -608,20 +603,7 @@ impl WorkspaceApp {
         } else {
             icon_color
         };
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(dialog_backdrop_color())
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(
                 div()
                     .w(px(width.max(280.0)))

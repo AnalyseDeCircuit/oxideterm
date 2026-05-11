@@ -57,6 +57,7 @@
         "sftp": "SFTP",
         "disconnect": "切断",
         "reconnect": "再接続",
+        "cancel_reconnect": "再接続をキャンセル",
         "port_forwarding": "ポートフォワーディング",
         "drill_in": "ドリルイン（次のホップ）"
       }

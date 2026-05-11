@@ -158,6 +158,9 @@ impl WorkspaceApp {
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
             });
 
         let sidebar = self.render_quick_command_category_sidebar(cx);

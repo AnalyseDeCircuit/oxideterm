@@ -20,7 +20,9 @@ use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
     ButtonTone, TextInputView, button,
     button::{ButtonOptions, ButtonSize, ButtonVariant, button_with},
-    checkbox, form_field, modal_body, modal_container, modal_footer, modal_header, modal_overlay,
+    checkbox, form_field,
+    modal::popover_backdrop,
+    modal_body, modal_container, modal_footer, modal_header, modal_overlay,
     radio_group::{radio_group, radio_group_item},
     segmented_tab, segmented_tabs,
     select::{

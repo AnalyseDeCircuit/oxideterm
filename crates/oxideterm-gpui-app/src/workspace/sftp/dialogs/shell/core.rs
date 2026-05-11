@@ -98,22 +98,7 @@ impl WorkspaceApp {
         };
         let show_description = !description.is_empty() && !matches!(dialog, SftpDialog::Preview { .. });
 
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(dialog_backdrop_color())
-            // Matches Radix DialogOverlay's modal behavior: the backdrop is the top
-            // hitbox, so file rows and scroll containers behind preview cannot react.
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(
                 div()
                     .w(px(width))

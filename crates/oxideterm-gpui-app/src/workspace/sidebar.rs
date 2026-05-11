@@ -1,5 +1,6 @@
 use super::session_manager::SessionManagerInput;
 use super::*;
+use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{TreeBranchMetrics, tree_child};
 
 const SESSION_TREE_NODE_HEIGHT: f32 = 32.0;

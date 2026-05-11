@@ -58,6 +58,7 @@
         "port_forwarding": "Port Forwarding",
         "disconnect": "Disconnect",
         "reconnect": "Reconnect",
+        "cancel_reconnect": "Cancel Reconnect",
         "drill_in": "Drill In (Next Hop)"
       }
     },

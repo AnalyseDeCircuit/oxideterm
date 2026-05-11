@@ -24,6 +24,7 @@ impl WorkspaceApp {
         let has_settings_background = self.settings_background_active();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_row()
             .bg(if has_settings_background {
@@ -60,6 +61,9 @@ impl WorkspaceApp {
             )
             .when_some(self.render_settings_select_overlay(cx), |surface, overlay| {
                 surface.child(overlay)
+            })
+            .when_some(self.render_theme_editor_modal(cx), |surface, modal| {
+                surface.child(modal)
             })
             .into_any_element()
     }
@@ -245,6 +249,10 @@ impl WorkspaceApp {
             .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sftp_transfer_manager
             .apply_settings(sftp_runtime_settings_from_settings(&settings));
+        self.reconnect_orchestrator.configure(
+            reconnect_timing_from_settings(&settings),
+            reconnect_max_attempts_from_settings(&settings),
+        );
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_width = settings.sidebar_ui.width as f32;
         let panes = self

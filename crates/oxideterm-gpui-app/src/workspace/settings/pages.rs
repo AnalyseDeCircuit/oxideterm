@@ -1,4 +1,7 @@
 
+// Tauri ReconnectTab uses `max-w-2xl` for the switch row, select grids, and hint card.
+const SETTINGS_RECONNECT_MAX_WIDTH: f32 = 672.0;
+
 impl WorkspaceApp {
     fn settings_local(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = self.settings_store.settings();
@@ -172,19 +175,15 @@ impl WorkspaceApp {
 
     fn settings_reconnect(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = self.settings_store.settings();
+        let reconnect_enabled = settings.reconnect.enabled;
         vec![
-            self.bool_row(
-                "settings_view.reconnect.enabled",
-                "settings_view.reconnect.enabled_hint",
-                settings.reconnect.enabled,
-                set_reconnect_enabled,
-                cx,
-            ),
+            self.reconnect_enabled_row(reconnect_enabled, cx),
             separator(&self.tokens, SeparatorOrientation::Horizontal).into_any_element(),
             div()
                 .flex()
                 .flex_col()
                 .gap(px(24.0))
+                .opacity(if reconnect_enabled { 1.0 } else { 0.4 })
                 .child(
                     div()
                         .text_size(px(18.0))
@@ -195,63 +194,169 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(672.0))
+                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
                         .grid()
                         .grid_cols(2)
                         .gap(px(32.0))
-                        .child(self.number_row(
+                        .child(self.reconnect_select_field(
                             "settings_view.reconnect.max_attempts",
                             "settings_view.reconnect.max_attempts_hint",
-                            settings.reconnect.max_attempts,
-                            1,
-                            1,
-                            20,
-                            set_reconnect_max_attempts,
+                            SettingsSelect::ReconnectMaxAttempts,
+                            reconnect_attempt_label(settings.reconnect.max_attempts),
+                            reconnect_enabled,
                             cx,
                         ))
-                        .child(self.number_row(
+                        .child(self.reconnect_select_field(
                             "settings_view.reconnect.base_delay",
                             "settings_view.reconnect.base_delay_hint",
-                            settings.reconnect.base_delay_ms,
-                            500,
-                            500,
-                            10000,
-                            set_reconnect_base_delay,
+                            SettingsSelect::ReconnectBaseDelay,
+                            reconnect_delay_label(settings.reconnect.base_delay_ms),
+                            reconnect_enabled,
                             cx,
                         )),
                 )
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(672.0))
+                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
                         .grid()
                         .grid_cols(2)
                         .gap(px(32.0))
-                        .child(self.number_row(
+                        .child(self.reconnect_select_field(
                             "settings_view.reconnect.max_delay",
                             "settings_view.reconnect.max_delay_hint",
-                            settings.reconnect.max_delay_ms,
-                            5000,
-                            5000,
-                            60000,
-                            set_reconnect_max_delay,
+                            SettingsSelect::ReconnectMaxDelay,
+                            reconnect_delay_label(settings.reconnect.max_delay_ms),
+                            reconnect_enabled,
                             cx,
                         )),
                 )
                 .child(
                     div()
-                        .max_w(px(672.0))
+                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
                         .p(px(16.0))
                         .rounded(px(self.tokens.radii.md))
                         .border_1()
                         .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-                        .bg(rgb(self.tokens.ui.bg_card))
+                        .bg(self.settings_panel_background(self.tokens.ui.bg_card))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(self.i18n.t("settings_view.reconnect.formula_hint")),
                 )
                 .into_any_element(),
         ]
+    }
+
+    fn reconnect_enabled_row(&self, checked: bool, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .grid()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("settings_view.reconnect.enabled")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("settings_view.reconnect.enabled_hint")),
+                    ),
+            )
+            .child(
+                checkbox(&self.tokens, String::new(), checked)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.edit_settings(
+                                |settings| set_reconnect_enabled(settings, !checked),
+                                cx,
+                            );
+                        }),
+                    )
+                    .into_any_element(),
+            )
+            .into_any_element()
+    }
+
+    fn reconnect_select_field(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        select_id: SettingsSelect,
+        value: String,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let anchor_id = select_id.anchor_id();
+        let workspace = cx.entity();
+        let trigger = select_trigger(&self.tokens, value, false, !enabled);
+        let trigger = if enabled {
+            trigger.cursor_pointer().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.focused_settings_input = None;
+                    this.open_settings_select = if this.open_settings_select == Some(select_id) {
+                        None
+                    } else {
+                        Some(select_id)
+                    };
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+        } else {
+            trigger
+        };
+
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .grid()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .grid()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t(label_key)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t(hint_key)),
+                    ),
+            )
+            .child(select_anchor_probe(
+                anchor_id,
+                trigger,
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_select_anchor(anchor, cx);
+                    });
+                },
+            ))
+            .when(!enabled, |field| {
+                field.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+            })
+            .into_any_element()
     }
 
     fn settings_ai(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -658,5 +763,42 @@ impl WorkspaceApp {
             Language::ZhTw => "繁體中文",
         }
         .to_string()
+    }
+}
+
+fn reconnect_max_attempt_options() -> [i64; 8] {
+    [1, 2, 3, 5, 8, 10, 15, 20]
+}
+
+fn reconnect_base_delay_options() -> [(i64, &'static str); 6] {
+    [
+        (500, "0.5s"),
+        (1_000, "1s"),
+        (2_000, "2s"),
+        (3_000, "3s"),
+        (5_000, "5s"),
+        (10_000, "10s"),
+    ]
+}
+
+fn reconnect_max_delay_options() -> [(i64, &'static str); 5] {
+    [
+        (5_000, "5s"),
+        (10_000, "10s"),
+        (15_000, "15s"),
+        (30_000, "30s"),
+        (60_000, "60s"),
+    ]
+}
+
+fn reconnect_attempt_label(value: i64) -> String {
+    value.to_string()
+}
+
+fn reconnect_delay_label(value: i64) -> String {
+    if value % 1_000 == 0 {
+        format!("{}s", value / 1_000)
+    } else {
+        format!("{:.1}s", value as f64 / 1_000.0)
     }
 }

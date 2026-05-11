@@ -41,6 +41,7 @@ impl WorkspaceApp {
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
+        let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -103,6 +104,7 @@ impl WorkspaceApp {
             focused_settings_input: None,
             settings_input_draft: String::new(),
             settings_slider_drag: None,
+            theme_editor: None,
             background_blur_preview: None,
             background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
@@ -128,16 +130,31 @@ impl WorkspaceApp {
             node_event_tx,
             node_event_rx,
             node_event_generations: HashMap::new(),
-            reconnect_orchestrator: ReconnectOrchestratorStore::default(),
+            reconnect_orchestrator: ReconnectOrchestratorStore::new(
+                reconnect_timing_from_settings(&settings),
+                reconnect_max_attempts_from_settings(&settings),
+            ),
             reconnect_worker_tx,
             reconnect_worker_rx,
+            pending_reconnect_node_ids: HashSet::new(),
+            reconnect_debounce_scheduled: false,
+            reconnect_debounce_generation: 0,
+            reconnect_pipeline_active_node: None,
+            reconnect_requeue_counts: HashMap::new(),
+            last_ssh_active_probe_at: None,
+            ssh_active_probe_in_flight: false,
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_totals: HashMap::new(),
             reconnect_forward_restore_totals: HashMap::new(),
+            event_log_entries: VecDeque::new(),
+            event_log_next_id: 1,
+            event_log_unread_count: 0,
+            event_log_unread_errors: 0,
             terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
+            pending_ssh_terminal_opens: VecDeque::new(),
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
@@ -179,9 +196,23 @@ impl WorkspaceApp {
             terminal_notice_tx,
             terminal_notice_rx,
             workspace_toasts: Vec::new(),
+            connection_trace_tx,
+            connection_trace_rx,
+            connection_trace_toasts: HashMap::new(),
+            connection_trace_nodes: HashMap::new(),
+            connection_trace_attempt_seq: 0,
             workspace_tooltip: None,
             workspace_tooltip_pending: None,
             workspace_tooltip_generation: 0,
+            active_activity_view: WorkspaceActivityView::Notifications,
+            event_log_filter: WorkspaceEventFilter::default(),
+            event_log_dnd_enabled: true,
+            notification_entries: VecDeque::new(),
+            notification_next_id: 1,
+            notification_unread_count: 0,
+            notification_unread_critical_count: 0,
+            notification_filter: WorkspaceNotificationFilter::default(),
+            notification_dnd_enabled: true,
         };
         workspace.restore_session_tree_snapshot();
         let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
@@ -203,6 +234,7 @@ impl WorkspaceApp {
                             workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
+                            workspace.maybe_probe_active_ssh_connections(cx);
                             workspace.maybe_start_forwards_port_scan(cx);
                             workspace.maybe_refresh_forwards_stats(cx);
                             if workspace.any_terminal_recording_active(cx) {

@@ -57,6 +57,7 @@
         "sftp": "SFTP",
         "disconnect": "斷開",
         "reconnect": "重新連線",
+        "cancel_reconnect": "取消重連",
         "port_forwarding": "連接埠轉發",
         "drill_in": "深入連線（下一跳）"
       }

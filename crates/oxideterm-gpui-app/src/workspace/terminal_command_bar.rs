@@ -108,16 +108,6 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(4.0))
             .shadow_lg()
-            .when(self.terminal_broadcast_menu_open, |bar| {
-                bar.child(self.render_terminal_broadcast_menu(
-                    TerminalBroadcastMenuPlacement::Bottom(62.0),
-                    cx,
-                ))
-            })
-            .when(
-                quick_commands_enabled && self.terminal_quick_commands_open,
-                |bar| bar.child(self.render_terminal_quick_commands_popover(cx)),
-            )
             .child(
                 div()
                     .min_h(px(24.0))
@@ -530,7 +520,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_terminal_quick_commands_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn render_terminal_quick_commands_popover(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.render_quick_commands_popover(cx)
     }
 
@@ -565,6 +558,12 @@ impl WorkspaceApp {
             .shadow_lg()
             .p(px(6.0))
             .text_size(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .child(
                 div()
                     .px(px(6.0))

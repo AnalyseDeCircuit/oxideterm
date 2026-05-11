@@ -8,6 +8,7 @@ impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_tab_titles(cx);
         self.poll_forwarding_worker_results(cx);
+        self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
         let title = self
             .active_tab()
@@ -435,17 +436,71 @@ impl Render for WorkspaceApp {
                 },
             )
             .when(
-                self.terminal_broadcast_menu_open
-                    && !self.settings_store.settings().terminal.command_bar.enabled,
+                self.terminal_broadcast_menu_open,
                 |root| {
-                    root.child(self.render_terminal_broadcast_menu(
+                    let placement = if self.settings_store.settings().terminal.command_bar.enabled {
+                        actions::TerminalBroadcastMenuPlacement::Bottom(62.0)
+                    } else {
                         actions::TerminalBroadcastMenuPlacement::Top(
                             self.tokens.metrics.titlebar_height
                                 + self.tokens.metrics.tabbar_height
                                 + 6.0,
-                        ),
-                        cx,
-                    ))
+                        )
+                    };
+                    root.child(
+                        popover_backdrop()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.terminal_broadcast_menu_open = false;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.terminal_broadcast_menu_open = false;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .child(self.render_terminal_broadcast_menu(placement, cx)),
+                    )
+                },
+            )
+            .when(
+                self.settings_store
+                    .settings()
+                    .terminal
+                    .command_bar
+                    .quick_commands_enabled
+                    && self.terminal_quick_commands_open,
+                |root| {
+                    root.child(
+                        popover_backdrop()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.terminal_quick_commands_open = false;
+                                    this.terminal_quick_command_pending = None;
+                                    this.quick_commands.focused_input = None;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.terminal_quick_commands_open = false;
+                                    this.terminal_quick_command_pending = None;
+                                    this.quick_commands.focused_input = None;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .child(self.render_terminal_quick_commands_popover(cx)),
+                    )
                 },
             )
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
@@ -471,7 +526,7 @@ impl WorkspaceApp {
         y: f32,
         cx: &mut Context<Self>,
     ) {
-        const TOOLTIP_DELAY: Duration = Duration::from_millis(550);
+        const TOOLTIP_DELAY: Duration = Duration::from_millis(300); // Tauri TooltipProvider delayDuration.
 
         let id = id.into();
         let label = label.into();
@@ -570,6 +625,8 @@ impl WorkspaceApp {
         let now = Instant::now();
         self.workspace_toasts
             .retain(|toast| toast.expires_at > now);
+        self.connection_trace_toasts
+            .retain(|_, trace| trace.expires_at.map_or(true, |expires_at| expires_at > now));
 
         let mut added = false;
         while let Ok(notice) = self.terminal_notice_rx.try_recv() {
@@ -596,18 +653,208 @@ impl WorkspaceApp {
     }
 
     fn render_workspace_toasts(&self) -> Option<AnyElement> {
-        if self.workspace_toasts.is_empty() {
+        if self.workspace_toasts.is_empty()
+            && !self
+                .connection_trace_toasts
+                .values()
+                .any(|trace| trace.displayed.is_some())
+        {
             return None;
         }
 
-        let toasts = self.workspace_toasts.iter().map(|toast| ToastView {
+        let standard_toasts = self.workspace_toasts.iter().map(|toast| ToastView {
             title: toast.notice.title.clone(),
             description: toast.notice.description.clone(),
             status_text: toast.notice.status_text.clone(),
             progress: toast.notice.progress,
             variant: toast_variant_from_terminal(toast.notice.variant),
         });
+        let trace_toasts = self
+            .connection_trace_toasts
+            .values()
+            .filter_map(|trace| trace.displayed.as_ref())
+            .map(|event| ToastView {
+                title: self.connection_trace_title(event),
+                description: None,
+                status_text: Some(self.connection_trace_status_text(event)),
+                progress: Some(event.progress),
+                variant: match event.status {
+                    ConnectionTraceStatus::Ready => ToastVariant::Success,
+                    _ => ToastVariant::Default,
+                },
+            });
+        let toasts = standard_toasts.chain(trace_toasts);
         Some(toaster(&self.tokens, toasts).into_any_element())
+    }
+
+    fn poll_connection_trace_events(&mut self, cx: &mut Context<Self>) {
+        const DISPLAY_DELAY: Duration = Duration::from_millis(1200);
+        const UPDATE_COALESCE: Duration = Duration::from_millis(300);
+        const SUCCESS_DISMISS: Duration = Duration::from_millis(1800);
+
+        let mut changed = false;
+        while let Ok(event) = self.connection_trace_rx.try_recv() {
+            let now = Instant::now();
+            let attempt_id = event.attempt_id.clone();
+            let trace = self
+                .connection_trace_toasts
+                .entry(attempt_id.clone())
+                .or_insert_with(|| ActiveConnectionTrace {
+                    visible: false,
+                    latest: event.clone(),
+                    displayed: None,
+                    started_at: now,
+                    show_generation: 0,
+                    flush_generation: 0,
+                    expires_at: None,
+                });
+            trace.latest = event.clone();
+            trace.expires_at = None;
+
+            match event.status {
+                ConnectionTraceStatus::Running => {
+                    if !trace.visible && trace.show_generation == 0 {
+                        trace.show_generation = trace.show_generation.wrapping_add(1);
+                        let generation = trace.show_generation;
+                        let attempt_id = attempt_id.clone();
+                        cx.spawn(async move |weak, cx| {
+                            Timer::after(DISPLAY_DELAY).await;
+                            let _ = weak.update(cx, |workspace, cx| {
+                                workspace.show_connection_trace(&attempt_id, generation);
+                                cx.notify();
+                            });
+                        })
+                        .detach();
+                    } else {
+                        trace.flush_generation = trace.flush_generation.wrapping_add(1);
+                        let generation = trace.flush_generation;
+                        let attempt_id = attempt_id.clone();
+                        cx.spawn(async move |weak, cx| {
+                            Timer::after(UPDATE_COALESCE).await;
+                            let _ = weak.update(cx, |workspace, cx| {
+                                workspace.flush_connection_trace(&attempt_id, generation);
+                                cx.notify();
+                            });
+                        })
+                        .detach();
+                    }
+                }
+                ConnectionTraceStatus::Ready => {
+                    let elapsed_ms = trace
+                        .started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64;
+                    if trace.visible {
+                        let mut success = event;
+                        success.elapsed_ms = elapsed_ms;
+                        trace.latest = success.clone();
+                        trace.displayed = Some(success);
+                        trace.expires_at = Some(now + SUCCESS_DISMISS);
+                        let attempt_id = attempt_id.clone();
+                        cx.spawn(async move |weak, cx| {
+                            Timer::after(SUCCESS_DISMISS).await;
+                            let _ = weak.update(cx, |workspace, cx| {
+                                workspace.connection_trace_toasts.remove(&attempt_id);
+                                cx.notify();
+                            });
+                        })
+                        .detach();
+                    } else {
+                        self.connection_trace_toasts.remove(&attempt_id);
+                    }
+                    changed = true;
+                }
+                ConnectionTraceStatus::Failed | ConnectionTraceStatus::Cancelled => {
+                    self.connection_trace_toasts.remove(&attempt_id);
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn show_connection_trace(&mut self, attempt_id: &str, generation: u64) {
+        let Some(trace) = self.connection_trace_toasts.get_mut(attempt_id) else {
+            return;
+        };
+        if trace.visible
+            || trace.show_generation != generation
+            || trace.latest.status != ConnectionTraceStatus::Running
+        {
+            return;
+        }
+        trace.visible = true;
+        trace.displayed = Some(trace.latest.clone());
+    }
+
+    fn flush_connection_trace(&mut self, attempt_id: &str, generation: u64) {
+        let Some(trace) = self.connection_trace_toasts.get_mut(attempt_id) else {
+            return;
+        };
+        if !trace.visible
+            || trace.flush_generation != generation
+            || trace.latest.status != ConnectionTraceStatus::Running
+        {
+            return;
+        }
+        trace.displayed = Some(trace.latest.clone());
+    }
+
+    fn connection_trace_title(&self, event: &ConnectionTraceEvent) -> String {
+        let label = event
+            .label
+            .clone()
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| {
+                if event.node_id.0.is_empty() {
+                    self.i18n.t("connections.trace.target_unknown")
+                } else {
+                    event.node_id.0.clone()
+                }
+            });
+        let chain_title = event
+            .step_index
+            .zip(event.total_steps)
+            .filter(|(_, total)| *total > 1);
+        match (event.mode, chain_title) {
+            (ConnectionTraceMode::Reconnect, Some((current, total))) => self
+                .i18n
+                .t("connections.trace.reconnecting_chain")
+                .replace("{{current}}", &current.to_string())
+                .replace("{{total}}", &total.to_string())
+                .replace("{{label}}", &label),
+            (ConnectionTraceMode::Connect, Some((current, total))) => self
+                .i18n
+                .t("connections.trace.connecting_chain")
+                .replace("{{current}}", &current.to_string())
+                .replace("{{total}}", &total.to_string())
+                .replace("{{label}}", &label),
+            (ConnectionTraceMode::Reconnect, None) => self
+                .i18n
+                .t("connections.trace.reconnecting")
+                .replace("{{label}}", &label),
+            (ConnectionTraceMode::Connect, None) => self
+                .i18n
+                .t("connections.trace.connecting")
+                .replace("{{label}}", &label),
+        }
+    }
+
+    fn connection_trace_status_text(&self, event: &ConnectionTraceEvent) -> String {
+        if event.status == ConnectionTraceStatus::Ready {
+            return self
+                .i18n
+                .t("connections.trace.connected")
+                .replace("{{elapsed}}", &format_connection_trace_elapsed(event.elapsed_ms));
+        }
+        event
+            .detail
+            .clone()
+            .unwrap_or_else(|| self.i18n.t(connection_trace_stage_key(event.stage)))
     }
 }
 
@@ -617,5 +864,27 @@ fn toast_variant_from_terminal(variant: TerminalNoticeVariant) -> ToastVariant {
         TerminalNoticeVariant::Success => ToastVariant::Success,
         TerminalNoticeVariant::Error => ToastVariant::Error,
         TerminalNoticeVariant::Warning => ToastVariant::Warning,
+    }
+}
+
+fn connection_trace_stage_key(stage: ConnectionTraceStage) -> &'static str {
+    match stage {
+        ConnectionTraceStage::Queued => "connections.trace.stage.queued",
+        ConnectionTraceStage::Preparing => "connections.trace.stage.preparing",
+        ConnectionTraceStage::OpeningTransport => "connections.trace.stage.opening_transport",
+        ConnectionTraceStage::SshHandshake => "connections.trace.stage.ssh_handshake",
+        ConnectionTraceStage::HostKey => "connections.trace.stage.host_key",
+        ConnectionTraceStage::Authentication => "connections.trace.stage.authentication",
+        ConnectionTraceStage::Pty => "connections.trace.stage.pty",
+        ConnectionTraceStage::ShellReady => "connections.trace.stage.shell_ready",
+        ConnectionTraceStage::Ready => "connections.trace.stage.ready",
+    }
+}
+
+fn format_connection_trace_elapsed(ms: u64) -> String {
+    if ms < 10_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{}s", (ms + 500) / 1000)
     }
 }

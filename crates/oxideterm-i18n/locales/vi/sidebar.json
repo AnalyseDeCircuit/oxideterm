@@ -57,6 +57,7 @@
         "sftp": "SFTP",
         "disconnect": "Ngắt kết nối",
         "reconnect": "Kết nối lại",
+        "cancel_reconnect": "Hủy kết nối lại",
         "port_forwarding": "Chuyển tiếp cổng",
         "drill_in": "Drill In (Bước tiếp)"
       }

@@ -120,18 +120,25 @@ impl WorkspaceApp {
             self.file_manager.dialog,
             Some(FileManagerDialog::Preview { .. })
         ) {
+            let is_video_preview =
+                matches!(self.file_manager.preview, Some(LocalPreview::Video { .. }));
             match key {
-                "escape" | "space" | " " => {
+                "escape" => {
                     self.close_file_manager_dialog();
                     cx.notify();
                     return true;
                 }
-                "arrowleft" | "left" => {
+                "space" | " " if !is_video_preview => {
+                    self.close_file_manager_dialog();
+                    cx.notify();
+                    return true;
+                }
+                "arrowleft" | "left" if !is_video_preview => {
                     self.navigate_file_manager_preview(-1, cx);
                     cx.notify();
                     return true;
                 }
-                "arrowright" | "right" => {
+                "arrowright" | "right" if !is_video_preview => {
                     self.navigate_file_manager_preview(1, cx);
                     cx.notify();
                     return true;

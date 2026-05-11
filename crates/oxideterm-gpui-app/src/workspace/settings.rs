@@ -2,6 +2,7 @@ use gpui::{
     AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, StatefulInteractiveElement,
     StyledImage, anchored, deferred, point,
 };
+use gpui_component::scroll::ScrollableElement;
 use oxideterm_settings::{
     FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, create_default_highlight_rule, reindex_highlight_rules,
@@ -19,6 +20,7 @@ use oxideterm_gpui_ui::{
     button,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox::checkbox,
+    modal::{dialog_backdrop, popover_backdrop},
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_label, select_option,
         select_overlay_popup, select_panel_overlay_popup_with_max_height, select_separator,
@@ -28,6 +30,23 @@ use oxideterm_gpui_ui::{
     slider::{SliderView, slider},
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ThemeEditorSection {
+    Terminal,
+    Ui,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ThemeEditorState {
+    pub(super) edit_theme_id: Option<String>,
+    pub(super) name: String,
+    pub(super) duplicate_theme: String,
+    pub(super) duplicate_theme_touched: bool,
+    pub(super) terminal_colors: Vec<String>,
+    pub(super) ui_colors: Vec<String>,
+    pub(super) active_section: ThemeEditorSection,
+}
 
 include!("settings/surface.rs");
 include!("settings/cards.rs");

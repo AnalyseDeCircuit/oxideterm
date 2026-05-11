@@ -4,8 +4,9 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+use crate::modal::dialog_backdrop;
+
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
-const CONFIRM_OVERLAY_ALPHA: u32 = 0x99; // Tauri DialogOverlay bg-black/60
 const CONFIRM_BORDER_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
 const CONFIRM_DIVIDER_ALPHA: u32 = 0x66; // Tauri border-theme-border/40
 const CONFIRM_SHADOW_ALPHA: u32 = 0x66; // Tauri shadow-black/40
@@ -56,16 +57,7 @@ pub fn confirm_dialog(
     let confirm_color = if is_danger { TW_RED_400 } else { theme.accent };
     let confirm_hover_color = if is_danger { TW_RED_300 } else { theme.accent };
 
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(rgba((TW_BLACK << 8) | CONFIRM_OVERLAY_ALPHA))
+    dialog_backdrop()
         .child(
             div()
                 .w(px(CONFIRM_DIALOG_WIDTH))

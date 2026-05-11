@@ -57,6 +57,7 @@
         "sftp": "SFTP",
         "disconnect": "연결 끊기",
         "reconnect": "다시 연결",
+        "cancel_reconnect": "재연결 취소",
         "port_forwarding": "포트 포워딩",
         "drill_in": "드릴 인 (다음 홉)"
       }

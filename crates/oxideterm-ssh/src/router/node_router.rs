@@ -99,7 +99,18 @@ impl NodeRouter {
         self.runtime.reconcile_with_connections(&connections);
     }
 
-    pub fn resolve_connection(&self, node_id: &NodeId) -> Result<ResolvedConnection, RouteError> {
+    pub async fn resolve_connection(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<ResolvedConnection, RouteError> {
+        self.resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await
+    }
+
+    pub fn resolve_connection_now(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<ResolvedConnection, RouteError> {
         let runtime = self
             .runtime
             .snapshot(node_id)
@@ -394,6 +405,16 @@ impl NodeRouter {
             .or_else(|| self.node_id_for_connection(&connection.connection_id))?;
         self.sync_connection_state(&node_id, connection, reason)
             .ok()
+    }
+
+    pub fn sync_node_readiness_event(
+        &self,
+        node_id: &NodeId,
+        readiness: NodeReadiness,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        self.runtime
+            .apply_node_readiness(node_id, readiness, reason)
     }
 
     async fn resolve_connection_wait(

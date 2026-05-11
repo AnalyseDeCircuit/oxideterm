@@ -13,7 +13,7 @@ use oxideterm_gpui_ui::{
     TauriTableMetrics,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with},
     checkbox, icon_badge,
-    modal::dialog_backdrop_color,
+    modal::{dialog_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_overlay,
     surface::{color_for_background, color_for_background_or_alpha},
     tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header, tauri_table_row,

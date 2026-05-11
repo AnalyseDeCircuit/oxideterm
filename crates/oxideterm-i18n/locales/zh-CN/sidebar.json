@@ -58,6 +58,7 @@
         "port_forwarding": "端口转发",
         "disconnect": "断开",
         "reconnect": "重新连接",
+        "cancel_reconnect": "取消重连",
         "drill_in": "钻入 (下一跳)"
       }
     },

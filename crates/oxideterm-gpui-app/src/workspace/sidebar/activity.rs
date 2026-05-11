@@ -117,6 +117,24 @@ impl WorkspaceApp {
         let tooltip = self.activity_icon_tooltip(section);
         let tooltip_id = format!("activity-icon-{}", section.as_settings_key());
         let tooltip_id_for_move = tooltip_id.clone();
+        let badge_count = if section == SidebarSection::Notifications {
+            let notification_count = if self.notification_dnd_enabled {
+                0
+            } else {
+                self.notification_unread_count
+            };
+            let event_count = if self.event_log_dnd_enabled {
+                0
+            } else {
+                self.event_log_unread_count
+            };
+            notification_count.saturating_add(event_count)
+        } else {
+            0
+        };
+        let badge_is_error = section == SidebarSection::Notifications
+            && ((!self.notification_dnd_enabled && self.notification_unread_critical_count > 0)
+                || (!self.event_log_dnd_enabled && self.event_log_unread_errors > 0));
         div()
             .id(("activity-icon", section as u64))
             .relative()
@@ -159,6 +177,29 @@ impl WorkspaceApp {
                     rgb(theme.text)
                 },
             ))
+            .when(badge_count > 0, |icon_el| {
+                icon_el.child(
+                    div()
+                        .absolute()
+                        .right(px(1.0))
+                        .top(px(1.0))
+                        .min_w(px(14.0))
+                        .h(px(14.0))
+                        .px(px(3.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(rgb(if badge_is_error { 0xef4444 } else { theme.accent }))
+                        .text_color(rgb(0xffffff))
+                        .text_size(px(9.0))
+                        .child(if badge_count > 99 {
+                            "99+".to_string()
+                        } else {
+                            badge_count.to_string()
+                        }),
+                )
+            })
             .on_mouse_move(cx.listener({
                 let tooltip = tooltip.clone();
                 move |this, event: &MouseMoveEvent, _window, cx| {
@@ -190,6 +231,9 @@ impl WorkspaceApp {
                         let _ = this.create_local_terminal_tab(window, cx);
                     } else if section == SidebarSection::Files {
                         this.open_file_manager_tab(window, cx);
+                    } else if section == SidebarSection::Notifications {
+                        this.active_surface = ActiveSurface::Terminal;
+                        this.set_sidebar_section(section, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
                         this.set_sidebar_section(section, cx);

@@ -10,6 +10,7 @@ impl WorkspaceApp {
             .is_some();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(if has_background {
@@ -51,11 +52,30 @@ impl WorkspaceApp {
             })
             .when_some(
                 self.session_manager
-                    .row_context_menu_connection_id
-                    .as_deref()
-                    .and_then(|id| self.connection_info_by_id(id)),
+                .row_context_menu_connection_id
+                .as_deref()
+                .and_then(|id| self.connection_info_by_id(id)),
                 |surface, conn| {
-                    surface.child(self.render_row_context_menu(conn, window, has_background, cx))
+                    surface.child(
+                        popover_backdrop()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.session_manager.row_context_menu_connection_id = None;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.session_manager.row_context_menu_connection_id = None;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .child(self.render_row_context_menu(conn, window, has_background, cx)),
+                    )
                 },
             )
             .into_any_element()

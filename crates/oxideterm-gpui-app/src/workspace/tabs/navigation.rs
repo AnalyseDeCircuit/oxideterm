@@ -230,6 +230,23 @@ impl WorkspaceApp {
             nodes_to_disconnect.push(node_id.clone());
         }
         for affected_node_id in &nodes_to_disconnect {
+            self.cancel_connection_trace_for_node(affected_node_id);
+            self.reconnect_orchestrator.cancel(&affected_node_id.0);
+            self.pending_reconnect_node_ids.remove(affected_node_id);
+            self.reconnect_requeue_counts.remove(affected_node_id);
+            if self
+                .reconnect_pipeline_active_node
+                .as_ref()
+                .is_some_and(|active_node_id| active_node_id == affected_node_id)
+            {
+                self.reconnect_pipeline_active_node = None;
+            }
+            let _ = self.interrupt_sftp_transfers_by_node(
+                affected_node_id,
+                "Connection closed".to_string(),
+            );
+        }
+        for affected_node_id in &nodes_to_disconnect {
             self.forwarding_port_profiler_nodes.remove(affected_node_id);
             self.forwarding_port_detection_by_node.remove(affected_node_id);
             let forwarding_registry = self.forwarding_registry.clone();

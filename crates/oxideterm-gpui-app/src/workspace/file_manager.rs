@@ -11,7 +11,7 @@ use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_options,
 };
 use oxideterm_gpui_ui::{
-    modal::{dialog_backdrop_color, quicklook_backdrop_color},
+    modal::{dialog_backdrop, popover_backdrop, quicklook_backdrop},
     surface::{color_for_background, color_with_background_scaled_alpha},
     text_input::{TextInputView, text_caret, text_input, text_input_anchor_probe},
 };

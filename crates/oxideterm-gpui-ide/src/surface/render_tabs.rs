@@ -223,15 +223,34 @@ impl IdeSurface {
             )
             .into_any_element();
 
-        deferred(
-            anchored()
-                .anchor(Corner::TopLeft)
-                .position(gpui::point(px(x), px(y)))
-                .position_mode(AnchoredPositionMode::Window)
-                .child(popup),
-        )
-        .with_priority(IDE_TAB_CONTEXT_MENU_Z)
-        .into_any_element()
+        popover_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tab_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tab_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(x), px(y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(popup),
+                )
+                .with_priority(IDE_TAB_CONTEXT_MENU_Z),
+            )
+            .into_any_element()
     }
 
     fn render_tab_context_menu_item(
@@ -376,15 +395,34 @@ impl IdeSurface {
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .into_any_element();
 
-        deferred(
-            anchored()
-                .anchor(Corner::TopLeft)
-                .position(gpui::point(px(x), px(y)))
-                .position_mode(AnchoredPositionMode::Window)
-                .child(popup),
-        )
-        .with_priority(IDE_TREE_CONTEXT_MENU_Z)
-        .into_any_element()
+        popover_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, _window, cx| {
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(x), px(y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(popup),
+                )
+                .with_priority(IDE_TREE_CONTEXT_MENU_Z),
+            )
+            .into_any_element()
     }
 
     fn render_tree_context_menu_item(

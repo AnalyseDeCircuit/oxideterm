@@ -632,6 +632,12 @@ impl WorkspaceApp {
             .border_color(theme_border(theme.border, has_background))
             .bg(theme_panel_bg(theme.bg_panel, has_background))
             .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .child(
                 self.render_row_menu_item_with_icon_color(
                     LucideIcon::Play,

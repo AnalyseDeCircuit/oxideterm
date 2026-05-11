@@ -20,7 +20,7 @@ pub fn modal_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyEleme
     dialog_overlay(tokens, dialog)
 }
 
-pub fn dialog_overlay(_tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
+pub fn modal_backdrop(backdrop: Rgba) -> Div {
     div()
         .absolute()
         .top_0()
@@ -30,13 +30,41 @@ pub fn dialog_overlay(_tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyEle
         .flex()
         .items_center()
         .justify_center()
-        .bg(dialog_backdrop_color())
+        .bg(backdrop)
         .occlude()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-        .child(dialog)
-        .into_any_element()
+}
+
+pub fn dialog_backdrop() -> Div {
+    // Radix DialogOverlay is modal: pointer and wheel events cannot fall through
+    // to the background surface while the dialog is open.
+    modal_backdrop(dialog_backdrop_color())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+}
+
+pub fn quicklook_backdrop() -> Div {
+    // Tauri QuickLook uses the same portal-style top layer as dialogs, but
+    // left-clicking the backdrop itself closes the preview.
+    modal_backdrop(quicklook_backdrop_color())
+}
+
+pub fn popover_backdrop() -> Div {
+    // Radix popovers/context menus dismiss on outside pointer activity while
+    // their portal content remains interactive.
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .bg(rgba(0x00000000))
+        .occlude()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+}
+
+pub fn dialog_overlay(_tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
+    dialog_backdrop().child(dialog).into_any_element()
 }
 
 pub fn modal_container(tokens: &ThemeTokens) -> Div {

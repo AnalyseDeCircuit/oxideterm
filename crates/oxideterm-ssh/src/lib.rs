@@ -19,8 +19,9 @@ pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
     ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, HEARTBEAT_FAIL_THRESHOLD,
-    HEARTBEAT_INTERVAL, ProbeConnectionStatus, SftpSessionState, SshConnectionHandle,
-    SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus, SftpSessionState,
+    SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
+    WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use host_key::{HostKeyStatus, check_host_key, remove_host_key};
 pub use oxideterm_sftp::{
@@ -30,10 +31,10 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    PhaseEvent, PhaseResult, ReconnectForwardRule, ReconnectForwardRuleSnapshot,
-    ReconnectIdeSnapshot, ReconnectJob, ReconnectNodeTerminalSnapshot,
-    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
-    ReconnectTiming,
+    MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRule,
+    ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,
+    ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
+    ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot, ReconnectTiming,
 };
 pub use router::{
     FlatNode, NodeEventEmitter, NodeEventSequencer, NodeId, NodeOrigin, NodeReadiness, NodeRouter,

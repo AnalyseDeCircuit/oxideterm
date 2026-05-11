@@ -34,6 +34,18 @@ fn sftp_runtime_settings_from_settings(
     }
 }
 
+fn reconnect_timing_from_settings(settings: &PersistedSettings) -> ReconnectTiming {
+    ReconnectTiming {
+        retry_base_delay: Duration::from_millis(settings.reconnect.base_delay_ms.max(1) as u64),
+        retry_max_delay: Duration::from_millis(settings.reconnect.max_delay_ms.max(1) as u64),
+        ..ReconnectTiming::default()
+    }
+}
+
+fn reconnect_max_attempts_from_settings(settings: &PersistedSettings) -> u32 {
+    settings.reconnect.max_attempts.max(1) as u32
+}
+
 fn session_terminal_encoding(encoding: SettingsTerminalEncoding) -> SessionTerminalEncoding {
     match encoding {
         SettingsTerminalEncoding::Utf8 => SessionTerminalEncoding::Utf8,
@@ -80,7 +92,8 @@ fn settings_language_from_locale(locale: Locale) -> Language {
 }
 
 fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
-    let mut tokens = ThemeTokens::from_builtin(theme_by_id(&settings.terminal.theme));
+    let mut tokens = settings::custom_theme_tokens_from_settings(settings)
+        .unwrap_or_else(|| ThemeTokens::from_builtin(theme_by_id(&settings.terminal.theme)));
     let radius = settings.appearance.border_radius as f32;
     tokens.radii = UiRadii {
         xs: (radius - 4.0).max(0.0),
@@ -145,7 +158,554 @@ fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
     settings_css_font_family_head(&family).unwrap_or_else(|| gpui_font_family_name(&family))
 }
 
+fn reconnect_phase_label(phase: &ReconnectPhase) -> &'static str {
+    match phase {
+        ReconnectPhase::Queued => "queued",
+        ReconnectPhase::Snapshot => "snapshot",
+        ReconnectPhase::GracePeriod => "grace-period",
+        ReconnectPhase::SshConnect => "ssh-connect",
+        ReconnectPhase::AwaitTerminal => "await-terminal",
+        ReconnectPhase::RestoreForwards => "restore-forwards",
+        ReconnectPhase::ResumeTransfers => "resume-transfers",
+        ReconnectPhase::RestoreIde => "restore-ide",
+        ReconnectPhase::Verify => "verify",
+        ReconnectPhase::Done => "done",
+        ReconnectPhase::Failed => "failed",
+        ReconnectPhase::Cancelled => "cancelled",
+    }
+}
+
 impl WorkspaceApp {
+    fn push_event_log_entry(
+        &mut self,
+        severity: WorkspaceEventSeverity,
+        category: WorkspaceEventCategory,
+        node_id: Option<NodeId>,
+        connection_id: Option<String>,
+        title: impl Into<String>,
+        detail: Option<String>,
+        source: &'static str,
+    ) {
+        let entry = WorkspaceEventLogEntry {
+            id: self.event_log_next_id,
+            timestamp: SystemTime::now(),
+            severity,
+            category,
+            node_id,
+            connection_id,
+            title: title.into(),
+            detail,
+            source,
+        };
+        self.event_log_next_id = self.event_log_next_id.saturating_add(1);
+        self.event_log_entries.push_back(entry);
+        while self.event_log_entries.len() > WORKSPACE_EVENT_LOG_MAX_ENTRIES {
+            self.event_log_entries.pop_front();
+        }
+        self.event_log_unread_count = self.event_log_unread_count.saturating_add(1);
+        if severity == WorkspaceEventSeverity::Error {
+            self.event_log_unread_errors = self.event_log_unread_errors.saturating_add(1);
+        }
+    }
+
+    fn clear_event_log(&mut self) {
+        self.event_log_entries.clear();
+        self.event_log_unread_count = 0;
+        self.event_log_unread_errors = 0;
+    }
+
+    fn cycle_event_log_severity_filter(&mut self) {
+        self.event_log_filter.severity = match self.event_log_filter.severity {
+            WorkspaceEventSeverityFilter::All => WorkspaceEventSeverityFilter::Error,
+            WorkspaceEventSeverityFilter::Error => WorkspaceEventSeverityFilter::Warn,
+            WorkspaceEventSeverityFilter::Warn => WorkspaceEventSeverityFilter::Info,
+            WorkspaceEventSeverityFilter::Info => WorkspaceEventSeverityFilter::All,
+        };
+    }
+
+    fn cycle_event_log_category_filter(&mut self) {
+        self.event_log_filter.category = match self.event_log_filter.category {
+            WorkspaceEventCategoryFilter::All => WorkspaceEventCategoryFilter::Connection,
+            WorkspaceEventCategoryFilter::Connection => WorkspaceEventCategoryFilter::Reconnect,
+            WorkspaceEventCategoryFilter::Reconnect => WorkspaceEventCategoryFilter::Node,
+            WorkspaceEventCategoryFilter::Node => WorkspaceEventCategoryFilter::All,
+        };
+    }
+
+    fn event_log_entry_matches_filter(&self, entry: &WorkspaceEventLogEntry) -> bool {
+        let severity_matches = match self.event_log_filter.severity {
+            WorkspaceEventSeverityFilter::All => true,
+            WorkspaceEventSeverityFilter::Error => entry.severity == WorkspaceEventSeverity::Error,
+            WorkspaceEventSeverityFilter::Warn => entry.severity == WorkspaceEventSeverity::Warn,
+            WorkspaceEventSeverityFilter::Info => entry.severity == WorkspaceEventSeverity::Info,
+        };
+        let category_matches = match self.event_log_filter.category {
+            WorkspaceEventCategoryFilter::All => true,
+            WorkspaceEventCategoryFilter::Connection => {
+                entry.category == WorkspaceEventCategory::Connection
+            }
+            WorkspaceEventCategoryFilter::Reconnect => {
+                entry.category == WorkspaceEventCategory::Reconnect
+            }
+            WorkspaceEventCategoryFilter::Node => entry.category == WorkspaceEventCategory::Node,
+        };
+        severity_matches && category_matches
+    }
+
+    fn push_notification_entry(
+        &mut self,
+        kind: WorkspaceNotificationKind,
+        severity: WorkspaceNotificationSeverity,
+        title: impl Into<String>,
+        body: Option<String>,
+        scope: WorkspaceNotificationScope,
+        dedupe_key: Option<String>,
+    ) {
+        let title = title.into();
+        if let Some(dedupe_key) = dedupe_key.as_ref()
+            && let Some(existing) = self.notification_entries.iter_mut().find(|entry| {
+                entry.dedupe_key.as_ref() == Some(dedupe_key)
+                    && entry.status != WorkspaceNotificationStatus::Read
+            })
+        {
+            existing.created_at = SystemTime::now();
+            existing.kind = kind;
+            existing.severity = severity;
+            existing.title = title;
+            existing.body = body;
+            existing.scope = scope;
+            existing.status = WorkspaceNotificationStatus::Unread;
+            self.recount_notifications();
+            return;
+        }
+
+        let entry = WorkspaceNotificationEntry {
+            id: self.notification_next_id,
+            created_at: SystemTime::now(),
+            kind,
+            severity,
+            title,
+            body,
+            status: WorkspaceNotificationStatus::Unread,
+            scope,
+            dedupe_key,
+        };
+        self.notification_next_id = self.notification_next_id.saturating_add(1);
+        self.notification_entries.push_back(entry);
+        while self.notification_entries.len() > 200 {
+            self.notification_entries.pop_front();
+        }
+        self.recount_notifications();
+    }
+
+    fn resolve_connection_notifications_for_node(&mut self, node_id: &NodeId) {
+        self.notification_entries.retain(|entry| {
+            let scoped_to_node = matches!(&entry.scope, WorkspaceNotificationScope::Node(entry_node_id) if entry_node_id == node_id);
+            let connection_kind = matches!(
+                entry.kind,
+                WorkspaceNotificationKind::Connection | WorkspaceNotificationKind::Security
+            );
+            !(scoped_to_node && connection_kind)
+        });
+        self.recount_notifications();
+    }
+
+    fn recount_notifications(&mut self) {
+        self.notification_unread_count = 0;
+        self.notification_unread_critical_count = 0;
+        for entry in &self.notification_entries {
+            if entry.status == WorkspaceNotificationStatus::Unread {
+                self.notification_unread_count =
+                    self.notification_unread_count.saturating_add(1);
+                if matches!(
+                    entry.severity,
+                    WorkspaceNotificationSeverity::Critical | WorkspaceNotificationSeverity::Error
+                ) {
+                    self.notification_unread_critical_count =
+                        self.notification_unread_critical_count.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    fn clear_notifications(&mut self) {
+        self.notification_entries.clear();
+        self.recount_notifications();
+    }
+
+    fn mark_all_notifications_read(&mut self) {
+        for entry in &mut self.notification_entries {
+            entry.status = WorkspaceNotificationStatus::Read;
+        }
+        self.recount_notifications();
+    }
+
+    fn dismiss_notification(&mut self, id: u64) {
+        self.notification_entries.retain(|entry| entry.id != id);
+        self.recount_notifications();
+    }
+
+    fn cycle_notification_status_filter(&mut self) {
+        self.notification_filter.status = match self.notification_filter.status {
+            WorkspaceNotificationStatusFilter::All => WorkspaceNotificationStatusFilter::Unread,
+            WorkspaceNotificationStatusFilter::Unread => WorkspaceNotificationStatusFilter::All,
+        };
+    }
+
+    fn cycle_notification_severity_filter(&mut self) {
+        self.notification_filter.severity = match self.notification_filter.severity {
+            WorkspaceNotificationSeverityFilter::All => {
+                WorkspaceNotificationSeverityFilter::Critical
+            }
+            WorkspaceNotificationSeverityFilter::Critical => {
+                WorkspaceNotificationSeverityFilter::Error
+            }
+            WorkspaceNotificationSeverityFilter::Error => {
+                WorkspaceNotificationSeverityFilter::Warning
+            }
+            WorkspaceNotificationSeverityFilter::Warning => {
+                WorkspaceNotificationSeverityFilter::Info
+            }
+            WorkspaceNotificationSeverityFilter::Info => WorkspaceNotificationSeverityFilter::All,
+        };
+    }
+
+    fn cycle_notification_kind_filter(&mut self) {
+        self.notification_filter.kind = match self.notification_filter.kind {
+            WorkspaceNotificationKindFilter::All => WorkspaceNotificationKindFilter::Connection,
+            WorkspaceNotificationKindFilter::Connection => WorkspaceNotificationKindFilter::Security,
+            WorkspaceNotificationKindFilter::Security => WorkspaceNotificationKindFilter::Transfer,
+            WorkspaceNotificationKindFilter::Transfer => WorkspaceNotificationKindFilter::Update,
+            WorkspaceNotificationKindFilter::Update => WorkspaceNotificationKindFilter::Health,
+            WorkspaceNotificationKindFilter::Health => WorkspaceNotificationKindFilter::Plugin,
+            WorkspaceNotificationKindFilter::Plugin => WorkspaceNotificationKindFilter::Agent,
+            WorkspaceNotificationKindFilter::Agent => WorkspaceNotificationKindFilter::All,
+        };
+    }
+
+    fn notification_matches_filter(&self, entry: &WorkspaceNotificationEntry) -> bool {
+        let status_matches = match self.notification_filter.status {
+            WorkspaceNotificationStatusFilter::All => true,
+            WorkspaceNotificationStatusFilter::Unread => {
+                entry.status == WorkspaceNotificationStatus::Unread
+            }
+        };
+        let severity_matches = match self.notification_filter.severity {
+            WorkspaceNotificationSeverityFilter::All => true,
+            WorkspaceNotificationSeverityFilter::Critical => {
+                entry.severity == WorkspaceNotificationSeverity::Critical
+            }
+            WorkspaceNotificationSeverityFilter::Error => {
+                entry.severity == WorkspaceNotificationSeverity::Error
+            }
+            WorkspaceNotificationSeverityFilter::Warning => {
+                entry.severity == WorkspaceNotificationSeverity::Warning
+            }
+            WorkspaceNotificationSeverityFilter::Info => {
+                entry.severity == WorkspaceNotificationSeverity::Info
+            }
+        };
+        let kind_matches = match self.notification_filter.kind {
+            WorkspaceNotificationKindFilter::All => true,
+            WorkspaceNotificationKindFilter::Connection => {
+                entry.kind == WorkspaceNotificationKind::Connection
+            }
+            WorkspaceNotificationKindFilter::Security => {
+                entry.kind == WorkspaceNotificationKind::Security
+            }
+            WorkspaceNotificationKindFilter::Transfer => {
+                entry.kind == WorkspaceNotificationKind::Transfer
+            }
+            WorkspaceNotificationKindFilter::Update => entry.kind == WorkspaceNotificationKind::Update,
+            WorkspaceNotificationKindFilter::Health => entry.kind == WorkspaceNotificationKind::Health,
+            WorkspaceNotificationKindFilter::Plugin => entry.kind == WorkspaceNotificationKind::Plugin,
+            WorkspaceNotificationKindFilter::Agent => entry.kind == WorkspaceNotificationKind::Agent,
+        };
+        status_matches && severity_matches && kind_matches
+    }
+
+    fn push_reconnect_notice(
+        &self,
+        title: impl Into<String>,
+        description: Option<String>,
+        variant: TerminalNoticeVariant,
+    ) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title: title.into(),
+            description,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
+    fn next_connection_trace_attempt_id(&mut self) -> String {
+        self.connection_trace_attempt_seq = self.connection_trace_attempt_seq.wrapping_add(1);
+        format!("native-connection-{}", self.connection_trace_attempt_seq)
+    }
+
+    fn connection_trace_plan_for_node(
+        &mut self,
+        node_id: &NodeId,
+        mode: ConnectionTraceMode,
+    ) -> Option<ConnectionTracePlan> {
+        let mut path = Vec::new();
+        let mut current = Some(node_id.clone());
+        while let Some(current_id) = current {
+            path.push(current_id.clone());
+            current = self
+                .node_runtime_store
+                .snapshot(&current_id)
+                .and_then(|snapshot| snapshot.parent_id);
+        }
+        path.reverse();
+        let start_index = path
+            .iter()
+            .position(|candidate| !self.connection_trace_node_is_ready(candidate))?;
+        Some(ConnectionTracePlan {
+            attempt_id: self.next_connection_trace_attempt_id(),
+            mode,
+            node_ids: path[start_index..].to_vec(),
+        })
+    }
+
+    fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
+        self.ssh_nodes.get(node_id).is_some_and(|node| {
+            matches!(node.readiness, NodeReadiness::Ready)
+                && self
+                    .node_router
+                    .connection_id_for_node(node_id)
+                    .and_then(|connection_id| self.ssh_registry.get(&connection_id))
+                    .is_some_and(|handle| {
+                        matches!(handle.state(), ConnectionState::Active | ConnectionState::Idle)
+                    })
+        })
+    }
+
+    fn begin_connection_trace_for_node(
+        &mut self,
+        node_id: &NodeId,
+        plan: Option<&ConnectionTracePlan>,
+        parent_id: Option<&NodeId>,
+    ) {
+        let Some((attempt_id, mode, step_index, total_steps)) = plan
+            .and_then(|plan| {
+                let step = plan
+                    .node_ids
+                    .iter()
+                    .position(|candidate| candidate == node_id)?;
+                Some((
+                    plan.attempt_id.clone(),
+                    plan.mode,
+                    (step + 1) as u32,
+                    plan.node_ids.len() as u32,
+                ))
+            })
+            .or_else(|| {
+                Some((
+                    self.next_connection_trace_attempt_id(),
+                    ConnectionTraceMode::Connect,
+                    1,
+                    1,
+                ))
+            })
+        else {
+            return;
+        };
+        let label = self.ssh_nodes.get(node_id).map(|node| node.title.clone());
+        self.connection_trace_nodes.insert(
+            node_id.clone(),
+            ConnectionTraceNodeContext {
+                attempt_id: attempt_id.clone(),
+                label: label.clone(),
+                step_index: Some(step_index),
+                total_steps: Some(total_steps),
+                mode,
+            },
+        );
+        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Queued, 5.0, None);
+        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Preparing, 15.0, None);
+        self.emit_connection_trace_stage(
+            node_id,
+            ConnectionTraceStage::OpeningTransport,
+            28.0,
+            None,
+        );
+        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::HostKey, 38.0, None);
+        self.emit_connection_trace_stage(
+            node_id,
+            ConnectionTraceStage::SshHandshake,
+            48.0,
+            parent_id.map(|parent_id| format!("via {}", parent_id.0)),
+        );
+        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Authentication, 62.0, None);
+    }
+
+    fn emit_connection_trace_stage(
+        &self,
+        node_id: &NodeId,
+        stage: ConnectionTraceStage,
+        progress: f32,
+        detail: Option<String>,
+    ) {
+        self.emit_connection_trace_event(node_id, stage, ConnectionTraceStatus::Running, progress, detail);
+    }
+
+    fn finish_connection_trace_success(&mut self, node_id: &NodeId) {
+        if self.connection_trace_nodes.contains_key(node_id) {
+            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Pty, 86.0, None);
+            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::ShellReady, 96.0, None);
+            self.emit_connection_trace_event(
+                node_id,
+                ConnectionTraceStage::Ready,
+                ConnectionTraceStatus::Ready,
+                100.0,
+                None,
+            );
+            self.connection_trace_nodes.remove(node_id);
+        }
+    }
+
+    fn finish_connection_trace_failed(&mut self, node_id: &NodeId, detail: Option<String>) {
+        if self.connection_trace_nodes.contains_key(node_id) {
+            self.emit_connection_trace_event(
+                node_id,
+                ConnectionTraceStage::Authentication,
+                ConnectionTraceStatus::Failed,
+                100.0,
+                detail,
+            );
+            self.connection_trace_nodes.remove(node_id);
+        }
+    }
+
+    fn cancel_connection_trace_for_node(&mut self, node_id: &NodeId) {
+        if self.connection_trace_nodes.contains_key(node_id) {
+            self.emit_connection_trace_event(
+                node_id,
+                ConnectionTraceStage::Authentication,
+                ConnectionTraceStatus::Cancelled,
+                100.0,
+                None,
+            );
+            self.connection_trace_nodes.remove(node_id);
+        }
+    }
+
+    fn emit_connection_trace_event(
+        &self,
+        node_id: &NodeId,
+        stage: ConnectionTraceStage,
+        status: ConnectionTraceStatus,
+        progress: f32,
+        detail: Option<String>,
+    ) {
+        let Some(context) = self.connection_trace_nodes.get(node_id) else {
+            return;
+        };
+        let _ = self.connection_trace_tx.send(ConnectionTraceEvent {
+            attempt_id: context.attempt_id.clone(),
+            node_id: node_id.clone(),
+            stage,
+            status,
+            progress,
+            elapsed_ms: 0,
+            detail,
+            label: context.label.clone(),
+            step_index: context.step_index,
+            total_steps: context.total_steps,
+            mode: context.mode,
+        });
+    }
+
+    fn log_reconnect_phase(
+        &mut self,
+        node_id: &NodeId,
+        phase: ReconnectPhase,
+        detail: Option<String>,
+    ) {
+        let severity = match phase {
+            ReconnectPhase::Failed => WorkspaceEventSeverity::Error,
+            ReconnectPhase::Cancelled => WorkspaceEventSeverity::Warn,
+            _ => WorkspaceEventSeverity::Info,
+        };
+        self.push_event_log_entry(
+            severity,
+            WorkspaceEventCategory::Reconnect,
+            Some(node_id.clone()),
+            self.node_router.connection_id_for_node(node_id),
+            format!("Reconnect phase: {}", reconnect_phase_label(&phase)),
+            detail,
+            "reconnect_orchestrator",
+        );
+    }
+
+    fn log_connection_event(
+        &mut self,
+        node_id: &NodeId,
+        connection_id: Option<String>,
+        title: impl Into<String>,
+        severity: WorkspaceEventSeverity,
+        detail: Option<String>,
+        source: &'static str,
+    ) {
+        self.push_event_log_entry(
+            severity,
+            WorkspaceEventCategory::Connection,
+            Some(node_id.clone()),
+            connection_id,
+            title,
+            detail,
+            source,
+        );
+    }
+
+    fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
+        self.reconnect_orchestrator
+            .job(&node_id.0)
+            .is_some_and(|job| job.ended_at.is_none())
+    }
+
+    pub(super) fn cancel_reconnect_for_node(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
+        let mut affected_nodes = self.node_runtime_store.subtree_postorder(node_id);
+        if affected_nodes.is_empty() {
+            affected_nodes.push(node_id.clone());
+        }
+        let mut cancelled = 0_u32;
+        for affected_node_id in affected_nodes {
+            if self
+                .reconnect_orchestrator
+                .cancel(&affected_node_id.0)
+                .is_some()
+            {
+                cancelled = cancelled.saturating_add(1);
+            }
+            self.pending_reconnect_node_ids.remove(&affected_node_id);
+            self.reconnect_requeue_counts.remove(&affected_node_id);
+            self.pending_reconnect_transfer_resumes.remove(&affected_node_id);
+            self.reconnect_transfer_resume_totals.remove(&affected_node_id);
+            self.reconnect_forward_restore_totals.remove(&affected_node_id);
+            self.clear_reconnect_pipeline_active(&affected_node_id);
+        }
+        if cancelled > 0 {
+            self.push_event_log_entry(
+                WorkspaceEventSeverity::Warn,
+                WorkspaceEventCategory::Reconnect,
+                Some(node_id.clone()),
+                self.node_router.connection_id_for_node(node_id),
+                "Reconnect cancelled",
+                Some(format!("cancelled {cancelled} active reconnect job(s)")),
+                "reconnect_orchestrator",
+            );
+            self.push_reconnect_notice(
+                "Reconnection cancelled",
+                None,
+                TerminalNoticeVariant::Default,
+            );
+            cx.notify();
+        }
+    }
+
     pub(super) fn prepare_modal_interaction_boundary(&mut self) {
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.

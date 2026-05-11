@@ -15,7 +15,7 @@ mod terminal_cast;
 mod terminal_command_bar;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     path::PathBuf,
     sync::Arc,
@@ -47,6 +47,7 @@ use oxideterm_gpui_terminal::{
     TerminalUiPreferences, TerminalUiTheme,
 };
 use oxideterm_gpui_ui::{
+    modal::popover_backdrop,
     toast::{ToastVariant, ToastView},
     toaster::toaster,
     tooltip::tooltip_content,
@@ -65,19 +66,23 @@ use oxideterm_sftp::{
     SftpTransferRuntimeSettings, StoredTransferProgress,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, NodeId, NodeOrigin,
-    NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeExpansion,
-    NodeTreeSnapshot, NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig,
-    ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectNodeTerminalSnapshot,
-    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot,
-    SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint,
+    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState,
+    MAX_RETAINED_RECONNECT_JOBS, NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
+    NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreeSnapshot, NodeTreeSnapshotNode,
+    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
+    ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
+    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
+    ReconnectPhase, ReconnectSnapshot, ReconnectTiming, SshConfig, SshConnectionRegistry,
+    SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 use oxideterm_terminal::{
     LocalPtyConfig, ShellInfo, SshSessionConfig, TerminalCursorShape,
     TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
 };
-use oxideterm_theme::{ThemeTokens, UiRadii, theme_by_id};
+use oxideterm_theme::{
+    AppUiColors, TerminalTheme, ThemeTokens, UiRadii, derive_ui_colors_from_terminal, theme_by_id,
+};
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
     PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
@@ -94,6 +99,7 @@ use self::new_connection::{
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
 use self::session_manager::{AutoRouteModalState, SessionManagerState};
+use self::settings::ThemeEditorState;
 use self::sidebar::SidebarSection;
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::assets::LucideIcon;
@@ -151,6 +157,7 @@ pub(crate) struct WorkspaceApp {
     focused_settings_input: Option<SettingsInput>,
     settings_input_draft: String,
     settings_slider_drag: Option<SettingsSlider>,
+    theme_editor: Option<ThemeEditorState>,
     background_blur_preview: Option<i64>,
     background_blur_commit_generation: u64,
     background_cache_poll_scheduled: bool,
@@ -179,13 +186,25 @@ pub(crate) struct WorkspaceApp {
     reconnect_orchestrator: ReconnectOrchestratorStore,
     reconnect_worker_tx: std::sync::mpsc::Sender<ReconnectWorkerResult>,
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
+    pending_reconnect_node_ids: HashSet<NodeId>,
+    reconnect_debounce_scheduled: bool,
+    reconnect_debounce_generation: u64,
+    reconnect_pipeline_active_node: Option<NodeId>,
+    reconnect_requeue_counts: HashMap<NodeId, u32>,
+    last_ssh_active_probe_at: Option<Instant>,
+    ssh_active_probe_in_flight: bool,
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
+    event_log_entries: VecDeque<WorkspaceEventLogEntry>,
+    event_log_next_id: u64,
+    event_log_unread_count: u32,
+    event_log_unread_errors: u32,
     terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
+    pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
@@ -227,15 +246,98 @@ pub(crate) struct WorkspaceApp {
     terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     workspace_toasts: Vec<WorkspaceToast>,
+    connection_trace_tx: std::sync::mpsc::Sender<ConnectionTraceEvent>,
+    connection_trace_rx: std::sync::mpsc::Receiver<ConnectionTraceEvent>,
+    connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
+    connection_trace_nodes: HashMap<NodeId, ConnectionTraceNodeContext>,
+    connection_trace_attempt_seq: u64,
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
+    active_activity_view: WorkspaceActivityView,
+    event_log_filter: WorkspaceEventFilter,
+    event_log_dnd_enabled: bool,
+    notification_entries: VecDeque<WorkspaceNotificationEntry>,
+    notification_next_id: u64,
+    notification_unread_count: u32,
+    notification_unread_critical_count: u32,
+    notification_filter: WorkspaceNotificationFilter,
+    notification_dnd_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
 struct WorkspaceToast {
     notice: TerminalNotice,
     expires_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionTraceStage {
+    Queued,
+    Preparing,
+    OpeningTransport,
+    SshHandshake,
+    HostKey,
+    Authentication,
+    Pty,
+    ShellReady,
+    Ready,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionTraceStatus {
+    Running,
+    Ready,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionTraceMode {
+    Connect,
+    Reconnect,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectionTraceEvent {
+    attempt_id: String,
+    node_id: NodeId,
+    stage: ConnectionTraceStage,
+    status: ConnectionTraceStatus,
+    progress: f32,
+    elapsed_ms: u64,
+    detail: Option<String>,
+    label: Option<String>,
+    step_index: Option<u32>,
+    total_steps: Option<u32>,
+    mode: ConnectionTraceMode,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveConnectionTrace {
+    visible: bool,
+    latest: ConnectionTraceEvent,
+    displayed: Option<ConnectionTraceEvent>,
+    started_at: Instant,
+    show_generation: u64,
+    flush_generation: u64,
+    expires_at: Option<Instant>,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectionTraceNodeContext {
+    attempt_id: String,
+    label: Option<String>,
+    step_index: Option<u32>,
+    total_steps: Option<u32>,
+    mode: ConnectionTraceMode,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectionTracePlan {
+    attempt_id: String,
+    mode: ConnectionTraceMode,
+    node_ids: Vec<NodeId>,
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +354,162 @@ struct WorkspaceTooltipPending {
     x: f32,
     y: f32,
     generation: u64,
+}
+
+const WORKSPACE_EVENT_LOG_MAX_ENTRIES: usize = 500;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceEventSeverity {
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceEventCategory {
+    Connection,
+    Reconnect,
+    Node,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceEventLogEntry {
+    id: u64,
+    timestamp: SystemTime,
+    severity: WorkspaceEventSeverity,
+    category: WorkspaceEventCategory,
+    node_id: Option<NodeId>,
+    connection_id: Option<String>,
+    title: String,
+    detail: Option<String>,
+    source: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceActivityView {
+    Notifications,
+    EventLog,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceEventSeverityFilter {
+    All,
+    Error,
+    Warn,
+    Info,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceEventCategoryFilter {
+    All,
+    Connection,
+    Reconnect,
+    Node,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WorkspaceEventFilter {
+    severity: WorkspaceEventSeverityFilter,
+    category: WorkspaceEventCategoryFilter,
+}
+
+impl Default for WorkspaceEventFilter {
+    fn default() -> Self {
+        Self {
+            severity: WorkspaceEventSeverityFilter::All,
+            category: WorkspaceEventCategoryFilter::All,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationKind {
+    Connection,
+    Security,
+    Transfer,
+    Update,
+    Health,
+    Plugin,
+    Agent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationSeverity {
+    Info,
+    Warning,
+    Error,
+    Critical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationStatus {
+    Unread,
+    Read,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+enum WorkspaceNotificationScope {
+    Global,
+    Node(NodeId),
+    Connection(String),
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceNotificationEntry {
+    id: u64,
+    created_at: SystemTime,
+    kind: WorkspaceNotificationKind,
+    severity: WorkspaceNotificationSeverity,
+    title: String,
+    body: Option<String>,
+    status: WorkspaceNotificationStatus,
+    scope: WorkspaceNotificationScope,
+    dedupe_key: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationStatusFilter {
+    All,
+    Unread,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationSeverityFilter {
+    All,
+    Critical,
+    Error,
+    Warning,
+    Info,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceNotificationKindFilter {
+    All,
+    Connection,
+    Security,
+    Transfer,
+    Update,
+    Health,
+    Plugin,
+    Agent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WorkspaceNotificationFilter {
+    status: WorkspaceNotificationStatusFilter,
+    severity: WorkspaceNotificationSeverityFilter,
+    kind: WorkspaceNotificationKindFilter,
+}
+
+impl Default for WorkspaceNotificationFilter {
+    fn default() -> Self {
+        Self {
+            status: WorkspaceNotificationStatusFilter::All,
+            severity: WorkspaceNotificationSeverityFilter::All,
+            kind: WorkspaceNotificationKindFilter::All,
+        }
+    }
 }
 
 #[derive(Clone)]

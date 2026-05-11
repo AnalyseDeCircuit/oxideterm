@@ -29,6 +29,12 @@ impl WorkspaceApp {
             let tab_id = tab.id;
             let active = Some(tab_id) == self.active_tab_id;
             let tab_width = self.tab_visual_width(tab);
+            let reconnect_node_id = self.reconnect_node_id_for_tab(tab);
+            let reconnect_job = reconnect_node_id
+                .as_ref()
+                .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
+                .filter(|job| job.ended_at.is_none());
+            let show_reconnect_progress = reconnect_job.is_some();
             let icon = match tab.kind {
                 TabKind::LocalTerminal => LucideIcon::Square,
                 TabKind::SshTerminal => LucideIcon::Terminal,
@@ -60,7 +66,11 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(self.tokens.metrics.tab_gap))
                     .border_r_1()
-                    .border_color(rgb(theme.border))
+                    .border_color(if show_reconnect_progress {
+                        rgb(0xf59e0b)
+                    } else {
+                        rgb(theme.border)
+                    })
                     .bg(if active {
                         rgb(theme.bg_panel)
                     } else {
@@ -77,7 +87,7 @@ impl WorkspaceApp {
                             this.set_active_tab(tab_id, window, cx);
                         }),
                     )
-                    .when(active, |tab| {
+                    .when(active || show_reconnect_progress, |tab| {
                         tab.child(
                             div()
                                 .absolute()
@@ -85,7 +95,11 @@ impl WorkspaceApp {
                                 .left_0()
                                 .right_0()
                                 .h(px(self.tokens.metrics.tab_active_accent_height))
-                                .bg(rgb(theme.accent)),
+                                .bg(rgb(if show_reconnect_progress {
+                                    0xf59e0b
+                                } else {
+                                    theme.accent
+                                })),
                         )
                     })
                     .child(Self::render_lucide_icon(
@@ -100,29 +114,37 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.tab_font_size))
                             .child(tab_text),
                     )
-                    .child(
-                        div()
-                            .size(px(self.tokens.metrics.tab_close_button_size))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .cursor_pointer()
-                            .text_color(rgb(theme.text_muted))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::X,
-                                self.tokens.metrics.tab_close_icon_size,
-                                rgb(theme.text_muted),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.set_active_tab(tab_id, window, cx);
-                                    this.close_active_tab(window, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                    ),
+                    .when_some(
+                        reconnect_job.zip(reconnect_node_id),
+                        |tab, (job, node_id)| {
+                            tab.child(self.render_tab_reconnect_indicator(&job, node_id, cx))
+                        },
+                    )
+                    .when(!show_reconnect_progress, |tab| {
+                        tab.child(
+                            div()
+                                .size(px(self.tokens.metrics.tab_close_button_size))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(self.tokens.radii.sm))
+                                .cursor_pointer()
+                                .text_color(rgb(theme.text_muted))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::X,
+                                    self.tokens.metrics.tab_close_icon_size,
+                                    rgb(theme.text_muted),
+                                ))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.set_active_tab(tab_id, window, cx);
+                                        this.close_active_tab(window, cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                        )
+                    }),
             );
         }
 
@@ -133,6 +155,158 @@ impl WorkspaceApp {
                 bar.child(actions)
             });
         bar.into_any_element()
+    }
+
+    fn reconnect_node_id_for_tab(&self, tab: &Tab) -> Option<NodeId> {
+        match tab.kind {
+            TabKind::SshTerminal => {
+                if let Some(active_pane_id) = tab.active_pane_id
+                    && let Some(session_id) = tab
+                        .root_pane
+                        .as_ref()
+                        .and_then(|root| root.session_id_for_pane(active_pane_id))
+                    && let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+                {
+                    return Some(node_id.clone());
+                }
+                let mut session_ids = Vec::new();
+                tab.root_pane
+                    .as_ref()
+                    .map(|root| root.collect_session_ids(&mut session_ids));
+                session_ids
+                    .into_iter()
+                    .filter_map(|session_id| self.terminal_ssh_nodes.get(&session_id))
+                    .find(|node_id| self.has_active_reconnect_job(node_id))
+                    .cloned()
+                    .or_else(|| {
+                        tab.root_pane.as_ref().and_then(|root| {
+                            let mut session_ids = Vec::new();
+                            root.collect_session_ids(&mut session_ids);
+                            session_ids
+                                .first()
+                                .and_then(|session_id| self.terminal_ssh_nodes.get(session_id))
+                                .cloned()
+                        })
+                    })
+            }
+            TabKind::Sftp => self
+                .sftp_tab_nodes
+                .get(&tab.id)
+                .cloned()
+                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+            TabKind::Forwards => self
+                .forward_tab_nodes
+                .get(&tab.id)
+                .cloned()
+                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+            TabKind::Ide => self
+                .ide_tab_nodes
+                .get(&tab.id)
+                .cloned()
+                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+            _ => None,
+        }
+    }
+
+    fn render_tab_reconnect_indicator(
+        &self,
+        job: &ReconnectJob,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let phase_label = reconnect_phase_label(&job.status);
+        let phase_text = if job.attempt > 1 {
+            format!("{phase_label} {}/{}", job.attempt, job.max_attempts)
+        } else {
+            phase_label.to_string()
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .text_size(px(10.0))
+            .text_color(rgb(0xf59e0b))
+            .child(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                12.0,
+                rgb(0xf59e0b),
+            ))
+            .child(self.render_reconnect_phase_strip(job))
+            .child(div().max_w(px(72.0)).truncate().child(phase_text))
+            .child(
+                div()
+                    .size(px(self.tokens.metrics.tab_close_button_size))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.sm))
+                    .cursor_pointer()
+                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::X,
+                        self.tokens.metrics.tab_close_icon_size,
+                        rgb(0xf59e0b),
+                    ))
+                    .on_mouse_move(cx.listener({
+                        let label = self.i18n.t("sessions.tree.actions.cancel_reconnect");
+                        move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.queue_workspace_tooltip(
+                                "tabbar-cancel-reconnect",
+                                label.clone(),
+                                f32::from(event.position.x) + 12.0,
+                                f32::from(event.position.y) + 16.0,
+                                cx,
+                            );
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.cancel_reconnect_for_node(&node_id, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_reconnect_phase_strip(&self, job: &ReconnectJob) -> AnyElement {
+        let phases = [
+            ReconnectPhase::Snapshot,
+            ReconnectPhase::GracePeriod,
+            ReconnectPhase::SshConnect,
+            ReconnectPhase::AwaitTerminal,
+            ReconnectPhase::RestoreForwards,
+            ReconnectPhase::ResumeTransfers,
+            ReconnectPhase::RestoreIde,
+            ReconnectPhase::Verify,
+        ];
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .children(phases.into_iter().map(|phase| {
+                let result = job
+                    .phase_history
+                    .iter()
+                    .rev()
+                    .find(|event| event.phase == phase)
+                    .map(|event| event.result);
+                let color = match result {
+                    Some(PhaseResult::Ok) => 0x10b981,
+                    Some(PhaseResult::Failed) => 0xef4444,
+                    Some(PhaseResult::Skipped) => self.tokens.ui.text_muted,
+                    Some(PhaseResult::Running) => 0xf59e0b,
+                    None => self.tokens.ui.border,
+                };
+                div()
+                    .size(px(4.0))
+                    .rounded_full()
+                    .bg(rgb(color))
+                    .into_any_element()
+            }))
+            .into_any_element()
     }
 
     fn render_legacy_terminal_actions(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

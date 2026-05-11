@@ -30,13 +30,13 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::Semaphore,
     sync::{Mutex, mpsc},
-    time::{Instant, sleep_until},
+    time::{Instant, sleep_until, timeout},
 };
 use zeroize::Zeroizing;
 
 use crate::{
-    AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus, ProxyHopConfig,
-    SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus,
+    KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     host_key::{
         HostKeyStatus, HostKeyVerification, check_host_key, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,

@@ -735,23 +735,78 @@ impl WorkspaceApp {
                     self.editing_saved_connection_id.as_deref(),
                     self.saved_connection_prompt_action,
                 );
-                if mode.stores_connection_on_connect()
+                let saved_connection_id = if mode.stores_connection_on_connect()
                     && self
                         .new_connection_form
                         .as_ref()
                         .is_some_and(|form| form.save_connection)
-                    && let Some(form) = self.new_connection_form.as_ref()
-                    && let Ok(request) = save_request_from_form(form, None)
-                    && let Err(error) = self.connection_store.upsert(request)
-                    && let Some(form) = self.new_connection_form.as_mut()
                 {
-                    form.error = Some(error.to_string());
-                    cx.notify();
-                    return;
-                }
+                    let request = match self
+                        .new_connection_form
+                        .as_ref()
+                        .map(|form| save_request_from_form(form, None))
+                    {
+                        Some(Ok(request)) => request,
+                        Some(Err(error)) => {
+                            if let Some(form) = self.new_connection_form.as_mut() {
+                                form.error = Some(error.to_string());
+                            }
+                            cx.notify();
+                            return;
+                        }
+                        None => return,
+                    };
+                    match self.connection_store.upsert(request) {
+                        Ok(connection) => Some(connection.id),
+                        Err(error) => {
+                            if let Some(form) = self.new_connection_form.as_mut() {
+                                form.error = Some(error.to_string());
+                            }
+                            cx.notify();
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
                 self.new_connection_form = None;
                 self.host_key_challenge = None;
                 self.open_new_connection_select = None;
+                if config
+                    .proxy_chain
+                    .as_ref()
+                    .is_some_and(|chain| !chain.is_empty())
+                {
+                    let expansion_id = saved_connection_id
+                        .clone()
+                        .unwrap_or_else(|| format!("manual-{}", self.next_ssh_node_id));
+                    match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
+                        Ok(expansion) => {
+                            if saved_connection_id.is_some() {
+                                self.saved_ssh_nodes
+                                    .insert(expansion_id.clone(), expansion.target_node_id.clone());
+                            }
+                            if let Some(target_config) = self
+                                .node_runtime_store
+                                .snapshot(&expansion.target_node_id)
+                                .map(|snapshot| snapshot.config)
+                            {
+                                let _ = self.queue_ssh_terminal_tab_for_node(
+                                    expansion.target_node_id,
+                                    target_config,
+                                    title,
+                                    saved_connection_id,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            self.session_manager.status = Some(error.to_string());
+                        }
+                    }
+                    return;
+                }
                 let _ = self.create_ssh_terminal_tab(config, title, window, cx);
             }
             SshConnectionIntent::ConnectSaved(id) => {

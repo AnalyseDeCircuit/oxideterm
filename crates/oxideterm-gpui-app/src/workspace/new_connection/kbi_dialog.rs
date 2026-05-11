@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_ui::{
-    TextInputView, form_field, modal::dialog_backdrop_color, text_input, text_input_anchor_probe,
+    TextInputView, form_field, modal::dialog_backdrop, text_input, text_input_anchor_probe,
 };
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
@@ -223,20 +223,7 @@ impl WorkspaceApp {
             ));
         }
 
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(dialog_backdrop_color())
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(
                 div()
                     .w(px(self.tokens.metrics.modal_width))

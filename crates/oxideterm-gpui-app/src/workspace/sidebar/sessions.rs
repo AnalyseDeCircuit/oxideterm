@@ -83,7 +83,22 @@ impl WorkspaceApp {
         let mut children = Vec::new();
 
         if expanded {
-            if matches!(
+            if self.has_active_reconnect_job(&node_id) {
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    is_last,
+                    LucideIcon::X,
+                    self.i18n.t("sessions.tree.actions.cancel_reconnect"),
+                    SessionActionVariant::Danger,
+                    cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, _window, cx| {
+                            this.cancel_reconnect_for_node(&node_id, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ));
+            } else if matches!(
                 node_view.status(),
                 ActiveSessionStatus::Active | ActiveSessionStatus::Connected
             ) {
@@ -99,11 +114,11 @@ impl WorkspaceApp {
                         let title = node.title.clone();
                         let saved_connection_id = node.saved_connection_id.clone();
                         move |this, _event, window, cx| {
-                            let _ = this.create_ssh_terminal_tab_for_node(
+                            let _ = this.queue_ssh_terminal_tab_for_node(
+                                node_id.clone(),
                                 config.clone(),
                                 title.clone(),
                                 saved_connection_id.clone(),
-                                Some(node_id.clone()),
                                 window,
                                 cx,
                             );
@@ -209,11 +224,11 @@ impl WorkspaceApp {
                         let title = node.title.clone();
                         let saved_connection_id = node.saved_connection_id.clone();
                         move |this, _event, window, cx| {
-                            let _ = this.create_ssh_terminal_tab_for_node(
+                            let _ = this.queue_ssh_terminal_tab_for_node(
+                                node_id.clone(),
                                 config.clone(),
                                 title.clone(),
                                 saved_connection_id.clone(),
-                                Some(node_id.clone()),
                                 window,
                                 cx,
                             );

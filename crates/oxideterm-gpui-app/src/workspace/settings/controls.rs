@@ -35,6 +35,34 @@ impl WorkspaceApp {
                     self.tokens.metrics.settings_theme_select_popup_max_height,
                 );
 
+                if !settings.custom_themes.is_empty() {
+                    popup = popup.child(select_label(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.appearance.theme_group_custom"),
+                    ));
+                    let mut custom_theme_ids: Vec<_> = settings.custom_themes.keys().cloned().collect();
+                    custom_theme_ids.sort();
+                    for theme_id in custom_theme_ids {
+                        let label = custom_theme_display_name(settings, &theme_id);
+                        let selected = theme_id == settings.terminal.theme;
+                        popup = popup.child(
+                            select_option(&self.tokens, label, selected).on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.open_settings_select = None;
+                                    this.edit_settings(
+                                        |settings| settings.terminal.theme = theme_id.clone(),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        );
+                    }
+                    popup = popup.child(select_separator(&self.tokens));
+                }
+
                 popup = popup.child(select_label(
                     &self.tokens,
                     self.i18n.t("settings_view.appearance.theme_group_oxide"),
@@ -94,6 +122,44 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }),
                         ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Appearance, SettingsSelect::CustomThemeDuplicate) => {
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width,
+                    self.tokens.metrics.settings_theme_select_popup_max_height,
+                );
+                let mut themes: Vec<_> = BUILT_IN_THEMES.iter().collect();
+                themes.sort_by_key(|theme| theme.id);
+                for theme in themes {
+                    let theme_id = theme.id.to_string();
+                    let selected = self
+                        .theme_editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.duplicate_theme == theme_id);
+                    popup = popup.child(
+                        select_option(&self.tokens, theme_display_name(theme.id), selected)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.open_settings_select = None;
+                                    if let Some(editor) = this.theme_editor.as_mut() {
+                                        let theme = theme_by_id(&theme_id);
+                                        editor.duplicate_theme = theme_id.clone();
+                                        editor.duplicate_theme_touched = true;
+                                        editor.terminal_colors =
+                                            terminal_theme_to_colors(theme.terminal);
+                                        editor.ui_colors = app_ui_colors_to_colors(
+                                            derive_ui_colors_from_terminal(theme.terminal),
+                                        );
+                                    }
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
                     );
                 }
                 Some(popup)
@@ -445,6 +511,78 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Reconnect, SettingsSelect::ReconnectMaxAttempts) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for attempts in reconnect_max_attempt_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            attempts.to_string(),
+                            attempts == settings.reconnect.max_attempts,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| set_reconnect_max_attempts(settings, attempts),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Reconnect, SettingsSelect::ReconnectBaseDelay) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for (delay_ms, label) in reconnect_base_delay_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            label,
+                            delay_ms == settings.reconnect.base_delay_ms,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| set_reconnect_base_delay(settings, delay_ms),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
+            (SettingsTab::Reconnect, SettingsSelect::ReconnectMaxDelay) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for (delay_ms, label) in reconnect_max_delay_options() {
+                    popup = popup.child(
+                        select_option(
+                            &self.tokens,
+                            label,
+                            delay_ms == settings.reconnect.max_delay_ms,
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_settings_select = None;
+                                this.edit_settings(
+                                    |settings| set_reconnect_max_delay(settings, delay_ms),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+                Some(popup)
+            }
             (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_concurrent_options() {
@@ -523,22 +661,47 @@ impl WorkspaceApp {
                 Some(popup)
             }
             _ => None,
-        }?;
+        }?
+        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+            cx.stop_propagation();
+        });
 
         Some(
-            deferred(
-                anchored()
-                    .anchor(Corner::TopLeft)
-                    .position(anchor.bounds.bottom_left())
-                    .offset(point(
-                        px(0.0),
-                        px(self.tokens.metrics.settings_select_popup_gap),
-                    ))
-                    .position_mode(AnchoredPositionMode::Window)
-                    .child(popup),
-            )
-            .with_priority(100)
-            .into_any_element(),
+            popover_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.open_settings_select = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.open_settings_select = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Corner::TopLeft)
+                            .position(anchor.bounds.bottom_left())
+                            .offset(point(
+                                px(0.0),
+                                px(self.tokens.metrics.settings_select_popup_gap),
+                            ))
+                            .position_mode(AnchoredPositionMode::Window)
+                            .child(popup),
+                    )
+                    .with_priority(100),
+                )
+                .into_any_element(),
         )
     }
 

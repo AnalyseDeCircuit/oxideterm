@@ -93,20 +93,7 @@ impl IdeSurface {
                         ),
                     ),
             );
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(dialog_backdrop_color())
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(dialog)
             .into_any_element()
     }

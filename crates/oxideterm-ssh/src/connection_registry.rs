@@ -77,6 +77,13 @@ pub enum ProbeConnectionStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeepaliveProbeResult {
+    Ok,
+    Timeout,
+    IoError,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectionTransportStatus {
     Open,
     Closed,
@@ -159,6 +166,7 @@ struct ConnectionEntry {
     sftp: Mutex<SharedSftpState>,
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
+    heartbeat_failures: AtomicU64,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
     idle_timeout: Option<Duration>,
@@ -178,6 +186,7 @@ impl ConnectionEntry {
             sftp: Mutex::new(SharedSftpState::Empty),
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
+            heartbeat_failures: AtomicU64::new(0),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
@@ -202,6 +211,14 @@ impl ConnectionEntry {
 
     fn touch(&self) {
         *self.last_active_at.write() = SystemTime::now();
+    }
+
+    fn reset_heartbeat_failures(&self) {
+        self.heartbeat_failures.store(0, Ordering::Relaxed);
+    }
+
+    fn increment_heartbeat_failures(&self) -> u64 {
+        self.heartbeat_failures.fetch_add(1, Ordering::Relaxed) + 1
     }
 }
 
@@ -522,7 +539,34 @@ impl SshConnectionRegistry {
             if affects_entry {
                 *entry.state.write() = ConnectionState::LinkDown;
                 entry.touch();
-                changed.push(entry.info());
+                let info = entry.info();
+                if let Some(emitter) = self.node_event_emitter.read().clone() {
+                    let _ = emitter.emit_state_from_connection(
+                        &info.connection_id,
+                        &info.state,
+                        "link down cascade",
+                    );
+                }
+                changed.push(info);
+            }
+        }
+        changed
+    }
+
+    pub async fn probe_active_connections(&self, timeout: Duration) -> Vec<ConnectionInfo> {
+        let connection_ids = self
+            .list()
+            .into_iter()
+            .filter(|info| matches!(info.state, ConnectionState::Active | ConnectionState::Idle))
+            .map(|info| info.connection_id)
+            .collect::<Vec<_>>();
+        let mut changed = Vec::new();
+        for connection_id in connection_ids {
+            if matches!(
+                self.probe_single_connection(&connection_id, timeout).await,
+                ProbeConnectionStatus::Dead
+            ) {
+                changed.extend(self.mark_link_down_cascade(&connection_id));
             }
         }
         changed
@@ -536,7 +580,8 @@ impl SshConnectionRegistry {
         let Some(handle) = self.get(connection_id) else {
             return ProbeConnectionStatus::NotFound;
         };
-        match handle.state() {
+        let state = handle.state();
+        match state {
             ConnectionState::Active | ConnectionState::Idle | ConnectionState::LinkDown => {}
             ConnectionState::Connecting
             | ConnectionState::Reconnecting
@@ -545,18 +590,67 @@ impl SshConnectionRegistry {
             | ConnectionState::Error(_) => return ProbeConnectionStatus::NotApplicable,
         }
 
-        let mut alive = handle.probe_alive(timeout).await.is_ok();
-        if !alive {
-            sleep(Duration::from_millis(250)).await;
-            alive = handle.probe_alive(timeout).await.is_ok();
-        }
+        match handle.probe_alive(timeout).await {
+            KeepaliveProbeResult::Ok => {
+                handle.entry.reset_heartbeat_failures();
+                let _ = self.mark_state(connection_id, ConnectionState::Active);
+                ProbeConnectionStatus::Alive
+            }
+            KeepaliveProbeResult::Timeout => {
+                if matches!(state, ConnectionState::Active | ConnectionState::Idle) {
+                    let failures = handle.entry.increment_heartbeat_failures();
+                    if failures < HEARTBEAT_FAIL_THRESHOLD as u64 {
+                        return ProbeConnectionStatus::Alive;
+                    }
+                    let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
+                    return ProbeConnectionStatus::Dead;
+                }
 
-        if alive {
-            let _ = self.mark_state(connection_id, ConnectionState::Active);
-            ProbeConnectionStatus::Alive
-        } else {
-            let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
-            ProbeConnectionStatus::Dead
+                // LinkDown grace probing matches Tauri probe_single_connection:
+                // a timeout gets one 1.5s retry before the old connection is
+                // considered still dead.
+                sleep(Duration::from_millis(1500)).await;
+                match handle.probe_alive(timeout).await {
+                    KeepaliveProbeResult::Ok => {
+                        handle.entry.reset_heartbeat_failures();
+                        let _ = self.mark_state(connection_id, ConnectionState::Active);
+                        ProbeConnectionStatus::Alive
+                    }
+                    KeepaliveProbeResult::Timeout | KeepaliveProbeResult::IoError => {
+                        let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
+                        ProbeConnectionStatus::Dead
+                    }
+                }
+            }
+            KeepaliveProbeResult::IoError => {
+                // Match Tauri Smart Butler mode: an IO error gets a 1.5s
+                // quick probe to avoid false positives from transient network
+                // churn; a second failure confirms LinkDown immediately.
+                if matches!(
+                    handle.state(),
+                    ConnectionState::Disconnecting | ConnectionState::Disconnected
+                ) {
+                    return ProbeConnectionStatus::NotApplicable;
+                }
+                sleep(Duration::from_millis(1500)).await;
+                if matches!(
+                    handle.state(),
+                    ConnectionState::Disconnecting | ConnectionState::Disconnected
+                ) {
+                    return ProbeConnectionStatus::NotApplicable;
+                }
+                match handle.probe_alive(timeout).await {
+                    KeepaliveProbeResult::Ok => {
+                        handle.entry.reset_heartbeat_failures();
+                        let _ = self.mark_state(connection_id, ConnectionState::Active);
+                        ProbeConnectionStatus::Alive
+                    }
+                    KeepaliveProbeResult::Timeout | KeepaliveProbeResult::IoError => {
+                        let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
+                        ProbeConnectionStatus::Dead
+                    }
+                }
+            }
         }
     }
 

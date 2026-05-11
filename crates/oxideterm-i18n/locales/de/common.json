@@ -15,9 +15,6 @@
     "portuguese_brazil": "Português (Brasil)",
     "vietnamese": "Tiếng Việt"
   },
-  "titlebar": {
-    "open_recent_project": "Letztes Projekt öffnen"
-  },
   "layout": {
     "empty": {
       "title": "OxideTerm",

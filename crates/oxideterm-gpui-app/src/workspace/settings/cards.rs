@@ -511,6 +511,21 @@ impl WorkspaceApp {
                 .command_bar
                 .focus_handoff_commands
                 .join("\n"),
+            SettingsInput::CustomThemeName => self
+                .theme_editor
+                .as_ref()
+                .map(|editor| editor.name.clone())
+                .unwrap_or_default(),
+            SettingsInput::CustomThemeTerminalColor(index) => self
+                .theme_editor
+                .as_ref()
+                .and_then(|editor| editor.terminal_colors.get(index).cloned())
+                .unwrap_or_default(),
+            SettingsInput::CustomThemeUiColor(index) => self
+                .theme_editor
+                .as_ref()
+                .and_then(|editor| editor.ui_colors.get(index).cloned())
+                .unwrap_or_default(),
             SettingsInput::HighlightLabel(index) => settings
                 .terminal
                 .highlight_rules
@@ -689,6 +704,18 @@ impl WorkspaceApp {
                     move |settings| settings.terminal.command_bar.focus_handoff_commands = commands,
                     cx,
                 );
+            }
+            SettingsInput::CustomThemeName => {
+                if let Some(editor) = self.theme_editor.as_mut() {
+                    editor.name = self.settings_input_draft.clone();
+                }
+                cx.notify();
+            }
+            SettingsInput::CustomThemeTerminalColor(index) => {
+                self.apply_theme_editor_color(ThemeEditorSection::Terminal, index, cx);
+            }
+            SettingsInput::CustomThemeUiColor(index) => {
+                self.apply_theme_editor_color(ThemeEditorSection::Ui, index, cx);
             }
             SettingsInput::HighlightLabel(index) => {
                 let value = self.settings_input_draft.trim().to_string();

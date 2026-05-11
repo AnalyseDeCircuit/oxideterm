@@ -53,6 +53,7 @@ impl NodeAgentIdeFileSystem {
         let resolved = self
             .router
             .resolve_connection(&node_id)
+            .await
             .map_err(|error| IdeFileError::new(IdeFileErrorKind::Other, error.to_string()))?;
         self.registry.remove(&resolved.connection_id).await;
         let remote_path = remote_agent_path(&resolved.handle)
@@ -110,7 +111,7 @@ impl NodeAgentIdeFileSystem {
             let _ = self.ensure_agent(node_id).await;
         }
 
-        let resolved = self.router.resolve_connection(node_id).ok()?;
+        let resolved = self.router.resolve_connection(node_id).await.ok()?;
         let session = self.registry.get(&resolved.connection_id)?;
         if session.is_alive() {
             self.set_status(session.status());
@@ -125,7 +126,7 @@ impl NodeAgentIdeFileSystem {
 
     async fn ensure_agent(&self, node_id: &NodeId) -> AgentStatus {
         let _guard = self.deploy_lock.lock().await;
-        if let Ok(resolved) = self.router.resolve_connection(node_id)
+        if let Ok(resolved) = self.router.resolve_connection(node_id).await
             && let Some(session) = self.registry.get(&resolved.connection_id)
             && session.is_alive()
         {
@@ -146,7 +147,7 @@ impl NodeAgentIdeFileSystem {
     }
 
     async fn deploy_agent(&self, node_id: &NodeId) -> Result<AgentStatus, AgentError> {
-        let resolved = self.router.resolve_connection(node_id)?;
+        let resolved = self.router.resolve_connection(node_id).await?;
         let arch = detect_arch(&resolved.handle).await?;
         let remote_path = remote_agent_path(&resolved.handle).await?;
         let target = arch_to_target(&arch);
@@ -200,7 +201,7 @@ impl NodeAgentIdeFileSystem {
     }
 
     async fn probe_agent_status(&self, node_id: &NodeId) -> Result<AgentStatus, AgentError> {
-        let resolved = self.router.resolve_connection(node_id)?;
+        let resolved = self.router.resolve_connection(node_id).await?;
         if let Some(session) = self.registry.get(&resolved.connection_id) {
             if session.is_alive() {
                 return Ok(session.status());

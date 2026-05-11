@@ -12,6 +12,7 @@ impl WorkspaceApp {
             let result = async {
                 let resolved = router
                     .resolve_connection(&node_id)
+                    .await
                     .map_err(|error| error.to_string())?;
                 progress_store
                     .list_incomplete(&resolved.connection_id)
@@ -239,6 +240,7 @@ impl WorkspaceApp {
                 .map(|progress| progress.strategy.clone());
             let resolved_connection_id = router
                 .resolve_connection(&node_id)
+                .await
                 .map(|resolved| resolved.connection_id)
                 .unwrap_or_else(|_| format!("node:{}", node_id.0));
             let mut directory_progress = is_directory.then(|| {
@@ -401,6 +403,7 @@ impl WorkspaceApp {
                             .await?;
                         let resolved = router
                             .resolve_connection(&node_id)
+                            .await
                             .map_err(|error| error.to_string())?;
                         tar_upload_directory(
                             &resolved.handle,
@@ -453,6 +456,7 @@ impl WorkspaceApp {
                             );
                             let resolved = router
                                 .resolve_connection(&node_id)
+                                .await
                                 .map_err(|error| error.to_string())?;
                             let tar_result = tar_upload_directory(
                                 &resolved.handle,
@@ -541,6 +545,7 @@ impl WorkspaceApp {
                             .await?;
                         let resolved = router
                             .resolve_connection(&node_id)
+                            .await
                             .map_err(|error| error.to_string())?;
                         tar_download_directory(
                             &resolved.handle,
@@ -583,6 +588,7 @@ impl WorkspaceApp {
                             );
                             let resolved = router
                                 .resolve_connection(&node_id)
+                                .await
                                 .map_err(|error| error.to_string())?;
                             let tar_result = tar_download_directory(
                                 &resolved.handle,
@@ -840,6 +846,7 @@ impl WorkspaceApp {
         error: String,
     ) -> bool {
         let mut changed = false;
+        let mut transfer_ids_to_pause = Vec::new();
         for transfer in &mut self.sftp_view.transfers {
             if &transfer.node_id == node_id
                 && matches!(
@@ -849,8 +856,12 @@ impl WorkspaceApp {
             {
                 transfer.state = SftpTransferState::Error;
                 transfer.error = Some(error.clone());
+                transfer_ids_to_pause.push(transfer.transfer_id.clone());
                 changed = true;
             }
+        }
+        for transfer_id in transfer_ids_to_pause {
+            self.sftp_transfer_manager.pause(&transfer_id);
         }
         changed
     }
@@ -859,6 +870,7 @@ impl WorkspaceApp {
 async fn sftp_tar_probe_for_node(router: &NodeRouter, node_id: &NodeId) -> Result<bool, String> {
     let resolved = router
         .resolve_connection(node_id)
+        .await
         .map_err(|error| error.to_string())?;
     Ok(probe_tar_support(&resolved.handle).await)
 }
@@ -869,6 +881,7 @@ async fn sftp_tar_compression_probe_for_node(
 ) -> Result<TarCompression, String> {
     let resolved = router
         .resolve_connection(node_id)
+        .await
         .map_err(|error| error.to_string())?;
     Ok(probe_tar_compression(&resolved.handle).await)
 }

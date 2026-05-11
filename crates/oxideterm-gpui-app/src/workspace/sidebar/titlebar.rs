@@ -3,13 +3,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let titlebar_bg = titlebar_background(theme.bg_panel, theme.bg_active, theme.accent);
         let titlebar_border = mix_rgb(titlebar_bg, theme.border, 0.65);
-        let label_color = readable_color(titlebar_bg, theme.accent, theme.text_heading);
         let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
-        let label_padding_left = if cfg!(target_os = "macos") {
-            self.tokens.metrics.titlebar_label_x()
-        } else {
-            12.0
-        };
 
         div()
             .h(px(self.tokens.metrics.titlebar_height))
@@ -22,17 +16,7 @@ impl WorkspaceApp {
             .border_color(rgb(titlebar_border))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(text_color))
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .items_center()
-                    .pl(px(label_padding_left))
-                    .text_color(rgb(label_color))
-                    .child(self.i18n.t("titlebar.open_recent_project")),
-            )
+            .child(div().flex_1().h_full().min_w(px(0.0)))
             .when(cfg!(target_os = "windows"), |bar| {
                 bar.child(self.render_windows_titlebar_controls(titlebar_bg, text_color))
             })

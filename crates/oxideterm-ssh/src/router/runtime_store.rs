@@ -394,6 +394,33 @@ impl NodeRuntimeStore {
         self.rebuild_connection_index();
     }
 
+    pub fn apply_node_readiness(
+        &self,
+        node_id: &NodeId,
+        readiness: NodeReadiness,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.generation += 1;
+        route.state.readiness = readiness.clone();
+        route.state.error = match readiness {
+            NodeReadiness::Error => {
+                let reason = reason.into();
+                (!reason.is_empty()).then_some(reason)
+            }
+            NodeReadiness::Disconnected | NodeReadiness::Ready | NodeReadiness::Connecting => None,
+        };
+        Ok(NodeStateEvent::ConnectionStateChanged {
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            state: route.state.readiness.clone(),
+            reason: route.state.error.clone().unwrap_or_default(),
+        })
+    }
+
     pub fn subtree_postorder(&self, node_id: &NodeId) -> Vec<NodeId> {
         fn collect(store: &NodeRuntimeStore, node_id: &NodeId, output: &mut Vec<NodeId>) {
             let children = store
@@ -549,6 +576,7 @@ impl NodeRuntimeStore {
         route.state.readiness = readiness_for_connection(connection);
         route.state.error = match &connection.state {
             ConnectionState::Error(error) => Some(error.clone()),
+            ConnectionState::LinkDown => Some("Link down".to_string()),
             _ => None,
         };
         Ok(NodeStateEvent::ConnectionStateChanged {
@@ -655,4 +683,3 @@ impl NodeRuntimeStore {
         }
     }
 }
-

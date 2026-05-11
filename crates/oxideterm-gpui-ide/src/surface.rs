@@ -21,8 +21,8 @@ use oxideterm_gpui_ui::{
     button::ButtonVariant,
     button::{ButtonOptions, ButtonRadius, ButtonSize, button_with},
     modal::{
-        dialog_backdrop_color, dialog_content, dialog_description, dialog_footer, dialog_header,
-        dialog_title,
+        dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
+        dialog_title, popover_backdrop,
     },
     select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,

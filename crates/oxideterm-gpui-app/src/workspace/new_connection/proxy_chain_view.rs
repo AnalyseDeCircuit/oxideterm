@@ -31,6 +31,9 @@ impl WorkspaceApp {
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .child(
                 select_option(
                     &self.tokens,
@@ -87,16 +90,35 @@ impl WorkspaceApp {
         };
 
         Some(
-            deferred(
-                anchored()
-                    .anchor(anchor_corner)
-                    .position(position)
-                    .offset(point(px(0.0), px(offset_y)))
-                    .position_mode(AnchoredPositionMode::Window)
-                    .child(popup),
-            )
-            .with_priority(200)
-            .into_any_element(),
+            popover_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.open_new_connection_select = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.open_new_connection_select = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(anchor_corner)
+                            .position(position)
+                            .offset(point(px(0.0), px(offset_y)))
+                            .position_mode(AnchoredPositionMode::Window)
+                            .child(popup),
+                    )
+                    .with_priority(200),
+                )
+                .into_any_element(),
         )
     }
 

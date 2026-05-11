@@ -229,15 +229,34 @@ impl IdeSurface {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .into_any_element();
 
-        deferred(
-            anchored()
-                .anchor(Corner::TopLeft)
-                .position(gpui::point(px(x), px(y)))
-                .position_mode(AnchoredPositionMode::Window)
-                .child(popup),
-        )
-        .with_priority(IDE_AGENT_MENU_Z)
-        .into_any_element()
+        popover_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.agent_status_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, _window, cx| {
+                    this.agent_status_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(x), px(y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(popup),
+                )
+                .with_priority(IDE_AGENT_MENU_Z),
+            )
+            .into_any_element()
     }
 
     fn agent_status_menu_height(&self, status: &AgentStatus) -> f32 {
