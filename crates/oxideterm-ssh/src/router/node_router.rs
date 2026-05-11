@@ -124,6 +124,7 @@ impl NodeRouter {
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
         self.require_resolvable_state(node_id, &handle.info())?;
+        self.require_physical_transport(node_id, &connection_id, &handle)?;
         Ok(ResolvedConnection {
             connection_id,
             handle,
@@ -149,6 +150,7 @@ impl NodeRouter {
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
         self.require_resolvable_state(node_id, &handle.info())?;
+        self.require_physical_transport(node_id, &connection_id, &handle)?;
         let handle = self
             .registry
             .acquire_consumer_for_connection(&connection_id, consumer)
@@ -158,6 +160,7 @@ impl NodeRouter {
                 .update_connection_state(node_id, &handle.info(), "connection acquired");
 
         self.require_resolvable_state(node_id, &handle.info())?;
+        self.require_physical_transport(node_id, &connection_id, &handle)?;
         Ok(ResolvedConnection {
             connection_id,
             handle,
@@ -220,6 +223,24 @@ impl NodeRouter {
             .emitter
             .emit_state_from_connection(&connection_id, &connection.state, "connection bound")
             .unwrap_or(event))
+    }
+
+    pub fn disconnect_node_runtime(
+        &self,
+        node_id: &NodeId,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        // Tauri emits SftpReady(false) as part of connection teardown even
+        // though link-down keeps the SFTP owner around for reconnect. Keep the
+        // same split here: explicit disconnect clears SFTP before the node
+        // state moves to Disconnected, while link-down callers do not come
+        // through this path.
+        if let Ok(event) = self.runtime.set_sftp_ready(node_id, false, None) {
+            self.emitter.dispatch(&event);
+        }
+        let event = self.runtime.disconnect_node(node_id, reason)?;
+        self.emitter.dispatch(&event);
+        Ok(event)
     }
 
     pub fn bind_terminal_session(
@@ -301,7 +322,10 @@ impl NodeRouter {
                 .registry
                 .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
         }
-        self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        let event = self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        if was_new {
+            self.emitter.dispatch(&event);
+        }
         Ok(session)
     }
 
@@ -328,7 +352,8 @@ impl NodeRouter {
             let _ = self
                 .registry
                 .mark_sftp_session(&resolved.connection_id, false, None);
-            self.runtime.set_sftp_ready(node_id, false, None)?;
+            let event = self.runtime.set_sftp_ready(node_id, false, None)?;
+            self.emitter.dispatch(&event);
         }
 
         let AcquiredSftpMeta { session, cwd, .. } = resolved
@@ -339,7 +364,8 @@ impl NodeRouter {
         let _ = self
             .registry
             .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
-        self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        let event = self.runtime.set_sftp_ready(node_id, true, cwd)?;
+        self.emitter.dispatch(&event);
         Ok(session)
     }
 
@@ -535,5 +561,23 @@ impl NodeRouter {
                 Err(RouteError::NotConnected(node_id.0.clone()))
             }
         }
+    }
+
+    fn require_physical_transport(
+        &self,
+        node_id: &NodeId,
+        connection_id: &str,
+        handle: &SshConnectionHandle,
+    ) -> Result<(), RouteError> {
+        if handle.has_physical() {
+            return Ok(());
+        }
+        let _ = self
+            .registry
+            .mark_state(connection_id, ConnectionState::LinkDown);
+        Err(RouteError::NotConnected(format!(
+            "Connection {connection_id} for node {} has no active transport",
+            node_id.0
+        )))
     }
 }

@@ -163,6 +163,66 @@ mod tests {
     }
 
     #[test]
+    fn saved_connection_store_writes_tauri_compatible_versions() {
+        let path = temp_store_path("versioned-store");
+        let mut store = ConnectionStore::load(&path).unwrap();
+
+        store
+            .upsert(request("conn-1", SavedAuth::Agent))
+            .expect("connection saved");
+
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("\"version\": 1"));
+        assert_eq!(store.get("conn-1").unwrap().version, CONFIG_VERSION);
+    }
+
+    #[test]
+    fn edit_preserves_tauri_connection_options_and_marks_used() {
+        let path = temp_store_path("preserve-options");
+        fs::write(
+            &path,
+            r##"{
+              "version": 1,
+              "connections": [
+                {
+                  "id": "conn-1",
+                  "version": 1,
+                  "name": "Home",
+                  "host": "192.168.1.2",
+                  "port": 22,
+                  "username": "me",
+                  "auth": { "type": "agent" },
+                  "options": {
+                    "keep_alive_interval": 45,
+                    "compression": true,
+                    "jump_host": "legacy-jump",
+                    "term_type": "vt100",
+                    "agent_forwarding": false
+                  },
+                  "created_at": "2026-01-01T00:00:00Z"
+                }
+              ],
+              "groups": []
+            }"##,
+        )
+        .unwrap();
+        let mut store = ConnectionStore::load(&path).unwrap();
+
+        let mut update = request("conn-1", SavedAuth::Agent);
+        update.name = "Home Edited".to_string();
+        update.agent_forwarding = true;
+        store.upsert(update).unwrap();
+
+        let conn = store.get("conn-1").unwrap();
+        assert_eq!(conn.options.keep_alive_interval, 45);
+        assert!(conn.options.compression);
+        assert_eq!(conn.options.jump_host.as_deref(), Some("legacy-jump"));
+        assert_eq!(conn.options.term_type.as_deref(), Some("vt100"));
+        assert!(conn.options.agent_forwarding);
+        assert!(conn.last_used_at.is_some());
+    }
+
+    #[test]
     fn legacy_plaintext_password_and_passphrase_are_migrated() {
         let path = temp_store_path("legacy-migration");
         fs::write(
@@ -382,8 +442,52 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_proxy_hop_key_path_preserves_passphrase_keychain_entry() {
-        let mut store = load_empty_store("proxy-hop-passphrase");
+    fn deleting_connection_removes_main_and_proxy_keychain_entries() {
+        let mut store = load_empty_store("delete-cleans-secrets");
+        let mut req = request(
+            "conn-1",
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("target-secret")),
+            },
+        );
+        req.proxy_chain = vec![SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("jump-secret")),
+            },
+            agent_forwarding: false,
+        }];
+        store.upsert(req).unwrap();
+
+        let conn = store.get("conn-1").unwrap();
+        let target_keychain_id = match &conn.auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected target auth: {other:?}"),
+        };
+        let proxy_keychain_id = match &conn.proxy_chain[0].auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        };
+
+        assert!(store.delete("conn-1").unwrap());
+
+        assert!(store.keychain.get(&target_keychain_id).is_err());
+        assert!(store.keychain.get(&proxy_keychain_id).is_err());
+    }
+
+    #[test]
+    fn explicit_proxy_hop_key_update_without_passphrase_clears_old_keychain_entry() {
+        let mut store = load_empty_store("proxy-hop-passphrase-clear");
         let mut req = request("conn-1", SavedAuth::Agent);
         req.proxy_chain = vec![SavedProxyHop {
             host: "jump.example.com".to_string(),
@@ -424,6 +528,48 @@ mod tests {
         match &store.get("conn-1").unwrap().proxy_chain[0].auth {
             SavedAuth::Key {
                 has_passphrase,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+                ..
+            } => assert!(!*has_passphrase),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        }
+        assert!(store.keychain.get(&previous_keychain_id).is_err());
+    }
+
+    #[test]
+    fn copied_existing_proxy_hop_preserves_passphrase_keychain_entry() {
+        let mut store = load_empty_store("proxy-hop-passphrase-preserve");
+        let mut req = request("conn-1", SavedAuth::Agent);
+        req.proxy_chain = vec![SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Key {
+                key_path: "/tmp/jump-key".to_string(),
+                has_passphrase: true,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: Some(SecretString::from("jump-key-secret")),
+            },
+            agent_forwarding: false,
+        }];
+        store.upsert(req).unwrap();
+        let existing_hop = store.get("conn-1").unwrap().proxy_chain[0].clone();
+        let previous_keychain_id = match &existing_hop.auth {
+            SavedAuth::Key {
+                passphrase_keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        };
+
+        let mut update = request("conn-1", SavedAuth::Agent);
+        update.proxy_chain = vec![existing_hop];
+        store.upsert(update).unwrap();
+
+        match &store.get("conn-1").unwrap().proxy_chain[0].auth {
+            SavedAuth::Key {
+                has_passphrase,
                 passphrase_keychain_id: Some(keychain_id),
                 plaintext_passphrase: None,
                 ..
@@ -433,5 +579,9 @@ mod tests {
             }
             other => panic!("unexpected proxy auth: {other:?}"),
         }
+        assert_eq!(
+            store.keychain.get(&previous_keychain_id).unwrap(),
+            SecretString::from("jump-key-secret")
+        );
     }
 }

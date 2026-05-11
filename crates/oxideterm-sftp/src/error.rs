@@ -23,6 +23,8 @@ pub enum SftpError {
     InvalidPath(String),
     #[error("Transfer cancelled")]
     TransferCancelled,
+    #[error("Transfer interrupted: {0}")]
+    TransferInterrupted(String),
     #[error("SFTP session not initialized for: {0}")]
     NotInitialized(String),
     #[error("Transfer error: {0}")]
@@ -50,6 +52,7 @@ impl SftpError {
             | Self::DirectoryNotFound(_)
             | Self::InvalidPath(_)
             | Self::TransferCancelled
+            | Self::TransferInterrupted(_)
             | Self::NotInitialized(_)
             | Self::TransferError(_)
             | Self::WriteError(_)

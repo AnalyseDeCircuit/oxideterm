@@ -10,6 +10,7 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 keyring.workspace = true
+russh = { path = "../russh" }
 uuid.workspace = true
 whoami.workspace = true
 zeroize.workspace = true

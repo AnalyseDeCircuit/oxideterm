@@ -165,17 +165,22 @@ pub struct SftpTransferControl {
     cancel_rx: watch::Receiver<bool>,
     pause_tx: watch::Sender<bool>,
     pause_rx: watch::Receiver<bool>,
+    interrupt_tx: watch::Sender<Option<String>>,
+    interrupt_rx: watch::Receiver<Option<String>>,
 }
 
 impl SftpTransferControl {
     pub fn new() -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (pause_tx, pause_rx) = watch::channel(false);
+        let (interrupt_tx, interrupt_rx) = watch::channel(None);
         Self {
             cancel_tx,
             cancel_rx,
             pause_tx,
             pause_rx,
+            interrupt_tx,
+            interrupt_rx,
         }
     }
 
@@ -185,6 +190,10 @@ impl SftpTransferControl {
 
     pub fn is_paused(&self) -> bool {
         *self.pause_rx.borrow()
+    }
+
+    pub fn interrupt_reason(&self) -> Option<String> {
+        self.interrupt_rx.borrow().clone()
     }
 
     pub fn cancel(&self) {
@@ -197,6 +206,10 @@ impl SftpTransferControl {
 
     pub fn resume(&self) {
         let _ = self.pause_tx.send(false);
+    }
+
+    pub fn interrupt(&self, reason: impl Into<String>) {
+        let _ = self.interrupt_tx.send(Some(reason.into()));
     }
 
     pub fn subscribe_cancellation(&self) -> watch::Receiver<bool> {
@@ -464,6 +477,13 @@ impl SftpTransferManager {
     pub fn pause(&self, transfer_id: &str) -> bool {
         if let Some(control) = self.get_control(transfer_id) {
             control.pause();
+            if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
+                && !snapshot.state.is_finished()
+            {
+                snapshot.state = BackgroundTransferState::Paused;
+                snapshot.backend_speed = Some(0);
+                self.background_notify.notify_waiters();
+            }
             true
         } else {
             false
@@ -473,10 +493,39 @@ impl SftpTransferManager {
     pub fn resume(&self, transfer_id: &str) -> bool {
         if let Some(control) = self.get_control(transfer_id) {
             control.resume();
+            if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
+                && snapshot.state == BackgroundTransferState::Paused
+            {
+                snapshot.state = BackgroundTransferState::Pending;
+                self.background_notify.notify_waiters();
+            }
             true
         } else {
             false
         }
+    }
+
+    pub fn interrupt(&self, transfer_id: &str, reason: impl Into<String>) -> bool {
+        let reason = reason.into();
+        // This is distinct from cancel: reconnect wants the running worker to
+        // stop using the broken SSH channel while leaving progress resumable.
+        let had_control = if let Some(control) = self.get_control(transfer_id) {
+            control.interrupt(reason.clone());
+            true
+        } else {
+            false
+        };
+        if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
+            && !snapshot.state.is_finished()
+        {
+            snapshot.state = BackgroundTransferState::Error;
+            snapshot.error = Some(reason.clone());
+            snapshot.backend_speed = Some(0);
+            snapshot.end_time = Some(now_ms());
+            self.background_notify.notify_waiters();
+            return true;
+        }
+        had_control
     }
 
     pub fn cancel_all(&self) {
@@ -492,10 +541,16 @@ impl SftpTransferManager {
         if control.is_cancelled() {
             return Err(SftpError::TransferCancelled);
         }
+        if let Some(reason) = control.interrupt_reason() {
+            return Err(SftpError::TransferInterrupted(reason));
+        }
         while control.is_paused() {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if control.is_cancelled() {
                 return Err(SftpError::TransferCancelled);
+            }
+            if let Some(reason) = control.interrupt_reason() {
+                return Err(SftpError::TransferInterrupted(reason));
             }
         }
         Ok(())
@@ -669,5 +724,45 @@ mod tests {
 
         assert_eq!(snapshot.state, BackgroundTransferState::Error);
         assert_eq!(snapshot.error.as_deref(), Some("boom"));
+    }
+
+    #[tokio::test]
+    async fn interrupted_transfer_exits_without_deleting_resume_progress() {
+        let manager = SftpTransferManager::new();
+        manager.register("tx-1");
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.mark_background_transfer_active("tx-1");
+
+        assert!(manager.interrupt("tx-1", "Connection lost"));
+
+        let error = manager
+            .check_control("tx-1")
+            .await
+            .expect_err("interrupted transfer should exit the worker loop");
+        assert!(matches!(
+            error,
+            SftpError::TransferInterrupted(message) if message == "Connection lost"
+        ));
+        let snapshot = manager.get_background_transfer("tx-1").unwrap();
+        assert_eq!(snapshot.state, BackgroundTransferState::Error);
+        assert_eq!(snapshot.error.as_deref(), Some("Connection lost"));
+        assert_eq!(snapshot.backend_speed, Some(0));
+    }
+
+    #[test]
+    fn pause_and_resume_update_background_snapshot_state() {
+        let manager = SftpTransferManager::new();
+        manager.register("tx-1");
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.mark_background_transfer_active("tx-1");
+
+        assert!(manager.pause("tx-1"));
+        let paused = manager.get_background_transfer("tx-1").unwrap();
+        assert_eq!(paused.state, BackgroundTransferState::Paused);
+        assert_eq!(paused.backend_speed, Some(0));
+
+        assert!(manager.resume("tx-1"));
+        let resumed = manager.get_background_transfer("tx-1").unwrap();
+        assert_eq!(resumed.state, BackgroundTransferState::Pending);
     }
 }

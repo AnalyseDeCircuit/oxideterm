@@ -56,6 +56,7 @@ use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio::sync::oneshot;
+use zeroize::Zeroizing;
 
 pub use crate::auth::AuthResult;
 use crate::channels::{
@@ -140,7 +141,7 @@ pub enum Msg {
         method: auth::Method,
     },
     AuthInfoResponse {
-        responses: Vec<String>,
+        responses: Zeroizing<Vec<String>>,
     },
     Signed {
         data: Vec<u8>,
@@ -344,10 +345,12 @@ impl<H: Handler> Handle<H> {
     ///   of prompts. If a prompt has an empty string, then the response should be an empty string.
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
-        responses: Vec<String>,
+        responses: impl Into<Zeroizing<Vec<String>>>,
     ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
         self.sender
-            .send(Msg::AuthInfoResponse { responses })
+            .send(Msg::AuthInfoResponse {
+                responses: responses.into(),
+            })
             .await
             .map_err(|_| crate::Error::SendError)?;
         self.wait_recv_keyboard_interactive_reply().await

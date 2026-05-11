@@ -96,6 +96,22 @@ impl NodeEventEmitter {
         )
     }
 
+    pub fn emit_connection_status_changed(
+        &self,
+        connection_id: impl Into<String>,
+        status: impl Into<String>,
+        affected_children: Vec<String>,
+    ) -> NodeStateEvent {
+        let event = NodeStateEvent::ConnectionStatusChanged {
+            connection_id: connection_id.into(),
+            status: status.into(),
+            affected_children,
+            timestamp: now_ms(),
+        };
+        self.dispatch(&event);
+        event
+    }
+
     pub fn emit_sftp_ready(
         &self,
         connection_id: &str,

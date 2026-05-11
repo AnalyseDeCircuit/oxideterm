@@ -101,7 +101,16 @@ async fn authenticate_proxy_hop(
         agent_forwarding: hop.agent_forwarding,
         ..SshConfig::default()
     };
-    authenticate(handle, &config, None).await
+    authenticate_with_options(
+        handle,
+        &config,
+        None,
+        AuthenticationOptions {
+            password_kbi_fallback: false,
+            interactive_kbi_chain: false,
+        },
+    )
+    .await
 }
 
 #[derive(Clone)]
@@ -156,12 +165,20 @@ impl client::Handler for NativeClientHandler {
                     actual_fingerprint,
                 });
             }
+            if let Some(trust_host_key) = self.trust_host_key {
+                accept_host_key_for_session(&self.host, self.port, actual_fingerprint.clone());
+                if trust_host_key {
+                    learn_host_key(&self.host, self.port, server_public_key)?;
+                }
+                return Ok(true);
+            }
         }
 
         match verify_host_key(&self.host, self.port, server_public_key)? {
             HostKeyVerification::Verified => Ok(true),
             HostKeyVerification::Unknown { fingerprint, .. } => {
                 if let Some(trust_host_key) = self.trust_host_key {
+                    accept_host_key_for_session(&self.host, self.port, fingerprint);
                     if trust_host_key {
                         learn_host_key(&self.host, self.port, server_public_key)?;
                     }
@@ -247,6 +264,36 @@ async fn authenticate(
     config: &SshConfig,
     prompt_handler: Option<&dyn SshPromptHandler>,
 ) -> Result<(), SshTransportError> {
+    authenticate_with_options(
+        handle,
+        config,
+        prompt_handler,
+        AuthenticationOptions::default(),
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+struct AuthenticationOptions {
+    password_kbi_fallback: bool,
+    interactive_kbi_chain: bool,
+}
+
+impl Default for AuthenticationOptions {
+    fn default() -> Self {
+        Self {
+            password_kbi_fallback: true,
+            interactive_kbi_chain: true,
+        }
+    }
+}
+
+async fn authenticate_with_options(
+    handle: &mut client::Handle<NativeClientHandler>,
+    config: &SshConfig,
+    prompt_handler: Option<&dyn SshPromptHandler>,
+    options: AuthenticationOptions,
+) -> Result<(), SshTransportError> {
     if let Some(result) = try_none_auth_probe(handle, &config.username).await
         && result.success()
     {
@@ -255,20 +302,16 @@ async fn authenticate(
 
     let result = match &config.auth {
         AuthMethod::Password { password } => {
-            if password.trim().is_empty() {
-                return Err(SshTransportError::AuthenticationFailed(
-                    "password is empty".to_string(),
-                ));
-            }
             let result = authenticate_password(handle, config, password).await?;
-            if try_password_as_keyboard_interactive(
-                handle,
-                config,
-                password,
-                &result,
-                prompt_handler,
-            )
-            .await?
+            if options.password_kbi_fallback
+                && try_password_as_keyboard_interactive(
+                    handle,
+                    config,
+                    password,
+                    &result,
+                    prompt_handler,
+                )
+                .await?
             {
                 return Ok(());
             }
@@ -304,7 +347,8 @@ async fn authenticate(
 
     if result.success() {
         Ok(())
-    } else if try_keyboard_interactive_chain(handle, &config.username, &result, prompt_handler)
+    } else if options.interactive_kbi_chain
+        && try_keyboard_interactive_chain(handle, &config.username, &result, prompt_handler)
         .await?
     {
         Ok(())

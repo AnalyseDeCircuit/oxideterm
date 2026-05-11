@@ -2,7 +2,9 @@ use gpui::{
     AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
     px, rgb,
 };
-use oxideterm_ssh::{KeyboardInteractivePromptRequest, SshPromptError};
+use oxideterm_ssh::{
+    KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
+};
 use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
@@ -13,17 +15,18 @@ use oxideterm_gpui_ui::{
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
     request: KeyboardInteractivePromptRequest,
-    pub(in crate::workspace) responses: Vec<String>,
+    pub(in crate::workspace) responses: KeyboardInteractiveResponses,
     pub(in crate::workspace) focused_prompt: usize,
-    response_tx: Option<oneshot::Sender<Result<Vec<String>, SshPromptError>>>,
+    response_tx: Option<oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>>,
 }
 
 impl KeyboardInteractiveChallenge {
     fn new(
         request: KeyboardInteractivePromptRequest,
-        response_tx: oneshot::Sender<Result<Vec<String>, SshPromptError>>,
+        response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
     ) -> Self {
-        let responses = vec![String::new(); request.prompts.len()];
+        let responses =
+            KeyboardInteractiveResponses::new(vec![String::new(); request.prompts.len()]);
         Self {
             request,
             responses,
@@ -37,7 +40,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn open_keyboard_interactive_challenge(
         &mut self,
         request: KeyboardInteractivePromptRequest,
-        response_tx: oneshot::Sender<Result<Vec<String>, SshPromptError>>,
+        response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

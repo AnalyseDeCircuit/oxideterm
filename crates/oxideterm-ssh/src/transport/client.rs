@@ -115,6 +115,7 @@ impl SshTransportClient {
         match pooled {
             Ok(pooled) => {
                 connection.set_physical(pooled);
+                let _ = registry.set_parent_connection_id(&connection_id, None);
                 let _ = registry.mark_state(&connection_id, ConnectionState::Active);
                 Ok(connection)
             }
@@ -133,8 +134,10 @@ impl SshTransportClient {
         consumer: ConnectionConsumer,
         connection: SshConnectionHandle,
         parent: SshConnectionHandle,
+        parent_consumer: ConnectionConsumer,
     ) -> Result<SshConnectionHandle, SshTransportError> {
         let connection_id = connection.connection_id().to_string();
+        let parent_connection_id = parent.connection_id().to_string();
         let remote_forward_handler = Arc::new(RwLock::new(None));
 
         // This is the native equivalent of Tauri establish_tunneled_connection:
@@ -194,12 +197,17 @@ impl SshTransportClient {
         match pooled {
             Ok(pooled) => {
                 connection.set_physical(pooled);
+                let _ = registry.set_parent_connection_id(
+                    &connection_id,
+                    Some(parent_connection_id),
+                );
                 let _ = registry.mark_state(&connection_id, ConnectionState::Active);
                 Ok(connection)
             }
             Err(error) => {
                 let _ =
                     registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
+                registry.release(&parent_connection_id, &parent_consumer);
                 registry.release(&connection_id, &consumer);
                 Err(error)
             }

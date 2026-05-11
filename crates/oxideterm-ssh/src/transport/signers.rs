@@ -1,5 +1,12 @@
 type NativeAgentClient = AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>;
 
+/// Send-safe wrapper around russh's agent client.
+///
+/// Tauri keeps the same wrapper because russh's blanket `Signer` impl for
+/// `AgentClient` can produce a future whose borrowed `AgentIdentity` lifetime
+/// is not general enough once the SSH connect flow is spawned onto a Send
+/// runtime. Native terminal startup has the same Send boundary, so keep the
+/// owned-key clone here instead of passing `AgentClient` directly.
 struct AgentSigner<'a> {
     agent: &'a mut NativeAgentClient,
 }
@@ -54,4 +61,3 @@ impl RusshSigner for LocalKeySigner {
         async move { sign_auth_payload_with_hash_alg(key.as_ref(), hash_alg, to_sign) }
     }
 }
-

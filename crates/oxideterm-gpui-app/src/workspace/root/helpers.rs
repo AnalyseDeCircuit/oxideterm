@@ -439,6 +439,56 @@ impl WorkspaceApp {
         });
     }
 
+    fn i18n_with(&self, key: &str, replacements: &[(&str, String)]) -> String {
+        let mut text = self.i18n.t(key);
+        for (name, value) in replacements {
+            text = text.replace(&format!("{{{{{name}}}}}"), value);
+        }
+        text
+    }
+
+    fn connection_failure_notice_for_node(
+        &self,
+        node_id: &NodeId,
+        error: &str,
+    ) -> Option<(String, Option<String>)> {
+        if connection_error_is_cancelled(error) {
+            return None;
+        }
+
+        if connection_error_is_proxy_hop_unsupported(error) {
+            return Some((
+                self.i18n.t("connections.toast.proxy_chain_invalid"),
+                Some(self.i18n.t("connections.toast.proxy_hop_kbi_unsupported")),
+            ));
+        }
+
+        if let Some(run) = self.active_connection_chain.as_ref()
+            && let Some(position) = run
+                .node_ids
+                .iter()
+                .position(|candidate| candidate == node_id)
+        {
+            let total = run.node_ids.len();
+            return Some((
+                self.i18n.t("connections.errors.chain_failed_title"),
+                Some(self.i18n_with(
+                    "connections.errors.chain_failed_desc",
+                    &[
+                        ("position", (position + 1).to_string()),
+                        ("total", total.to_string()),
+                        ("error", error.to_string()),
+                    ],
+                )),
+            ));
+        }
+
+        Some((
+            self.i18n.t("connections.errors.generic_title"),
+            Some(error.to_string()),
+        ))
+    }
+
     fn next_connection_trace_attempt_id(&mut self) -> String {
         self.connection_trace_attempt_seq = self.connection_trace_attempt_seq.wrapping_add(1);
         format!("native-connection-{}", self.connection_trace_attempt_seq)
@@ -684,6 +734,8 @@ impl WorkspaceApp {
             self.reconnect_requeue_counts.remove(&affected_node_id);
             self.pending_reconnect_transfer_resumes.remove(&affected_node_id);
             self.reconnect_transfer_resume_totals.remove(&affected_node_id);
+            self.reconnect_transfer_resume_successes
+                .remove(&affected_node_id);
             self.reconnect_forward_restore_totals.remove(&affected_node_id);
             self.clear_reconnect_pipeline_active(&affected_node_id);
         }
@@ -698,7 +750,7 @@ impl WorkspaceApp {
                 "reconnect_orchestrator",
             );
             self.push_reconnect_notice(
-                "Reconnection cancelled",
+                self.i18n.t("connections.reconnect.cancelled"),
                 None,
                 TerminalNoticeVariant::Default,
             );
@@ -870,6 +922,22 @@ fn persistable_session_tree_config(node: &NodeTreeSnapshotNode) -> Option<SshCon
         return None;
     }
     config_without_runtime_secret(&node.config).then(|| node.config.clone())
+}
+
+fn connection_error_is_cancelled(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("cancelled")
+        || error.contains("user_cancelled")
+        || error.contains("manual disconnect")
+        || error.contains("explicit disconnect")
+}
+
+fn connection_error_is_proxy_hop_unsupported(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("proxy")
+        && (error.contains("keyboard-interactive")
+            || error.contains("2fa")
+            || error.contains("unsupported auth"))
 }
 
 fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<SshConfig> {

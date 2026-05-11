@@ -45,7 +45,7 @@ async fn try_password_as_keyboard_interactive(
         ))
     })?;
 
-    loop {
+    for _ in 0..MAX_PASSWORD_KBI_FALLBACK_ROUNDS {
         match response {
             client::KeyboardInteractiveAuthResponse::Success => return Ok(true),
             client::KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
@@ -97,6 +97,7 @@ async fn try_password_as_keyboard_interactive(
             }
         }
     }
+    Ok(false)
 }
 
 async fn authenticate_keyboard_interactive(
@@ -172,7 +173,7 @@ async fn continue_keyboard_interactive_flow(
     mut response: client::KeyboardInteractiveAuthResponse,
     chained: bool,
 ) -> Result<bool, SshTransportError> {
-    for _ in 0..MAX_PASSWORD_KBI_FALLBACK_ROUNDS {
+    loop {
         match response {
             client::KeyboardInteractiveAuthResponse::Success => return Ok(true),
             client::KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
@@ -202,11 +203,7 @@ async fn continue_keyboard_interactive_flow(
                 .map_err(|_| {
                     SshTransportError::AuthenticationFailed(SshPromptError::Timeout.to_string())
                 })?
-                .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?
-                .into_iter()
-                .map(Zeroizing::new)
-                .map(|reply| (*reply).clone())
-                .collect::<Vec<_>>();
+                .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
                 response = tokio::time::timeout(
                     PASSWORD_AUTH_TIMEOUT,
                     handle.authenticate_keyboard_interactive_respond(replies),
@@ -225,7 +222,6 @@ async fn continue_keyboard_interactive_flow(
             }
         }
     }
-    Ok(false)
 }
 
 fn prompt_looks_like_password(prompt: &str) -> bool {
@@ -260,9 +256,13 @@ fn load_private_key_material(
     key_path: &str,
     passphrase: Option<&str>,
 ) -> Result<Arc<PrivateKey>, SshTransportError> {
-    let key_path = resolve_key_path(key_path)?;
-    let key = load_secret_key(&key_path, passphrase)
-        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+    let key = if key_path.trim().is_empty() {
+        load_first_available_default_key(passphrase)?
+    } else {
+        let key_path = expand_tilde_path(key_path);
+        load_secret_key(&key_path, passphrase)
+            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?
+    };
     Ok(Arc::new(key))
 }
 
@@ -425,7 +425,8 @@ async fn authenticate_agent(
     }
 
     let server_rsa_preference = resolve_server_rsa_preference(handle).await;
-    let mut last_failure = None;
+    let mut last_error = None;
+    let mut publickey_exhausted = false;
     for identity in identities {
         let public_key = identity.public_key().into_owned();
         let algorithms = auth_algorithm_attempt_order(
@@ -433,7 +434,7 @@ async fn authenticate_agent(
             server_rsa_preference,
         );
         for hash_alg in algorithms {
-            let result = handle
+            match handle
                 .authenticate_publickey_with(
                     config.username.clone(),
                     public_key.clone(),
@@ -441,25 +442,34 @@ async fn authenticate_agent(
                     &mut AgentSigner { agent: &mut agent },
                 )
                 .await
-                .map_err(|error| match error {
-                    AgentAuthError::Send(send) => {
-                        SshTransportError::AuthenticationFailed(send.to_string())
+            {
+                Ok(result) if result.success() => return Ok(client::AuthResult::Success),
+                Ok(result) => {
+                    if !server_allows_more_publickey_attempts(&result) {
+                        publickey_exhausted = true;
+                        break;
                     }
-                    AgentAuthError::Key(key_error) => {
-                        SshTransportError::AuthenticationFailed(key_error.to_string())
-                    }
-                })?;
-            if result.success() || !server_allows_more_publickey_attempts(&result) {
-                return Ok(result);
+                }
+                Err(AgentAuthError::Send(send)) => {
+                    return Err(SshTransportError::AuthenticationFailed(send.to_string()));
+                }
+                Err(AgentAuthError::Key(key_error)) => {
+                    last_error = Some(key_error.to_string());
+                }
             }
-            last_failure = Some(result);
+        }
+
+        if publickey_exhausted {
+            break;
         }
     }
 
-    Ok(last_failure.unwrap_or_else(|| client::AuthResult::Failure {
-        remaining_methods: russh::MethodSet::empty(),
-        partial_success: false,
-    }))
+    Err(SshTransportError::AuthenticationFailed(format!(
+        "No agent key was accepted by the server{}",
+        last_error
+            .map(|error| format!(". Last error: {error}"))
+            .unwrap_or_default()
+    )))
 }
 
 async fn connect_agent_client() -> Result<NativeAgentClient, String> {

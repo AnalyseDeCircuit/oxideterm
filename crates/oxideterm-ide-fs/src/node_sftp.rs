@@ -402,7 +402,9 @@ fn map_route_error(error: RouteError) -> IdeFileError {
         RouteError::NotConnected(_) | RouteError::ParentNotConnected(_) => {
             IdeFileErrorKind::Disconnected
         }
-        RouteError::CapabilityUnavailable(_) if is_network_error_message(&message) => {
+        RouteError::CapabilityUnavailable(_)
+            if is_network_error_message(&message) || is_session_dead_error_message(&message) =>
+        {
             IdeFileErrorKind::Disconnected
         }
         RouteError::CapabilityUnavailable(_) => IdeFileErrorKind::Unsupported,
@@ -437,6 +439,7 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
         SftpError::SubsystemNotAvailable(_) => IdeFileErrorKind::Unsupported,
         SftpError::InvalidPath(_) => IdeFileErrorKind::NotFound,
         SftpError::TransferCancelled => IdeFileErrorKind::Other,
+        SftpError::TransferInterrupted(_) => IdeFileErrorKind::Disconnected,
         SftpError::NotInitialized(_) => IdeFileErrorKind::Disconnected,
         SftpError::TransferError(_) | SftpError::WriteError(_) | SftpError::StorageError(_) => {
             if is_network_error_message(&message) {
@@ -462,6 +465,22 @@ fn is_network_error_message(message: &str) -> bool {
         "broken pipe",
         "reset by peer",
         "channel closed",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+fn is_session_dead_error_message(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    [
+        "session not found",
+        "not initialized",
+        "no active ssh connection",
+        "transport is closed",
+        "transport is missing",
+        "stale",
+        "link_down",
+        "link down",
     ]
     .iter()
     .any(|needle| normalized.contains(needle))
@@ -499,6 +518,19 @@ mod tests {
     #[test]
     fn maps_channel_closed_to_disconnected() {
         let error = map_sftp_error(SftpError::ChannelError("channel closed".into()));
+        assert_eq!(error.kind, IdeFileErrorKind::Disconnected);
+    }
+
+    #[test]
+    fn maps_sftp_session_unavailable_route_to_disconnected() {
+        let error = map_route_error(RouteError::CapabilityUnavailable(
+            "Session not found: node-1".to_string(),
+        ));
+        assert_eq!(error.kind, IdeFileErrorKind::Disconnected);
+
+        let error = map_route_error(RouteError::CapabilityUnavailable(
+            "SFTP session not initialized for: node-1".to_string(),
+        ));
         assert_eq!(error.kind, IdeFileErrorKind::Disconnected);
     }
 }

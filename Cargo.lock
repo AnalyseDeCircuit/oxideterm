@@ -6471,6 +6471,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "keyring",
+ "russh",
  "serde",
  "serde_json",
  "uuid",

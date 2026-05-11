@@ -1,10 +1,11 @@
 use std::{future::Future, pin::Pin, result::Result as StdResult, sync::Arc, sync::mpsc};
 
 use gpui::{Context, Window};
+use oxideterm_connections::first_available_default_key_path;
 use oxideterm_ssh::{
-    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, NodeId, NodeReadiness,
-    ProxyChainPreflightChallenge, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
-    SshTransportClient, check_host_key,
+    AuthMethod, HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses,
+    NodeId, NodeReadiness, ProxyChainPreflightChallenge, ProxyHopConfig, SshConfig, SshPromptError,
+    SshPromptHandler, SshTransportClient, check_host_key,
 };
 use tokio::sync::oneshot;
 
@@ -49,7 +50,7 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
     },
     KeyboardInteractivePrompt {
         request: KeyboardInteractivePromptRequest,
-        response_tx: oneshot::Sender<Result<Vec<String>, SshPromptError>>,
+        response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
     },
 }
 
@@ -68,7 +69,9 @@ impl SshPromptHandler for NativeSshPromptHandler {
     fn keyboard_interactive(
         &self,
         request: KeyboardInteractivePromptRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SshPromptError>> + Send + '_>> {
+    ) -> Pin<
+        Box<dyn Future<Output = Result<KeyboardInteractiveResponses, SshPromptError>> + Send + '_>,
+    > {
         Box::pin(async move {
             let (response_tx, response_rx) = oneshot::channel();
             self.tx
@@ -211,6 +214,16 @@ impl WorkspaceApp {
         };
         if intent == SshConnectionIntent::Test {
             self.start_ssh_test_flow(config, title, cx);
+            return;
+        }
+        let mut config = config;
+        if let Err(error) = prepare_tree_connect_config(&mut config) {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.error = Some(error);
+            } else {
+                self.session_manager.status = Some(error);
+            }
+            cx.notify();
             return;
         }
         if let SshConnectionIntent::DrillDown(parent_id) = intent {
@@ -395,11 +408,20 @@ impl WorkspaceApp {
     fn start_saved_connection_flow(
         &mut self,
         id: String,
-        config: SshConfig,
+        mut config: SshConfig,
         title: String,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Err(error) = prepare_tree_connect_config(&mut config) {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.error = Some(error);
+            } else {
+                self.session_manager.status = Some(error);
+            }
+            cx.notify();
+            return;
+        }
         self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
         if config.proxy_chain.is_some() {
             self.start_proxy_chain_preflight(SshProxyPreflightPlan {
@@ -462,6 +484,18 @@ impl WorkspaceApp {
             cx.notify();
             return None;
         }
+        if form
+            .proxy_hops
+            .iter()
+            .any(|hop| hop.complete() && hop.auth_tab == SshAuthTab::TwoFactor)
+        {
+            form.error = Some(
+                self.i18n
+                    .t("sessionManager.toast.proxy_hop_kbi_unsupported"),
+            );
+            cx.notify();
+            return None;
+        }
 
         let auth = match form.auth_tab {
             SshAuthTab::Password => AuthMethod::password(form.password.clone()),
@@ -495,7 +529,14 @@ impl WorkspaceApp {
             }
             SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
         };
-        let proxy_chain = proxy_chain_from_form(form);
+        let proxy_chain = match proxy_chain_from_form(form) {
+            Ok(proxy_chain) => proxy_chain,
+            Err(error) => {
+                form.error = Some(error);
+                cx.notify();
+                return None;
+            }
+        };
         let config = SshConfig {
             host: host.clone(),
             port: port.unwrap_or(22),
@@ -895,26 +936,31 @@ impl WorkspaceApp {
     }
 }
 
-fn proxy_chain_from_form(form: &mut NewConnectionForm) -> Option<Vec<ProxyHopConfig>> {
+fn proxy_chain_from_form(
+    form: &mut NewConnectionForm,
+) -> Result<Option<Vec<ProxyHopConfig>>, String> {
     if form.proxy_hops.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(
-        form.proxy_hops
-            .iter()
-            .filter(|hop| hop.complete())
-            .map(|hop| ProxyHopConfig {
-                host: hop.host.trim().to_string(),
-                port: hop.port.trim().parse::<u16>().unwrap_or(22),
-                username: hop.username.trim().to_string(),
-                auth: auth_method_from_proxy_hop(hop),
-                agent_forwarding: hop.agent_forwarding,
-                strict_host_key_checking: true,
-                trust_host_key: None,
-                expected_host_key_fingerprint: None,
-            })
-            .collect(),
-    )
+
+    let mut chain = Vec::new();
+    for hop in form.proxy_hops.iter().filter(|hop| hop.complete()) {
+        if hop.auth_tab == SshAuthTab::TwoFactor {
+            return Err("Proxy hop does not support keyboard-interactive/2FA".to_string());
+        }
+        chain.push(ProxyHopConfig {
+            host: hop.host.trim().to_string(),
+            port: hop.port.trim().parse::<u16>().unwrap_or(22),
+            username: hop.username.trim().to_string(),
+            auth: auth_method_from_proxy_hop(hop),
+            agent_forwarding: hop.agent_forwarding,
+            strict_host_key_checking: true,
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+        });
+    }
+
+    Ok(Some(chain))
 }
 
 fn prepare_proxy_chain_test_config(config: &mut SshConfig) {
@@ -928,6 +974,29 @@ fn prepare_proxy_chain_test_config(config: &mut SshConfig) {
             hop.trust_host_key = Some(false);
             hop.expected_host_key_fingerprint = None;
         }
+    }
+}
+
+fn prepare_tree_connect_config(config: &mut SshConfig) -> Result<(), String> {
+    // Tauri resolves `default_key` to the first existing default key before
+    // adding/connecting SessionTree nodes, while test_connection keeps its own
+    // dynamic loader. Native mirrors that split here.
+    resolve_default_key_for_tree_auth(&mut config.auth)?;
+    if let Some(chain) = config.proxy_chain.as_mut() {
+        for hop in chain {
+            resolve_default_key_for_tree_auth(&mut hop.auth)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_default_key_for_tree_auth(auth: &mut AuthMethod) -> Result<(), String> {
+    match auth {
+        AuthMethod::Key { key_path, .. } if key_path.trim().is_empty() => {
+            *key_path = first_available_default_key_path().map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -947,6 +1016,7 @@ fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
             hop.cert_path.trim().to_string(),
             (!hop.passphrase.is_empty()).then(|| hop.passphrase.clone()),
         ),
-        SshAuthTab::Agent | SshAuthTab::TwoFactor => AuthMethod::Agent,
+        SshAuthTab::Agent => AuthMethod::Agent,
+        SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
     }
 }

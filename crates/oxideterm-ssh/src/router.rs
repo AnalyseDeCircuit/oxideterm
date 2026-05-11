@@ -155,6 +155,12 @@ pub struct ResolvedConnection {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum NodeStateEvent {
+    ConnectionStatusChanged {
+        connection_id: String,
+        status: String,
+        affected_children: Vec<String>,
+        timestamp: u64,
+    },
     ConnectionStateChanged {
         node_id: String,
         generation: u64,

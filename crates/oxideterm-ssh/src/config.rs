@@ -221,7 +221,7 @@ const fn default_rows() -> u32 {
 }
 
 const fn default_proxy_strict_host_key_checking() -> bool {
-    true
+    false
 }
 
 #[cfg(test)]
@@ -264,5 +264,10 @@ mod tests {
             config.connection_key(),
             "app@target:22|ops@jump-a:2222>root@jump-b:22"
         );
+    }
+
+    #[test]
+    fn proxy_hop_default_matches_tauri_non_strict_proxy_default() {
+        assert!(!default_proxy_strict_host_key_checking());
     }
 }

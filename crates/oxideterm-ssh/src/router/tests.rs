@@ -10,6 +10,7 @@ mod tests {
         let config = SshConfig::password("host", 22, "me", "pw");
         router.upsert_node(node.clone(), config.clone());
         let terminal = registry.acquire(config, ConnectionConsumer::Terminal("term-a".into()));
+        terminal.set_physical(Arc::new(()));
         registry.mark_state(terminal.connection_id(), ConnectionState::Active);
         router
             .bind_connection(&node, terminal.connection_id().to_string())
@@ -221,6 +222,85 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_node_runtime_clears_connection_and_session_metadata() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+        router
+            .bind_terminal_endpoint(
+                &node,
+                TerminalEndpoint {
+                    ws_port: 0,
+                    ws_token: "native-terminal-term-a".to_string(),
+                    session_id: "term-a".to_string(),
+                },
+            )
+            .unwrap();
+        router.runtime_store().set_sftp_ready(&node, true, Some("/home/me".to_string())).unwrap();
+
+        router
+            .disconnect_node_runtime(&node, "explicit disconnect")
+            .unwrap();
+        let snapshot = router.runtime_store().snapshot(&node).unwrap();
+
+        assert_eq!(snapshot.state.readiness, NodeReadiness::Disconnected);
+        assert!(snapshot.connection_id.is_none());
+        assert!(snapshot.terminal_session_id.is_none());
+        assert!(snapshot.sftp_session_id.is_none());
+        assert!(!snapshot.state.sftp_ready);
+        assert!(snapshot.state.sftp_cwd.is_none());
+        assert!(snapshot.state.ws_endpoint.is_none());
+        assert!(matches!(
+            router.acquire_connection(&node, ConnectionConsumer::Sftp("node-a:sftp".into())),
+            Err(RouteError::NotConnected(_))
+        ));
+    }
+
+    #[test]
+    fn disconnect_node_runtime_emits_sftp_ready_false_before_disconnected() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let node = NodeId::new("node-a");
+        router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
+        router
+            .bind_sftp_session(&node, "sftp-a", Some("/home/me".to_string()))
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        router.emitter().subscribe(tx);
+
+        router
+            .disconnect_node_runtime(&node, "explicit disconnect")
+            .unwrap();
+
+        let events = rx.try_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            events.first(),
+            Some(NodeStateEvent::SftpReady {
+                node_id,
+                ready: false,
+                cwd: None,
+                ..
+            }) if node_id == "node-a"
+        ));
+        assert!(matches!(
+            events.get(1),
+            Some(NodeStateEvent::ConnectionStateChanged {
+                node_id,
+                state: NodeReadiness::Disconnected,
+                reason,
+                ..
+            }) if node_id == "node-a" && reason == "explicit disconnect"
+        ));
+    }
+
+    #[test]
     fn acquiring_consumer_does_not_revive_link_down_connection() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -252,6 +332,12 @@ mod tests {
         router
             .bind_connection(&node, handle.connection_id().to_string())
             .unwrap();
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        assert!(matches!(
+            router.acquire_connection(&node, ConnectionConsumer::Sftp("node-a:sftp".into())),
+            Err(RouteError::NotConnected(_))
+        ));
         registry.mark_state(handle.connection_id(), ConnectionState::Active);
 
         let result =

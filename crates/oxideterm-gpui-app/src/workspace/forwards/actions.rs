@@ -664,6 +664,19 @@ impl WorkspaceApp {
         binding: Option<(String, String, ConnectionConsumer)>,
     ) {
         if let Some((session_id, connection_id, consumer)) = binding {
+            if let Some((previous_connection_id, previous_consumer)) =
+                self.forwarding_connection_consumers.get(&session_id)
+                && (previous_connection_id != &connection_id || previous_consumer != &consumer)
+            {
+                // Forwarding is node-owned in the same sense as Tauri's
+                // NodeRouter path: reconnect/restore must swap to the fresh
+                // registry handle and release the old logical consumer instead
+                // of keeping a reference to the last terminal-era transport.
+                self.forwarding_registry
+                    .stop_port_profiler(previous_connection_id);
+                self.ssh_registry
+                    .release(previous_connection_id, previous_consumer);
+            }
             self.forwarding_connection_consumers
                 .insert(session_id, (connection_id, consumer));
         }

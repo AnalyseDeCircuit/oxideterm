@@ -144,13 +144,6 @@ impl WorkspaceApp {
         let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
             return;
         };
-        let endpoint_session_id = endpoint_session
-            .as_ref()
-            .map(|owner| owner.endpoint.session_id.clone())
-            .unwrap_or_else(|| session_id.0.to_string());
-        let _ = self
-            .node_router
-            .unbind_terminal_session(&node_id, &endpoint_session_id);
         // Tauri terminal close only removes the terminal/session mapping.
         // Do not health-probe here: a closed shell channel is not evidence
         // that the node-owned SSH transport died, and probing on the last
@@ -159,6 +152,15 @@ impl WorkspaceApp {
             return;
         };
         node.terminal_ids.retain(|id| *id != session_id);
+        if node.terminal_ids.is_empty() {
+            let endpoint_session_id = endpoint_session
+                .as_ref()
+                .map(|owner| owner.endpoint.session_id.clone())
+                .unwrap_or_else(|| session_id.0.to_string());
+            let _ = self
+                .node_router
+                .unbind_terminal_session(&node_id, &endpoint_session_id);
+        }
         self.persist_session_tree_snapshot();
     }
 
@@ -231,9 +233,12 @@ impl WorkspaceApp {
         }
         for affected_node_id in &nodes_to_disconnect {
             self.cancel_connection_trace_for_node(affected_node_id);
+            self.abort_connection_chain_for_node(affected_node_id);
             self.reconnect_orchestrator.cancel(&affected_node_id.0);
             self.pending_reconnect_node_ids.remove(affected_node_id);
             self.reconnect_requeue_counts.remove(affected_node_id);
+            self.pending_reconnect_cascade_nodes
+                .retain(|pending_node_id| pending_node_id != affected_node_id);
             if self
                 .reconnect_pipeline_active_node
                 .as_ref()
@@ -273,6 +278,7 @@ impl WorkspaceApp {
             if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
                 let node_consumer = ConnectionConsumer::NodeRouter(affected_node_id.0.clone());
                 self.ssh_registry.release(&connection_id, &node_consumer);
+                self.release_parent_ref_for_child_connection(affected_node_id, &connection_id);
                 if let Some(handle) = self.ssh_registry.get(&connection_id) {
                     let runtime = self.forwarding_runtime.clone();
                     runtime.spawn(async move {
@@ -289,11 +295,31 @@ impl WorkspaceApp {
                     self.emit_node_event(event);
                 }
                 self.node_router.emitter().unregister(&connection_id);
+                let _ = self.ssh_registry.retire_connection(&connection_id);
             }
 
             if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
-                node.readiness = NodeReadiness::Disconnected;
+                node.readiness = if affected_node_id == node_id {
+                    NodeReadiness::Disconnected
+                } else {
+                    NodeReadiness::Error
+                };
                 node.terminal_ids.clear();
+            }
+            if let Ok(event) = self
+                .node_router
+                .disconnect_node_runtime(affected_node_id, "explicit disconnect")
+            {
+                self.emit_node_event(event);
+            }
+            if affected_node_id != node_id
+                && let Ok(event) = self.node_router.sync_node_readiness_event(
+                    affected_node_id,
+                    NodeReadiness::Error,
+                    "parent disconnected",
+                )
+            {
+                self.emit_node_event(event);
             }
         }
         self.persist_session_tree_snapshot();

@@ -67,31 +67,6 @@ fn is_agent_conflict_parts(code: i32, message: &str) -> bool {
         || message.contains("modified externally")
 }
 
-fn map_agent_error(error: AgentError) -> IdeFileError {
-    let message = error.to_string();
-    let kind = match &error {
-        AgentError::Timeout(_) => IdeFileErrorKind::Timeout,
-        AgentError::Rpc { code: -2, .. } => IdeFileErrorKind::NotFound,
-        AgentError::Rpc { code: -3, .. } => IdeFileErrorKind::PermissionDenied,
-        AgentError::Rpc { message, .. } if message.contains("CONFLICT") => {
-            IdeFileErrorKind::Conflict
-        }
-        AgentError::ChannelClosed | AgentError::Ssh(_) | AgentError::Route(_) => {
-            IdeFileErrorKind::Disconnected
-        }
-        AgentError::UnsupportedArch(_) | AgentError::BinaryNotFound(_) => {
-            IdeFileErrorKind::Unsupported
-        }
-        AgentError::Serialize(_)
-        | AgentError::Deserialize(_)
-        | AgentError::Rpc { .. }
-        | AgentError::LocalIo(_)
-        | AgentError::Sftp(_)
-        | AgentError::Handshake(_) => IdeFileErrorKind::Other,
-    };
-    IdeFileError::new(kind, message)
-}
-
 #[cfg(test)]
 fn file_tree_entry_from_sftp(node_id: &NodeId, entry: FileInfo) -> FileTreeEntry {
     FileTreeEntry {
@@ -110,4 +85,3 @@ fn file_tree_entry_from_sftp(node_id: &NodeId, entry: FileInfo) -> FileTreeEntry
         },
     }
 }
-

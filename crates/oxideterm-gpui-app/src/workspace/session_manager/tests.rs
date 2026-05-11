@@ -153,6 +153,33 @@ mod tests {
     }
 
     #[test]
+    fn proxy_hop_two_factor_is_rejected_instead_of_saved_as_agent() {
+        let mut form = NewConnectionForm {
+            auth_tab: SshAuthTab::Agent,
+            ..base_form()
+        };
+        form.proxy_hops
+            .push(crate::workspace::new_connection::NewConnectionProxyHop {
+                host: "jump.example.com".to_string(),
+                port: "22".to_string(),
+                username: "ops".to_string(),
+                auth_tab: SshAuthTab::TwoFactor,
+                password: String::new(),
+                key_path: String::new(),
+                cert_path: String::new(),
+                passphrase: String::new(),
+                agent_forwarding: false,
+            });
+
+        let error = save_request_from_form(&form, None).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Proxy hop 1 does not support keyboard-interactive/2FA"
+        );
+    }
+
+    #[test]
     fn saved_proxy_chain_becomes_ssh_config_chain() {
         let path = std::env::temp_dir().join(format!(
             "oxideterm-gpui-session-manager-test-{}-connections.json",
@@ -163,6 +190,7 @@ mod tests {
         let now = Utc::now();
         let conn = SavedConnection {
             id: "conn-1".to_string(),
+            version: oxideterm_connections::CONFIG_VERSION,
             name: "Home".to_string(),
             group: None,
             host: "target.example.com".to_string(),
@@ -176,9 +204,7 @@ mod tests {
                 auth: SavedAuth::Agent,
                 agent_forwarding: true,
             }],
-            options: oxideterm_connections::ConnectionOptions {
-                agent_forwarding: false,
-            },
+            options: oxideterm_connections::ConnectionOptions::default(),
             created_at: now,
             last_used_at: None,
             updated_at: Some(now),

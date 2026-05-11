@@ -1,7 +1,8 @@
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
+use zeroize::Zeroizing;
 
 use crate::{
     ConnectionOptions, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
@@ -107,6 +108,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
     };
     Ok(SavedConnection {
         id: String::new(),
+        version: crate::store::CONFIG_VERSION,
         name: host.alias.clone(),
         group: Some(IMPORTED_GROUP.to_string()),
         host: host.hostname.unwrap_or(host.alias),
@@ -137,11 +139,11 @@ pub fn save_request_from_draft(
         port,
         username: draft.username.trim().to_string(),
         auth: if existing_auth.is_some() {
-            saved_auth_from_draft_for_update(draft.auth, existing_auth)
+            saved_auth_from_draft_for_update(draft.auth, existing_auth)?
         } else {
-            saved_auth_from_draft(draft.auth)
+            saved_auth_from_draft_for_save(draft.auth)?
         },
-        proxy_chain: saved_proxy_chain_from_drafts(draft.proxy_hops),
+        proxy_chain: saved_proxy_chain_from_drafts(draft.proxy_hops)?,
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
         tags: draft.tags,
         agent_forwarding: draft.agent_forwarding,
@@ -177,63 +179,176 @@ pub fn saved_auth_from_draft(draft: ConnectionAuthDraft) -> SavedAuth {
     }
 }
 
+fn saved_auth_from_draft_for_save(draft: ConnectionAuthDraft) -> Result<SavedAuth> {
+    if draft.kind == ConnectionAuthDraftKind::DefaultKey {
+        return Ok(SavedAuth::Key {
+            key_path: first_available_default_key_path()?,
+            has_passphrase: !draft.passphrase.is_empty(),
+            passphrase_keychain_id: None,
+            plaintext_passphrase: (!draft.passphrase.is_empty()).then_some(draft.passphrase),
+        });
+    }
+
+    Ok(saved_auth_from_draft(draft))
+}
+
 fn saved_auth_from_draft_for_update(
     draft: ConnectionAuthDraft,
     existing_auth: Option<&SavedAuth>,
-) -> SavedAuth {
+) -> Result<SavedAuth> {
     if draft.kind == ConnectionAuthDraftKind::Password && !draft.password_loaded {
         if let Some(SavedAuth::Password {
             keychain_id,
             plaintext_password,
         }) = existing_auth
         {
-            return SavedAuth::Password {
+            return Ok(SavedAuth::Password {
                 keychain_id: keychain_id.clone(),
                 plaintext_password: plaintext_password.clone(),
-            };
+            });
         }
-        return SavedAuth::Password {
+        return Ok(SavedAuth::Password {
             keychain_id: None,
             plaintext_password: None,
-        };
+        });
     }
 
     if draft.kind == ConnectionAuthDraftKind::Password {
-        return SavedAuth::Password {
+        return Ok(SavedAuth::Password {
             keychain_id: draft.password_keychain_id,
             plaintext_password: Some(draft.password),
-        };
+        });
     }
 
-    saved_auth_from_draft(draft)
+    saved_auth_from_draft_for_save(draft)
 }
 
-fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Vec<SavedProxyHop> {
+fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Result<Vec<SavedProxyHop>> {
     hops.into_iter()
-        .map(|hop| SavedProxyHop {
-            host: hop.host.trim().to_string(),
-            port: hop.port.trim().parse::<u16>().unwrap_or(22),
-            username: hop.username.trim().to_string(),
-            auth: saved_proxy_hop_auth_from_draft(hop.auth),
-            agent_forwarding: hop.agent_forwarding,
+        .enumerate()
+        .map(|(index, hop)| {
+            let auth = saved_proxy_hop_auth_from_draft(hop.auth, index + 1)?;
+            Ok(SavedProxyHop {
+                host: hop.host.trim().to_string(),
+                port: hop.port.trim().parse::<u16>().unwrap_or(22),
+                username: hop.username.trim().to_string(),
+                auth,
+                agent_forwarding: hop.agent_forwarding,
+            })
         })
         .collect()
 }
 
-fn saved_proxy_hop_auth_from_draft(mut auth: ConnectionAuthDraft) -> SavedAuth {
+fn saved_proxy_hop_auth_from_draft(
+    mut auth: ConnectionAuthDraft,
+    hop_index: usize,
+) -> Result<SavedAuth> {
+    if auth.kind == ConnectionAuthDraftKind::TwoFactor {
+        anyhow::bail!("Proxy hop {hop_index} does not support keyboard-interactive/2FA");
+    }
+    if auth.kind == ConnectionAuthDraftKind::DefaultKey {
+        return Ok(SavedAuth::Key {
+            key_path: first_loadable_default_key_path(auth.passphrase.expose_secret())
+                .map_err(|error| anyhow::anyhow!("No SSH key found for proxy hop: {error}"))?,
+            has_passphrase: false,
+            passphrase_keychain_id: None,
+            plaintext_passphrase: None,
+        });
+    }
     if auth.kind == ConnectionAuthDraftKind::Password {
         auth.save_password = true;
     }
-    saved_auth_from_draft(auth)
+    saved_auth_from_draft_for_save(auth)
 }
 
 fn current_username() -> String {
     whoami::username()
 }
 
+pub fn first_available_default_key_path() -> Result<String> {
+    first_available_default_key_path_in_home(
+        std::env::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+    )
+}
+
+fn first_available_default_key_path_in_home(home: PathBuf) -> Result<String> {
+    for path in default_key_paths_in_home(home) {
+        if path.exists() {
+            return Ok(path.to_string_lossy().into_owned());
+        }
+    }
+    anyhow::bail!("No default SSH key found")
+}
+
+fn default_key_paths_in_home(home: PathBuf) -> [PathBuf; 3] {
+    let ssh = home.join(".ssh");
+    [
+        ssh.join("id_ed25519"),
+        ssh.join("id_ecdsa"),
+        ssh.join("id_rsa"),
+    ]
+}
+
+fn first_loadable_default_key_path(passphrase: &str) -> Result<String> {
+    first_loadable_default_key_path_in_home(
+        std::env::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        passphrase,
+    )
+}
+
+fn first_loadable_default_key_path_in_home(home: PathBuf, passphrase: &str) -> Result<String> {
+    let passphrase = (!passphrase.is_empty()).then_some(passphrase);
+    let mut saw_encrypted_key = false;
+
+    for path in default_key_paths_in_home(home) {
+        if !path.exists() {
+            continue;
+        }
+
+        let key_data = match std::fs::read_to_string(&path) {
+            Ok(contents) => Zeroizing::new(contents),
+            Err(_) => continue,
+        };
+        let is_encrypted =
+            key_data.contains("ENCRYPTED") || key_data.contains("Proc-Type: 4,ENCRYPTED");
+        if is_encrypted && passphrase.is_none() {
+            saw_encrypted_key = true;
+            continue;
+        }
+
+        match russh::keys::decode_secret_key(&key_data, passphrase) {
+            Ok(_) => return Ok(path.to_string_lossy().into_owned()),
+            Err(error) if key_error_is_passphrase_related(&error) => {
+                saw_encrypted_key = true;
+            }
+            Err(_) => {}
+        }
+    }
+
+    if saw_encrypted_key {
+        anyhow::bail!("Encrypted key requires passphrase")
+    } else {
+        anyhow::bail!("Key file not found: ~/.ssh/id_*")
+    }
+}
+
+fn key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
+    let normalized = error.to_string().to_ascii_lowercase();
+    normalized.contains("decrypt")
+        || normalized.contains("password")
+        || normalized.contains("passphrase")
+        || normalized.contains("encrypted")
+        || normalized.contains("bcrypt")
+        || normalized.contains("kdf")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use russh::keys::{
+        Algorithm, PrivateKey,
+        ssh_key::{LineEnding, rand_core::OsRng},
+    };
 
     fn password_draft() -> ConnectionAuthDraft {
         ConnectionAuthDraft {
@@ -265,7 +380,7 @@ mod tests {
         };
         let mut draft = password_draft();
         draft.password_loaded = false;
-        let auth = saved_auth_from_draft_for_update(draft, Some(&existing));
+        let auth = saved_auth_from_draft_for_update(draft, Some(&existing)).unwrap();
         assert!(matches!(
             auth,
             SavedAuth::Password {
@@ -283,7 +398,7 @@ mod tests {
         };
         let mut draft = password_draft();
         draft.password_keychain_id = Some("password-key".to_string());
-        let auth = saved_auth_from_draft_for_update(draft, Some(&existing));
+        let auth = saved_auth_from_draft_for_update(draft, Some(&existing)).unwrap();
         assert!(matches!(
             auth,
             SavedAuth::Password {
@@ -291,5 +406,99 @@ mod tests {
                 plaintext_password: Some(ref password)
             } if keychain_id == "password-key" && password == "secret"
         ));
+    }
+
+    #[test]
+    fn proxy_hop_two_factor_is_rejected_instead_of_saved_as_agent() {
+        let draft = ConnectionDraft {
+            name: "Home".to_string(),
+            host: "target.example.com".to_string(),
+            port: "22".to_string(),
+            username: "me".to_string(),
+            auth: ConnectionAuthDraft {
+                kind: ConnectionAuthDraftKind::Agent,
+                ..ConnectionAuthDraft::default()
+            },
+            group: "Ungrouped".to_string(),
+            color: String::new(),
+            tags: Vec::new(),
+            proxy_hops: vec![ProxyHopDraft {
+                host: "jump.example.com".to_string(),
+                port: "22".to_string(),
+                username: "ops".to_string(),
+                auth: ConnectionAuthDraft {
+                    kind: ConnectionAuthDraftKind::TwoFactor,
+                    ..ConnectionAuthDraft::default()
+                },
+                agent_forwarding: false,
+            }],
+            agent_forwarding: false,
+        };
+
+        let error = save_request_from_draft(draft, None, None).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Proxy hop 1 does not support keyboard-interactive/2FA"
+        );
+    }
+
+    #[test]
+    fn default_key_paths_match_tauri_save_order() {
+        let home = PathBuf::from("/tmp/home");
+        let paths = default_key_paths_in_home(home);
+
+        assert_eq!(paths[0], PathBuf::from("/tmp/home/.ssh/id_ed25519"));
+        assert_eq!(paths[1], PathBuf::from("/tmp/home/.ssh/id_ecdsa"));
+        assert_eq!(paths[2], PathBuf::from("/tmp/home/.ssh/id_rsa"));
+    }
+
+    #[test]
+    fn saving_default_key_resolves_first_existing_key_path_like_tauri() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxideterm-conn-default-key-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let rsa = ssh_dir.join("id_rsa");
+        let ecdsa = ssh_dir.join("id_ecdsa");
+        std::fs::write(&rsa, "rsa").unwrap();
+        std::fs::write(&ecdsa, "ecdsa").unwrap();
+
+        let path = first_available_default_key_path_in_home(dir.clone()).unwrap();
+
+        assert_eq!(path, ecdsa.to_string_lossy());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saving_proxy_default_key_uses_first_loadable_default_key_like_tauri() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxideterm-conn-proxy-default-key-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let encrypted = ssh_dir.join("id_ed25519");
+        let fallback = ssh_dir.join("id_ecdsa");
+        let mut rng = OsRng;
+        PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .unwrap()
+            .encrypt(&mut rng, "secret")
+            .unwrap()
+            .write_openssh_file(&encrypted, LineEnding::LF)
+            .unwrap();
+        PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .unwrap()
+            .write_openssh_file(&fallback, LineEnding::LF)
+            .unwrap();
+
+        let path = first_loadable_default_key_path_in_home(dir.clone(), "").unwrap();
+
+        assert_eq!(path, fallback.to_string_lossy());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

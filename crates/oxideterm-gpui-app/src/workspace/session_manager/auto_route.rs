@@ -284,7 +284,7 @@ impl WorkspaceApp {
                 .t("sessionManager.auto_route.status.connecting")
                 .replace("{{name}}", &target_node.display_title()),
         );
-        self.ensure_node_connection_started(&expansion.target_node_id);
+        self.ensure_node_connection_started_without_ancestors(&expansion.target_node_id);
         self.close_auto_route_modal(cx);
         self.persist_session_tree_snapshot();
         window.focus(&self.focus_handle);
@@ -1099,6 +1099,7 @@ mod auto_route_tests {
     fn saved_connection(id: &str, host: &str, proxy_chain: Vec<SavedProxyHop>) -> SavedConnection {
         SavedConnection {
             id: id.to_string(),
+            version: oxideterm_connections::CONFIG_VERSION,
             name: id.to_string(),
             group: None,
             host: host.to_string(),

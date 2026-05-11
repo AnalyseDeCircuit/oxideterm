@@ -1,5 +1,8 @@
 #[derive(Default)]
 struct AgentRegistry {
+    // Tauri keys remote agents by SSH connection id, not by node id or IDE tab.
+    // Reconnect creates a new connection id, so stale agent channels cannot
+    // make a node look alive or serve requests after the node has moved on.
     sessions: DashMap<String, Arc<AgentSession>>,
 }
 

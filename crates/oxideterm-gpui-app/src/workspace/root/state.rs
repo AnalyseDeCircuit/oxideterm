@@ -26,6 +26,10 @@ pub(super) enum ReconnectWorkerResult {
         error: String,
         job_id: Option<String>,
     },
+    ContinueConnectionChain {
+        node_id: NodeId,
+    },
+    ContinueReconnectCascade,
     FlushPendingReconnect {
         generation: u64,
     },

@@ -188,15 +188,15 @@ impl WorkspaceApp {
                                 if sftp_error_should_retry_init(&error)
                                     && self.sftp_view.remote_load_retry_count < 3
                                 {
-                                    // Tauri retries node SFTP through the
-                                    // connection entry owner. When native sees
-                                    // stale Active state from an old terminal
-                                    // shell, rebuild the node connection and
-                                    // queue the list again instead of leaving
-                                    // the tab stuck on a closed channel.
+                                    // Tauri's node_sftp_list_dir retry path only
+                                    // rebuilds the SFTP channel through
+                                    // NodeRouter/ConnectionEntry; it does not
+                                    // let SFTP own SSH liveness. Native keeps
+                                    // the same boundary here: queue a delayed
+                                    // list retry, but leave SSH reconnect/start
+                                    // decisions to the node owner.
                                     self.sftp_view.remote_load_retry_count += 1;
                                     let attempt = self.sftp_view.remote_load_retry_count;
-                                    self.ensure_node_connection_started(&node_id);
                                     self.schedule_sftp_remote_load_retry(
                                         tab_id,
                                         node_id.clone(),
@@ -257,7 +257,12 @@ impl WorkspaceApp {
                     refresh_remote,
                     refresh_local,
                 } => {
-                    self.on_sftp_transfer_finished_for_reconnect(&node_id, &transfer_id, cx);
+                    self.on_sftp_transfer_finished_for_reconnect(
+                        &node_id,
+                        &transfer_id,
+                        result.is_ok(),
+                        cx,
+                    );
                     let mut batch_update = None;
                     let should_refresh = if let Some(item) = self
                         .sftp_view
@@ -312,6 +317,7 @@ impl WorkspaceApp {
                                 self.on_sftp_transfer_finished_for_reconnect(
                                     &node_id,
                                     &transfer_id,
+                                    false,
                                     cx,
                                 );
                             }
@@ -320,6 +326,7 @@ impl WorkspaceApp {
                             self.on_sftp_transfer_finished_for_reconnect(
                                 &node_id,
                                 &transfer_id,
+                                false,
                                 cx,
                             );
                         }
@@ -710,27 +717,43 @@ fn apply_tauri_transfer_completion(
     }
 }
 
-/// Classifies capability failures that should re-enter the node-only connect
-/// path instead of being shown as a final SFTP error.
+/// Classifies capability failures caused by an unavailable SSH connection.
 ///
 /// This deliberately matches transport ownership failures, not ordinary SFTP
-/// errors such as permissions or missing files. It prevents a regression to the
-/// terminal-owned model: once every terminal pane is closed, SFTP should still
-/// be able to rebuild the node connection and retry through NodeRouter.
-fn sftp_error_needs_node_reconnect(error: &str) -> bool {
+/// errors such as permissions or missing files. SFTP may retry its own listing
+/// work while the node owner reconnects, but it must not start/revive SSH
+/// liveness by itself.
+fn sftp_error_is_connection_unavailable(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("stale")
         || lower.contains("link_down")
         || lower.contains("link down")
+        || lower.contains("disconnected")
         || lower.contains("transport is closed")
         || lower.contains("transport is missing")
         || lower.contains("ssh connection is closed")
+        || lower.contains("connection closed")
+        || lower.contains("connection reset")
+        || lower.contains("reset by peer")
+        || lower.contains("broken pipe")
+        || lower.contains("unexpected eof")
+        || lower.contains("channel closed")
+        || lower.contains("closed channel")
         || lower.contains("no active ssh connection")
+        || lower.contains("session not found")
+        || lower.contains("not initialized")
 }
 
 fn sftp_error_should_retry_init(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    sftp_error_needs_node_reconnect(error)
+    if sftp_error_is_auth_failure(error)
+        || sftp_error_is_permission_denied(error)
+        || sftp_error_is_not_found(error)
+    {
+        return false;
+    }
+
+    sftp_error_is_connection_unavailable(error)
         || lower.contains("not connected")
         || lower.contains("connection timeout")
         || lower.contains("timeout")
@@ -738,12 +761,43 @@ fn sftp_error_should_retry_init(error: &str) -> bool {
 
 fn sftp_error_is_permission_denied(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("permission denied") || lower.contains("permissiondenied")
+    !sftp_error_is_auth_failure(error)
+        && (lower.contains("permission denied") || lower.contains("permissiondenied"))
 }
 
 fn sftp_error_is_not_found(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("not found") || lower.contains("no such file") || lower.contains("notfound")
+    if lower.contains("session not found")
+        || lower.contains("node not found")
+        || lower.contains("connection not found")
+    {
+        return false;
+    }
+    lower.contains("file not found")
+        || lower.contains("directory not found")
+        || lower.contains("path not found")
+        || lower.contains("no such file")
+        || lower.contains("no such directory")
+        || lower.contains("no such path")
+        || lower.contains("filenotfound")
+        || lower.contains("directorynotfound")
+        || lower.contains("pathnotfound")
+        || lower.contains("nosuchfile")
+        || lower.contains("nosuchdirectory")
+}
+
+fn sftp_error_is_auth_failure(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("authentication failed")
+        || lower.contains("auth failed")
+        || lower.contains("permission denied (publickey")
+        || lower.contains("permission denied (password")
+        || lower.contains("permission denied (keyboard-interactive")
+        || lower.contains("all authentication methods failed")
+        || lower.contains("agent authentication failed")
+        || lower.contains("keyboard-interactive")
+        || lower.contains("password authentication timed out")
+        || lower.contains("host key")
 }
 
 #[cfg(test)]
@@ -817,14 +871,71 @@ mod tests {
     }
 
     #[test]
-    fn stale_node_sftp_errors_trigger_node_reconnect_retry() {
-        assert!(sftp_error_needs_node_reconnect(
+    fn stale_node_sftp_errors_are_connection_unavailable() {
+        assert!(sftp_error_is_connection_unavailable(
             "Connection abc is stale: transport is closed"
         ));
-        assert!(sftp_error_needs_node_reconnect(
+        assert!(sftp_error_is_connection_unavailable(
             "SFTP init failed: Channel error: SSH connection is closed and cannot open an SFTP channel"
         ));
-        assert!(!sftp_error_needs_node_reconnect(
+        assert!(sftp_error_is_connection_unavailable(
+            "Capability unavailable: Session not found: node-1"
+        ));
+        assert!(sftp_error_is_connection_unavailable(
+            "SFTP subsystem not available: failed to open SFTP channel: channel closed"
+        ));
+        assert!(!sftp_error_is_connection_unavailable(
+            "Permission denied: /home/me/secret"
+        ));
+    }
+
+    #[test]
+    fn sftp_retry_classifier_matches_tauri_error_classes() {
+        assert!(sftp_error_should_retry_init(
+            "SFTP subsystem not available: failed to open SFTP channel: channel closed"
+        ));
+        assert!(sftp_error_should_retry_init(
+            "Connection timeout while opening SFTP"
+        ));
+
+        assert!(!sftp_error_should_retry_init(
+            "Authentication failed: Permission denied (publickey,password)"
+        ));
+        assert!(!sftp_error_should_retry_init(
+            "Permission denied: /home/me/secret"
+        ));
+        assert!(!sftp_error_should_retry_init(
+            "Directory not found: /home/me/missing"
+        ));
+        assert!(!sftp_error_should_retry_init(
+            "SFTP subsystem not available: server disabled subsystem"
+        ));
+    }
+
+    #[test]
+    fn sftp_path_not_found_classifier_does_not_catch_dead_sessions() {
+        assert!(sftp_error_is_not_found(
+            "Directory not found: /home/me/missing"
+        ));
+        assert!(sftp_error_is_not_found(
+            "No such file or directory: /home/me/missing"
+        ));
+
+        assert!(!sftp_error_is_not_found(
+            "Capability unavailable: Session not found: node-1"
+        ));
+        assert!(!sftp_error_is_not_found("Node not found: node-1"));
+    }
+
+    #[test]
+    fn sftp_auth_failure_is_not_path_permission_denied() {
+        assert!(sftp_error_is_auth_failure(
+            "Authentication failed: Permission denied (publickey,password)"
+        ));
+        assert!(!sftp_error_is_permission_denied(
+            "Authentication failed: Permission denied (publickey,password)"
+        ));
+        assert!(sftp_error_is_permission_denied(
             "Permission denied: /home/me/secret"
         ));
     }

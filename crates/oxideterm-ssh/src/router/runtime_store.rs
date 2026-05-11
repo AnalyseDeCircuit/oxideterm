@@ -472,6 +472,35 @@ impl NodeRuntimeStore {
         })
     }
 
+    fn disconnect_node(
+        &self,
+        node_id: &NodeId,
+        reason: impl Into<String>,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let reason = reason.into();
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        if let Some(connection_id) = route.connection_id.take() {
+            self.connection_nodes.remove(&connection_id);
+        }
+        route.terminal_session_id = None;
+        route.sftp_session_id = None;
+        route.state.readiness = NodeReadiness::Disconnected;
+        route.state.error = None;
+        route.state.sftp_ready = false;
+        route.state.sftp_cwd = None;
+        route.state.ws_endpoint = None;
+        route.generation += 1;
+        Ok(NodeStateEvent::ConnectionStateChanged {
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            state: NodeReadiness::Disconnected,
+            reason,
+        })
+    }
+
     fn bind_terminal_session(
         &self,
         node_id: &NodeId,
@@ -551,15 +580,23 @@ impl NodeRuntimeStore {
         node_id: &NodeId,
         ready: bool,
         cwd: Option<String>,
-    ) -> Result<(), RouteError> {
+    ) -> Result<NodeStateEvent, RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        if !ready {
+            route.sftp_session_id = None;
+        }
         route.state.sftp_ready = ready;
-        route.state.sftp_cwd = cwd;
+        route.state.sftp_cwd = if ready { cwd } else { None };
         route.generation += 1;
-        Ok(())
+        Ok(NodeStateEvent::SftpReady {
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            ready: route.state.sftp_ready,
+            cwd: route.state.sftp_cwd.clone(),
+        })
     }
 
     fn update_connection_state(

@@ -234,15 +234,25 @@ impl WorkspaceApp {
         let tx = self.sftp_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
+            let resolved_connection_id = match router.resolve_connection(&node_id).await {
+                Ok(resolved) => resolved.connection_id,
+                Err(error) => {
+                    let error = error.to_string();
+                    let _ = tx.send(SftpWorkerResult::TransferComplete {
+                        node_id,
+                        transfer_id,
+                        id,
+                        result: Err(error),
+                        refresh_remote: false,
+                        refresh_local: false,
+                    });
+                    return;
+                }
+            };
             let resume_directory_strategy = resume_progress
                 .as_ref()
                 .filter(|_| is_directory)
                 .map(|progress| progress.strategy.clone());
-            let resolved_connection_id = router
-                .resolve_connection(&node_id)
-                .await
-                .map(|resolved| resolved.connection_id)
-                .unwrap_or_else(|_| format!("node:{}", node_id.0));
             let mut directory_progress = is_directory.then(|| {
                 if let Some(mut progress) = resume_progress.clone() {
                     progress.mark_active();
@@ -846,7 +856,7 @@ impl WorkspaceApp {
         error: String,
     ) -> bool {
         let mut changed = false;
-        let mut transfer_ids_to_pause = Vec::new();
+        let mut transfer_ids_to_interrupt = Vec::new();
         for transfer in &mut self.sftp_view.transfers {
             if &transfer.node_id == node_id
                 && matches!(
@@ -856,12 +866,25 @@ impl WorkspaceApp {
             {
                 transfer.state = SftpTransferState::Error;
                 transfer.error = Some(error.clone());
-                transfer_ids_to_pause.push(transfer.transfer_id.clone());
+                transfer_ids_to_interrupt.push(transfer.transfer_id.clone());
                 changed = true;
             }
         }
-        for transfer_id in transfer_ids_to_pause {
-            self.sftp_transfer_manager.pause(&transfer_id);
+        for transfer_id in transfer_ids_to_interrupt {
+            // Link-down/manual disconnect mirrors Tauri's interrupted transfer
+            // state: the UI row becomes an error, the old worker exits, and
+            // persisted progress stays resumable for the reconnect snapshot.
+            self.sftp_transfer_manager
+                .interrupt(&transfer_id, error.clone());
+            let progress_store = self.sftp_progress_store.clone();
+            let transfer_id = transfer_id.clone();
+            let error = error.clone();
+            self.forwarding_runtime.spawn(async move {
+                if let Ok(Some(mut progress)) = progress_store.load(&transfer_id).await {
+                    progress.mark_failed(error);
+                    let _ = progress_store.save(&progress).await;
+                }
+            });
         }
         changed
     }

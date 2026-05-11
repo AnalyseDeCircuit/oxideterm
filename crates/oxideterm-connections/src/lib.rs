@@ -7,7 +7,8 @@ mod store;
 
 pub use draft::{
     ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, IMPORTED_GROUP, ProxyHopDraft,
-    SSH_CONFIG_TAG, save_request_from_draft, saved_auth_from_draft, saved_connection_from_ssh_host,
+    SSH_CONFIG_TAG, first_available_default_key_path, save_request_from_draft,
+    saved_auth_from_draft, saved_connection_from_ssh_host,
 };
 pub use secret::SecretString;
 pub use ssh_config::{
@@ -16,6 +17,7 @@ pub use ssh_config::{
 };
 pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{
-    AuthType, ConnectionInfo, ConnectionOptions, ConnectionStore, ConnectionStoreData,
-    SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop, validate_group_name,
+    AuthType, CONFIG_VERSION, ConnectionInfo, ConnectionOptions, ConnectionStore,
+    ConnectionStoreData, ProxyHopInfo, SaveConnectionRequest, SavedAuth, SavedConnection,
+    SavedProxyHop, validate_group_name,
 };

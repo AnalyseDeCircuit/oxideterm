@@ -38,8 +38,8 @@ use crate::{
     AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus,
     KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     host_key::{
-        HostKeyStatus, HostKeyVerification, check_host_key, check_host_key_via_stream,
-        learn_host_key, public_key_fingerprint, verify_host_key,
+        HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key,
+        check_host_key_via_stream, learn_host_key, public_key_fingerprint, verify_host_key,
     },
 };
 
@@ -187,6 +187,8 @@ pub struct KeyboardInteractivePromptRequest {
     pub chained: bool,
 }
 
+pub type KeyboardInteractiveResponses = Zeroizing<Vec<String>>;
+
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum SshPromptError {
     #[error("keyboard-interactive authentication cancelled")]
@@ -201,7 +203,9 @@ pub trait SshPromptHandler: Send + Sync {
     fn keyboard_interactive(
         &self,
         request: KeyboardInteractivePromptRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SshPromptError>> + Send + '_>>;
+    ) -> Pin<
+        Box<dyn Future<Output = Result<KeyboardInteractiveResponses, SshPromptError>> + Send + '_>,
+    >;
 }
 
 pub struct SshPtyHandle {

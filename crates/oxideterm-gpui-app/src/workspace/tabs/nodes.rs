@@ -209,6 +209,16 @@ impl WorkspaceApp {
                         self.emit_node_event(event);
                     }
                     self.persist_session_tree_snapshot();
+                    let connection_chain_node = self
+                        .active_connection_chain
+                        .as_ref()
+                        .is_some_and(|run| run.node_ids.contains(&node_id));
+                    if connection_chain_node {
+                        self.advance_connection_chain_after_node_connected(&node_id);
+                    } else {
+                        self.connecting_node_locks.remove(&node_id);
+                        self.schedule_next_reconnect_cascade_node();
+                    }
                     let _ = self.drain_ready_pending_ssh_terminal_opens(window, cx);
                     self.restore_forwarding_rules_for_reconnect(&node_id);
                     if self
@@ -246,16 +256,18 @@ impl WorkspaceApp {
                             }
                         }
                     }
-                    let children_to_start = self
-                        .node_runtime_store
-                        .snapshot(&node_id)
-                        .map(|snapshot| snapshot.children_ids)
-                        .unwrap_or_default();
-                    for child_id in children_to_start {
-                        if self.ssh_nodes.get(&child_id).is_some_and(|child| {
-                            child.readiness == NodeReadiness::Connecting
-                        }) {
-                            self.ensure_node_connection_started(&child_id);
+                    if !connection_chain_node {
+                        let children_to_start = self
+                            .node_runtime_store
+                            .snapshot(&node_id)
+                            .map(|snapshot| snapshot.children_ids)
+                            .unwrap_or_default();
+                        for child_id in children_to_start {
+                            if self.ssh_nodes.get(&child_id).is_some_and(|child| {
+                                child.readiness == NodeReadiness::Connecting
+                            }) {
+                                self.ensure_node_connection_started(&child_id);
+                            }
                         }
                     }
                     changed = true;
@@ -272,6 +284,19 @@ impl WorkspaceApp {
                         .reconnect_orchestrator
                         .job(&node_id.0)
                         .is_some_and(|job| job.ended_at.is_none());
+                    let connection_chain_node = self
+                        .active_connection_chain
+                        .as_ref()
+                        .is_some_and(|run| run.node_ids.contains(&node_id));
+                    let connection_failure_notice = (!active_reconnect_job)
+                        .then(|| self.connection_failure_notice_for_node(&node_id, &error))
+                        .flatten();
+                    self.abort_connection_chain_for_node(&node_id);
+                    if !connection_chain_node {
+                        self.connecting_node_locks.remove(&node_id);
+                    } else {
+                        self.pending_reconnect_cascade_nodes.clear();
+                    }
                     self.finish_connection_trace_failed(&node_id, Some(error.clone()));
                     if active_reconnect_job {
                         self.log_reconnect_phase(
@@ -325,6 +350,8 @@ impl WorkspaceApp {
                         } else {
                             self.finish_reconnect_job(&node_id, Err(error.clone()));
                         }
+                    } else if let Some((title, description)) = connection_failure_notice {
+                        self.push_reconnect_notice(title, description, TerminalNoticeVariant::Error);
                     }
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Error;
@@ -336,8 +363,22 @@ impl WorkspaceApp {
                         reason: error,
                     };
                     self.emit_node_event(event);
+                    if !connection_chain_node {
+                        self.schedule_next_reconnect_cascade_node();
+                    }
                     self.persist_session_tree_snapshot();
                     changed = true;
+                }
+                ReconnectWorkerResult::ContinueConnectionChain { node_id } => {
+                    if self.connection_chain_waits_after_node(&node_id) {
+                        self.start_next_connection_chain_node();
+                        changed = true;
+                    }
+                }
+                ReconnectWorkerResult::ContinueReconnectCascade => {
+                    if self.start_next_reconnect_cascade_node() {
+                        changed = true;
+                    }
                 }
                 ReconnectWorkerResult::FlushPendingReconnect { generation } => {
                     self.flush_pending_reconnects(generation, cx);
@@ -404,7 +445,7 @@ impl WorkspaceApp {
                             Some(format!("starting retry {}/{}", job.attempt, job.max_attempts)),
                         );
                         let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
-                        self.ensure_node_connection_started(&node_id);
+                        self.start_reconnect_cascade_after_grace_expired(&node_id);
                         changed = true;
                     }
                 }
@@ -417,21 +458,6 @@ impl WorkspaceApp {
                     if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
                         continue;
                     }
-                    let old_connection_node_ids = self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .map(|job| {
-                            job.snapshot
-                                .old_connections_by_node
-                                .iter()
-                                .map(|entry| NodeId::new(entry.node_id.clone()))
-                                .collect::<HashSet<_>>()
-                        })
-                        .unwrap_or_default();
-                    let recovered_node_ids = recovered_connections
-                        .iter()
-                        .map(|(recovered_node_id, _)| recovered_node_id.clone())
-                        .collect::<HashSet<_>>();
                     let _ = self.reconnect_orchestrator.complete_phase(
                         &node_id.0,
                         PhaseResult::Ok,
@@ -441,7 +467,7 @@ impl WorkspaceApp {
                     );
                     self.finish_reconnect_job(&node_id, Ok(0));
                     self.push_reconnect_notice(
-                        "Connection recovered - session preserved",
+                        self.i18n.t("connections.reconnect.recovered"),
                         None,
                         TerminalNoticeVariant::Success,
                     );
@@ -449,45 +475,36 @@ impl WorkspaceApp {
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Ready;
                     }
-                    // Match Tauri's clearLinkDown(root): the recovered root
-                    // clears inherited link-down state for descendants that did
-                    // not have their own SSH connection in the snapshot. A child
-                    // with an independent old connection stays link-down unless
-                    // its own grace probe also recovered.
-                    for recovered_node_id in self.node_runtime_store.subtree_postorder(&node_id) {
-                        if recovered_node_id == node_id {
-                            continue;
-                        }
-                        if should_clear_grace_link_down_for_node(
-                            &node_id,
-                            &recovered_node_id,
-                            &old_connection_node_ids,
-                            &recovered_node_ids,
-                        )
-                            && let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id)
-                        {
+                    let _ = self.node_router.sync_node_readiness_event(
+                        &node_id,
+                        NodeReadiness::Ready,
+                        "grace recovered",
+                    );
+                    // Tauri's phaseGracePeriod calls clearLinkDown(root) and
+                    // then clearLinkDown(each descendant). The descendant
+                    // probes only decide whether their backend connection can
+                    // also be marked Active; UI link-down is cleared for the
+                    // whole affected subtree once the root connection survives.
+                    for affected_node_id in self.node_runtime_store.subtree_postorder(&node_id) {
+                        if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
                             node.readiness = NodeReadiness::Ready;
                         }
+                        let _ = self.node_router.sync_node_readiness_event(
+                            &affected_node_id,
+                            NodeReadiness::Ready,
+                            "grace recovered",
+                        );
                     }
-                    if let Some(info) = self
+                    let _ = self
                         .ssh_registry
-                        .mark_state(&connection_id, ConnectionState::Active)
-                        && let Some(event) = self
-                            .node_router
-                            .sync_connection_state_by_connection_id(&info, "grace recovered")
-                    {
-                        self.emit_node_event(event);
-                    }
+                        .mark_state_without_event(&connection_id, ConnectionState::Active);
                     for (recovered_node_id, recovered_connection_id) in recovered_connections {
-                        if let Some(info) = self
+                        let _ = self
                             .ssh_registry
-                            .mark_state(&recovered_connection_id, ConnectionState::Active)
-                            && let Some(event) = self
-                                .node_router
-                                .sync_connection_state_by_connection_id(&info, "grace recovered")
-                        {
-                            self.emit_node_event(event);
-                        }
+                            .mark_state_without_event(
+                                &recovered_connection_id,
+                                ConnectionState::Active,
+                            );
                         if let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id) {
                             node.readiness = NodeReadiness::Ready;
                         }
@@ -531,10 +548,10 @@ impl WorkspaceApp {
                     );
                     let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
                     // Tauri falls back from grace-period probing to a full
-                    // connect_tree_node rebuild. Native does the same by
-                    // restarting the node-only transport path instead of
-                    // fabricating a terminal pane.
-                    self.ensure_node_connection_started(&node_id);
+                    // reconnectCascade(root): root reconnect first, and
+                    // descendants marked link-down reconnect once their parent
+                    // becomes Active.
+                    self.start_reconnect_cascade_after_grace_expired(&node_id);
                     changed = true;
                 }
                 ReconnectWorkerResult::SftpTransfersSnapshotted {
@@ -663,6 +680,99 @@ impl WorkspaceApp {
 
     fn apply_node_event(&mut self, event: NodeStateEvent, cx: &mut Context<Self>) -> bool {
         match event {
+            NodeStateEvent::ConnectionStatusChanged {
+                connection_id,
+                status,
+                affected_children,
+                ..
+            } => {
+                let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
+                    return false;
+                };
+                let Some(state) = readiness_for_connection_status(&status) else {
+                    return false;
+                };
+                let reason = reason_for_connection_status(&status);
+                self.ensure_workspace_ssh_node_from_runtime(&node_id);
+                let _ = self.node_router.sync_node_readiness_event(
+                    &node_id,
+                    state.clone(),
+                    reason.clone(),
+                );
+                if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                    node.readiness = state.clone();
+                }
+                let event_severity = match state {
+                    NodeReadiness::Error => WorkspaceEventSeverity::Error,
+                    NodeReadiness::Disconnected => WorkspaceEventSeverity::Warn,
+                    _ => WorkspaceEventSeverity::Info,
+                };
+                let affected_children_count = affected_children.len();
+                if matches!(
+                    state,
+                    NodeReadiness::Error | NodeReadiness::Disconnected
+                ) {
+                    let _ = self.cascade_connection_status_to_runtime_children(
+                        &node_id,
+                        Some(&affected_children),
+                        state.clone(),
+                        reason.clone(),
+                    );
+                }
+                self.push_event_log_entry(
+                    event_severity,
+                    WorkspaceEventCategory::Connection,
+                    Some(node_id.clone()),
+                    Some(connection_id.clone()),
+                    match status.as_str() {
+                        "link_down" => "Connection link down",
+                        "disconnected" => "Connection disconnected",
+                        "connected" => "Connection connected",
+                        "reconnecting" => "Connection reconnecting",
+                        _ => "Connection status changed",
+                    },
+                    (affected_children_count > 0)
+                        .then_some(format!("affected children: {affected_children_count}")),
+                    "connection_status_changed",
+                );
+                if matches!(state, NodeReadiness::Error) {
+                    self.push_notification_entry(
+                        WorkspaceNotificationKind::Connection,
+                        WorkspaceNotificationSeverity::Error,
+                        "Connection lost",
+                        Some(if affected_children_count > 0 {
+                            format!("{reason}; affected children: {affected_children_count}")
+                        } else {
+                            reason.clone()
+                        }),
+                        WorkspaceNotificationScope::Node(node_id.clone()),
+                        Some(format!("connection-lost:{}", node_id.0)),
+                    );
+                } else if matches!(state, NodeReadiness::Ready) {
+                    self.resolve_connection_notifications_for_node(&node_id);
+                }
+                if matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected) {
+                    let message = if matches!(state, NodeReadiness::Disconnected) {
+                        "Connection closed".to_string()
+                    } else {
+                        self.i18n.t("sftp.errors.connection_lost")
+                    };
+                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
+                    let session_id = self.forwarding_session_id_for_node(&node_id);
+                    let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
+                    let forwarding_registry = self.forwarding_registry.clone();
+                    self.forwarding_runtime.spawn(async move {
+                        if let Some(connection_id) = forwarding_connection_id {
+                            forwarding_registry.stop_port_profiler(&connection_id);
+                        }
+                        let _ = forwarding_registry.suspend_session(&session_id).await;
+                    });
+                }
+                if status == "link_down" {
+                    self.schedule_grace_period_reconnect(&node_id, cx);
+                }
+                true
+            }
             NodeStateEvent::ConnectionStateChanged {
                 node_id,
                 generation,
@@ -708,6 +818,7 @@ impl WorkspaceApp {
                     let affected_children =
                         self.cascade_connection_status_to_runtime_children(
                             &node_id,
+                            None,
                             state.clone(),
                             reason.clone(),
                         );
@@ -813,6 +924,7 @@ impl WorkspaceApp {
     fn cascade_connection_status_to_runtime_children(
         &mut self,
         root_node_id: &NodeId,
+        affected_connection_ids: Option<&[String]>,
         state: NodeReadiness,
         reason: String,
     ) -> usize {
@@ -822,11 +934,26 @@ impl WorkspaceApp {
             NodeReadiness::Ready | NodeReadiness::Connecting => return 0,
         };
         let affected = self
-            .node_runtime_store
-            .subtree_postorder(root_node_id)
-            .into_iter()
-            .filter(|node_id| node_id != root_node_id)
-            .collect::<Vec<_>>();
+            .node_router
+            .connection_id_for_node(root_node_id)
+            .map(|root_connection_id| {
+                affected_connection_ids
+                    .map(|ids| ids.to_vec())
+                    .unwrap_or_else(|| {
+                        self.ssh_registry
+                            .descendant_connection_infos(&root_connection_id)
+                            .into_iter()
+                            .map(|info| info.connection_id)
+                            .collect::<Vec<_>>()
+                    })
+                    .into_iter()
+                    .filter_map(|connection_id| {
+                        self.node_router.node_id_for_connection(&connection_id)
+                    })
+                    .filter(|node_id| node_id != root_node_id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         for affected_node_id in &affected {
             self.ensure_workspace_ssh_node_from_runtime(affected_node_id);
             if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
@@ -838,17 +965,10 @@ impl WorkspaceApp {
                 reason.clone(),
             );
             if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id)
-                && let Some(info) = self
-                    .ssh_registry
-                    .mark_state(&connection_id, connection_state.clone())
-                && let Some(event) = self
-                    .node_router
-                    .sync_connection_state_by_connection_id(
-                        &info,
-                        "parent connection status changed",
-                    )
             {
-                self.emit_node_event(event);
+                let _ = self
+                    .ssh_registry
+                    .mark_state_without_event(&connection_id, connection_state.clone());
             }
             let message = if matches!(state, NodeReadiness::Disconnected) {
                 "Connection closed".to_string()
@@ -856,6 +976,15 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.errors.connection_lost")
             };
             let _ = self.interrupt_sftp_transfers_by_node(affected_node_id, message);
+            let session_id = self.forwarding_session_id_for_node(affected_node_id);
+            let connection_id = self.forwarding_connection_id_for_node(affected_node_id);
+            let forwarding_registry = self.forwarding_registry.clone();
+            self.forwarding_runtime.spawn(async move {
+                if let Some(connection_id) = connection_id {
+                    forwarding_registry.stop_port_profiler(&connection_id);
+                }
+                let _ = forwarding_registry.suspend_session(&session_id).await;
+            });
         }
         affected.len()
     }
@@ -969,6 +1098,8 @@ impl WorkspaceApp {
         if queued > 0 {
             self.reconnect_transfer_resume_totals
                 .insert(node_id.clone(), queued);
+            self.reconnect_transfer_resume_successes
+                .insert(node_id.clone(), 0);
         }
         queued
     }
@@ -977,6 +1108,7 @@ impl WorkspaceApp {
         &mut self,
         _transfer_node_id: &NodeId,
         transfer_id: &str,
+        success: bool,
         cx: &mut Context<Self>,
     ) {
         let roots = self
@@ -992,20 +1124,30 @@ impl WorkspaceApp {
             let Some(pending) = self.pending_reconnect_transfer_resumes.get_mut(&root_id) else {
                 continue;
             };
+            if success {
+                *self
+                    .reconnect_transfer_resume_successes
+                    .entry(root_id.clone())
+                    .or_default() += 1;
+            }
             pending.remove(transfer_id);
             if !pending.is_empty() {
                 continue;
             }
             self.pending_reconnect_transfer_resumes.remove(&root_id);
-            let total = self
+            let _queued = self
                 .reconnect_transfer_resume_totals
+                .remove(&root_id)
+                .unwrap_or_default();
+            let resumed = self
+                .reconnect_transfer_resume_successes
                 .remove(&root_id)
                 .unwrap_or_default();
             self.finish_reconnect_after_transfer_resume(
                 &root_id,
                 PhaseResult::Ok,
-                format!("resumed {total} transfer(s)"),
-                total as u32,
+                format!("resumed {resumed} transfer(s)"),
+                resumed as u32,
                 cx,
             );
         }
@@ -1200,6 +1342,7 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let ide_snapshot = self.ide_snapshot_for_node(node_id, cx);
         let snapshot = ReconnectSnapshot {
+            node_id: node_id.0.clone(),
             old_terminal_session_ids,
             terminal_sessions_by_node,
             forward_rules,
@@ -1207,13 +1350,17 @@ impl WorkspaceApp {
             old_connections_by_node: old_connections_by_node.clone(),
             old_connection_ids: old_connection_ids.clone(),
             ide_snapshot,
+            snapshot_at: Some(SystemTime::now()),
             ..ReconnectSnapshot::default()
         };
         let reconnect_job = self
             .reconnect_orchestrator
             .schedule(node_id.0.clone(), node_title, snapshot);
         self.push_reconnect_notice(
-            format!("{} is reconnecting...", reconnect_job.node_name),
+            self.i18n_with(
+                "connections.reconnect.starting",
+                &[("name", reconnect_job.node_name.clone())],
+            ),
             None,
             TerminalNoticeVariant::Default,
         );
@@ -1312,7 +1459,7 @@ impl WorkspaceApp {
                         });
                         return;
                     }
-                    ProbeConnectionStatus::NotFound | ProbeConnectionStatus::NotApplicable => {
+                    ProbeConnectionStatus::NotFound => {
                         let detail =
                             format!("connection {connection_id} is unavailable for grace probe");
                         let _ = tx.send(ReconnectWorkerResult::GraceExpired {
@@ -1323,7 +1470,7 @@ impl WorkspaceApp {
                         });
                         return;
                     }
-                    ProbeConnectionStatus::Dead => {
+                    ProbeConnectionStatus::Dead | ProbeConnectionStatus::NotApplicable => {
                         if started_at.elapsed() >= timing.grace_period {
                             let detail = format!(
                                 "connection {connection_id} did not recover within {:?}",
@@ -1344,16 +1491,86 @@ impl WorkspaceApp {
         });
     }
 
+    fn start_reconnect_cascade_after_grace_expired(&mut self, root_node_id: &NodeId) {
+        let mut affected_nodes = self.node_runtime_store.subtree_postorder(root_node_id);
+        affected_nodes.reverse();
+        if affected_nodes.is_empty() {
+            affected_nodes.push(root_node_id.clone());
+        }
+
+        self.pending_reconnect_cascade_nodes.clear();
+        for affected_node_id in affected_nodes
+            .iter()
+            .filter(|affected_node_id| *affected_node_id != root_node_id)
+        {
+            if self
+                .ssh_nodes
+                .get(affected_node_id)
+                .is_some_and(|node| reconnect_cascade_child_should_start(&node.readiness))
+            {
+                self.pending_reconnect_cascade_nodes
+                    .push_back(affected_node_id.clone());
+            }
+        }
+
+        if let Some(node) = self.ssh_nodes.get_mut(root_node_id) {
+            node.readiness = NodeReadiness::Connecting;
+        }
+        let _ = self.node_router.sync_node_readiness_event(
+            root_node_id,
+            NodeReadiness::Connecting,
+            "grace expired",
+        );
+        if !self.ensure_node_connection_started(root_node_id) {
+            self.pending_reconnect_cascade_nodes.clear();
+        }
+    }
+
+    fn schedule_next_reconnect_cascade_node(&self) {
+        if self.pending_reconnect_cascade_nodes.is_empty() {
+            return;
+        }
+        let tx = self.reconnect_worker_tx.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = tx.send(ReconnectWorkerResult::ContinueReconnectCascade);
+        });
+    }
+
+    fn start_next_reconnect_cascade_node(&mut self) -> bool {
+        while let Some(node_id) = self.pending_reconnect_cascade_nodes.pop_front() {
+            let parent_ready = self
+                .node_runtime_store
+                .snapshot(&node_id)
+                .and_then(|snapshot| snapshot.parent_id)
+                .is_some_and(|parent_id| self.node_is_ready_for_terminal(&parent_id));
+            if !parent_ready {
+                continue;
+            }
+            if self.ensure_node_connection_started_without_ancestors_with_mode(
+                &node_id,
+                ConnectionTraceMode::Reconnect,
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn finish_reconnect_job(&mut self, node_id: &NodeId, result: Result<u32, String>) {
         let notice = match &result {
             Ok(restored_count) => Some((
-                format!("Connection restored, {restored_count} service(s) recovered"),
+                self.i18n_with(
+                    "connections.reconnect.completed",
+                    &[("count", restored_count.to_string())],
+                ),
                 TerminalNoticeVariant::Success,
                 ReconnectPhase::Done,
                 None,
             )),
             Err(error) => Some((
-                "Reconnect failed".to_string(),
+                self.i18n_with("connections.reconnect.failed", &[("error", error.clone())]),
                 TerminalNoticeVariant::Error,
                 ReconnectPhase::Failed,
                 Some(error.clone()),
@@ -1443,12 +1660,42 @@ impl WorkspaceApp {
     fn drop_stale_node_connection(&mut self, node_id: &NodeId, connection_id: &str) {
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
         self.ssh_registry.release(connection_id, &consumer);
+        self.release_parent_ref_for_child_connection(node_id, connection_id);
         if let Some(handle) = self.ssh_registry.get(connection_id) {
             let runtime = self.forwarding_runtime.clone();
             runtime.spawn(async move {
                 handle.clear_physical().await;
             });
         }
+        let _ = self
+            .ssh_registry
+            .mark_state_without_event(connection_id, ConnectionState::Disconnected);
+        self.node_router.emitter().unregister(connection_id);
+        let _ = self.ssh_registry.retire_connection(connection_id);
+    }
+
+    fn release_parent_ref_for_child_connection(
+        &self,
+        child_node_id: &NodeId,
+        child_connection_id: &str,
+    ) {
+        let Some(parent_connection_id) = self
+            .ssh_registry
+            .get(child_connection_id)
+            .and_then(|handle| handle.info().parent_connection_id)
+        else {
+            return;
+        };
+        // Tauri increments the parent connection ref when a tunneled child is
+        // established and releases it when that child connection is destroyed.
+        // Native represents that ref as a stable ancestor consumer.
+        self.ssh_registry.release(
+            &parent_connection_id,
+            &ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_node_id.0)),
+        );
+        let _ = self
+            .ssh_registry
+            .set_parent_connection_id(child_connection_id, None);
     }
 
     fn node_still_needs_reconnect(&self, node_id: &NodeId) -> bool {
@@ -1523,11 +1770,206 @@ impl WorkspaceApp {
         } else {
             ConnectionTraceMode::Connect
         };
-        let trace_plan = self.connection_trace_plan_for_node(node_id, trace_mode);
-        self.ensure_node_connection_started_with_trace(node_id, trace_plan.as_ref())
+        self.connect_node_with_ancestors(node_id, trace_mode)
     }
 
-    fn ensure_node_connection_started_with_trace(
+    pub(super) fn ensure_node_connection_started_without_ancestors(
+        &mut self,
+        node_id: &NodeId,
+    ) -> bool {
+        self.ensure_node_connection_started_without_ancestors_with_mode(
+            node_id,
+            ConnectionTraceMode::Connect,
+        )
+    }
+
+    fn ensure_node_connection_started_without_ancestors_with_mode(
+        &mut self,
+        node_id: &NodeId,
+        trace_mode: ConnectionTraceMode,
+    ) -> bool {
+        if self.node_connection_is_active_or_connecting(node_id) {
+            return true;
+        }
+        if self.connecting_node_locks.contains(node_id) {
+            return false;
+        }
+        self.connecting_node_locks.insert(node_id.clone());
+        let trace_plan = ConnectionTracePlan {
+            attempt_id: self.next_connection_trace_attempt_id(),
+            mode: trace_mode,
+            node_ids: vec![node_id.clone()],
+        };
+        if !self.ensure_single_node_connection_started_with_trace(node_id, Some(&trace_plan)) {
+            self.connecting_node_locks.remove(node_id);
+            return false;
+        }
+        true
+    }
+
+    fn node_connection_is_active_or_connecting(&self, node_id: &NodeId) -> bool {
+        let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
+            return false;
+        };
+        self.ssh_registry.get(&connection_id).is_some_and(|handle| {
+            matches!(
+                handle.state(),
+                ConnectionState::Connecting
+                    | ConnectionState::Reconnecting
+                    | ConnectionState::Active
+                    | ConnectionState::Idle
+            )
+        })
+    }
+
+    fn connect_node_with_ancestors(
+        &mut self,
+        node_id: &NodeId,
+        trace_mode: ConnectionTraceMode,
+    ) -> bool {
+        if self.active_connection_chain.is_some() {
+            return false;
+        }
+        let Ok(path_node_ids) = self.node_runtime_store.path_to_node(node_id) else {
+            return false;
+        };
+        if path_node_ids.is_empty() {
+            return false;
+        }
+
+        let start_index = path_node_ids
+            .iter()
+            .position(|candidate| !self.connection_trace_node_is_ready(candidate));
+        let Some(start_index) = start_index else {
+            return true;
+        };
+        let nodes_to_connect = path_node_ids[start_index..].to_vec();
+        if nodes_to_connect
+            .iter()
+            .any(|node_id| self.connecting_node_locks.contains(node_id))
+        {
+            return false;
+        }
+        for node_id in &nodes_to_connect {
+            self.connecting_node_locks.insert(node_id.clone());
+        }
+
+        for node_id in &nodes_to_connect {
+            self.reset_node_for_connection_chain(node_id);
+        }
+
+        let trace_plan = ConnectionTracePlan {
+            attempt_id: self.next_connection_trace_attempt_id(),
+            mode: trace_mode,
+            node_ids: nodes_to_connect.clone(),
+        };
+        self.active_connection_chain = Some(ConnectionChainRun {
+            node_ids: nodes_to_connect,
+            next_index: 0,
+            trace_plan,
+        });
+        self.start_next_connection_chain_node()
+    }
+
+    fn reset_node_for_connection_chain(&mut self, node_id: &NodeId) {
+        if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+            let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+            self.ssh_registry.release(&connection_id, &node_consumer);
+            self.release_parent_ref_for_child_connection(node_id, &connection_id);
+            if let Some(handle) = self.ssh_registry.get(&connection_id) {
+                let runtime = self.forwarding_runtime.clone();
+                runtime.spawn(async move {
+                    handle.clear_physical().await;
+                });
+            }
+            let _ = self
+                .ssh_registry
+                .mark_state(&connection_id, ConnectionState::Disconnected);
+            self.node_router.emitter().unregister(&connection_id);
+            let _ = self.ssh_registry.retire_connection(&connection_id);
+        }
+        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+            node.readiness = NodeReadiness::Disconnected;
+        }
+        if let Ok(event) = self
+            .node_router
+            .disconnect_node_runtime(node_id, "reset before linear connection")
+        {
+            self.emit_node_event(event);
+        }
+    }
+
+    fn start_next_connection_chain_node(&mut self) -> bool {
+        let Some(run) = self.active_connection_chain.clone() else {
+            return false;
+        };
+        let Some(node_id) = run.node_ids.get(run.next_index).cloned() else {
+            self.release_connection_chain();
+            return true;
+        };
+        if !self.ensure_single_node_connection_started_with_trace(&node_id, Some(&run.trace_plan)) {
+            self.abort_connection_chain_for_node(&node_id);
+            return false;
+        }
+        true
+    }
+
+    fn advance_connection_chain_after_node_connected(&mut self, node_id: &NodeId) {
+        let Some(run) = self.active_connection_chain.as_mut() else {
+            return;
+        };
+        let Some(current_id) = run.node_ids.get(run.next_index) else {
+            self.release_connection_chain();
+            return;
+        };
+        if current_id != node_id {
+            return;
+        }
+        run.next_index += 1;
+        if run.next_index >= run.node_ids.len() {
+            self.release_connection_chain();
+            self.schedule_next_reconnect_cascade_node();
+            return;
+        }
+        let tx = self.reconnect_worker_tx.clone();
+        let node_id = node_id.clone();
+        let runtime = self.forwarding_runtime.clone();
+        runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = tx.send(ReconnectWorkerResult::ContinueConnectionChain { node_id });
+        });
+    }
+
+    fn connection_chain_waits_after_node(&self, node_id: &NodeId) -> bool {
+        let Some(run) = self.active_connection_chain.as_ref() else {
+            return false;
+        };
+        run.next_index > 0
+            && run
+                .node_ids
+                .get(run.next_index - 1)
+                .is_some_and(|current_id| current_id == node_id)
+    }
+
+    fn abort_connection_chain_for_node(&mut self, node_id: &NodeId) {
+        if self
+            .active_connection_chain
+            .as_ref()
+            .is_some_and(|run| run.node_ids.contains(node_id))
+        {
+            self.release_connection_chain();
+        }
+    }
+
+    fn release_connection_chain(&mut self) {
+        if let Some(run) = self.active_connection_chain.take() {
+            for node_id in run.node_ids {
+                self.connecting_node_locks.remove(&node_id);
+            }
+        }
+    }
+
+    fn ensure_single_node_connection_started_with_trace(
         &mut self,
         node_id: &NodeId,
         trace_plan: Option<&ConnectionTracePlan>,
@@ -1535,19 +1977,21 @@ impl WorkspaceApp {
         let Some(node) = self.ssh_nodes.get(node_id).cloned() else {
             return false;
         };
-        let force_reconnect = self
+        let stale_connection_id = self
             .node_router
             .connection_id_for_node(node_id)
-            .and_then(|connection_id| self.ssh_registry.get(&connection_id))
-            .is_some_and(|handle| {
-                matches!(
-                    handle.state(),
-                    ConnectionState::LinkDown
-                        | ConnectionState::Disconnected
-                        | ConnectionState::Disconnecting
-                        | ConnectionState::Error(_)
-                )
+            .filter(|connection_id| {
+                self.ssh_registry.get(connection_id).is_some_and(|handle| {
+                    matches!(
+                        handle.state(),
+                        ConnectionState::LinkDown
+                            | ConnectionState::Disconnected
+                            | ConnectionState::Disconnecting
+                            | ConnectionState::Error(_)
+                    )
+                })
             });
+        let force_reconnect = stale_connection_id.is_some();
         if matches!(
             node.readiness,
             NodeReadiness::Ready | NodeReadiness::Connecting
@@ -1580,22 +2024,28 @@ impl WorkspaceApp {
             .node_runtime_store
             .snapshot(node_id)
             .and_then(|snapshot| snapshot.parent_id);
-        if let Some(parent_id) = parent_id.as_ref() {
-            self.ensure_node_connection_started_with_trace(parent_id, trace_plan);
-            if !self.node_is_ready_for_terminal(parent_id) {
-                self.begin_connection_trace_for_node(node_id, trace_plan, Some(parent_id));
-                if let Some(node) = self.ssh_nodes.get_mut(node_id) {
-                    node.readiness = NodeReadiness::Connecting;
-                }
-                let _ = self.node_router.sync_node_readiness_event(
-                    node_id,
-                    NodeReadiness::Connecting,
-                    "waiting for parent connection",
-                );
-                return true;
+        if let Some(parent_id) = parent_id.as_ref()
+            && !self.node_is_ready_for_terminal(parent_id)
+        {
+            let error = format!("Parent node {} has no SSH connection", parent_id.0);
+            self.begin_connection_trace_for_node(node_id, trace_plan, Some(parent_id));
+            if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+                node.readiness = NodeReadiness::Error;
             }
+            if let Ok(event) = self.node_router.sync_node_readiness_event(
+                node_id,
+                NodeReadiness::Error,
+                error.clone(),
+            ) {
+                self.emit_node_event(event);
+            }
+            self.finish_connection_trace_failed(node_id, Some(error));
+            return false;
         }
         self.begin_connection_trace_for_node(node_id, trace_plan, parent_id.as_ref());
+        if let Some(connection_id) = stale_connection_id.as_deref() {
+            self.drop_stale_node_connection(node_id, connection_id);
+        }
 
         let origin = self
             .node_runtime_store
@@ -1647,6 +2097,9 @@ impl WorkspaceApp {
                 node_handle.clear_physical().await;
             }
             let client = SshTransportClient::new(config).with_prompt_handler(prompt_handler);
+            let parent_consumer = parent_id.as_ref().map(|_| {
+                ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0))
+            });
             let parent_handle = if let Some(parent_id) = parent_id {
                 // Tauri's connect_tree_node waits for the parent path before
                 // dialing a tunneled child. Native must do the same here: a
@@ -1655,7 +2108,7 @@ impl WorkspaceApp {
                 match router
                     .acquire_connection_wait(
                         &parent_id,
-                        ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)),
+                        parent_consumer.clone().expect("parent consumer"),
                         Duration::from_secs(30),
                     )
                     .await
@@ -1680,6 +2133,7 @@ impl WorkspaceApp {
                         consumer,
                         node_handle,
                         parent_handle,
+                        parent_consumer.expect("parent consumer"),
                     )
                     .await
             } else {
@@ -2002,15 +2456,29 @@ fn reconnect_error_is_non_retryable(error: &str) -> bool {
     .any(|needle| error.contains(needle))
 }
 
-fn should_clear_grace_link_down_for_node(
-    root_id: &NodeId,
-    candidate_id: &NodeId,
-    old_connection_node_ids: &HashSet<NodeId>,
-    recovered_node_ids: &HashSet<NodeId>,
-) -> bool {
-    candidate_id == root_id
-        || !old_connection_node_ids.contains(candidate_id)
-        || recovered_node_ids.contains(candidate_id)
+fn readiness_for_connection_status(status: &str) -> Option<NodeReadiness> {
+    match status {
+        "connected" => Some(NodeReadiness::Ready),
+        "link_down" => Some(NodeReadiness::Error),
+        "reconnecting" => Some(NodeReadiness::Connecting),
+        "disconnected" => Some(NodeReadiness::Disconnected),
+        _ => None,
+    }
+}
+
+fn reason_for_connection_status(status: &str) -> String {
+    match status {
+        "connected" => "connection restored",
+        "link_down" => "link down",
+        "reconnecting" => "reconnecting",
+        "disconnected" => "connection disconnected",
+        _ => "connection status changed",
+    }
+    .to_string()
+}
+
+fn reconnect_cascade_child_should_start(readiness: &NodeReadiness) -> bool {
+    matches!(readiness, NodeReadiness::Error | NodeReadiness::Connecting)
 }
 
 #[cfg(test)]
@@ -2074,42 +2542,14 @@ mod tests {
     }
 
     #[test]
-    fn grace_recovered_only_clears_inherited_or_recovered_child_nodes() {
-        let root = NodeId::new("root");
-        let inherited_child = NodeId::new("inherited-child");
-        let own_child_dead = NodeId::new("own-child-dead");
-        let own_child_recovered = NodeId::new("own-child-recovered");
-
-        let old_connection_node_ids = HashSet::from([
-            root.clone(),
-            own_child_dead.clone(),
-            own_child_recovered.clone(),
-        ]);
-        let recovered_node_ids = HashSet::from([own_child_recovered.clone()]);
-
-        assert!(should_clear_grace_link_down_for_node(
-            &root,
-            &root,
-            &old_connection_node_ids,
-            &recovered_node_ids,
+    fn reconnect_cascade_skips_user_disconnected_children_like_tauri_link_down_set() {
+        assert!(reconnect_cascade_child_should_start(&NodeReadiness::Error));
+        assert!(reconnect_cascade_child_should_start(
+            &NodeReadiness::Connecting
         ));
-        assert!(should_clear_grace_link_down_for_node(
-            &root,
-            &inherited_child,
-            &old_connection_node_ids,
-            &recovered_node_ids,
+        assert!(!reconnect_cascade_child_should_start(
+            &NodeReadiness::Disconnected
         ));
-        assert!(should_clear_grace_link_down_for_node(
-            &root,
-            &own_child_recovered,
-            &old_connection_node_ids,
-            &recovered_node_ids,
-        ));
-        assert!(!should_clear_grace_link_down_for_node(
-            &root,
-            &own_child_dead,
-            &old_connection_node_ids,
-            &recovered_node_ids,
-        ));
+        assert!(!reconnect_cascade_child_should_start(&NodeReadiness::Ready));
     }
 }

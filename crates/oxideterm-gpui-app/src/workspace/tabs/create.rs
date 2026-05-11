@@ -44,8 +44,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
-        self.create_ssh_terminal_tab_for_node(config, title, None, None, window, cx)
-            .map(|_| ())
+        let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
+        self.queue_ssh_terminal_tab_for_node(node_id, config, title, None, window, cx)
     }
 
     pub(super) fn open_or_create_saved_ssh_terminal_tab(
@@ -65,11 +65,7 @@ impl WorkspaceApp {
         {
             return Ok(());
         }
-        if config
-            .proxy_chain
-            .as_ref()
-            .is_some_and(|chain| !chain.is_empty())
-            && let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
+        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
             && let Some(node) = self.ssh_nodes.get(&node_id).cloned()
         {
             self.queue_ssh_terminal_tab_for_node(
@@ -83,7 +79,7 @@ impl WorkspaceApp {
             return Ok(());
         }
 
-        let (target_config, node_id) = if config
+        if config
             .proxy_chain
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
@@ -109,21 +105,117 @@ impl WorkspaceApp {
             )?;
             return Ok(());
         } else {
-            (
+            if let Some(existing_node_id) = self.existing_direct_root_node_for_saved_config(&config)
+            {
+                self.ensure_workspace_ssh_node_from_runtime(&existing_node_id);
+                if let Some(session_id) = self
+                    .ssh_nodes
+                    .get(&existing_node_id)
+                    .and_then(|node| node.terminal_ids.first().copied())
+                    && self.focus_terminal_session(session_id, window, cx)
+                {
+                    return Ok(());
+                }
+                if let Some(node) = self.ssh_nodes.get(&existing_node_id).cloned() {
+                    // Tauri's saved direct-open path reuses an existing root
+                    // node by host/port/user without rewriting the node origin
+                    // to the saved connection. Keep the same tree owner here.
+                    self.queue_ssh_terminal_tab_for_node(
+                        existing_node_id,
+                        node.config,
+                        node.title,
+                        node.saved_connection_id,
+                        window,
+                        cx,
+                    )?;
+                    return Ok(());
+                }
+            }
+            let node_id = self.materialize_ssh_root_node(
+                config.clone(),
+                title.clone(),
+                Some(saved_connection_id.clone()),
+            );
+            self.queue_ssh_terminal_tab_for_node(
+                node_id,
                 config,
-                self.saved_ssh_nodes.get(&saved_connection_id).cloned(),
+                title,
+                Some(saved_connection_id),
+                window,
+                cx,
             )
-        };
+        }
+    }
 
-        self.create_ssh_terminal_tab_for_node(
-            target_config,
-            title,
-            Some(saved_connection_id),
-            node_id,
-            window,
-            cx,
-        )
-        .map(|_| ())
+    fn existing_direct_root_node_for_saved_config(&self, config: &SshConfig) -> Option<NodeId> {
+        self.node_runtime_store
+            .flatten()
+            .into_iter()
+            .find(|node| {
+                node.depth == 0
+                    && node.host == config.host
+                    && node.port == config.port
+                    && node.username == config.username
+            })
+            .map(|node| NodeId::new(node.id))
+    }
+
+    fn materialize_ssh_root_node(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        saved_connection_id: Option<String>,
+    ) -> NodeId {
+        if let Some(saved_connection_id) = saved_connection_id.as_ref()
+            && let Some(node_id) = self.saved_ssh_nodes.get(saved_connection_id).cloned()
+        {
+            if self.node_runtime_store.snapshot(&node_id).is_none() {
+                self.node_runtime_store.upsert_node_with_origin(
+                    node_id.clone(),
+                    config.clone(),
+                    NodeOrigin::Restored {
+                        saved_connection_id: saved_connection_id.clone(),
+                    },
+                );
+            }
+            self.ssh_nodes
+                .entry(node_id.clone())
+                .or_insert_with(|| WorkspaceSshNode {
+                    saved_connection_id: Some(saved_connection_id.clone()),
+                    config: config.clone(),
+                    title: title.clone(),
+                    terminal_ids: Vec::new(),
+                    readiness: NodeReadiness::Disconnected,
+                });
+            return node_id;
+        }
+
+        let node_id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
+        self.next_ssh_node_id += 1;
+        let origin = saved_connection_id
+            .as_ref()
+            .map(|id| NodeOrigin::Restored {
+                saved_connection_id: id.clone(),
+            })
+            .unwrap_or(NodeOrigin::Direct);
+        self.node_runtime_store
+            .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
+        self.ssh_nodes.insert(
+            node_id.clone(),
+            WorkspaceSshNode {
+                saved_connection_id: saved_connection_id.clone(),
+                config,
+                title,
+                terminal_ids: Vec::new(),
+                readiness: NodeReadiness::Disconnected,
+            },
+        );
+        if let Some(saved_connection_id) = saved_connection_id {
+            self.saved_ssh_nodes
+                .insert(saved_connection_id, node_id.clone());
+        }
+        self.persist_session_tree_snapshot();
+        node_id
     }
 
     pub(super) fn create_ssh_terminal_tab_for_node(
@@ -465,8 +557,15 @@ impl WorkspaceApp {
                 session,
             },
         );
-        if let Ok(event) = self.node_router.bind_terminal_endpoint(node_id, endpoint) {
-            self.emit_node_event(event);
+        let should_bind_primary = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .and_then(|snapshot| snapshot.terminal_session_id)
+            .is_none();
+        if should_bind_primary {
+            if let Ok(event) = self.node_router.bind_terminal_endpoint(node_id, endpoint) {
+                self.emit_node_event(event);
+            }
         }
         self.persist_session_tree_snapshot();
     }

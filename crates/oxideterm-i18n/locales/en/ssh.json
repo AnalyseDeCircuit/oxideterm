@@ -121,6 +121,30 @@
     }
   },
   "connections": {
+    "toast": {
+      "proxy_chain_established": "Proxy chain connection established",
+      "proxy_chain_invalid": "Proxy chain is invalid",
+      "proxy_hop_kbi_unsupported": "Jump host does not support keyboard-interactive/2FA",
+      "proxy_hop_auth_unsupported": "Jump host uses an unsupported auth type",
+      "proxy_chain_desc": "Chain depth {{depth}}. Topology synchronized."
+    },
+    "errors": {
+      "chain_busy_title": "Operation in Progress",
+      "chain_busy_desc": "Another connection chain is in progress. Please wait.",
+      "node_connecting_title": "Already Connecting",
+      "node_connecting_desc": "This node is already being connected.",
+      "chain_failed_title": "Connection Failed",
+      "chain_failed_desc": "Failed at node {{position}}/{{total}}: {{error}}",
+      "generic_title": "Connection Error"
+    },
+    "reconnect": {
+      "starting": "{{name}} is reconnecting...",
+      "ssh_restored": "SSH connection restored",
+      "completed": "Connection restored, {{count}} service(s) recovered",
+      "failed": "Reconnection failed: {{error}}",
+      "cancelled": "Reconnection cancelled",
+      "recovered": "Connection recovered - session preserved"
+    },
     "trace": {
       "connecting": "Connecting {{label}}",
       "reconnecting": "Reconnecting {{label}}",

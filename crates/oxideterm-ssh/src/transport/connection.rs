@@ -67,11 +67,11 @@ impl SshConnectionHandle {
         }
 
         let handle = pooled.target.lock().await;
-        // Tauri's app-level heartbeat uses an SSH GLOBAL_REQUEST
-        // `keepalive@openssh.com` with want_reply=true, not an exec channel.
-        // This native russh fork exposes `send_ping()` for the same frame and
-        // waits for the reply so the 5s Tauri timeout remains observable.
-        match timeout(probe_timeout, handle.send_ping()).await {
+        // Tauri's app-level heartbeat calls russh `send_keepalive(true)`.
+        // Use the same API and frame (`keepalive@openssh.com` with
+        // want_reply=true) so native preserves Tauri's timeout/error surface
+        // instead of using the stricter local `send_ping()` helper.
+        match timeout(probe_timeout, handle.send_keepalive(true)).await {
             Ok(Ok(())) => KeepaliveProbeResult::Ok,
             Ok(Err(error)) => {
                 let error = format!("{error:?}");

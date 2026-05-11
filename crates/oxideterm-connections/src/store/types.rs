@@ -1,5 +1,7 @@
 use crate::{SecretString, keychain::ConnectionKeychain};
 
+pub const CONFIG_VERSION: u32 = 1;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthType {
@@ -79,6 +81,14 @@ impl SavedAuth {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConnectionOptions {
     #[serde(default)]
+    pub keep_alive_interval: u32,
+    #[serde(default)]
+    pub compression: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term_type: Option<String>,
+    #[serde(default)]
     pub agent_forwarding: bool,
 }
 
@@ -94,8 +104,35 @@ pub struct SavedProxyHop {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProxyHopInfo {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_type: AuthType,
+    pub key_path: Option<String>,
+    pub cert_path: Option<String>,
+    pub agent_forwarding: bool,
+}
+
+impl From<&SavedProxyHop> for ProxyHopInfo {
+    fn from(hop: &SavedProxyHop) -> Self {
+        Self {
+            host: hop.host.clone(),
+            port: hop.port,
+            username: hop.username.clone(),
+            auth_type: hop.auth.auth_type(),
+            key_path: hop.auth.key_path().map(ToOwned::to_owned),
+            cert_path: hop.auth.cert_path().map(ToOwned::to_owned),
+            agent_forwarding: hop.agent_forwarding,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedConnection {
     pub id: String,
+    #[serde(default = "default_config_version")]
+    pub version: u32,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -123,6 +160,10 @@ fn default_port() -> u16 {
     22
 }
 
+fn default_config_version() -> u32 {
+    CONFIG_VERSION
+}
+
 impl SavedConnection {
     pub fn touch(&mut self) {
         let now = Utc::now();
@@ -142,7 +183,7 @@ pub struct ConnectionInfo {
     pub auth_type: AuthType,
     pub key_path: Option<String>,
     pub cert_path: Option<String>,
-    pub proxy_chain: Vec<SavedProxyHop>,
+    pub proxy_chain: Vec<ProxyHopInfo>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub color: Option<String>,
@@ -162,7 +203,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             auth_type: conn.auth.auth_type(),
             key_path: conn.auth.key_path().map(ToOwned::to_owned),
             cert_path: conn.auth.cert_path().map(ToOwned::to_owned),
-            proxy_chain: conn.proxy_chain.clone(),
+            proxy_chain: conn.proxy_chain.iter().map(ProxyHopInfo::from).collect(),
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
             color: conn.color.clone(),
@@ -187,12 +228,24 @@ pub struct SaveConnectionRequest {
     pub agent_forwarding: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionStoreData {
+    #[serde(default = "default_config_version")]
+    pub version: u32,
     #[serde(default)]
     pub connections: Vec<SavedConnection>,
     #[serde(default)]
     pub groups: Vec<String>,
+}
+
+impl Default for ConnectionStoreData {
+    fn default() -> Self {
+        Self {
+            version: CONFIG_VERSION,
+            connections: Vec::new(),
+            groups: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

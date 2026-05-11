@@ -191,10 +191,14 @@ pub(crate) struct WorkspaceApp {
     reconnect_debounce_generation: u64,
     reconnect_pipeline_active_node: Option<NodeId>,
     reconnect_requeue_counts: HashMap<NodeId, u32>,
+    active_connection_chain: Option<ConnectionChainRun>,
+    connecting_node_locks: HashSet<NodeId>,
+    pending_reconnect_cascade_nodes: VecDeque<NodeId>,
     last_ssh_active_probe_at: Option<Instant>,
     ssh_active_probe_in_flight: bool,
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
+    reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     event_log_entries: VecDeque<WorkspaceEventLogEntry>,
     event_log_next_id: u64,
@@ -338,6 +342,13 @@ struct ConnectionTracePlan {
     attempt_id: String,
     mode: ConnectionTraceMode,
     node_ids: Vec<NodeId>,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectionChainRun {
+    node_ids: Vec<NodeId>,
+    next_index: usize,
+    trace_plan: ConnectionTracePlan,
 }
 
 #[derive(Clone, Debug)]

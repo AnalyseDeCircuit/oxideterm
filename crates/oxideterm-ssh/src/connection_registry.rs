@@ -59,6 +59,7 @@ pub struct ConnectionInfo {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub parent_connection_id: Option<String>,
     pub state: ConnectionState,
     pub ref_count: u64,
     pub consumers: Vec<ConnectionConsumer>,
@@ -159,6 +160,7 @@ struct ConnectionEntry {
     connection_id: String,
     key: String,
     config: SshConfig,
+    parent_connection_id: RwLock<Option<String>>,
     state: RwLock<ConnectionState>,
     ref_count: AtomicU64,
     consumers: RwLock<Vec<ConnectionConsumer>>,
@@ -167,6 +169,7 @@ struct ConnectionEntry {
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
     heartbeat_failures: AtomicU64,
+    last_emitted_status: RwLock<Option<String>>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
     idle_timeout: Option<Duration>,
@@ -179,6 +182,7 @@ impl ConnectionEntry {
             connection_id: Uuid::new_v4().to_string(),
             key,
             config,
+            parent_connection_id: RwLock::new(None),
             state: RwLock::new(ConnectionState::Connecting),
             ref_count: AtomicU64::new(0),
             consumers: RwLock::new(Vec::new()),
@@ -187,6 +191,7 @@ impl ConnectionEntry {
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
             heartbeat_failures: AtomicU64::new(0),
+            last_emitted_status: RwLock::new(None),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
@@ -200,6 +205,7 @@ impl ConnectionEntry {
             host: self.config.host.clone(),
             port: self.config.port,
             username: self.config.username.clone(),
+            parent_connection_id: self.parent_connection_id.read().clone(),
             state: self.state.read().clone(),
             ref_count: self.ref_count.load(Ordering::SeqCst),
             consumers: self.consumers.read().clone(),
@@ -472,16 +478,20 @@ impl SshConnectionRegistry {
             return;
         };
 
-        entry
-            .consumers
-            .write()
-            .retain(|existing| existing != consumer);
-        entry
-            .ref_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                Some(count.saturating_sub(1))
-            })
-            .ok();
+        let removed = {
+            let mut consumers = entry.consumers.write();
+            let before = consumers.len();
+            consumers.retain(|existing| existing != consumer);
+            consumers.len() != before
+        };
+        if removed {
+            entry
+                .ref_count
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    Some(count.saturating_sub(1))
+                })
+                .ok();
+        }
         entry.touch();
         if entry.ref_count.load(Ordering::SeqCst) == 0 {
             *entry.state.write() = ConnectionState::Idle;
@@ -493,6 +503,24 @@ impl SshConnectionRegistry {
         connection_id: &str,
         state: ConnectionState,
     ) -> Option<ConnectionInfo> {
+        self.mark_state_inner(connection_id, state, true, "connection state changed")
+    }
+
+    pub fn mark_state_without_event(
+        &self,
+        connection_id: &str,
+        state: ConnectionState,
+    ) -> Option<ConnectionInfo> {
+        self.mark_state_inner(connection_id, state, false, "")
+    }
+
+    fn mark_state_inner(
+        &self,
+        connection_id: &str,
+        state: ConnectionState,
+        emit_node_event: bool,
+        reason: &str,
+    ) -> Option<ConnectionInfo> {
         let key = self
             .by_id
             .get(connection_id)
@@ -501,53 +529,141 @@ impl SshConnectionRegistry {
         *entry.state.write() = state;
         entry.touch();
         let info = entry.info();
-        if let Some(emitter) = self.node_event_emitter.read().clone() {
+        if emit_node_event && let Some(emitter) = self.node_event_emitter.read().clone() {
             // Match Tauri's registry-to-node event flow: low-level connection
             // state changes are translated through the shared NodeEventEmitter
             // whenever the connection has been registered to a node.
-            let _ = emitter.emit_state_from_connection(
-                &info.connection_id,
-                &info.state,
-                "connection state changed",
-            );
+            let _ = emitter.emit_state_from_connection(&info.connection_id, &info.state, reason);
         }
         Some(info)
     }
 
-    pub fn mark_link_down_cascade(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
-        let Some(root_key) = self
-            .by_id
-            .get(root_connection_id)
-            .map(|key| key.value().clone())
-        else {
-            return Vec::new();
+    fn emit_connection_status_changed(
+        &self,
+        connection_id: &str,
+        status: &str,
+        affected_children: Vec<String>,
+    ) -> bool {
+        let Some(handle) = self.get(connection_id) else {
+            return false;
         };
+        {
+            let mut last_status = handle.entry.last_emitted_status.write();
+            if last_status.as_deref() == Some(status) {
+                return false;
+            }
+            *last_status = Some(status.to_string());
+        }
+        if let Some(emitter) = self.node_event_emitter.read().clone() {
+            emitter.emit_connection_status_changed(
+                connection_id.to_string(),
+                status.to_string(),
+                affected_children,
+            );
+        }
+        true
+    }
 
-        let root_host = self
-            .by_key
-            .get(&root_key)
-            .map(|entry| entry.config.host.clone())
-            .unwrap_or_default();
-        let mut changed = Vec::new();
-        for entry in self.by_key.iter() {
-            let affects_entry = entry.key().as_str() == root_key.as_str()
-                || entry
-                    .config
-                    .proxy_chain
-                    .as_ref()
-                    .is_some_and(|chain| chain.iter().any(|hop| hop.host == root_host));
-            if affects_entry {
-                *entry.state.write() = ConnectionState::LinkDown;
-                entry.touch();
-                let info = entry.info();
-                if let Some(emitter) = self.node_event_emitter.read().clone() {
-                    let _ = emitter.emit_state_from_connection(
-                        &info.connection_id,
-                        &info.state,
-                        "link down cascade",
-                    );
+    pub fn set_parent_connection_id(
+        &self,
+        connection_id: &str,
+        parent_connection_id: Option<String>,
+    ) -> Option<ConnectionInfo> {
+        let key = self
+            .by_id
+            .get(connection_id)
+            .map(|key| key.value().clone())?;
+        let entry = self.by_key.get(&key)?.clone();
+        *entry.parent_connection_id.write() = parent_connection_id;
+        entry.touch();
+        Some(entry.info())
+    }
+
+    pub fn descendant_connection_infos(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
+        if self.get(root_connection_id).is_none() {
+            return Vec::new();
+        }
+        let mut descendants = Vec::new();
+        let mut stack = vec![root_connection_id.to_string()];
+        while let Some(parent_id) = stack.pop() {
+            let children = self
+                .by_key
+                .iter()
+                .filter(|entry| entry.parent_connection_id.read().as_deref() == Some(&parent_id))
+                .map(|entry| entry.connection_id.clone())
+                .collect::<Vec<_>>();
+            for child_id in children {
+                if let Some(handle) = self.get(&child_id) {
+                    descendants.push(handle.info());
                 }
+                stack.push(child_id);
+            }
+        }
+        descendants
+    }
+
+    pub fn retire_connection(&self, connection_id: &str) -> Option<ConnectionInfo> {
+        let key = self
+            .by_id
+            .get(connection_id)
+            .map(|key| key.value().clone())?;
+        let entry = self.by_key.get(&key).map(|entry| entry.clone())?;
+        let info = entry.info();
+        if entry.connection_id == connection_id {
+            self.by_key.remove(&key);
+        }
+        self.by_id.remove(connection_id);
+        Some(info)
+    }
+
+    pub fn mark_link_down_cascade(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
+        if self.get(root_connection_id).is_none() {
+            return Vec::new();
+        }
+        let affected_children = self
+            .descendant_connection_infos(root_connection_id)
+            .into_iter()
+            .map(|info| info.connection_id)
+            .collect::<Vec<_>>();
+        let mut connection_ids = vec![root_connection_id.to_string()];
+        connection_ids.extend(affected_children.iter().cloned());
+
+        let mut changed = Vec::new();
+        for connection_id in connection_ids {
+            let Some(handle) = self.get(&connection_id) else {
+                continue;
+            };
+            if !matches!(
+                handle.state(),
+                ConnectionState::Active
+                    | ConnectionState::Idle
+                    | ConnectionState::Connecting
+                    | ConnectionState::Reconnecting
+                    | ConnectionState::LinkDown
+            ) {
+                continue;
+            }
+            if let Some(info) =
+                self.mark_state_inner(&connection_id, ConnectionState::LinkDown, false, "")
+            {
                 changed.push(info);
+            }
+        }
+        if !changed.is_empty() {
+            // Tauri emits one `connection_status_changed` event for the root
+            // connection and carries descendant connection ids in
+            // `affected_children`; child UI state is derived from that payload.
+            let emitted_status = self.emit_connection_status_changed(
+                root_connection_id,
+                "link_down",
+                affected_children,
+            );
+            if emitted_status && let Some(emitter) = self.node_event_emitter.read().clone() {
+                let _ = emitter.emit_state_from_connection(
+                    root_connection_id,
+                    &ConnectionState::LinkDown,
+                    "link down",
+                );
             }
         }
         changed
@@ -563,13 +679,71 @@ impl SshConnectionRegistry {
         let mut changed = Vec::new();
         for connection_id in connection_ids {
             if matches!(
-                self.probe_single_connection(&connection_id, timeout).await,
+                self.probe_active_connection(&connection_id, timeout).await,
                 ProbeConnectionStatus::Dead
             ) {
                 changed.extend(self.mark_link_down_cascade(&connection_id));
             }
         }
         changed
+    }
+
+    async fn probe_active_connection(
+        &self,
+        connection_id: &str,
+        timeout: Duration,
+    ) -> ProbeConnectionStatus {
+        let Some(handle) = self.get(connection_id) else {
+            return ProbeConnectionStatus::NotFound;
+        };
+        if !matches!(
+            handle.state(),
+            ConnectionState::Active | ConnectionState::Idle
+        ) {
+            return ProbeConnectionStatus::NotApplicable;
+        }
+
+        match handle.probe_alive(timeout).await {
+            KeepaliveProbeResult::Ok => {
+                handle.entry.reset_heartbeat_failures();
+                handle.entry.touch();
+                ProbeConnectionStatus::Alive
+            }
+            KeepaliveProbeResult::Timeout => {
+                let failures = handle.entry.increment_heartbeat_failures();
+                if failures < HEARTBEAT_FAIL_THRESHOLD as u64 {
+                    return ProbeConnectionStatus::Alive;
+                }
+                ProbeConnectionStatus::Dead
+            }
+            KeepaliveProbeResult::IoError => {
+                // Tauri's app-level heartbeat confirms an IO error with a
+                // 1.5s quick probe before emitting link_down.
+                if matches!(
+                    handle.state(),
+                    ConnectionState::Disconnecting | ConnectionState::Disconnected
+                ) {
+                    return ProbeConnectionStatus::NotApplicable;
+                }
+                sleep(Duration::from_millis(1500)).await;
+                if matches!(
+                    handle.state(),
+                    ConnectionState::Disconnecting | ConnectionState::Disconnected
+                ) {
+                    return ProbeConnectionStatus::NotApplicable;
+                }
+                match handle.probe_alive(timeout).await {
+                    KeepaliveProbeResult::Ok => {
+                        handle.entry.reset_heartbeat_failures();
+                        handle.entry.touch();
+                        ProbeConnectionStatus::Alive
+                    }
+                    KeepaliveProbeResult::Timeout | KeepaliveProbeResult::IoError => {
+                        ProbeConnectionStatus::Dead
+                    }
+                }
+            }
+        }
     }
 
     pub async fn probe_single_connection(
@@ -592,17 +766,16 @@ impl SshConnectionRegistry {
 
         match handle.probe_alive(timeout).await {
             KeepaliveProbeResult::Ok => {
-                handle.entry.reset_heartbeat_failures();
-                let _ = self.mark_state(connection_id, ConnectionState::Active);
+                if matches!(state, ConnectionState::LinkDown) {
+                    handle.entry.reset_heartbeat_failures();
+                    handle.entry.touch();
+                    let _ = self.mark_state_without_event(connection_id, ConnectionState::Active);
+                    self.emit_connection_status_changed(connection_id, "connected", Vec::new());
+                }
                 ProbeConnectionStatus::Alive
             }
             KeepaliveProbeResult::Timeout => {
                 if matches!(state, ConnectionState::Active | ConnectionState::Idle) {
-                    let failures = handle.entry.increment_heartbeat_failures();
-                    if failures < HEARTBEAT_FAIL_THRESHOLD as u64 {
-                        return ProbeConnectionStatus::Alive;
-                    }
-                    let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
                     return ProbeConnectionStatus::Dead;
                 }
 
@@ -612,45 +785,27 @@ impl SshConnectionRegistry {
                 sleep(Duration::from_millis(1500)).await;
                 match handle.probe_alive(timeout).await {
                     KeepaliveProbeResult::Ok => {
-                        handle.entry.reset_heartbeat_failures();
-                        let _ = self.mark_state(connection_id, ConnectionState::Active);
+                        if matches!(state, ConnectionState::LinkDown) {
+                            handle.entry.reset_heartbeat_failures();
+                            handle.entry.touch();
+                            let _ = self
+                                .mark_state_without_event(connection_id, ConnectionState::Active);
+                            self.emit_connection_status_changed(
+                                connection_id,
+                                "connected",
+                                Vec::new(),
+                            );
+                        }
                         ProbeConnectionStatus::Alive
                     }
                     KeepaliveProbeResult::Timeout | KeepaliveProbeResult::IoError => {
-                        let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
+                        let _ =
+                            self.mark_state_without_event(connection_id, ConnectionState::LinkDown);
                         ProbeConnectionStatus::Dead
                     }
                 }
             }
-            KeepaliveProbeResult::IoError => {
-                // Match Tauri Smart Butler mode: an IO error gets a 1.5s
-                // quick probe to avoid false positives from transient network
-                // churn; a second failure confirms LinkDown immediately.
-                if matches!(
-                    handle.state(),
-                    ConnectionState::Disconnecting | ConnectionState::Disconnected
-                ) {
-                    return ProbeConnectionStatus::NotApplicable;
-                }
-                sleep(Duration::from_millis(1500)).await;
-                if matches!(
-                    handle.state(),
-                    ConnectionState::Disconnecting | ConnectionState::Disconnected
-                ) {
-                    return ProbeConnectionStatus::NotApplicable;
-                }
-                match handle.probe_alive(timeout).await {
-                    KeepaliveProbeResult::Ok => {
-                        handle.entry.reset_heartbeat_failures();
-                        let _ = self.mark_state(connection_id, ConnectionState::Active);
-                        ProbeConnectionStatus::Alive
-                    }
-                    KeepaliveProbeResult::Timeout | KeepaliveProbeResult::IoError => {
-                        let _ = self.mark_state(connection_id, ConnectionState::LinkDown);
-                        ProbeConnectionStatus::Dead
-                    }
-                }
-            }
+            KeepaliveProbeResult::IoError => ProbeConnectionStatus::Dead,
         }
     }
 
@@ -746,6 +901,7 @@ impl Default for SshConnectionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::router::{NodeId, NodeReadiness, NodeStateEvent};
 
     #[test]
     fn shares_one_connection_for_many_consumers() {
@@ -775,6 +931,26 @@ mod tests {
     }
 
     #[test]
+    fn release_ignores_unknown_consumer_without_decrementing_ref_count() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::Terminal("a".into());
+        let handle = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            consumer.clone(),
+        );
+
+        registry.release(
+            handle.connection_id(),
+            &ConnectionConsumer::Sftp("missing".into()),
+        );
+
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.state(), ConnectionState::Connecting);
+        registry.release(handle.connection_id(), &consumer);
+        assert_eq!(handle.info().ref_count, 0);
+    }
+
+    #[test]
     fn stores_one_physical_connection_slot_per_entry() {
         let registry = SshConnectionRegistry::default();
         let first = registry.acquire(
@@ -791,5 +967,144 @@ mod tests {
             second.physical::<String>().as_deref().map(String::as_str),
             Some("authenticated")
         );
+    }
+
+    #[test]
+    fn link_down_cascade_follows_parent_connection_ids_not_proxy_hosts() {
+        let registry = SshConnectionRegistry::default();
+        let root = registry.acquire(
+            SshConfig::password("jump", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("root".into()),
+        );
+        let child = registry.acquire(
+            SshConfig::password("target", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("child".into()),
+        );
+        let unrelated = registry.acquire(
+            SshConfig::password("target", 22, "other", "pw"),
+            ConnectionConsumer::NodeRouter("unrelated".into()),
+        );
+        registry.mark_state(root.connection_id(), ConnectionState::Active);
+        registry.mark_state(child.connection_id(), ConnectionState::Active);
+        registry.mark_state(unrelated.connection_id(), ConnectionState::Active);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(root.connection_id().to_string()),
+        );
+
+        let changed = registry.mark_link_down_cascade(root.connection_id());
+        let changed_ids = changed
+            .iter()
+            .map(|info| info.connection_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(changed_ids.contains(&root.connection_id()));
+        assert!(changed_ids.contains(&child.connection_id()));
+        assert!(!changed_ids.contains(&unrelated.connection_id()));
+        assert_eq!(root.state(), ConnectionState::LinkDown);
+        assert_eq!(child.state(), ConnectionState::LinkDown);
+        assert_eq!(unrelated.state(), ConnectionState::Active);
+    }
+
+    #[test]
+    fn tunneled_child_parent_ref_is_released_by_ancestor_consumer() {
+        let registry = SshConnectionRegistry::default();
+        let root = registry.acquire(
+            SshConfig::password("jump", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("root".into()),
+        );
+        let parent_ref = ConnectionConsumer::NodeRouter("child:ancestor".into());
+        let parent_for_child = registry
+            .acquire_consumer_for_connection(root.connection_id(), parent_ref.clone())
+            .unwrap();
+        let child = registry.acquire(
+            SshConfig::password("target", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("child".into()),
+        );
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(parent_for_child.connection_id().to_string()),
+        );
+
+        assert_eq!(root.info().ref_count, 2);
+        registry.release(root.connection_id(), &parent_ref);
+
+        assert_eq!(root.info().ref_count, 1);
+        assert!(
+            root.info()
+                .consumers
+                .contains(&ConnectionConsumer::NodeRouter("root".into()))
+        );
+    }
+
+    #[test]
+    fn link_down_cascade_emits_tauri_shaped_status_event() {
+        let registry = SshConnectionRegistry::default();
+        let emitter = NodeEventEmitter::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        emitter.subscribe(tx);
+        registry.set_node_event_emitter(emitter.clone());
+
+        let root = registry.acquire(
+            SshConfig::password("jump", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("root".into()),
+        );
+        let child = registry.acquire(
+            SshConfig::password("target", 22, "me", "pw"),
+            ConnectionConsumer::NodeRouter("child".into()),
+        );
+        emitter.register(root.connection_id(), NodeId::new("root"));
+        emitter.register(child.connection_id(), NodeId::new("child"));
+        registry.mark_state_without_event(root.connection_id(), ConnectionState::Active);
+        registry.mark_state_without_event(child.connection_id(), ConnectionState::Active);
+        registry.set_parent_connection_id(
+            child.connection_id(),
+            Some(root.connection_id().to_string()),
+        );
+
+        registry.mark_link_down_cascade(root.connection_id());
+
+        match rx.recv().unwrap() {
+            NodeStateEvent::ConnectionStatusChanged {
+                connection_id,
+                status,
+                affected_children,
+                ..
+            } => {
+                assert_eq!(connection_id, root.connection_id());
+                assert_eq!(status, "link_down");
+                assert_eq!(affected_children, vec![child.connection_id().to_string()]);
+            }
+            event => panic!("expected connection status event, got {event:?}"),
+        }
+        match rx.recv().unwrap() {
+            NodeStateEvent::ConnectionStateChanged { node_id, state, .. } => {
+                assert_eq!(node_id, "root");
+                assert_eq!(state, NodeReadiness::Error);
+            }
+            event => panic!("expected root node state event, got {event:?}"),
+        }
+
+        registry.mark_link_down_cascade(root.connection_id());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn retiring_connection_allows_same_config_to_receive_new_id() {
+        let registry = SshConnectionRegistry::default();
+        let config = SshConfig::password("host", 22, "me", "pw");
+        let first = registry.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter("node-a".into()),
+        );
+        let first_id = first.connection_id().to_string();
+
+        let retired = registry.retire_connection(&first_id).unwrap();
+        let second = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+
+        assert_eq!(retired.connection_id, first_id);
+        assert_ne!(second.connection_id(), first_id);
+        assert!(registry.get(&first_id).is_none());
+        assert!(registry.get(second.connection_id()).is_some());
     }
 }

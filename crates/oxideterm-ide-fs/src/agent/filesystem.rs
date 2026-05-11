@@ -128,11 +128,13 @@ impl NodeAgentIdeFileSystem {
         let _guard = self.deploy_lock.lock().await;
         if let Ok(resolved) = self.router.resolve_connection(node_id).await
             && let Some(session) = self.registry.get(&resolved.connection_id)
-            && session.is_alive()
         {
-            let status = session.status();
-            self.set_status(status.clone());
-            return status;
+            if session.is_alive() {
+                let status = session.status();
+                self.set_status(status.clone());
+                return status;
+            }
+            self.registry.remove(&resolved.connection_id).await;
         }
 
         self.set_status(AgentStatus::Deploying);
@@ -203,11 +205,11 @@ impl NodeAgentIdeFileSystem {
     async fn probe_agent_status(&self, node_id: &NodeId) -> Result<AgentStatus, AgentError> {
         let resolved = self.router.resolve_connection(node_id).await?;
         if let Some(session) = self.registry.get(&resolved.connection_id) {
-            if session.is_alive() {
-                return Ok(session.status());
-            }
-            self.registry
-                .remove_without_shutdown(&resolved.connection_id);
+            // Mirrors Tauri's `node_agent_status`: the current connection's
+            // agent session is authoritative even when the channel is already
+            // closed, so the UI sees a failed agent instead of an install probe
+            // result from the same node.
+            return Ok(session.status());
         }
 
         let arch = detect_arch(&resolved.handle).await?;
@@ -342,10 +344,8 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                         return Err(IdeFileError::new(IdeFileErrorKind::Conflict, message));
                     }
                     Err(error) => {
-                        self.set_status(AgentStatus::Failed {
-                            reason: error.to_string(),
-                        });
-                        return Err(map_agent_error(error));
+                        warn!("[ide-agent] write via agent failed, falling back to SFTP: {error}");
+                        self.set_status(AgentStatus::SftpFallback);
                     }
                 }
             }

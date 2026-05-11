@@ -64,17 +64,25 @@ impl ConnectionStore {
             .map(collect_connection_keychain_ids)
             .unwrap_or_default();
         let existing = self.get(&id).cloned();
+        let is_update = existing.is_some();
         let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
+        let mut options = existing
+            .as_ref()
+            .map(|conn| conn.options.clone())
+            .unwrap_or_default();
+        // Tauri preserves saved per-connection SSH options on edit and only
+        // overwrites the UI-exposed agent-forwarding bit. This keeps imported
+        // Tauri config tails such as compression/term_type from being dropped.
+        options.agent_forwarding = request.agent_forwarding;
         let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
-        let proxy_chain = self.materialize_proxy_chain(
-            request.proxy_chain,
-            existing
-                .as_ref()
-                .map(|connection| connection.proxy_chain.as_slice()),
-        )?;
+        let proxy_chain = self.materialize_proxy_chain(request.proxy_chain)?;
         let next_keychain_ids = collect_keychain_ids_for_parts(&auth, &proxy_chain);
         let connection = SavedConnection {
             id: id.clone(),
+            version: existing
+                .as_ref()
+                .map(|conn| conn.version)
+                .unwrap_or(CONFIG_VERSION),
             name: non_empty(request.name.trim(), "Connection name")?.to_string(),
             group: group.clone(),
             host: non_empty(request.host.trim(), "Host")?.to_string(),
@@ -82,11 +90,13 @@ impl ConnectionStore {
             username: non_empty(request.username.trim(), "Username")?.to_string(),
             auth,
             proxy_chain,
-            options: ConnectionOptions {
-                agent_forwarding: request.agent_forwarding,
-            },
+            options,
             created_at: self.get(&id).map(|conn| conn.created_at).unwrap_or(now),
-            last_used_at: self.get(&id).and_then(|conn| conn.last_used_at),
+            last_used_at: if is_update {
+                Some(now)
+            } else {
+                self.get(&id).and_then(|conn| conn.last_used_at)
+            },
             updated_at: Some(now),
             color: request.color,
             tags: request.tags,
@@ -206,10 +216,11 @@ impl ConnectionStore {
         mut connection: SavedConnection,
     ) -> Result<ConnectionInfo> {
         connection.id = Uuid::new_v4().to_string();
+        connection.version = CONFIG_VERSION;
         connection.created_at = Utc::now();
         connection.updated_at = Some(Utc::now());
         connection.auth = self.materialize_auth(connection.auth, None)?;
-        connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain, None)?;
+        connection.proxy_chain = self.materialize_proxy_chain(connection.proxy_chain)?;
         if let Some(group) = connection.group.clone() {
             self.ensure_group(group)?;
         }
@@ -383,28 +394,15 @@ impl ConnectionStore {
         }
     }
 
-    fn materialize_proxy_chain(
-        &self,
-        proxy_chain: Vec<SavedProxyHop>,
-        existing_proxy_chain: Option<&[SavedProxyHop]>,
-    ) -> Result<Vec<SavedProxyHop>> {
+    fn materialize_proxy_chain(&self, proxy_chain: Vec<SavedProxyHop>) -> Result<Vec<SavedProxyHop>> {
         proxy_chain
             .into_iter()
-            .enumerate()
-            .map(|(index, hop)| {
-                let existing_auth = existing_proxy_chain
-                    .and_then(|chain| chain.get(index))
-                    .filter(|existing| {
-                        existing.host == hop.host
-                            && existing.port == hop.port
-                            && existing.username == hop.username
-                    })
-                    .map(|existing| &existing.auth);
+            .map(|hop| {
                 Ok(SavedProxyHop {
                     host: non_empty(hop.host.trim(), "Proxy host")?.to_string(),
                     port: hop.port.max(1),
                     username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
-                    auth: self.materialize_auth(hop.auth, existing_auth)?,
+                    auth: self.materialize_auth(hop.auth, None)?,
                     agent_forwarding: hop.agent_forwarding,
                 })
             })
