@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-launcher"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-settings = { path = "../oxideterm-settings" }

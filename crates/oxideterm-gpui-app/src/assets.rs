@@ -8,6 +8,7 @@ pub(crate) enum LucideIcon {
     Activity,
     AlertCircle,
     AlertTriangle,
+    AppWindow,
     ArrowDown,
     ArrowDownRight,
     ArrowDownAZ,
@@ -74,6 +75,7 @@ pub(crate) enum LucideIcon {
     Pause,
     Play,
     Plus,
+    Power,
     Puzzle,
     Radio,
     RefreshCcw,
@@ -104,6 +106,7 @@ impl LucideIcon {
             Self::Activity => "lucide/activity.svg",
             Self::AlertCircle => "lucide/alert-circle.svg",
             Self::AlertTriangle => "lucide/alert-triangle.svg",
+            Self::AppWindow => "lucide/app-window.svg",
             Self::ArrowDown => "lucide/arrow-down.svg",
             Self::ArrowDownRight => "lucide/arrow-down-right.svg",
             Self::ArrowDownAZ => "lucide/arrow-down-a-z.svg",
@@ -170,6 +173,7 @@ impl LucideIcon {
             Self::Pause => "lucide/pause.svg",
             Self::Play => "lucide/play.svg",
             Self::Plus => "lucide/plus.svg",
+            Self::Power => "lucide/power.svg",
             Self::Puzzle => "lucide/puzzle.svg",
             Self::Radio => "lucide/radio.svg",
             Self::RefreshCcw => "lucide/refresh-ccw.svg",
@@ -204,6 +208,7 @@ impl AssetSource for NativeAssets {
             "lucide/activity.svg" => ACTIVITY,
             "lucide/alert-circle.svg" => ALERT_CIRCLE,
             "lucide/alert-triangle.svg" => ALERT_TRIANGLE,
+            "lucide/app-window.svg" => APP_WINDOW,
             "lucide/arrow-down.svg" => ARROW_DOWN,
             "lucide/arrow-down-right.svg" => ARROW_DOWN_RIGHT,
             "lucide/arrow-down-a-z.svg" => ARROW_DOWN_A_Z,
@@ -281,6 +286,7 @@ impl AssetSource for NativeAssets {
             "lucide/pause.svg" => PAUSE,
             "lucide/play.svg" => PLAY,
             "lucide/plus.svg" => PLUS,
+            "lucide/power.svg" => POWER,
             "lucide/puzzle.svg" => PUZZLE,
             "lucide/radio.svg" => RADIO,
             "lucide/refresh-ccw.svg" => REFRESH_CCW,
@@ -314,6 +320,7 @@ impl AssetSource for NativeAssets {
                 "activity.svg",
                 "alert-circle.svg",
                 "alert-triangle.svg",
+                "app-window.svg",
                 "arrow-down.svg",
                 "arrow-down-right.svg",
                 "arrow-down-a-z.svg",
@@ -388,6 +395,7 @@ impl AssetSource for NativeAssets {
                 "pause.svg",
                 "play.svg",
                 "plus.svg",
+                "power.svg",
                 "puzzle.svg",
                 "radio.svg",
                 "refresh-ccw.svg",
@@ -423,6 +431,7 @@ impl AssetSource for NativeAssets {
 const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>"#;
 const ALERT_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>"#;
 const ALERT_TRIANGLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
+const APP_WINDOW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg>"#;
 const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>"#;
 const ARROW_DOWN_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>"#;
 const ARROW_DOWN_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;
@@ -500,6 +509,7 @@ const PIN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="
 const PAUSE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>"#;
 const PLAY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>"#;
 const PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>"#;
+const POWER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>"#;
 const PUZZLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg>"#;
 const RADIO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>"#;
 const REFRESH_CCW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>"#;

@@ -3,6 +3,7 @@ mod file_manager;
 mod forwards;
 mod ide;
 mod ime;
+mod launcher;
 mod new_connection;
 mod pane_tree;
 mod quick_commands;
@@ -33,6 +34,7 @@ use gpui::{
     ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Timer, Window, anchored,
     deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
+use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
@@ -95,6 +97,7 @@ use oxideterm_workspace::{
 use self::actions::SearchBarState;
 use self::file_manager::FileManagerState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
+use self::launcher::LauncherState;
 use self::new_connection::{
     HostKeyChallenge, KeyboardInteractiveChallenge, NativeSshPromptHandler, NewConnectionForm,
     NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab, SshConnectionWorkerResult,
@@ -232,6 +235,7 @@ pub(crate) struct WorkspaceApp {
     ide_tab_nodes: HashMap<TabId, NodeId>,
     ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
     sftp_view: sftp::SftpViewState,
+    launcher: LauncherState,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

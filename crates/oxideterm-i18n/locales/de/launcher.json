@@ -1,0 +1,27 @@
+{
+  "launcher": {
+    "title": "Startrampe",
+    "tabTitle": "Startrampe",
+    "search": "Verbindungen suchen…",
+    "refresh": "Aktualisieren",
+    "scanning": "Wird gescannt…",
+    "retry": "Erneut versuchen",
+    "noResults": "Keine passenden Verbindungen gefunden.",
+    "empty": "Keine Verbindungen verfügbar. Fügen Sie eine Verbindung hinzu, um zu beginnen.",
+    "wslTitle": "WSL-Distributionen",
+    "searchWsl": "WSL-Distributionen suchen…",
+    "loadingWsl": "WSL-Distributionen werden geladen…",
+    "noWslResults": "Keine passenden WSL-Distributionen gefunden.",
+    "noWsl": "Keine WSL-Distributionen verfügbar. Stellen Sie sicher, dass WSL installiert ist.",
+    "consentTitle": "App-Launcher aktivieren",
+    "consentDescription": "Der Launcher scannt installierte Anwendungen auf Ihrem Mac und speichert deren Symbole lokal für schnelles Durchsuchen.",
+    "consentScan": "Scannt /Applications und andere Verzeichnisse nach installierten .app-Bundles",
+    "consentCache": "Speichert App-Symbole als PNG-Dateien im Verzeichnis:",
+    "consentPrivacy": "Alle Daten bleiben lokal — nichts wird an einen Server gesendet",
+    "consentEnable": "Launcher aktivieren",
+    "disable": "Launcher deaktivieren",
+    "disableConfirm": "Alle zwischengespeicherten Symbole werden gelöscht und der Launcher deaktiviert. Sie können ihn jederzeit wieder aktivieren.",
+    "disableCancel": "Abbrechen",
+    "disableAction": "Deaktivieren"
+  }
+}

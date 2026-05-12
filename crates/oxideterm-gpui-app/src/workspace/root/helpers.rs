@@ -3,6 +3,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
         TabKind::FileManager => "file_manager",
+        TabKind::Launcher => "launcher",
         TabKind::Sftp => "sftp",
         TabKind::Ide => "ide",
         TabKind::Forwards => "forwards",
@@ -957,31 +958,22 @@ fn connection_trace_failure_stage(error: Option<&str>) -> ConnectionTraceStage {
         return ConnectionTraceStage::Preparing;
     }
 
-    if error.contains("parent node")
-        || error.contains("no ssh connection")
-        || error.contains("not connected")
-        || error.contains("connection refused")
-        || error.contains("connection failed")
-        || error.contains("dns")
-        || error.contains("network")
-        || error.contains("timeout")
-        || error.contains("timed out")
-    {
-        return ConnectionTraceStage::OpeningTransport;
+    match classify_message(&error) {
+        BackendErrorClass::Disconnected
+        | BackendErrorClass::PortInUse
+        | BackendErrorClass::Timeout => ConnectionTraceStage::OpeningTransport,
+        BackendErrorClass::HostKey => ConnectionTraceStage::HostKey,
+        // Tauri's backend emits most transport `connect()` failures after the
+        // authentication stage has started, so auth/proxy-agent/cancelled
+        // failures keep the same terminal stage while detail carries the class.
+        BackendErrorClass::Auth
+        | BackendErrorClass::Cancelled
+        | BackendErrorClass::PermissionDenied
+        | BackendErrorClass::Unsupported
+        | BackendErrorClass::Conflict
+        | BackendErrorClass::NotFound
+        | BackendErrorClass::Other => ConnectionTraceStage::Authentication,
     }
-
-    if error.contains("host key")
-        || error.contains("known_hosts")
-        || error.contains("known hosts")
-        || error.contains("fingerprint")
-    {
-        return ConnectionTraceStage::HostKey;
-    }
-
-    // Tauri's backend emits most transport `connect()` failures after the
-    // authentication stage has started, so auth/proxy-agent failures keep the
-    // same terminal stage while the detailed error toast carries the class.
-    ConnectionTraceStage::Authentication
 }
 
 fn saved_origin_config(store: &ConnectionStore, origin: &NodeOrigin) -> Option<SshConfig> {
@@ -1081,6 +1073,28 @@ mod helper_tests {
         assert_eq!(
             connection_trace_failure_stage(Some("Authentication failed: permission denied")),
             ConnectionTraceStage::Authentication
+        );
+    }
+
+    #[test]
+    fn trace_failure_stage_covers_proxy_hop_and_manual_cancel_classes() {
+        assert_eq!(
+            connection_trace_failure_stage(Some(
+                "proxy_hop_kbi_unsupported: keyboard-interactive authentication is not supported for proxy chain hops"
+            )),
+            ConnectionTraceStage::Authentication
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("USER_CANCELLED")),
+            ConnectionTraceStage::Authentication
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("retry exhausted after network timeout")),
+            ConnectionTraceStage::OpeningTransport
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some("known_hosts entry mismatch")),
+            ConnectionTraceStage::HostKey
         );
     }
 }

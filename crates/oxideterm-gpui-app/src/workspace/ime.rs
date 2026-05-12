@@ -8,6 +8,7 @@ use gpui::{
 use super::WorkspaceApp;
 use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
+use super::launcher::LauncherInput;
 use super::new_connection::NewConnectionField;
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::SessionManagerInput;
@@ -25,6 +26,7 @@ pub(super) enum WorkspaceImeTarget {
     SessionManager(SessionManagerInput),
     Forwards(ForwardInput),
     FileManager(FileManagerInput),
+    Launcher(LauncherInput),
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
@@ -41,6 +43,7 @@ impl WorkspaceImeTarget {
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
             Self::Forwards(input) => 1_700 + input.anchor_key(),
             Self::FileManager(input) => 1_800 + input.anchor_key(),
+            Self::Launcher(input) => 1_850 + input.anchor_key(),
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -345,6 +348,14 @@ impl WorkspaceApp {
 
         if self
             .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Launcher)
+            && let Some(input) = self.launcher.focused_input
+        {
+            return Some(WorkspaceImeTarget::Launcher(input));
+        }
+
+        if self
+            .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
             && let Some(input) = self.sftp_view.focused_input
         {
@@ -424,6 +435,13 @@ impl WorkspaceApp {
             WorkspaceImeTarget::FileManager(input) => {
                 if self.file_manager.focused_input == Some(input) {
                     Some(self.file_manager_input_value(input).to_string())
+                } else {
+                    None
+                }
+            }
+            WorkspaceImeTarget::Launcher(input) => {
+                if self.launcher.focused_input == Some(input) {
+                    Some(self.launcher_input_value(input).to_string())
                 } else {
                     None
                 }
@@ -581,6 +599,17 @@ impl WorkspaceApp {
                 if self.file_manager.focused_input == Some(input) {
                     replace_utf16(
                         self.file_manager_input_value_mut(input),
+                        replacement_range,
+                        text,
+                    );
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::Launcher(input) => {
+                if self.launcher.focused_input == Some(input) {
+                    replace_utf16(
+                        self.launcher_input_value_mut(input),
                         replacement_range,
                         text,
                     );

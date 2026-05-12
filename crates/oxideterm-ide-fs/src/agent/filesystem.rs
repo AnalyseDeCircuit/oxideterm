@@ -4,9 +4,11 @@ impl NodeAgentIdeFileSystem {
             sftp: NodeSftpIdeFileSystem::new(router.clone()),
             router,
             registry: Arc::new(AgentRegistry::default()),
-            ide_consumers: Arc::new(DashMap::new()),
+            ide_sessions: Arc::new(DashMap::new()),
             mode,
-            status: Arc::new(RwLock::new(AgentStatus::SftpFallback)),
+            agent_statuses: Arc::new(DashMap::new()),
+            latest_agent_status: Arc::new(DashMap::new()),
+            watch_subscriptions: Arc::new(DashMap::new()),
             deploy_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -14,14 +16,26 @@ impl NodeAgentIdeFileSystem {
     pub fn set_mode(&mut self, mode: NodeAgentMode) {
         self.mode = mode;
         if mode == NodeAgentMode::Disabled {
-            self.set_status(AgentStatus::SftpFallback);
+            self.agent_statuses.clear();
+            self.latest_agent_status.clear();
+            self.watch_subscriptions.clear();
         }
     }
 
     pub fn status(&self) -> AgentStatus {
-        self.status
-            .read()
-            .map(|status| status.clone())
+        self.status_for_node(None)
+    }
+
+    pub fn status_for_node(&self, node_id: Option<&str>) -> AgentStatus {
+        let Some(node_id) = node_id else {
+            return AgentStatus::SftpFallback;
+        };
+        let Some(key) = self.latest_agent_status.get(node_id) else {
+            return AgentStatus::SftpFallback;
+        };
+        self.agent_statuses
+            .get(key.value())
+            .map(|status| status.value().clone())
             .unwrap_or(AgentStatus::SftpFallback)
     }
 
@@ -32,12 +46,12 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub async fn refresh_agent_status(&self, node_id: impl Into<String>) -> AgentStatus {
+        let node_id = NodeId::new(node_id.into());
         if self.mode == NodeAgentMode::Disabled {
-            self.set_status(AgentStatus::SftpFallback);
+            self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
             return AgentStatus::SftpFallback;
         }
 
-        let node_id = NodeId::new(node_id.into());
         let _ = self.ensure_ide_session_for_node(&node_id).await;
         let status = match self.probe_agent_status(&node_id).await {
             Ok(status) => status,
@@ -45,7 +59,7 @@ impl NodeAgentIdeFileSystem {
                 reason: error.to_string(),
             },
         };
-        self.set_status(status.clone());
+        self.set_status_for_node(&node_id, None, status.clone());
         status
     }
 
@@ -72,7 +86,7 @@ impl NodeAgentIdeFileSystem {
             )
             .await
             .map_err(|error| ide_error_from_agent_message(error.to_string()))?;
-        self.set_status(AgentStatus::SftpFallback);
+        self.set_status_for_node(&node_id, Some(&resolved.connection_id), AgentStatus::SftpFallback);
         Ok(())
     }
 
@@ -87,7 +101,7 @@ impl NodeAgentIdeFileSystem {
         if self.mode == NodeAgentMode::Enabled {
             let _ = self.ensure_agent(&NodeId::new(node_id.clone())).await;
         } else {
-            self.set_status(AgentStatus::SftpFallback);
+            self.set_status_for_node(&NodeId::new(node_id.clone()), None, AgentStatus::SftpFallback);
         }
         self.sftp.open_project(node_id, path).await
     }
@@ -119,7 +133,7 @@ impl NodeAgentIdeFileSystem {
         node_id: impl Into<String>,
         path: impl Into<String>,
         ignore: Vec<String>,
-    ) -> Result<Option<mpsc::Receiver<AgentWatchEvent>>, IdeFileError> {
+    ) -> Result<Option<IdeWatchSubscription>, IdeFileError> {
         if self.mode == NodeAgentMode::Disabled {
             return Ok(None);
         }
@@ -134,15 +148,37 @@ impl NodeAgentIdeFileSystem {
         };
         if !session.is_alive() {
             self.registry.remove_without_shutdown(&resolved.connection_id);
-            self.set_status(AgentStatus::SftpFallback);
+            self.set_status_for_node(
+                &node_id,
+                Some(&resolved.connection_id),
+                AgentStatus::SftpFallback,
+            );
             return Ok(None);
+        }
+
+        let key = IdeWatchKey::new(node_id.0.clone(), normalize_agent_watch_path(&path));
+        if let Some(shared) = self.watch_subscriptions.get(&key)
+            && shared.connection_id == resolved.connection_id
+        {
+            return Ok(Some(IdeWatchSubscription {
+                rx: shared.events_tx.subscribe(),
+            }));
         }
 
         session
             .watch_start(&path, ignore)
             .await
             .map_err(ide_error_from_agent_error)?;
-        Ok(session.take_watch_rx().await)
+        let (events_tx, _) = broadcast::channel::<IdeWatchEvent>(1024);
+        let shared = Arc::new(IdeWatchShared {
+            connection_id: resolved.connection_id.clone(),
+            events_tx,
+        });
+        self.watch_subscriptions.insert(key.clone(), shared.clone());
+        spawn_watch_dispatcher(key, shared.clone(), session.subscribe_watch_events());
+        Ok(Some(IdeWatchSubscription {
+            rx: shared.events_tx.subscribe(),
+        }))
     }
 
     pub async fn stop_watch_directory(
@@ -152,14 +188,20 @@ impl NodeAgentIdeFileSystem {
     ) -> Result<(), IdeFileError> {
         let node_id = node_id.into();
         let path = path.into();
+        let key = IdeWatchKey::new(node_id.clone(), normalize_agent_watch_path(&path));
+        self.watch_subscriptions.remove(&key);
         // Tauri's IDE cleanup invalidates an existing agent/watch owner; it
         // never opens a fresh node route just to unsubscribe. Keep this path
         // cleanup-only so closing a tab or disconnecting a subtree cannot
         // revive an IDE consumer after the user intentionally tore it down.
-        let Some(lease) = self.ide_consumers.get(&node_id).map(|entry| entry.clone()) else {
+        let Some(connection_id) = self
+            .ide_sessions
+            .get(&node_id)
+            .and_then(|entry| entry.connection_id())
+        else {
             return Ok(());
         };
-        let Some(session) = self.registry.get(&lease.connection_id) else {
+        let Some(session) = self.registry.get(&connection_id) else {
             return Ok(());
         };
         session
@@ -210,19 +252,48 @@ impl NodeAgentIdeFileSystem {
         case_sensitive: bool,
         max_results: u32,
     ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
-        let node_id = NodeId::new(node_id.into());
         let pattern = pattern.into();
         let root_path = root_path.into();
+        self.search_project(
+            node_id,
+            IdeSearchQuery {
+                pattern,
+                root_path,
+                case_sensitive,
+                regex: false,
+                include_globs: oxideterm_ide_core::tauri_project_search_include_globs(),
+                exclude_globs: Vec::new(),
+                include_hidden: false,
+                max_results,
+                stale_token: 0,
+            },
+        )
+        .await
+    }
+
+    pub async fn search_project(
+        &self,
+        node_id: impl Into<String>,
+        query: IdeSearchQuery,
+    ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
+        let node_id = NodeId::new(node_id.into());
         self.ensure_ide_session_for_node(&node_id).await?;
         if let Some(session) = self.agent_session(&node_id).await {
             match session
-                .grep(&pattern, &root_path, case_sensitive, max_results)
+                .grep(
+                    &query.pattern,
+                    &query.root_path,
+                    query.case_sensitive,
+                    query.max_results,
+                )
                 .await
             {
                 Ok(matches) => {
                     return Ok(matches
                         .into_iter()
-                        .map(|hit| search_match_from_agent(hit, &pattern, case_sensitive))
+                        .map(|hit| {
+                            search_match_from_agent(hit, &query.pattern, query.case_sensitive)
+                        })
                         .collect());
                 }
                 Err(error) => {
@@ -230,66 +301,77 @@ impl NodeAgentIdeFileSystem {
                         "[ide-agent] grep via agent failed ({}), falling back to exec grep",
                         agent_error_log_label(&error)
                     );
-                    self.set_status(AgentStatus::SftpFallback);
+                    self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
                 }
             }
         }
 
-        self.grep_project_via_exec(&node_id, &pattern, &root_path, max_results)
+        self.grep_project_via_exec(&node_id, &query)
             .await
     }
 
     async fn grep_project_via_exec(
         &self,
         node_id: &NodeId,
-        pattern: &str,
-        root_path: &str,
-        max_results: u32,
+        query: &IdeSearchQuery,
     ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
-        if pattern.len() > 8192 {
+        if query.pattern.len() > 8192 {
             return Err(IdeFileError::new(
                 IdeFileErrorKind::Unsupported,
                 "Search query too long",
+            ));
+        }
+        if query.regex {
+            return Err(IdeFileError::new(
+                IdeFileErrorKind::Unsupported,
+                "Regex project search requires the remote agent",
             ));
         }
         let resolved = self
             .acquire_ide_connection(node_id)
             .await
             .map_err(crate::node_sftp::map_route_error)?;
-        let escaped_query = regex_escape_for_basic_grep(pattern);
+        let escaped_query = regex_escape_for_basic_grep(&query.pattern);
+        let include_patterns = grep_include_patterns(&query.include_globs);
         let command = format!(
             "cd {} && grep -rn -I {} --color=never -- -e '{}' . 2>/dev/null | head -{}",
-            shell_cd_arg(root_path),
-            grep_include_patterns(),
+            shell_cd_arg(&query.root_path),
+            include_patterns,
             shell_single_quote(&escaped_query),
-            max_results
+            query.max_results
         );
         let output = resolved
             .handle
             .run_command(&command, Duration::from_secs(30), 256 * 1024)
             .await
             .map_err(|error| ide_error_from_agent_message(error.to_string()))?;
-        Ok(parse_grep_output(&output, pattern, false))
+        Ok(parse_grep_output(&output, &query.pattern, false))
+    }
+
+    pub fn close_ide_session(&self, node_id: &str) {
+        if let Some((_, session)) = self.ide_sessions.remove(node_id) {
+            session.close();
+        }
+    }
+
+    pub fn close_all_ide_sessions(&self) {
+        let sessions = self
+            .ide_sessions
+            .iter()
+            .map(|entry| entry.key().clone())
+            .filter_map(|node_id| self.ide_sessions.remove(&node_id).map(|(_, session)| session))
+            .collect::<Vec<_>>();
+        for session in sessions {
+            session.close();
+        }
     }
 
     pub fn release_ide_consumer(&self, node_id: &str) {
-        if let Some((_, lease)) = self.ide_consumers.remove(node_id) {
-            self.router
-                .release_consumer(&lease.connection_id, &lease.consumer);
-        }
+        self.close_ide_session(node_id);
     }
 
     pub fn release_all_ide_consumers(&self) {
-        let leases = self
-            .ide_consumers
-            .iter()
-            .map(|entry| entry.key().clone())
-            .filter_map(|node_id| self.ide_consumers.remove(&node_id).map(|(_, lease)| lease))
-            .collect::<Vec<_>>();
-        for lease in leases {
-            self.router
-                .release_consumer(&lease.connection_id, &lease.consumer);
-        }
+        self.close_all_ide_sessions();
     }
 
     async fn ensure_ide_session_for_node(&self, node_id: &NodeId) -> Result<(), IdeFileError> {
@@ -303,27 +385,13 @@ impl NodeAgentIdeFileSystem {
         &self,
         node_id: &NodeId,
     ) -> Result<ResolvedConnection, RouteError> {
-        let consumer = ConnectionConsumer::Ide(node_id.0.clone());
-        let resolved = self
-            .router
-            .acquire_connection_wait(node_id, consumer.clone(), Duration::from_secs(15))
-            .await?;
-        let lease = IdeConnectionLease {
-            connection_id: resolved.connection_id.clone(),
-            consumer,
-        };
-        if let Some(existing) = self.ide_consumers.insert(node_id.0.clone(), lease.clone())
-            && existing != lease
-        {
-            self.router
-                .release_consumer(&existing.connection_id, &existing.consumer);
-        }
-        Ok(resolved)
+        let session = self.ide_session_for_node(node_id);
+        session.acquire_connection().await
     }
 
     async fn agent_session(&self, node_id: &NodeId) -> Option<Arc<AgentSession>> {
         if self.mode == NodeAgentMode::Disabled {
-            self.set_status(AgentStatus::SftpFallback);
+            self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
             return None;
         }
         if self.mode == NodeAgentMode::Enabled {
@@ -333,12 +401,16 @@ impl NodeAgentIdeFileSystem {
         let resolved = self.acquire_ide_connection(node_id).await.ok()?;
         let session = self.registry.get(&resolved.connection_id)?;
         if session.is_alive() {
-            self.set_status(session.status());
+            self.set_status_for_node(node_id, Some(&resolved.connection_id), session.status());
             Some(session)
         } else {
             self.registry
                 .remove_without_shutdown(&resolved.connection_id);
-            self.set_status(AgentStatus::SftpFallback);
+            self.set_status_for_node(
+                node_id,
+                Some(&resolved.connection_id),
+                AgentStatus::SftpFallback,
+            );
             None
         }
     }
@@ -350,20 +422,20 @@ impl NodeAgentIdeFileSystem {
         {
             if session.is_alive() {
                 let status = session.status();
-                self.set_status(status.clone());
+                self.set_status_for_node(node_id, Some(&resolved.connection_id), status.clone());
                 return status;
             }
             self.registry.remove(&resolved.connection_id).await;
         }
 
-        self.set_status(AgentStatus::Deploying);
+        self.set_status_for_node(node_id, None, AgentStatus::Deploying);
         let status = match self.deploy_agent(node_id).await {
             Ok(status) => status,
             Err(error) => AgentStatus::Failed {
                 reason: error.to_string(),
             },
         };
-        self.set_status(status.clone());
+        self.set_status_for_node(node_id, None, status.clone());
         status
     }
 
@@ -422,8 +494,11 @@ impl NodeAgentIdeFileSystem {
             arch: info.arch.clone(),
             pid: info.pid,
         };
-        self.registry
-            .register(resolved.connection_id, AgentSession::new(transport, info));
+        self.registry.register(
+            resolved.connection_id.clone(),
+            AgentSession::new(transport, info),
+        );
+        self.set_status_for_node(node_id, Some(&resolved.connection_id), status.clone());
         Ok(status)
     }
 
@@ -461,10 +536,38 @@ impl NodeAgentIdeFileSystem {
         }
     }
 
-    fn set_status(&self, status: AgentStatus) {
-        if let Ok(mut current) = self.status.write() {
-            *current = status;
-        }
+    fn ide_session_for_node(&self, node_id: &NodeId) -> Arc<IdeRemoteSessionInner> {
+        self.ide_sessions
+            .entry(node_id.0.clone())
+            .or_insert_with(|| {
+                Arc::new(IdeRemoteSessionInner::new(
+                    node_id.clone(),
+                    self.router.clone(),
+                ))
+            })
+            .clone()
+    }
+
+    fn set_status_for_node(
+        &self,
+        node_id: &NodeId,
+        connection_id: Option<&str>,
+        status: AgentStatus,
+    ) {
+        let connection_id = connection_id
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.ide_sessions
+                    .get(&node_id.0)
+                    .and_then(|session| session.connection_id())
+            })
+            .unwrap_or_else(|| "<unresolved>".to_string());
+        let key = AgentStatusKey {
+            node_id: node_id.0.clone(),
+            connection_id,
+        };
+        self.agent_statuses.insert(key.clone(), status);
+        self.latest_agent_status.insert(node_id.0.clone(), key);
     }
 }
 
@@ -528,8 +631,42 @@ fn regex_escape_for_basic_grep(pattern: &str) -> String {
     })
 }
 
-fn grep_include_patterns() -> &'static str {
-    "--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.rs' --include='*.toml' --include='*.md' --include='*.txt' --include='*.py' --include='*.go' --include='*.java' --include='*.c' --include='*.cpp' --include='*.h' --include='*.css' --include='*.scss' --include='*.html' --include='*.vue' --include='*.svelte' --include='*.yaml' --include='*.yml' --include='*.sh' --include='*.bash'"
+fn spawn_watch_dispatcher(
+    key: IdeWatchKey,
+    shared: Arc<IdeWatchShared>,
+    mut rx: broadcast::Receiver<AgentWatchEvent>,
+) {
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            let event_path = normalize_agent_watch_path(&event.path);
+            if event_path != key.path
+                && !event_path.starts_with(&format!("{}/", key.path.trim_end_matches('/')))
+            {
+                continue;
+            }
+            let _ = shared.events_tx.send(IdeWatchEvent {
+                path: event.path,
+                kind: event.kind,
+            });
+        }
+    });
+}
+
+fn normalize_agent_watch_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed == "/" {
+        "/".to_string()
+    } else {
+        trimmed.trim_end_matches('/').to_string()
+    }
+}
+
+fn grep_include_patterns(globs: &[String]) -> String {
+    globs
+        .iter()
+        .map(|glob| format!("--include={}", shell_single_quote(glob)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn shell_cd_arg(path: &str) -> String {
@@ -567,7 +704,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                             "[ide-agent] read via agent failed ({}), falling back to SFTP",
                             agent_error_log_label(&error)
                         );
-                        self.set_status(AgentStatus::SftpFallback);
+                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
                     }
                 }
             }
@@ -598,7 +735,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                             "[ide-agent] stat via agent failed ({}), falling back to SFTP",
                             agent_error_log_label(&error)
                         );
-                        self.set_status(AgentStatus::SftpFallback);
+                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
                     }
                 }
             }
@@ -623,7 +760,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                             "[ide-agent] directory listing via agent failed ({}), falling back to SFTP",
                             agent_error_log_label(&error)
                         );
-                        self.set_status(AgentStatus::SftpFallback);
+                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
                     }
                 }
             }
@@ -664,7 +801,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                             "[ide-agent] write via agent failed ({}), falling back to SFTP",
                             agent_error_log_label(&error)
                         );
-                        self.set_status(AgentStatus::SftpFallback);
+                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
                     }
                 }
             }

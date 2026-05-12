@@ -49,6 +49,88 @@ pub struct IdeProjectInfo {
     pub file_count: u32,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeWatchKey {
+    pub node_id: String,
+    pub path: String,
+}
+
+impl IdeWatchKey {
+    pub fn new(node_id: impl Into<String>, path: impl Into<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            path: path.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeWatchEvent {
+    pub path: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeSearchQuery {
+    pub pattern: String,
+    pub root_path: String,
+    pub case_sensitive: bool,
+    pub regex: bool,
+    pub include_globs: Vec<String>,
+    pub exclude_globs: Vec<String>,
+    pub include_hidden: bool,
+    pub max_results: u32,
+    pub stale_token: u64,
+}
+
+impl IdeSearchQuery {
+    pub fn tauri_literal_project_search(
+        pattern: impl Into<String>,
+        root_path: impl Into<String>,
+        max_results: u32,
+        stale_token: u64,
+    ) -> Self {
+        Self {
+            pattern: pattern.into(),
+            root_path: root_path.into(),
+            case_sensitive: false,
+            regex: false,
+            include_globs: tauri_project_search_include_globs(),
+            exclude_globs: Vec::new(),
+            include_hidden: false,
+            max_results,
+            stale_token,
+        }
+    }
+
+    pub fn cache_key(&self) -> String {
+        format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            self.root_path,
+            self.pattern,
+            self.case_sensitive,
+            self.regex,
+            self.include_hidden,
+            self.include_globs.join(","),
+            self.exclude_globs.join(",")
+        )
+    }
+}
+
+pub fn tauri_project_search_include_globs() -> Vec<String> {
+    [
+        "*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "*.rs", "*.toml", "*.md", "*.txt", "*.py",
+        "*.go", "*.java", "*.c", "*.cpp", "*.h", "*.css", "*.scss", "*.html", "*.vue", "*.svelte",
+        "*.yaml", "*.yml", "*.sh", "*.bash",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdePathStat {

@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 chrono.workspace = true
 dashmap.workspace = true
+oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 serde.workspace = true
 serde_json.workspace = true

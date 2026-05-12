@@ -29,8 +29,8 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
-    IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdeWorkspace, SavedFileVersion,
-    WorkspaceSnapshot, WriteMode,
+    IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdeSearchQuery, IdeWorkspace,
+    SavedFileVersion, WorkspaceSnapshot, WriteMode,
 };
 use oxideterm_ide_fs::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
 use oxideterm_ssh::{NodeRouter, ReconnectIdeSnapshot};

@@ -1,8 +1,7 @@
 struct AgentTransport {
     write_tx: mpsc::Sender<String>,
     pending: PendingMap,
-    watch_rx: Mutex<Option<mpsc::Receiver<AgentWatchEvent>>>,
-    _watch_tx: mpsc::Sender<AgentWatchEvent>,
+    watch_tx: broadcast::Sender<AgentWatchEvent>,
     shutdown_tx: mpsc::Sender<()>,
     alive: Arc<AtomicBool>,
 }
@@ -20,7 +19,7 @@ impl AgentTransport {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
-        let (watch_tx, watch_rx) = mpsc::channel::<AgentWatchEvent>(1024);
+        let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1024);
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
         let pending_for_task = pending.clone();
@@ -81,8 +80,7 @@ impl AgentTransport {
         Ok(Self {
             write_tx,
             pending,
-            watch_rx: Mutex::new(Some(watch_rx)),
-            _watch_tx: watch_tx,
+            watch_tx,
             shutdown_tx,
             alive,
         })
@@ -145,14 +143,14 @@ impl AgentTransport {
         let _ = self.shutdown_tx.send(()).await;
     }
 
-    async fn take_watch_rx(&self) -> Option<mpsc::Receiver<AgentWatchEvent>> {
-        self.watch_rx.lock().await.take()
+    fn subscribe_watch_events(&self) -> broadcast::Receiver<AgentWatchEvent> {
+        self.watch_tx.subscribe()
     }
 }
 
 async fn handle_agent_line(
     pending: &PendingMap,
-    watch_tx: &mpsc::Sender<AgentWatchEvent>,
+    watch_tx: &broadcast::Sender<AgentWatchEvent>,
     line: &str,
 ) {
     match serde_json::from_str::<AgentMessage>(line) {
@@ -170,7 +168,7 @@ async fn handle_agent_line(
         Ok(AgentMessage::Notification(notification)) => {
             if notification.method == "watch/event" {
                 if let Ok(event) = serde_json::from_value::<AgentWatchEvent>(notification.params) {
-                    let _ = watch_tx.send(event).await;
+                    let _ = watch_tx.send(event);
                 }
             } else {
                 debug!(
