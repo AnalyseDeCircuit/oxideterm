@@ -63,7 +63,7 @@ mod tests {
     fn kitty_raw_rgba_image_is_placed_and_respects_no_cursor_move() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let payload = BASE64.encode([0, 255, 0, 255]);
-        let seq = format!("\x1b_Ga=t,f=32,s=1,v=1,i=42,C=1;{payload}\x1b\\");
+        let seq = format!("\x1b_Ga=T,f=32,s=1,v=1,i=42,C=1;{payload}\x1b\\");
         let result = ingress.advance(seq.as_bytes(), cursor());
 
         assert!(result.terminal_bytes.is_empty());
@@ -75,6 +75,44 @@ mod tests {
                     protocol: TerminalImageProtocol::Kitty,
                     width: 1,
                     height: 1,
+                    ..
+                })
+            )
+        }));
+    }
+
+    #[test]
+    fn kitty_transmit_only_does_not_place_until_put_action() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([0, 255, 0, 255]);
+        let upload = format!("\x1b_Ga=t,f=32,s=1,v=1,i=42;{payload}\x1b\\");
+        let uploaded = ingress.advance(upload.as_bytes(), cursor());
+
+        assert!(uploaded.terminal_bytes.is_empty());
+        assert!(uploaded.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::ImageReady(TerminalImageData {
+                    id: TerminalImageId(42),
+                    ..
+                })
+            )
+        }));
+        assert!(!uploaded
+            .events
+            .iter()
+            .any(|event| matches!(event, TerminalGraphicsEvent::Place(_))));
+
+        let placed = ingress.advance(b"\x1b_Ga=p,i=42,c=3,r=2,z=4\x1b\\", cursor());
+        assert_eq!(placed.terminal_bytes, b"   \r\n   ");
+        assert!(placed.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Place(TerminalImagePlacement {
+                    id: TerminalImageId(42),
+                    cols: 3,
+                    rows: 2,
+                    z_index: 4,
                     ..
                 })
             )
@@ -108,6 +146,37 @@ mod tests {
                     col: 0,
                     cols: 1,
                     rows: 1,
+                    z_index: -1,
+                    ..
+                })
+            )
+        }));
+    }
+
+    #[test]
+    fn kitty_display_geometry_source_rect_and_z_index_are_preserved() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ]);
+        let seq = format!(
+            "\x1b_Ga=T,f=32,s=2,v=2,i=77,x=1,y=0,w=1,h=2,c=4,r=2,z=-3;{payload}\x1b\\"
+        );
+        let result = ingress.advance(seq.as_bytes(), cursor());
+
+        assert_eq!(result.terminal_bytes, b"    \r\n    ");
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalGraphicsEvent::Place(TerminalImagePlacement {
+                    id: TerminalImageId(77),
+                    cols: 4,
+                    rows: 2,
+                    source_x: 1,
+                    source_y: 0,
+                    source_width: 1,
+                    source_height: 2,
+                    z_index: -3,
                     ..
                 })
             )
@@ -176,7 +245,7 @@ mod tests {
     fn advance_with_anchors_image_after_preceding_terminal_text() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let payload = BASE64.encode([0, 255, 0, 255]);
-        let seq = format!("abc\x1b_Ga=t,f=32,s=1,v=1,i=42;{payload}\x1b\\xyz");
+        let seq = format!("abc\x1b_Ga=T,f=32,s=1,v=1,i=42;{payload}\x1b\\xyz");
         let mut terminal_bytes = Vec::new();
         let col = std::cell::Cell::new(0usize);
         let events = ingress.advance_with(
@@ -223,8 +292,8 @@ mod tests {
         let payload = BASE64.encode(bytes);
         let split = payload.len() / 2;
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let first = format!("\x1b_Ga=t,f=100,i=7,m=1;{}\x1b\\", &payload[..split]);
-        let second = format!("\x1b_Ga=t,f=100,i=7,m=0;{}\x1b\\", &payload[split..]);
+        let first = format!("\x1b_Ga=T,f=100,i=7,m=1;{}\x1b\\", &payload[..split]);
+        let second = format!("\x1b_Ga=T,f=100,i=7,m=0;{}\x1b\\", &payload[split..]);
 
         let first = ingress.advance(first.as_bytes(), cursor());
         assert!(first.events.is_empty());

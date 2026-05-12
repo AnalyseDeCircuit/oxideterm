@@ -11,6 +11,7 @@ members = [
   "crates/oxideterm-gpui-editor",
   "crates/oxideterm-gpui-ide",
   "crates/oxideterm-connections",
+  "crates/oxideterm-connection-monitor",
   "crates/oxideterm-backend-classification",
   "crates/oxideterm-ide-core",
   "crates/oxideterm-ide-fs",

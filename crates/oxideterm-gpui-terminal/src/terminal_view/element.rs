@@ -270,7 +270,7 @@ impl TerminalElement {
             self.selected_command_mark_id.as_deref(),
         );
         let mut selections = Vec::new();
-        let images = self
+        let mut images = self
             .rendered_images
             .iter()
             .filter(|image| {
@@ -280,7 +280,8 @@ impl TerminalElement {
             })
             .cloned()
             .map(|image| TerminalImageLayout { image })
-            .collect();
+            .collect::<Vec<_>>();
+        images.sort_by_key(|image| (image.image.snapshot.z_index, image.image.snapshot.id.0));
         let mut text_runs = Vec::new();
         let mut cursor = None;
         let scrollbar = terminal_scrollbar(&self.snapshot, &self.metrics);
@@ -843,7 +844,11 @@ impl Element for TerminalElement {
             for rect in &layout.highlight_backgrounds {
                 paint_terminal_rect(rect, origin, &self.metrics, window);
             }
-            for image in &layout.images {
+            for image in layout
+                .images
+                .iter()
+                .filter(|image| image.image.snapshot.z_index < 0)
+            {
                 paint_terminal_image(image, origin, &self.metrics, window);
             }
             for rect in &layout.search_matches {
@@ -866,6 +871,13 @@ impl Element for TerminalElement {
             }
             if let Some(marked_text) = &layout.marked_text {
                 paint_text_run(marked_text, origin, &self.metrics, window, cx);
+            }
+            for image in layout
+                .images
+                .iter()
+                .filter(|image| image.image.snapshot.z_index >= 0)
+            {
+                paint_terminal_image(image, origin, &self.metrics, window);
             }
             for rect in &layout.highlight_underlines {
                 paint_terminal_underline(rect, origin, &self.metrics, window);

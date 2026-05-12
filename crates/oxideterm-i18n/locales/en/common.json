@@ -21,6 +21,9 @@
       "new_connection": "New Connection",
       "new_local_terminal": "Local Terminal",
       "keyboard_shortcuts": "Keyboard Shortcuts"
+    },
+    "connection_monitor": {
+      "title": "Connection Monitor"
     }
   },
   "command_palette": {

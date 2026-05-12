@@ -21,6 +21,9 @@
       "new_connection": "新增連線",
       "new_local_terminal": "本機終端",
       "keyboard_shortcuts": "鍵盤快捷鍵"
+    },
+    "connection_monitor": {
+      "title": "連線監控"
     }
   },
   "command_palette": {

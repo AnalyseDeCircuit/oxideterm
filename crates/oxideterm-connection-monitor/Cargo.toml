@@ -1,0 +1,9 @@
+[package]
+name = "oxideterm-connection-monitor"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+tokio.workspace = true

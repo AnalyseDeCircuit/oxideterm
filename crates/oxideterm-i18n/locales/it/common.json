@@ -21,6 +21,9 @@
       "new_connection": "Nuova Connessione",
       "new_local_terminal": "Terminale locale",
       "keyboard_shortcuts": "Scorciatoie da tastiera"
+    },
+    "connection_monitor": {
+      "title": "Monitor Connessioni"
     }
   },
   "command_palette": {

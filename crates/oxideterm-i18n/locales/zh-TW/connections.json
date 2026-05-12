@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "monitor": {
+      "title": "連線池",
+      "loading": "載入統計資料...",
+      "idle_timeout": "閒置：{{min}} 分鐘",
+      "idle_timeout_never": "閒置：永不逾時",
+      "capacity": "容量：{{capacity}}",
+      "active": "使用中",
+      "idle": "閒置",
+      "reconnecting": "重新連線中",
+      "link_down": "連線中斷",
+      "terminals": "終端機",
+      "sftp": "SFTP",
+      "forwards": "轉發",
+      "summary": "總計：{{total}} 個連線 • 參照：{{refs}}",
+      "live": "即時"
+    }
+  }
+}

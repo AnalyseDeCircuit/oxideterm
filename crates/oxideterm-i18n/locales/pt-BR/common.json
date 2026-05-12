@@ -21,6 +21,9 @@
       "new_connection": "Nova conexão",
       "new_local_terminal": "Terminal local",
       "keyboard_shortcuts": "Atalhos de teclado"
+    },
+    "connection_monitor": {
+      "title": "Monitor de conexão"
     }
   },
   "command_palette": {

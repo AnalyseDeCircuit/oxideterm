@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "monitor": {
+      "title": "Nhóm kết nối",
+      "loading": "Đang tải thống kê...",
+      "idle_timeout": "Rảnh: {{min}} phút",
+      "idle_timeout_never": "Rảnh: không giới hạn",
+      "capacity": "Dung lượng: {{capacity}}",
+      "active": "Hoạt động",
+      "idle": "Rảnh",
+      "reconnecting": "Đang kết nối lại",
+      "link_down": "Mất kết nối",
+      "terminals": "Terminal",
+      "sftp": "SFTP",
+      "forwards": "Chuyển tiếp",
+      "summary": "Tổng: {{total}} kết nối • Tham chiếu: {{refs}}",
+      "live": "Trực tiếp"
+    }
+  }
+}

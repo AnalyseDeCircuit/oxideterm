@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "monitor": {
+      "title": "接続プール",
+      "loading": "統計を読み込み中...",
+      "idle_timeout": "アイドル: {{min}}分",
+      "idle_timeout_never": "アイドル: タイムアウトなし",
+      "capacity": "容量: {{capacity}}",
+      "active": "アクティブ",
+      "idle": "アイドル",
+      "reconnecting": "再接続中",
+      "link_down": "リンクダウン",
+      "terminals": "ターミナル",
+      "sftp": "SFTP",
+      "forwards": "転送",
+      "summary": "合計: {{total}}接続 • 参照: {{refs}}",
+      "live": "ライブ"
+    }
+  }
+}

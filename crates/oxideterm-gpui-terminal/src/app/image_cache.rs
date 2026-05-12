@@ -16,10 +16,20 @@ pub(crate) struct TerminalRenderedImage {
 }
 
 pub(crate) struct ImageRenderCache {
-    entries: HashMap<(TerminalImageId, u64), CachedRenderImage>,
-    order: VecDeque<(TerminalImageId, u64)>,
+    entries: HashMap<ImageCacheKey, CachedRenderImage>,
+    order: VecDeque<ImageCacheKey>,
     bytes: usize,
     byte_limit: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct ImageCacheKey {
+    id: TerminalImageId,
+    version: u64,
+    source_x: u32,
+    source_y: u32,
+    source_width: u32,
+    source_height: u32,
 }
 
 struct CachedRenderImage {
@@ -57,7 +67,7 @@ impl ImageRenderCache {
                     snapshot
                         .data
                         .as_ref()
-                        .and_then(|data| self.image_for_snapshot(&snapshot, data.rgba.len()))
+                        .and_then(|_| self.image_for_snapshot(&snapshot))
                 } else {
                     None
                 };
@@ -69,20 +79,25 @@ impl ImageRenderCache {
             .collect()
     }
 
-    fn image_for_snapshot(
-        &mut self,
-        snapshot: &TerminalImageSnapshot,
-        byte_len: usize,
-    ) -> Option<Arc<RenderImage>> {
-        let key = (snapshot.id, snapshot.version);
+    fn image_for_snapshot(&mut self, snapshot: &TerminalImageSnapshot) -> Option<Arc<RenderImage>> {
+        let key = ImageCacheKey {
+            id: snapshot.id,
+            version: snapshot.version,
+            source_x: snapshot.source_x,
+            source_y: snapshot.source_y,
+            source_width: snapshot.source_width,
+            source_height: snapshot.source_height,
+        };
         if self.entries.contains_key(&key) {
             self.touch(key);
             return self.entries.get(&key).map(|cached| cached.image.clone());
         }
 
         let data = snapshot.data.as_ref()?;
-        let pixels = gpui_render_image_pixels_from_protocol_rgba(data.rgba.to_vec());
-        let buffer = RgbaImage::from_raw(data.width, data.height, pixels)?;
+        let pixels = cropped_protocol_rgba(data, snapshot);
+        let byte_len = pixels.len();
+        let pixels = gpui_render_image_pixels_from_protocol_rgba(pixels);
+        let buffer = RgbaImage::from_raw(snapshot.source_width, snapshot.source_height, pixels)?;
         let render_image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
         self.entries.insert(
             key,
@@ -97,7 +112,7 @@ impl ImageRenderCache {
         Some(render_image)
     }
 
-    fn touch(&mut self, key: (TerminalImageId, u64)) {
+    fn touch(&mut self, key: ImageCacheKey) {
         self.order.retain(|existing| *existing != key);
         self.order.push_back(key);
     }
@@ -113,6 +128,35 @@ impl ImageRenderCache {
             }
         }
     }
+}
+
+fn cropped_protocol_rgba(
+    data: &oxideterm_terminal::TerminalImageData,
+    snapshot: &TerminalImageSnapshot,
+) -> Vec<u8> {
+    let source_x = snapshot.source_x.min(data.width);
+    let source_y = snapshot.source_y.min(data.height);
+    let source_width = snapshot
+        .source_width
+        .min(data.width.saturating_sub(source_x));
+    let source_height = snapshot
+        .source_height
+        .min(data.height.saturating_sub(source_y));
+
+    if source_x == 0 && source_y == 0 && source_width == data.width && source_height == data.height
+    {
+        return data.rgba.to_vec();
+    }
+
+    let row_bytes = source_width as usize * 4;
+    let mut cropped = Vec::with_capacity(row_bytes * source_height as usize);
+    let stride = data.width as usize * 4;
+    for row in source_y..source_y + source_height {
+        let start = row as usize * stride + source_x as usize * 4;
+        let end = start + row_bytes;
+        cropped.extend_from_slice(&data.rgba[start..end]);
+    }
+    cropped
 }
 
 fn gpui_render_image_pixels_from_protocol_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
@@ -143,6 +187,11 @@ mod tests {
             rows: 1,
             pixel_width: 1,
             pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
             placeholder: true,
             version: 1,
             data: Some(TerminalImageData {
@@ -176,6 +225,11 @@ mod tests {
             rows: 1,
             pixel_width: 1,
             pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
             placeholder: true,
             version: 1,
             data: Some(TerminalImageData {
@@ -193,6 +247,42 @@ mod tests {
         let image = rendered[0].render_image.as_ref().unwrap();
 
         assert_eq!(image.as_bytes(0), Some([0, 0, 255, 255].as_slice()));
+    }
+
+    #[test]
+    fn render_cache_crops_protocol_rgba_from_snapshot_source_rect() {
+        let mut cache = ImageRenderCache::default();
+        let snapshot = TerminalImageSnapshot {
+            id: TerminalImageId(10),
+            protocol: TerminalImageProtocol::Kitty,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 2,
+            pixel_height: 1,
+            source_x: 1,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
+            placeholder: true,
+            version: 1,
+            data: Some(TerminalImageData {
+                id: TerminalImageId(10),
+                protocol: TerminalImageProtocol::Kitty,
+                version: 1,
+                width: 2,
+                height: 1,
+                rgba: vec![255, 0, 0, 255, 0, 255, 0, 255].into(),
+                name: None,
+            }),
+        };
+
+        let rendered = cache.render_images(&[snapshot], true);
+        let image = rendered[0].render_image.as_ref().unwrap();
+
+        assert_eq!(image.as_bytes(0), Some([0, 255, 0, 255].as_slice()));
     }
 
     #[test]
@@ -214,6 +304,11 @@ mod tests {
             rows: 1,
             pixel_width: 1,
             pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
             placeholder: true,
             version: 1,
             data: Some(TerminalImageData {

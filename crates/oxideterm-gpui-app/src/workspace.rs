@@ -1,4 +1,5 @@
 mod actions;
+mod connection_monitor;
 mod file_manager;
 mod forwards;
 mod graphics;
@@ -36,6 +37,9 @@ use gpui::{
     deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
+use oxideterm_connection_monitor::{
+    ConnectionPoolMonitorStats, MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
+};
 use oxideterm_connections::ConnectionStore;
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
@@ -96,6 +100,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
+use self::connection_monitor::ConnectionMonitorState;
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{WorkspaceImeElement, keystroke_commits_platform_text};
@@ -240,6 +245,7 @@ pub(crate) struct WorkspaceApp {
     sftp_view: sftp::SftpViewState,
     launcher: LauncherState,
     graphics: GraphicsState,
+    connection_monitor: ConnectionMonitorState,
     sftp_worker_tx: std::sync::mpsc::Sender<sftp::SftpWorkerResult>,
     sftp_worker_rx: std::sync::mpsc::Receiver<sftp::SftpWorkerResult>,
     forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,

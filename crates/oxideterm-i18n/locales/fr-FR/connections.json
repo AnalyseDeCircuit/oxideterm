@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "monitor": {
+      "title": "Pool de connexions",
+      "loading": "Chargement des statistiques...",
+      "idle_timeout": "Inactif : {{min}} min",
+      "idle_timeout_never": "Inactif : jamais",
+      "capacity": "Capacité : {{capacity}}",
+      "active": "Actif",
+      "idle": "Inactif",
+      "reconnecting": "Reconnexion",
+      "link_down": "Lien coupé",
+      "terminals": "Terminaux",
+      "sftp": "SFTP",
+      "forwards": "Transferts",
+      "summary": "Total : {{total}} connexions • Réf : {{refs}}",
+      "live": "En direct"
+    }
+  }
+}

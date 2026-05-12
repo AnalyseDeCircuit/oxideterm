@@ -224,6 +224,8 @@ impl WorkspaceApp {
                         this.open_settings(window, cx);
                     } else if section == SidebarSection::Connections {
                         this.open_session_manager_tab(window, cx);
+                    } else if section == SidebarSection::Activity {
+                        this.open_connection_monitor_tab(window, cx);
                     } else if section == SidebarSection::Workspace {
                         // Tauri treats the bottom square as a local-terminal action,
                         // not as a sidebar content section. Keep the current sidebar
@@ -252,7 +254,7 @@ impl WorkspaceApp {
             SidebarSection::Sessions => self.i18n.t("sidebar.panels.sessions"),
             SidebarSection::Connections => self.i18n.t("sidebar.panels.open_session_manager"),
             SidebarSection::Terminal => self.i18n.t("terminal.local_terminal"),
-            SidebarSection::Activity => self.i18n.t("sidebar.panels.activity"),
+            SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.forwards"),
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
             SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),

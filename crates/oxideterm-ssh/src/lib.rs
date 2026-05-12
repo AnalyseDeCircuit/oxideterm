@@ -11,6 +11,7 @@
 mod config;
 mod connection_registry;
 mod host_key;
+mod monitor;
 mod reconnect;
 mod router;
 mod transport;
@@ -24,6 +25,7 @@ pub use connection_registry::{
     WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use host_key::{HostKeyStatus, check_host_key, remove_host_key};
+pub use oxideterm_connection_monitor::ConnectionPoolMonitorStats;
 pub use oxideterm_sftp::{
     DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM, FileInfo, FileType,
     ListFilter, MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpError,

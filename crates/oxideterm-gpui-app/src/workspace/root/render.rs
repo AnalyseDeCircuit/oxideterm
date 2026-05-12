@@ -9,6 +9,8 @@ impl Render for WorkspaceApp {
         self.sync_tab_titles(cx);
         self.poll_forwarding_worker_results(cx);
         self.poll_graphics_worker_results(window, cx);
+        self.poll_connection_monitor_updates(cx);
+        self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
         let title = self
@@ -33,6 +35,7 @@ impl Render for WorkspaceApp {
                             | TabKind::FileManager
                             | TabKind::Launcher
                             | TabKind::Graphics
+                            | TabKind::ConnectionMonitor
                     )
                 })
             && !self.search.visible
@@ -51,6 +54,7 @@ impl Render for WorkspaceApp {
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
+                (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),
                 (TabKind::Ide, _) => self.render_ide_surface(cx),
                 (TabKind::Forwards, _) => self.render_forwards_surface(window, cx),

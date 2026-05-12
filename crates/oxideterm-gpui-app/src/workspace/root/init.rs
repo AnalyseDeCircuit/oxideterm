@@ -42,6 +42,7 @@ impl WorkspaceApp {
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -182,6 +183,7 @@ impl WorkspaceApp {
             sftp_view: sftp::SftpViewState::default(),
             launcher: LauncherState::new(settings.launcher.enabled),
             graphics: GraphicsState::new(),
+            connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
             sftp_worker_tx,
             sftp_worker_rx,
             forwarding_worker_tx,
@@ -241,6 +243,8 @@ impl WorkspaceApp {
                             workspace.poll_sftp_worker_results(cx);
                             workspace.poll_launcher_worker_results(cx);
                             workspace.poll_graphics_worker_results(window, cx);
+                            workspace.poll_connection_monitor_updates(cx);
+                            workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);

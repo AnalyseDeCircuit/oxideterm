@@ -25,6 +25,7 @@ pub enum TabKind {
     FileManager,
     Launcher,
     Graphics,
+    ConnectionMonitor,
     Sftp,
     Ide,
     Forwards,

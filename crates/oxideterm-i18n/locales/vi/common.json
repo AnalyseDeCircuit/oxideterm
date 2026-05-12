@@ -21,6 +21,9 @@
       "new_connection": "Kết nối mới",
       "new_local_terminal": "Terminal cục bộ",
       "keyboard_shortcuts": "Phím tắt"
+    },
+    "connection_monitor": {
+      "title": "Giám sát kết nối"
     }
   },
   "command_palette": {

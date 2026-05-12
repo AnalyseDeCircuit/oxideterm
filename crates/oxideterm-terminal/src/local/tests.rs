@@ -208,6 +208,10 @@ mod tests {
             rows: 1,
             pixel_width: 1,
             pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
             z_index: 0,
             placeholder: true,
         }));
@@ -223,6 +227,50 @@ mod tests {
 
         assert!(!graphics.images.contains_key(&TerminalImageId(1)));
         assert!(graphics.images.contains_key(&TerminalImageId(2)));
+        assert!(graphics.placements.is_empty());
+    }
+
+    #[test]
+    fn graphics_state_removes_existing_placements_when_image_id_is_retransmitted() {
+        let mut graphics = TerminalGraphicsState::default();
+
+        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            id: TerminalImageId(7),
+            protocol: TerminalImageProtocol::Kitty,
+            version: 0,
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255].into(),
+            name: None,
+        }));
+        graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
+            id: TerminalImageId(7),
+            protocol: TerminalImageProtocol::Kitty,
+            line: 0,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            z_index: 0,
+            placeholder: true,
+        }));
+        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            id: TerminalImageId(7),
+            protocol: TerminalImageProtocol::Kitty,
+            version: 0,
+            width: 1,
+            height: 1,
+            rgba: vec![255, 255, 255, 255].into(),
+            name: None,
+        }));
+
+        assert!(graphics.images.contains_key(&TerminalImageId(7)));
         assert!(graphics.placements.is_empty());
     }
 

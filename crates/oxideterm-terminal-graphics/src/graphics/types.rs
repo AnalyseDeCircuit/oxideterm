@@ -58,6 +58,10 @@ pub struct TerminalImagePlacement {
     pub rows: usize,
     pub pixel_width: u32,
     pub pixel_height: u32,
+    pub source_x: u32,
+    pub source_y: u32,
+    pub source_width: u32,
+    pub source_height: u32,
     pub z_index: i32,
     pub placeholder: bool,
 }
@@ -139,9 +143,16 @@ pub struct GraphicsIngress {
     state: ParserState,
     next_image_id: u64,
     kitty_chunks: HashMap<u64, KittyChunkAssembly>,
+    kitty_images: HashMap<TerminalImageId, KittyImageRecord>,
 }
 
 struct KittyChunkAssembly {
     params: HashMap<String, String>,
     encoded: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct KittyImageRecord {
+    width: u32,
+    height: u32,
 }

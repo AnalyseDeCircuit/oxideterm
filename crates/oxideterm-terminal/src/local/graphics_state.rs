@@ -29,6 +29,7 @@ impl TerminalGraphicsState {
                         .storage_bytes
                         .saturating_sub(image_storage_bytes(&previous));
                     self.image_order.retain(|id| *id != image.id);
+                    self.placements.retain(|placement| placement.id != image.id);
                 }
                 let next_version = self
                     .image_versions
@@ -87,6 +88,11 @@ impl TerminalGraphicsState {
                     rows: placement.rows,
                     pixel_width: placement.pixel_width,
                     pixel_height: placement.pixel_height,
+                    source_x: placement.source_x,
+                    source_y: placement.source_y,
+                    source_width: placement.source_width,
+                    source_height: placement.source_height,
+                    z_index: placement.z_index,
                     placeholder: placement.placeholder,
                     version: self
                         .images

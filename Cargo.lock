@@ -6469,6 +6469,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-connection-monitor"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "oxideterm-connections"
 version = "0.1.0"
 dependencies = [
@@ -6559,6 +6567,7 @@ dependencies = [
  "objc2-foundation",
  "oxideterm-backend-classification",
  "oxideterm-code-editor",
+ "oxideterm-connection-monitor",
  "oxideterm-connections",
  "oxideterm-forwarding",
  "oxideterm-gpui-ide",
@@ -6812,6 +6821,7 @@ name = "oxideterm-ssh"
 version = "0.1.0"
 dependencies = [
  "dashmap",
+ "oxideterm-connection-monitor",
  "oxideterm-sftp",
  "parking_lot",
  "russh",

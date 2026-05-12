@@ -21,6 +21,9 @@
       "new_connection": "新規接続",
       "new_local_terminal": "ローカルターミナル",
       "keyboard_shortcuts": "キーボードショートカット"
+    },
+    "connection_monitor": {
+      "title": "接続モニター"
     }
   },
   "command_palette": {

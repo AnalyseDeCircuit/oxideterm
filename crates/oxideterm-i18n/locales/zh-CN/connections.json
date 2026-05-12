@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "monitor": {
+      "title": "连接池",
+      "loading": "加载统计中...",
+      "idle_timeout": "空闲: {{min}}分钟",
+      "idle_timeout_never": "空闲: 永不超时",
+      "capacity": "容量: {{capacity}}",
+      "active": "活动",
+      "idle": "空闲",
+      "reconnecting": "重连中",
+      "link_down": "链路断开",
+      "terminals": "终端",
+      "sftp": "SFTP",
+      "forwards": "转发",
+      "summary": "总计: {{total}} 个连接 • 引用: {{refs}}",
+      "live": "实时"
+    }
+  }
+}

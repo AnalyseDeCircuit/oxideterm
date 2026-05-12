@@ -1,3 +1,26 @@
+struct PlacementOptions {
+    move_cursor: bool,
+    cols: Option<usize>,
+    rows: Option<usize>,
+    source_x: u32,
+    source_y: u32,
+    source_width: u32,
+    source_height: u32,
+    z_index: i32,
+}
+
+enum KittyDecodeResult {
+    Image {
+        image: TerminalImageData,
+        placement: Option<TerminalImagePlacement>,
+        advance: Vec<u8>,
+    },
+    Placement {
+        placement: TerminalImagePlacement,
+        advance: Vec<u8>,
+    },
+}
+
 impl GraphicsIngress {
     pub fn new(options: GraphicsOptions) -> Self {
         Self {
@@ -5,6 +28,7 @@ impl GraphicsIngress {
             state: ParserState::Ground,
             next_image_id: 1,
             kitty_chunks: HashMap::new(),
+            kitty_images: HashMap::new(),
         }
     }
 
@@ -273,6 +297,11 @@ impl GraphicsIngress {
                     .get("i")
                     .and_then(|value| value.parse::<u64>().ok())
                     .map(TerminalImageId);
+                if let Some(id) = id {
+                    self.kitty_images.remove(&id);
+                } else {
+                    self.kitty_images.clear();
+                }
                 result.events.push(TerminalGraphicsEvent::Delete { id });
                 return;
             }
@@ -286,13 +315,35 @@ impl GraphicsIngress {
                     .push(TerminalGraphicsEvent::Respond(kitty_query_response(id)));
                 return;
             }
+            "p" => {
+                match self.place_kitty_image(&params, cursor) {
+                    Ok((placement, advance)) => {
+                        result.events.push(TerminalGraphicsEvent::Place(placement));
+                        result.terminal_bytes.extend(advance);
+                    }
+                    Err(error) => result
+                        .events
+                        .push(TerminalGraphicsEvent::Error(error.to_string())),
+                }
+                return;
+            }
             _ if payload.is_none() => return,
             _ => {}
         }
 
         match self.decode_kitty(&data[1..], cursor) {
-            Ok(Some((image, placement, advance))) => {
+            Ok(Some(KittyDecodeResult::Image {
+                image,
+                placement,
+                advance,
+            })) => {
                 result.events.push(TerminalGraphicsEvent::ImageReady(image));
+                if let Some(placement) = placement {
+                    result.events.push(TerminalGraphicsEvent::Place(placement));
+                }
+                result.terminal_bytes.extend(advance);
+            }
+            Ok(Some(KittyDecodeResult::Placement { placement, advance })) => {
                 result.events.push(TerminalGraphicsEvent::Place(placement));
                 result.terminal_bytes.extend(advance);
             }
@@ -345,7 +396,16 @@ impl GraphicsIngress {
             image.width,
             image.height,
             cursor,
-            !do_not_move,
+            PlacementOptions {
+                move_cursor: !do_not_move,
+                cols: None,
+                rows: None,
+                source_x: 0,
+                source_y: 0,
+                source_width: image.width,
+                source_height: image.height,
+                z_index: 0,
+            },
         );
         Ok((image, placement, advance))
     }
@@ -370,8 +430,23 @@ impl GraphicsIngress {
             rgba: decoded.pixels.into(),
             name: None,
         };
-        let (placement, advance) =
-            self.placement_for_image(image.id, image.protocol, width, height, cursor, true);
+        let (placement, advance) = self.placement_for_image(
+            image.id,
+            image.protocol,
+            width,
+            height,
+            cursor,
+            PlacementOptions {
+                move_cursor: true,
+                cols: None,
+                rows: None,
+                source_x: 0,
+                source_y: 0,
+                source_width: width,
+                source_height: height,
+                z_index: 0,
+            },
+        );
         Ok((image, placement, advance))
     }
 
@@ -379,19 +454,29 @@ impl GraphicsIngress {
         &mut self,
         data: &[u8],
         cursor: GraphicsCursor,
-    ) -> Result<Option<(TerminalImageData, TerminalImagePlacement, Vec<u8>)>, GraphicsError> {
+    ) -> Result<Option<KittyDecodeResult>, GraphicsError> {
         let Some((params, payload)) = parse_kitty_params_and_payload(data) else {
             return Ok(None);
         };
-        let action = params.get("a").map(String::as_str).unwrap_or("t");
-        if action == "d" || action == "q" {
+        let command_action = params.get("a").map(String::as_str).unwrap_or("t");
+        if command_action == "d" || command_action == "q" {
             return Ok(None);
+        }
+        if command_action == "p" {
+            let (placement, advance) = self.place_kitty_image(&params, cursor)?;
+            return Ok(Some(KittyDecodeResult::Placement { placement, advance }));
         }
 
         let explicit_id = params
             .get("i")
             .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_else(|| self.next_image_id);
+            .unwrap_or_else(|| {
+                if self.kitty_chunks.len() == 1 {
+                    *self.kitty_chunks.keys().next().expect("pending kitty chunk")
+                } else {
+                    self.next_image_id
+                }
+            });
         let more = params.get("m").is_some_and(|value| value == "1");
         let mut assembly =
             self.kitty_chunks
@@ -412,6 +497,10 @@ impl GraphicsIngress {
             return Ok(None);
         }
         let params = assembly.params;
+        let action = params.get("a").map(String::as_str).unwrap_or("t");
+        if action != "t" && action != "T" {
+            return Err(GraphicsError::UnsupportedImage);
+        }
         let complete =
             decode_kitty_payload(&params, &assembly.encoded, self.options.storage_limit_mb)?;
 
@@ -422,6 +511,13 @@ impl GraphicsIngress {
         };
         let image_id = TerminalImageId(explicit_id);
         self.next_image_id = self.next_image_id.max(explicit_id + 1);
+        self.kitty_images.insert(
+            image_id,
+            KittyImageRecord {
+                width: decoded.width,
+                height: decoded.height,
+            },
+        );
         let image = TerminalImageData {
             id: image_id,
             protocol: TerminalImageProtocol::Kitty,
@@ -431,16 +527,53 @@ impl GraphicsIngress {
             rgba: decoded.rgba.into(),
             name: None,
         };
-        let move_cursor = !params.get("C").is_some_and(|value| value == "1");
+        if action == "t" {
+            return Ok(Some(KittyDecodeResult::Image {
+                image,
+                placement: None,
+                advance: Vec::new(),
+            }));
+        }
+        let placement_options = kitty_placement_options(&params, image.width, image.height, cursor);
         let (placement, advance) = self.placement_for_image(
             image.id,
             image.protocol,
             image.width,
             image.height,
             cursor,
-            move_cursor,
+            placement_options,
         );
-        Ok(Some((image, placement, advance)))
+        Ok(Some(KittyDecodeResult::Image {
+            image,
+            placement: Some(placement),
+            advance,
+        }))
+    }
+
+    fn place_kitty_image(
+        &self,
+        params: &HashMap<String, String>,
+        cursor: GraphicsCursor,
+    ) -> Result<(TerminalImagePlacement, Vec<u8>), GraphicsError> {
+        let image_id = params
+            .get("i")
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(TerminalImageId)
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        let image = self
+            .kitty_images
+            .get(&image_id)
+            .copied()
+            .ok_or(GraphicsError::UnsupportedImage)?;
+        let placement_options = kitty_placement_options(params, image.width, image.height, cursor);
+        Ok(self.placement_for_image(
+            image_id,
+            TerminalImageProtocol::Kitty,
+            image.width,
+            image.height,
+            cursor,
+            placement_options,
+        ))
     }
 
     fn placement_for_image(
@@ -450,9 +583,11 @@ impl GraphicsIngress {
         pixel_width: u32,
         pixel_height: u32,
         cursor: GraphicsCursor,
-        move_cursor: bool,
+        options: PlacementOptions,
     ) -> (TerminalImagePlacement, Vec<u8>) {
-        let (cols, rows) = cursor.image_cells(pixel_width, pixel_height);
+        let (default_cols, default_rows) = cursor.image_cells(options.source_width, options.source_height);
+        let cols = options.cols.unwrap_or(default_cols).clamp(1, cursor.cols.max(1));
+        let rows = options.rows.unwrap_or(default_rows).clamp(1, cursor.rows.max(1));
         let placement = TerminalImagePlacement {
             id,
             protocol,
@@ -463,14 +598,108 @@ impl GraphicsIngress {
             rows,
             pixel_width,
             pixel_height,
-            z_index: 0,
+            source_x: options.source_x,
+            source_y: options.source_y,
+            source_width: options.source_width,
+            source_height: options.source_height,
+            z_index: options.z_index,
             placeholder: self.options.show_placeholder,
         };
-        let advance = if move_cursor {
+        let advance = if options.move_cursor {
             advance_bytes(cursor.col, cols, rows, cursor.cols)
         } else {
             Vec::new()
         };
         (placement, advance)
     }
+}
+
+fn kitty_placement_options(
+    params: &HashMap<String, String>,
+    image_width: u32,
+    image_height: u32,
+    cursor: GraphicsCursor,
+) -> PlacementOptions {
+    let source = kitty_source_rect(params, image_width, image_height);
+    let cols = parse_positive_usize(params.get("c"));
+    let rows = parse_positive_usize(params.get("r"));
+    let (cols, rows) = complete_kitty_display_cells(cols, rows, source.2, source.3, cursor);
+    PlacementOptions {
+        move_cursor: !params.get("C").is_some_and(|value| value == "1"),
+        cols,
+        rows,
+        source_x: source.0,
+        source_y: source.1,
+        source_width: source.2,
+        source_height: source.3,
+        z_index: params
+            .get("z")
+            .and_then(|value| value.parse::<i32>().ok())
+            .unwrap_or_default(),
+    }
+}
+
+fn kitty_source_rect(
+    params: &HashMap<String, String>,
+    image_width: u32,
+    image_height: u32,
+) -> (u32, u32, u32, u32) {
+    let source_x = parse_u32(params.get("x"))
+        .unwrap_or_default()
+        .min(image_width.saturating_sub(1));
+    let source_y = parse_u32(params.get("y"))
+        .unwrap_or_default()
+        .min(image_height.saturating_sub(1));
+    let max_width = image_width.saturating_sub(source_x);
+    let max_height = image_height.saturating_sub(source_y);
+    let source_width = parse_u32(params.get("w"))
+        .filter(|width| *width > 0)
+        .unwrap_or(max_width)
+        .min(max_width)
+        .max(1);
+    let source_height = parse_u32(params.get("h"))
+        .filter(|height| *height > 0)
+        .unwrap_or(max_height)
+        .min(max_height)
+        .max(1);
+    (source_x, source_y, source_width, source_height)
+}
+
+fn complete_kitty_display_cells(
+    cols: Option<usize>,
+    rows: Option<usize>,
+    source_width: u32,
+    source_height: u32,
+    cursor: GraphicsCursor,
+) -> (Option<usize>, Option<usize>) {
+    match (cols, rows) {
+        (Some(cols), None) => {
+            let pixel_width = cols as u64 * u64::from(cursor.cell_width.max(1));
+            let pixel_height =
+                pixel_width.saturating_mul(u64::from(source_height)) / u64::from(source_width.max(1));
+            let rows = pixel_height
+                .div_ceil(u64::from(cursor.cell_height.max(1)))
+                .max(1) as usize;
+            (Some(cols), Some(rows))
+        }
+        (None, Some(rows)) => {
+            let pixel_height = rows as u64 * u64::from(cursor.cell_height.max(1));
+            let pixel_width =
+                pixel_height.saturating_mul(u64::from(source_width)) / u64::from(source_height.max(1));
+            let cols = pixel_width
+                .div_ceil(u64::from(cursor.cell_width.max(1)))
+                .max(1) as usize;
+            (Some(cols), Some(rows))
+        }
+        both => both,
+    }
+}
+
+fn parse_positive_usize(value: Option<&String>) -> Option<usize> {
+    value.and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn parse_u32(value: Option<&String>) -> Option<u32> {
+    value.and_then(|value| value.parse::<u32>().ok())
 }

@@ -47,6 +47,7 @@ impl SidebarSection {
         match key {
             "connections" | "saved" => Self::Connections,
             "sftp" | "terminal" => Self::Terminal,
+            "connection_monitor" => Self::Activity,
             "forwards" | "activity" => Self::Activity,
             "network" => Self::Network,
             "extensions" => Self::Extensions,

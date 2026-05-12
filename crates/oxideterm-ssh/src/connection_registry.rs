@@ -12,6 +12,9 @@ use std::{
 };
 
 use dashmap::DashMap;
+use oxideterm_connection_monitor::{
+    ConnectionMonitorConsumerKind, ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot,
+};
 use oxideterm_sftp::{SftpError, SftpSession};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -212,6 +215,28 @@ impl ConnectionEntry {
             created_at: self.created_at,
             last_active_at: *self.last_active_at.read(),
             idle_timeout_secs: self.idle_timeout.map(|duration| duration.as_secs()),
+        }
+    }
+
+    fn monitor_snapshot(&self) -> PoolConnectionMonitorSnapshot {
+        let state = self.state.read().clone();
+        let consumers = self
+            .consumers
+            .read()
+            .iter()
+            .map(ConnectionMonitorConsumerKind::from)
+            .collect();
+
+        PoolConnectionMonitorSnapshot {
+            is_active: matches!(state, ConnectionState::Active),
+            is_idle: matches!(state, ConnectionState::Idle),
+            is_reconnecting: matches!(state, ConnectionState::Reconnecting),
+            is_link_down: matches!(state, ConnectionState::LinkDown),
+            ref_count: self.ref_count.load(Ordering::SeqCst),
+            // Tauri counts one SFTP session per connection when the backend
+            // entry owns a ready session, not one count per SFTP UI consumer.
+            has_sftp_session: self.sftp_state.read().ready,
+            consumers,
         }
     }
 
@@ -890,6 +915,36 @@ impl SshConnectionRegistry {
         }
         stats
     }
+
+    pub fn monitor_stats(&self) -> ConnectionPoolMonitorStats {
+        let idle_timeout_secs = self
+            .config
+            .idle_timeout
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let snapshots = self
+            .by_key
+            .iter()
+            .map(|entry| entry.monitor_snapshot())
+            .collect::<Vec<_>>();
+
+        ConnectionPoolMonitorStats::from_snapshots(
+            snapshots,
+            self.config.max_connections,
+            idle_timeout_secs,
+        )
+    }
+}
+
+impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
+    fn from(consumer: &ConnectionConsumer) -> Self {
+        match consumer {
+            ConnectionConsumer::Terminal(_) => Self::Terminal,
+            ConnectionConsumer::Sftp(_) => Self::Sftp,
+            ConnectionConsumer::PortForward(_) => Self::PortForward,
+            ConnectionConsumer::Ide(_) | ConnectionConsumer::NodeRouter(_) => Self::Other,
+        }
+    }
 }
 
 impl Default for SshConnectionRegistry {
@@ -948,6 +1003,71 @@ mod tests {
         assert_eq!(handle.state(), ConnectionState::Connecting);
         registry.release(handle.connection_id(), &consumer);
         assert_eq!(handle.info().ref_count, 0);
+    }
+
+    #[test]
+    fn monitor_stats_match_tauri_pool_stats_shape() {
+        let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
+            idle_timeout: Some(Duration::from_secs(120)),
+            max_connections: 9,
+            protect_on_exit: true,
+        });
+
+        let active = registry.acquire(
+            SshConfig::password("active.example", 22, "me", "pw"),
+            ConnectionConsumer::Terminal("term-1".into()),
+        );
+        registry.mark_state(active.connection_id(), ConnectionState::Active);
+        registry.acquire_consumer_for_connection(
+            active.connection_id(),
+            ConnectionConsumer::Terminal("term-2".into()),
+        );
+        registry.acquire_consumer_for_connection(
+            active.connection_id(),
+            ConnectionConsumer::Sftp("sftp-1".into()),
+        );
+        registry.mark_sftp_session(active.connection_id(), true, Some("/home/me".into()));
+        registry.acquire_consumer_for_connection(
+            active.connection_id(),
+            ConnectionConsumer::PortForward("forward-1".into()),
+        );
+
+        let idle_consumer = ConnectionConsumer::NodeRouter("idle".into());
+        let idle = registry.acquire(
+            SshConfig::password("idle.example", 22, "me", "pw"),
+            idle_consumer.clone(),
+        );
+        registry.release(idle.connection_id(), &idle_consumer);
+
+        let link_down_consumer = ConnectionConsumer::NodeRouter("link-down".into());
+        let link_down = registry.acquire(
+            SshConfig::password("link-down.example", 22, "me", "pw"),
+            link_down_consumer.clone(),
+        );
+        registry.release(link_down.connection_id(), &link_down_consumer);
+        registry.mark_state(link_down.connection_id(), ConnectionState::LinkDown);
+
+        let reconnecting_consumer = ConnectionConsumer::NodeRouter("reconnecting".into());
+        let reconnecting = registry.acquire(
+            SshConfig::password("reconnecting.example", 22, "me", "pw"),
+            reconnecting_consumer.clone(),
+        );
+        registry.release(reconnecting.connection_id(), &reconnecting_consumer);
+        registry.mark_state(reconnecting.connection_id(), ConnectionState::Reconnecting);
+
+        let stats = registry.monitor_stats();
+
+        assert_eq!(stats.total_connections, 4);
+        assert_eq!(stats.active_connections, 1);
+        assert_eq!(stats.idle_connections, 1);
+        assert_eq!(stats.link_down_connections, 1);
+        assert_eq!(stats.reconnecting_connections, 1);
+        assert_eq!(stats.total_terminals, 2);
+        assert_eq!(stats.total_sftp_sessions, 1);
+        assert_eq!(stats.total_forwards, 1);
+        assert_eq!(stats.total_ref_count, 4);
+        assert_eq!(stats.pool_capacity, 9);
+        assert_eq!(stats.idle_timeout_secs, 120);
     }
 
     #[test]
